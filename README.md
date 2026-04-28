@@ -1,5 +1,7 @@
 # Chord
 
+[![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
+
 A lightweight, local-first terminal coding agent. Low resource usage, reliable long sessions, flexible model orchestration, Vim-like navigation, multi-agent collaboration, and a headless mode for remote control — designed to make AI coding feel calm and predictable.
 
 - 中文版：see [README_CN.md](./README_CN.md)

@@ -1,5 +1,7 @@
 # Chord
 
+[![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
+
 一款轻量、本地优先的终端 Coding Agent。低资源占用、可靠长会话、灵活模型编排、Vim-like 操作、多 Agent 协作，以及可通过网关远程操控的 headless 模式——让 AI 编码体验更稳定、可预期。
 
 - English: [README.md](./README.md)
