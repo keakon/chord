@@ -2082,6 +2082,47 @@ func TestWriteToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 	}
 }
 
+func TestToolUpdateAfterExecutionStartsDoesNotRestoreReceivedCharCount(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	initialArgs := `{"command":"echo hello"}`
+	finalArgs := `{"command":"echo hello world"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-bash-progress-after-running-1",
+		Name:     "Bash",
+		AgentID:  "",
+		ArgsJSON: initialArgs,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID:       "call-bash-progress-after-running-1",
+		Name:     "Bash",
+		AgentID:  "",
+		ArgsJSON: initialArgs,
+		State:    agent.ToolCallExecutionStateRunning,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:       "call-bash-progress-after-running-1",
+		Name:     "Bash",
+		AgentID:  "",
+		ArgsJSON: finalArgs,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-bash-progress-after-running-1")
+	if !ok {
+		t.Fatal("expected bash tool block")
+	}
+	if block.ToolProgress != nil {
+		t.Fatalf("expected post-running arg update not to restore temp char count, got %+v", *block.ToolProgress)
+	}
+	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if strings.Contains(joined, "chars received") {
+		t.Fatalf("expected post-running arg update to keep temp char count hidden; got:\n%s", joined)
+	}
+	if !strings.Contains(block.Content, "echo hello world") {
+		t.Fatalf("expected post-running arg update to refresh content, got %q", block.Content)
+	}
+}
+
 func TestEditToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 

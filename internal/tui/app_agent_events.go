@@ -691,13 +691,14 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		updated := false
+		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
 		displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		if displayArgs != "" && displayArgs != block.Content {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
 			block.Content = displayArgs
 			updated = true
 		}
-		if evt.ArgsStreamingDone {
+		if argsStreamingDone {
 			delete(m.toolArgRenderState, evt.ID)
 			// Args have finished streaming but the tool may not have been dispatched yet
 			// (execution-state events arrive only after the model response finalizes).
@@ -721,7 +722,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 		}
 		if updated {
-			if !evt.ArgsStreamingDone {
+			if !argsStreamingDone {
 				m.recordToolArgRender(evt.ID, evt.ArgsJSON, now)
 			}
 			block.InvalidateCache()

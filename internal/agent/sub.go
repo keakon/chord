@@ -658,7 +658,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 			if s.turn != nil {
 				s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 			}
-			s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, AgentID: s.instanceID})
+			s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
 
 		case permission.ActionAllow:
 			// Execute directly.
@@ -685,7 +685,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 						if s.turn != nil {
 							s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 						}
-						s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, AgentID: s.instanceID})
+						s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
 					}
 				}
 			}

@@ -84,7 +84,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 					Audit:    execResult.Audit,
 				})
 			}
-			a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+			a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true})
 
 		case permission.ActionAllow:
 			// Execute directly — no confirmation needed.
@@ -111,7 +111,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 						if a.turn != nil {
 							a.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 						}
-						a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+						a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true})
 					}
 				}
 			}
