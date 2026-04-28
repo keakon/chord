@@ -1,0 +1,13 @@
+# Binaries
+/chord
+
+# Hidden files
+.*
+!.githooks
+!.github
+!.gitignore
+
+# Go build/test artifacts
+*.test
+*.out
+coverage.*

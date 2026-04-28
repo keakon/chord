@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"
+          awk -v total="${total}" -v min="65.0" 'BEGIN {
+            if (total + 0 < min) {
+              printf("coverage %.1f%% is below required %.1f%%\n", total, min)
+              exit 1
+            }
+            printf("coverage %.1f%% meets required %.1f%%\n", total, min)
+          }'
+
+      - name: Vet
+        run: |
+          go vet ./...
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Staticcheck
+        run: |
+          staticcheck -checks 'all,-ST*' ./...
+
+      - name: Check gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(gofmt -l .)"
+          if [[ -n "${out}" ]]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "${out}"
+            exit 1
+          fi
+
+  build:
+    name: Build binaries (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set build version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME}"
+          else
+            sha="${GITHUB_SHA::7}"
+            v="dev-${sha}"
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ext=""
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            ext=".exe"
+          fi
+          out="dist/chord-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags "-s -w -X main.Version=${{ steps.ver.outputs.version }}" \
+            -o "${out}" ./cmd/chord/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: chord-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error

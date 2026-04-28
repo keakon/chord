@@ -1,0 +1,105 @@
+name: Bug report
+description: Report a problem with Chord
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+
+        **Security issues:** please open a [GitHub security advisory](https://github.com/keakon/chord/security/advisories/new) with reproduction steps and impact details.
+
+        **Redaction reminder:** do not include API keys, OAuth tokens, Authorization headers, or other secrets.
+
+  - type: input
+    id: version
+    attributes:
+      label: Chord version
+      description: Output of `chord --version` (or commit SHA if built from source)
+      placeholder: "v0.1.0 / dev-abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - WSL
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      description: e.g. Ghostty, iTerm2, Kitty, Windows Terminal
+      placeholder: "Ghostty"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Local TUI
+        - Headless
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Please include minimal steps to reproduce the issue
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Logs (recommended)
+
+        Logs are often the fastest way to diagnose provider / MCP / LSP / headless issues.
+
+        - Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`
+        - Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`
+
+        Tip: to make it easy to attach logs, reproduce once with:
+
+        ```bash
+        chord --logs-dir ./chord-logs
+        ```
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt / attachments
+      description: Paste the last ~200-500 lines from the most relevant log file, or attach the whole file. Please redact secrets.
+      render: text
+    validations:
+      required: false

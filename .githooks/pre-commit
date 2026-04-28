@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gofmt >/dev/null 2>&1; then
+  echo "pre-commit: gofmt not found in PATH"
+  exit 1
+fi
+
+files="$(git diff --cached --name-only --diff-filter=ACMR -- '*.go')"
+if [[ -z "${files}" ]]; then
+  exit 0
+fi
+
+count=0
+while IFS= read -r f; do
+  [[ -z "${f}" ]] && continue
+  gofmt -w "${f}"
+  git add "${f}"
+  count=$((count + 1))
+done <<< "${files}"
+
+echo "pre-commit: gofmt applied to ${count} staged Go file(s)"
