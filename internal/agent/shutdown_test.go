@@ -7,13 +7,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
 )
 
 type shutdownHookEngine struct {
 	mu        sync.Mutex
 	durations []time.Duration
 	calls     int
+}
+
+type shutdownBlockingProvider struct {
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+}
+
+func (p *shutdownBlockingProvider) CompleteStream(
+	ctx context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	_ llm.RequestTuning,
+	cb llm.StreamCallback,
+) (*message.Response, error) {
+	p.startOnce.Do(func() { close(p.started) })
+	if cb != nil {
+		cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 1, Events: 1}})
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.release:
+		return &message.Response{}, nil
+	}
+}
+
+func (p *shutdownBlockingProvider) Complete(
+	ctx context.Context,
+	apiKey string,
+	model string,
+	systemPrompt string,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	maxTokens int,
+	tuning llm.RequestTuning,
+) (*message.Response, error) {
+	return p.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, nil)
 }
 
 func (e *shutdownHookEngine) Fire(ctx context.Context, env hook.Envelope) (*hook.Result, error) {
@@ -90,5 +135,51 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 	}
 	if elapsed > 650*time.Millisecond {
 		t.Fatalf("Shutdown exceeded shared budget too much: %v", elapsed)
+	}
+}
+
+func TestShutdownWaitsForMainLLMEmittersBeforeClosingOutput(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	providerCfg := llm.NewProviderConfig("test-provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	provider := &shutdownBlockingProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client := llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
+	a.swapLLMClientWithRef(client, "test-model", 128000, "test-provider/test-model")
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- a.Run(runCtx)
+	}()
+
+	turnCtx, cancelTurn := context.WithCancel(context.Background())
+	a.spawnMainLLMResponseGoroutine(turnCtx, 1, []message.Message{{Role: "user", Content: "hello"}}, "")
+	<-provider.started
+
+	cancelTurn()
+	if err := a.Shutdown(2 * time.Second); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	select {
+	case err := <-runDone:
+		if err == nil {
+			t.Fatal("Run() error = nil, want cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Run to exit")
 	}
 }

@@ -303,6 +303,17 @@ web_fetch:
 
 这个配置同时支持全局配置和项目级 `.chord/config.yaml`，且项目级配置优先。
 
+你也可以为 WebFetch 请求配置代理：
+
+```yaml
+web_fetch:
+  proxy: socks5://127.0.0.1:1080  # 支持 http, https, socks5
+```
+
+- `proxy: nil`（默认）—— 继承全局 `proxy` 配置
+- `proxy: ""`（空字符串）—— 明确禁用代理（"direct" 模式）
+- `proxy: "http://..."`、`"https://..."`、`"socks5://..."` —— 使用指定代理
+
 `WebFetch` 会保持轻量的静态 HTTP 读取定位，不运行本地浏览器。对于 JS-heavy 页面，如果返回的 HTML 像应用空壳而不是可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
 ## MCP

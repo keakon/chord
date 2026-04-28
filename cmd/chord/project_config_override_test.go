@@ -80,3 +80,31 @@ func TestApplyProjectConfigOverrides_WebFetchEmptyUserAgentResetsGlobal(t *testi
 		t.Fatalf("expected empty project web_fetch.user_agent to reset global override, got %#v", ac.Cfg.WebFetch.UserAgent)
 	}
 }
+
+func TestApplyProjectConfigOverrides_WebFetchProxy(t *testing.T) {
+	ac := newTestAppContext(t)
+	globalProxy := "http://global-proxy:8080"
+	projectProxy := "socks5://project-proxy:1080"
+	ac.Cfg = &config.Config{WebFetch: config.WebFetchConfig{Proxy: &globalProxy}}
+	pc := &config.Config{WebFetch: config.WebFetchConfig{Proxy: &projectProxy}}
+
+	applyProjectConfigOverrides(ac, pc)
+
+	if ac.Cfg.WebFetch.Proxy == nil || *ac.Cfg.WebFetch.Proxy != projectProxy {
+		t.Fatalf("expected project web_fetch.proxy override to apply, got %#v", ac.Cfg.WebFetch.Proxy)
+	}
+}
+
+func TestApplyProjectConfigOverrides_WebFetchEmptyProxyResetsToDirect(t *testing.T) {
+	ac := newTestAppContext(t)
+	globalProxy := "http://global-proxy:8080"
+	projectProxy := ""
+	ac.Cfg = &config.Config{WebFetch: config.WebFetchConfig{Proxy: &globalProxy}}
+	pc := &config.Config{WebFetch: config.WebFetchConfig{Proxy: &projectProxy}}
+
+	applyProjectConfigOverrides(ac, pc)
+
+	if ac.Cfg.WebFetch.Proxy == nil || *ac.Cfg.WebFetch.Proxy != "" {
+		t.Fatalf("expected empty project web_fetch.proxy to force direct mode, got %#v", ac.Cfg.WebFetch.Proxy)
+	}
+}

@@ -46,6 +46,10 @@ type WebFetchConfig struct {
 	// UserAgent overrides the default browser-like User-Agent. Nil = inherit builtin default;
 	// non-nil empty string explicitly resets to builtin default when merging project config.
 	UserAgent *string `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
+	// Proxy specifies the proxy URL for WebFetch requests. Nil = use global proxy;
+	// non-nil empty string = "direct" (explicitly disable proxy); non-empty = use that proxy.
+	// Supported schemes: http, https, socks5.
+	Proxy *string `json:"proxy,omitempty" yaml:"proxy,omitempty"`
 }
 
 type MaintenanceConfig struct {

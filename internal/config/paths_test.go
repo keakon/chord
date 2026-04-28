@@ -12,6 +12,9 @@ func TestResolvePathLocatorXDGDefaultsAndChordHomeIgnored(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CHORD_HOME", filepath.Join(t.TempDir(), "legacy"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
 
 	locator, err := ResolvePathLocator(nil, PathOptions{})
 	if err != nil {

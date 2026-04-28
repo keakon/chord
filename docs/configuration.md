@@ -328,6 +328,17 @@ web_fetch:
 
 This setting works in both global config and project-level `.chord/config.yaml`; project config overrides the global value.
 
+You can also configure a proxy for WebFetch requests:
+
+```yaml
+web_fetch:
+  proxy: socks5://127.0.0.1:1080  # http, https, socks5 supported
+```
+
+- `proxy: nil` (default) — inherits the global `proxy` setting
+- `proxy: ""` (empty string) — explicitly disables proxy ("direct" mode)
+- `proxy: "http://..."`, `"https://..."`, `"socks5://..."` — uses specified proxy
+
 `WebFetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
 ## MCP

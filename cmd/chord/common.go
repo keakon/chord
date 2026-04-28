@@ -453,7 +453,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.GrepTool{})
 	ac.Registry.Register(tools.GlobTool{})
 	ac.Registry.Register(tools.HandoffTool{})
-	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch))
+	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
 	// ---------------------------------------------------------------
 	// 13a. MCP servers — discover and register tools.

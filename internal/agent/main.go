@@ -267,7 +267,9 @@ type MainAgent struct {
 	pausePendingUserDrainOnce bool
 
 	// Output channel consumed by the TUI or any external observer.
-	outputCh chan AgentEvent
+	outputCh     chan AgentEvent
+	outputMu     sync.RWMutex
+	outputClosed atomic.Bool
 
 	turn       *Turn
 	nextTurnID uint64
@@ -328,6 +330,12 @@ type MainAgent struct {
 	// QuestionFunc). Run waits on toolWg after closing stoppingCh before closing
 	// outputCh, ensuring no send-on-closed-channel.
 	toolWg sync.WaitGroup
+
+	// outputWg tracks background goroutines that may continue emitting regular
+	// TUI events after the main loop has started shutting down (for example,
+	// in-flight LLM response goroutines finishing cancellation/flush work).
+	// Run waits on outputWg before closing outputCh.
+	outputWg sync.WaitGroup
 
 	// Confirm/Question interaction: requestID → response channel.
 	confirmFlowMu  sync.Mutex

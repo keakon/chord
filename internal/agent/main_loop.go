@@ -45,9 +45,15 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		close(a.stoppingCh)
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.
 		a.toolWg.Wait()
-		// 3. Now safe to close outputCh (all producers stopped).
+		// 3. Wait for async TUI producers (for example, main LLM goroutines) to
+		// finish any cancellation/flush work before closing outputCh.
+		a.outputWg.Wait()
+		// 4. Now safe to close outputCh (all producers stopped).
+		a.outputMu.Lock()
+		a.outputClosed.Store(true)
 		close(a.outputCh)
-		// 4. Signal Shutdown() that Run has fully exited.
+		a.outputMu.Unlock()
+		// 5. Signal Shutdown() that Run has fully exited.
 		close(a.done)
 	}()
 
@@ -164,15 +170,34 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 }
 
 func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs ...any) {
-	select {
-	case a.outputCh <- evt:
+	a.outputMu.RLock()
+	if a.outputClosed.Load() {
+		a.outputMu.RUnlock()
 		return
-	default:
-		slog.Warn(warnMsg, warnAttrs...)
 	}
 	select {
 	case a.outputCh <- evt:
+		a.outputMu.RUnlock()
+		return
+	default:
+		a.outputMu.RUnlock()
+		slog.Warn(warnMsg, warnAttrs...)
+	}
+	select {
 	case <-a.stoppingCh:
+		return
+	default:
+	}
+	a.outputMu.RLock()
+	if a.outputClosed.Load() {
+		a.outputMu.RUnlock()
+		return
+	}
+	select {
+	case a.outputCh <- evt:
+		a.outputMu.RUnlock()
+	case <-a.stoppingCh:
+		a.outputMu.RUnlock()
 	}
 }
 
@@ -206,6 +231,16 @@ func (a *MainAgent) emitToTUI(evt AgentEvent) {
 		return
 	}
 	select {
+	case <-a.stoppingCh:
+		return
+	default:
+	}
+	a.outputMu.RLock()
+	defer a.outputMu.RUnlock()
+	if a.outputClosed.Load() {
+		return
+	}
+	select {
 	case a.outputCh <- evt:
 	default:
 		slog.Warn("TUI output channel full, dropping event",
@@ -229,6 +264,16 @@ func (a *MainAgent) shouldEmitSubAgentStreaming(agentID string) bool {
 // for space in the channel, but respects ctx cancellation and stoppingCh to avoid
 // blocking forever during shutdown.
 func (a *MainAgent) emitInteractiveToTUI(ctx context.Context, evt AgentEvent) error {
+	select {
+	case <-a.stoppingCh:
+		return ErrAgentShutdown
+	default:
+	}
+	a.outputMu.RLock()
+	defer a.outputMu.RUnlock()
+	if a.outputClosed.Load() {
+		return ErrAgentShutdown
+	}
 	select {
 	case a.outputCh <- evt:
 		return nil

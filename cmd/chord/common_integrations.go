@@ -35,6 +35,10 @@ func applyProjectConfigOverrides(ac *AppContext, pc *config.Config) {
 		v := *pc.WebFetch.UserAgent
 		ac.Cfg.WebFetch.UserAgent = &v
 	}
+	if pc.WebFetch.Proxy != nil {
+		v := *pc.WebFetch.Proxy
+		ac.Cfg.WebFetch.Proxy = &v
+	}
 }
 
 func lspServerDisplayList(mgr *lsp.Manager) []agent.LSPServerDisplay {

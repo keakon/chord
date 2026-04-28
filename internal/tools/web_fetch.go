@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	readability "github.com/mackee/go-readability"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/net/proxy"
 	"golang.org/x/text/transform"
 )
 
@@ -50,7 +52,8 @@ func extractReadableHTML(htmlText string, options readability.ReadabilityOptions
 
 // WebFetchTool fetches a URL and returns its content as plain text or Markdown.
 type WebFetchTool struct {
-	cfg config.WebFetchConfig
+	cfg         config.WebFetchConfig
+	globalProxy string
 }
 
 type webFetchArgs struct {
@@ -110,8 +113,65 @@ type webFetchHTMLRender struct {
 	ExtractedBytes int
 }
 
-func NewWebFetchTool(cfg config.WebFetchConfig) WebFetchTool {
-	return WebFetchTool{cfg: cfg}
+func NewWebFetchTool(cfg config.WebFetchConfig, globalProxy string) WebFetchTool {
+	return WebFetchTool{cfg: cfg, globalProxy: globalProxy}
+}
+
+func (t WebFetchTool) effectiveProxy() string {
+	if t.cfg.Proxy != nil {
+		if *t.cfg.Proxy == "" {
+			return "direct"
+		}
+		return *t.cfg.Proxy
+	}
+	return t.globalProxy
+}
+
+func newHTTPClientWithProxy(proxyURL string, timeout time.Duration) (*http.Client, error) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   60 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   16,
+	}
+
+	if proxyURL != "" && proxyURL != "direct" {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse proxy URL %q: %w", proxyURL, err)
+		}
+		scheme := strings.ToLower(parsed.Scheme)
+		switch scheme {
+		case "http", "https":
+			transport.Proxy = http.ProxyURL(parsed)
+		case "socks5":
+			dialer, err := proxy.FromURL(parsed, proxy.Direct)
+			if err != nil {
+				return nil, fmt.Errorf("create SOCKS5 dialer from %q: %w", proxyURL, err)
+			}
+			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if cd, ok := dialer.(proxy.ContextDialer); ok {
+					return cd.DialContext(ctx, network, addr)
+				}
+				conn, err := dialer.Dial(network, addr)
+				return conn, err
+			}
+		default:
+			return nil, fmt.Errorf("unsupported proxy scheme %q", scheme)
+		}
+	} else if proxyURL == "direct" {
+		transport.Proxy = nil
+	}
+
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
 }
 
 func (WebFetchTool) Name() string { return "WebFetch" }
@@ -173,19 +233,20 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	client := &http.Client{
-		Timeout: time.Duration(timeoutSec) * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("stopped after 5 redirects")
-			}
-			// Only allow http/https redirects.
-			scheme := req.URL.Scheme
-			if scheme != "http" && scheme != "https" {
-				return fmt.Errorf("redirect to non-http scheme %q not allowed", scheme)
-			}
-			return nil
-		},
+	effectiveProxy := t.effectiveProxy()
+	client, err := newHTTPClientWithProxy(effectiveProxy, time.Duration(timeoutSec)*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("create HTTP client: %w", err)
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("stopped after 5 redirects")
+		}
+		scheme := req.URL.Scheme
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("redirect to non-http scheme %q not allowed", scheme)
+		}
+		return nil
 	}
 	req, err := http.NewRequestWithContext(execCtx, http.MethodGet, a.URL, nil)
 	if err != nil {
