@@ -95,7 +95,7 @@ func (m *Manager) OpenSession(projectRoot, sessionID string) (*SessionHandle, er
 	if err != nil {
 		return nil, fmt.Errorf("open runtime cache lock: %w", err)
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockFileExclusiveNonBlocking(lockFile); err != nil {
 		_ = lockFile.Close()
 		if isWouldBlock(err) {
 			return nil, fmt.Errorf("runtime cache for session %s is already active", sessionID)
@@ -108,8 +108,7 @@ func (m *Manager) OpenSession(projectRoot, sessionID string) (*SessionHandle, er
 		CreatedAt:   time.Now(),
 		PID:         os.Getpid(),
 	}); err != nil {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		_ = lockFile.Close()
+		_ = unlockAndClose(lockFile)
 		return nil, err
 	}
 	return &SessionHandle{
@@ -256,7 +255,7 @@ func (m *Manager) removeSessionDirIfInactive(sessionDir string) error {
 	defer func() {
 		_ = unlockAndClose(lockFile)
 	}()
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockFileExclusiveNonBlocking(lockFile); err != nil {
 		if isWouldBlock(err) {
 			return nil
 		}
@@ -295,7 +294,7 @@ func writeSessionMeta(path string, meta sessionMeta) error {
 }
 
 func isWouldBlock(err error) bool {
-	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
+	return isWouldBlockLock(err)
 }
 
 func unlockAndClose(f *os.File) error {
@@ -303,7 +302,7 @@ func unlockAndClose(f *os.File) error {
 		return nil
 	}
 	var firstErr error
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil && !errors.Is(err, fs.ErrClosed) {
+	if err := unlockFile(f); err != nil && !errors.Is(err, fs.ErrClosed) {
 		firstErr = err
 	}
 	if err := f.Close(); err != nil && firstErr == nil {

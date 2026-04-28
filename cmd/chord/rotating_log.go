@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -214,11 +213,11 @@ func (w *rotatingLogFile) maybeMaintainLocked() error {
 		return err
 	}
 	defer lockFile.Close()
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockRuntimeLogFile(lockFile); err != nil {
 		return err
 	}
 	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = unlockRuntimeLogFile(lockFile)
 	}()
 
 	pathInfo, err = os.Stat(w.path)

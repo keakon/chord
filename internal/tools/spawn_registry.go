@@ -10,7 +10,6 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/keakon/chord/internal/shell"
@@ -92,7 +91,7 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 	st := shell.ParseShellType(req.ShellType)
 	binary, args := shell.GetShellCommand(st, req.Command)
 	cmd := exec.Command(binary, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	_, _ = configureCommandProcessGroup(cmd)
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
@@ -365,7 +364,8 @@ func terminateSpawnProcessGroup(cmd *exec.Cmd, reason string, doneCh <-chan erro
 		return fmt.Errorf("command %s", reason)
 	}
 	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = pid
+	_ = terminateCommandProcessGroup(cmd)
 	select {
 	case err := <-doneCh:
 		if err != nil {
@@ -373,7 +373,7 @@ func terminateSpawnProcessGroup(cmd *exec.Cmd, reason string, doneCh <-chan erro
 		}
 		return fmt.Errorf("command %s", reason)
 	case <-time.After(killGracePeriod):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = terminateCommandProcessGroup(cmd)
 		if err := <-doneCh; err != nil {
 			return fmt.Errorf("command %s: %w", reason, err)
 		}

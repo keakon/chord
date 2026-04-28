@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -100,7 +99,7 @@ type StdioTransport struct {
 // The caller must call Close to terminate the child process.
 func NewStdioTransport(ctx context.Context, command string, args []string, env []string) (*StdioTransport, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureStdioCommand(cmd)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -275,19 +274,15 @@ func (t *StdioTransport) Close() error {
 	// Close stdin to signal the child process.
 	t.stdin.Close()
 
-	// Send SIGTERM to the process group.
-	if t.cmd.Process != nil {
-		_ = syscall.Kill(-t.cmd.Process.Pid, syscall.SIGTERM)
-	}
+	// Terminate the child process group.
+	terminateStdioCommand(t.cmd)
 
 	// Wait for the reader goroutine to finish (bounded).
 	select {
 	case <-t.done:
 	case <-time.After(stdioKillGrace):
 		// Force kill.
-		if t.cmd.Process != nil {
-			_ = syscall.Kill(-t.cmd.Process.Pid, syscall.SIGKILL)
-		}
+		terminateStdioCommand(t.cmd)
 		<-t.done
 	}
 

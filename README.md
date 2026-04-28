@@ -22,6 +22,10 @@ A lightweight, local-first terminal coding agent. Low resource usage, reliable l
 - **Remote control** — `chord headless` exposes a stdio JSONL control plane; with `chord-gateway`, control Chord from WeChat, Feishu, and other chat surfaces.
 - **Power-aware runtime** — prevents system sleep while work is active and allows sleep again when Chord becomes idle.
 
+## Platform support
+
+Chord is currently developed and tested primarily on macOS. Other platforms may compile or run, but functionality may be degraded or have undiscovered bugs, especially on Windows. The `prevent_sleep` power-management feature is currently only effective on macOS; on other platforms it is a no-op.
+
 ## Quickstart
 
 Requires Go 1.26+.

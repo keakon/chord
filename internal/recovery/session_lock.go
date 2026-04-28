@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -115,7 +114,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open session guard lock: %w", err)
 	}
-	if err := syscall.Flock(int(guardFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockSessionGuardFile(guardFile); err != nil {
 		_ = guardFile.Close()
 		if isWouldBlockError(err) {
 			return nil, currentSessionLockedError(sessionDir, lockPath)
@@ -254,14 +253,14 @@ func sessionDirLockedByLiveOwner(sessionPath string) (bool, error) {
 		_ = guardFile.Close()
 	}()
 
-	if err := syscall.Flock(int(guardFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockSessionGuardFile(guardFile); err != nil {
 		if isWouldBlockError(err) {
 			return true, nil
 		}
 		return false, fmt.Errorf("probe session guard lock: %w", err)
 	}
 	defer func() {
-		_ = syscall.Flock(int(guardFile.Fd()), syscall.LOCK_UN)
+		_ = unlockSessionGuardFile(guardFile)
 	}()
 
 	info, err := readLockFile(lockPath)
@@ -288,7 +287,7 @@ func unlockAndCloseGuard(f *os.File) error {
 		return nil
 	}
 	var firstErr error
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil && !errors.Is(err, syscall.EBADF) {
+	if err := unlockSessionGuardFile(f); err != nil && !errors.Is(err, os.ErrClosed) {
 		firstErr = fmt.Errorf("release session guard lock: %w", err)
 	}
 	if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) && firstErr == nil {
@@ -298,7 +297,7 @@ func unlockAndCloseGuard(f *os.File) error {
 }
 
 func isWouldBlockError(err error) bool {
-	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
+	return isSessionGuardWouldBlock(err)
 }
 
 // newOwnerID generates a random hex string to uniquely identify this lock acquisition.
@@ -306,18 +305,4 @@ func newOwnerID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// isProcessAlive returns true if a process with the given PID exists and
-// accepts signals (i.e. is not a zombie waiting for wait()).
-func isProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
 }

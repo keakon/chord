@@ -2,12 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"golang.org/x/sys/unix"
 )
 
 func (m *Model) refreshKittyTerminalMetrics() {
@@ -18,16 +16,9 @@ func readKittyTerminalMetrics(backend ImageBackend) kittyTerminalMetrics {
 	if backend != ImageBackendKitty {
 		return kittyTerminalMetrics{}
 	}
-	fd := os.Stdout.Fd()
-	ws, err := unix.IoctlGetWinsize(int(fd), unix.TIOCGWINSZ)
-	if err != nil || ws == nil || ws.Col == 0 || ws.Row == 0 {
+	metrics, ok := readKittyTerminalPixelMetrics()
+	if !ok {
 		return kittyTerminalMetrics{}
-	}
-	metrics := kittyTerminalMetrics{WindowWidthPx: int(ws.Xpixel), WindowHeightPx: int(ws.Ypixel)}
-	if metrics.WindowWidthPx > 0 && metrics.WindowHeightPx > 0 {
-		metrics.CellWidthPx = max(1, metrics.WindowWidthPx/int(ws.Col))
-		metrics.CellHeightPx = max(1, metrics.WindowHeightPx/int(ws.Row))
-		metrics.Valid = metrics.CellWidthPx > 0 && metrics.CellHeightPx > 0
 	}
 	return metrics
 }

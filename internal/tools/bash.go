@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/keakon/chord/internal/shell"
@@ -248,7 +247,7 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// Use the detected shell type to construct the correct command.
 	binary, args := resolveShellExecution(t.shellType, a.Command)
 	cmd := exec.Command(binary, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	_, _ = configureCommandProcessGroup(cmd)
 	if a.Workdir != "" {
 		cmd.Dir = a.Workdir
 	}
@@ -276,8 +275,10 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		}
 		return output, nil
 	case <-timer.C:
+		_ = terminateCommandProcessGroup(cmd)
 		return killProcessGroup(cmd, buf, fmt.Sprintf("timed out after %ds", timeoutInfo.EffectiveSec), doneCh)
 	case <-ctx.Done():
+		_ = terminateCommandProcessGroup(cmd)
 		return killProcessGroup(cmd, buf, "cancelled", doneCh)
 	}
 }
@@ -294,11 +295,12 @@ func resolveShellExecution(shellType, command string) (string, []string) {
 // returns whatever output was captured along with an error.
 func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason string, doneCh <-chan error) (string, error) {
 	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = pid
+	_ = terminateCommandProcessGroup(cmd)
 	select {
 	case <-doneCh:
 	case <-time.After(killGracePeriod):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = terminateCommandProcessGroup(cmd)
 		<-doneCh
 	}
 	output := buf.String()
