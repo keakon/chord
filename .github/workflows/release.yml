@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME}"
+          mkdir -p dist build
+
+          targets=(
+            "darwin amd64"
+            "darwin arm64"
+            "linux amd64"
+            "linux arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r goos goarch <<< "${target}"
+            name="chord-${version}-${goos}-${goarch}"
+            ext=""
+            if [[ "${goos}" == "windows" ]]; then
+              ext=".exe"
+            fi
+
+            out="build/${name}/chord${ext}"
+            mkdir -p "$(dirname "${out}")"
+
+            GOOS="${goos}" GOARCH="${goarch}" \
+              go build -trimpath -ldflags "-s -w -X main.Version=${version}" \
+              -o "${out}" ./cmd/chord/
+
+            cp LICENSE "build/${name}/"
+            if [[ "${goos}" == "windows" ]]; then
+              (cd build && zip -qr "../dist/${name}.zip" "${name}")
+            else
+              tar -C build -czf "dist/${name}.tar.gz" "${name}"
+            fi
+          done
+
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

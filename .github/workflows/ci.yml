@@ -2,13 +2,20 @@ name: ci
 
 on:
   push:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Test with coverage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,9 +41,35 @@ jobs:
             printf("coverage %.1f%% meets required %.1f%%\n", total, min)
           }'
 
+  vet:
+    name: Vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Vet
         run: |
           go vet ./...
+
+  staticcheck:
+    name: Staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Install staticcheck
         run: |
@@ -45,6 +78,19 @@ jobs:
       - name: Staticcheck
         run: |
           staticcheck -checks 'all,-ST*' ./...
+
+  gofmt:
+    name: Check gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Check gofmt
         shell: bash
