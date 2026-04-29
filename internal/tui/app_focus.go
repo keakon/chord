@@ -59,10 +59,16 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	msgs := m.agent.GetMessages()
 	var nextID int
 	blocks := messagesToBlocks(msgs, &nextID)
+	for _, block := range blocks {
+		if block != nil {
+			block.displayWorkingDir = m.workingDir
+		}
+	}
 	clearBlocksTiming(blocks)
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
 	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks, agentID, &m.nextBlockID)
 	m.viewport.SetFilter(viewportFilter)
+	m.viewport.SetWorkingDir(m.workingDir)
 	m.viewport.ReplaceBlocks(blocks)
 	m.revalidateFocusedBlock()
 	m.recalcViewportSize()

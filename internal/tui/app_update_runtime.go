@@ -14,6 +14,7 @@ func (m *Model) handleReconnected(msg reconnectedMsg) tea.Cmd {
 		closer.Close()
 	}
 	m.agent = msg.agent
+	m.syncWorkingDirFromAgent()
 	m.agentHadEvent = false
 	m.keyPoolTickGen++
 	return tea.Batch(

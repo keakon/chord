@@ -266,6 +266,11 @@ func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
 
 	var nextID int
 	blocks := messagesToBlocks(msgs, &nextID)
+	for _, block := range blocks {
+		if block != nil {
+			block.displayWorkingDir = m.workingDir
+		}
+	}
 	oldBlocks := m.viewport.blocks
 	limit := min(len(blocks), len(oldBlocks))
 	for i := range limit {

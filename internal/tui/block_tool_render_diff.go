@@ -105,7 +105,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		Path string `json:"path"`
 	}
 	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-		filePath = parsed.Path
+		filePath = b.displayToolPath(parsed.Path)
 	}
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string

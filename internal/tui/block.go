@@ -124,6 +124,10 @@ type Block struct {
 	toolHeaderCacheParamLines     []string
 	toolHeaderCacheParamLinesOK   bool
 
+	// displayWorkingDir is UI-only context used to shorten absolute tool paths
+	// for rendering. It does not affect tool execution or persisted arguments.
+	displayWorkingDir string
+
 	// MsgIndex is the index of the corresponding message in the agent's message
 	// list. Set for user blocks during transcript restore; -1 for dynamically
 	// appended blocks or non-user blocks.

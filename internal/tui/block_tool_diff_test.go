@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -165,6 +167,29 @@ func TestRenderInlineDiffLineLongLineUsesChangeSnippet(t *testing.T) {
 	}
 	if !strings.Contains(plain, "…") {
 		t.Fatalf("expected snippet ellipsis for long line, got %q", plain)
+	}
+}
+
+func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal", "tui", "example.go")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Edit",
+		Content:           fmt.Sprintf(`{"path":%q}`, abs),
+		Diff:              "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusSuccess,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	want := filepath.Join("internal", "tui", "example.go")
+	if !strings.Contains(joined, "Edit "+want) {
+		t.Fatalf("expected Edit header to show relative path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect Edit header to show absolute path; got:\n%s", joined)
 	}
 }
 

@@ -481,7 +481,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		shortResult := bashCollapsedResultIsShort(b, contentWidth)
 		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded || shortResult, expanded)
 		if expanded {
-			result = append(result, bashMetaLines(vals, contentWidth)...)
+			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
 		}

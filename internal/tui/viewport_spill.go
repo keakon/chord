@@ -170,6 +170,7 @@ func (b *Block) ensureMaterialized() error {
 	}
 
 	preserveMutableBlockState(b, loaded)
+	loaded.displayWorkingDir = b.displayWorkingDir
 	loaded.spillRef = b.spillRef
 	loaded.spillStore = b.spillStore
 	loaded.spillSummary = b.spillSummary
@@ -193,6 +194,7 @@ func (b *Block) inspectionBlock() (*Block, bool) {
 		return b, false
 	}
 	preserveMutableBlockState(b, loaded)
+	loaded.displayWorkingDir = b.displayWorkingDir
 	loaded.spillStore = b.spillStore
 	loaded.spillSummary = b.spillSummary
 	loaded.spillLineCounts = b.spillLineCounts

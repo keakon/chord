@@ -72,6 +72,90 @@ func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
 	}
 }
 
+func TestDisplayToolPathPrefersRelativeWithinWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal", "tui", "block_tool.go")
+	got := displayToolPath(abs, wd)
+	want := filepath.Join("internal", "tui", "block_tool.go")
+	if got != want {
+		t.Fatalf("displayToolPath(%q, %q) = %q, want %q", abs, wd, got, want)
+	}
+}
+
+func TestDisplayToolPathKeepsAbsoluteOutsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(string(os.PathSeparator), "tmp", "other", "block_tool.go")
+	if got := displayToolPath(abs, wd); got != abs {
+		t.Fatalf("displayToolPath(%q, %q) = %q, want original absolute path", abs, wd, got)
+	}
+}
+
+func TestDisplayToolPathKeepsExistingRelativePath(t *testing.T) {
+	rel := filepath.Join("internal", "tui", "block_tool.go")
+	if got := displayToolPath(rel, filepath.Join(string(os.PathSeparator), "tmp", "workspace")); got != rel {
+		t.Fatalf("displayToolPath(%q, wd) = %q, want unchanged relative path", rel, got)
+	}
+}
+
+func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal", "tui", "block_tool.go")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Read",
+		Content:           fmt.Sprintf(`{"path":%q,"limit":20,"offset":5}`, abs),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	want := filepath.Join("internal", "tui", "block_tool.go") + " (limit=20, offset=5)"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("expected Read header to show relative path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect Read header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "demo.txt")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Write",
+		Content:           fmt.Sprintf(`{"path":%q,"content":"hello"}`, abs),
+		Collapsed:         true,
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(joined, "Write demo.txt") {
+		t.Fatalf("expected Write header to show relative path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect Write header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestReadHeaderKeepsAbsolutePathOutsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(string(os.PathSeparator), "tmp", "other", "demo.txt")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Read",
+		Content:           fmt.Sprintf(`{"path":%q}`, abs),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, abs) {
+		t.Fatalf("expected Read header to keep absolute path outside working dir; got:\n%s", joined)
+	}
+}
+
 func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.T) {
 	tmp := t.TempDir()
 	wd := filepath.Join(tmp, "workspace")
@@ -856,6 +940,27 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 	}
 }
 
+func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal", "tui", "obsolete.go")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Delete",
+		Content:           fmt.Sprintf(`{"paths":[%q],"reason":"remove obsolete file"}`, abs),
+		ResultContent:     "Delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Delete internal/tui/obsolete.go") {
+		t.Fatalf("expected delete header to show relative path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect delete header to show absolute path; got:\n%s", joined)
+	}
+}
+
 func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	block := &Block{
 		ID:                     1,
@@ -1087,6 +1192,67 @@ func TestExpandedTaskDescriptionRendersMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(joined, "fmt.Println(\"ok\")") {
 		t.Fatalf("expected fenced code content in Delegate description; got:\n%s", joined)
+	}
+}
+
+func TestGrepHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal", "tui")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Grep",
+		Content:           fmt.Sprintf(`{"pattern":"TODO","path":%q,"glob":"*.go"}`, abs),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Grep TODO (path=internal/tui, glob=*.go)") {
+		t.Fatalf("expected grep header to show relative search path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect grep header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestGlobHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "internal")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "Glob",
+		Content:           fmt.Sprintf(`{"pattern":"**/*.go","path":%q}`, abs),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Glob **/*.go (path=internal)") {
+		t.Fatalf("expected glob header to show relative search path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("did not expect glob header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestBashExpandedMetaShowsRelativeWorkdirInsideWorkingDir(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	workdir := filepath.Join(wd, "internal", "tui")
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "Bash",
+		Content:                fmt.Sprintf(`{"command":"pwd","workdir":%q}`, workdir),
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+		displayWorkingDir:      wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "workdir: internal/tui") && !strings.Contains(joined, "Workdir: internal/tui") {
+		t.Fatalf("expected bash expanded body to show relative workdir; got:\n%s", joined)
+	}
+	if strings.Contains(joined, workdir) {
+		t.Fatalf("did not expect bash body to show absolute workdir; got:\n%s", joined)
 	}
 }
 

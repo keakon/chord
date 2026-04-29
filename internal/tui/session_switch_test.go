@@ -321,6 +321,55 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	}
 }
 
+func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolPath(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
+	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
+	}
+	messages = append(messages,
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
+			ID:   "call-read-root-1",
+			Name: "Read",
+			Args: []byte(`{"path":"/repo-b/internal/tui/app.go","limit":20,"offset":0}`),
+		}}},
+		message.Message{Role: "tool", ToolCallID: "call-read-root-1", Content: "1\tneedle line\n2\tomega line"},
+	)
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages, projectRoot: "/repo-b"}
+	m := NewModelWithSize(backend, 120, 24)
+	m.workingDir = "/repo-a"
+	m.viewport.SetWorkingDir(m.workingDir)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for project-root path test")
+	}
+	if got := m.workingDir; got != "/repo-b" {
+		t.Fatalf("workingDir after startup restore = %q, want /repo-b", got)
+	}
+
+	m.search = NewSearchModel(ModeNormal)
+	m.executeSearchAgainstCurrentTranscript("needle line")
+	match, ok := m.search.State.CurrentMatch()
+	if !ok {
+		t.Fatal("search should find deferred Read tool content")
+	}
+	if !m.maybeScrollToSearchMatch(match, "search_enter") {
+		t.Fatal("maybeScrollToSearchMatch should succeed for deferred Read tool match")
+	}
+	block := m.viewport.GetFocusedBlock(match.BlockID)
+	if block == nil {
+		t.Fatal("expected focused Read block after search reveal")
+	}
+	plain := stripANSI(strings.Join(block.Render(m.viewport.width, ""), "\n"))
+	if !strings.Contains(plain, "Read internal/tui/app.go") {
+		t.Fatalf("expected deferred restored Read header relative to updated project root, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "/repo-b/internal/tui/app.go") {
+		t.Fatalf("expected deferred restored Read header not to show absolute path, got:\n%s", plain)
+	}
+}
+
 func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
@@ -2330,6 +2379,42 @@ func TestRebuildViewportFromMessagesRestoresReadBlankLineResult(t *testing.T) {
 	}
 	if !strings.Contains(plain, "359") {
 		t.Fatalf("expected restored blank numbered line, got:\n%s", plain)
+	}
+}
+
+func TestSessionRestoredEventUpdatesWorkingDirAndShowsRelativeToolPath(t *testing.T) {
+	backend := &sessionControlAgent{
+		messages: []message.Message{{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{{
+				ID:   "tool-read",
+				Name: "Read",
+				Args: []byte(`{"path":"/repo-b/internal/tui/input.go","limit":1,"offset":358}`),
+			}},
+		}, {Role: "tool", ToolCallID: "tool-read", Content: "   359\t\n"}},
+		projectRoot: "/repo-b",
+	}
+	m := NewModelWithSize(backend, 100, 30)
+	m.workingDir = "/repo-a"
+	m.viewport.SetWorkingDir(m.workingDir)
+	m.beginSessionSwitch("resume", "123")
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+
+	if got := m.workingDir; got != "/repo-b" {
+		t.Fatalf("workingDir after session restore = %q, want /repo-b", got)
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
+	}
+	plain := stripANSI(strings.Join(blocks[0].Render(100, ""), "\n"))
+	if !strings.Contains(plain, "Read internal/tui/input.go") {
+		t.Fatalf("expected restored Read header relative to new project root, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "/repo-b/internal/tui/input.go") {
+		t.Fatalf("expected restored Read header not to show absolute path from new project root, got:\n%s", plain)
 	}
 }
 

@@ -41,7 +41,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		Offset int    `json:"offset"`
 	}
 	if json.Unmarshal([]byte(b.Content), &readArgs) == nil {
-		filePath = readArgs.Path
+		filePath = b.displayToolPath(readArgs.Path)
 	}
 
 	prefix := b.renderToolPrefix(spinnerFrame)

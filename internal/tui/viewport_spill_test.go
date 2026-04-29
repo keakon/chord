@@ -93,6 +93,58 @@ func TestViewportSpillPreservesSearchAndHydration(t *testing.T) {
 	}
 }
 
+func TestViewportSpillHydratePreservesToolDisplayWorkingDir(t *testing.T) {
+	v := NewViewport(80, 6)
+	v.SetWorkingDir(filepath.Join(string(os.PathSeparator), "tmp", "workspace"))
+
+	tool := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "Read",
+		Content:  `{"path":"` + filepath.Join(v.workingDir, "internal", "tui", "block_tool.go") + `","limit":20,"offset":5}`,
+	}
+	v.AppendBlock(tool)
+	abs := filepath.Join(v.workingDir, "internal", "tui", "block_tool.go")
+
+	if !v.spillBlock(tool) {
+		t.Fatal("expected spillBlock(tool) to succeed")
+	}
+	if !tool.spillCold {
+		t.Fatalf("expected tool block to spill, got spillCold=%v", tool.spillCold)
+	}
+
+	inspected, temporary := tool.inspectionBlock()
+	if !temporary {
+		t.Fatal("expected inspectionBlock() to load a temporary hydrated block")
+	}
+	if inspected == nil {
+		t.Fatal("expected inspectionBlock() result")
+	}
+	if inspected.displayWorkingDir != v.workingDir {
+		t.Fatalf("inspectionBlock() lost displayWorkingDir: got %q want %q", inspected.displayWorkingDir, v.workingDir)
+	}
+	inspected.InvalidateCache()
+
+	if err := tool.ensureMaterialized(); err != nil {
+		t.Fatalf("ensureMaterialized(): %v", err)
+	}
+	if tool.spillCold {
+		t.Fatal("expected tool block to hydrate")
+	}
+	if tool.displayWorkingDir != v.workingDir {
+		t.Fatalf("displayWorkingDir lost after hydrate: got %q want %q", tool.displayWorkingDir, v.workingDir)
+	}
+
+	joined := stripANSI(strings.Join(tool.Render(120, ""), "\n"))
+	want := filepath.Join("internal", "tui", "block_tool.go") + " (limit=20, offset=5)"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("expected hydrated tool block to keep relative path, got:\n%s", joined)
+	}
+	if strings.Contains(joined, abs) {
+		t.Fatalf("expected hydrated tool block not to fall back to absolute path, got:\n%s", joined)
+	}
+}
+
 func TestViewportRenderSkipsHydratingOffscreenSpilledBlocks(t *testing.T) {
 	v := NewViewport(40, 4)
 	v.maxHotBytes = 1024

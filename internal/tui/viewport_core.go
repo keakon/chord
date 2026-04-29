@@ -27,6 +27,7 @@ type Viewport struct {
 	accessSeq      uint64
 	spillRecovery  func() []*Block
 	lastBlockDirty bool
+	workingDir     string
 
 	visibleBlocksCache []*Block
 	visibleBlocksDirty bool
@@ -50,6 +51,22 @@ func NewViewport(width, height int) *Viewport {
 		hotBudgetDirty:     true,
 		hotBytesDirty:      true,
 	}
+}
+
+func (v *Viewport) SetWorkingDir(path string) {
+	if v == nil {
+		return
+	}
+	v.workingDir = path
+	for _, block := range v.blocks {
+		if block == nil {
+			continue
+		}
+		block.displayWorkingDir = path
+		block.InvalidateCache()
+	}
+	v.bumpRenderVersion()
+	v.recalcTotalLines()
 }
 
 func (v *Viewport) HasUserLocalShellPending() bool {

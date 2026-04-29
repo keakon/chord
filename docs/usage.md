@@ -15,6 +15,8 @@ Most personal development workflows should start with the local TUI.
 
 After startup, the input box is focused by default. Type a message and press `Enter` to send.
 
+Tool-call cards try to keep file paths concise: for file tools such as `Read`, `Write`, and `Edit`, paths inside the current working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
+
 Common keys:
 
 - `Esc`: switch to Normal mode; pressing `Esc` again in the running main view cancels the current turn

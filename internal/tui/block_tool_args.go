@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -74,11 +76,11 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 		b.toolHeaderCacheParamLinesOK = false
 	}
 	if !b.toolHeaderCacheHeaderParamsOK {
-		b.toolHeaderCacheHeaderParams = formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
+		b.toolHeaderCacheHeaderParams = b.formatToolHeaderParamsWithParsed(keys, vals)
 		b.toolHeaderCacheHeaderParamsOK = true
 	}
 	if !b.toolHeaderCacheHeaderPartsOK {
-		b.toolHeaderCacheHeaderMain, b.toolHeaderCacheHeaderGray = formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
+		b.toolHeaderCacheHeaderMain, b.toolHeaderCacheHeaderGray = b.formatToolHeaderPartsWithParsed(keys, vals)
 		b.toolHeaderCacheHeaderPartsOK = true
 	}
 	if !b.toolHeaderCacheCollapsedReady {
@@ -86,7 +88,12 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 		b.toolHeaderCacheCollapsedReady = true
 	}
 	if !b.toolHeaderCacheParamLinesOK {
-		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, vals)...)
+		paramVals := vals
+		switch b.ToolName {
+		case "Read", "Delete", "Grep", "Glob", "Bash", "Spawn", "Lsp":
+			paramVals = cloneToolValsWithDisplayDirs(b, vals)
+		}
+		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
 		b.toolHeaderCacheParamLinesOK = true
 	}
 	return b.toolHeaderCacheHeaderParams,
@@ -151,6 +158,84 @@ func formatParamValue(v any) string {
 		}
 		return s
 	}
+}
+
+func displayToolPath(path, workingDir string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	workingDir = strings.TrimSpace(workingDir)
+	if workingDir == "" {
+		return path
+	}
+	rel, err := filepath.Rel(workingDir, path)
+	if err != nil {
+		return path
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == "" {
+		return path
+	}
+	up := ".." + string(os.PathSeparator)
+	if rel == ".." || strings.HasPrefix(rel, up) {
+		return path
+	}
+	return rel
+}
+
+func displayToolDir(path, workingDir string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if path == "." {
+		return path
+	}
+	return displayToolPath(path, workingDir)
+}
+
+func (b *Block) displayToolPath(path string) string {
+	if b == nil {
+		return strings.TrimSpace(path)
+	}
+	return displayToolPath(path, b.displayWorkingDir)
+}
+
+func (b *Block) displayToolDir(path string) string {
+	if b == nil {
+		return strings.TrimSpace(path)
+	}
+	return displayToolDir(path, b.displayWorkingDir)
+}
+
+func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]string {
+	if b == nil || len(vals) == 0 {
+		return vals
+	}
+	cloned := make(map[string]string, len(vals))
+	for k, v := range vals {
+		cloned[k] = v
+	}
+	if path, ok := cloned["path"]; ok {
+		switch b.ToolName {
+		case "Grep", "Glob", "Lsp":
+			cloned["path"] = b.displayToolDir(path)
+		case "Read", "Write", "Edit", "Delete":
+			cloned["path"] = b.displayToolPath(path)
+		}
+	}
+	if workdir, ok := cloned["workdir"]; ok {
+		cloned["workdir"] = b.displayToolDir(workdir)
+	}
+	return cloned
+}
+
+func (b *Block) toolHeaderParamsWithDisplayDirs(vals map[string]string) string {
+	return formatToolHeaderParamsWithParsed(b.ToolName, nil, cloneToolValsWithDisplayDirs(b, vals))
 }
 
 func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[string]string) (mainPart, grayPart string) {
@@ -244,6 +329,94 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 		return name, ""
 	default:
 		return "", ""
+	}
+}
+
+func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]string) (mainPart, grayPart string) {
+	if b == nil {
+		return formatToolHeaderPartsWithParsed("", keys, vals)
+	}
+	switch b.ToolName {
+	case "Delete":
+		filePaths := parseDeleteHeaderPaths(vals)
+		if len(filePaths) == 0 {
+			return "", ""
+		}
+		if len(filePaths) == 1 {
+			return b.displayToolPath(filePaths[0]), ""
+		}
+		return fmt.Sprintf("%d files", len(filePaths)), ""
+	case "Grep", "Glob", "Bash", "Spawn", "Lsp":
+		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
+	default:
+		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
+	}
+}
+
+func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]string) string {
+	if b == nil {
+		return formatToolHeaderParamsWithParsed("", keys, vals)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	switch b.ToolName {
+	case "Read":
+		path := b.displayToolPath(vals["path"])
+		if path == "" {
+			return ""
+		}
+		var opts []string
+		if v := vals["limit"]; v != "" && v != "0" {
+			opts = append(opts, "limit="+v)
+		}
+		if v := vals["offset"]; v != "" && v != "0" {
+			opts = append(opts, "offset="+v)
+		}
+		if len(opts) == 0 {
+			return path
+		}
+		return path + " (" + strings.Join(opts, ", ") + ")"
+	case "Delete":
+		filePaths := parseDeleteHeaderPaths(vals)
+		if len(filePaths) == 0 {
+			return ""
+		}
+		if len(filePaths) == 1 {
+			return b.displayToolPath(filePaths[0])
+		}
+		return fmt.Sprintf("%d files", len(filePaths))
+	case "Grep":
+		pattern := vals["pattern"]
+		if pattern == "" {
+			return ""
+		}
+		var opts []string
+		filePath := b.displayToolDir(vals["path"])
+		if filePath != "" && filePath != "." {
+			opts = append(opts, "path="+filePath)
+		}
+		if v := vals["glob"]; v != "" {
+			opts = append(opts, "glob="+v)
+		}
+		if len(opts) == 0 {
+			return pattern
+		}
+		return pattern + " (" + strings.Join(opts, ", ") + ")"
+	case "Glob":
+		pattern := vals["pattern"]
+		if pattern == "" {
+			return ""
+		}
+		filePath := b.displayToolDir(vals["path"])
+		if filePath != "" && filePath != "." {
+			return pattern + " (path=" + filePath + ")"
+		}
+		return pattern
+	case "Bash", "Spawn", "Lsp":
+		return b.toolHeaderParamsWithDisplayDirs(vals)
+	default:
+		return formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
 	}
 }
 

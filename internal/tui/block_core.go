@@ -23,6 +23,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 		}
 	}
 	clone.toolHeaderCacheParamLines = append([]string(nil), src.toolHeaderCacheParamLines...)
+	clone.displayWorkingDir = src.displayWorkingDir
 	if src.ToolProgress != nil {
 		progress := *src.ToolProgress
 		clone.ToolProgress = &progress

@@ -524,6 +524,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		runtimeCacheMgr:            newRuntimeCacheManager(),
 		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
+	m.viewport.SetWorkingDir(wd)
 	if a != nil {
 		pending, sessionID := a.StartupResumeStatus()
 		if pending {
@@ -557,6 +558,30 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		)
 	}
 	return m
+}
+
+func (m *Model) syncWorkingDirFromAgent() {
+	if m == nil {
+		return
+	}
+	wd := strings.TrimSpace(m.workingDir)
+	if m.agent != nil {
+		if projectRoot := strings.TrimSpace(m.agent.ProjectRoot()); projectRoot != "" {
+			wd = projectRoot
+		}
+	}
+	if wd == m.workingDir {
+		if m.viewport != nil {
+			m.viewport.SetWorkingDir(wd)
+		}
+		return
+	}
+	m.workingDir = wd
+	if m.viewport != nil {
+		m.viewport.SetWorkingDir(wd)
+	}
+	m.invalidateStatusBarAgentSnapshot()
+	m.invalidateDrawCaches()
 }
 
 func (m *Model) SetTheme(t Theme) {
@@ -655,6 +680,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case sessionRestoredRebuildMsg:
+		m.syncWorkingDirFromAgent()
 		shouldResetRuntimeCache := m.startupRestorePending || m.sessionSwitch.active()
 		m.startupRestorePending = false
 		var (

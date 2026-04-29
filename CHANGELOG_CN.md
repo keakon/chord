@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- 改进 TUI 工具调用中的本地路径显示：`Read`、`Write`、`Edit`、`Delete`、`Grep`、`Glob`，以及 Bash 中当前已可见的路径元信息，会在可能时优先显示相对于当前活动项目根目录的路径；恢复会话、启动时恢复和 spill/hydrate 恢复后也保持同样逻辑，项目根之外的路径仍显示绝对路径。
 - 改进 AGENTS.md 处理：仅在检测到仓库指令存在时，才在 stable system prompt 中加入一小段 framing；AGENTS.md 正文仍保留在 session `<system-reminder>` 上下文层。
 - 修复 sticky fallback 模型的 variant 状态：已 pin 的 fallback 请求会保留自身 `@variant`，且不会把主模型的 variant 泄漏到无 variant 的 fallback 运行中。
 - 修复分类后的循环阻塞消息会渲染成未命名状态卡的问题。
