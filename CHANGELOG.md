@@ -4,7 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
-- No changes yet.
+- Fixed categorized loop blocked messages rendering as unnamed status cards.
 
 ## 0.1.0 - 2026-04-29
 

@@ -608,6 +608,38 @@ func TestAtMentionFileRefsHandlesEscapedSpacesAndDedupes(t *testing.T) {
 	}
 }
 
+func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
+	mustWriteFile(t, filepath.Join(wd, "docs", "需求，第一版.md"), "doc")
+	mustWriteFile(t, filepath.Join(wd, "docs", "a"), "short")
+	mustWriteFile(t, filepath.Join(wd, "docs", "a，b.md"), "long")
+
+	text := strings.Join([]string{
+		`参考 @AGENTS.md，分析哪些内容应该纳入。`,
+		`再看 @docs/需求，第一版.md，帮我总结`,
+		`最后 @docs/a，b.md，分析`,
+	}, "\n")
+
+	got := atMentionFileRefs([]string{text}, wd)
+	want := []string{`AGENTS.md`, `docs/需求，第一版.md`, `docs/a，b.md`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAtMentionFileRefsPrefersFullCandidateBeforeProseDelimiterFallback(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "docs", "note，分析"), "full")
+	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "short")
+
+	got := atMentionFileRefs([]string{`参考 @docs/note，分析`}, wd)
+	want := []string{`docs/note，分析`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestAtMentionFileRefsSkipsRemovedComposerReference(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "keep.txt"), "keep")

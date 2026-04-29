@@ -19,6 +19,12 @@ var atMentionTokenRE = regexp.MustCompile(`@(?:\\.|[^\s@])+`)
 // trimmed when the full candidate does not resolve to a file.
 const atMentionTrimSuffixes = ".,;:!?)]}>\"'，。；：！？）】》」』’”"
 
+// Characters that can separate an @ file reference from following prose. These
+// are only used as a fallback after the full candidate and simple suffix trims
+// fail, and candidates are tried from right to left to preserve the longest
+// existing path when punctuation is part of a filename.
+const atMentionProseDelimiters = ",;:!?)]}>\"'，。；：！？、）】》」』’”"
+
 type atMentionOption struct {
 	Path  string
 	IsDir bool
@@ -155,6 +161,16 @@ func hasAtMentionBoundaryBefore(text string, start int) bool {
 	return unicode.IsSpace(r) || strings.ContainsRune("([<{\"'“‘", r)
 }
 
+func atMentionCandidateExists(candidate, workingDir string, tried map[string]bool) bool {
+	if candidate == "" || tried[candidate] {
+		return false
+	}
+	tried[candidate] = true
+	resolved := resolveAtMentionFSPath(candidate, workingDir)
+	info, err := os.Stat(resolved)
+	return err == nil && !info.IsDir()
+}
+
 func trimAtMentionCandidate(candidate string) (string, bool) {
 	if candidate == "" {
 		return "", false
@@ -166,6 +182,25 @@ func trimAtMentionCandidate(candidate string) (string, bool) {
 	return candidate[:len(candidate)-size], true
 }
 
+func proseDelimitedAtMentionCandidates(candidate string) []string {
+	var out []string
+	for i := len(candidate); i > 0; {
+		r, size := utf8.DecodeLastRuneInString(candidate[:i])
+		if r == utf8.RuneError {
+			break
+		}
+		i -= size
+		if !strings.ContainsRune(atMentionProseDelimiters, r) {
+			continue
+		}
+		prefix := strings.TrimSpace(candidate[:i])
+		if prefix != "" {
+			out = append(out, prefix)
+		}
+	}
+	return out
+}
+
 func resolveAtMentionCandidate(candidate, workingDir string) (string, bool) {
 	candidate = filepath.ToSlash(unescapeAtMentionPath(candidate))
 	candidate = strings.TrimSpace(candidate)
@@ -173,19 +208,27 @@ func resolveAtMentionCandidate(candidate, workingDir string) (string, bool) {
 		return "", false
 	}
 	tried := map[string]bool{}
-	for candidate != "" {
-		if !tried[candidate] {
-			tried[candidate] = true
-			resolved := resolveAtMentionFSPath(candidate, workingDir)
-			if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
-				return candidate, true
-			}
+	for trimmed := candidate; trimmed != ""; {
+		if atMentionCandidateExists(trimmed, workingDir, tried) {
+			return trimmed, true
 		}
-		trimmed, ok := trimAtMentionCandidate(candidate)
+		next, ok := trimAtMentionCandidate(trimmed)
 		if !ok {
 			break
 		}
-		candidate = trimmed
+		trimmed = next
+	}
+	for _, delimited := range proseDelimitedAtMentionCandidates(candidate) {
+		for trimmed := delimited; trimmed != ""; {
+			if atMentionCandidateExists(trimmed, workingDir, tried) {
+				return trimmed, true
+			}
+			next, ok := trimAtMentionCandidate(trimmed)
+			if !ok {
+				break
+			}
+			trimmed = next
+		}
 	}
 	return "", false
 }

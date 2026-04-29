@@ -1,8 +1,8 @@
-// Package protocol defines the server-to-client event wire format used by
-// remote HTTP/SSE mode.
+// Package protocol defines shared control-plane payload types used by headless
+// stdio JSONL integrations and related clients.
 //
-// Every outbound server event is encoded as an [Envelope] with a typed JSON
-// payload so transports can remain simple and transport-agnostic.
+// Outbound events are represented as typed JSON payloads so transports can
+// remain simple and transport-agnostic.
 package protocol
 
 import (
