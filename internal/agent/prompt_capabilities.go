@@ -169,7 +169,7 @@ func riskAndReportingPromptBlock(visible map[string]struct{}, audience capabilit
 			lines = append(lines, "- Use permission approval for execution authorization. If a materially different decision or owner-agent intervention is required, explain the blocker clearly in assistant text because neither `Question`, `Notify`, nor `Escalate` is available in this role.")
 		}
 	} else if hasVisibleTool(visible, "Question") {
-		lines = append(lines, "- Use permission approval for execution authorization, and use `Question` when the user needs to choose between materially different options.")
+		lines = append(lines, "- Use permission approval for execution authorization; see Structured User Confirmation for when to use `Question` versus plain assistant text.")
 	} else {
 		lines = append(lines, "- Use permission approval for execution authorization, and ask the user for clarification when they need to choose between materially different options.")
 	}

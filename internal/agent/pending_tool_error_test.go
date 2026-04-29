@@ -414,6 +414,51 @@ func TestComposeToolResultTextsWithOutputError(t *testing.T) {
 	}
 }
 
+func TestWrapToolRejectedByUserDisplaysWithoutSentinelDuplication(t *testing.T) {
+	err := wrapToolRejectedByUser("Write", "")
+	if !errors.Is(err, errToolRejectedByUser) {
+		t.Fatalf("errors.Is(err, errToolRejectedByUser) = false for %v", err)
+	}
+	want := `tool "Write" rejected by user`
+	if got := err.Error(); got != want {
+		t.Fatalf("err.Error() = %q, want %q", got, want)
+	}
+
+	display, contextResult, errorText, isError := composeToolResultTexts("", err)
+	if !isError {
+		t.Fatal("expected error status")
+	}
+	if errorText != want {
+		t.Fatalf("errorText = %q, want %q", errorText, want)
+	}
+	if display != want {
+		t.Fatalf("display = %q, want %q", display, want)
+	}
+	if contextResult != "Error: "+want {
+		t.Fatalf("contextResult = %q, want %q", contextResult, "Error: "+want)
+	}
+	if strings.Count(display, "rejected by user") != 1 {
+		t.Fatalf("display should mention rejection once, got %q", display)
+	}
+}
+
+func TestWrapToolRejectedByUserIncludesDenyReasonOnce(t *testing.T) {
+	err := wrapToolRejectedByUser("Bash", " risky command ")
+	if !errors.Is(err, errToolRejectedByUser) {
+		t.Fatalf("errors.Is(err, errToolRejectedByUser) = false for %v", err)
+	}
+	want := `tool "Bash" rejected by user: risky command`
+	if got := err.Error(); got != want {
+		t.Fatalf("err.Error() = %q, want %q", got, want)
+	}
+	if strings.Count(err.Error(), "rejected by user") != 1 {
+		t.Fatalf("error should mention rejection once, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), ": tool rejected by user") {
+		t.Fatalf("error should not append sentinel text, got %q", err.Error())
+	}
+}
+
 func TestSubAgentDrainPendingToolFailureSets(t *testing.T) {
 	s := &SubAgent{instanceID: "agent-1", turn: &Turn{ID: 7, PendingToolMeta: make(map[string]PendingToolCall)}}
 	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-7", Name: "Read", ArgsJSON: `{"path":"x"}`, AgentID: s.instanceID})

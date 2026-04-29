@@ -35,12 +35,23 @@ func wrapToolConfirmationFailed(toolName string, err error) error {
 	return fmt.Errorf("confirmation for tool %q failed: %w", toolName, errors.Join(errToolConfirmationFailed, err))
 }
 
-func wrapToolRejectedByUser(toolName, denyReason string) error {
-	denyReason = strings.TrimSpace(denyReason)
-	if denyReason != "" {
-		return fmt.Errorf("tool %q rejected by user: %s: %w", toolName, denyReason, errToolRejectedByUser)
+type toolRejectedByUserError struct {
+	toolName   string
+	denyReason string
+}
+
+func (e toolRejectedByUserError) Error() string {
+	base := fmt.Sprintf("tool %q rejected by user", e.toolName)
+	if strings.TrimSpace(e.denyReason) == "" {
+		return base
 	}
-	return fmt.Errorf("tool %q rejected by user: %w", toolName, errToolRejectedByUser)
+	return base + ": " + strings.TrimSpace(e.denyReason)
+}
+
+func (e toolRejectedByUserError) Unwrap() error { return errToolRejectedByUser }
+
+func wrapToolRejectedByUser(toolName, denyReason string) error {
+	return toolRejectedByUserError{toolName: toolName, denyReason: denyReason}
 }
 
 func wrapEditedArgsPermissionDenied(toolName string) error {

@@ -748,8 +748,8 @@ Question: allow
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
-	if !strings.Contains(got, "use `Question` when the user needs to choose between materially different options.") {
-		t.Fatalf("mainAgentCapabilityPromptBlock() should mention Question when visible, got %q", got)
+	if !strings.Contains(got, "see Structured User Confirmation for when to use `Question` versus plain assistant text.") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() should reference Structured User Confirmation when Question is visible, got %q", got)
 	}
 }
 
@@ -1021,8 +1021,8 @@ Edit:
 	if !strings.Contains(mainBlock, "ask to adjust permissions, scope, or approach") {
 		t.Fatalf("main capability block missing user-facing escalation wording: %q", mainBlock)
 	}
-	if !strings.Contains(mainBlock, "use `Question` when the user needs to choose between materially different options") {
-		t.Fatalf("main capability block missing Question guidance: %q", mainBlock)
+	if !strings.Contains(mainBlock, "see Structured User Confirmation for when to use `Question` versus plain assistant text") {
+		t.Fatalf("main capability block missing Structured User Confirmation reference: %q", mainBlock)
 	}
 	if !strings.Contains(subBlock, "Question` when the user must choose between materially different options") && !strings.Contains(subBlock, "Use `Question` when the user must choose between materially different options") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
