@@ -62,6 +62,53 @@ func TestDebugLoggingEnabled(t *testing.T) {
 	}
 }
 
+func TestProxyScheme(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "http", in: "http://proxy.example:8080", want: "http"},
+		{name: "https", in: "https://user:pass@proxy.example", want: "https"},
+		{name: "socks", in: "socks5://127.0.0.1:1080", want: "socks5"},
+		{name: "missing scheme", in: "proxy.example:8080", want: "unknown"},
+		{name: "empty", in: "", want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := proxyScheme(tt.in); got != tt.want {
+				t.Fatalf("proxyScheme(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLogEffectiveProxy(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	logEffectiveProxy("")
+	logEffectiveProxy("direct")
+	logEffectiveProxy("https://user:pass@proxy.example")
+
+	text := buf.String()
+	for _, want := range []string{
+		"proxy: using environment",
+		"proxy: disabled",
+		"proxy: configured",
+		"scheme=https",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("log output = %q, want %q", text, want)
+		}
+	}
+	if strings.Contains(text, "user:pass") {
+		t.Fatalf("log output leaked proxy credentials: %q", text)
+	}
+}
+
 func TestWriteStartupStderrNoticeUsesProvidedLogPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "startup.log")

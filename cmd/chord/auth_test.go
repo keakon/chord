@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -113,6 +114,61 @@ func TestPromptAuthLoginProvider(t *testing.T) {
 			t.Fatalf("got %q, err %v", got, err)
 		}
 	})
+}
+
+func TestGenerateOpenAIPKCEAndState(t *testing.T) {
+	pkce, err := generateOpenAIPKCE()
+	if err != nil {
+		t.Fatalf("generateOpenAIPKCE: %v", err)
+	}
+	if len(pkce.Verifier) != 43 {
+		t.Fatalf("verifier length = %d, want 43", len(pkce.Verifier))
+	}
+	for _, r := range pkce.Verifier {
+		if !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", r) {
+			t.Fatalf("verifier contains invalid character %q in %q", r, pkce.Verifier)
+		}
+	}
+	sum := sha256.Sum256([]byte(pkce.Verifier))
+	wantChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
+	if pkce.Challenge != wantChallenge {
+		t.Fatalf("challenge = %q, want %q", pkce.Challenge, wantChallenge)
+	}
+
+	state, err := generateOpenAIState()
+	if err != nil {
+		t.Fatalf("generateOpenAIState: %v", err)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(state)
+	if err != nil {
+		t.Fatalf("state is not raw URL base64: %v", err)
+	}
+	if len(decoded) != 32 {
+		t.Fatalf("decoded state length = %d, want 32", len(decoded))
+	}
+}
+
+func TestGenerateOpenAIRandomString(t *testing.T) {
+	got, err := generateOpenAIRandomString(64)
+	if err != nil {
+		t.Fatalf("generateOpenAIRandomString: %v", err)
+	}
+	if len(got) != 64 {
+		t.Fatalf("length = %d, want 64", len(got))
+	}
+	for _, r := range got {
+		if !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", r) {
+			t.Fatalf("random string contains invalid character %q in %q", r, got)
+		}
+	}
+
+	empty, err := generateOpenAIRandomString(0)
+	if err != nil {
+		t.Fatalf("generateOpenAIRandomString(0): %v", err)
+	}
+	if empty != "" {
+		t.Fatalf("generateOpenAIRandomString(0) = %q, want empty", empty)
+	}
 }
 
 func TestOpenAIOAuthCallbackAddressHelpers(t *testing.T) {

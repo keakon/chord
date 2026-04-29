@@ -101,6 +101,7 @@ func isLoopTerminalInfo(msg string) bool {
 	}
 	return strings.HasPrefix(trimmed, "Loop completed:") ||
 		strings.HasPrefix(trimmed, "Loop blocked:") ||
+		strings.HasPrefix(trimmed, "Loop blocked (") ||
 		strings.HasPrefix(trimmed, "Loop stopped:")
 }
 

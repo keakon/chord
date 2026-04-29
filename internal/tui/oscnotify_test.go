@@ -191,6 +191,22 @@ func TestOSC9LoopTerminalInfoNotification(t *testing.T) {
 	}
 }
 
+func TestLoopBlockedInfoWithCategoryDoesNotCreateUnnamedStatusCard(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	message := "Loop blocked (required_input_missing): missing candidate evidence"
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.InfoEvent{Message: message}})
+	if cmd == nil {
+		t.Fatal("expected info followup command")
+	}
+	if len(m.viewport.visibleBlocks()) != 0 {
+		t.Fatalf("visible blocks = %#v, want no unnamed transcript status block", m.viewport.visibleBlocks())
+	}
+	if m.activeToast == nil || m.activeToast.Message != message {
+		t.Fatalf("activeToast = %+v, want loop blocked toast", m.activeToast)
+	}
+}
+
 func TestIdleEventDoesNotNotifyWhileLoopStillBusy(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)

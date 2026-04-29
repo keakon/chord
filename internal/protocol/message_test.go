@@ -596,6 +596,88 @@ func TestProtocolRoundTripAdditionalEvents(t *testing.T) {
 		check func(t *testing.T, got agent.AgentEvent)
 	}{
 		{
+			name:  "stream thinking",
+			event: agent.StreamThinkingEvent{Text: "reasoning", AgentID: "main"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.StreamThinkingEvent)
+				if ev.Text != "reasoning" || ev.AgentID != "main" {
+					t.Fatalf("StreamThinkingEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "stream rollback",
+			event: agent.StreamRollbackEvent{Reason: "retry", AgentID: "main"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.StreamRollbackEvent)
+				if ev.Reason != "retry" || ev.AgentID != "main" {
+					t.Fatalf("StreamRollbackEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "tool call start",
+			event: agent.ToolCallStartEvent{ID: "call-1", Name: "Read", ArgsJSON: `{"path":"README.md"}`, AgentID: "a1"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.ToolCallStartEvent)
+				if ev.ID != "call-1" || ev.Name != "Read" || ev.ArgsJSON == "" || ev.AgentID != "a1" {
+					t.Fatalf("ToolCallStartEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "tool call execution running",
+			event: agent.ToolCallExecutionEvent{ID: "call-2", Name: "Bash", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateRunning, AgentID: "a2"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.ToolCallExecutionEvent)
+				if ev.ID != "call-2" || ev.State != agent.ToolCallExecutionStateRunning || ev.AgentID != "a2" {
+					t.Fatalf("ToolCallExecutionEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name: "tool result cancelled with diff metadata",
+			event: agent.ToolResultEvent{
+				CallID: "call-3", Name: "Edit", ArgsJSON: `{}`, Result: "cancelled",
+				Status: agent.ToolResultStatusCancelled, AgentID: "a3", Diff: "diff", DiffAdded: 2, DiffRemoved: 1, FileCreated: true,
+			},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.ToolResultEvent)
+				if ev.CallID != "call-3" || ev.Status != agent.ToolResultStatusCancelled || ev.Diff != "diff" || ev.DiffAdded != 2 || ev.DiffRemoved != 1 || !ev.FileCreated {
+					t.Fatalf("ToolResultEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "error",
+			event: agent.ErrorEvent{Err: errors.New("boom"), AgentID: "a4"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.ErrorEvent)
+				if ev.Err == nil || ev.Err.Error() != "boom" || ev.AgentID != "a4" {
+					t.Fatalf("ErrorEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "idle",
+			event: agent.IdleEvent{},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				if _, ok := got.(agent.IdleEvent); !ok {
+					t.Fatalf("expected IdleEvent, got %T", got)
+				}
+			},
+		},
+		{
+			name:  "handoff",
+			event: agent.HandoffEvent{PlanPath: "/tmp/plan.md"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.HandoffEvent)
+				if ev.PlanPath != "/tmp/plan.md" {
+					t.Fatalf("HandoffEvent = %+v", ev)
+				}
+			},
+		},
+		{
 			name:  "info",
 			event: agent.InfoEvent{Message: "hello", AgentID: "main"},
 			check: func(t *testing.T, got agent.AgentEvent) {
@@ -632,6 +714,69 @@ func TestProtocolRoundTripAdditionalEvents(t *testing.T) {
 				ev := got.(agent.ConfirmRequestEvent)
 				if ev.RequestID != "r1" || ev.ToolName != "Write" || len(ev.NeedsApproval) != 1 || len(ev.AlreadyAllowed) != 1 {
 					t.Fatalf("ConfirmRequestEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "role changed",
+			event: agent.RoleChangedEvent{Role: "reviewer"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.RoleChangedEvent)
+				if ev.Role != "reviewer" {
+					t.Fatalf("RoleChangedEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "model select",
+			event: agent.ModelSelectEvent{},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				if _, ok := got.(agent.ModelSelectEvent); !ok {
+					t.Fatalf("expected ModelSelectEvent, got %T", got)
+				}
+			},
+		},
+		{
+			name:  "running model changed",
+			event: agent.RunningModelChangedEvent{AgentID: "a5", ProviderModelRef: "openai/gpt", RunningModelRef: "fallback/gpt"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.RunningModelChangedEvent)
+				if ev.AgentID != "a5" || ev.ProviderModelRef != "openai/gpt" || ev.RunningModelRef != "fallback/gpt" {
+					t.Fatalf("RunningModelChangedEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name: "session select with sessions",
+			event: agent.SessionSelectEvent{Sessions: []agent.SessionSummary{{
+				ID:               "s1",
+				LastModTime:      time.Unix(123, 0),
+				FirstUserMessage: "hello",
+				ForkedFrom:       "base",
+			}}},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.SessionSelectEvent)
+				if len(ev.Sessions) != 1 || ev.Sessions[0].ID != "s1" || ev.Sessions[0].ForkedFrom != "base" {
+					t.Fatalf("SessionSelectEvent = %+v", ev)
+				}
+			},
+		},
+		{
+			name:  "session restored",
+			event: agent.SessionRestoredEvent{},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				if _, ok := got.(agent.SessionRestoredEvent); !ok {
+					t.Fatalf("expected SessionRestoredEvent, got %T", got)
+				}
+			},
+		},
+		{
+			name:  "toast",
+			event: agent.ToastEvent{Message: "saved", Level: "success", AgentID: "a6"},
+			check: func(t *testing.T, got agent.AgentEvent) {
+				ev := got.(agent.ToastEvent)
+				if ev.Message != "saved" || ev.Level != "success" || ev.AgentID != "a6" {
+					t.Fatalf("ToastEvent = %+v", ev)
 				}
 			},
 		},
