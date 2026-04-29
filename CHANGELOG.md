@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Improved AGENTS.md handling by adding stable system-prompt framing only when repository guidance exists, while keeping AGENTS.md contents in the session `<system-reminder>` context layer.
 - Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
 - Fixed Ghostty focus restore artifacts by keeping the late post-focus redraw after weak streaming boundary redraws.

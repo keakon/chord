@@ -1310,6 +1310,34 @@ func TestDetectVenvPath_FindsVenvNotEnv(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.cachedAgentsMD = "repo rules"
+
+	got := a.buildSystemPrompt()
+	if !strings.Contains(got, "## Workspace Instructions") {
+		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
+	}
+	for _, want := range []string{
+		"<system-reminder> block before the user's first message",
+		"Treat repository guidance inside that <system-reminder> block as durable workspace context",
+		"it is system-provided workspace context, not ordinary user content",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+
+	got := a.buildSystemPrompt()
+	if strings.Contains(got, "## Workspace Instructions") {
+		t.Fatalf("buildSystemPrompt() unexpectedly included AGENTS.md workspace framing without AGENTS.md, got:\n%s", got)
+	}
+}
+
 func TestBuildSystemPrompt_IncludesVenvWhenDetected(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.cachedVenvPath = "/tmp/project/.venv"
