@@ -169,9 +169,9 @@ type Block struct {
 	// TUI can switch between preview and full preserved-context views without
 	// losing the expanded content.
 	CompactionSummaryRaw string
-	// compactionHL caches lexer detection and rendered snippets for fenced code
-	// inside compaction summary markdown blocks.
-	compactionHL *codeHighlighter
+	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
+	// markdown cards that share assistant fenced-code rendering.
+	richMarkdownHL *codeHighlighter
 	// CompactionPreviewLines is the number of rendered markdown lines shown by
 	// default when the compaction summary card is collapsed.
 	CompactionPreviewLines int
@@ -181,6 +181,9 @@ type Block struct {
 	mdCacheWidth                 int
 	mdCacheSyntheticPrefixWidths []int
 	mdCacheSoftWrapContinuations []bool
+	// thinkingStreamSettled caches the rendered settled markdown prefix for each
+	// in-flight thinking part independently from assistant body streaming caches.
+	thinkingStreamSettled []thinkingStreamSettledCache
 	// streamSettled* caches the rendered markdown for the stable prefix of
 	// in-flight streaming content. They survive append-only streaming updates so
 	// unchanged settled prefixes can be reused across deltas.

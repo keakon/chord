@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -381,6 +382,179 @@ func TestRenderCompactionSummaryHighlightsFencedCode(t *testing.T) {
 	joinedANSI := strings.Join(lines, "\n")
 	if !strings.Contains(joinedANSI, "\x1b[") {
 		t.Fatalf("expected ANSI styling for highlighted code fence, got %q", joinedANSI)
+	}
+}
+
+func TestRenderThinkingPartsStreamingUsesSettledMarkdownAndCheapTail(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockAssistant,
+		Streaming: true,
+		ThinkingParts: []string{
+			"## Plan\n\n- stable item\n\nstill arriving",
+		},
+	}
+	lines := block.renderThinkingParts(70)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Plan") {
+		t.Fatalf("expected settled heading text, got %q", plain)
+	}
+	if !strings.Contains(plain, "• stable item") {
+		t.Fatalf("expected settled list markdown rendering, got %q", plain)
+	}
+	if !strings.Contains(plain, "still arriving") {
+		t.Fatalf("expected cheap tail text, got %q", plain)
+	}
+	if len(block.thinkingStreamSettled) != 1 || block.thinkingStreamSettled[0].frontier == 0 {
+		t.Fatalf("expected per-part settled cache, got %#v", block.thinkingStreamSettled)
+	}
+	if block.streamSettledFrontier != 0 || block.streamSettledRaw != "" || len(block.streamSettledLines) != 0 {
+		t.Fatalf("thinking render must not use assistant body stream cache: frontier=%d raw=%q lines=%d", block.streamSettledFrontier, block.streamSettledRaw, len(block.streamSettledLines))
+	}
+}
+
+func TestRenderThinkingPartsStreamingUnclosedFenceKeepsTailVisible(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockAssistant,
+		Streaming: true,
+		ThinkingParts: []string{
+			"## Stable\n\nsettled paragraph\n\n```go\nfmt.Println(1)\nstill in tail",
+		},
+	}
+
+	lines := block.renderThinkingParts(70)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Stable") || !strings.Contains(plain, "settled paragraph") {
+		t.Fatalf("expected settled prefix to render, got %q", plain)
+	}
+	if !strings.Contains(plain, "```go") || !strings.Contains(plain, "fmt.Println(1)") || !strings.Contains(plain, "still in tail") {
+		t.Fatalf("expected unclosed fence tail to remain visible, got %q", plain)
+	}
+	if strings.Contains(plain, "GO") {
+		t.Fatalf("unclosed streaming fence should stay on cheap tail path, got %q", plain)
+	}
+	if len(block.thinkingStreamSettled) != 1 || block.thinkingStreamSettled[0].frontier == 0 {
+		t.Fatalf("expected settled prefix cache before unclosed fence, got %#v", block.thinkingStreamSettled)
+	}
+}
+
+func TestRenderThinkingPartsStreamingCachesPartsIndependently(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockAssistant,
+		Streaming: true,
+		ThinkingParts: []string{
+			"## One\n\nsettled one\n\ntail one",
+			"## Two\n\n- settled two\n\ntail two",
+		},
+	}
+	_ = block.renderThinkingParts(80)
+	if len(block.thinkingStreamSettled) != 2 {
+		t.Fatalf("cache parts = %d, want 2", len(block.thinkingStreamSettled))
+	}
+	if block.thinkingStreamSettled[0].raw == block.thinkingStreamSettled[1].raw {
+		t.Fatalf("expected distinct per-part cache entries, got %#v", block.thinkingStreamSettled)
+	}
+	oldFirst := block.thinkingStreamSettled[0].raw
+	block.ThinkingParts = block.ThinkingParts[:1]
+	_ = block.renderThinkingParts(80)
+	if len(block.thinkingStreamSettled) != 1 {
+		t.Fatalf("cache parts after truncation = %d, want 1", len(block.thinkingStreamSettled))
+	}
+	if block.thinkingStreamSettled[0].raw != oldFirst {
+		t.Fatalf("first part cache not preserved across tail part removal: got %q want %q", block.thinkingStreamSettled[0].raw, oldFirst)
+	}
+}
+
+func TestRenderThinkingPartsStreamingWidthInvalidatesPartCache(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:          BlockAssistant,
+		Streaming:     true,
+		ThinkingParts: []string{"## Width\n\n- settled\n\ntail"},
+	}
+	_ = block.renderThinkingParts(80)
+	if len(block.thinkingStreamSettled) != 1 {
+		t.Fatalf("cache parts = %d, want 1", len(block.thinkingStreamSettled))
+	}
+	oldWidth := block.thinkingStreamSettled[0].width
+	_ = block.renderThinkingParts(50)
+	if block.thinkingStreamSettled[0].width == oldWidth {
+		t.Fatalf("expected width cache update, still %d", oldWidth)
+	}
+}
+
+func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockThinking,
+		Streaming: true,
+		Content:   "## Plan\n\n- stable item\n\nstill arriving",
+	}
+	_ = block.renderThinking(70)
+	if len(block.thinkingStreamSettled) != 1 || block.thinkingStreamSettled[0].frontier == 0 {
+		t.Fatalf("expected standalone thinking settled cache, got %#v", block.thinkingStreamSettled)
+	}
+	oldRaw := block.thinkingStreamSettled[0].raw
+	oldLines := append([]string(nil), block.thinkingStreamSettled[0].lines...)
+
+	_ = block.renderThinking(70)
+	if len(block.thinkingStreamSettled) != 1 {
+		t.Fatalf("cache entries after rerender = %d, want 1", len(block.thinkingStreamSettled))
+	}
+	if block.thinkingStreamSettled[0].raw != oldRaw {
+		t.Fatalf("standalone thinking cache was not reused: got %q want %q", block.thinkingStreamSettled[0].raw, oldRaw)
+	}
+	if !reflect.DeepEqual(block.thinkingStreamSettled[0].lines, oldLines) {
+		t.Fatalf("standalone thinking cache lines changed across identical rerender")
+	}
+}
+
+func TestCloneBlockForDeferredSourceClearsThinkingStreamCache(t *testing.T) {
+	block := &Block{
+		Type:          BlockAssistant,
+		Streaming:     true,
+		ThinkingParts: []string{"## Cached\n\nsettled\n\ntail"},
+	}
+	_ = block.renderThinkingParts(80)
+	if len(block.thinkingStreamSettled) == 0 {
+		t.Fatal("expected source thinking stream cache to be populated")
+	}
+
+	clone := cloneBlockForDeferredSource(block)
+	if len(clone.thinkingStreamSettled) != 0 {
+		t.Fatalf("deferred source clone should rebuild thinking stream cache independently, got %#v", clone.thinkingStreamSettled)
+	}
+	clone.ThinkingParts[0] = "## Clone\n\nsettled\n\ntail"
+	if block.ThinkingParts[0] == clone.ThinkingParts[0] {
+		t.Fatal("clone should not share ThinkingParts slice with source")
+	}
+}
+
+func TestRenderRichMarkdownContentHighlightsFencedCode(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	var hl *codeHighlighter
+	lines := renderRichMarkdownContent("## Example\n\n```go\nfmt.Println(1)\n```", 32, &hl)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Example") {
+		t.Fatalf("expected heading text, got %q", plain)
+	}
+	if !strings.Contains(plain, "GO") || !strings.Contains(plain, "fmt.Println(1)") {
+		t.Fatalf("expected assistant-style fenced code, got %q", plain)
+	}
+	if hl == nil {
+		t.Fatal("expected rich markdown helper to reuse fenced code highlighter")
+	}
+}
+
+func TestRenderStatusUsesRichMarkdownFencedCode(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "## Loop\n```go\nfmt.Println(1)\n```"}
+	lines := block.Render(70, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "GO") || !strings.Contains(plain, "fmt.Println(1)") {
+		t.Fatalf("expected status card fenced code to use rich markdown helper, got %q", plain)
 	}
 }
 

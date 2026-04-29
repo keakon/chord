@@ -139,6 +139,13 @@ type assistantMarkdownSegment struct {
 	fenceLen    int
 }
 
+type thinkingStreamSettledCache struct {
+	raw      string
+	frontier int
+	width    int
+	lines    []string
+}
+
 func splitAssistantMarkdownSegments(content string) []assistantMarkdownSegment {
 	content = markdownutil.NormalizeNewlines(content)
 	if content == "" {
@@ -372,7 +379,11 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 	return lines, syntheticOut, softWrapsOut
 }
 
-func renderCompactionSummaryMarkdown(content string, width int, hl **codeHighlighter) []string {
+func renderRichMarkdownContent(content string, width int, hl **codeHighlighter) []string {
+	var localHL *codeHighlighter
+	if hl == nil {
+		hl = &localHL
+	}
 	segments := splitAssistantMarkdownSegments(content)
 	if len(segments) == 0 {
 		return renderMarkdownContent(content, width)
@@ -675,6 +686,69 @@ func (b *Block) renderAssistant(width int) []string {
 // renderThinkingParts renders thinking sections with indentation and ThinkingContentStyle (gray) only
 // so they are visually distinct from the main reply. Full line (including indent) is styled so color is consistent.
 // When ThinkingCollapsed is true, only the last maxCollapsedThinkingLines are shown.
+func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth int) ([]string, int) {
+	part = removeTrailingCursorGlyph(part)
+	part = preprocessThinkingMarkdown(part)
+	if !b.Streaming {
+		return renderMarkdownContent(part, contentWidth), 0
+	}
+
+	frontier := markdownutil.FindStreamingSettledFrontier(part)
+	for len(b.thinkingStreamSettled) <= partIndex {
+		b.thinkingStreamSettled = append(b.thinkingStreamSettled, thinkingStreamSettledCache{})
+	}
+
+	var out []string
+	settledLineCount := 0
+	if frontier > 0 {
+		settledRaw := part[:frontier]
+		cache := &b.thinkingStreamSettled[partIndex]
+		if cache.frontier != frontier || cache.width != contentWidth || cache.raw != settledRaw {
+			cache.raw = settledRaw
+			cache.frontier = frontier
+			cache.width = contentWidth
+			cache.lines = renderMarkdownContent(settledRaw, contentWidth)
+		}
+		out = append(out, cache.lines...)
+		settledLineCount = len(out)
+	} else if partIndex < len(b.thinkingStreamSettled) {
+		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{}
+	}
+
+	if tail := part[frontier:]; tail != "" {
+		out = append(out, wrapText(tail, contentWidth)...)
+	}
+	if len(out) == 0 {
+		out = []string{""}
+	}
+	return out, settledLineCount
+}
+
+func styleStreamingThinkingLines(mdLines []string, settledLineCount int) []string {
+	var raw []string
+	paraStart := true
+	for i, line := range mdLines {
+		if strings.TrimSpace(line) == "" {
+			raw = append(raw, "")
+			paraStart = true
+			continue
+		}
+		if i >= settledLineCount {
+			raw = append(raw, "  "+ThinkingContentStyle.Render(line))
+			paraStart = false
+			continue
+		}
+		style := ThinkingContentStyle
+		if paraStart {
+			style = ThinkingTitleStyle
+			paraStart = false
+		}
+		line = preserveStyleAfterResets(line, style)
+		raw = append(raw, "  "+style.Render(line))
+	}
+	return raw
+}
+
 func (b *Block) renderThinkingParts(innerWidth int) []string {
 	if len(b.ThinkingParts) == 0 {
 		return nil
@@ -690,6 +764,9 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	// Previously rawLines (titles) and tempLines (content) were merged by rawLines = tempLines,
 	// which dropped the title lines; now we append everything to one slice.
 	var rawLines []string
+	if len(b.thinkingStreamSettled) > len(b.ThinkingParts) {
+		b.thinkingStreamSettled = b.thinkingStreamSettled[:len(b.ThinkingParts)]
+	}
 	for i, part := range b.ThinkingParts {
 		if i == 0 {
 			rawLines = append(rawLines, ThinkingLabelStyle.Render("THINKING"))
@@ -697,22 +774,12 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 		} else if i > 0 {
 			rawLines = append(rawLines, "") // small gap between distinct thinking segments
 		}
-		part = removeTrailingCursorGlyph(part)
-		part = preprocessThinkingMarkdown(part)
-		var mdLines []string
+		mdLines, settledLineCount := b.renderThinkingMarkdownPart(part, i, contentWidth)
 		if b.Streaming {
-			// Same cheap-path rule as assistant streaming: use plain wrapping while
-			// the thinking text is still arriving, then render settled markdown once
-			// the block completes.
-			plain := wrapText(part, contentWidth)
-			mdLines = make([]string, len(plain))
-			for j, line := range plain {
-				mdLines[j] = ThinkingContentStyle.Render(line)
-			}
+			rawLines = append(rawLines, styleStreamingThinkingLines(mdLines, settledLineCount)...)
 		} else {
-			mdLines = renderMarkdownContent(part, contentWidth)
+			rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
 		}
-		rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
 	}
 
 	// Thinking is always shown in full (no collapse) so the THINKING label and all content are visible.
@@ -752,24 +819,17 @@ func (b *Block) renderThinking(width int) []string {
 		return nil
 	}
 	// Use transparent renderer for thinking as well
-	var mdLines []string
-	if b.Streaming {
-		// Streaming THINKING blocks reuse the same cheap wrap-only path to avoid
-		// running glamour on every incremental delta.
-		plain := wrapText(content, contentWidth)
-		mdLines = make([]string, len(plain))
-		for i, line := range plain {
-			mdLines[i] = ThinkingContentStyle.Render(line)
-		}
-	} else {
-		mdLines = renderMarkdownContent(content, contentWidth)
-	}
+	mdLines, settledLineCount := b.renderThinkingMarkdownPart(content, 0, contentWidth)
 
 	var rawLines []string
 	rawLines = append(rawLines, ThinkingLabelStyle.Render("THINKING"))
 	rawLines = append(rawLines, "") // internal gap
 
-	rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
+	if b.Streaming {
+		rawLines = append(rawLines, styleStreamingThinkingLines(mdLines, settledLineCount)...)
+	} else {
+		rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
+	}
 
 	// Thinking duration footer
 	if b.ThinkingDuration >= time.Second && !b.Streaming {

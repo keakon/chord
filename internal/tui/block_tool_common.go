@@ -171,7 +171,7 @@ func toolExpandedResultLines(displayResult string, width int, expanded bool, all
 	hidden := 0
 	if !expanded {
 		visible := len(out)
-		total := toolCollapsedVisibleLineCount(displayResult, width)
+		total := len(toolExpandedTextLines(displayResult, width))
 		if total > visible {
 			hidden = total - visible
 		}

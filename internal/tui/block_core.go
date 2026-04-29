@@ -13,7 +13,8 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	}
 	clone := *src
 	clone.diffHL = nil
-	clone.compactionHL = nil
+	clone.richMarkdownHL = nil
+	clone.thinkingStreamSettled = nil
 	clone.toolArgsCacheKeys = append([]string(nil), src.toolArgsCacheKeys...)
 	if len(src.toolArgsCacheVals) > 0 {
 		clone.toolArgsCacheVals = make(map[string]string, len(src.toolArgsCacheVals))
@@ -216,8 +217,9 @@ func (b *Block) ToggleAtWidth(width int) {
 }
 
 // InvalidateCache clears render caches that must be recomputed after content
-// changes. It intentionally preserves streamSettled* so append-only streaming
-// updates can reuse the already-rendered stable prefix across deltas.
+// changes. It intentionally preserves streamSettled* and thinkingStreamSettled
+// so append-only streaming updates can reuse already-rendered stable prefixes
+// across deltas.
 func (b *Block) InvalidateCache() {
 	b.lineCache = nil
 	b.lineCacheWidth = 0
@@ -248,6 +250,13 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamSettledSyntheticPrefixWidths = nil
 	b.streamSettledSoftWrapContinuations = nil
 	b.streamSettledLineCount = 0
+}
+
+// InvalidateThinkingStreamingSettledCache clears cached rendered markdown for
+// in-flight thinking parts. Call this when thinking content is replaced
+// non-monotonically or part ordering changes.
+func (b *Block) InvalidateThinkingStreamingSettledCache() {
+	b.thinkingStreamSettled = nil
 }
 
 // GetViewportCache returns the styled and truncated lines cached for Viewport.Render,

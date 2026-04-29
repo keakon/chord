@@ -106,15 +106,7 @@ Check logs first when you encounter:
 - hook execution results that differ from expectations
 - incomplete headless integration events
 
-Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`
-
-Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`. To reproduce and collect logs quickly:
-
-```bash
-chord --logs-dir ./chord-logs
-```
-
-Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`
+Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`. The current log file is `chord.log`; rotated files are `chord.log.1` and `chord.log.2`.
 
 Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`. To reproduce and collect logs quickly:
 

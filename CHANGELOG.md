@@ -5,6 +5,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## Unreleased
 
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
+- Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
+- Fixed collapsed tool result hidden-line counts for markdown-like output.
 
 ## 0.1.0 - 2026-04-29
 

@@ -51,7 +51,7 @@ func (b *Block) renderStatus(width int) []string {
 	}
 	label := ThinkingLabelStyle.Render(title)
 
-	bodyLines := renderMarkdownContent(strings.TrimSpace(b.Content), innerWidth-2)
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth-2, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}
@@ -97,7 +97,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 		innerWidth = 10
 	}
 	label := ThinkingLabelStyle.Render("CONTEXT SUMMARY")
-	bodyLines := renderCompactionSummaryMarkdown(strings.TrimSpace(b.Content), innerWidth, &b.compactionHL)
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}

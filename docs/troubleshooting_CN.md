@@ -106,15 +106,7 @@ curl -I https://api.openai.com/v1
 - hook 执行结果与预期不符
 - headless 集成事件不完整
 
-默认日志目录：`${XDG_STATE_HOME:-~/.local/state}/chord/logs/`
-
-可以通过 `--logs-dir <path>` 或环境变量 `CHORD_LOGS_DIR=<path>` 覆盖。快速复现并收集日志：
-
-```bash
-chord --logs-dir ./chord-logs
-```
-
-默认日志目录：`${XDG_STATE_HOME:-~/.local/state}/chord/logs/`
+默认日志目录：`${XDG_STATE_HOME:-~/.local/state}/chord/logs/`。当前日志文件是 `chord.log`；轮转文件是 `chord.log.1` 和 `chord.log.2`。
 
 可以通过 `--logs-dir <path>` 或环境变量 `CHORD_LOGS_DIR=<path>` 覆盖。快速复现并收集日志：
 

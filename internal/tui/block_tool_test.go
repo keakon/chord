@@ -229,6 +229,27 @@ func TestCompactToolCardMarkdownKeepsCardBackgroundWithoutPerLinePadding(t *test
 	}
 }
 
+func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:                   BlockToolCall,
+		ToolName:               "WebFetch",
+		Content:                `{"url":"https://example.com"}`,
+		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```",
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Ready") || !strings.Contains(joined, "fmt.Println(1)") {
+		t.Fatalf("expected markdown-looking tool result content to remain visible, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "GO") {
+		t.Fatalf("ordinary tool result must not use assistant-style rich fenced code rendering, got:\n%s", joined)
+	}
+}
+
 func TestCollapsedBashToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
