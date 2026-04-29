@@ -132,6 +132,10 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
+		return cmd
+	}
+
 	switch {
 	// -- mode switches ---------------------------------------------------
 	case keyMatches(key, m.keyMap.EnterInsert):

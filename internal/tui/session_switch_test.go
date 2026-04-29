@@ -1699,6 +1699,41 @@ func TestHandleInsertDiagnosticsCommandStaysLocal(t *testing.T) {
 	}
 }
 
+func TestHandleInsertDiagnosticsShortcutStaysLocal(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.SetValue("draft")
+
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+
+	if cmd == nil {
+		t.Fatal("expected diagnostics shortcut command")
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+	if got := len(backend.resumeIDs); got != 0 {
+		t.Fatalf("ResumeSessionID() calls = %d, want 0", got)
+	}
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("viewport should remain unchanged, got %d blocks", got)
+	}
+	if got := m.input.Value(); got != "draft" {
+		t.Fatalf("input value = %q, want draft preserved", got)
+	}
+}
+
+func TestHandleNormalDiagnosticsShortcutReturnsCmd(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected diagnostics shortcut command")
+	}
+}
+
 func TestNewModelShowsStartupResumeStatusAndKeepsInteractionSuppressedUntilRestored(t *testing.T) {
 	backend := &sessionControlAgent{
 		resumePending:   true,

@@ -21,8 +21,23 @@ func localShellCommandFromParts(display string, parts []message.ContentPart) str
 	return userBlockTextFromParts(parts, display)
 }
 
+func (m *Model) maybeExportDiagnosticsShortcut(key string) tea.Cmd {
+	if !keyMatches(key, m.keyMap.Diagnostics) {
+		return nil
+	}
+	trigger := key
+	if strings.TrimSpace(trigger) == "" {
+		trigger = "diagnostics"
+	}
+	m.recordTUIDiagnostic("local-command", "shortcut:%s", trigger)
+	return m.exportDiagnosticsBundleNow("shortcut:" + trigger)
+}
+
 func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
+		return cmd
+	}
 	m.clearPendingQuit()
 	if key != "" {
 		m.input.ClearSelection()

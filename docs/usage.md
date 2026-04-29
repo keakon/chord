@@ -24,6 +24,7 @@ Common keys:
 - `/`: search messages
 - `Ctrl+J`: open the message directory
 - `Ctrl+P`: switch model
+- `Ctrl+G`: export a diagnostics bundle
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
 
@@ -51,6 +52,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/export`: export the current session
 - `/compact`: manually trigger context compaction
 - `/stats`: view usage statistics
+- `/diagnostics`: export a diagnostics bundle for troubleshooting
 - `/loop on` / `/loop off`: enable or disable continuous execution mode
 
 ## Multi-agent focus switching

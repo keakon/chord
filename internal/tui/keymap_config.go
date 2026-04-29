@@ -63,6 +63,7 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.SwitchAgent, "switch_agent")
 	apply(&km.SwitchRole, "switch_role")
 	apply(&km.SwitchModel, "switch_model")
+	apply(&km.Diagnostics, "diagnostics")
 
 	return km
 }
