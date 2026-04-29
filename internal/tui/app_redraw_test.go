@@ -56,16 +56,40 @@ func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 	}
 }
 
-func TestPostFocusSettleFallbackSkipsWhenHostRedrawAlreadyRanAfterFocus(t *testing.T) {
+func TestPostFocusSettleFallbackSkipsWhenStrongHostRedrawAlreadyRanAfterFocus(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.focusResizeGeneration = 7
 	now := time.Now()
 	m.lastForegroundAt = now
 	m.lastHostRedrawAt = now.Add(100 * time.Millisecond)
+	m.lastHostRedrawReason = "scroll-flush-fallback"
 
 	if cmd := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 7, fallback: true}); cmd != nil {
-		t.Fatalf("fallback redraw should skip when host redraw already ran after focus, got %#v", cmd)
+		t.Fatalf("fallback redraw should skip when strong host redraw already ran after focus, got %#v", cmd)
+	}
+}
+
+func TestPostFocusSettleFallbackIgnoresWeakHostRedrawAfterFocus(t *testing.T) {
+	tests := []string{"content-boundary", "live-append", "scroll-flush", "stream-flush"}
+	for _, reason := range tests {
+		t.Run(reason, func(t *testing.T) {
+			m := NewModelWithSize(nil, 120, 40)
+			m.SetFocusResizeFreezeEnabled(true)
+			m.focusResizeGeneration = 7
+			now := time.Now()
+			m.lastForegroundAt = now.Add(-2 * time.Second)
+			m.lastHostRedrawAt = now.Add(-hostRedrawMinInterval / 2)
+			m.lastHostRedrawReason = reason
+
+			cmd := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 7, fallback: true})
+			if cmd == nil {
+				t.Fatal("fallback redraw should still run after weak post-focus redraw")
+			}
+			if m.lastHostRedrawReason != "post-focus-settle-fallback" {
+				t.Fatalf("lastHostRedrawReason = %q, want post-focus-settle-fallback", m.lastHostRedrawReason)
+			}
+		})
 	}
 }
 

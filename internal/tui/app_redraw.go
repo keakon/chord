@@ -34,10 +34,9 @@ const (
 
 	// postFocusSettleFallbackRedrawDelay is a best-effort late redraw for
 	// Ghostty/cmux-style hosts that can still show stale cells well after the
-	// first settle window. We only arm it when the focus cycle has not yet
-	// produced any other host redraw, which keeps the extra clear-screen pass
-	// rare while still covering the "tab restored, then first manual redraw
-	// fixes it" reports.
+	// first settle window. We only suppress it after a strong recovery redraw;
+	// weak redraws such as content-boundary can still race with host surface
+	// recovery while streaming.
 	postFocusSettleFallbackRedrawDelay = 1500 * time.Millisecond
 
 	// scrollFlushFallbackRedrawDelay is a follow-up redraw for scroll flushes that
@@ -84,6 +83,15 @@ func postHostRedrawFallbackCmd(generation uint64, reason string, delay time.Dura
 	return tea.Tick(delay, func(time.Time) tea.Msg {
 		return postHostRedrawFallbackMsg{generation: generation, reason: reason}
 	})
+}
+
+func hostRedrawSuppressesPostFocusFallback(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case "content-boundary", "live-append", "scroll-flush", "stream-flush":
+		return false
+	default:
+		return true
+	}
 }
 
 func (m *Model) suppressPeriodicViewerHostRedraw(reason string) bool {
@@ -141,6 +149,10 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 }
 
 func (m *Model) hostRedrawCmd(reason string) tea.Cmd {
+	return m.hostRedrawCmdWithOptions(reason, false)
+}
+
+func (m *Model) hostRedrawCmdWithOptions(reason string, bypassMinInterval bool) tea.Cmd {
 	if m == nil || !m.useFocusResizeFreeze || m.focusResizeFrozen {
 		if m != nil {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s enabled=%t frozen=%t", strings.TrimSpace(reason), m.useFocusResizeFreeze, m.focusResizeFrozen)
@@ -156,7 +168,7 @@ func (m *Model) hostRedrawCmd(reason string) tea.Cmd {
 		return nil
 	}
 	now := time.Now()
-	if !m.lastHostRedrawAt.IsZero() {
+	if !bypassMinInterval && !m.lastHostRedrawAt.IsZero() {
 		since := now.Sub(m.lastHostRedrawAt)
 		if since < hostRedrawMinInterval {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s throttled=true since_last=%s last_reason=%s", reason, since.Truncate(time.Millisecond), m.lastHostRedrawReason)

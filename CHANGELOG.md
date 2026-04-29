@@ -5,6 +5,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## Unreleased
 
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
+- Fixed Ghostty focus restore artifacts by keeping the late post-focus redraw after weak streaming boundary redraws.
+- Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
 - Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
 - Fixed collapsed tool result hidden-line counts for markdown-like output.
 

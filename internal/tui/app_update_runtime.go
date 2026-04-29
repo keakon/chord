@@ -267,12 +267,16 @@ func (m *Model) handlePostFocusSettleRedraw(msg postFocusSettleRedrawMsg) tea.Cm
 		return nil
 	}
 	if msg.fallback {
+		bypassMinInterval := false
 		if !m.lastForegroundAt.IsZero() && m.lastHostRedrawAt.After(m.lastForegroundAt) {
-			m.recordTUIDiagnostic("post-focus-settle-fallback-skip", "generation=%d host_redraw_after_focus=%s", msg.generation, m.lastHostRedrawAt.Format(time.RFC3339Nano))
-			return nil
+			if hostRedrawSuppressesPostFocusFallback(m.lastHostRedrawReason) {
+				m.recordTUIDiagnostic("post-focus-settle-fallback-skip", "generation=%d host_redraw_after_focus=%s reason=%s", msg.generation, m.lastHostRedrawAt.Format(time.RFC3339Nano), strings.TrimSpace(m.lastHostRedrawReason))
+				return nil
+			}
+			bypassMinInterval = true
 		}
 		m.recordTUIDiagnostic("post-focus-settle-fallback", "generation=%d mode=%s", msg.generation, debugModeString(m.mode))
-		return m.hostRedrawCmd("post-focus-settle-fallback")
+		return m.hostRedrawCmdWithOptions("post-focus-settle-fallback", bypassMinInterval)
 	}
 	m.recordTUIDiagnostic("post-focus-settle-redraw", "generation=%d mode=%s", msg.generation, debugModeString(m.mode))
 	return tea.Batch(tea.ClearScreen, postFocusSettleFallbackRedrawCmd(msg.generation))

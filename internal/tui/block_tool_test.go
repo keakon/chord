@@ -722,6 +722,28 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 	}
 }
 
+func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
+	line := renderQueuedToolHeaderBadge("  ▸ Bash", 24)
+	plain := stripANSI(line)
+	if got := ansi.StringWidth(plain); got != 24 {
+		t.Fatalf("queued header width = %d, want 24; got %q", got, plain)
+	}
+	if !strings.HasSuffix(plain, "Queued ") {
+		t.Fatalf("expected queued badge to keep one trailing content-column space; got %q", plain)
+	}
+}
+
+func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
+	line := renderQueuedToolHeaderBadge("  ▸ VeryLongToolName", 20)
+	plain := stripANSI(line)
+	if strings.Contains(plain, "Queued") {
+		t.Fatalf("expected queued badge to hide when width is too narrow; got %q", plain)
+	}
+	if plain != "  ▸ VeryLongToolName" {
+		t.Fatalf("queued header = %q, want original trimmed header", plain)
+	}
+}
+
 func TestActiveToolHeaderUsesProvidedSpinnerFrame(t *testing.T) {
 	block := &Block{
 		ID:                 1,

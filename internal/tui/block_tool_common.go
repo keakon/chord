@@ -513,21 +513,22 @@ func formatToolResultSummaryLine(b *Block) string {
 
 func renderQueuedToolHeaderBadge(line string, width int) string {
 	const badgeText = "Queued"
+	const rightPadding = 1
 	trimmed := strings.TrimRight(line, " ")
 	badge := DimStyle.Render(badgeText)
 	badgeWidth := runewidth.StringWidth(badgeText)
 	lineWidth := ansi.StringWidth(trimmed)
 	if lineWidth == 0 {
-		return badge
+		return badge + strings.Repeat(" ", rightPadding)
 	}
 	if width <= 0 {
-		width = lineWidth + 1 + badgeWidth
+		width = lineWidth + 1 + badgeWidth + rightPadding
 	}
-	availableGap := width - lineWidth - badgeWidth
-	if availableGap >= 2 {
-		return trimmed + strings.Repeat(" ", availableGap) + badge
+	availableGap := width - lineWidth - badgeWidth - rightPadding
+	if availableGap < 2 {
+		return trimmed
 	}
-	return trimmed + " " + badge
+	return trimmed + strings.Repeat(" ", availableGap) + badge + strings.Repeat(" ", rightPadding)
 }
 
 func renderToolExpandHint(indent string, hidden int) string {
