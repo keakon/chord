@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- 修复 sticky fallback 模型的 variant 状态：已 pin 的 fallback 请求会保留自身 `@variant`，且不会把主模型的 variant 泄漏到无 variant 的 fallback 运行中。
 - 修复分类后的循环阻塞消息会渲染成未命名状态卡的问题。
 - 修复 Ghostty 恢复焦点后因弱流式边界重绘而跳过延迟 post-focus 重绘，导致界面残影的问题。
 - 改进排队中的工具调用徽标：保持右侧留白，并在工具标题宽度不足时隐藏。

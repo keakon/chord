@@ -150,6 +150,7 @@ func (c *Client) completeStreamWithRetry(
 	startModelID string,
 	startMaxTokens int,
 	startTuning RequestTuning,
+	startVariant string,
 	messages []message.Message,
 	tools []message.ToolDefinition,
 	cb StreamCallback,
@@ -174,7 +175,7 @@ func (c *Client) completeStreamWithRetry(
 	lastInputTokens := c.getLastInputTokens()
 	outputCapSetting := c.getOutputTokenMax()
 	systemPrompt := c.getSystemPrompt()
-	activeVariant := strings.TrimSpace(c.ActiveVariant())
+	variantForStart := strings.TrimSpace(startVariant)
 
 	retryCount := 0
 
@@ -244,7 +245,7 @@ func (c *Client) completeStreamWithRetry(
 				maxTokens:    startMaxTokens,
 				contextLimit: c.ContextLimitForModelRef(providerModelRef(startProvider, startModelID)),
 				tuning:       startTuning,
-				variant:      activeVariant,
+				variant:      variantForStart,
 				isFallback:   false,
 			},
 		}

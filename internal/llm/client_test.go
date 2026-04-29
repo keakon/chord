@@ -701,6 +701,7 @@ func TestCompleteStreamWithRetryDoesNotResetRetryCountAfterVisibleOutputOnly(t *
 		"gpt-test",
 		4096,
 		RequestTuning{},
+		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
@@ -736,6 +737,7 @@ func TestCompleteStreamWithRetryHonorsExplicitMaxAttempts(t *testing.T) {
 		"primary-model",
 		4096,
 		RequestTuning{},
+		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
@@ -837,6 +839,7 @@ func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 		"gpt-test",
 		4096,
 		RequestTuning{},
+		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
@@ -881,6 +884,7 @@ func TestCompleteStreamWithRetryPrefersShortestRoundWaitAcrossModels(t *testing.
 		"gpt-primary",
 		4096,
 		RequestTuning{},
+		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
@@ -1495,6 +1499,120 @@ func TestModelPoolStickyCursorKeepsSuccessfulModel(t *testing.T) {
 	}
 	if impl0.CallCount() != 1 {
 		t.Fatalf("model0 calls = %d, want 1 (should not reset to model0 on second request)", impl0.CallCount())
+	}
+}
+
+func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
+	primaryCfg := testProviderConfig("primary-prov", "primary-model")
+	fallbackCfg := NewProviderConfig("qt", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {
+				Limit: config.ModelLimit{Context: 128000, Output: 4096},
+				Variants: map[string]config.ModelVariant{
+					"xhigh": {Reasoning: &config.ReasoningConfig{Effort: "high"}},
+				},
+			},
+		},
+	}, []string{"fb-key"})
+
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "primary failed"}}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "fallback first"}},
+		{resp: &message.Response{Content: "fallback second"}},
+	}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "gpt-5.5", MaxTokens: 4096, ContextLimit: 128000, Variant: "xhigh"},
+	}, 0)
+
+	resp1, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-1"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("first CompleteStream() error = %v", err)
+	}
+	if resp1 == nil || resp1.Content != "fallback first" {
+		t.Fatalf("first response = %#v, want fallback first", resp1)
+	}
+	st1 := c.LastCallStatus()
+	if st1.RunningModelRef != "qt/gpt-5.5@xhigh" {
+		t.Fatalf("first RunningModelRef = %q, want qt/gpt-5.5@xhigh", st1.RunningModelRef)
+	}
+
+	resp2, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-2"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("second CompleteStream() error = %v", err)
+	}
+	if resp2 == nil || resp2.Content != "fallback second" {
+		t.Fatalf("second response = %#v, want fallback second", resp2)
+	}
+	st2 := c.LastCallStatus()
+	if st2.SelectedModelRef != "qt/gpt-5.5@xhigh" {
+		t.Fatalf("second SelectedModelRef = %q, want qt/gpt-5.5@xhigh", st2.SelectedModelRef)
+	}
+	if st2.RunningModelRef != "qt/gpt-5.5@xhigh" {
+		t.Fatalf("second RunningModelRef = %q, want qt/gpt-5.5@xhigh", st2.RunningModelRef)
+	}
+}
+
+func TestModelPoolStickyCursorDoesNotLeakPrimaryVariantToVariantlessPinnedFallback(t *testing.T) {
+	primaryCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {
+				Limit: config.ModelLimit{Context: 400000, Output: 128000},
+				Variants: map[string]config.ModelVariant{
+					"high": {Thinking: &config.ThinkingConfig{Effort: "high"}},
+				},
+			},
+		},
+	}, []string{"k"})
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"fb-key"})
+
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "fail primary"}}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "fallback first"}},
+		{resp: &message.Response{Content: "fallback second"}},
+	}}
+
+	c := NewClient(primaryCfg, primaryImpl, "gpt-5.5", 4096, "sys")
+	c.SetVariant("high")
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "gpt-5.5", MaxTokens: 4096, ContextLimit: 400000, Variant: "high"},
+		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "fallback-model", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+
+	resp1, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-1"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("first CompleteStream() error = %v", err)
+	}
+	if resp1 == nil || resp1.Content != "fallback first" {
+		t.Fatalf("first response = %#v, want fallback first", resp1)
+	}
+	st1 := c.LastCallStatus()
+	if st1.RunningModelRef != "fallback-prov/fallback-model" {
+		t.Fatalf("first RunningModelRef = %q, want fallback-prov/fallback-model", st1.RunningModelRef)
+	}
+
+	resp2, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-2"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("second CompleteStream() error = %v", err)
+	}
+	if resp2 == nil || resp2.Content != "fallback second" {
+		t.Fatalf("second response = %#v, want fallback second", resp2)
+	}
+	st2 := c.LastCallStatus()
+	if st2.SelectedModelRef != "fallback-prov/fallback-model" {
+		t.Fatalf("second SelectedModelRef = %q, want fallback-prov/fallback-model", st2.SelectedModelRef)
+	}
+	if st2.RunningModelRef != "fallback-prov/fallback-model" {
+		t.Fatalf("second RunningModelRef = %q, want fallback-prov/fallback-model", st2.RunningModelRef)
 	}
 }
 
@@ -2381,6 +2499,7 @@ func TestCompleteStreamFallbackRunningModelRefIncludesFallbackVariant(t *testing
 		"primary-model",
 		4096,
 		RequestTuning{},
+		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
 		nil,

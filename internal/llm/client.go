@@ -343,7 +343,7 @@ func (c *Client) CompleteStream(
 	// the round, continues through remaining targets, then waits only between rounds.
 	resp, err := c.completeStreamWithRetry(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
-		start.MaxTokens, requestTuning,
+		start.MaxTokens, requestTuning, start.Variant,
 		messages, tools, cb, true, orderedFallbacks, 0, &status,
 	)
 

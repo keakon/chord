@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
 - Fixed Ghostty focus restore artifacts by keeping the late post-focus redraw after weak streaming boundary redraws.
 - Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
