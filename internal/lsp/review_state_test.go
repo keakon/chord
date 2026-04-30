@@ -45,3 +45,40 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 		t.Fatalf("RebuildReviewSnapshotsFromMessages() = %#v, want %#v", got, want)
 	}
 }
+
+func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "edit-stale", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","old_string":"old","new_string":"bad"}`)},
+			},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "edit-stale",
+			Content:    "Edit completed.",
+			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
+		},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "edit-clean", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","old_string":"bad","new_string":"good"}`)},
+			},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "edit-clean",
+			Content:    "Edit completed.",
+			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}},
+		},
+	}
+
+	got := RebuildReviewSnapshotsFromMessages(msgs)
+	want := []ReviewedFileSnapshot{
+		{Path: "a.go", ServerID: "gopls", Errors: 0, Warnings: 0},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RebuildReviewSnapshotsFromMessages() = %#v, want %#v", got, want)
+	}
+}

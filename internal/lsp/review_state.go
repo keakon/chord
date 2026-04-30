@@ -150,24 +150,15 @@ func (m *Manager) currentReviewSnapshots(path string) []message.LSPReview {
 	}
 	m.diagMu.RLock()
 	defer m.diagMu.RUnlock()
-	if len(m.diagByServer) == 0 {
+	serverIDs := m.reviewServerIDsForPathLocked(path)
+	if len(serverIDs) == 0 {
 		return nil
 	}
-	var out []message.LSPReview
-	for serverID, byURI := range m.diagByServer {
-		var counts reviewCounts
-		for uri, diagCounts := range byURI {
-			if normalizeWaiterPath(uriToPath(uri)) != path {
-				continue
-			}
-			counts.errors += diagCounts.errors
-			counts.warnings += diagCounts.warnings
-		}
+	out := make([]message.LSPReview, 0, len(serverIDs))
+	for _, serverID := range serverIDs {
+		counts := m.reviewCountsForPathLocked(serverID, path)
 		out = append(out, message.LSPReview{ServerID: serverID, Errors: counts.errors, Warnings: counts.warnings})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].ServerID < out[j].ServerID
-	})
 	return out
 }
 
@@ -184,18 +175,9 @@ func (m *Manager) recordReviewSnapshot(path string) {
 	if m.reviewByServer == nil {
 		m.reviewByServer = make(map[string]map[string]reviewCounts)
 	}
-	for serverID, byURI := range m.diagByServer {
-		if byURI == nil {
-			continue
-		}
-		var total reviewCounts
-		for uri, counts := range byURI {
-			if normalizeWaiterPath(uriToPath(uri)) != path {
-				continue
-			}
-			total.errors += counts.errors
-			total.warnings += counts.warnings
-		}
+	serverIDs := m.reviewServerIDsForPathLocked(path)
+	for _, serverID := range serverIDs {
+		total := m.reviewCountsForPathLocked(serverID, path)
 		total.reviewedAt = now
 		byPath := m.reviewByServer[serverID]
 		if byPath == nil {
@@ -206,6 +188,62 @@ func (m *Manager) recordReviewSnapshot(path string) {
 	}
 	m.diagMu.Unlock()
 	m.notifySidebarChanged()
+}
+
+// reviewServerIDsForPathLocked returns the servers whose latest post-write review
+// should be snapshotted for path. m.diagMu must be held. It intentionally includes
+// servers with an existing review for path even when their current diagnostics are
+// empty, so a clean follow-up edit overwrites stale non-zero sidebar counts.
+func (m *Manager) reviewServerIDsForPathLocked(path string) []string {
+	seen := make(map[string]struct{})
+	for serverID, byURI := range m.diagByServer {
+		for uri := range byURI {
+			if normalizeWaiterPath(uriToPath(uri)) == path {
+				seen[serverID] = struct{}{}
+				break
+			}
+		}
+	}
+	for serverID, byPath := range m.reviewByServer {
+		if _, ok := byPath[path]; ok {
+			seen[serverID] = struct{}{}
+		}
+	}
+	m.clientsMu.RLock()
+	for serverID := range m.clients {
+		if m.cfg == nil {
+			seen[serverID] = struct{}{}
+			continue
+		}
+		if srvCfg, ok := m.cfg.LSP[serverID]; ok && !srvCfg.Disabled && m.handles(srvCfg, path) {
+			seen[serverID] = struct{}{}
+		}
+	}
+	m.clientsMu.RUnlock()
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for serverID := range seen {
+		out = append(out, serverID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reviewCountsForPathLocked returns the current diagnostics for path on serverID.
+// m.diagMu must be held. Missing diagnostics deliberately mean a reviewed clean
+// file, not "unknown", once reviewServerIDsForPathLocked selected the server.
+func (m *Manager) reviewCountsForPathLocked(serverID, path string) reviewCounts {
+	var total reviewCounts
+	for uri, counts := range m.diagByServer[serverID] {
+		if normalizeWaiterPath(uriToPath(uri)) != path {
+			continue
+		}
+		total.errors += counts.errors
+		total.warnings += counts.warnings
+	}
+	return total
 }
 
 func (m *Manager) ResetReviews() {

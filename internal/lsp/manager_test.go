@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
@@ -176,6 +177,60 @@ func TestRecordReviewSnapshotDoesNotOverwriteOtherTouchedFiles(t *testing.T) {
 	}
 	if gotB.errors != 0 || gotB.warnings != 3 {
 		t.Fatalf("review snapshot for b.go = %+v, want 0E/3W", gotB)
+	}
+}
+
+func TestRecordReviewSnapshotClearsStaleDiagnosticsForCleanTouchedFile(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+			},
+		},
+	}, t.TempDir(), nil)
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "a.go"))
+	mgr.clients["gopls"] = &Client{}
+	mgr.reviewByServer = map[string]map[string]reviewCounts{
+		"gopls": {
+			path: {errors: 1, warnings: 0},
+		},
+	}
+	mgr.touchedPaths = map[string]struct{}{
+		path: {},
+	}
+
+	mgr.recordReviewSnapshot(path)
+
+	got := mgr.reviewByServer["gopls"][path]
+	if got.errors != 0 || got.warnings != 0 {
+		t.Fatalf("review snapshot after clean edit = %+v, want 0E/0W", got)
+	}
+	rows := mgr.SidebarEntries()
+	if len(rows) != 1 {
+		t.Fatalf("SidebarEntries() len = %d, want 1", len(rows))
+	}
+	if rows[0].Name != "gopls" || rows[0].Errors != 0 || rows[0].Warnings != 0 {
+		t.Fatalf("gopls row = %+v, want clean diagnostics", rows[0])
+	}
+}
+
+func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+			},
+		},
+	}, t.TempDir(), nil)
+	path := filepath.Join(mgr.projectRoot, "a.go")
+	mgr.clients["gopls"] = &Client{}
+
+	got := mgr.CurrentReviewSnapshots(path)
+	want := []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CurrentReviewSnapshots() = %#v, want %#v", got, want)
 	}
 }
 
