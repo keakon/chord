@@ -80,6 +80,12 @@ Common actions:
 - `Ctrl+F`: attach image paths from the input box to the current message
 - `Enter` / `o` / `Space`: open the image in the current message in Normal mode
 
+## Copying text
+
+- Drag in the transcript to select text inside the TUI
+- `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord
+- `Ctrl+C`: remains reserved for cancel / quit and is not used for transcript copy
+
 ## Headless
 
 `chord headless` is useful for:

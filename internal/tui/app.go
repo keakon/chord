@@ -204,14 +204,15 @@ type Model struct {
 	zone           *ZoneManager
 
 	// In-app mouse text selection (drag to select, release to copy)
-	mouseDown       bool
-	selStartBlockID int
-	selStartLine    int
-	selStartCol     int
-	selEndBlockID   int
-	selEndLine      int
-	selEndCol       int
-	inputMouseDown  bool
+	mouseDown              bool
+	selStartBlockID        int
+	selStartLine           int
+	selStartCol            int
+	selEndBlockID          int
+	selEndLine             int
+	selEndCol              int
+	selEndInclusiveForCopy bool
+	inputMouseDown         bool
 
 	// Status bar copy targets (working directory / session ID).
 	statusPathLastClickTime time.Time

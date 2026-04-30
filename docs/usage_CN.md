@@ -80,6 +80,12 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - `Ctrl+F`：把输入框中的图片路径加入当前消息附件
 - `Enter` / `o` / `Space`：在 Normal 模式下打开当前消息中的图片
 
+## 复制文本
+
+- 可在转录区内用鼠标拖选 TUI 里的文本
+- `Cmd+C`：在会把这个按键转发给 Chord 的 macOS 终端中，复制当前转录区选中的文本
+- `Ctrl+C`：仍用于取消 / 退出，不用于复制转录区文本
+
 ## Headless 模式
 
 `chord headless` 适合以下场景：

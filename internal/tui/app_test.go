@@ -5598,6 +5598,38 @@ func TestOpenModelSelectClearsActiveSearchSession(t *testing.T) {
 	}
 }
 
+func TestMouseSelectionRangeConvertsInclusiveDragEndpointToExclusive(t *testing.T) {
+	m := NewModel(nil)
+	m.selStartBlockID = 1
+	m.selStartLine = 0
+	m.selStartCol = 4
+	m.selEndBlockID = 1
+	m.selEndLine = 0
+	m.selEndCol = 13
+	m.selEndInclusiveForCopy = true
+
+	sel := m.mouseSelectionRange()
+	if sel.StartCol != 4 || sel.EndCol != 14 {
+		t.Fatalf("mouseSelectionRange() = (%d, %d), want (4, 14)", sel.StartCol, sel.EndCol)
+	}
+}
+
+func TestMouseSelectionRangePreservesExclusiveWordSelection(t *testing.T) {
+	m := NewModel(nil)
+	m.selStartBlockID = 1
+	m.selStartLine = 0
+	m.selStartCol = 4
+	m.selEndBlockID = 1
+	m.selEndLine = 0
+	m.selEndCol = 14
+	m.selEndInclusiveForCopy = false
+
+	sel := m.mouseSelectionRange()
+	if sel.StartCol != 4 || sel.EndCol != 14 {
+		t.Fatalf("mouseSelectionRange() = (%d, %d), want unchanged (4, 14)", sel.StartCol, sel.EndCol)
+	}
+}
+
 func TestOpenUsageStatsClearsActiveSearchSession(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 24)
 	m.mode = ModeNormal
@@ -5887,6 +5919,53 @@ func TestCopyFocusedBlockRejectsErrorCard(t *testing.T) {
 	}
 	if got, want := m.activeToast.Message, "This card type cannot be copied"; got != want {
 		t.Fatalf("toast message = %q, want %q", got, want)
+	}
+}
+
+func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 20)
+	m.mode = ModeNormal
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "prefix `app_id/app_secret` suffix"}
+	m.viewport.AppendBlock(block)
+
+	lines := block.Render(m.viewport.width, "")
+	target := -1
+	startCol := -1
+	for i, line := range lines {
+		plain := stripANSI(line)
+		if idx := strings.Index(plain, "app_id/app_secret"); idx >= 0 {
+			target = i
+			startCol = ansi.StringWidth(plain[:idx])
+			break
+		}
+	}
+	if target < 0 || startCol < 0 {
+		t.Fatalf("failed to find rendered inline code in %#v", lines)
+	}
+
+	m.selStartBlockID = 1
+	m.selStartLine = target
+	m.selStartCol = startCol
+	m.selEndBlockID = 1
+	m.selEndLine = target
+	m.selEndCol = startCol + len("app_id/app_secret") - 1
+	m.selEndInclusiveForCopy = true
+
+	cmd := m.handleSuperCopy()
+	if cmd == nil {
+		t.Fatal("handleSuperCopy should return clipboard command for mouse selection")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Selection copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Selection copied to clipboard")
+	}
+	if got := m.viewport.ExtractSelectionText(m.mouseSelectionRange()); got != "app_id/app_secret" {
+		t.Fatalf("copied selection text = %q, want %q", got, "app_id/app_secret")
 	}
 }
 

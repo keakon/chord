@@ -496,6 +496,39 @@ func TestExtractSelectionTextStripsOSC8Hyperlinks(t *testing.T) {
 	}
 }
 
+func TestExtractSelectionTextMouseInclusiveEndpointKeepsLastCharacter(t *testing.T) {
+	v := NewViewport(100, 20)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "prefix `app_id/app_secret` suffix"}
+	v.AppendBlock(block)
+
+	lines := block.Render(v.width, "")
+	target := -1
+	startCol := -1
+	for i, line := range lines {
+		plain := stripANSI(line)
+		if idx := strings.Index(plain, "app_id/app_secret"); idx >= 0 {
+			target = i
+			startCol = ansi.StringWidth(plain[:idx])
+			break
+		}
+	}
+	if target < 0 || startCol < 0 {
+		t.Fatalf("failed to find rendered inline code in %#v", lines)
+	}
+
+	got := v.ExtractSelectionText(SelectionRange{
+		StartBlockID: 1,
+		StartLine:    target,
+		StartCol:     startCol,
+		EndBlockID:   1,
+		EndLine:      target,
+		EndCol:       startCol + len("app_id/app_secret"),
+	})
+	if got != "app_id/app_secret" {
+		t.Fatalf("ExtractSelectionText() = %q, want %q", got, "app_id/app_secret")
+	}
+}
+
 func TestExtractSelectionTextHydratesSpilledBlocks(t *testing.T) {
 	v := NewViewport(40, 4)
 	v.maxHotBytes = 1024

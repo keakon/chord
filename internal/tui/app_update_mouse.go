@@ -299,6 +299,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 							m.selEndBlockID = block.ID
 							m.selEndLine = lineInBlock
 							m.selEndCol = eCol
+							m.selEndInclusiveForCopy = false
 							m.mouseDown = false
 						} else {
 							m.mouseDown = true
@@ -308,6 +309,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 							m.selEndBlockID = block.ID
 							m.selEndLine = lineInBlock
 							m.selEndCol = col
+							m.selEndInclusiveForCopy = true
 						}
 					} else if m.clickCount >= 3 {
 						_, lineWidth := m.viewport.GetLinePlain(block.ID, lineInBlock)
@@ -319,6 +321,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 							m.selEndBlockID = block.ID
 							m.selEndLine = lineInBlock
 							m.selEndCol = lineWidth
+							m.selEndInclusiveForCopy = false
 							m.mouseDown = false
 						} else {
 							// Empty line: treat as single click (point selection).
@@ -329,6 +332,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 							m.selEndBlockID = block.ID
 							m.selEndLine = lineInBlock
 							m.selEndCol = col
+							m.selEndInclusiveForCopy = true
 						}
 					} else {
 						if block.ID != m.focusedBlockID {
@@ -372,6 +376,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 						m.selEndBlockID = block.ID
 						m.selEndLine = lineInBlock
 						m.selEndCol = col
+						m.selEndInclusiveForCopy = true
 					}
 				}
 			} else {
@@ -425,6 +430,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 				m.selEndBlockID = block.ID
 				m.selEndLine = lineInBlock
 				m.selEndCol = clampCol(viewportCol, m.viewport.width)
+				m.selEndInclusiveForCopy = true
 			}
 			return nil
 		}

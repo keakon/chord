@@ -225,7 +225,7 @@ func (m *Model) hasMouseSelection() bool {
 }
 
 func (m *Model) mouseSelectionRange() SelectionRange {
-	return SelectionRange{
+	r := SelectionRange{
 		StartBlockID: m.selStartBlockID,
 		StartLine:    m.selStartLine,
 		StartCol:     m.selStartCol,
@@ -233,6 +233,17 @@ func (m *Model) mouseSelectionRange() SelectionRange {
 		EndLine:      m.selEndLine,
 		EndCol:       m.selEndCol,
 	}
+	if !m.selEndInclusiveForCopy {
+		return r
+	}
+	if posLess(r.StartBlockID, r.StartLine, r.StartCol, r.EndBlockID, r.EndLine, r.EndCol) {
+		r.EndCol++
+		return r
+	}
+	if posLess(r.EndBlockID, r.EndLine, r.EndCol, r.StartBlockID, r.StartLine, r.StartCol) {
+		r.StartCol++
+	}
+	return r
 }
 
 func (m *Model) clearMouseSelection() {
@@ -243,6 +254,7 @@ func (m *Model) clearMouseSelection() {
 	m.selEndBlockID = -1
 	m.selEndLine = -1
 	m.selEndCol = -1
+	m.selEndInclusiveForCopy = false
 }
 
 func (m *Model) statusPathContainsPoint(x, y int) bool {
