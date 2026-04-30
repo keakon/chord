@@ -18,7 +18,7 @@ func containsCmd(cmds []tea.Cmd, target tea.Cmd) bool {
 }
 
 func TestHostRedrawSequenceSkipsWindowSizeForFlushReasons(t *testing.T) {
-	tests := []string{"stream-flush", "scroll-flush", "scroll-flush-fallback", "post-focus-settle-fallback"}
+	tests := []string{"stream-flush", "scroll-flush", "scroll-flush-fallback"}
 	for _, reason := range tests {
 		t.Run(reason, func(t *testing.T) {
 			m := NewModelWithSize(nil, 80, 24)
@@ -93,7 +93,7 @@ func TestPostFocusSettleFallbackIgnoresWeakHostRedrawAfterFocus(t *testing.T) {
 	}
 }
 
-func TestPostFocusSettleFallbackTriggersHostRedrawWithoutWindowSize(t *testing.T) {
+func TestPostFocusSettleFallbackTriggersStrongHostRedraw(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.focusResizeGeneration = 7
@@ -107,6 +107,17 @@ func TestPostFocusSettleFallbackTriggersHostRedrawWithoutWindowSize(t *testing.T
 	}
 	if m.lastHostRedrawReason != "post-focus-settle-fallback" {
 		t.Fatalf("lastHostRedrawReason = %q, want post-focus-settle-fallback", m.lastHostRedrawReason)
+	}
+
+	cmds := m.hostRedrawSequence("post-focus-settle-fallback")
+	if len(cmds) != 3 {
+		t.Fatalf("post-focus-settle-fallback redraw cmd count = %d, want 3", len(cmds))
+	}
+	if !containsCmd(cmds, tea.ClearScreen) {
+		t.Fatal("post-focus-settle-fallback redraw should include ClearScreen")
+	}
+	if !containsCmd(cmds, tea.RequestWindowSize) {
+		t.Fatal("post-focus-settle-fallback redraw should include RequestWindowSize")
 	}
 }
 

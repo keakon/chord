@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Fixed TUI card background artifacts around emoji, variation selectors, and ZWJ graphemes by aligning wrapping, padding, and truncation with the viewport grapheme-width calculation.
 - Improved TUI tool-call file path display so local-path tools such as `Read`, `Write`, `Edit`, `Delete`, `Grep`, and `Glob`, along with existing visible path-bearing Bash metadata, show paths relative to the active project root when possible, including after session resume/startup restore and spill/hydrate recovery, while keeping external paths absolute.
 - Improved AGENTS.md handling by adding stable system-prompt framing only when repository guidance exists, while keeping AGENTS.md contents in the session `<system-reminder>` context layer.
 - Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.

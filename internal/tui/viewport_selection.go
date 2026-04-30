@@ -423,16 +423,12 @@ func truncateLineToDisplayWidth(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
-	if ansi.StringWidth(s) <= width {
+	if tuiStringWidth(s) <= width {
 		return s
 	}
-	_, endByte := findColumnByteOffsets(s, 0, width)
-	if endByte < 0 {
-		return s
-	}
-	out := s[:endByte]
+	out := tuiCut(s, 0, width)
 
-	if endByte < len(s) && strings.Contains(s, "\x1b[") {
+	if len(out) < len(s) && strings.Contains(s, "\x1b[") {
 		baseBg := firstSGRBackgroundSeq(s)
 		out += "\x1b[49m"
 		if baseBg != "" {

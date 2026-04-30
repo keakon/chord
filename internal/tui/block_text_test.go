@@ -310,6 +310,90 @@ func TestRailANSISeqUsesFocusedColor(t *testing.T) {
 	}
 }
 
+func TestWrapPreformattedTextUsesGraphemeClustersForEmoji(t *testing.T) {
+	line := "👩‍⚕️x"
+	if got, want := tuiStringWidth(line), 3; got != want {
+		t.Fatalf("test fixture width=%d want %d", got, want)
+	}
+	lines := wrapPreformattedText(line, 3)
+	if len(lines) != 1 || lines[0] != line {
+		t.Fatalf("wrapPreformattedText split grapheme cluster line: %#v", lines)
+	}
+}
+
+func TestPadLineToDisplayWidthUsesViewportGraphemeWidth(t *testing.T) {
+	line := "👩‍⚕️x"
+	padded := padLineToDisplayWidth(line, 3)
+	if got := stripANSI(padded); got != line {
+		t.Fatalf("padLineToDisplayWidth added padding with viewport-full grapheme line: %q", got)
+	}
+}
+
+func TestTruncateLineToDisplayWidthKeepsEmojiGraphemeIntact(t *testing.T) {
+	line := "⚠️ ok"
+	got := truncateLineToDisplayWidth(line, 2)
+	if got != "⚠️" {
+		t.Fatalf("truncateLineToDisplayWidth split or overran emoji grapheme: %q", got)
+	}
+}
+
+func TestWrapPreformattedTextKeepsOversizeGraphemeWithoutLeadingBlank(t *testing.T) {
+	lines := wrapPreformattedText("⚠️x", 1)
+	want := []string{"⚠️", "x"}
+	if len(lines) != len(want) {
+		t.Fatalf("wrapPreformattedText lines=%#v want %#v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("wrapPreformattedText lines=%#v want %#v", lines, want)
+		}
+	}
+}
+
+func TestWrapTextKeepsOversizeGraphemeWithoutLeadingBlank(t *testing.T) {
+	lines := wrapText("⚠️x", 1)
+	want := []string{"⚠️", "x"}
+	if len(lines) != len(want) {
+		t.Fatalf("wrapText lines=%#v want %#v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("wrapText lines=%#v want %#v", lines, want)
+		}
+	}
+}
+
+func TestTruncateLineToDisplayWidthDropsOversizeFirstGraphemeStrictly(t *testing.T) {
+	got := truncateLineToDisplayWidth("⚠️x", 1)
+	if got != "" {
+		t.Fatalf("truncateLineToDisplayWidth should not exceed requested width: %q", got)
+	}
+}
+
+func TestTuiWrapHeadTailKeepsStyledOversizeFirstGrapheme(t *testing.T) {
+	line := "\x1b[38;5;196m⚠️x\x1b[0m"
+	head, tail := tuiWrapHeadTail(line, 1)
+	if got := stripANSI(head); got != "⚠️" {
+		t.Fatalf("head plain=%q want ⚠️; ansi=%q", got, head)
+	}
+	if got := stripANSI(tail); got != "x" {
+		t.Fatalf("tail plain=%q want x; ansi=%q", got, tail)
+	}
+}
+
+func TestRenderPrewrappedCardDoesNotOverpadEmojiVariationSelector(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	style := lipgloss.NewStyle().Padding(0, 0).Background(lipgloss.Color(currentTheme.AssistantCardBg))
+	out := renderPrewrappedCard(style, 2, []string{"▶️"}, currentTheme.AssistantCardBg, "")
+	if len(out) != 1 {
+		t.Fatalf("renderPrewrappedCard lines=%d want 1", len(out))
+	}
+	plain := stripANSI(out[0])
+	if plain != "▶️" {
+		t.Fatalf("renderPrewrappedCard overpadded viewport-full emoji line: plain=%q ansi=%q", plain, out[0])
+	}
+}
+
 func TestRenderPrewrappedCardAppliesRailToPaddingRows(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	style := lipgloss.NewStyle().Padding(1, 1).MarginLeft(1).Background(lipgloss.Color(currentTheme.AssistantCardBg))

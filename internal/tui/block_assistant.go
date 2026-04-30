@@ -222,14 +222,15 @@ func wrapStyledLiteralLineWithContinuation(line string, width, continuationExtra
 			prefix = strings.Repeat(" ", continuationExtra)
 			prefixWidth = continuationExtra
 		}
-		if ansi.StringWidth(remaining) <= limit {
+		if tuiStringWidth(remaining) <= limit {
 			out = append(out, prefix+remaining)
 			synthetic = append(synthetic, prefixWidth)
 			break
 		}
-		out = append(out, prefix+ansi.Cut(remaining, 0, limit))
+		head, tail := tuiWrapHeadTail(remaining, limit)
+		out = append(out, prefix+head)
 		synthetic = append(synthetic, prefixWidth)
-		remaining = ansi.Cut(remaining, limit, ansi.StringWidth(remaining))
+		remaining = tail
 		first = false
 	}
 	return out, synthetic

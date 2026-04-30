@@ -26,11 +26,55 @@ const (
 // ansiStrip removes ANSI CSI sequences for display-width calculation.
 var ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// tuiWidthMethod is the display-width algorithm used by the viewport cell
+// renderer. All card wrapping, truncation, and padding code must use the same
+// method so emoji/variation-selector graphemes do not shift background fills.
+const tuiWidthMethod = ansi.GraphemeWidth
+
+func tuiStringWidth(s string) int {
+	return tuiWidthMethod.StringWidth(s)
+}
+
+func tuiCut(s string, left, right int) string {
+	return tuiWidthMethod.Cut(s, left, right)
+}
+
+func tuiWrapHeadTail(s string, width int) (string, string) {
+	if width <= 0 || s == "" {
+		return s, ""
+	}
+	totalWidth := tuiStringWidth(s)
+	head := tuiCut(s, 0, width)
+	headWidth := tuiStringWidth(head)
+	for headWidth == 0 && width < totalWidth {
+		width++
+		head = tuiCut(s, 0, width)
+		headWidth = tuiStringWidth(head)
+	}
+	if head != "" {
+		return head, tuiCut(s, headWidth, totalWidth)
+	}
+	cluster, _ := ansi.FirstGraphemeCluster(s, tuiWidthMethod)
+	if cluster == "" {
+		return s, ""
+	}
+	return cluster, s[len(cluster):]
+}
+
+func tuiHardwrap(s string, width int) []string {
+	wrapped := tuiWidthMethod.Hardwrap(s, width, true)
+	parts := strings.Split(wrapped, "\n")
+	if len(parts) > 1 && parts[0] == "" {
+		parts = parts[1:]
+	}
+	return parts
+}
+
 // padLineToDisplayWidth pads line with spaces to exactly width display columns
-// so block backgrounds extend to full width and selection aligns. Uses ansi
-// (grapheme-aware) so emoji/wide chars match viewport highlight column math.
+// so block backgrounds extend to full width and selection aligns. Uses the same
+// grapheme-aware width method as the viewport so emoji/wide chars match highlight column math.
 func padLineToDisplayWidth(line string, width int) string {
-	w := ansi.StringWidth(line)
+	w := tuiStringWidth(line)
 	if w >= width {
 		return line
 	}
@@ -50,7 +94,7 @@ func padLineToDisplayWidth(line string, width int) string {
 // (eg renderPrewrappedCard): trailing spaces should belong to the outer card,
 // not inherit an inner sub-surface such as a fenced code block background.
 func padLineToDisplayWidthForOuterBg(line string, width int) string {
-	w := ansi.StringWidth(line)
+	w := tuiStringWidth(line)
 	if w >= width {
 		return line
 	}
@@ -61,7 +105,7 @@ func lineLooksAlreadyFullWidth(line string, width int) bool {
 	if width <= 0 || line == "" {
 		return false
 	}
-	return ansi.StringWidth(line) >= width
+	return tuiStringWidth(line) >= width
 }
 
 // ensureStyledLineReset appends a final SGR reset when a styled line still ends
@@ -88,7 +132,7 @@ func ensureStyledLineReset(line string) string {
 // so the sole trailing reset is the last rune's closing sequence — removing it lets the
 // strike/underline bleed across the pad spaces).
 func padLineToDisplayWidthWithStyle(style lipgloss.Style, line string, width int) string {
-	w := ansi.StringWidth(line)
+	w := tuiStringWidth(line)
 	if w >= width {
 		return line
 	}
@@ -435,18 +479,24 @@ func expandTabsForDisplay(s string, tabWidth int) string {
 	}
 	var b strings.Builder
 	col := 0
-	for _, r := range s {
-		if r == '\t' {
+	for len(s) > 0 {
+		cluster, w := ansi.FirstGraphemeCluster(s, tuiWidthMethod)
+		if cluster == "" {
+			break
+		}
+		if cluster == "\t" {
 			spaces := tabWidth - (col % tabWidth)
 			if spaces <= 0 {
 				spaces = tabWidth
 			}
 			b.WriteString(strings.Repeat(" ", spaces))
 			col += spaces
+			s = s[len(cluster):]
 			continue
 		}
-		b.WriteRune(r)
-		col += ansi.StringWidth(string(r))
+		b.WriteString(cluster)
+		col += w
+		s = s[len(cluster):]
 	}
 	return b.String()
 }
@@ -485,7 +535,7 @@ func expandTabsForDisplayANSI(s string, tabWidth int) string {
 			continue
 		}
 		b.WriteRune(r)
-		col += ansi.StringWidth(string(r))
+		col += tuiStringWidth(string(r))
 		i += size
 	}
 	return b.String()
@@ -507,21 +557,8 @@ func wrapPreformattedText(text string, width int) []string {
 			result = append(result, "")
 			continue
 		}
-		var cur strings.Builder
-		curWidth := 0
-		for _, r := range expanded {
-			rw := ansi.StringWidth(string(r))
-			if curWidth+rw > width && cur.Len() > 0 {
-				result = append(result, cur.String())
-				cur.Reset()
-				curWidth = 0
-			}
-			cur.WriteRune(r)
-			curWidth += rw
-		}
-		if cur.Len() > 0 {
-			result = append(result, cur.String())
-		}
+		wrapped := tuiHardwrap(expanded, width)
+		result = append(result, wrapped...)
 	}
 	if len(result) == 0 {
 		return []string{""}
@@ -531,7 +568,7 @@ func wrapPreformattedText(text string, width int) []string {
 
 // wrapText word-wraps text to the given column width (in display columns).
 // It splits on existing newlines first, then wraps each paragraph by words.
-// Uses ansi for width so wrap break points match viewport/padLineToDisplayWidth (avoids misalignment).
+// Uses the viewport width method so wrap break points match final cell rendering.
 func wrapText(text string, width int) []string {
 	if width <= 0 {
 		width = 80
@@ -550,7 +587,7 @@ func wrapText(text string, width int) []string {
 		// Preserve leading whitespace (indentation).
 		trimmed := strings.TrimLeft(para, " \t")
 		indent := para[:len(para)-len(trimmed)]
-		indentWidth := ansi.StringWidth(indent)
+		indentWidth := tuiStringWidth(indent)
 
 		words := strings.Fields(trimmed)
 		if len(words) == 0 {
@@ -560,10 +597,10 @@ func wrapText(text string, width int) []string {
 
 		var cur strings.Builder
 		cur.WriteString(indent)
-		curWidth := indentWidth // current line width in display columns (ansi)
+		curWidth := indentWidth // current line width in display columns
 
 		for _, word := range words {
-			wordWidth := ansi.StringWidth(word)
+			wordWidth := tuiStringWidth(word)
 			if curWidth == indentWidth {
 				// First word on the line.
 				appendWord(&result, &cur, &curWidth, word, wordWidth, width)
@@ -592,29 +629,27 @@ func wrapText(text string, width int) []string {
 }
 
 // appendWord adds a word to the builder, breaking it by runes if its display
-// width exceeds the available line width. Uses ansi width so columns match padLineToDisplayWidth.
+// width exceeds the available line width. Uses the viewport width method so
+// columns match final rendering.
 func appendWord(result *[]string, cur *strings.Builder, curWidth *int, word string, wordWidth, width int) {
 	if wordWidth <= width {
 		cur.WriteString(word)
 		*curWidth += wordWidth
 		return
 	}
-	// Word is wider than the line — break it rune by rune (ansi display width).
-	lineW := 0
-	var line strings.Builder
-	for _, r := range word {
-		rw := ansi.StringWidth(string(r))
-		if lineW+rw > width && line.Len() > 0 {
-			*result = append(*result, line.String())
-			line.Reset()
-			lineW = 0
-		}
-		line.WriteRune(r)
-		lineW += rw
+	// Word is wider than the line — break it by grapheme clusters.
+	parts := tuiHardwrap(word, width)
+	if len(parts) == 0 {
+		return
 	}
-	if line.Len() > 0 {
-		cur.WriteString(line.String())
-		*curWidth += lineW
+	for i, part := range parts {
+		if i > 0 {
+			*result = append(*result, cur.String())
+			cur.Reset()
+			*curWidth = 0
+		}
+		cur.WriteString(part)
+		*curWidth += tuiStringWidth(part)
 	}
 }
 
