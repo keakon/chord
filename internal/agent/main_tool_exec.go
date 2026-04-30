@@ -190,8 +190,8 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 		trackedFilePath string
 		deleteLocks     *deleteLockSet
 	)
-	if tc.Name == "Read" || tc.Name == "Write" || tc.Name == "Edit" || tc.Name == "MultiEdit" || tc.Name == "Delete" {
-		if tc.Name == "Delete" {
+	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == "MultiEdit" || tc.Name == tools.NameDelete {
+		if tc.Name == tools.NameDelete {
 			locks, err := acquireDeleteLocks(a.fileTrack, a.instanceID, tc.Args)
 			if err != nil {
 				if _, ok := errors.AsType[*filelock.ExternalModificationError](err); ok {
@@ -214,7 +214,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	}
 
 	// Write/Edit/MultiEdit: acquire write lock before execution, release after.
-	if trackedFilePath != "" && (tc.Name == "Write" || tc.Name == "Edit" || tc.Name == "MultiEdit") {
+	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == "MultiEdit") {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := a.fileTrack.AcquireWrite(trackedFilePath, a.instanceID, currentHash); err != nil {
 			if _, ok := errors.AsType[*filelock.ExternalModificationError](err); ok {
@@ -249,12 +249,12 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	}
 
 	// Read: track content hash after successful execution for optimistic locking.
-	if tc.Name == "Read" && trackedFilePath != "" {
+	if tc.Name == tools.NameRead && trackedFilePath != "" {
 		hash := computeFileHash(trackedFilePath)
 		a.fileTrack.TrackRead(trackedFilePath, a.instanceID, hash)
 	}
 
-	if (tc.Name == "Write" || tc.Name == "Edit") && trackedFilePath != "" {
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
 		if tool, ok := a.tools.Get(tc.Name); ok {
 			switch t := tool.(type) {
 			case tools.WriteTool:

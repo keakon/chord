@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func cloneBlockForDeferredSource(src *Block) *Block {
@@ -167,14 +168,14 @@ func (b *Block) ToggleAtWidth(width int) {
 			b.InvalidateCache()
 		}
 	case BlockToolCall, BlockToolResult:
-		if b.Type == BlockToolCall && (b.ToolName == "Write" || b.ToolName == "Edit") {
+		if b.Type == BlockToolCall && (b.ToolName == tools.NameWrite || b.ToolName == tools.NameEdit) {
 			if b.Collapsed {
 				b.Collapsed = false
 				b.InvalidateCache()
 			}
 			return
 		}
-		if b.Type == BlockToolCall && b.ToolName == "Read" {
+		if b.Type == BlockToolCall && b.ToolName == tools.NameRead {
 			if b.Collapsed {
 				b.Collapsed = false
 				b.InvalidateCache()

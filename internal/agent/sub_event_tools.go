@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (s *SubAgent) startNextToolBatch(turn *Turn) {
@@ -73,7 +74,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				Diff:        diff.Text,
 				DiffAdded:   diff.Added,
 				DiffRemoved: diff.Removed,
-				FileCreated: tc.Name == "Write" && !execResult.PreExisted,
+				FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted,
 				LSPReviews:  append([]message.LSPReview(nil), execResult.LSPReviews...),
 				Duration:    time.Since(startedAt),
 			}:

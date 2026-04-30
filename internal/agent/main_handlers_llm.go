@@ -452,7 +452,7 @@ func (a *MainAgent) startNextToolBatch(turn *Turn) {
 					Diff:        diff.Text,
 					DiffAdded:   diff.Added,
 					DiffRemoved: diff.Removed,
-					FileCreated: tc.Name == "Write" && !execResult.PreExisted,
+					FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted,
 					LSPReviews:  append([]message.LSPReview(nil), execResult.LSPReviews...),
 				},
 			})

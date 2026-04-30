@@ -209,7 +209,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 		if !ok {
 			continue
 		}
-		if info.name == "Delete" {
+		if info.name == tools.NameDelete {
 			groups := tools.ParseDeleteResult(msg.Content)
 			for _, path := range groups.Deleted {
 				m.sidebar.AddFileEdit("main", path, 0, 1)
@@ -484,7 +484,7 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 					b.Diff = msg.ToolDiff
 					b.Collapsed = false
 				}
-				if b.ToolName == "Read" {
+				if b.ToolName == tools.NameRead {
 					b.Collapsed = false
 				}
 			}

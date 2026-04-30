@@ -7,6 +7,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 const bashCommandPreviewMaxLines = 2
@@ -226,13 +228,13 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == "TodoWrite" {
 		return b.renderTodoCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Write" {
+	if b.ToolName == tools.NameWrite {
 		return b.renderWriteCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Edit" {
+	if b.ToolName == tools.NameEdit {
 		return b.renderFileDiffCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Read" {
+	if b.ToolName == tools.NameRead {
 		return b.renderReadCall(width, spinnerFrame)
 	}
 	if b.ToolName == "Question" {
@@ -364,7 +366,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 				result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
 			}
 			lineStyle := DimStyle
-			if b.ToolName == "Delete" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			if b.ToolName == tools.NameDelete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				lineStyle = ToolResultExpandedStyle
 			}
 			displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)

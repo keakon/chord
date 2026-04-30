@@ -6,6 +6,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // SelectionRange represents a contiguous selection from (BlockID, Line, Col) to end.
@@ -171,7 +173,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 					}
 				}
 				segment = strings.TrimRight(segment, " ")
-				if block.Type == BlockToolCall && block.ToolName == "Edit" && block.Diff != "" {
+				if block.Type == BlockToolCall && block.ToolName == tools.NameEdit && block.Diff != "" {
 					segment = stripEditDiffClipboardLine(segment)
 				}
 				if segment != "" {

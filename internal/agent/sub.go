@@ -760,8 +760,8 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 		trackedFilePath string
 		deleteLocks     *deleteLockSet
 	)
-	if tc.Name == "Read" || tc.Name == "Write" || tc.Name == "Edit" || tc.Name == "Delete" {
-		if tc.Name == "Delete" {
+	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NameDelete {
+		if tc.Name == tools.NameDelete {
 			locks, err := acquireDeleteLocks(s.parent.fileTrack, s.instanceID, tc.Args)
 			if err != nil {
 				var ext *filelock.ExternalModificationError
@@ -786,7 +786,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 
 	// Write/Edit: acquire write lock before execution, release after.
 	// Uses the parent MainAgent's FileTracker (shared, goroutine-safe).
-	if trackedFilePath != "" && (tc.Name == "Write" || tc.Name == "Edit") {
+	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := s.parent.fileTrack.AcquireWrite(trackedFilePath, s.instanceID, currentHash); err != nil {
 			var ext *filelock.ExternalModificationError
@@ -820,12 +820,12 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 	}
 
 	// Read: track content hash after successful execution for optimistic locking.
-	if tc.Name == "Read" && trackedFilePath != "" {
+	if tc.Name == tools.NameRead && trackedFilePath != "" {
 		hash := computeFileHash(trackedFilePath)
 		s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
 	}
 
-	if (tc.Name == "Write" || tc.Name == "Edit") && trackedFilePath != "" {
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
 		if tool, ok := s.tools.Get(tc.Name); ok {
 			switch t := tool.(type) {
 			case tools.WriteTool:

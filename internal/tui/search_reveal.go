@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/chord/internal/tools"
+)
 
 func revealSearchMatchedBlock(block *Block) bool {
 	if block == nil {
@@ -15,7 +19,7 @@ func revealSearchMatchedBlock(block *Block) bool {
 				block.Collapsed = false
 				changed = true
 			}
-			if block.ToolName == "Read" && !block.ReadContentExpanded {
+			if block.ToolName == tools.NameRead && !block.ReadContentExpanded {
 				block.ReadContentExpanded = true
 				changed = true
 			}

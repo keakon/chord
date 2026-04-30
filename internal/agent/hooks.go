@@ -165,8 +165,8 @@ func toolResultSummary(payload *ToolResultPayload, storedResult string, errText 
 		"error":      errText,
 		"path":       extractHookFilePath(json.RawMessage(payload.ArgsJSON)),
 		"paths":      extractHookFilePaths(json.RawMessage(payload.ArgsJSON)),
-		"is_changed": payload.Diff != "" || payload.Name == "Delete",
-		"is_deleted": payload.Name == "Delete",
+		"is_changed": payload.Diff != "" || payload.Name == tools.NameDelete,
+		"is_deleted": payload.Name == tools.NameDelete,
 	}
 	if payload.Audit != nil {
 		summary["args_audit"] = toolArgsAuditHookData(payload.Audit)
@@ -179,7 +179,7 @@ func changedFileSummary(payload *ToolResultPayload) map[string]any {
 	if len(filePaths) == 0 {
 		return nil
 	}
-	if payload.Name == "Delete" {
+	if payload.Name == tools.NameDelete {
 		deleted := tools.ParseDeleteResult(payload.Result).Deleted
 		if len(deleted) == 0 {
 			return nil

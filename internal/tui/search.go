@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/muesli/reflow/truncate"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -132,7 +134,7 @@ func approximateSearchMatchInnerOffset(block *Block, query string, width int) in
 			return i
 		}
 	}
-	if block.ToolName == "Read" && block.ResultContent != "" {
+	if block.ToolName == tools.NameRead && block.ResultContent != "" {
 		rows, _ := parseReadDisplayLines(block.ResultContent)
 		for i, row := range rows {
 			if strings.Contains(strings.ToLower(row.Content), lowerQuery) {

@@ -808,7 +808,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				block.Collapsed = false
 			}
 			if shouldTrackSidebarFileEdit(evt.Name) && evt.Status != agent.ToolResultStatusError {
-				if evt.Name == "Delete" {
+				if evt.Name == tools.NameDelete {
 					groups := tools.ParseDeleteResult(evt.Result)
 					for _, path := range groups.Deleted {
 						m.sidebar.AddFileEdit(evt.AgentID, path, 0, 1)
