@@ -103,24 +103,6 @@ func (l *Loader) ScanMeta() ([]*Meta, error) {
 	return skills, nil
 }
 
-// Scan discovers and loads all skills from configured directories.
-// Deprecated: prefer ScanMeta for startup discovery and Load for on-demand body loading.
-func (l *Loader) Scan() ([]*Skill, error) {
-	metas, err := l.ScanMeta()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*Skill, 0, len(metas))
-	for _, meta := range metas {
-		sk, err := LoadSkill(meta.Location)
-		if err != nil {
-			continue
-		}
-		out = append(out, sk)
-	}
-	return out, nil
-}
-
 // Load loads a single skill's full content by name.
 func (l *Loader) Load(name string) (*Skill, error) {
 	name = strings.TrimSpace(name)
