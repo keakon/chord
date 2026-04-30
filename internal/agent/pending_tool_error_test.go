@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -118,6 +119,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 		projectRoot,
 		&config.Config{},
 		nil,
+		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 	a.startPersistLoop()
 	defer func() {

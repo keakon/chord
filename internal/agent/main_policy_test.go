@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
@@ -515,6 +516,7 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		projectRoot,
 		&config.Config{},
 		nil,
+		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 	a.startPersistLoop()
 	if a.usageLedger == nil {

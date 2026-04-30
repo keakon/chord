@@ -109,7 +109,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= compactReadLikeAgeTurns && len(prepared[i].Content) > compactReadLikeOutputBytes {
 			meta := callMeta[prepared[i].ToolCallID]
-			if isReadLikeToolOutput(meta.Name) {
+			if tools.IsReadLike(meta.Name) {
 				prepared[i].Content = compactReadLikeOutputSummary(meta.Name, meta.Args, prepared[i].Content)
 				prepared[i].ToolDiff = ""
 				continue
@@ -135,15 +135,6 @@ func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {
 		}
 	}
 	return meta
-}
-
-func isReadLikeToolOutput(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "Read", "Grep", "Glob", "WebFetch":
-		return true
-	default:
-		return false
-	}
 }
 
 func extractReadToolPath(argsJSON string) string {
@@ -173,13 +164,13 @@ func compactReadOutputSummary(argsJSON, content string) string {
 
 func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
 	switch strings.TrimSpace(toolName) {
-	case "Read":
+	case tools.NameRead:
 		return compactReadOutputSummary(argsJSON, content)
-	case "Grep":
+	case tools.NameGrep:
 		return compactGrepOutputSummary(argsJSON, content)
-	case "Glob":
+	case tools.NameGlob:
 		return compactGlobOutputSummary(argsJSON, content)
-	case "WebFetch":
+	case tools.NameWebFetch:
 		return compactWebFetchOutputSummary(argsJSON, content)
 	default:
 		return fmt.Sprintf("[Older %s output omitted to save context; re-run the tool if needed.]", toolNameOrUnknown(toolName))

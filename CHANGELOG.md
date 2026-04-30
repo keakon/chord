@@ -4,6 +4,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Improved MCP initialize handshake metadata so runtime-managed MCP clients now send the build-time Chord version instead of a stale hardcoded version, while preserving the default `mcp.NewClient` / `NewPendingManager` / `NewManager` convenience APIs and adding explicit `WithClientInfo` variants for callers that need custom handshake identity.
+- Centralized local tool traits used by TUI expansion and compaction (`Read` / `Grep` / `Glob` / `WebFetch` vs file-mutating tools) into `internal/tools/tool_traits.go` to reduce scattered string-driven branching.
+- Removed the legacy `ProviderConfig.UpdatePolledRateLimitSnapshot` test-compat wrapper in favor of explicit credential-index updates via `UpdatePolledRateLimitSnapshotForCredentialIndex`.
 - Added structured SubAgent completion handoff with files changed, verification run, remaining limitations, risks, follow-up recommendations, and artifact references.
 - Fixed TUI tool cards so queued badges and wrapped content keep consistent right-side padding.
 - Added session-scoped `SaveArtifact` and `ReadArtifact` tools for SubAgent handoff artifacts, with persistence through mailbox, task registry, snapshots, and session restore.

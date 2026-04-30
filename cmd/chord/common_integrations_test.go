@@ -27,7 +27,7 @@ func TestLSPServerDisplayListMapsManagerRows(t *testing.T) {
 }
 
 func TestMCPServerDisplayListMapsManagerStatuses(t *testing.T) {
-	mgr := mcp.NewPendingManager([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}})
+	mgr := mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})
 	rows := mcpServerDisplayList(mgr)
 	if len(rows) != 1 {
 		t.Fatalf("mcpServerDisplayList len = %d, want 1", len(rows))

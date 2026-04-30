@@ -467,9 +467,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	if len(mcpConfigs) > 0 {
 		if asyncMCP {
 			ac.MCPConfigs = mcpConfigs
-			ac.MCPMgr = mcp.NewPendingManager(mcpConfigs)
+			ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
 		} else {
-			mgr, err := mcp.NewManager(ac.Ctx, mcpConfigs)
+			mgr, err := mcp.NewManagerWithClientInfo(ac.Ctx, mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
 			if err != nil {
 				slog.Warn("MCP initialization failed", "error", err)
 			} else {
@@ -513,6 +513,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		ac.Ctx, llmClient, ac.CtxMgr, ac.Registry, ac.HookEngine,
 		ac.SessionDir, modelID, projectRoot,
 		cfg, ac.ProjectCfg,
+		mcp.ClientInfo{Name: "chord", Version: Version},
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
 	slog.Debug("[DEBUG-BOOT] step 15: MainAgent created, setting up session lock and callbacks")

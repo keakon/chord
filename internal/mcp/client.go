@@ -53,6 +53,23 @@ type clientInfo struct {
 	Version string `json:"version"`
 }
 
+// ClientInfo identifies the application during MCP initialize handshakes.
+type ClientInfo = clientInfo
+
+var defaultClientInfo = clientInfo{Name: "chord", Version: "dev"}
+
+func normalizeClientInfo(info ClientInfo) clientInfo {
+	info.Name = strings.TrimSpace(info.Name)
+	info.Version = strings.TrimSpace(info.Version)
+	if info.Name == "" {
+		info.Name = defaultClientInfo.Name
+	}
+	if info.Version == "" {
+		info.Version = defaultClientInfo.Version
+	}
+	return info
+}
+
 // initializeResult is the server's response to initialize.
 type initializeResult struct {
 	ProtocolVersion string         `json:"protocolVersion"`
@@ -71,15 +88,24 @@ type initializeResult struct {
 type Client struct {
 	name       string
 	transport  Transport
-	nextID     atomic.Int64
+	clientInfo clientInfo
 	serverInfo initializeResult
+	nextID     atomic.Int64
 }
 
 // NewClient creates a new MCP client for the named server using the given transport.
 func NewClient(name string, transport Transport) *Client {
+	return NewClientWithInfo(name, transport, defaultClientInfo)
+}
+
+// NewClientWithInfo creates a new MCP client with explicit application metadata
+// for the initialize handshake.
+func NewClientWithInfo(name string, transport Transport, info ClientInfo) *Client {
+	info = normalizeClientInfo(info)
 	c := &Client{
-		name:      name,
-		transport: transport,
+		name:       name,
+		transport:  transport,
+		clientInfo: info,
 	}
 	// Start IDs at 1 (0 is reserved/ambiguous in JSON-RPC).
 	c.nextID.Store(1)
@@ -100,10 +126,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		Params: initializeParams{
 			ProtocolVersion: "2024-11-05",
 			Capabilities:    map[string]any{},
-			ClientInfo: clientInfo{
-				Name:    "chord",
-				Version: "0.1.0",
-			},
+			ClientInfo:      c.clientInfo,
 		},
 	}
 
@@ -293,17 +316,28 @@ type Manager struct {
 	allowedTools     map[string]map[string]struct{}
 	endpointStat     []ServerEndpointStatus // sorted by Name, one row per unique config key (last duplicate wins)
 	newClientFactory func(context.Context, ServerConfig) (*Client, error)
+	clientInfo       clientInfo
 }
 
 // NewPendingManager creates a manager that exposes configured endpoints as
 // pending before any connection attempt starts. Invalid configs are marked as
 // immediate failures.
 func NewPendingManager(configs []ServerConfig) *Manager {
+	return NewPendingManagerWithClientInfo(configs, defaultClientInfo)
+}
+
+// NewPendingManagerWithClientInfo creates a pending manager with explicit
+// application metadata for MCP initialize handshakes.
+func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *Manager {
+	info = normalizeClientInfo(info)
 	m := &Manager{
-		clients:          make(map[string]*Client),
-		toolDefs:         make(map[string][]MCPToolDef),
-		allowedTools:     makeAllowedToolsByServer(configs),
-		newClientFactory: createClient,
+		clients:      make(map[string]*Client),
+		toolDefs:     make(map[string][]MCPToolDef),
+		allowedTools: makeAllowedToolsByServer(configs),
+		newClientFactory: func(ctx context.Context, cfg ServerConfig) (*Client, error) {
+			return createClient(ctx, cfg, info)
+		},
+		clientInfo: info,
 	}
 	if len(configs) == 0 {
 		return m
@@ -342,7 +376,13 @@ func NewPendingManager(configs []ServerConfig) *Manager {
 // Failed servers are recorded in [Manager.ServerEndpoints]; the manager is still
 // returned so the UI can show red status for misconfigured or unreachable MCPs.
 func NewManager(ctx context.Context, configs []ServerConfig) (*Manager, error) {
-	m := NewPendingManager(configs)
+	return NewManagerWithClientInfo(ctx, configs, defaultClientInfo)
+}
+
+// NewManagerWithClientInfo creates MCP clients with explicit application
+// metadata for initialize handshakes.
+func NewManagerWithClientInfo(ctx context.Context, configs []ServerConfig, info ClientInfo) (*Manager, error) {
+	m := NewPendingManagerWithClientInfo(configs, info)
 	if len(configs) == 0 {
 		return m, nil
 	}
@@ -695,18 +735,18 @@ func (m *Manager) setEndpointStatus(status ServerEndpointStatus) {
 }
 
 // createClient builds a Client with the appropriate transport based on config.
-func createClient(ctx context.Context, cfg ServerConfig) (*Client, error) {
+func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Client, error) {
 	if cfg.Command != "" {
 		transport, err := NewStdioTransport(ctx, cfg.Command, cfg.Args, cfg.Env)
 		if err != nil {
 			return nil, err
 		}
-		return NewClient(cfg.Name, transport), nil
+		return NewClientWithInfo(cfg.Name, transport, info), nil
 	}
 
 	if cfg.URL != "" {
 		transport := NewHTTPTransport(cfg.URL)
-		return NewClient(cfg.Name, transport), nil
+		return NewClientWithInfo(cfg.Name, transport, info), nil
 	}
 
 	return nil, fmt.Errorf("mcp server %q: must specify either command or url", strings.TrimSpace(cfg.Name))

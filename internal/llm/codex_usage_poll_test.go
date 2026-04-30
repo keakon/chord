@@ -118,7 +118,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersInlineOverPolled(t *testing.T) {
 		Primary:    &ratelimit.RateLimitWindow{UsedPct: 42},
 		Source:     ratelimit.SnapshotSourcePolledUsage,
 	}
-	prov.UpdatePolledRateLimitSnapshot(polled)
+	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, polled)
 	prov.UpdateKeySnapshot("k1", inline)
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
@@ -201,11 +201,11 @@ func TestUpdatePolledRateLimitSnapshotCallsOnPolledUpdate(t *testing.T) {
 	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, snap)
 
 	if !called.Load() {
-		t.Fatal("onPolledUpdate callback was not called after UpdatePolledRateLimitSnapshot")
+		t.Fatal("onPolledUpdate callback was not called after UpdatePolledRateLimitSnapshotForCredentialIndex")
 	}
 }
 
-func TestUpdatePolledRateLimitSnapshotNoCallbackForNilSnap(t *testing.T) {
+func TestUpdatePolledRateLimitSnapshotForCredentialIndexNoCallbackForNilSnap(t *testing.T) {
 	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"k1"})
 
 	var called atomic.Bool
@@ -213,7 +213,7 @@ func TestUpdatePolledRateLimitSnapshotNoCallbackForNilSnap(t *testing.T) {
 		called.Store(true)
 	})
 
-	prov.UpdatePolledRateLimitSnapshot(nil)
+	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, nil)
 	if called.Load() {
 		t.Fatal("onPolledUpdate should not be called for nil snapshot")
 	}

@@ -177,19 +177,18 @@ type ConfirmFunc func(ctx context.Context, toolName string, args string, needsAp
 // display (sidebar listing). The fields are snapshot values safe to read from
 // any goroutine.
 type SubAgentInfo struct {
-	InstanceID          string
-	TaskID              string
-	AgentDefName        string
-	TaskDesc            string
-	ModelName           string
-	SelectedRef         string
-	RunningRef          string
-	State               string
-	Color               string // optional ANSI color code from agent config
-	LastSummary         string
-	UrgentInboxCount    int
-	LastArtifactRelPath string
-	LastArtifactType    string
+	InstanceID       string
+	TaskID           string
+	AgentDefName     string
+	TaskDesc         string
+	ModelName        string
+	SelectedRef      string
+	RunningRef       string
+	State            string
+	Color            string // optional ANSI color code from agent config
+	LastSummary      string
+	UrgentInboxCount int
+	LastArtifact     tools.ArtifactRef
 }
 
 // ModelOption describes a model available for runtime switching.
@@ -300,6 +299,7 @@ type MainAgent struct {
 	providerModelRef string // "provider/model" for unique identification
 	runningModelRef  string // actual model used in latest LLM call
 	instanceID       string
+	mcpClientInfo    mcp.ClientInfo
 
 	// turnMu protects the turn pointer for cross-goroutine access.
 	// The event-loop goroutine writes turn in newTurn(); external goroutines
@@ -546,6 +546,7 @@ func NewMainAgent(
 	projectRoot string,
 	globalCfg *config.Config,
 	projectCfg *config.Config,
+	mcpClientInfo mcp.ClientInfo,
 ) *MainAgent {
 	parentCtx, cancel := context.WithCancel(ctx)
 
@@ -574,6 +575,7 @@ func NewMainAgent(
 		modelName:                modelName,
 		runningModelRef:          modelName,
 		instanceID:               NextInstanceID("main"),
+		mcpClientInfo:            mcpClientInfo,
 		done:                     make(chan struct{}),
 		stoppingCh:               make(chan struct{}),
 		confirmCh:                make(map[string]chan ConfirmResponse),

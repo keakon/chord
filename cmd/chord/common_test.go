@@ -424,6 +424,7 @@ func newTestAppContext(t *testing.T) *AppContext {
 		projectRoot,
 		&config.Config{},
 		nil,
+		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 
 	return &AppContext{

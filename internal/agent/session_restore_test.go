@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -1162,6 +1163,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 		projectRoot,
 		&config.Config{},
 		nil,
+		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 	a.startPersistLoop()
 	t.Cleanup(func() {

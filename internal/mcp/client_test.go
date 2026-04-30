@@ -18,6 +18,10 @@ import (
 // fakeTransport — in-memory Transport for unit tests
 // ---------------------------------------------------------------------------
 
+// testClientInfo is the application metadata used by all unit tests when
+// constructing MCP clients or managers.
+var testClientInfo = ClientInfo{Name: "chord-test", Version: "test"}
+
 // fakeTransport is a test double that records requests and returns
 // pre-configured responses.
 type fakeTransport struct {
@@ -123,7 +127,7 @@ func TestClient_Initialize(t *testing.T) {
 		}{Name: "test-server", Version: "1.0"},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 
 	if err := client.Initialize(ctx); err != nil {
@@ -153,7 +157,7 @@ func TestClient_ListTools(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -181,7 +185,7 @@ func TestClient_CallTool(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -205,7 +209,7 @@ func TestClient_CallTool_MultipleContent(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -228,7 +232,7 @@ func TestClient_CallTool_Error(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -243,7 +247,7 @@ func TestClient_CallTool_Error(t *testing.T) {
 
 func TestClient_AllocID_Monotonic(t *testing.T) {
 	ft := newFakeTransport()
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 
 	ids := make(map[int]bool)
 	for i := 0; i < 100; i++ {
@@ -257,7 +261,7 @@ func TestClient_AllocID_Monotonic(t *testing.T) {
 
 func TestClient_Close(t *testing.T) {
 	ft := newFakeTransport()
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 
 	if err := client.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -280,7 +284,7 @@ func TestMCPTool_Interface(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test-server", ft)
+	client := NewClientWithInfo("test-server", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -323,7 +327,7 @@ func TestMCPTool_Execute(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -349,7 +353,7 @@ func TestDiscoverTools_SkipsEmptyName(t *testing.T) {
 		},
 	})
 
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
@@ -379,9 +383,9 @@ func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool", "beta_tool"}}}
-	mgr := NewPendingManager(cfgs)
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
-		client := NewClient("search", ft)
+		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
 	mgr.ConnectAll(ctx, cfgs)
@@ -422,9 +426,9 @@ func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManager(cfgs)
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
-		client := NewClient("search", ft)
+		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
 	mgr.ConnectAll(ctx, cfgs)
@@ -450,9 +454,9 @@ func TestConnectAllRefreshesAllowedTools(t *testing.T) {
 
 	ctx := context.Background()
 	initialCfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool"}}}
-	mgr := NewPendingManager(initialCfgs)
+	mgr := NewPendingManagerWithClientInfo(initialCfgs, testClientInfo)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
-		client := NewClient("search", ft)
+		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
 	mgr.ConnectAll(ctx, []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"beta_tool"}}})
@@ -523,7 +527,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL)
-	client := NewClient("http-test", transport)
+	client := NewClientWithInfo("http-test", transport, testClientInfo)
 	ctx := context.Background()
 
 	if err := client.Initialize(ctx); err != nil {
@@ -573,7 +577,7 @@ func TestHTTPTransport_SSE_Stream(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL)
-	client := NewClient("sse-test", transport)
+	client := NewClientWithInfo("sse-test", transport, testClientInfo)
 	ctx := context.Background()
 
 	if err := client.Initialize(ctx); err != nil {
@@ -647,7 +651,7 @@ func TestHTTPTransport_ServerError(t *testing.T) {
 
 func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing.T) {
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManager([]ServerConfig{cfg})
+	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
 
 	attempts := 0
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
@@ -664,7 +668,7 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 		if attempts == 1 {
 			ft.onSendError("initialize", fmt.Errorf("mcp http: send request: net/http: TLS handshake timeout"))
 		}
-		return NewClient(cfg.Name, ft), nil
+		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
 	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
@@ -689,11 +693,11 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 
 func TestManagerConnectAll_CanceledInitializeStaysPending(t *testing.T) {
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManager([]ServerConfig{cfg})
+	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
 		ft := newFakeTransport()
 		ft.onSendError("initialize", context.Canceled)
-		return NewClient(cfg.Name, ft), nil
+		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
 	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
@@ -715,7 +719,7 @@ func TestManagerConnectAll_CanceledInitializeStaysPending(t *testing.T) {
 
 func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManager([]ServerConfig{cfg})
+	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
 
 	attempts := 0
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
@@ -723,7 +727,7 @@ func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 		ft := newFakeTransport()
 		ft.onMethod("initialize", initializeResult{})
 		ft.onSendError("initialize", fmt.Errorf("mcp http: send request: net/http: TLS handshake timeout"))
-		return NewClient(cfg.Name, ft), nil
+		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
 	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
@@ -831,7 +835,7 @@ func TestJSONRPCRequest_Marshal(t *testing.T) {
 
 func TestClient_AllocID_Concurrent(t *testing.T) {
 	ft := newFakeTransport()
-	client := NewClient("test", ft)
+	client := NewClientWithInfo("test", ft, testClientInfo)
 
 	const goroutines = 10
 	const idsPerGoroutine = 100
@@ -902,7 +906,7 @@ func TestFullWorkflow_FakeTransport(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	client := NewClient("test-server", ft)
+	client := NewClientWithInfo("test-server", ft, testClientInfo)
 
 	// Step 1: Initialize
 	if err := client.Initialize(ctx); err != nil {

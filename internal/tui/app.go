@@ -14,6 +14,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -100,11 +101,11 @@ type scrollFlushTickMsg struct{ generation uint64 }
 // Clipboard, local shell, and cached render helpers are in split files.
 
 func shouldExpandToolResult(toolName string) bool {
-	return toolName == "Write" || toolName == "Edit" || toolName == "Read" || toolName == "Delete"
+	return tools.ShouldExpandResult(toolName)
 }
 
 func shouldTrackSidebarFileEdit(toolName string) bool {
-	return toolName == "Write" || toolName == "Edit" || toolName == "Delete"
+	return tools.IsFileMutation(toolName)
 }
 
 // reconnectedMsg is sent when auto-reconnect succeeds and carries the new agent.

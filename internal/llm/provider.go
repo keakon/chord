@@ -812,22 +812,7 @@ func (p *ProviderConfig) UpdatePolledRateLimitSnapshotForCredentialIndex(credIdx
 	}
 }
 
-// UpdatePolledRateLimitSnapshot updates the polled snapshot for the currently selected OAuth key.
-// Retained for backward compatibility in tests; prefer UpdatePolledRateLimitSnapshotForCredentialIndex.
-func (p *ProviderConfig) UpdatePolledRateLimitSnapshot(snap *ratelimit.KeyRateLimitSnapshot) {
-	if snap == nil {
-		return
-	}
-	p.mu.Lock()
-	_, _, credIdx, ok := p.codexUsagePollAuthLocked()
-	p.mu.Unlock()
-	if !ok {
-		return
-	}
-	p.UpdatePolledRateLimitSnapshotForCredentialIndex(credIdx, snap)
-}
-
-// SetOnPolledRateLimitUpdated registers a callback invoked after UpdatePolledRateLimitSnapshot
+// SetOnPolledRateLimitUpdated registers a callback invoked after UpdatePolledRateLimitSnapshotForCredentialIndex
 // writes a new polled snapshot. Used by the agent layer to push a RateLimitUpdatedEvent to the TUI.
 func (p *ProviderConfig) SetOnPolledRateLimitUpdated(fn func()) {
 	p.mu.Lock()

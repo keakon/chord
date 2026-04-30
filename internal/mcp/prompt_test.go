@@ -18,9 +18,9 @@ func TestConnectedServersPromptBlockFiltersAllowedTools(t *testing.T) {
 		},
 	})
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool", "beta_tool"}}}
-	mgr := NewPendingManager(cfgs)
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
-		client := NewClient("search", ft)
+		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
 	mgr.ConnectAll(ctx, cfgs)

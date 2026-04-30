@@ -178,8 +178,8 @@ func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, result *AgentResult) 
 	}
 	env := &CompletionEnvelope{Summary: strings.TrimSpace(summary)}
 	if sub != nil {
-		if id, rel, typ := sub.LastArtifact(); strings.TrimSpace(rel) != "" || strings.TrimSpace(id) != "" {
-			env.Artifacts = artifactRefsFromLegacy([]string{id}, []string{rel}, typ)
+		if ref := sub.LastArtifact(); strings.TrimSpace(ref.RelPath) != "" || strings.TrimSpace(ref.ID) != "" {
+			env.Artifacts = tools.NormalizeArtifactRefs([]tools.ArtifactRef{ref})
 		}
 	}
 	return normalizeCompletionEnvelope(env)
@@ -430,7 +430,7 @@ func (a *MainAgent) getOrCreateAgentMCP(mcpCfg config.MCPConfig) []tools.Tool {
 			continue
 		}
 		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, AllowedTools: sc.AllowedTools}
-		mgr, err := mcp.NewManager(connectCtx, []mcp.ServerConfig{cfg})
+		mgr, err := mcp.NewManagerWithClientInfo(connectCtx, []mcp.ServerConfig{cfg}, a.mcpClientInfo)
 		if err != nil {
 			slog.Warn("failed to create MCP manager for server", "server", name, "error", err)
 			continue
