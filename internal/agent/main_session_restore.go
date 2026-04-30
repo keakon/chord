@@ -65,9 +65,7 @@ type loadedSubAgentState struct {
 	LastReplyToMailboxID    string
 	LastReplyKind           string
 	LastReplySummary        string
-	LastArtifactID          string
-	LastArtifactRelPath     string
-	LastArtifactType        string
+	LastArtifact            tools.ArtifactRef
 }
 
 type restoredSubAgentBuilder struct {
@@ -151,9 +149,7 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	b.state.LastReplyToMailboxID = strings.TrimSpace(meta.LastReplyToMailboxID)
 	b.state.LastReplyKind = strings.TrimSpace(meta.LastReplyKind)
 	b.state.LastReplySummary = strings.TrimSpace(meta.LastReplySummary)
-	b.state.LastArtifactID = strings.TrimSpace(meta.LastArtifactID)
-	b.state.LastArtifactRelPath = strings.TrimSpace(meta.LastArtifactRelPath)
-	b.state.LastArtifactType = strings.TrimSpace(meta.LastArtifactType)
+	b.state.LastArtifact = tools.NormalizeArtifactRef(meta.LastArtifact)
 }
 
 func (b *restoredSubAgentBuilder) overlayMailbox(mailbox restoredMailboxAgentState) {
@@ -799,8 +795,8 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		if strings.TrimSpace(state.LastReplyMessageID) != "" || strings.TrimSpace(state.LastReplySummary) != "" {
 			sub.setReplyThread(state.LastReplyMessageID, state.LastReplyToMailboxID, state.LastReplyKind, state.LastReplySummary)
 		}
-		if strings.TrimSpace(state.LastArtifactRelPath) != "" {
-			sub.setLastArtifact(state.LastArtifactID, state.LastArtifactRelPath, state.LastArtifactType)
+		if strings.TrimSpace(state.LastArtifact.RelPath) != "" || strings.TrimSpace(state.LastArtifact.ID) != "" {
+			sub.setLastArtifact(state.LastArtifact)
 		}
 
 		a.mu.Lock()

@@ -17,7 +17,6 @@ type completeArgs struct {
 	Summary              string        `json:"summary"`
 	FilesChanged         []string      `json:"files_changed,omitempty"`
 	VerificationRun      []string      `json:"verification_run,omitempty"`
-	BlockersRemaining    []string      `json:"blockers_remaining,omitempty"` // Deprecated: use remaining_limitations or Escalate for true blockers.
 	RemainingLimitations []string      `json:"remaining_limitations,omitempty"`
 	KnownRisks           []string      `json:"known_risks,omitempty"`
 	FollowUpRecommended  []string      `json:"follow_up_recommended,omitempty"`
@@ -81,11 +80,6 @@ func (CompleteTool) Parameters() map[string]any {
 					},
 					"additionalProperties": false,
 				},
-			},
-			"blockers_remaining": map[string]any{
-				"type":        "array",
-				"description": "Deprecated compatibility field. Prefer remaining_limitations; true blockers should not Complete.",
-				"items":       map[string]any{"type": "string"},
 			},
 		},
 		"required":             []string{"summary"},

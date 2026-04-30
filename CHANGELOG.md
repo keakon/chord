@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Removed the deprecated `blockers_remaining` field from the SubAgent `Complete` tool arguments and `CompletionEnvelope`; SubAgents must report non-blocking caveats via `remaining_limitations` and signal true blockers through the Escalate or `blocked` mailbox path instead of `Complete`.
+- Unified SubAgent artifact representation: mailbox messages, durable task records, per-instance meta files, and the in-memory runtime state now reference artifacts via a single `ArtifactRef` / `[]ArtifactRef` shape; removed the parallel `artifact_ids` / `artifact_rel_paths` / `artifact_type` fields and the related legacy adapter.
+- Replaced remaining hard-coded tool-name string literals (`Read` / `Write` / `Edit` / `Delete` / `Grep` / `Glob`) across TUI rendering, search, hooks, agent execution paths, and edit tracking with the centralized `tools.NameXxx` constants.
+- Removed the unused deprecated `skill.Loader.Scan()` helper; remaining callers already use `ScanMeta` plus on-demand `Load`.
 - Improved MCP initialize handshake metadata so runtime-managed MCP clients now send the build-time Chord version instead of a stale hardcoded version, while preserving the default `mcp.NewClient` / `NewPendingManager` / `NewManager` convenience APIs and adding explicit `WithClientInfo` variants for callers that need custom handshake identity.
 - Centralized local tool traits used by TUI expansion and compaction (`Read` / `Grep` / `Glob` / `WebFetch` vs file-mutating tools) into `internal/tools/tool_traits.go` to reduce scattered string-driven branching.
 - Removed the legacy `ProviderConfig.UpdatePolledRateLimitSnapshot` test-compat wrapper in favor of explicit credential-index updates via `UpdatePolledRateLimitSnapshotForCredentialIndex`.

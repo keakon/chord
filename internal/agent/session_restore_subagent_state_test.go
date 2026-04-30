@@ -486,10 +486,10 @@ func TestMailboxLongPayloadPersistsArtifact(t *testing.T) {
 		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
 	}
 	last := msgs[len(msgs)-1]
-	if len(last.ArtifactRelPaths) == 0 {
+	if last.Completion == nil || len(last.Completion.Artifacts) == 0 {
 		t.Fatal("expected mailbox artifact path to be persisted")
 	}
-	if _, err := os.Stat(filepath.Join(a.sessionDir, filepath.FromSlash(last.ArtifactRelPaths[0]))); err != nil {
+	if _, err := os.Stat(filepath.Join(a.sessionDir, filepath.FromSlash(last.Completion.Artifacts[0].RelPath))); err != nil {
 		t.Fatalf("artifact file missing: %v", err)
 	}
 }

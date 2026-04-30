@@ -188,8 +188,8 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 		b.WriteString(e.Activity)
 		b.WriteString(e.LastSummary)
 		appendInt(e.UrgentCount)
-		b.WriteString(e.LastArtifactRelPath)
-		b.WriteString(e.LastArtifactType)
+		b.WriteString(e.LastArtifact.RelPath)
+		b.WriteString(e.LastArtifact.Type)
 		appendSep()
 	}
 	if pending := m.sidebar.PendingTasks(); pending > 0 {

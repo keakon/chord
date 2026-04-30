@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *testing.T) {
@@ -45,7 +46,7 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	metaSub := &SubAgent{instanceID: "worker-1", taskID: "task-from-meta", agentDefName: "restorer", taskDesc: "from meta", ownerAgentID: "owner-from-meta", ownerTaskID: "owner-task-from-meta", depth: 3}
 	metaSub.setLastMailboxID("mailbox-123")
 	metaSub.setReplyThread("reply-msg", "reply-mailbox", "progress", "reply summary")
-	metaSub.setLastArtifact("artifact-1", "artifacts/out.txt", "text/plain")
+	metaSub.setLastArtifact(tools.ArtifactRef{ID: "artifact-1", RelPath: "artifacts/out.txt", Path: "artifacts/out.txt", Type: "text/plain"})
 	metaSub.setPendingCompleteIntent(&AgentResult{Summary: "pending from meta"})
 	metaSub.setState(SubAgentStateWaitingPrimary, "summary from meta")
 	a.persistSubAgentMeta(metaSub)
@@ -87,7 +88,7 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	if !got.PendingCompleteIntent || got.PendingCompleteSummary != "pending from meta" {
 		t.Fatalf("pending complete = (%v,%q), want meta priority", got.PendingCompleteIntent, got.PendingCompleteSummary)
 	}
-	if got.LastMailboxID != "mailbox-123" || got.LastReplyMessageID != "reply-msg" || got.LastArtifactID != "artifact-1" {
+	if got.LastMailboxID != "mailbox-123" || got.LastReplyMessageID != "reply-msg" || got.LastArtifact.ID != "artifact-1" {
 		t.Fatalf("meta continuity fields not restored: %#v", got)
 	}
 }

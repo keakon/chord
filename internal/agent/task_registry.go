@@ -44,9 +44,6 @@ type DurableTaskRecord struct {
 	LastReplyToMailboxID string              `json:"last_reply_to_mailbox_id,omitempty"`
 	LastReplyKind        string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary     string              `json:"last_reply_summary,omitempty"`
-	LastArtifactID       string              `json:"last_artifact_id,omitempty"`
-	LastArtifactRelPath  string              `json:"last_artifact_rel_path,omitempty"`
-	LastArtifactType     string              `json:"last_artifact_type,omitempty"`
 	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
 	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
 	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
@@ -87,9 +84,6 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastReplyToMailboxID = strings.TrimSpace(out.LastReplyToMailboxID)
 	out.LastReplyKind = strings.TrimSpace(out.LastReplyKind)
 	out.LastReplySummary = strings.TrimSpace(out.LastReplySummary)
-	out.LastArtifactID = strings.TrimSpace(out.LastArtifactID)
-	out.LastArtifactRelPath = strings.TrimSpace(out.LastArtifactRelPath)
-	out.LastArtifactType = strings.TrimSpace(out.LastArtifactType)
 	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
 	out.SuspectedStallReason = strings.TrimSpace(out.SuspectedStallReason)
@@ -393,7 +387,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	summary := sub.LastSummary()
 	lastMailboxID := sub.LastMailboxID()
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
-	lastArtifactID, lastArtifactRelPath, lastArtifactType := sub.LastArtifact()
+	lastArtifact := sub.LastArtifact()
 	now := time.Now()
 
 	a.mu.Lock()
@@ -428,10 +422,9 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.LastReplyToMailboxID = strings.TrimSpace(lastReplyToMailboxID)
 	rec.LastReplyKind = strings.TrimSpace(lastReplyKind)
 	rec.LastReplySummary = strings.TrimSpace(lastReplySummary)
-	rec.LastArtifactID = strings.TrimSpace(lastArtifactID)
-	rec.LastArtifactRelPath = strings.TrimSpace(lastArtifactRelPath)
-	rec.LastArtifactType = strings.TrimSpace(lastArtifactType)
-	rec.LastArtifactRefs = mergeArtifactRefs(rec.LastArtifactRefs, artifactRefsFromLegacy([]string{lastArtifactID}, []string{lastArtifactRelPath}, lastArtifactType))
+	if strings.TrimSpace(lastArtifact.ID) != "" || strings.TrimSpace(lastArtifact.RelPath) != "" {
+		rec.LastArtifactRefs = tools.NormalizeArtifactRefs(append(rec.LastArtifactRefs, lastArtifact))
+	}
 	rec.LastUpdatedTurn = a.explicitUserTurnCount
 	rec.UpdatedAt = now
 	if strings.TrimSpace(closedReason) != "" {
@@ -468,9 +461,9 @@ func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {
 		LastReplyToMailboxID: strings.TrimSpace(state.LastReplyToMailboxID),
 		LastReplyKind:        strings.TrimSpace(state.LastReplyKind),
 		LastReplySummary:     strings.TrimSpace(state.LastReplySummary),
-		LastArtifactID:       strings.TrimSpace(state.LastArtifactID),
-		LastArtifactRelPath:  strings.TrimSpace(state.LastArtifactRelPath),
-		LastArtifactType:     strings.TrimSpace(state.LastArtifactType),
+	}
+	if ref := state.LastArtifact; strings.TrimSpace(ref.ID) != "" || strings.TrimSpace(ref.RelPath) != "" {
+		rec.LastArtifactRefs = tools.NormalizeArtifactRefs([]tools.ArtifactRef{ref})
 	}
 	return cloneDurableTaskRecord(rec)
 }
@@ -536,15 +529,6 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.LastReplySummary == "" {
 					next.LastReplySummary = prev.LastReplySummary
-				}
-				if next.LastArtifactID == "" {
-					next.LastArtifactID = prev.LastArtifactID
-				}
-				if next.LastArtifactRelPath == "" {
-					next.LastArtifactRelPath = prev.LastArtifactRelPath
-				}
-				if next.LastArtifactType == "" {
-					next.LastArtifactType = prev.LastArtifactType
 				}
 				if len(next.LastArtifactRefs) == 0 {
 					next.LastArtifactRefs = prev.LastArtifactRefs
@@ -690,21 +674,20 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 		}
 		state := sub.State()
 		summary := sub.LastSummary()
-		_, artifactRelPath, artifactType := sub.LastArtifact()
+		artifact := sub.LastArtifact()
 		liveInfos = append(liveInfos, SubAgentInfo{
-			InstanceID:          sub.instanceID,
-			TaskID:              sub.taskID,
-			AgentDefName:        sub.agentDefName,
-			TaskDesc:            sub.taskDesc,
-			ModelName:           sub.modelName,
-			SelectedRef:         selectedRef,
-			RunningRef:          runningRef,
-			State:               string(state),
-			Color:               sub.color,
-			LastSummary:         summary,
-			UrgentInboxCount:    a.subAgentUrgentInboxCountLocked(sub.instanceID),
-			LastArtifactRelPath: artifactRelPath,
-			LastArtifactType:    artifactType,
+			InstanceID:       sub.instanceID,
+			TaskID:           sub.taskID,
+			AgentDefName:     sub.agentDefName,
+			TaskDesc:         sub.taskDesc,
+			ModelName:        sub.modelName,
+			SelectedRef:      selectedRef,
+			RunningRef:       runningRef,
+			State:            string(state),
+			Color:            sub.color,
+			LastSummary:      summary,
+			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(sub.instanceID),
+			LastArtifact:     artifact,
 		})
 		if taskID := strings.TrimSpace(sub.taskID); taskID != "" {
 			seenTaskIDs[taskID] = struct{}{}
@@ -727,15 +710,18 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			state != string(SubAgentStateFailed) {
 			continue
 		}
+		var lastArtifact tools.ArtifactRef
+		if len(rec.LastArtifactRefs) > 0 {
+			lastArtifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
+		}
 		historical = append(historical, SubAgentInfo{
-			InstanceID:          strings.TrimSpace(rec.LatestInstanceID),
-			TaskID:              taskID,
-			AgentDefName:        strings.TrimSpace(rec.AgentDefName),
-			TaskDesc:            strings.TrimSpace(rec.TaskDesc),
-			State:               state,
-			LastSummary:         strings.TrimSpace(rec.LastSummary),
-			LastArtifactRelPath: strings.TrimSpace(rec.LastArtifactRelPath),
-			LastArtifactType:    strings.TrimSpace(rec.LastArtifactType),
+			InstanceID:   strings.TrimSpace(rec.LatestInstanceID),
+			TaskID:       taskID,
+			AgentDefName: strings.TrimSpace(rec.AgentDefName),
+			TaskDesc:     strings.TrimSpace(rec.TaskDesc),
+			State:        state,
+			LastSummary:  strings.TrimSpace(rec.LastSummary),
+			LastArtifact: lastArtifact,
 		})
 	}
 	sort.Slice(historical, func(i, j int) bool {

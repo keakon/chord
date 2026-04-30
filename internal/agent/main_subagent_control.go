@@ -278,7 +278,7 @@ func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string
 			artifactType := "execution_spec"
 			artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, sub.instanceID, replyMessageID, artifactType, "MainAgent follow-up", message)
 			if err == nil && artifactRelPath != "" {
-				sub.setLastArtifact(artifactID, artifactRelPath, artifactType)
+				sub.setLastArtifact(tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType})
 				payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", replyKind, truncateMailboxReplySummary(message), artifactRelPath)
 			}
 		}
@@ -375,8 +375,8 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	if record.LastReplyMessageID != "" || record.LastReplySummary != "" {
 		sub.setReplyThread(record.LastReplyMessageID, record.LastReplyToMailboxID, record.LastReplyKind, record.LastReplySummary)
 	}
-	if record.LastArtifactRelPath != "" {
-		sub.setLastArtifact(record.LastArtifactID, record.LastArtifactRelPath, record.LastArtifactType)
+	if len(record.LastArtifactRefs) > 0 {
+		sub.setLastArtifact(record.LastArtifactRefs[0])
 	}
 	if err := a.acquireSubAgentSlot(sub); err != nil {
 		cancel()

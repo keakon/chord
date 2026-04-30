@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (s *SubAgent) State() SubAgentState {
@@ -32,9 +33,9 @@ func (s *SubAgent) LastReplyThread() (replyMessageID, replyToMailboxID, replyKin
 	return replyMessageID, replyToMailboxID, replyKind, replySummary
 }
 
-func (s *SubAgent) LastArtifact() (artifactID, artifactRelPath, artifactType string) {
-	artifactID, artifactRelPath, artifactType, _ = s.runtimeState.artifactSnapshot()
-	return artifactID, artifactRelPath, artifactType
+func (s *SubAgent) LastArtifact() tools.ArtifactRef {
+	ref, _ := s.runtimeState.artifactSnapshot()
+	return ref
 }
 
 func (s *SubAgent) OwnerAgentID() string {
@@ -124,7 +125,7 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 }
 
 func (s *SubAgent) StateChangedAt() time.Time {
-	_, _, _, changedAt := s.runtimeState.artifactSnapshot()
+	_, changedAt := s.runtimeState.artifactSnapshot()
 	return changedAt
 }
 
@@ -140,6 +141,6 @@ func (s *SubAgent) setReplyThread(replyMessageID, replyToMailboxID, replyKind, r
 	s.runtimeState.setReplyThread(replyMessageID, replyToMailboxID, replyKind, replySummary)
 }
 
-func (s *SubAgent) setLastArtifact(artifactID, artifactRelPath, artifactType string) {
-	s.runtimeState.setLastArtifact(artifactID, artifactRelPath, artifactType)
+func (s *SubAgent) setLastArtifact(ref tools.ArtifactRef) {
+	s.runtimeState.setLastArtifact(ref)
 }

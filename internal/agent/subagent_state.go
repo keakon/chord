@@ -3,6 +3,8 @@ package agent
 import (
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 type SubAgentState string
@@ -26,9 +28,7 @@ type subAgentRuntimeState struct {
 	lastReplyToMailboxID string
 	lastReplyKind        string
 	lastReplySummary     string
-	lastArtifactID       string
-	lastArtifactRelPath  string
-	lastArtifactType     string
+	lastArtifact         tools.ArtifactRef
 	pendingComplete      *AgentResult
 	stateChangedAt       time.Time
 }
@@ -90,16 +90,14 @@ func (s *subAgentRuntimeState) mailboxThreadSnapshot() (lastMailboxID, lastReply
 	return s.lastMailboxID, s.lastReplyMessageID, s.lastReplyToMailboxID, s.lastReplyKind, s.lastReplySummary
 }
 
-func (s *subAgentRuntimeState) setLastArtifact(artifactID, artifactRelPath, artifactType string) {
+func (s *subAgentRuntimeState) setLastArtifact(ref tools.ArtifactRef) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.lastArtifactID = artifactID
-	s.lastArtifactRelPath = artifactRelPath
-	s.lastArtifactType = artifactType
+	s.lastArtifact = tools.NormalizeArtifactRef(ref)
 }
 
-func (s *subAgentRuntimeState) artifactSnapshot() (artifactID, artifactRelPath, artifactType string, stateChangedAt time.Time) {
+func (s *subAgentRuntimeState) artifactSnapshot() (tools.ArtifactRef, time.Time) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.lastArtifactID, s.lastArtifactRelPath, s.lastArtifactType, s.stateChangedAt
+	return s.lastArtifact, s.stateChangedAt
 }

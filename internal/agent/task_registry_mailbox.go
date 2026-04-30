@@ -45,14 +45,6 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 			rec.LastArtifactRefs = mergeArtifactRefs(rec.LastArtifactRefs, rec.LastCompletion.Artifacts)
 		}
 	}
-	legacyRefs := artifactRefsFromLegacy(msg.ArtifactIDs, msg.ArtifactRelPaths, msg.ArtifactType)
-	rec.LastArtifactRefs = mergeArtifactRefs(rec.LastArtifactRefs, legacyRefs)
-	if len(rec.LastArtifactRefs) > 0 {
-		first := rec.LastArtifactRefs[0]
-		rec.LastArtifactID = first.ID
-		rec.LastArtifactRelPath = first.RelPath
-		rec.LastArtifactType = first.Type
-	}
 	switch msg.Kind {
 	case SubAgentMailboxKindCompleted:
 		rec.State = string(SubAgentStateCompleted)

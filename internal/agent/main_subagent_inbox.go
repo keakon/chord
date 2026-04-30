@@ -25,18 +25,8 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 	if msg.Completion != nil {
 		msg.Completion = normalizeCompletionEnvelope(msg.Completion)
 	}
-	if len(msg.ArtifactRelPaths) > 0 {
-		legacyRefs := artifactRefsFromLegacy(msg.ArtifactIDs, msg.ArtifactRelPaths, msg.ArtifactType)
-		if msg.Completion == nil {
-			msg.Completion = &CompletionEnvelope{}
-		}
-		msg.Completion.Artifacts = mergeArtifactRefs(msg.Completion.Artifacts, legacyRefs)
-	}
 	if shouldPersistMailboxArtifact(*msg) {
-		artifactType := msg.ArtifactType
-		if strings.TrimSpace(artifactType) == "" {
-			artifactType = artifactTypeForMailboxKind(msg.Kind)
-		}
+		artifactType := artifactTypeForMailboxKind(msg.Kind)
 		title := fmt.Sprintf("%s %s mailbox", msg.AgentID, msg.Kind)
 		body := strings.TrimSpace(msg.Payload)
 		if body == "" {
@@ -44,26 +34,18 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 		}
 		artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, body)
 		if err == nil && artifactRelPath != "" {
-			msg.ArtifactType = artifactType
-			msg.ArtifactIDs = appendUniqueString(msg.ArtifactIDs, artifactID)
-			msg.ArtifactRelPaths = appendUniqueString(msg.ArtifactRelPaths, artifactRelPath)
+			ref := tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
 			if msg.Completion == nil {
 				msg.Completion = &CompletionEnvelope{}
 			}
-			msg.Completion.Artifacts = mergeArtifactRefs(msg.Completion.Artifacts, artifactRefsFromLegacy([]string{artifactID}, []string{artifactRelPath}, artifactType))
+			msg.Completion.Artifacts = mergeArtifactRefs(msg.Completion.Artifacts, []tools.ArtifactRef{ref})
 			msg.Payload = compactMailboxArtifactPayload(msg.Summary, artifactRelPath)
 		}
 	}
 	if sub := a.subAgentByID(msg.AgentID); sub != nil {
 		sub.setLastMailboxID(msg.MessageID)
-		artifactRefs := tools.NormalizeArtifactRefs(nil)
-		if msg.Completion != nil {
-			artifactRefs = mergeArtifactRefs(artifactRefs, msg.Completion.Artifacts)
-		}
-		artifactRefs = mergeArtifactRefs(artifactRefs, artifactRefsFromLegacy(msg.ArtifactIDs, msg.ArtifactRelPaths, msg.ArtifactType))
-		if len(artifactRefs) > 0 {
-			first := artifactRefs[0]
-			sub.setLastArtifact(first.ID, first.RelPath, first.Type)
+		if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
+			sub.setLastArtifact(msg.Completion.Artifacts[0])
 		}
 		a.persistSubAgentMeta(sub)
 	}
@@ -236,7 +218,7 @@ func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 }
 
 func shouldPersistMailboxArtifact(msg SubAgentMailboxMessage) bool {
-	if len(msg.ArtifactRelPaths) > 0 {
+	if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
 		return false
 	}
 	payload := strings.TrimSpace(msg.Payload)
@@ -254,19 +236,6 @@ func compactMailboxArtifactPayload(summary, artifactRelPath string) string {
 		return fmt.Sprintf("Detailed handoff saved to artifact: %s", artifactRelPath)
 	}
 	return fmt.Sprintf("%s\n\nDetailed handoff saved to artifact: %s", summary, artifactRelPath)
-}
-
-func appendUniqueString(items []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return items
-	}
-	for _, item := range items {
-		if strings.TrimSpace(item) == value {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 func durableTaskRecordIncludesInstance(rec *DurableTaskRecord, instanceID string) bool {
@@ -571,10 +540,6 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString("\n- known_risks: ")
 			b.WriteString(strings.Join(msg.Completion.KnownRisks, ", "))
 		}
-		if len(msg.Completion.BlockersRemaining) > 0 {
-			b.WriteString("\n- blockers_remaining_deprecated: ")
-			b.WriteString(strings.Join(msg.Completion.BlockersRemaining, ", "))
-		}
 		if len(msg.Completion.FollowUpRecommended) > 0 {
 			b.WriteString("\n- follow_up_recommended: ")
 			b.WriteString(strings.Join(msg.Completion.FollowUpRecommended, ", "))
@@ -594,18 +559,6 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 				b.WriteString(strings.Join(refs, ", "))
 			}
 		}
-	}
-	if len(msg.ArtifactIDs) > 0 {
-		b.WriteString("\n- artifact_ids: ")
-		b.WriteString(strings.Join(msg.ArtifactIDs, ", "))
-	}
-	if len(msg.ArtifactRelPaths) > 0 {
-		b.WriteString("\n- artifact_rel_paths: ")
-		b.WriteString(strings.Join(msg.ArtifactRelPaths, ", "))
-	}
-	if strings.TrimSpace(msg.ArtifactType) != "" {
-		b.WriteString("\n- artifact_type: ")
-		b.WriteString(msg.ArtifactType)
 	}
 	if msg.RequiresAck {
 		b.WriteString("\n- requires_ack: true")

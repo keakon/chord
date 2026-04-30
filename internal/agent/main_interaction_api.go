@@ -95,21 +95,20 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		}
 		state := sub.State()
 		summary := sub.LastSummary()
-		_, artifactRelPath, artifactType := sub.LastArtifact()
+		artifact := sub.LastArtifact()
 		infos = append(infos, SubAgentInfo{
-			InstanceID:          sub.instanceID,
-			TaskID:              sub.taskID,
-			AgentDefName:        sub.agentDefName,
-			TaskDesc:            sub.taskDesc,
-			ModelName:           sub.modelName,
-			SelectedRef:         selectedRef,
-			RunningRef:          runningRef,
-			State:               string(state),
-			Color:               sub.color,
-			LastSummary:         summary,
-			UrgentInboxCount:    a.subAgentUrgentInboxCountLocked(sub.instanceID),
-			LastArtifactRelPath: artifactRelPath,
-			LastArtifactType:    artifactType,
+			InstanceID:       sub.instanceID,
+			TaskID:           sub.taskID,
+			AgentDefName:     sub.agentDefName,
+			TaskDesc:         sub.taskDesc,
+			ModelName:        sub.modelName,
+			SelectedRef:      selectedRef,
+			RunningRef:       runningRef,
+			State:            string(state),
+			Color:            sub.color,
+			LastSummary:      summary,
+			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(sub.instanceID),
+			LastArtifact:     artifact,
 		})
 	}
 	return infos

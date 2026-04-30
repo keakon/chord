@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 type subAgentMeta struct {
@@ -27,9 +29,7 @@ type subAgentMeta struct {
 	LastReplyToMailboxID    string              `json:"last_reply_to_mailbox_id,omitempty"`
 	LastReplyKind           string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary        string              `json:"last_reply_summary,omitempty"`
-	LastArtifactID          string              `json:"last_artifact_id,omitempty"`
-	LastArtifactRelPath     string              `json:"last_artifact_rel_path,omitempty"`
-	LastArtifactType        string              `json:"last_artifact_type,omitempty"`
+	LastArtifact            tools.ArtifactRef   `json:"last_artifact,omitempty"`
 	UpdatedAt               time.Time           `json:"updated_at"`
 }
 
@@ -57,7 +57,7 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 	summary := sub.LastSummary()
 	lastMailboxID := sub.LastMailboxID()
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
-	lastArtifactID, lastArtifactRelPath, lastArtifactType := sub.LastArtifact()
+	lastArtifact := sub.LastArtifact()
 	pendingComplete := sub.PendingCompleteIntent()
 	meta := subAgentMeta{
 		InstanceID:            sub.instanceID,
@@ -75,9 +75,7 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 		LastReplyToMailboxID:  lastReplyToMailboxID,
 		LastReplyKind:         lastReplyKind,
 		LastReplySummary:      lastReplySummary,
-		LastArtifactID:        lastArtifactID,
-		LastArtifactRelPath:   lastArtifactRelPath,
-		LastArtifactType:      lastArtifactType,
+		LastArtifact:          lastArtifact,
 		UpdatedAt:             time.Now(),
 	}
 	if pendingComplete != nil {

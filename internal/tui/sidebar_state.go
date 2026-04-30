@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // FileEdit records a single file-edit event (Write, Edit, or Delete tool call).
@@ -17,19 +18,18 @@ type FileEdit struct {
 
 // SidebarEntry represents a single agent in the sidebar listing.
 type SidebarEntry struct {
-	ID                  string     // instance ID (e.g. "agent-1") or "main"
-	AgentDefName        string     // SubAgent: agent config name (e.g. reviewer); empty for main
-	TaskDesc            string     // task description (truncated for display)
-	Status              string     // "running", "idle", "done", "error"
-	Color               string     // optional ANSI color code for TUI display
-	SelectedRef         string     // last known primary model ref (SubAgent only; may include @variant)
-	RunningRef          string     // last known effective running ref (SubAgent only)
-	EditedFiles         []FileEdit // recent file edits, in order
-	Activity            string     // latest runtime activity/detail snapshot; AGENTS rows may choose not to render it
-	LastSummary         string
-	UrgentCount         int
-	LastArtifactRelPath string
-	LastArtifactType    string
+	ID           string     // instance ID (e.g. "agent-1") or "main"
+	AgentDefName string     // SubAgent: agent config name (e.g. reviewer); empty for main
+	TaskDesc     string     // task description (truncated for display)
+	Status       string     // "running", "idle", "done", "error"
+	Color        string     // optional ANSI color code for TUI display
+	SelectedRef  string     // last known primary model ref (SubAgent only; may include @variant)
+	RunningRef   string     // last known effective running ref (SubAgent only)
+	EditedFiles  []FileEdit // recent file edits, in order
+	Activity     string     // latest runtime activity/detail snapshot; AGENTS rows may choose not to render it
+	LastSummary  string
+	UrgentCount  int
+	LastArtifact tools.ArtifactRef
 }
 
 // Sidebar displays active SubAgent status in a narrow panel to the left of
@@ -110,17 +110,16 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 			status = cached
 		}
 		entry := SidebarEntry{
-			ID:                  info.InstanceID,
-			AgentDefName:        info.AgentDefName,
-			TaskDesc:            info.TaskDesc,
-			Status:              status,
-			Color:               info.Color,
-			SelectedRef:         info.SelectedRef,
-			RunningRef:          info.RunningRef,
-			LastSummary:         info.LastSummary,
-			UrgentCount:         info.UrgentInboxCount,
-			LastArtifactRelPath: info.LastArtifactRelPath,
-			LastArtifactType:    info.LastArtifactType,
+			ID:           info.InstanceID,
+			AgentDefName: info.AgentDefName,
+			TaskDesc:     info.TaskDesc,
+			Status:       status,
+			Color:        info.Color,
+			SelectedRef:  info.SelectedRef,
+			RunningRef:   info.RunningRef,
+			LastSummary:  info.LastSummary,
+			UrgentCount:  info.UrgentInboxCount,
+			LastArtifact: info.LastArtifact,
 		}
 		if existing, ok := existingByID[info.InstanceID]; ok {
 			entry.EditedFiles = existing.EditedFiles

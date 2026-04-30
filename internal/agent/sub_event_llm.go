@@ -240,7 +240,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				Summary              string              `json:"summary"`
 				FilesChanged         []string            `json:"files_changed,omitempty"`
 				VerificationRun      []string            `json:"verification_run,omitempty"`
-				BlockersRemaining    []string            `json:"blockers_remaining,omitempty"`
 				RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
 				KnownRisks           []string            `json:"known_risks,omitempty"`
 				FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
@@ -267,7 +266,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 					Summary:              args.Summary,
 					FilesChanged:         args.FilesChanged,
 					VerificationRun:      args.VerificationRun,
-					BlockersRemaining:    args.BlockersRemaining,
 					RemainingLimitations: args.RemainingLimitations,
 					KnownRisks:           args.KnownRisks,
 					FollowUpRecommended:  args.FollowUpRecommended,

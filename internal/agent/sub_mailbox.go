@@ -36,7 +36,6 @@ type CompletionEnvelope struct {
 	Summary              string              `json:"summary,omitempty"`
 	FilesChanged         []string            `json:"files_changed,omitempty"`
 	VerificationRun      []string            `json:"verification_run,omitempty"`
-	BlockersRemaining    []string            `json:"blockers_remaining,omitempty"` // Deprecated: use RemainingLimitations or Escalate/blocked for true blockers.
 	RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
 	KnownRisks           []string            `json:"known_risks,omitempty"`
 	FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
@@ -44,23 +43,20 @@ type CompletionEnvelope struct {
 }
 
 type SubAgentMailboxMessage struct {
-	MessageID        string                  `json:"message_id"`
-	AgentID          string                  `json:"agent_id"`
-	TaskID           string                  `json:"task_id"`
-	OwnerAgentID     string                  `json:"owner_agent_id,omitempty"`
-	OwnerTaskID      string                  `json:"owner_task_id,omitempty"`
-	InReplyTo        string                  `json:"in_reply_to,omitempty"`
-	Kind             SubAgentMailboxKind     `json:"kind"`
-	Priority         SubAgentMailboxPriority `json:"priority"`
-	Summary          string                  `json:"summary"`
-	Payload          string                  `json:"payload,omitempty"`
-	Completion       *CompletionEnvelope     `json:"completion,omitempty"`
-	ArtifactIDs      []string                `json:"artifact_ids,omitempty"`
-	ArtifactRelPaths []string                `json:"artifact_rel_paths,omitempty"`
-	ArtifactType     string                  `json:"artifact_type,omitempty"`
-	RequiresAck      bool                    `json:"requires_ack,omitempty"`
-	Consumed         bool                    `json:"consumed,omitempty"`
-	CreatedAt        time.Time               `json:"created_at"`
+	MessageID    string                  `json:"message_id"`
+	AgentID      string                  `json:"agent_id"`
+	TaskID       string                  `json:"task_id"`
+	OwnerAgentID string                  `json:"owner_agent_id,omitempty"`
+	OwnerTaskID  string                  `json:"owner_task_id,omitempty"`
+	InReplyTo    string                  `json:"in_reply_to,omitempty"`
+	Kind         SubAgentMailboxKind     `json:"kind"`
+	Priority     SubAgentMailboxPriority `json:"priority"`
+	Summary      string                  `json:"summary"`
+	Payload      string                  `json:"payload,omitempty"`
+	Completion   *CompletionEnvelope     `json:"completion,omitempty"`
+	RequiresAck  bool                    `json:"requires_ack,omitempty"`
+	Consumed     bool                    `json:"consumed,omitempty"`
+	CreatedAt    time.Time               `json:"created_at"`
 }
 
 type SubAgentMailboxAckRecord struct {
@@ -147,7 +143,7 @@ func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID stri
 	if sub := a.subAgentByID(agentID); sub != nil {
 		sub.setReplyThread(replyMessageID, messageID, replyKind, replySummary)
 		if artifactRelPath != "" {
-			sub.setLastArtifact(artifactID, artifactRelPath, artifactType)
+			sub.setLastArtifact(tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType})
 		}
 		a.persistSubAgentMeta(sub)
 	}

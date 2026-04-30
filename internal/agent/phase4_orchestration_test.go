@@ -26,7 +26,6 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 				"known_risks":           []string{"manual QA still useful"},
 				"follow_up_recommended": []string{"review"},
 				"artifacts":             []map[string]any{{"id": "art-1", "type": "research_report", "rel_path": "artifacts/subagents/worker-1/report.md"}},
-				"blockers_remaining":    []string{"legacy caveat"},
 			}),
 		})},
 	})
@@ -169,18 +168,16 @@ func TestSaveArtifactOverwriteReplacesExistingContent(t *testing.T) {
 func TestMailboxArtifactRefsMergeAndDedupe(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
-		MessageID:        "worker-1-1",
-		AgentID:          "worker-1",
-		TaskID:           "task-1",
-		Kind:             SubAgentMailboxKindCompleted,
-		Priority:         SubAgentMailboxPriorityUrgent,
-		Summary:          "done",
-		ArtifactIDs:      []string{"art-1"},
-		ArtifactRelPaths: []string{"artifacts/subagents/worker-1/task-1/report.md"},
-		ArtifactType:     "research_report",
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Priority:  SubAgentMailboxPriorityUrgent,
+		Summary:   "done",
 		Completion: &CompletionEnvelope{
 			Summary: "done",
 			Artifacts: []tools.ArtifactRef{
+				{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/task-1/report.md"},
 				{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/task-1/report.md"},
 				{ID: "art-2", Type: "verification_log", RelPath: "artifacts/subagents/worker-1/task-1/verify.log"},
 			},

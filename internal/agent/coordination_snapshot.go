@@ -137,7 +137,7 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 				b.WriteString(strings.Join(rec.LastCompletion.KnownRisks, ", "))
 			}
 		}
-		refs := mergeArtifactRefs(rec.LastArtifactRefs, artifactRefsFromLegacy([]string{rec.LastArtifactID}, []string{rec.LastArtifactRelPath}, rec.LastArtifactType))
+		refs := tools.NormalizeArtifactRefs(rec.LastArtifactRefs)
 		if len(refs) > 0 {
 			parts := make([]string, 0, len(refs))
 			for _, ref := range refs {
