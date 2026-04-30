@@ -5,6 +5,7 @@
 ## 未发布
 
 - 新增结构化 SubAgent 完成交接信息，支持记录实际修改文件、已运行验证、剩余限制、已知风险、推荐后续事项和 artifact 引用。
+- 修复 TUI 工具卡片：排队徽标与换行内容现在会保持一致的右侧留白。
 - 新增会话范围内的 `SaveArtifact` / `ReadArtifact` 工具，用于 SubAgent 交接 artifact，并支持通过 mailbox、task registry、snapshot 和会话恢复持久化。
 - 改进 SubAgent 协调快照：展示近期完成信息、artifact 引用、写入范围和疑似停滞原因。
 - 修复转录区选择复制在包含 tab 展开渲染行时的列宽计算问题。

@@ -87,7 +87,7 @@ func applyBlockStyles(t Theme) {
 		Foreground(lipgloss.Color(t.ToolCallFg))
 
 	ToolBlockStyle = lipgloss.NewStyle().
-		Padding(1, 1).
+		Padding(1, 2, 1, 1).
 		MarginLeft(1).
 		MarginBottom(1).
 		Background(lipgloss.Color(t.ToolCallBg))

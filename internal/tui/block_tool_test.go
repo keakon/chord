@@ -817,6 +817,14 @@ func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
 	}
 }
 
+func TestToolBlockStyleUsesExplicitRightPadding(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	top, right, bottom, left := ToolBlockStyle.GetPadding()
+	if top != 1 || right != 2 || bottom != 1 || left != 1 {
+		t.Fatalf("tool block padding = (%d,%d,%d,%d), want (1,2,1,1)", top, right, bottom, left)
+	}
+}
+
 func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
 	line := renderQueuedToolHeaderBadge("  ▸ VeryLongToolName", 20)
 	plain := stripANSI(line)

@@ -5,6 +5,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## Unreleased
 
 - Added structured SubAgent completion handoff with files changed, verification run, remaining limitations, risks, follow-up recommendations, and artifact references.
+- Fixed TUI tool cards so queued badges and wrapped content keep consistent right-side padding.
 - Added session-scoped `SaveArtifact` and `ReadArtifact` tools for SubAgent handoff artifacts, with persistence through mailbox, task registry, snapshots, and session restore.
 - Improved SubAgent coordination snapshots to surface recent completion metadata, artifact references, write scope, and suspected stalls.
 - Fixed transcript selection column handling for tab-expanded rendered lines.
