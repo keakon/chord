@@ -218,9 +218,9 @@ func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *test
 	if sub.semHeld {
 		t.Fatal("waiting_descendant worker should release semaphore slot")
 	}
-	intent, summary := sub.PendingCompleteIntent()
-	if !intent || summary != "final summary" {
-		t.Fatalf("PendingCompleteIntent = (%v, %q), want (true, %q)", intent, summary, "final summary")
+	pending := sub.PendingCompleteIntent()
+	if pending == nil || pending.Summary != "final summary" {
+		t.Fatalf("PendingCompleteIntent = %#v, want summary %q", pending, "final summary")
 	}
 	msgs := sub.ctxMgr.Snapshot()
 	if len(msgs) == 0 || msgs[len(msgs)-1].Role != "tool" {

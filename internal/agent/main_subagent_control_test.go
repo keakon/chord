@@ -595,7 +595,7 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
-	parent.setPendingCompleteIntent("final summary")
+	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary"})
 	a.mu.Lock()
 	delete(a.subAgents, "worker-1")
 	a.subAgents[parent.instanceID] = parent
@@ -638,8 +638,8 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	if child.semHeld {
 		t.Fatal("expected child slot to be transferred away on final joined completion")
 	}
-	intent, _ := parent.PendingCompleteIntent()
-	if intent {
+	pending := parent.PendingCompleteIntent()
+	if pending != nil {
 		t.Fatal("expected pending complete intent to be cleared after reactivation")
 	}
 	select {
@@ -858,7 +858,7 @@ func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
-	parent.setPendingCompleteIntent("final summary")
+	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary"})
 	a.mu.Lock()
 	delete(a.subAgents, "worker-1")
 	a.subAgents[parent.instanceID] = parent

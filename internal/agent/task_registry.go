@@ -24,34 +24,37 @@ const (
 )
 
 type DurableTaskRecord struct {
-	TaskID               string           `json:"task_id"`
-	AgentDefName         string           `json:"agent_def_name,omitempty"`
-	TaskDesc             string           `json:"task_desc,omitempty"`
-	PlanTaskRef          string           `json:"plan_task_ref,omitempty"`
-	SemanticTaskKey      string           `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope   tools.WriteScope `json:"expected_write_scope,omitempty"`
-	OwnerAgentID         string           `json:"owner_agent_id,omitempty"`
-	OwnerTaskID          string           `json:"owner_task_id,omitempty"`
-	Depth                int              `json:"depth,omitempty"`
-	JoinToOwner          bool             `json:"join_to_owner,omitempty"`
-	State                string           `json:"state,omitempty"`
-	ResumePolicy         string           `json:"resume_policy,omitempty"`
-	LatestInstanceID     string           `json:"latest_instance_id,omitempty"`
-	InstanceHistory      []string         `json:"instance_history,omitempty"`
-	LastSummary          string           `json:"last_summary,omitempty"`
-	LastMailboxID        string           `json:"last_mailbox_id,omitempty"`
-	LastReplyMessageID   string           `json:"last_reply_message_id,omitempty"`
-	LastReplyToMailboxID string           `json:"last_reply_to_mailbox_id,omitempty"`
-	LastReplyKind        string           `json:"last_reply_kind,omitempty"`
-	LastReplySummary     string           `json:"last_reply_summary,omitempty"`
-	LastArtifactID       string           `json:"last_artifact_id,omitempty"`
-	LastArtifactRelPath  string           `json:"last_artifact_rel_path,omitempty"`
-	LastArtifactType     string           `json:"last_artifact_type,omitempty"`
-	CreatedTurn          uint64           `json:"created_turn,omitempty"`
-	LastUpdatedTurn      uint64           `json:"last_updated_turn,omitempty"`
-	CreatedAt            time.Time        `json:"created_at,omitempty"`
-	UpdatedAt            time.Time        `json:"updated_at,omitempty"`
-	ClosedReason         string           `json:"closed_reason,omitempty"`
+	TaskID               string              `json:"task_id"`
+	AgentDefName         string              `json:"agent_def_name,omitempty"`
+	TaskDesc             string              `json:"task_desc,omitempty"`
+	PlanTaskRef          string              `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey      string              `json:"semantic_task_key,omitempty"`
+	ExpectedWriteScope   tools.WriteScope    `json:"expected_write_scope,omitempty"`
+	OwnerAgentID         string              `json:"owner_agent_id,omitempty"`
+	OwnerTaskID          string              `json:"owner_task_id,omitempty"`
+	Depth                int                 `json:"depth,omitempty"`
+	JoinToOwner          bool                `json:"join_to_owner,omitempty"`
+	State                string              `json:"state,omitempty"`
+	ResumePolicy         string              `json:"resume_policy,omitempty"`
+	LatestInstanceID     string              `json:"latest_instance_id,omitempty"`
+	InstanceHistory      []string            `json:"instance_history,omitempty"`
+	LastSummary          string              `json:"last_summary,omitempty"`
+	LastMailboxID        string              `json:"last_mailbox_id,omitempty"`
+	LastReplyMessageID   string              `json:"last_reply_message_id,omitempty"`
+	LastReplyToMailboxID string              `json:"last_reply_to_mailbox_id,omitempty"`
+	LastReplyKind        string              `json:"last_reply_kind,omitempty"`
+	LastReplySummary     string              `json:"last_reply_summary,omitempty"`
+	LastArtifactID       string              `json:"last_artifact_id,omitempty"`
+	LastArtifactRelPath  string              `json:"last_artifact_rel_path,omitempty"`
+	LastArtifactType     string              `json:"last_artifact_type,omitempty"`
+	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
+	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
+	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
+	CreatedTurn          uint64              `json:"created_turn,omitempty"`
+	LastUpdatedTurn      uint64              `json:"last_updated_turn,omitempty"`
+	CreatedAt            time.Time           `json:"created_at,omitempty"`
+	UpdatedAt            time.Time           `json:"updated_at,omitempty"`
+	ClosedReason         string              `json:"closed_reason,omitempty"`
 }
 
 func durableTaskRegistryPath(sessionDir string) string {
@@ -87,6 +90,9 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastArtifactID = strings.TrimSpace(out.LastArtifactID)
 	out.LastArtifactRelPath = strings.TrimSpace(out.LastArtifactRelPath)
 	out.LastArtifactType = strings.TrimSpace(out.LastArtifactType)
+	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
+	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
+	out.SuspectedStallReason = strings.TrimSpace(out.SuspectedStallReason)
 	out.ClosedReason = strings.TrimSpace(out.ClosedReason)
 	out.InstanceHistory = dedupeTaskInstanceHistory(out.InstanceHistory)
 	return &out
@@ -425,6 +431,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.LastArtifactID = strings.TrimSpace(lastArtifactID)
 	rec.LastArtifactRelPath = strings.TrimSpace(lastArtifactRelPath)
 	rec.LastArtifactType = strings.TrimSpace(lastArtifactType)
+	rec.LastArtifactRefs = mergeArtifactRefs(rec.LastArtifactRefs, artifactRefsFromLegacy([]string{lastArtifactID}, []string{lastArtifactRelPath}, lastArtifactType))
 	rec.LastUpdatedTurn = a.explicitUserTurnCount
 	rec.UpdatedAt = now
 	if strings.TrimSpace(closedReason) != "" {
@@ -538,6 +545,15 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.LastArtifactType == "" {
 					next.LastArtifactType = prev.LastArtifactType
+				}
+				if len(next.LastArtifactRefs) == 0 {
+					next.LastArtifactRefs = prev.LastArtifactRefs
+				}
+				if next.LastCompletion == nil {
+					next.LastCompletion = prev.LastCompletion
+				}
+				if next.SuspectedStallReason == "" {
+					next.SuspectedStallReason = prev.SuspectedStallReason
 				}
 				if next.CreatedAt.IsZero() {
 					next.CreatedAt = prev.CreatedAt

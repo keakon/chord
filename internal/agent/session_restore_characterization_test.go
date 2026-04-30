@@ -46,7 +46,7 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	metaSub.setLastMailboxID("mailbox-123")
 	metaSub.setReplyThread("reply-msg", "reply-mailbox", "progress", "reply summary")
 	metaSub.setLastArtifact("artifact-1", "artifacts/out.txt", "text/plain")
-	metaSub.setPendingCompleteIntent("pending from meta")
+	metaSub.setPendingCompleteIntent(&AgentResult{Summary: "pending from meta"})
 	metaSub.setState(SubAgentStateWaitingPrimary, "summary from meta")
 	a.persistSubAgentMeta(metaSub)
 

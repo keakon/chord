@@ -96,18 +96,19 @@ func RestoreTodoItems(states []TodoState) []tools.TodoItem {
 
 // AgentSnapshot captures the recoverable state of a running SubAgent.
 type AgentSnapshot struct {
-	InstanceID             string `json:"instance_id"`    // e.g. "agent-1"
-	TaskID                 string `json:"task_id"`        // plan task ID or "adhoc-N"
-	AgentDefName           string `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
-	TaskDesc               string `json:"task_desc"`      // task description
-	OwnerAgentID           string `json:"owner_agent_id,omitempty"`
-	OwnerTaskID            string `json:"owner_task_id,omitempty"`
-	Depth                  int    `json:"depth,omitempty"`
-	JoinToOwner            bool   `json:"join_to_owner,omitempty"`
-	State                  string `json:"state,omitempty"`
-	LastSummary            string `json:"last_summary,omitempty"`
-	PendingCompleteIntent  bool   `json:"pending_complete_intent,omitempty"`
-	PendingCompleteSummary string `json:"pending_complete_summary,omitempty"`
+	InstanceID              string          `json:"instance_id"`    // e.g. "agent-1"
+	TaskID                  string          `json:"task_id"`        // plan task ID or "adhoc-N"
+	AgentDefName            string          `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
+	TaskDesc                string          `json:"task_desc"`      // task description
+	OwnerAgentID            string          `json:"owner_agent_id,omitempty"`
+	OwnerTaskID             string          `json:"owner_task_id,omitempty"`
+	Depth                   int             `json:"depth,omitempty"`
+	JoinToOwner             bool            `json:"join_to_owner,omitempty"`
+	State                   string          `json:"state,omitempty"`
+	LastSummary             string          `json:"last_summary,omitempty"`
+	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitempty"`
+	PendingCompleteSummary  string          `json:"pending_complete_summary,omitempty"`
+	PendingCompleteEnvelope json.RawMessage `json:"pending_complete_envelope,omitempty"`
 }
 
 // RecoveryManager handles session persistence via JSONL message logs and

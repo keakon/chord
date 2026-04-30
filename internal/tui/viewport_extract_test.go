@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -40,6 +39,54 @@ func TestExtractPlainByColumns(t *testing.T) {
 	})
 }
 
+func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(120, 20)
+	block := &Block{
+		ID:      1,
+		Type:    BlockAssistant,
+		Content: "\t\tSaveArtifact\tReadArtifact\tComplete",
+	}
+	v.AppendBlock(block)
+
+	// Force viewport render path to materialize and expand tabs.
+	_ = v.Render("", nil, -1)
+	cached := block.GetViewportCache(v.width, "")
+	if cached == nil {
+		t.Fatal("expected viewport cache after render")
+	}
+
+	// Find the visible row containing SaveArtifact and compute the selection columns
+	// from the *rendered* (tab-expanded) text.
+	targetLine := -1
+	startCol := -1
+	endCol := -1
+	want := "SaveArtifact"
+	for i := range cached {
+		plain, _ := v.GetLinePlain(block.ID, i)
+		if idx := strings.Index(plain, want); idx >= 0 {
+			targetLine = i
+			midCol := selectionPlainTextWidth(plain[:idx]) + selectionPlainTextWidth(want)/2
+			startCol, endCol = WordBoundsAtCol(plain, midCol)
+			break
+		}
+	}
+	if targetLine < 0 {
+		t.Fatalf("failed to locate %q in viewport cached lines: %#v", want, stripANSILines(cached))
+	}
+
+	got := v.ExtractSelectionText(SelectionRange{
+		StartBlockID: block.ID,
+		StartLine:    targetLine,
+		StartCol:     startCol,
+		EndBlockID:   block.ID,
+		EndLine:      targetLine,
+		EndCol:       endCol,
+	})
+	if got != want {
+		t.Fatalf("ExtractSelectionText() tabbed line\n got %q\nwant %q", got, want)
+	}
+}
 func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	v := NewViewport(120, 20)
 	block := &Block{
@@ -49,10 +96,10 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 		Content:  `{"path":"internal/tui/block_tool_render_write.go"}`,
 		Diff: strings.Join([]string{
 			"@@ -1,4 +1,4 @@",
-			"-		blockStyle2 := ToolBlockStyle",
-			"-		cardBgStyle2 := lipgloss.NewStyle().Background(blockStyle2.GetBackground())",
-			"+		cardBgStyle := lipgloss.NewStyle().Background(blockStyle.GetBackground())",
-			"+		blockStyle2 := ToolBlockStyle",
+			"-\t\tblockStyle2 := ToolBlockStyle",
+			"-\t\tcardBgStyle2 := lipgloss.NewStyle().Background(blockStyle2.GetBackground())",
+			"+\t\tcardBgStyle := lipgloss.NewStyle().Background(blockStyle.GetBackground())",
+			"+\t\tblockStyle2 := ToolBlockStyle",
 		}, "\n"),
 	}
 	v.AppendBlock(block)
@@ -67,8 +114,8 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 		idx := strings.Index(plain, want)
 		if idx >= 0 {
 			targetLine = i
-			startCol = ansi.StringWidth(plain[:idx])
-			endCol = startCol + ansi.StringWidth(want)
+			startCol = selectionPlainTextWidth(plain[:idx])
+			endCol = startCol + selectionPlainTextWidth(want)
 			break
 		}
 	}

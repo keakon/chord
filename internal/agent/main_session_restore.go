@@ -45,27 +45,29 @@ type loadedSessionState struct {
 }
 
 type loadedSubAgentState struct {
-	InstanceID             string
-	TaskID                 string
-	AgentDefName           string
-	TaskDesc               string
-	OwnerAgentID           string
-	OwnerTaskID            string
-	Depth                  int
-	JoinToOwner            bool
-	Messages               []message.Message
-	State                  SubAgentState
-	LastSummary            string
-	PendingCompleteIntent  bool
-	PendingCompleteSummary string
-	LastMailboxID          string
-	LastReplyMessageID     string
-	LastReplyToMailboxID   string
-	LastReplyKind          string
-	LastReplySummary       string
-	LastArtifactID         string
-	LastArtifactRelPath    string
-	LastArtifactType       string
+	InstanceID              string
+	TaskID                  string
+	AgentDefName            string
+	TaskDesc                string
+	OwnerAgentID            string
+	OwnerTaskID             string
+	Depth                   int
+	JoinToOwner             bool
+	Messages                []message.Message
+	State                   SubAgentState
+	LastSummary             string
+	PendingComplete         *AgentResult
+	PendingCompleteIntent   bool
+	PendingCompleteSummary  string
+	PendingCompleteEnvelope json.RawMessage
+	LastMailboxID           string
+	LastReplyMessageID      string
+	LastReplyToMailboxID    string
+	LastReplyKind           string
+	LastReplySummary        string
+	LastArtifactID          string
+	LastArtifactRelPath     string
+	LastArtifactType        string
 }
 
 type restoredSubAgentBuilder struct {
@@ -94,6 +96,17 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	b.state.JoinToOwner = snap.JoinToOwner
 	b.state.PendingCompleteIntent = snap.PendingCompleteIntent
 	b.state.PendingCompleteSummary = strings.TrimSpace(snap.PendingCompleteSummary)
+	b.state.PendingCompleteEnvelope = append(json.RawMessage(nil), snap.PendingCompleteEnvelope...)
+	if b.state.PendingCompleteIntent {
+		b.state.PendingComplete = &AgentResult{
+			Summary:  b.state.PendingCompleteSummary,
+			Envelope: unmarshalCompletionEnvelope(b.state.PendingCompleteEnvelope),
+		}
+		if strings.TrimSpace(b.state.PendingComplete.Summary) == "" && b.state.PendingComplete.Envelope == nil {
+			b.state.PendingComplete = nil
+			b.state.PendingCompleteIntent = false
+		}
+	}
 }
 
 func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
@@ -121,6 +134,17 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	b.state.PendingCompleteIntent = meta.PendingCompleteIntent
 	if summary := strings.TrimSpace(meta.PendingCompleteSummary); summary != "" {
 		b.state.PendingCompleteSummary = summary
+	}
+	b.state.PendingComplete = nil
+	if b.state.PendingCompleteIntent {
+		b.state.PendingComplete = &AgentResult{
+			Summary:  b.state.PendingCompleteSummary,
+			Envelope: normalizeCompletionEnvelope(meta.PendingCompleteEnvelope),
+		}
+		if strings.TrimSpace(b.state.PendingComplete.Summary) == "" && b.state.PendingComplete.Envelope == nil {
+			b.state.PendingComplete = nil
+			b.state.PendingCompleteIntent = false
+		}
 	}
 	b.state.LastMailboxID = strings.TrimSpace(meta.LastMailboxID)
 	b.state.LastReplyMessageID = strings.TrimSpace(meta.LastReplyMessageID)
@@ -762,7 +786,11 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		}
 		sub.setState(restoreState, restoreSummary)
 		if state.PendingCompleteIntent {
-			sub.setPendingCompleteIntent(state.PendingCompleteSummary)
+			pending := state.PendingComplete
+			if pending == nil && strings.TrimSpace(state.PendingCompleteSummary) != "" {
+				pending = &AgentResult{Summary: state.PendingCompleteSummary, Envelope: unmarshalCompletionEnvelope(state.PendingCompleteEnvelope)}
+			}
+			sub.setPendingCompleteIntent(pending)
 		}
 		a.noteSubAgentStateTransition(sub, restoreState)
 		if strings.TrimSpace(state.LastMailboxID) != "" {

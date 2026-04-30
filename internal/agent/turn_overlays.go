@@ -15,6 +15,13 @@ import (
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	var overlays []message.Message
 
+	if block := strings.TrimSpace(a.buildCoordinationSnapshotOverlay()); block != "" {
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
+		})
+	}
+
 	if msgs := a.takePendingSubAgentMailboxes(); len(msgs) > 0 {
 		parts := make([]string, 0, len(msgs))
 		for _, m := range msgs {

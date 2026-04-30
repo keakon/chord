@@ -93,13 +93,11 @@ func (a *MainAgent) directActiveChildCountLocked(ownerAgentID, ownerTaskID strin
 	return count
 }
 
-func (a *MainAgent) outstandingJoinChildTaskIDs(taskID string) []string {
+func (a *MainAgent) outstandingJoinChildTaskIDsLocked(taskID string) []string {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return nil
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	var out []string
 	for _, rec := range a.taskRecords {
 		if rec == nil || !rec.JoinToOwner {
@@ -115,6 +113,16 @@ func (a *MainAgent) outstandingJoinChildTaskIDs(taskID string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (a *MainAgent) outstandingJoinChildTaskIDs(taskID string) []string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.outstandingJoinChildTaskIDsLocked(taskID)
 }
 
 func (a *MainAgent) directChildTaskIDs(taskID string) []string {
@@ -157,22 +165,24 @@ func (a *MainAgent) canCallerDelegate(ctx context.Context) (delegationCaller, er
 // injects the completion result into the MainAgent's conversation for LLM
 // review, and triggers a new LLM call so the MainAgent can decide next steps
 // (e.g. mark todo as done, request revisions, start next task).
-func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, summary string) *CompletionEnvelope {
-	if sub == nil {
-		return &CompletionEnvelope{Summary: strings.TrimSpace(summary)}
+func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, result *AgentResult) *CompletionEnvelope {
+	if result != nil && result.Envelope != nil {
+		env := normalizeCompletionEnvelope(result.Envelope)
+		if env != nil {
+			return env
+		}
+	}
+	summary := ""
+	if result != nil {
+		summary = result.Summary
 	}
 	env := &CompletionEnvelope{Summary: strings.TrimSpace(summary)}
-	if scope := sub.writeScope.Normalized(); !scope.Empty() {
-		env.FilesChanged = append(env.FilesChanged, scope.Files...)
-		env.FilesChanged = append(env.FilesChanged, scope.PathPrefix...)
+	if sub != nil {
+		if id, rel, typ := sub.LastArtifact(); strings.TrimSpace(rel) != "" || strings.TrimSpace(id) != "" {
+			env.Artifacts = artifactRefsFromLegacy([]string{id}, []string{rel}, typ)
+		}
 	}
-	if strings.TrimSpace(sub.LastSummary()) == "" {
-		env.FollowUpRecommended = append(env.FollowUpRecommended, "owner acceptance review")
-	}
-	if _, rel, typ := sub.LastArtifact(); strings.TrimSpace(rel) != "" || strings.TrimSpace(typ) != "" {
-		env.VerificationRun = append(env.VerificationRun, "artifact:"+strings.TrimSpace(rel))
-	}
-	return env
+	return normalizeCompletionEnvelope(env)
 }
 
 func (a *MainAgent) handleAgentDone(evt Event) {
@@ -220,7 +230,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		Priority:     SubAgentMailboxPriorityUrgent,
 		Summary:      result.Summary,
 		Payload:      result.Summary,
-		Completion:   firstNonNilCompletion(result.Envelope, a.buildCompletionEnvelope(sub, result.Summary)),
+		Completion:   a.buildCompletionEnvelope(sub, result),
 		RequiresAck:  false,
 	}})
 

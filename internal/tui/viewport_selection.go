@@ -77,7 +77,7 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 			return "", 0
 		}
 		plain = stripANSI(lines[lineInBlock])
-		width = ansi.StringWidth(lines[lineInBlock])
+		width = selectionPlainTextWidth(plain)
 		if b.renderSyntheticPrefixWidthsW == v.width && lineInBlock < len(b.renderSyntheticPrefixWidths) {
 			adjust := b.renderSyntheticPrefixWidths[lineInBlock]
 			if b.renderSoftWrapContinuations != nil && lineInBlock < len(b.renderSoftWrapContinuations) && !b.renderSoftWrapContinuations[lineInBlock] {
@@ -135,7 +135,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 			}
 			line := lines[lineIdx]
 			plain := stripANSI(line)
-			lineWidth := ansi.StringWidth(line)
+			lineWidth := selectionPlainTextWidth(plain)
 			prefixAdjust := v.selectionLinePrefixWidth(block, lineIdx, plain)
 			if prefixAdjust < 0 {
 				prefixAdjust = 0
@@ -143,34 +143,33 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 			if prefixAdjust > lineWidth {
 				prefixAdjust = lineWidth
 			}
-			contentPlain := plain
-			contentWidth := lineWidth
-			if prefixAdjust > 0 {
-				contentPlain = extractPlainByColumns(plain, prefixAdjust, lineWidth)
-				contentWidth = lineWidth - prefixAdjust
-			}
-			colStart := 0
-			colEnd := contentWidth
+			absStart := prefixAdjust
+			absEnd := lineWidth
 			if i == sIdx && lineIdx == sL {
-				colStart = sC - prefixAdjust
-				if colStart < 0 {
-					colStart = 0
+				absStart = sC
+				if absStart < prefixAdjust {
+					absStart = prefixAdjust
 				}
-				if colStart > contentWidth {
-					colStart = contentWidth
+				if absStart > lineWidth {
+					absStart = lineWidth
 				}
 			}
 			if i == eIdx && lineIdx == eL {
-				colEnd = eC - prefixAdjust
-				if colEnd < 0 {
-					colEnd = 0
+				absEnd = eC
+				if absEnd < prefixAdjust {
+					absEnd = prefixAdjust
 				}
-				if colEnd > contentWidth {
-					colEnd = contentWidth
+				if absEnd > lineWidth {
+					absEnd = lineWidth
 				}
 			}
-			if colStart < colEnd {
-				segment := extractPlainByColumns(contentPlain, colStart, colEnd)
+			if absStart < absEnd {
+				segment := extractPlainByColumns(plain, absStart, absEnd)
+				if i == sIdx && i == eIdx && lineIdx == sL && lineIdx == eL && segment != "" {
+					if plainSegmentWidth := selectionPlainTextWidth(segment); absEnd-absStart > plainSegmentWidth {
+						segment = extractPlainByColumns(plain, absStart, min(lineWidth, absEnd+1))
+					}
+				}
 				segment = strings.TrimRight(segment, " ")
 				if block.Type == BlockToolCall && block.ToolName == "Edit" && block.Diff != "" {
 					segment = stripEditDiffClipboardLine(segment)
@@ -499,8 +498,8 @@ func extractPlainByColumns(s string, startCol, endCol int) string {
 	col := 0
 	var b strings.Builder
 	for _, r := range plain {
-		rw := ansi.StringWidth(string(r))
-		nextCol := col + rw
+		w := selectionRuneWidthAtCol(r, col)
+		nextCol := col + w
 		if nextCol > startCol && col < endCol {
 			b.WriteRune(r)
 		}

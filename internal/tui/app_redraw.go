@@ -32,13 +32,6 @@ const (
 	// long after focus restore.
 	postFocusSettleRedrawDelay = 500 * time.Millisecond
 
-	// postFocusSettleFallbackRedrawDelay is a best-effort late redraw for
-	// Ghostty/cmux-style hosts that can still show stale cells well after the
-	// first settle window. We only suppress it after a strong recovery redraw;
-	// weak redraws such as content-boundary can still race with host surface
-	// recovery while streaming.
-	postFocusSettleFallbackRedrawDelay = 1500 * time.Millisecond
-
 	// scrollFlushFallbackRedrawDelay is a follow-up redraw for scroll flushes that
 	// happen shortly after a focus restore. In Ghostty/cmux the initial scroll
 	// redraw can still race with the host's lingering surface recovery; a later
@@ -70,12 +63,6 @@ type postFocusSettleRedrawMsg struct {
 func postFocusSettleRedrawCmd(generation int) tea.Cmd {
 	return tea.Tick(postFocusSettleRedrawDelay, func(time.Time) tea.Msg {
 		return postFocusSettleRedrawMsg{generation: generation}
-	})
-}
-
-func postFocusSettleFallbackRedrawCmd(generation int) tea.Cmd {
-	return tea.Tick(postFocusSettleFallbackRedrawDelay, func(time.Time) tea.Msg {
-		return postFocusSettleRedrawMsg{generation: generation, fallback: true}
 	})
 }
 

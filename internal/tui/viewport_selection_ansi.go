@@ -2,11 +2,10 @@ package tui
 
 import (
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 func WordBoundsAtCol(plain string, col int) (startCol, endCol int) {
-	width := ansi.StringWidth(plain)
+	width := selectionPlainTextWidth(plain)
 	if width == 0 || col < 0 {
 		return 0, 0
 	}
@@ -17,7 +16,7 @@ func WordBoundsAtCol(plain string, col int) (startCol, endCol int) {
 	var wordStart, wordEnd int
 	inWord := false
 	for _, r := range plain {
-		w := ansi.StringWidth(string(r))
+		w := selectionRuneWidthAtCol(r, curCol)
 		isSpace := r == ' ' || r == '\t' || r == '\n' || r == '\r'
 		if isSpace {
 			if inWord {
@@ -76,6 +75,46 @@ func applySearchMatchToLine(line string, colStart, colEnd int) string {
 	return line[:startByte] + hiOn + highlighted + hiOff + line[endByte:]
 }
 
+func selectionPlainTextWidth(plain string) int {
+	col := 0
+	for _, r := range plain {
+		col += selectionRuneWidthAtCol(r, col)
+	}
+	return col
+}
+
+func selectionStyledTextWidth(s string) int {
+	col := 0
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' {
+			next := skipANSISequence(s, i)
+			if next <= i {
+				next = i + 1
+			}
+			i = next
+			continue
+		}
+		r, size := rune(s[i]), 1
+		if r >= 0x80 {
+			r, size = decodeUTF8(s[i:])
+		}
+		col += selectionRuneWidthAtCol(r, col)
+		i += size
+	}
+	return col
+}
+
+func selectionRuneWidthAtCol(r rune, col int) int {
+	if r == '\t' {
+		spaces := preformattedTabWidth - (col % preformattedTabWidth)
+		if spaces <= 0 {
+			spaces = preformattedTabWidth
+		}
+		return spaces
+	}
+	return tuiStringWidth(string(r))
+}
+
 func findColumnByteOffsets(s string, colStart, colEnd int) (startByte, endByte int) {
 	col := 0
 	startByte = -1
@@ -90,7 +129,7 @@ func findColumnByteOffsets(s string, colStart, colEnd int) (startByte, endByte i
 		if r >= 0x80 {
 			r, size = decodeUTF8(s[i:])
 		}
-		w := ansi.StringWidth(string(r))
+		w := selectionRuneWidthAtCol(r, col)
 		if col >= colEnd {
 			endByte = i
 			break

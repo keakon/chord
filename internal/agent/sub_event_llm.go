@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (s *SubAgent) handleLLMResponse(result *llmResult) {
@@ -229,14 +230,21 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// all complete. This prevents the last batch of file edits from being
 	// silently dropped.
 	var taskCompleteCallID string
-	var taskCompleteSummary string
+	var taskComplete *AgentResult
 	var wakeMainCallID string
 	var wakeMainReason string
 	var wakeMainArgsJSON string
 	for _, tc := range validCalls {
 		if tc.Name == "Complete" {
 			var args struct {
-				Summary string `json:"summary"`
+				Summary              string              `json:"summary"`
+				FilesChanged         []string            `json:"files_changed,omitempty"`
+				VerificationRun      []string            `json:"verification_run,omitempty"`
+				BlockersRemaining    []string            `json:"blockers_remaining,omitempty"`
+				RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
+				KnownRisks           []string            `json:"known_risks,omitempty"`
+				FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
+				Artifacts            []tools.ArtifactRef `json:"artifacts,omitempty"`
 			}
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
 				s.sendEvent(Event{
@@ -245,8 +253,27 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				})
 				return
 			}
+			if strings.TrimSpace(args.Summary) == "" {
+				s.sendEvent(Event{
+					Type:    EventAgentError,
+					Payload: fmt.Errorf("invalid Complete args: summary is required"),
+				})
+				return
+			}
 			taskCompleteCallID = tc.ID
-			taskCompleteSummary = args.Summary
+			taskComplete = &AgentResult{
+				Summary: strings.TrimSpace(args.Summary),
+				Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
+					Summary:              args.Summary,
+					FilesChanged:         args.FilesChanged,
+					VerificationRun:      args.VerificationRun,
+					BlockersRemaining:    args.BlockersRemaining,
+					RemainingLimitations: args.RemainingLimitations,
+					KnownRisks:           args.KnownRisks,
+					FollowUpRecommended:  args.FollowUpRecommended,
+					Artifacts:            args.Artifacts,
+				}),
+			}
 			break
 		}
 	}
@@ -336,15 +363,15 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		outstandingChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)
 		if len(outstandingChildren) > 0 {
 			s.appendCompleteToolResult(taskCompleteCallID, deferredCompleteResult(len(outstandingChildren)))
-			s.setPendingCompleteIntent(taskCompleteSummary)
+			s.setPendingCompleteIntent(taskComplete)
 			s.enterWaitingDescendant(deferredCompleteResult(len(outstandingChildren)))
 			return
 		}
 		s.clearPendingCompleteIntent()
-		s.appendCompleteToolResult(taskCompleteCallID, taskCompleteSummary)
+		s.appendCompleteToolResult(taskCompleteCallID, taskComplete.Summary)
 		s.sendEvent(Event{
 			Type:    EventAgentDone,
-			Payload: &AgentResult{Summary: taskCompleteSummary},
+			Payload: taskComplete,
 		})
 		return
 	}
@@ -354,7 +381,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if taskCompleteCallID != "" {
 		slog.Info("Complete co-returned with other tools; executing others first",
 			"agent", s.instanceID, "other_tools", len(regularToolCalls))
-		s.pendingComplete = &AgentResult{Summary: taskCompleteSummary}
+		s.pendingComplete = taskComplete
 		s.pendingCompleteCallID = taskCompleteCallID
 	}
 	if wakeMainCallID != "" {

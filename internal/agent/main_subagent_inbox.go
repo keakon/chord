@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
@@ -20,6 +21,16 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 	}
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
+	}
+	if msg.Completion != nil {
+		msg.Completion = normalizeCompletionEnvelope(msg.Completion)
+	}
+	if len(msg.ArtifactRelPaths) > 0 {
+		legacyRefs := artifactRefsFromLegacy(msg.ArtifactIDs, msg.ArtifactRelPaths, msg.ArtifactType)
+		if msg.Completion == nil {
+			msg.Completion = &CompletionEnvelope{}
+		}
+		msg.Completion.Artifacts = mergeArtifactRefs(msg.Completion.Artifacts, legacyRefs)
 	}
 	if shouldPersistMailboxArtifact(*msg) {
 		artifactType := msg.ArtifactType
@@ -36,17 +47,28 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 			msg.ArtifactType = artifactType
 			msg.ArtifactIDs = appendUniqueString(msg.ArtifactIDs, artifactID)
 			msg.ArtifactRelPaths = appendUniqueString(msg.ArtifactRelPaths, artifactRelPath)
+			if msg.Completion == nil {
+				msg.Completion = &CompletionEnvelope{}
+			}
+			msg.Completion.Artifacts = mergeArtifactRefs(msg.Completion.Artifacts, artifactRefsFromLegacy([]string{artifactID}, []string{artifactRelPath}, artifactType))
 			msg.Payload = compactMailboxArtifactPayload(msg.Summary, artifactRelPath)
 		}
 	}
 	if sub := a.subAgentByID(msg.AgentID); sub != nil {
 		sub.setLastMailboxID(msg.MessageID)
-		if len(msg.ArtifactRelPaths) > 0 {
-			sub.setLastArtifact(firstNonEmpty(msg.ArtifactIDs...), firstNonEmpty(msg.ArtifactRelPaths...), msg.ArtifactType)
+		artifactRefs := tools.NormalizeArtifactRefs(nil)
+		if msg.Completion != nil {
+			artifactRefs = mergeArtifactRefs(artifactRefs, msg.Completion.Artifacts)
+		}
+		artifactRefs = mergeArtifactRefs(artifactRefs, artifactRefsFromLegacy(msg.ArtifactIDs, msg.ArtifactRelPaths, msg.ArtifactType))
+		if len(artifactRefs) > 0 {
+			first := artifactRefs[0]
+			sub.setLastArtifact(first.ID, first.RelPath, first.Type)
 		}
 		a.persistSubAgentMeta(sub)
 	}
 	a.persistSubAgentMailboxMessage(*msg)
+	a.syncTaskRecordFromMailbox(*msg)
 	a.emitSubAgentMailboxUI(*msg)
 }
 
@@ -94,9 +116,30 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			if child := a.subAgentByID(msg.AgentID); child != nil && child.semHeld && !owner.semHeld {
 				a.transferSubAgentSlot(child, owner)
 			}
-			pendingIntent, pendingSummary := owner.PendingCompleteIntent()
-			if pendingIntent && strings.TrimSpace(pendingSummary) != "" {
-				text = "Parent pending completion intent:\n- summary: " + pendingSummary + "\n\n" + text
+			pendingComplete := owner.PendingCompleteIntent()
+			if pendingComplete != nil && strings.TrimSpace(pendingComplete.Summary) != "" {
+				pendingText := "Parent pending completion intent:\n- summary: " + pendingComplete.Summary
+				if env := normalizeCompletionEnvelope(pendingComplete.Envelope); env != nil {
+					if len(env.FilesChanged) > 0 {
+						pendingText += "\n- files_changed: " + strings.Join(env.FilesChanged, ", ")
+					}
+					if len(env.VerificationRun) > 0 {
+						pendingText += "\n- verification_run: " + strings.Join(env.VerificationRun, ", ")
+					}
+					if len(env.Artifacts) > 0 {
+						refs := make([]string, 0, len(env.Artifacts))
+						for _, ref := range env.Artifacts {
+							ref = tools.NormalizeArtifactRef(ref)
+							if ref.RelPath != "" {
+								refs = append(refs, ref.RelPath)
+							}
+						}
+						if len(refs) > 0 {
+							pendingText += "\n- artifact_refs: " + strings.Join(refs, ", ")
+						}
+					}
+				}
+				text = pendingText + "\n\n" + text
 				owner.clearPendingCompleteIntent()
 			}
 			if reactivateOwner(text, "Child task completed; resuming", true) {
@@ -224,16 +267,6 @@ func appendUniqueString(items []string, value string) []string {
 		}
 	}
 	return append(items, value)
-}
-
-func firstNonEmpty(items ...string) string {
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			return item
-		}
-	}
-	return ""
 }
 
 func durableTaskRecordIncludesInstance(rec *DurableTaskRecord, instanceID string) bool {
@@ -530,13 +563,36 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString("\n- verification_run: ")
 			b.WriteString(strings.Join(msg.Completion.VerificationRun, ", "))
 		}
+		if len(msg.Completion.RemainingLimitations) > 0 {
+			b.WriteString("\n- remaining_limitations: ")
+			b.WriteString(strings.Join(msg.Completion.RemainingLimitations, ", "))
+		}
+		if len(msg.Completion.KnownRisks) > 0 {
+			b.WriteString("\n- known_risks: ")
+			b.WriteString(strings.Join(msg.Completion.KnownRisks, ", "))
+		}
 		if len(msg.Completion.BlockersRemaining) > 0 {
-			b.WriteString("\n- blockers_remaining: ")
+			b.WriteString("\n- blockers_remaining_deprecated: ")
 			b.WriteString(strings.Join(msg.Completion.BlockersRemaining, ", "))
 		}
 		if len(msg.Completion.FollowUpRecommended) > 0 {
 			b.WriteString("\n- follow_up_recommended: ")
 			b.WriteString(strings.Join(msg.Completion.FollowUpRecommended, ", "))
+		}
+		if len(msg.Completion.Artifacts) > 0 {
+			refs := make([]string, 0, len(msg.Completion.Artifacts))
+			for _, ref := range msg.Completion.Artifacts {
+				ref = tools.NormalizeArtifactRef(ref)
+				if ref.RelPath != "" {
+					refs = append(refs, ref.RelPath)
+				} else if ref.ID != "" {
+					refs = append(refs, ref.ID)
+				}
+			}
+			if len(refs) > 0 {
+				b.WriteString("\n- artifact_refs: ")
+				b.WriteString(strings.Join(refs, ", "))
+			}
 		}
 	}
 	if len(msg.ArtifactIDs) > 0 {

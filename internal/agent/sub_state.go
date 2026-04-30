@@ -49,12 +49,12 @@ func (s *SubAgent) Depth() int {
 	return s.depth
 }
 
-func (s *SubAgent) PendingCompleteIntent() (bool, string) {
+func (s *SubAgent) PendingCompleteIntent() *AgentResult {
 	return s.runtimeState.pendingCompleteSnapshot()
 }
 
-func (s *SubAgent) setPendingCompleteIntent(summary string) {
-	s.runtimeState.setPendingComplete(summary)
+func (s *SubAgent) setPendingCompleteIntent(result *AgentResult) {
+	s.runtimeState.setPendingComplete(result)
 }
 
 func (s *SubAgent) clearPendingCompleteIntent() {

@@ -10,26 +10,27 @@ import (
 )
 
 type subAgentMeta struct {
-	InstanceID             string    `json:"instance_id"`
-	TaskID                 string    `json:"task_id"`
-	AgentDefName           string    `json:"agent_def_name,omitempty"`
-	TaskDesc               string    `json:"task_desc,omitempty"`
-	OwnerAgentID           string    `json:"owner_agent_id,omitempty"`
-	OwnerTaskID            string    `json:"owner_task_id,omitempty"`
-	Depth                  int       `json:"depth,omitempty"`
-	State                  string    `json:"state,omitempty"`
-	LastSummary            string    `json:"last_summary,omitempty"`
-	PendingCompleteIntent  bool      `json:"pending_complete_intent,omitempty"`
-	PendingCompleteSummary string    `json:"pending_complete_summary,omitempty"`
-	LastMailboxID          string    `json:"last_mailbox_id,omitempty"`
-	LastReplyMessageID     string    `json:"last_reply_message_id,omitempty"`
-	LastReplyToMailboxID   string    `json:"last_reply_to_mailbox_id,omitempty"`
-	LastReplyKind          string    `json:"last_reply_kind,omitempty"`
-	LastReplySummary       string    `json:"last_reply_summary,omitempty"`
-	LastArtifactID         string    `json:"last_artifact_id,omitempty"`
-	LastArtifactRelPath    string    `json:"last_artifact_rel_path,omitempty"`
-	LastArtifactType       string    `json:"last_artifact_type,omitempty"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	InstanceID              string              `json:"instance_id"`
+	TaskID                  string              `json:"task_id"`
+	AgentDefName            string              `json:"agent_def_name,omitempty"`
+	TaskDesc                string              `json:"task_desc,omitempty"`
+	OwnerAgentID            string              `json:"owner_agent_id,omitempty"`
+	OwnerTaskID             string              `json:"owner_task_id,omitempty"`
+	Depth                   int                 `json:"depth,omitempty"`
+	State                   string              `json:"state,omitempty"`
+	LastSummary             string              `json:"last_summary,omitempty"`
+	PendingCompleteIntent   bool                `json:"pending_complete_intent,omitempty"`
+	PendingCompleteSummary  string              `json:"pending_complete_summary,omitempty"`
+	PendingCompleteEnvelope *CompletionEnvelope `json:"pending_complete_envelope,omitempty"`
+	LastMailboxID           string              `json:"last_mailbox_id,omitempty"`
+	LastReplyMessageID      string              `json:"last_reply_message_id,omitempty"`
+	LastReplyToMailboxID    string              `json:"last_reply_to_mailbox_id,omitempty"`
+	LastReplyKind           string              `json:"last_reply_kind,omitempty"`
+	LastReplySummary        string              `json:"last_reply_summary,omitempty"`
+	LastArtifactID          string              `json:"last_artifact_id,omitempty"`
+	LastArtifactRelPath     string              `json:"last_artifact_rel_path,omitempty"`
+	LastArtifactType        string              `json:"last_artifact_type,omitempty"`
+	UpdatedAt               time.Time           `json:"updated_at"`
 }
 
 func subAgentMetaPath(sessionDir, instanceID string) string {
@@ -57,28 +58,31 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 	lastMailboxID := sub.LastMailboxID()
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
 	lastArtifactID, lastArtifactRelPath, lastArtifactType := sub.LastArtifact()
-	pendingCompleteIntent, pendingCompleteSummary := sub.PendingCompleteIntent()
+	pendingComplete := sub.PendingCompleteIntent()
 	meta := subAgentMeta{
-		InstanceID:             sub.instanceID,
-		TaskID:                 sub.taskID,
-		AgentDefName:           sub.agentDefName,
-		TaskDesc:               sub.taskDesc,
-		OwnerAgentID:           sub.ownerAgentID,
-		OwnerTaskID:            sub.ownerTaskID,
-		Depth:                  sub.depth,
-		State:                  string(state),
-		LastSummary:            summary,
-		PendingCompleteIntent:  pendingCompleteIntent,
-		PendingCompleteSummary: pendingCompleteSummary,
-		LastMailboxID:          lastMailboxID,
-		LastReplyMessageID:     lastReplyMessageID,
-		LastReplyToMailboxID:   lastReplyToMailboxID,
-		LastReplyKind:          lastReplyKind,
-		LastReplySummary:       lastReplySummary,
-		LastArtifactID:         lastArtifactID,
-		LastArtifactRelPath:    lastArtifactRelPath,
-		LastArtifactType:       lastArtifactType,
-		UpdatedAt:              time.Now(),
+		InstanceID:            sub.instanceID,
+		TaskID:                sub.taskID,
+		AgentDefName:          sub.agentDefName,
+		TaskDesc:              sub.taskDesc,
+		OwnerAgentID:          sub.ownerAgentID,
+		OwnerTaskID:           sub.ownerTaskID,
+		Depth:                 sub.depth,
+		State:                 string(state),
+		LastSummary:           summary,
+		PendingCompleteIntent: pendingComplete != nil,
+		LastMailboxID:         lastMailboxID,
+		LastReplyMessageID:    lastReplyMessageID,
+		LastReplyToMailboxID:  lastReplyToMailboxID,
+		LastReplyKind:         lastReplyKind,
+		LastReplySummary:      lastReplySummary,
+		LastArtifactID:        lastArtifactID,
+		LastArtifactRelPath:   lastArtifactRelPath,
+		LastArtifactType:      lastArtifactType,
+		UpdatedAt:             time.Now(),
+	}
+	if pendingComplete != nil {
+		meta.PendingCompleteSummary = pendingComplete.Summary
+		meta.PendingCompleteEnvelope = normalizeCompletionEnvelope(pendingComplete.Envelope)
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

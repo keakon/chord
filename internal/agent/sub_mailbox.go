@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 type SubAgentMailboxKind string
@@ -28,12 +30,17 @@ const (
 	SubAgentMailboxPriorityInterrupt SubAgentMailboxPriority = "interrupt"
 )
 
+type ArtifactRef = tools.ArtifactRef
+
 type CompletionEnvelope struct {
-	Summary             string   `json:"summary,omitempty"`
-	FilesChanged        []string `json:"files_changed,omitempty"`
-	VerificationRun     []string `json:"verification_run,omitempty"`
-	BlockersRemaining   []string `json:"blockers_remaining,omitempty"`
-	FollowUpRecommended []string `json:"follow_up_recommended,omitempty"`
+	Summary              string              `json:"summary,omitempty"`
+	FilesChanged         []string            `json:"files_changed,omitempty"`
+	VerificationRun      []string            `json:"verification_run,omitempty"`
+	BlockersRemaining    []string            `json:"blockers_remaining,omitempty"` // Deprecated: use RemainingLimitations or Escalate/blocked for true blockers.
+	RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
+	KnownRisks           []string            `json:"known_risks,omitempty"`
+	FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
+	Artifacts            []tools.ArtifactRef `json:"artifacts,omitempty"`
 }
 
 type SubAgentMailboxMessage struct {
@@ -54,15 +61,6 @@ type SubAgentMailboxMessage struct {
 	RequiresAck      bool                    `json:"requires_ack,omitempty"`
 	Consumed         bool                    `json:"consumed,omitempty"`
 	CreatedAt        time.Time               `json:"created_at"`
-}
-
-func firstNonNilCompletion(values ...*CompletionEnvelope) *CompletionEnvelope {
-	for _, v := range values {
-		if v != nil {
-			return v
-		}
-	}
-	return nil
 }
 
 type SubAgentMailboxAckRecord struct {

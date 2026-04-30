@@ -278,7 +278,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	if len(outstandingJoinChildren) > 0 {
 		if s.pendingComplete != nil {
 			s.appendCompleteToolResult(s.pendingCompleteCallID, deferredCompleteResult(len(outstandingJoinChildren)))
-			s.setPendingCompleteIntent(s.pendingComplete.Summary)
+			s.setPendingCompleteIntent(s.pendingComplete)
 			s.pendingComplete = nil
 			s.pendingCompleteCallID = ""
 		}

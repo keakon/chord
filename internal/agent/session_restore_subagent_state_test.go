@@ -100,9 +100,9 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 	if restored.Depth() != 2 {
 		t.Fatalf("Depth() = %d, want 2", restored.Depth())
 	}
-	intent, summary := restored.PendingCompleteIntent()
-	if !intent || summary != "final summary" {
-		t.Fatalf("PendingCompleteIntent() = (%v, %q), want (true, %q)", intent, summary, "final summary")
+	pending := restored.PendingCompleteIntent()
+	if pending == nil || pending.Summary != "final summary" {
+		t.Fatalf("PendingCompleteIntent() = %#v, want summary %q", pending, "final summary")
 	}
 }
 

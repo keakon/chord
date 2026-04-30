@@ -18,20 +18,19 @@ const (
 )
 
 type subAgentRuntimeState struct {
-	mu                     sync.RWMutex
-	state                  SubAgentState
-	lastSummary            string
-	lastMailboxID          string
-	lastReplyMessageID     string
-	lastReplyToMailboxID   string
-	lastReplyKind          string
-	lastReplySummary       string
-	lastArtifactID         string
-	lastArtifactRelPath    string
-	lastArtifactType       string
-	pendingCompleteIntent  bool
-	pendingCompleteSummary string
-	stateChangedAt         time.Time
+	mu                   sync.RWMutex
+	state                SubAgentState
+	lastSummary          string
+	lastMailboxID        string
+	lastReplyMessageID   string
+	lastReplyToMailboxID string
+	lastReplyKind        string
+	lastReplySummary     string
+	lastArtifactID       string
+	lastArtifactRelPath  string
+	lastArtifactType     string
+	pendingComplete      *AgentResult
+	stateChangedAt       time.Time
 }
 
 func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
@@ -44,24 +43,22 @@ func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
 	}
 }
 
-func (s *subAgentRuntimeState) setPendingComplete(summary string) {
+func (s *subAgentRuntimeState) setPendingComplete(result *AgentResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pendingCompleteIntent = true
-	s.pendingCompleteSummary = summary
+	s.pendingComplete = cloneAgentResult(result)
 }
 
 func (s *subAgentRuntimeState) clearPendingComplete() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pendingCompleteIntent = false
-	s.pendingCompleteSummary = ""
+	s.pendingComplete = nil
 }
 
-func (s *subAgentRuntimeState) pendingCompleteSnapshot() (bool, string) {
+func (s *subAgentRuntimeState) pendingCompleteSnapshot() *AgentResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.pendingCompleteIntent, s.pendingCompleteSummary
+	return cloneAgentResult(s.pendingComplete)
 }
 
 func (s *subAgentRuntimeState) snapshot() (SubAgentState, string) {

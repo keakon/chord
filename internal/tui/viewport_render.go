@@ -2,8 +2,6 @@ package tui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockIndex int) string {
@@ -125,11 +123,11 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 		for i := lo; i < hi && len(visible) < v.height; i++ {
 			line := finalLines[i]
 			if searchBlockIndex == blockIndex && sel == nil && !block.Focused {
-				line = applySearchMatchToLine(line, 0, ansi.StringWidth(line))
+				line = applySearchMatchToLine(line, 0, selectionStyledTextWidth(line))
 			}
 			if sel != nil && sel.StartBlockID >= 0 && sel.EndBlockID >= 0 {
 				if colStart, colEnd, ok := selectionColRange(block.ID, i, sel); ok && colStart < colEnd {
-					lineWidth := ansi.StringWidth(line)
+					lineWidth := selectionStyledTextWidth(line)
 					if colStart > lineWidth {
 						colStart = lineWidth
 					}

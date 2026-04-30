@@ -331,21 +331,25 @@ func (a *MainAgent) saveRecoverySnapshot() {
 	for _, sub := range a.subAgents {
 		state := sub.State()
 		summary := sub.LastSummary()
-		pendingCompleteIntent, pendingCompleteSummary := sub.PendingCompleteIntent()
-		agents = append(agents, recovery.AgentSnapshot{
-			InstanceID:             sub.instanceID,
-			TaskID:                 sub.taskID,
-			AgentDefName:           sub.agentDefName,
-			TaskDesc:               sub.taskDesc,
-			OwnerAgentID:           sub.OwnerAgentID(),
-			OwnerTaskID:            sub.OwnerTaskID(),
-			Depth:                  sub.Depth(),
-			JoinToOwner:            sub.joinToOwner,
-			State:                  string(state),
-			LastSummary:            summary,
-			PendingCompleteIntent:  pendingCompleteIntent,
-			PendingCompleteSummary: pendingCompleteSummary,
-		})
+		pendingComplete := sub.PendingCompleteIntent()
+		snap := recovery.AgentSnapshot{
+			InstanceID:            sub.instanceID,
+			TaskID:                sub.taskID,
+			AgentDefName:          sub.agentDefName,
+			TaskDesc:              sub.taskDesc,
+			OwnerAgentID:          sub.OwnerAgentID(),
+			OwnerTaskID:           sub.OwnerTaskID(),
+			Depth:                 sub.Depth(),
+			JoinToOwner:           sub.joinToOwner,
+			State:                 string(state),
+			LastSummary:           summary,
+			PendingCompleteIntent: pendingComplete != nil,
+		}
+		if pendingComplete != nil {
+			snap.PendingCompleteSummary = pendingComplete.Summary
+			snap.PendingCompleteEnvelope = marshalCompletionEnvelope(pendingComplete.Envelope)
+		}
+		agents = append(agents, snap)
 	}
 	a.mu.RUnlock()
 

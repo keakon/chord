@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // CompleteTool marks the current task as complete. It is only available to
@@ -13,16 +14,22 @@ import (
 type CompleteTool struct{}
 
 type completeArgs struct {
-	Summary string `json:"summary"`
+	Summary              string        `json:"summary"`
+	FilesChanged         []string      `json:"files_changed,omitempty"`
+	VerificationRun      []string      `json:"verification_run,omitempty"`
+	BlockersRemaining    []string      `json:"blockers_remaining,omitempty"` // Deprecated: use remaining_limitations or Escalate for true blockers.
+	RemainingLimitations []string      `json:"remaining_limitations,omitempty"`
+	KnownRisks           []string      `json:"known_risks,omitempty"`
+	FollowUpRecommended  []string      `json:"follow_up_recommended,omitempty"`
+	Artifacts            []ArtifactRef `json:"artifacts,omitempty"`
 }
 
 func (CompleteTool) Name() string { return "Complete" }
 
 func (CompleteTool) Description() string {
-	return "Mark the current delegated task as complete. Call this after all work is finished, " +
-		"providing a summary of what was accomplished. This is the ONLY way to signal " +
-		"completion — do NOT simply stop responding. " +
-		"Include key outcomes, files modified, and any important notes for the owner agent."
+	return "Mark the current delegated task as complete. Call this only after all non-blocked work is finished. " +
+		"Provide a concise summary plus structured completion details when available: actual files changed, verification run, non-blocking limitations/risks, recommended follow-up, and artifact references. " +
+		"If a true blocker prevents completion, use Escalate/Notify/blocked flow instead of Complete. This is the ONLY way to signal completion — do NOT simply stop responding."
 }
 
 func (CompleteTool) Parameters() map[string]any {
@@ -31,7 +38,54 @@ func (CompleteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"summary": map[string]any{
 				"type":        "string",
-				"description": "Summary of what was done and the result. Include files modified, tests run, and any important decisions made.",
+				"description": "Summary of what was done and the result.",
+			},
+			"files_changed": map[string]any{
+				"type":        "array",
+				"description": "Actual files changed by this task. Do not list expected scope unless it was actually changed.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"verification_run": map[string]any{
+				"type":        "array",
+				"description": "Verification commands or checks actually run. Leave empty and explain in remaining_limitations if not run.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"remaining_limitations": map[string]any{
+				"type":        "array",
+				"description": "Non-blocking limitations, caveats, or unverified items. True blockers should use Escalate/Notify instead of Complete.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"known_risks": map[string]any{
+				"type":        "array",
+				"description": "Known non-blocking risks for owner acceptance review.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"follow_up_recommended": map[string]any{
+				"type":        "array",
+				"description": "Recommended follow-up actions, if any.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"artifacts": map[string]any{
+				"type":        "array",
+				"description": "Runtime artifact references, such as research reports or verification logs, when available.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":          map[string]any{"type": "string"},
+						"type":        map[string]any{"type": "string"},
+						"rel_path":    map[string]any{"type": "string"},
+						"path":        map[string]any{"type": "string"},
+						"description": map[string]any{"type": "string"},
+						"mime_type":   map[string]any{"type": "string"},
+						"size_bytes":  map[string]any{"type": "integer"},
+					},
+					"additionalProperties": false,
+				},
+			},
+			"blockers_remaining": map[string]any{
+				"type":        "array",
+				"description": "Deprecated compatibility field. Prefer remaining_limitations; true blockers should not Complete.",
+				"items":       map[string]any{"type": "string"},
 			},
 		},
 		"required":             []string{"summary"},
@@ -48,8 +102,8 @@ func (CompleteTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if a.Summary == "" {
+	if strings.TrimSpace(a.Summary) == "" {
 		return "", fmt.Errorf("summary is required")
 	}
-	return "Marked as complete: " + a.Summary, nil
+	return "Marked as complete: " + strings.TrimSpace(a.Summary), nil
 }

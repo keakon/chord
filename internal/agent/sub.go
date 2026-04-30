@@ -239,7 +239,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// when this instance's depth/config does not allow nested delegation.
 	for _, t := range cfg.BaseTools.ListTools() {
 		switch t.Name() {
-		case "TodoWrite", "Handoff":
+		case "TodoWrite", "Handoff", "ReadArtifact", "SaveArtifact":
 			// Skip MainAgent-only tools.
 		case "Notify":
 			// SubAgents get a dedicated Notify tool so owner-notify and
@@ -281,6 +281,8 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// available so a worker can explicitly close its lifecycle even under
 	// restrictive permission rules.
 	subTools.Register(tools.CompleteTool{})
+	subTools.Register(tools.SaveArtifactTool{})
+	subTools.Register(tools.ReadArtifactTool{})
 	if !cfg.Ruleset.IsDisabled("Escalate") {
 		subTools.Register(tools.NewEscalateTool(sender))
 	}
