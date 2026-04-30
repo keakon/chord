@@ -1121,3 +1121,18 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLoopVerificationContinuationNote(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionVerify, Reasons: []string{"verification_required"}})
+	if note == nil {
+		t.Fatal("expected verification continuation note")
+	}
+	if note.Title != "LOOP VERIFY" {
+		t.Fatalf("note.Title = %q, want LOOP VERIFY", note.Title)
+	}
+	if !strings.Contains(note.Text, "Verification required") || !strings.Contains(note.Text, "Run the smallest relevant verification now") {
+		t.Fatalf("verification note text missing verification instruction: %q", note.Text)
+	}
+}

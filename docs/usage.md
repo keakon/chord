@@ -55,7 +55,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/compact`: manually trigger context compaction
 - `/stats`: view usage statistics
 - `/diagnostics`: export a diagnostics bundle for troubleshooting
-- `/loop on` / `/loop off`: enable or disable continuous execution mode
+- `/loop on [target]` / `/loop off`: enable or disable continuous execution mode
 
 ## Multi-agent focus switching
 

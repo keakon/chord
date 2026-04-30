@@ -55,7 +55,7 @@ Chord 会为当前项目维护持久化会话。
 - `/compact`：手动触发上下文压缩
 - `/stats`：查看用量统计
 - `/diagnostics`：导出用于排障的诊断包
-- `/loop on` / `/loop off`：开启或关闭持续执行模式
+- `/loop on [target]` / `/loop off`：开启或关闭持续执行模式
 
 ## 多 Agent 与焦点切换
 

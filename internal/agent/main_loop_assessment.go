@@ -374,9 +374,16 @@ func (a *MainAgent) activeSubAgentContinuationLines() []string {
 	return lines
 }
 
+func loopContinuationTitle(action LoopAssessmentAction) string {
+	if action == LoopAssessmentActionVerify {
+		return "LOOP VERIFY"
+	}
+	return "LOOP CONTINUE"
+}
+
 // buildLoopContinuationNote constructs the continuation notice injected into the next LLM request.
 func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopContinuationNote {
-	if assessment == nil || assessment.Action != LoopAssessmentActionContinue {
+	if assessment == nil || (assessment.Action != LoopAssessmentActionContinue && assessment.Action != LoopAssessmentActionVerify) {
 		return nil
 	}
 	reasons := assessment.Reasons
@@ -384,7 +391,11 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		reasons = a.currentLoopContinuationReasons()
 	}
 	sections := make([]string, 0, 10)
-	sections = append(sections, "<loop-continuation>", "Continue required.")
+	if assessment.Action == LoopAssessmentActionVerify {
+		sections = append(sections, "<loop-continuation>", "Verification required.")
+	} else {
+		sections = append(sections, "<loop-continuation>", "Continue required.")
+	}
 
 	// Iteration budget.
 	maxIter := a.loopState.MaxIterations
@@ -435,6 +446,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("the task made progress and should continue toward completion")
 		case "context_continue":
 			addGap("continue from the existing context to complete the current goal")
+		case "verification_required":
+			addGap("verification is required before completion")
 		case "open_todos":
 			addGap("open TODO items remain")
 		case "subagents_active":
@@ -467,6 +480,9 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		"- Choose the best reasonable path unless a real user decision is required",
 		"- Only ask the user when a material ambiguity, permission boundary, or major tradeoff requires it",
 	}
+	if assessment.Action == LoopAssessmentActionVerify {
+		instructionLines = append(instructionLines, "- Run the smallest relevant verification now, or include <verify-not-run>reason</verify-not-run> only if verification cannot be run")
+	}
 	if maxIter > 0 && maxIter-iter <= 2 {
 		instructionLines = append(instructionLines, "- You are near the iteration limit: wrap up remaining work, do not start new subtasks or investigations")
 	}
@@ -484,8 +500,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	sections = append(sections, instructionLines...)
 
 	return &LoopContinuationNote{
-		Title:    "LOOP CONTINUE",
+		Title:    loopContinuationTitle(assessment.Action),
 		Text:     strings.Join(sections, "\n"),
-		DedupKey: strings.Join(reasons, "|"),
+		DedupKey: string(assessment.Action) + ":" + strings.Join(reasons, "|"),
 	}
 }

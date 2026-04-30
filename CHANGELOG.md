@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Improved loop verification continuations so `verify` assessments inject a dedicated `LOOP VERIFY` notice with explicit verification guidance, and documented `/loop on [target]`.
 - Fixed LSP sidebar diagnostics so clean post-edit self-reviews persist `0E/0W` snapshots and clear stale errors after syntax issues are resolved.
 - Fixed TUI card background artifacts around emoji, variation selectors, and ZWJ graphemes by aligning wrapping, padding, and truncation with the viewport grapheme-width calculation.
 - Improved TUI tool-call file path display so local-path tools such as `Read`, `Write`, `Edit`, `Delete`, `Grep`, and `Glob`, along with existing visible path-bearing Bash metadata, show paths relative to the active project root when possible, including after session resume/startup restore and spill/hydrate recovery, while keeping external paths absolute.
