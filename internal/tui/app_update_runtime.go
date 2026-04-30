@@ -280,7 +280,7 @@ func (m *Model) handlePostFocusSettleRedraw(msg postFocusSettleRedrawMsg) tea.Cm
 		return m.hostRedrawCmdWithOptions("post-focus-settle-fallback", bypassMinInterval)
 	}
 	m.recordTUIDiagnostic("post-focus-settle-redraw", "generation=%d mode=%s", msg.generation, debugModeString(m.mode))
-	return tea.Batch(tea.ClearScreen, postFocusSettleFallbackRedrawCmd(msg.generation))
+	return m.hostRedrawCmdWithOptions("post-focus-settle-redraw", true)
 }
 
 func (m *Model) handlePostHostRedrawFallback(msg postHostRedrawFallbackMsg) tea.Cmd {

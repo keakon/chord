@@ -3325,19 +3325,30 @@ func TestFocusResizeSettleIgnoresStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestPostFocusSettleRedrawTriggersOnMatchingGeneration(t *testing.T) {
+func TestPostFocusSettleRedrawTriggersStrongHostRedraw(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
 	m.focusResizeGeneration = 5
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
 
-	updated, cmd := m.Update(postFocusSettleRedrawMsg{generation: 5})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
+	cmd := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 5})
 	if cmd == nil {
-		t.Fatal("matching generation should issue ClearScreen command")
+		t.Fatal("matching generation should schedule host redraw")
 	}
-	_ = model
+	if m.lastHostRedrawReason != "post-focus-settle-redraw" {
+		t.Fatalf("lastHostRedrawReason = %q, want post-focus-settle-redraw", m.lastHostRedrawReason)
+	}
+
+	cmds := m.hostRedrawSequence("post-focus-settle-redraw")
+	if len(cmds) != 3 {
+		t.Fatalf("post-focus-settle-redraw cmd count = %d, want 3", len(cmds))
+	}
+	if !containsCmd(cmds, tea.ClearScreen) {
+		t.Fatal("post-focus-settle-redraw should include ClearScreen")
+	}
+	if !containsCmd(cmds, tea.RequestWindowSize) {
+		t.Fatal("post-focus-settle-redraw should include RequestWindowSize")
+	}
 }
 
 func TestPostFocusSettleRedrawSkipsStaleGeneration(t *testing.T) {
