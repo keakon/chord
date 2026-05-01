@@ -4,50 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/keakon/chord/internal/message"
 )
 
-// responsesSessionState holds legacy HTTP previous_response_id bookkeeping.
-// Current Codex behavior no longer uses HTTP incremental transmission, so only
-// reset/log fields remain; connection-scoped incremental state lives in the
-// WebSocket fields on ResponsesProvider.
-type responsesSessionState struct {
-	mu sync.Mutex
-
-	lastResponseID   string
-	lastModelID      string
-	lastFullInputLen int
-	lastFullInputSig string
-
-	// for logging only
-	lastKeyHint string
-}
-
-func (s *responsesSessionState) reset(reason string, attrs ...any) {
-	attrs = append([]any{"reason", reason, "prev_response_id", s.lastResponseID, "prev_model", s.lastModelID}, attrs...)
-	slog.Info("responses: session reset", attrs...)
-	s.lastResponseID = ""
-	s.lastModelID = ""
-	s.lastFullInputLen = 0
-	s.lastFullInputSig = ""
-	s.lastKeyHint = ""
-}
-
-// ResetResponsesSession clears cached previous_response_id session state.
-func (r *ResponsesProvider) ResetResponsesSession(reason string) {
-	r.session.mu.Lock()
-	r.session.reset(reason)
-	r.session.mu.Unlock()
-	r.resetCodexWebSocketChain(reason)
-}
-
 // SetSessionID sets the persistent session identifier used as prompt_cache_key
-// for OpenAI's prompt caching. Should be called on session creation/switch.
+// for OpenAI's prompt caching. When the session changes, any existing Codex
+// WebSocket chain is dropped so incremental reuse cannot cross session bounds.
 func (r *ResponsesProvider) SetSessionID(sid string) {
+	if r == nil {
+		return
+	}
+	sid = strings.TrimSpace(sid)
+	if r.sessionID == sid {
+		return
+	}
+	if r.sessionID != "" || sid != "" {
+		r.resetCodexWebSocketChain("session_id_changed")
+	}
 	r.sessionID = sid
 }
 

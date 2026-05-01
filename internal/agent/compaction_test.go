@@ -140,6 +140,31 @@ func validCompactionSummaryForTest(history string) string {
 	)
 }
 
+// summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
+// continuation profile defaults previously baked into the deleted 2-arg wrapper.
+func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, relHistoryPath string) (summary string, modelRef string, err error) {
+	summary, _, modelRef, err = a.summarizeCompactionHead(head, relHistoryPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
+	return summary, modelRef, err
+}
+
+// splitMessagesForCompactionForTest validates compaction partitioning without
+// going through the full MainAgent setup.
+func splitMessagesForCompactionForTest(messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
+	a := &MainAgent{}
+	a.resetRuntimeEvidenceFromMessages(messages)
+	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+	evidenceItems := a.evidenceItemsForCompaction(messages, contextLimit)
+	return splitMessagesForCompactionWithSelections(messages, recentTail, evidenceItems)
+}
+
+// splitMessagesForCompactionForTestWithAgent uses an explicit MainAgent so tests
+// can inspect runtime evidence accumulation across calls.
+func splitMessagesForCompactionForTestWithAgent(a *MainAgent, messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
+	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+	items := a.evidenceItemsForCompaction(messages, contextLimit)
+	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
+}
+
 func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	a := &MainAgent{}
 
@@ -225,7 +250,7 @@ func TestSplitMessagesForCompaction_BuildsSyntheticEvidenceArtifact(t *testing.T
 		{Role: "tool", ToolCallID: "tc2", Content: "patched", ToolDiff: diff},
 	}
 
-	head, evidence := splitMessagesForCompaction(msgs, 4096)
+	head, evidence := splitMessagesForCompactionForTest(msgs, 4096)
 	if len(head) == 0 {
 		t.Fatal("expected non-empty archived head")
 	}
@@ -264,7 +289,7 @@ func TestSplitMessagesForCompaction_PreservesRecentRawTailOutsideArchive(t *test
 		{Role: "assistant", Content: "a4"},
 	}
 
-	head, _ := splitMessagesForCompaction(msgs, 8192)
+	head, _ := splitMessagesForCompactionForTest(msgs, 8192)
 	if len(head) == 0 {
 		t.Fatal("expected archived head")
 	}
@@ -574,7 +599,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	evidence := []evidenceItem{{Kind: evidenceUserCorrection, Title: "constraint", Excerpt: "do not hardcode"}}
 	tail := []message.Message{{Role: "user", Content: "Continue and prioritize candidate containment handling."}}
 
-	input, err := buildCompactionInput(head, 8192, evidence, tail)
+	input, err := buildCompactionInputWithOptions(head, 8192, evidence, tail, true)
 	if err != nil {
 		t.Fatalf("buildCompactionInput error: %v", err)
 	}
@@ -593,7 +618,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 }
 
 func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
-	prompt := buildCompactionPrompt(
+	prompt := buildCompactionPromptWithKeyFiles(
 		&compactionInput{
 			Transcript:       "transcript",
 			GoalAnchor:       "- improve extraction quality",
@@ -602,6 +627,7 @@ func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 			ProgressAnchor:   "- latest error: oldString not found",
 		},
 		"history-1.md",
+		nil,
 		nil,
 		nil,
 		nil,
@@ -658,7 +684,7 @@ func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
 		{Role: "user", Content: "Please continue working on the current task."},
 		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
 	}
-	_, _, err := a.summarizeCompactionHead(head, "history-1.md")
+	_, _, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
 	if err == nil {
 		t.Fatal("expected weak summary validation error")
 	}
@@ -696,7 +722,7 @@ func TestSummarizeCompactionHeadUsesCompactEndpointForCodexPreset(t *testing.T) 
 		{Role: "user", Content: "Please continue working on the current task."},
 		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
 	}
-	got, _, err := a.summarizeCompactionHead(head, "history-1.md")
+	got, _, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
 	if err != nil {
 		t.Fatalf("summarizeCompactionHead error: %v", err)
 	}
@@ -734,7 +760,7 @@ func TestSummarizeCompactionHeadUsesGenericBackendWhenCompactionPresetIsGeneric(
 		return client, "compact-model", 16384, nil
 	})
 
-	_, _, err := a.summarizeCompactionHead([]message.Message{
+	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
 		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
 	}, "history-1.md")
@@ -772,7 +798,7 @@ func TestSummarizeCompactionHeadCodexPresetFallsBackToGenericWhenEndpointUnavail
 		return client, "compact-model", 16384, nil
 	})
 
-	_, _, err := a.summarizeCompactionHead([]message.Message{
+	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
 		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
 	}, "history-1.md")
@@ -827,9 +853,12 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 		{Role: "user", Content: "u3"},
 		{Role: "assistant", Content: "a3"},
 	}
-	draft, err := a.produceCompactionDraft(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch})
+	// Test bypasses ctxmgr so use a non-zero headSplit directly. The async path
+	// requires headSplit > 0 because tail is preserved by ReplacePrefixAtomic.
+	headSplit := len(snapshot)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit)
 	if err != nil {
-		t.Fatalf("produceCompactionDraft error: %v", err)
+		t.Fatalf("produceCompactionDraftAsync error: %v", err)
 	}
 	if draft.Skip {
 		t.Fatal("expected non-skip compaction draft")
@@ -1069,9 +1098,10 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 }
 
 func TestBuildCompactionPromptIncludesBackgroundObjects(t *testing.T) {
-	prompt := buildCompactionPrompt(
+	prompt := buildCompactionPromptWithKeyFiles(
 		&compactionInput{Transcript: "transcript"},
 		"history-1.md",
+		nil,
 		nil,
 		nil,
 		[]recovery.BackgroundObjectState{{
@@ -1372,7 +1402,7 @@ func TestSplitMessagesForCompaction_UsesRuntimeEvidenceCandidates(t *testing.T) 
 		{Role: "user", Content: "plain follow-up"},
 		{Role: "assistant", Content: "done"},
 	}
-	head, evidence := a.splitMessagesForCompaction(msgs, 4096)
+	head, evidence := splitMessagesForCompactionForTestWithAgent(a, msgs, 4096)
 	if len(head) == 0 {
 		t.Fatal("expected non-empty archived head")
 	}
@@ -1401,7 +1431,7 @@ func TestSplitMessagesForCompaction_AllowsSummaryOnlyWhenNoEvidence(t *testing.T
 		{Role: "assistant", Content: "You're welcome."},
 	}
 
-	head, evidence := splitMessagesForCompaction(msgs, 4096)
+	head, evidence := splitMessagesForCompactionForTest(msgs, 4096)
 	if len(head) == 0 {
 		t.Fatal("expected non-empty archived head")
 	}

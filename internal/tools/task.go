@@ -128,7 +128,7 @@ type delegateArgs struct {
 	ExpectedWriteScope WriteScope `json:"expected_write_scope,omitempty"`
 }
 
-func (DelegateTool) Name() string { return "Delegate" }
+func (DelegateTool) Name() string { return NameDelegate }
 
 func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +

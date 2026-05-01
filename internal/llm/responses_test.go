@@ -871,20 +871,6 @@ func TestResponsesRequestSignatureIgnoresInputButTracksNonInputFields(t *testing
 	}
 }
 
-func TestResponsesSessionState_Reset(t *testing.T) {
-	s := &responsesSessionState{
-		lastResponseID:   "resp-1",
-		lastModelID:      "gpt-5",
-		lastFullInputLen: 3,
-		lastFullInputSig: "sig",
-		lastKeyHint:      "key",
-	}
-	s.reset("test_reason")
-	if s.lastResponseID != "" || s.lastModelID != "" || s.lastFullInputLen != 0 || s.lastFullInputSig != "" {
-		t.Errorf("reset did not clear all fields: %+v", s)
-	}
-}
-
 func TestResponsesInputSignature_PrefixConsistency(t *testing.T) {
 	items := []responsesInputItem{
 		{Type: "message", Role: "user", Content: "hello"},
@@ -908,53 +894,6 @@ func TestResponsesInputSignature_PrefixConsistency(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_IncrementalSessionConditions(t *testing.T) {
-	items1 := []responsesInputItem{
-		{Type: "message", Role: "user", Content: "hello"},
-	}
-	items2 := []responsesInputItem{
-		{Type: "message", Role: "user", Content: "hello"},
-		{Type: "message", Role: "assistant", Content: "hi"},
-	}
-
-	sig1 := responsesInputSignature(items1)
-
-	// Model match + prefix match + deltaLen>0 => incremental allowed.
-	lastResponseID := "resp-1"
-	model := "gpt-5"
-	lastModelID := "gpt-5"
-	lastFullInputLen := 1
-	can := lastResponseID != "" &&
-		model == lastModelID &&
-		lastFullInputLen > 0 &&
-		len(items2) >= lastFullInputLen &&
-		responsesInputPrefixSignature(items2, lastFullInputLen) == sig1 &&
-		len(items2)-lastFullInputLen > 0
-	if !can {
-		t.Error("expected incremental to be allowed")
-	}
-
-	// Model mismatch => not allowed.
-	can2 := model == "gpt-4"
-	if can2 {
-		t.Error("model mismatch should prevent incremental")
-	}
-
-	// deltaLen == 0 => not allowed.
-	can3 := len(items1)-1 > 0
-	if can3 {
-		t.Error("deltaLen==0 should prevent incremental")
-	}
-
-	// Prefix mismatch => not allowed.
-	modified := []responsesInputItem{{Type: "message", Role: "user", Content: "different"}}
-	modified = append(modified, items2[1:]...)
-	can4 := responsesInputPrefixSignature(modified, 1) == sig1
-	if can4 {
-		t.Error("prefix mismatch should prevent incremental")
-	}
-}
-
 func TestOpenAIProvider_PersistsResponsesProvider(t *testing.T) {
 	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,
@@ -972,32 +911,6 @@ func TestOpenAIProvider_PersistsResponsesProvider(t *testing.T) {
 	rp2 := o.responsesProvider
 	if rp1 != rp2 {
 		t.Error("responsesProvider must be the same instance")
-	}
-}
-
-func TestOpenAIProvider_ResetResponsesSession(t *testing.T) {
-	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
-		Type:   config.ProviderTypeChatCompletions,
-		Preset: config.ProviderPresetCodex,
-		APIURL: "https://example.com/v1/responses",
-	}, nil)
-	o, err := NewOpenAIProvider(providerCfg, "")
-	if err != nil {
-		t.Fatalf("NewOpenAIProvider: %v", err)
-	}
-	o.responsesProvider.session.mu.Lock()
-	o.responsesProvider.session.lastResponseID = "resp-xyz"
-	o.responsesProvider.session.lastModelID = "gpt-5"
-	o.responsesProvider.session.lastFullInputLen = 5
-	o.responsesProvider.session.mu.Unlock()
-
-	o.ResetResponsesSession("test")
-
-	o.responsesProvider.session.mu.Lock()
-	id := o.responsesProvider.session.lastResponseID
-	o.responsesProvider.session.mu.Unlock()
-	if id != "" {
-		t.Errorf("after reset, lastResponseID = %q, want empty", id)
 	}
 }
 
@@ -1057,16 +970,9 @@ func TestResponsesProvider_NoPreviousIDOnFirstRound(t *testing.T) {
 	if _, ok := gotBody["previous_response_id"]; ok {
 		t.Error("first request must not include previous_response_id")
 	}
-	// HTTP path no longer advances previous_response_id session chain.
-	r.session.mu.Lock()
-	id := r.session.lastResponseID
-	r.session.mu.Unlock()
-	if id != "" {
-		t.Errorf("session.lastResponseID = %q, want empty", id)
-	}
 }
 
-func TestResponsesProvider_IncrementalOnSecondRound(t *testing.T) {
+func TestResponsesProvider_HTTPSendsFullInputOnSecondRound(t *testing.T) {
 	var requestBodies []map[string]any
 	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1088,21 +994,12 @@ func TestResponsesProvider_IncrementalOnSecondRound(t *testing.T) {
 		Store:  &storeTrue,
 	}, []string{"test-key"})
 
-	// Compute fullInput as CompleteStream does internally (system prompt="", one user message).
-	msgs1 := []message.Message{{Role: "user", Content: "hello"}}
-	items1 := convertMessagesToResponses("", msgs1)
-
 	r := &ResponsesProvider{
 		provider: providerCfg,
 		client:   server.Client(),
 	}
-	// Seed session as if first round already succeeded.
-	r.session.lastResponseID = "resp-1"
-	r.session.lastModelID = "gpt-5"
-	r.session.lastFullInputLen = len(items1)
-	r.session.lastFullInputSig = responsesInputSignature(items1)
 
-	// Second round: same first message + one more.
+	// Second round: full input must always be sent on HTTP path.
 	msgs2 := []message.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "user", Content: "follow up"},
@@ -1122,7 +1019,6 @@ func TestResponsesProvider_IncrementalOnSecondRound(t *testing.T) {
 		t.Errorf("second round: unexpected previous_response_id = %v", body["previous_response_id"])
 	}
 	input, _ := body["input"].([]any)
-	// HTTP path always sends full input.
 	if len(input) != 2 {
 		t.Errorf("second round: sent %d input items, want 2 (full)", len(input))
 	}

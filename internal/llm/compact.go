@@ -74,7 +74,6 @@ func (c *Client) Compact(
 		return nil, err
 	}
 	if keySwitched {
-		c.ResetResponsesSession("key_switch")
 		provider.ClearInlineDisplayRateLimitSnapshot()
 	}
 

@@ -498,27 +498,6 @@ func fillHTMLMetadata(result *webFetchHTMLRender, htmlText string, doc *html.Nod
 	)
 }
 
-// htmlToMarkdown converts an HTML document to a simplified Markdown representation.
-func htmlToMarkdown(data []byte) string {
-	decoded, decErr := decodeWebFetchHTML(data, "text/html")
-	utf8Body := bytes.ToValidUTF8(data, []byte("�"))
-	if decErr == nil {
-		utf8Body = decoded.UTF8
-	}
-	doc, parseErr := html.Parse(bytes.NewReader(utf8Body))
-	if parseErr != nil {
-		if decErr == nil && decoded.Text != "" {
-			return decoded.Text
-		}
-		return string(utf8Body)
-	}
-	return htmlDocumentToMarkdown(doc)
-}
-
-func htmlDocumentToMarkdown(doc *html.Node) string {
-	return htmlDocumentToMarkdownBase(doc, "")
-}
-
 func htmlDocumentToMarkdownBase(doc *html.Node, baseURL string) string {
 	root := findContentRoot(doc)
 	if root == nil {

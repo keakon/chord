@@ -87,6 +87,16 @@ If `--continue` or `--resume` does not appear to work as expected:
 - try explicitly using `--resume <session-id>`
 - check whether restore is only slow rather than actually lost
 
+## Session resume / restore behavior notes
+
+Recent internal cleanup removed an unused legacy LLM responses-session reset path and consolidated session-boundary handling onto the active provider/session identifiers. This should be user-transparent, but if you are diagnosing session resume or model/key-switch behavior:
+
+- make sure you are testing on the latest build rather than comparing against older pre-1.0 behavior
+- after `--continue`, `--resume`, new-session, or fork-session flows, rely on current behavior rather than older assumptions about a separate manual responses-session reset step
+- if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
+
+This change does not remove session resume support; it only deletes obsolete internal reset plumbing that no longer affected HTTP request behavior and keeps the active WebSocket/session lifecycle tied to the current session identifier.
+
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:

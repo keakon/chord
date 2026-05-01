@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Removed obsolete pre-1.0 compatibility paths and dead code across compaction, LLM session handling, LSP test-only helpers, tools, and TUI internals. This cleanup deletes the unused `ResetResponsesSession` / legacy responses-session reset chain, removes the old synchronous compaction fallback path, moves test-only helpers into `_test.go`, deduplicates fallback-summary rendering, and finishes centralizing tool-name handling on `tools.NameXxx` constants.
 - Fixed long-session TUI transcript clipping where late updates to older background status cards could undercount transcript height after spill/hydrate recovery, making the bottom rows or even several final cards unreachable.
 - Removed the deprecated `blockers_remaining` field from the SubAgent `Complete` tool arguments and `CompletionEnvelope`; SubAgents must report non-blocking caveats via `remaining_limitations` and signal true blockers through the Escalate or `blocked` mailbox path instead of `Complete`.
 - Unified SubAgent artifact representation: mailbox messages, durable task records, per-instance meta files, and the in-memory runtime state now reference artifacts via a single `ArtifactRef` / `[]ArtifactRef` shape; removed the parallel `artifact_ids` / `artifact_rel_paths` / `artifact_type` fields and the related legacy adapter.

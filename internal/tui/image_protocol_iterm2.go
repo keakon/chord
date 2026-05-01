@@ -34,15 +34,3 @@ func iterm2InlineSequence(part BlockImagePart, cols, rows int) (string, error) {
 func iterm2ViewerSequence(part BlockImagePart, cols, rows int) (string, error) {
 	return iterm2InlineSequence(part, cols, rows)
 }
-
-func imageViewerHintText(caps TerminalImageCapabilities, total int) string {
-	switch caps.Backend {
-	case ImageBackendKitty, ImageBackendITerm2:
-		if total > 1 {
-			return imageViewerHint
-		}
-		return imageViewerSingleHint
-	default:
-		return imageViewerFallbackHint
-	}
-}

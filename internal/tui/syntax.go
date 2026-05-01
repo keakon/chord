@@ -180,11 +180,6 @@ type codeHighlighter struct {
 	renderCache   map[uint64]string // key: FNV-1a 64-bit hash of (bgTerm + "\x00" + source)
 }
 
-// newCodeHighlighter creates a codeHighlighter for the given file path.
-func newCodeHighlighter(filePath, sample string) *codeHighlighter {
-	return newCodeHighlighterWithLanguage(filePath, sample, "")
-}
-
 func newCodeHighlighterWithLanguage(filePath, sample, language string) *codeHighlighter {
 	return &codeHighlighter{
 		filePath:    filePath,

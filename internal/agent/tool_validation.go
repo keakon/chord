@@ -56,13 +56,6 @@ func buildToolArgsAudit(original json.RawMessage, effective json.RawMessage, edi
 	}
 }
 
-func auditEffectiveArgsJSON(args json.RawMessage, audit *message.ToolArgsAudit) string {
-	if audit != nil && strings.TrimSpace(audit.EffectiveArgsJSON) != "" {
-		return audit.EffectiveArgsJSON
-	}
-	return string(args)
-}
-
 func syncAuditEffectiveArgs(audit *message.ToolArgsAudit, effective json.RawMessage) *message.ToolArgsAudit {
 	if audit == nil {
 		return nil

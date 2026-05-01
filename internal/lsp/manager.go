@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -688,36 +687,4 @@ func (m *Manager) ConfiguredServers() []ConfiguredServerInfo {
 		out = append(out, ConfiguredServerInfo{Name: name, FileTypes: fts})
 	}
 	return out
-}
-
-// DiagnosticsSummary returns a short summary of diagnostics for the current
-// session's touched files, using each file's last direct after-write review
-// snapshot, e.g. "3 E, 1 W" or "—" when none. Used by tests and legacy callers.
-func (m *Manager) DiagnosticsSummary() string {
-	touched := m.touchedSnapshot()
-	m.diagMu.RLock()
-	defer m.diagMu.RUnlock()
-	if len(m.reviewByServer) == 0 || len(touched) == 0 {
-		return "—"
-	}
-	var errors, warnings int
-	for _, byPath := range m.reviewByServer {
-		for path, v := range byPath {
-			if _, ok := touched[path]; !ok {
-				continue
-			}
-			errors += v.errors
-			warnings += v.warnings
-		}
-	}
-	if errors == 0 && warnings == 0 {
-		return "—"
-	}
-	if warnings == 0 {
-		return fmt.Sprintf("%d E", errors)
-	}
-	if errors == 0 {
-		return fmt.Sprintf("%d W", warnings)
-	}
-	return fmt.Sprintf("%d E, %d W", errors, warnings)
 }

@@ -161,13 +161,3 @@ func TestBuildToolArgsAuditMarksUserModified(t *testing.T) {
 		t.Fatalf("EditSummary = %q", audit.EditSummary)
 	}
 }
-
-func TestAuditEffectiveArgsJSONFallsBackToArgs(t *testing.T) {
-	if got := auditEffectiveArgsJSON(json.RawMessage(`{"command":"pwd"}`), nil); got != `{"command":"pwd"}` {
-		t.Fatalf("got %q", got)
-	}
-	audit := &message.ToolArgsAudit{EffectiveArgsJSON: `{"command":"ls"}`}
-	if got := auditEffectiveArgsJSON(json.RawMessage(`{"command":"pwd"}`), audit); got != `{"command":"ls"}` {
-		t.Fatalf("got %q", got)
-	}
-}

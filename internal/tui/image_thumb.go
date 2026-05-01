@@ -97,21 +97,6 @@ func imagePartBodyLeftColumn() int {
 	return UserCardStyle.GetMarginLeft() + UserCardStyle.GetBorderLeftSize() + UserCardStyle.GetPaddingLeft() + imagePlaceholderMargin
 }
 
-func (b *Block) imagePartAtLine(lineInBlock, width int) (BlockImagePart, bool) {
-	if b == nil || b.Type != BlockUser || len(b.ImageParts) == 0 {
-		return BlockImagePart{}, false
-	}
-	_ = b.Render(width, "")
-	for idx, part := range b.ImageParts {
-		if !imagePartLineHit(part, lineInBlock) {
-			continue
-		}
-		part.Index = idx
-		return part, true
-	}
-	return BlockImagePart{}, false
-}
-
 func (b *Block) imagePartAtPoint(lineInBlock, viewportCol, width int) (BlockImagePart, bool) {
 	if b == nil || b.Type != BlockUser || len(b.ImageParts) == 0 {
 		return BlockImagePart{}, false

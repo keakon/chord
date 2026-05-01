@@ -1716,6 +1716,45 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "Read",
+		Content:    `{"path":"/tmp/chord-diag/tui-dump.txt","limit":120,"offset":1535}`,
+		ResultDone: true,
+		ResultContent: strings.Join([]string{
+			"  1281\t\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m",
+			"[screen_buffer]",
+		}, "\n"),
+	}
+
+	rows, source := parseReadDisplayLines(block.ResultContent)
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
+	}
+	if strings.ContainsRune(rows[0].Content, '\x1b') {
+		t.Fatalf("sanitized Read row should not contain raw ESC: %q", rows[0].Content)
+	}
+	if strings.ContainsRune(source, '\x1b') {
+		t.Fatalf("sanitized Read source sample should not contain raw ESC: %q", source)
+	}
+	if !strings.Contains(rows[0].Content, `\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m`) {
+		t.Fatalf("sanitized Read row should expose ANSI literally, got %q", rows[0].Content)
+	}
+
+	plain := stripANSI(strings.Join(block.renderReadCall(140, ""), "\n"))
+	for _, want := range []string{
+		`Read /tmp/chord-diag/tui-dump.txt`,
+		`\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m`,
+		`[screen_buffer]`,
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected rendered Read card to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) {
 	block := &Block{
 		ID:         1,

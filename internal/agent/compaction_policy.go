@@ -23,28 +23,6 @@ func evidencePackTokenBudget(contextLimit int) int {
 	return b
 }
 
-// splitMessagesForCompaction chooses an archived head plus optional synthetic
-// evidence artifact(s). It no longer preserves a contiguous raw suffix; instead
-// it archives most older history, summarizes that archive, and optionally keeps
-// a compact synthetic evidence message built from high-value verbatim excerpts
-// (user corrections, current blockers, recent diffs, wake-main requests, etc.).
-//
-// Kept as a package-level helper for tests that validate compaction partitioning
-// independent of a fully constructed MainAgent.
-func splitMessagesForCompaction(messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
-	a := &MainAgent{}
-	a.resetRuntimeEvidenceFromMessages(messages)
-	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
-	evidenceItems := a.evidenceItemsForCompaction(messages, contextLimit)
-	return splitMessagesForCompactionWithSelections(messages, recentTail, evidenceItems)
-}
-
-func (a *MainAgent) splitMessagesForCompaction(messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
-	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
-	items := a.evidenceItemsForCompaction(messages, contextLimit)
-	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
-}
-
 func splitMessagesForCompactionWithSelections(messages []message.Message, recentTail []message.Message, evidenceItems []evidenceItem) (head []message.Message, evidence []message.Message) {
 	if len(messages) < 4 {
 		return nil, nil
@@ -396,10 +374,6 @@ type compactionInput struct {
 	ProgressAnchor   string
 }
 
-func buildCompactionInput(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message) (*compactionInput, error) {
-	return buildCompactionInputWithOptions(head, contextLimit, evidenceItems, recentTail, true)
-}
-
 func buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, autoRecentTail bool) (*compactionInput, error) {
 	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
@@ -682,22 +656,18 @@ func formatRecentTailAnchor(messages []message.Message) string {
 	return out
 }
 
-func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+// fallbackSummarySection is a heading/body pair rendered by
+// renderFallbackSummarySections. The body is TrimSpaced before writing.
+type fallbackSummarySection struct {
+	heading string
+	body    string
+}
+
+// renderFallbackSummarySections renders heading + body pairs separated by blank
+// lines, then appends a preserved background-objects footer when present. Used
+// by both the structured-fallback and truncate-only summary builders.
+func renderFallbackSummarySections(sections []fallbackSummarySection, backgroundObjects []recovery.BackgroundObjectState) string {
 	var sb strings.Builder
-	sections := []struct {
-		heading string
-		body    string
-	}{
-		{"## Goal", "- Continue the active coding task using the archived history and preserved recent context."},
-		{"## User Constraints", renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
-		{"## Progress", fallbackProgressSection(input)},
-		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
-		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, input, keyFiles)},
-		{"## Todo State", formatTodosAsBullets(todos)},
-		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
-		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
-		{"## Next Step", fallbackNextStepSection(input)},
-	}
 	for i, sec := range sections {
 		if i > 0 {
 			sb.WriteString("\n\n")
@@ -712,6 +682,20 @@ func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInpu
 		sb.WriteString("\n-->")
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+	return renderFallbackSummarySections([]fallbackSummarySection{
+		{"## Goal", "- Continue the active coding task using the archived history and preserved recent context."},
+		{"## User Constraints", renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
+		{"## Progress", fallbackProgressSection(input)},
+		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
+		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, input, keyFiles)},
+		{"## Todo State", formatTodosAsBullets(todos)},
+		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
+		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
+		{"## Next Step", fallbackNextStepSection(input)},
+	}, backgroundObjects)
 }
 
 func renderEvidenceKindForFallback(input *compactionInput, kind evidenceKind, empty string) string {
@@ -892,10 +876,6 @@ func backgroundObjectPromptDescription(description, fallbackCommand string) stri
 	return fallbackCommand
 }
 
-func buildCompactionPrompt(input *compactionInput, relHistoryPath string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
-	return buildCompactionPromptWithKeyFiles(input, relHistoryPath, nil, todos, subAgents, backgroundObjects)
-}
-
 func buildCompactionPromptWithKeyFiles(input *compactionInput, relHistoryPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	var sb strings.Builder
 	sb.WriteString("Summarize the earlier conversation transcript below so the main coding agent can continue work.\n")
@@ -986,11 +966,7 @@ func blankToDefault(value, fallback string) string {
 }
 
 func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
-	var sb strings.Builder
-	sections := []struct {
-		heading string
-		body    string
-	}{
+	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Goal", "- Continue the active coding task using the archived history and preserved recent context."},
 		{"## User Constraints", "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
 		{"## Progress", "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
@@ -1000,19 +976,5 @@ func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFile
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the archived history and listed key files."},
-	}
-	for i, sec := range sections {
-		if i > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(sec.heading)
-		sb.WriteString("\n")
-		sb.WriteString(strings.TrimSpace(sec.body))
-	}
-	if len(backgroundObjects) > 0 {
-		sb.WriteString("\n\n<!-- Background objects preserved:\n")
-		sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
-		sb.WriteString("\n-->")
-	}
-	return strings.TrimSpace(sb.String())
+	}, backgroundObjects)
 }

@@ -123,16 +123,6 @@ func emitCancelledToolResults(emit func(AgentEvent), calls []PendingToolCall) {
 	}
 }
 
-func discardSpeculativeStreamTools(emit func(AgentEvent), t *Turn) {
-	if t == nil {
-		return
-	}
-	spec := t.drainStreamingToolCalls()
-	if len(spec) > 0 {
-		emitCancelledToolResults(emit, spec)
-	}
-}
-
 func finalizeStreamingToolCards(emit func(AgentEvent), validCallIDs map[string]struct{}, t *Turn) {
 	if t == nil {
 		return

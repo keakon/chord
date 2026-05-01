@@ -55,27 +55,16 @@ type textEncoding struct {
 }
 
 var (
-	utf8Encoding      = textEncoding{Name: "utf-8"}
-	utf8BOMEncoding   = textEncoding{Name: "utf-8", BOM: utf8BOM}
-	utf16LEEncoding   = textEncoding{Name: "utf-16le", Enc: textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM), BOM: utf16LEBOM}
-	utf16BEEncoding   = textEncoding{Name: "utf-16be", Enc: textunicode.UTF16(textunicode.BigEndian, textunicode.IgnoreBOM), BOM: utf16BEBOM}
-	utf32LEEncoding   = textEncoding{Name: "utf-32le", Enc: utf32.UTF32(utf32.LittleEndian, utf32.IgnoreBOM), BOM: utf32LEBOM}
-	utf32BEEncoding   = textEncoding{Name: "utf-32be", Enc: utf32.UTF32(utf32.BigEndian, utf32.IgnoreBOM), BOM: utf32BEBOM}
-	gb18030Encoding   = textEncoding{Name: "gb18030", Enc: simplifiedchinese.GB18030}
-	big5Encoding      = textEncoding{Name: "big5", Enc: traditionalchinese.Big5}
-	shiftJISEncoding  = textEncoding{Name: "shift-jis", Enc: japanese.ShiftJIS}
-	legacyEncodings   = []textEncoding{gb18030Encoding, big5Encoding, shiftJISEncoding}
-	knownTextEncoding = map[string]textEncoding{
-		"utf-8":     utf8Encoding,
-		"utf-8-bom": utf8BOMEncoding,
-		"utf-16le":  utf16LEEncoding,
-		"utf-16be":  utf16BEEncoding,
-		"utf-32le":  utf32LEEncoding,
-		"utf-32be":  utf32BEEncoding,
-		"gb18030":   gb18030Encoding,
-		"big5":      big5Encoding,
-		"shift-jis": shiftJISEncoding,
-	}
+	utf8Encoding     = textEncoding{Name: "utf-8"}
+	utf8BOMEncoding  = textEncoding{Name: "utf-8", BOM: utf8BOM}
+	utf16LEEncoding  = textEncoding{Name: "utf-16le", Enc: textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM), BOM: utf16LEBOM}
+	utf16BEEncoding  = textEncoding{Name: "utf-16be", Enc: textunicode.UTF16(textunicode.BigEndian, textunicode.IgnoreBOM), BOM: utf16BEBOM}
+	utf32LEEncoding  = textEncoding{Name: "utf-32le", Enc: utf32.UTF32(utf32.LittleEndian, utf32.IgnoreBOM), BOM: utf32LEBOM}
+	utf32BEEncoding  = textEncoding{Name: "utf-32be", Enc: utf32.UTF32(utf32.BigEndian, utf32.IgnoreBOM), BOM: utf32BEBOM}
+	gb18030Encoding  = textEncoding{Name: "gb18030", Enc: simplifiedchinese.GB18030}
+	big5Encoding     = textEncoding{Name: "big5", Enc: traditionalchinese.Big5}
+	shiftJISEncoding = textEncoding{Name: "shift-jis", Enc: japanese.ShiftJIS}
+	legacyEncodings  = []textEncoding{gb18030Encoding, big5Encoding, shiftJISEncoding}
 )
 
 var (
@@ -627,21 +616,4 @@ func runeSet(chars string) map[rune]struct{} {
 		out[r] = struct{}{}
 	}
 	return out
-}
-
-func textEncodingByName(name string) (textEncoding, bool) {
-	enc, ok := knownTextEncoding[strings.ToLower(name)]
-	return enc, ok
-}
-
-func mustEncodeForTest(s string, encName string) []byte {
-	enc, ok := textEncodingByName(encName)
-	if !ok {
-		panic("unsupported test encoding: " + encName)
-	}
-	data, err := encodeString(s, enc)
-	if err != nil {
-		panic(err)
-	}
-	return data
 }

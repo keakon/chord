@@ -197,12 +197,6 @@ func (m *Model) computeStatusBarCurrentAgentColor() string {
 	return ""
 }
 
-// statusBarCurrentAgentLabel returns the human-facing agent name for the status bar
-// (role for main; SubAgent: optional agent def name + instance id, never task text).
-func (m *Model) statusBarCurrentAgentLabel() string {
-	return m.statusBarSnapshot().viewingLabel
-}
-
 func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 	if !m.statusBarAgentSnapshotDirty {
 		return m.statusBarAgentSnapshot

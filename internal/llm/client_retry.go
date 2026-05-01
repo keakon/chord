@@ -356,7 +356,6 @@ func (c *Client) completeStreamWithRetry(
 					return nil, err
 				}
 				if keySwitched {
-					c.ResetResponsesSession("key_switch")
 					t.provider.ClearInlineDisplayRateLimitSnapshot()
 					if cb != nil {
 						cb(message.StreamDelta{Type: "key_switched"})

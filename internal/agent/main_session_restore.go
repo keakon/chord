@@ -952,7 +952,6 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 	// Files with status "pending_apply" older than 5 minutes and no backup are
 	// considered orphaned (the compaction was cancelled but cleanup didn't run).
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
-	a.llmClient.ResetResponsesSession("session_restore")
 	a.llmClient.SetSessionID(filepath.Base(result.SessionPath))
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})
 	return nil
@@ -999,7 +998,6 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 		"todo_count", result.TodoCount,
 	)
 
-	a.llmClient.ResetResponsesSession("session_restore")
 	a.llmClient.SetSessionID(targetID)
 	a.emitToTUI(SessionRestoredEvent{})
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})

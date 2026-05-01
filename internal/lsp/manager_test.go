@@ -81,40 +81,6 @@ func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
 	}
 }
 
-func TestDiagnosticsSummaryAggregatesReviewedSnapshotsForTouchedFiles(t *testing.T) {
-	mgr := &Manager{
-		reviewByServer: map[string]map[string]reviewCounts{
-			"gopls": {
-				normalizeWaiterPath("/a.go"): {errors: 2, warnings: 1},
-			},
-			"pyright": {
-				normalizeWaiterPath("/b.py"): {warnings: 3},
-			},
-		},
-		touchedPaths: map[string]struct{}{
-			normalizeWaiterPath("/a.go"): {},
-			normalizeWaiterPath("/b.py"): {},
-		},
-	}
-	if got := mgr.DiagnosticsSummary(); got != "2 E, 4 W" {
-		t.Fatalf("DiagnosticsSummary() = %q, want %q", got, "2 E, 4 W")
-	}
-}
-
-func TestDiagnosticsSummaryIgnoresUntouchedReviewedFiles(t *testing.T) {
-	mgr := &Manager{
-		reviewByServer: map[string]map[string]reviewCounts{
-			"gopls": {
-				normalizeWaiterPath("/a.go"): {errors: 2, warnings: 1},
-			},
-		},
-		touchedPaths: map[string]struct{}{},
-	}
-	if got := mgr.DiagnosticsSummary(); got != "—" {
-		t.Fatalf("DiagnosticsSummary() = %q, want %q", got, "—")
-	}
-}
-
 func TestSidebarEntriesIncludePerServerReviewedSnapshotsForTouchedFiles(t *testing.T) {
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{

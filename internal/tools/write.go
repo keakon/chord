@@ -21,7 +21,7 @@ type writeArgs struct {
 	Content string `json:"content"`
 }
 
-func (t WriteTool) Name() string { return "Write" }
+func (t WriteTool) Name() string { return NameWrite }
 
 func (WriteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	return normalizeConcurrencyPolicy("Write", fileToolConcurrencyPolicy(args, false))

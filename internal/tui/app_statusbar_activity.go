@@ -44,10 +44,6 @@ func statusBarStartedLabel() string {
 	return "Since "
 }
 
-func statusBarTotalLabel() string {
-	return "Elapsed "
-}
-
 func formatStatusBarStartedAt(t time.Time) string {
 	if t.IsZero() {
 		return ""

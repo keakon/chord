@@ -155,7 +155,6 @@ func (a *MainAgent) SwapLLMClient(newClient *llm.Client, modelName string, conte
 // also atomically updates providerModelRef when non-empty.
 func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string, contextLimit int, providerModelRef string) {
 	a.llmMu.Lock()
-	oldClient := a.llmClient
 	a.llmClient = newClient
 	a.modelName = modelName
 	if providerModelRef != "" {
@@ -166,9 +165,6 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	}
 	a.installedSysPrompt = ""
 	a.llmMu.Unlock()
-	if oldClient != nil && oldClient != newClient {
-		oldClient.ResetResponsesSession("model_switch")
-	}
 	a.ctxMgr.SetMaxTokens(contextLimit)
 
 	// Wire the polled-rate-limit callback so that background /wham/usage poll

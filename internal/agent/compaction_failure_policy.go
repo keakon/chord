@@ -84,10 +84,6 @@ func (a *MainAgent) isUsageDrivenAutoCompactSuppressed() bool {
 	return a.usageDrivenAutoCompactCheckTurn() <= until
 }
 
-func (a *MainAgent) recordUsageDrivenCompactionFailure(err error) {
-	a.recordUsageDrivenCompactionFailureClassified(err, classifyCompactionFailure(err))
-}
-
 func (a *MainAgent) recordUsageDrivenCompactionFailureClassified(err error, class compactionFailureClass) {
 	state := &a.autoCompactFailureState
 	state.ConsecutiveFailures++

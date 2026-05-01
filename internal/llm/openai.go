@@ -72,13 +72,6 @@ func (o *OpenAIProvider) SetDumpWriter(w *DumpWriter) {
 	}
 }
 
-// ResetResponsesSession clears the cached previous_response_id session state.
-func (o *OpenAIProvider) ResetResponsesSession(reason string) {
-	if o.responsesProvider != nil {
-		o.responsesProvider.ResetResponsesSession(reason)
-	}
-}
-
 // SetSessionID sets the persistent session identifier for prompt caching.
 func (o *OpenAIProvider) SetSessionID(sid string) {
 	if o.responsesProvider != nil {

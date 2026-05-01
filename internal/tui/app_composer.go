@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
@@ -57,14 +56,6 @@ func (m *Model) draftIDForSubmit() string {
 		return id
 	}
 	return m.nextDraftID()
-}
-
-func (m *Model) prependQueuedDraft(draft queuedDraft) {
-	draft.Mirrored = false
-	if draft.QueuedAt.IsZero() {
-		draft.QueuedAt = time.Now()
-	}
-	m.queuedDrafts = append([]queuedDraft{draft}, m.queuedDrafts...)
 }
 
 func (m *Model) findQueuedDraftIndex(id string) int {

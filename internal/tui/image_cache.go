@@ -52,12 +52,6 @@ var (
 	imageCacheEncodePNG    = func(w io.Writer, m image.Image) error { return png.Encode(w, m) }
 )
 
-func resetImageRuntimeCache() {
-	imageRuntimeCache.mu.Lock()
-	imageRuntimeCache.entries = make(map[string]*imageRuntimeCacheEntry)
-	imageRuntimeCache.mu.Unlock()
-}
-
 func imageRuntimeEntryForPart(part BlockImagePart) (*imageRuntimeCacheEntry, error) {
 	key, err := imageRuntimeCacheKey(part)
 	if err != nil {
@@ -108,12 +102,6 @@ func (e *imageRuntimeCacheEntry) decodeConfig(part BlockImagePart) (image.Config
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.ensureDecodeConfigUnlocked(part)
-}
-
-func (e *imageRuntimeCacheEntry) transportPNG(part BlockImagePart) ([]byte, int, int, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.ensureTransportPNGUnlocked(part)
 }
 
 func (e *imageRuntimeCacheEntry) base64TransportPNG(part BlockImagePart) (string, int, error) {

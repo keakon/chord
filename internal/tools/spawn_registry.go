@@ -203,13 +203,6 @@ func waitForCommand(cmd *exec.Cmd, done <-chan struct{}) <-chan error {
 	return waitCh
 }
 
-func (r *SpawnRegistry) get(id string) (*spawnedProcess, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	proc, ok := r.processes[id]
-	return proc, ok
-}
-
 func (r *SpawnRegistry) cancel(id string, reason string) bool {
 	r.mu.Lock()
 	proc, ok := r.processes[id]

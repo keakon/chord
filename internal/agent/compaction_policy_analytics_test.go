@@ -20,11 +20,11 @@ func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T)
 		events = append(events, event)
 	})
 
-	a.recordUsageDrivenCompactionFailure(fmt.Errorf("first failure"))
+	a.recordUsageDrivenCompactionFailureClassified(fmt.Errorf("first failure"), classifyCompactionFailure(fmt.Errorf("first failure")))
 	if len(events) != 0 {
 		t.Fatalf("events after first failure = %d, want 0", len(events))
 	}
-	a.recordUsageDrivenCompactionFailure(fmt.Errorf("second failure"))
+	a.recordUsageDrivenCompactionFailureClassified(fmt.Errorf("second failure"), classifyCompactionFailure(fmt.Errorf("second failure")))
 	if len(events) != 1 {
 		t.Fatalf("events after breaker trip = %d, want 1", len(events))
 	}

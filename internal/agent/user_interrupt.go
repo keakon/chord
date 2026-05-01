@@ -68,9 +68,6 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause
 		emitCancelledToolResults(s.parent.emitToTUI, merged)
 	}
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
-	if resetResponses && s.llmClient != nil {
-		s.llmClient.ResetResponsesSession("turn_cancel")
-	}
 	slog.Info("SubAgent current turn interrupted",
 		"agent", s.instanceID,
 		"turn_id", s.turn.ID,

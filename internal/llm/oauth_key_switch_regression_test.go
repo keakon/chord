@@ -54,7 +54,7 @@ func TestResponsesProvider_OpenAIOAuthHTTPIgnoresConfiguredStoreTrue(t *testing.
 	}
 }
 
-func TestClient_ResetResponsesSessionClearsCodexChainState(t *testing.T) {
+func TestResponsesProvider_SetSessionIDClearsCodexChainState(t *testing.T) {
 	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,
 		Preset: config.ProviderPresetCodex,
@@ -70,9 +70,10 @@ func TestClient_ResetResponsesSessionClearsCodexChainState(t *testing.T) {
 	o.responsesProvider.codexWSLastInpLen = 2
 	o.responsesProvider.codexWSLastInpSig = "sig-123"
 	o.responsesProvider.codexWSPromptCacheKey = "prompt-123"
+	o.responsesProvider.sessionID = "old-session"
 
 	client := &Client{provider: providerCfg, providerImpl: o}
-	client.ResetResponsesSession("key_switch")
+	client.SetSessionID("new-session")
 
 	if o.responsesProvider.codexWSLastRespID != "" {
 		t.Fatalf("expected codexWSLastRespID reset, got %q", o.responsesProvider.codexWSLastRespID)
@@ -82,5 +83,8 @@ func TestClient_ResetResponsesSessionClearsCodexChainState(t *testing.T) {
 	}
 	if o.responsesProvider.codexWSPromptCacheKey != "" {
 		t.Fatalf("expected prompt cache key reset, got %q", o.responsesProvider.codexWSPromptCacheKey)
+	}
+	if o.responsesProvider.sessionID != "new-session" {
+		t.Fatalf("expected sessionID updated, got %q", o.responsesProvider.sessionID)
 	}
 }

@@ -148,9 +148,10 @@ func (a *MainAgent) handleCompactCommand() {
 	a.scheduleCompaction(true)
 }
 
-// produceCompactionDraftAsync is the async variant of produceCompactionDraft.
-// It respects context cancellation (for ESC-based cancel) and omits recentTail
-// from NewMessages since the tail will be preserved by ReplacePrefixAtomic.
+// produceCompactionDraftAsync archives the head, summarizes it, and builds the
+// new message list. Safe to call from a background goroutine (read-only use of
+// MainAgent fields + LLM / filesystem). Tail messages [headSplit:) are preserved
+// by ReplacePrefixAtomic at apply time, so the draft only carries the summary.
 func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int) (*compactionDraft, error) {
 	// Check for cancellation before starting expensive work
 	if ctx.Err() != nil {
@@ -165,6 +166,17 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 			Manual:         manual,
 			PlanID:         planID,
 			Target:         target,
+		}, nil
+	}
+
+	if headSplit <= 0 {
+		return &compactionDraft{
+			Skip:         true,
+			SmallContext: true,
+			InfoMessage:  "Cannot find a safe compaction boundary; nothing to compact.",
+			Manual:       manual,
+			PlanID:       planID,
+			Target:       target,
 		}, nil
 	}
 
@@ -214,7 +226,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	summaryMode := "model_summary"
 	backendName := config.CompactionPresetGeneric
 	modelRef := ""
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHeadWithProfile(head, relHistoryPath, profile, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
+	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(head, relHistoryPath, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
 	if strings.TrimSpace(backendUsed) != "" {
 		backendName = backendUsed
 	}
@@ -284,115 +296,8 @@ func (a *MainAgent) fireBeforeCompressHook(snapshot []message.Message, manual bo
 	}
 }
 
-// produceCompactionDraft archives the head, summarizes it, and builds the new
-// message list. Safe to call from a background goroutine (read-only use of
-// MainAgent fields + LLM / filesystem).
-func (a *MainAgent) produceCompactionDraft(snapshot []message.Message, manual bool, planID uint64, target compactionTarget) (*compactionDraft, error) {
-	if len(snapshot) < 4 {
-		return &compactionDraft{
-			Skip:           true,
-			TooFewMessages: true,
-			InfoMessage:    "Not enough history to compact.",
-			Manual:         manual,
-			PlanID:         planID,
-			Target:         target,
-		}, nil
-	}
-
-	todos := a.GetTodos()
-	subAgents := a.taskInfosForCompaction()
-	backgroundObjects := spawnStatesForSnapshot()
-	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
-	profile := a.resolveCompactionProfile(todos, subAgents, backgroundObjects, evidenceItems)
-	evidenceItems, recentTail := applyCompactionProfile(profile, snapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
-	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.projectRoot, 8)
-	head, evidenceMsgs := splitMessagesForCompactionWithSelections(snapshot, recentTail, evidenceItems)
-	if len(head) == 0 {
-		return &compactionDraft{
-			Skip:         true,
-			SmallContext: true,
-			InfoMessage:  "Current context is already small enough; nothing to compact.",
-			Manual:       manual,
-			PlanID:       planID,
-			Target:       target,
-		}, nil
-	}
-
-	index, err := nextCompactionIndex(a.sessionDir)
-	if err != nil {
-		return nil, fmt.Errorf("determine compaction index: %w", err)
-	}
-
-	absHistoryPath, relHistoryPath, err := a.exportCompactionHistory(head, index)
-	if err != nil {
-		return nil, fmt.Errorf("export compacted history: %w", err)
-	}
-	absHistoryMetaPath := compactionHistoryMetaPath(absHistoryPath)
-
-	summaryMode := "model_summary"
-	backendName := config.CompactionPresetGeneric
-	modelRef := ""
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHeadWithProfile(head, relHistoryPath, profile, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
-	if strings.TrimSpace(backendUsed) != "" {
-		backendName = backendUsed
-	}
-	if summarizeErr != nil {
-		summaryMode = "structured_fallback"
-		modelRef = "fallback"
-		input, inputErr := buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, false)
-		if inputErr == nil {
-			input.EvidenceItems = evidenceItems
-			if len(recentTail) > 0 {
-				input.RecentTail = recentTail
-				input.RecentTailAnchor = formatRecentTailAnchor(recentTail)
-			}
-			summaryText = buildStructuredFallbackSummary(relHistoryPath, input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
-		} else {
-			summaryMode = "truncate_only"
-			summaryText = buildTruncateOnlySummary(relHistoryPath, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
-		}
-	} else {
-		modelRef = usedModel
-	}
-
-	historyRefs, err := listHistoryReferences(a.projectRoot, a.sessionDir)
-	if err != nil {
-		return nil, fmt.Errorf("list history references: %w", err)
-	}
-	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
-	contextSummaryMsg := message.Message{
-		Role:                "user",
-		Content:             buildCompactionCheckpointMessage(summaryText, historyRefs, summaryMode, evidenceItems),
-		IsCompactionSummary: true,
-	}
-
-	newMessages := make([]message.Message, 0, 1+len(recentTail))
-	newMessages = append(newMessages, contextSummaryMsg)
-	newMessages = append(newMessages, recentTail...)
-
-	return &compactionDraft{
-		PlanID:             planID,
-		Target:             target,
-		NewMessages:        newMessages,
-		Index:              index,
-		AbsHistoryPath:     absHistoryPath,
-		AbsHistoryMetaPath: absHistoryMetaPath,
-		RelHistoryPath:     relHistoryPath,
-		SummaryMode:        summaryMode,
-		Backend:            backendName,
-		Profile:            string(profile),
-		ModelRef:           modelRef,
-		SummarizeErr:       summarizeErr,
-		Manual:             manual,
-		ArchivedCount:      len(head),
-		EvidenceCount:      len(evidenceItems),
-		EvidenceArtifacts:  len(evidenceMsgs),
-	}, nil
-}
-
-// applyCompactionDraft commits a draft produced by produceCompactionDraft (or
-// produceCompactionDraftAsync). In async mode (d.HeadSplit > 0), it uses
-// ReplacePrefixAtomic to preserve tail messages added during compaction.
+// applyCompactionDraft commits a draft produced by produceCompactionDraftAsync,
+// using ReplacePrefixAtomic to preserve tail messages added during compaction.
 func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 	if d == nil || d.Skip {
 		a.clearUsageDrivenAutoCompactRequest()
@@ -403,101 +308,7 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 		return nil
 	}
 
-	// Async mode: use ReplacePrefixAtomic to preserve tail messages
-	if d.HeadSplit > 0 {
-		return a.applyCompactionDraftAsync(d)
-	}
-
-	// Legacy sync mode: whole-history replacement
-	backupPath, err := a.rewriteSessionAfterCompaction(d.Index, d.NewMessages)
-	if err != nil {
-		return fmt.Errorf("rewrite compacted session: %w", err)
-	}
-
-	a.ctxMgr.RestoreMessages(d.NewMessages)
-	a.resetRuntimeEvidenceFromMessages(d.NewMessages)
-	a.saveRecoverySnapshot()
-	a.clearUsageDrivenAutoCompactRequest()
-	a.resetAutoCompactionFailureState()
-	if d.AbsHistoryMetaPath != "" {
-		meta := compactionHistoryMeta{
-			Version:     1,
-			HistoryFile: filepath.Base(d.AbsHistoryPath),
-			Status:      compactionHistoryApplied,
-			AppliedAt:   time.Now(),
-		}
-		if existing, err := readCompactionHistoryMeta(d.AbsHistoryMetaPath); err == nil {
-			if existing.Version != 0 {
-				meta.Version = existing.Version
-			}
-			if strings.TrimSpace(existing.HistoryFile) != "" {
-				meta.HistoryFile = existing.HistoryFile
-			}
-			meta.ExportedAt = existing.ExportedAt
-		} else if !os.IsNotExist(err) {
-			slog.Warn("failed to read compaction history meta before apply", "path", d.AbsHistoryMetaPath, "error", err)
-		}
-		if err := writeCompactionHistoryMeta(d.AbsHistoryMetaPath, meta); err != nil {
-			slog.Warn("failed to update compaction history meta", "path", d.AbsHistoryMetaPath, "error", err)
-		}
-	}
-
-	modeLabel := "automatically"
-	if d.Manual {
-		modeLabel = "manually"
-	}
-	info := fmt.Sprintf(
-		"Context compacted %s: archived %d messages into %s, preserved %d evidence item(s) (%s via %s, profile=%s). Backup: %s",
-		modeLabel,
-		d.ArchivedCount,
-		d.RelHistoryPath,
-		d.EvidenceCount,
-		d.SummaryMode,
-		blankToDefault(d.Backend, d.ModelRef),
-		blankToDefault(d.Profile, string(compactionProfileContinuation)),
-		backupPath,
-	)
-	if d.SummarizeErr != nil {
-		info += fmt.Sprintf(" Summary fallback reason: %v", d.SummarizeErr)
-	}
-	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
-	a.emitToTUI(CompactionStatusEvent{Status: "succeeded"})
-	a.emitToTUI(SessionRestoredEvent{})
-
-	// Compaction rewrites ctxMgr head and may drop early turns. Since the
-	// session-context reminder (AGENTS.md/currentDate) is not persisted to ctxMgr,
-	// ensure it is re-injected on the next LLM call.
-	a.sessionReminderInjected.Store(false)
-
-	a.llmClient.ResetResponsesSession("auto_compact")
-
-	slog.Info("context compacted",
-		"mode", modeLabel,
-		"summary_mode", d.SummaryMode,
-		"backend", d.Backend,
-		"profile", d.Profile,
-		"model", d.ModelRef,
-		"history_path", d.AbsHistoryPath,
-		"backup_path", backupPath,
-		"archived_messages", d.ArchivedCount,
-		"evidence_artifacts", d.EvidenceArtifacts,
-	)
-	if _, err := a.fireHook(a.parentCtx, hook.OnAfterCompress, 0, map[string]any{
-		"message_count":      len(d.NewMessages),
-		"context_tokens":     a.ctxMgr.LastTotalContextTokens(),
-		"manual":             d.Manual,
-		"summary_mode":       d.SummaryMode,
-		"backend":            d.Backend,
-		"profile":            d.Profile,
-		"model":              d.ModelRef,
-		"archived_messages":  d.ArchivedCount,
-		"evidence_artifacts": d.EvidenceArtifacts,
-		"history_path":       d.RelHistoryPath,
-		"backup_path":        backupPath,
-	}); err != nil {
-		slog.Warn("on_after_compress hook error", "error", err)
-	}
-	return nil
+	return a.applyCompactionDraftAsync(d)
 }
 
 // applyCompactionDraftAsync applies a compaction draft using ReplacePrefixAtomic,
@@ -577,7 +388,6 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.emitToTUI(SessionRestoredEvent{})
 
 	a.sessionReminderInjected.Store(false)
-	a.llmClient.ResetResponsesSession("auto_compact")
 
 	slog.Info("context compacted (async)",
 		"mode", modeLabel,
@@ -609,12 +419,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	return nil
 }
 
-func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHeadWithProfile(head, relHistoryPath, compactionProfileContinuation, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
-	return summary, modelRef, err
-}
-
-func (a *MainAgent) summarizeCompactionHeadWithProfile(head []message.Message, relHistoryPath string, profile compactionProfile, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
+func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
 	modelRef = a.compactionModelRef()
 	client, utilityContextLimit, err := a.newCompactionClient(modelRef)
 	if err != nil {

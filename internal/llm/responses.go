@@ -33,7 +33,6 @@ type ResponsesProvider struct {
 	dumpWriter   *DumpWriter
 	proxyScheme  string
 	dialProxyURL string
-	session      responsesSessionState
 	// codexWSCompleteFn is a test seam for the Codex WebSocket path. Production
 	// uses completeStreamCodexWebSocket directly.
 	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time) (*message.Response, bool, error)

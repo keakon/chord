@@ -365,17 +365,6 @@ func stripANSI(s string) string {
 	return ansi.Strip(s)
 }
 
-// stripANSILines returns a copy of lines with ANSI escapes removed from each
-// line. Useful for producing readable diagnostic output in test failure
-// messages where we want to show what text was actually rendered.
-func stripANSILines(lines []string) []string {
-	out := make([]string, len(lines))
-	for i, line := range lines {
-		out[i] = stripANSI(line)
-	}
-	return out
-}
-
 func skipANSISequence(s string, i int) int {
 	if i >= len(s) || s[i] != '\x1b' {
 		return i

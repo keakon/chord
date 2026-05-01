@@ -507,9 +507,10 @@ func TestDiscardSpeculativeStreamToolsEmitsCancelledResult(t *testing.T) {
 	turn := &Turn{}
 	turn.recordStreamingToolCall(PendingToolCall{CallID: "tool-spec-1", Name: "Read", ArgsJSON: `{"path":"internal/llm/provider.go"}`})
 
-	discardSpeculativeStreamTools(func(evt AgentEvent) {
+	emit := func(evt AgentEvent) {
 		events = append(events, evt)
-	}, turn)
+	}
+	emitCancelledToolResults(emit, turn.drainStreamingToolCalls())
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))

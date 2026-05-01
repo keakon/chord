@@ -91,13 +91,6 @@ func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map
 	return 0, false
 }
 
-// rebuildViewportFromMessages replaces all viewport blocks with blocks built
-// from the agent's current message list. Used after SessionRestoredEvent so
-// the restored conversation is visible.
-func (m *Model) rebuildViewportFromMessages() {
-	m.rebuildViewportFromMessagesWithReason("unspecified")
-}
-
 func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	if m.agent == nil {
 		return

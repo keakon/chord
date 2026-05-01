@@ -751,7 +751,6 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 		// Clear conversation history so the new role starts fresh.
 		a.ctxMgr.RestoreMessages(nil)
 		a.clearEvidenceCandidates()
-		a.llmClient.ResetResponsesSession("role_switch")
 	}
 
 	appliedModel := false
@@ -1459,7 +1458,6 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		a.commitPendingUserMessagesWithoutTurn()
 	}
 	a.emitActivity("main", ActivityIdle, "")
-	a.llmClient.ResetResponsesSession("turn_cancel")
 	a.markActiveSubAgentMailboxAck(false)
 	a.setIdleAndDrainPending()
 }
@@ -1672,7 +1670,6 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	}
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
-	a.llmClient.ResetResponsesSession("new_session")
 	a.installSessionTarget(newSessionDir)
 
 	// Freeze the new session's tool/system surface before installing the

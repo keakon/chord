@@ -582,6 +582,53 @@ func isReadLineNumberPrefix(s string) bool {
 	return true
 }
 
+func sanitizeReadDisplayText(s string) string {
+	if s == "" {
+		return ""
+	}
+	needsSanitization := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 0x20 && c != '\t') || c == 0x7f {
+			needsSanitization = true
+			break
+		}
+	}
+	if !needsSanitization {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\t':
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			b.WriteString(readDisplayControlLiteral(c))
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func readDisplayControlLiteral(c byte) string {
+	switch c {
+	case '\a':
+		return `\a`
+	case '\b':
+		return `\b`
+	case '\f':
+		return `\f`
+	case '\v':
+		return `\v`
+	default:
+		return fmt.Sprintf(`\x%02x`, c)
+	}
+}
+
 func parseReadDisplayLines(result string) ([]readDisplayLine, string) {
 	if result == "" {
 		return nil, ""
@@ -593,12 +640,12 @@ func parseReadDisplayLines(result string) ([]readDisplayLine, string) {
 	for _, line := range rawLines {
 		line = strings.TrimSuffix(line, "\r")
 		if before, after, ok := strings.Cut(line, "\t"); ok && isReadLineNumberPrefix(before) {
-			content := after
+			content := sanitizeReadDisplayText(after)
 			rows = append(rows, readDisplayLine{IsCode: true, LineNo: strings.TrimSpace(before), Content: content})
 			codeLines = append(codeLines, content)
 			continue
 		}
-		rows = append(rows, readDisplayLine{Content: line})
+		rows = append(rows, readDisplayLine{Content: sanitizeReadDisplayText(line)})
 	}
 
 	return rows, strings.Join(codeLines, "\n")

@@ -37,9 +37,6 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	}
 	emitCancelledToolResults(s.parent.emitToTUI, merged)
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
-	if s.llmClient != nil {
-		s.llmClient.ResetResponsesSession("turn_cancel")
-	}
 	slog.Info("SubAgent current turn cancelled by user",
 		"agent", s.instanceID,
 		"turn_id", turn.ID,

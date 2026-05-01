@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"image"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/keakon/chord/internal/config"
 )
 
 const maxTUIDiagnosticEvents = 128
@@ -110,28 +107,6 @@ func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
 	fmt.Fprintf(sb, "... truncated %d middle lines ...\n", len(lines)-tuiDiagnosticDumpSectionMaxLines)
 	sb.WriteString(strings.Join(lines[len(lines)-tail:], "\n"))
 	sb.WriteByte('\n')
-}
-
-func (m *Model) buildDiagnosticDump(now time.Time, trigger string) (string, string, error) {
-	baseDir := strings.TrimSpace(m.workingDir)
-	if baseDir == "" {
-		if _, err := os.Getwd(); err != nil {
-			return "", "", fmt.Errorf("resolve working dir: %w", err)
-		}
-	}
-	locator, err := config.DefaultPathLocator()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve storage paths: %w", err)
-	}
-	path := filepath.Join(locator.LogsDir, "tui-dumps",
-		fmt.Sprintf("tui-dump-%s-%d.log", now.Format("20060102-150405.000"), os.Getpid()))
-
-	m.recordTUIDiagnostic("diagnostic-dump", "%s", trigger)
-	content, err := m.buildDiagnosticDumpContent(now, trigger, path, false)
-	if err != nil {
-		return "", "", err
-	}
-	return path, content, nil
 }
 
 func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath string, sanitize bool) (string, error) {

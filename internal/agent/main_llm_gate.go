@@ -80,19 +80,6 @@ func (a *MainAgent) currentCompactionPendingCall() *pendingMainLLMCall {
 	return a.compactionState.pendingCall()
 }
 
-func (a *MainAgent) startCompactionState(planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan) {
-	a.compactionState = compactionState{
-		running:      true,
-		planID:       planID,
-		target:       target,
-		trigger:      trigger,
-		discard:      false,
-		continuation: continuation,
-		headSplit:    0, // Will be set by async path
-		cancel:       nil,
-	}
-}
-
 func (a *MainAgent) resetCompactionState() {
 	a.compactionState = compactionState{}
 }
@@ -114,23 +101,6 @@ func (a *MainAgent) markCompactionDiscard() {
 	if a.compactionState.running {
 		a.compactionState.discard = true
 	}
-}
-
-// historyMutationAllowed reports whether a mutation of an existing persisted
-// history message at idx is allowed under the current compaction state.
-// During async compaction, the frozen head [0, headSplit) must not be mutated;
-// only tail mutations at [headSplit, ...) are allowed.
-func (a *MainAgent) historyMutationAllowed(idx int) error {
-	if idx < 0 {
-		return nil
-	}
-	if !a.IsCompactionRunning() {
-		return nil
-	}
-	if idx < a.compactionState.headSplit {
-		return fmt.Errorf("history mutation at index %d blocked: async compaction froze [0, %d)", idx, a.compactionState.headSplit)
-	}
-	return nil
 }
 
 // IsCompactionRunning reports whether a compaction goroutine is currently
@@ -194,10 +164,6 @@ func (a *MainAgent) freezeToolSurface() {
 // ensureSessionBuilt re-captures it. Called on session-head resets.
 func (a *MainAgent) clearFrozenToolSurface() {
 	a.frozenToolDefs.Store(nil)
-}
-
-func (a *MainAgent) shouldDurableCompactBeforeMainLLM() bool {
-	return a.compactionTriggerForMainLLM().needed()
 }
 
 func (a *MainAgent) nextCompactionPlan() (uint64, compactionTarget) {
@@ -399,7 +365,6 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	//   case A (a.turn == nil or at barrier): apply now
 	//   case B (pendingMainLLMCall != nil, oversize pending): apply now + resume pending
 	//   case C (turn active, LLM/tool still running): defer to readyDraft
-	// Legacy path (headSplit == 0): always apply immediately
 	asyncPath := draft.HeadSplit > 0 && a.compactionState.headSplit > 0
 	turnActive := a.turn != nil
 	canApplyNow := !turnActive || a.compactionState.oversizeSuspended
@@ -430,7 +395,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		return
 	}
 
-	// Legacy path: apply immediately (existing behavior)
+	// Apply immediately
 	applySucceeded := false
 	if !discard {
 		if err := a.applyCompactionDraft(draft); err != nil {

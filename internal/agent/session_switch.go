@@ -109,7 +109,6 @@ func (a *MainAgent) handleNewSessionCommand() {
 	}
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
-	a.llmClient.ResetResponsesSession("new_session")
 	a.installSessionTarget(newSessionDir)
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 
@@ -342,7 +341,6 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	}
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
-	a.llmClient.ResetResponsesSession("fork_session")
 	a.installSessionTarget(newSessionDir)
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 

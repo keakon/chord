@@ -307,7 +307,6 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 		turn.activeToolBatchCancel = nil
 	}
 	turn.Cancel()
-	a.llmClient.ResetResponsesSession("turn_cancel")
 }
 
 // newTurn cancels any in-flight work and creates a fresh Turn.

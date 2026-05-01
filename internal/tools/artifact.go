@@ -83,7 +83,7 @@ type saveArtifactArgs struct {
 	Mode        string `json:"mode,omitempty"`
 }
 
-func (SaveArtifactTool) Name() string { return "SaveArtifact" }
+func (SaveArtifactTool) Name() string { return NameSaveArtifact }
 
 func (SaveArtifactTool) Description() string {
 	return "Save or update a runtime artifact for optional downstream worker handoff, such as a research report, task graph, review report, or verification log. This writes only under the current session's artifacts directory and does not modify project files. Multiple artifacts are allowed. Use mode=create for a new artifact, mode=append to add to an existing artifact, and mode=overwrite to replace an existing artifact intentionally."
@@ -279,7 +279,7 @@ type readArtifactArgs struct {
 	RelPath string `json:"rel_path,omitempty"`
 }
 
-func (ReadArtifactTool) Name() string { return "ReadArtifact" }
+func (ReadArtifactTool) Name() string { return NameReadArtifact }
 
 func (ReadArtifactTool) Description() string {
 	return "Read a runtime artifact by session-relative artifact path. Use this for SubAgent handoff artifacts such as research reports, task graphs, review reports, or verification logs. Only artifacts under the current session's artifacts directory are readable."
