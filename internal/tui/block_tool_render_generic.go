@@ -40,6 +40,7 @@ func renderCommandBlock(title string, lines []string, contentWidth int) []string
 	out := make([]string, 0, len(lines)+1)
 	out = append(out, DimStyle.Render("  "+title+":"))
 	for _, line := range lines {
+		line = sanitizeToolDisplayText(line)
 		for _, w := range wrapIndentedText(line, contentWidth) {
 			out = append(out, DimStyle.Render("    "+w))
 		}
@@ -98,8 +99,8 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 		style = ErrorStyle
 	}
 
-	total := toolCollapsedVisibleLineCount(content, contentWidth)
-	if total <= bashCollapsedResultMinVisibleLines {
+	total, truncated := toolPlainTextWrappedLineCount(content, contentWidth, bashCollapsedResultMinVisibleLines)
+	if !truncated && total <= bashCollapsedResultMinVisibleLines {
 		// Short output: show all lines inline.
 		for _, line := range toolExpandedTextLines(content, contentWidth) {
 			*result = append(*result, style.Render("  "+line))
@@ -159,7 +160,8 @@ func bashCollapsedResultIsShort(b *Block, contentWidth int) bool {
 	if strings.TrimSpace(content) == "" {
 		return true
 	}
-	return toolCollapsedVisibleLineCount(content, contentWidth) <= bashCollapsedResultMinVisibleLines
+	count, truncated := toolPlainTextWrappedLineCount(content, contentWidth, bashCollapsedResultMinVisibleLines)
+	return !truncated && count <= bashCollapsedResultMinVisibleLines
 }
 
 func bashCollapsedResultHiddenLines(b *Block, contentWidth int) int {
@@ -174,17 +176,26 @@ func bashCollapsedResultHiddenLines(b *Block, contentWidth int) int {
 	if strings.TrimSpace(content) == "" {
 		return 0
 	}
-	total := toolCollapsedVisibleLineCount(content, contentWidth)
-	// When total output is short enough to show inline in the collapsed
-	// card (see appendBashCollapsedSummary), there are no hidden lines.
-	if total <= bashCollapsedResultMinVisibleLines {
-		return 0
-	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	visible := 0
 	if line := bashFirstNonEmptyLine(content); line != "" {
 		visible = len(wrapText(line, contentWidth))
 	}
-	return total - visible
+	shortLimit := bashCollapsedResultMinVisibleLines
+	if visible > shortLimit {
+		shortLimit = visible
+	}
+	total, truncated := toolPlainTextWrappedLineCount(content, contentWidth, shortLimit)
+	if !truncated && total <= bashCollapsedResultMinVisibleLines {
+		return 0
+	}
+	if len(lines) > 1 {
+		return len(lines) - 1
+	}
+	if total > visible {
+		return total - visible
+	}
+	return 1
 }
 
 func bashCollapsedCommandHiddenLines(command string, contentWidth int) int {
@@ -274,34 +285,34 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			toolName := ToolCallStyle.Render(b.ToolName)
 			headerLine := "  " + prefix + " " + toolName
 			if mainPart != "" || grayPart != "" {
-				headerLine += " " + mainPart
+				headerLine += " " + sanitizeToolDisplayText(mainPart)
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 				}
 			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 			}
 			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 			result = append(result, headerLine)
 		} else {
 			headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
 			if mainPart != "" || grayPart != "" {
-				headerLine += " " + mainPart
+				headerLine += " " + sanitizeToolDisplayText(mainPart)
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 				}
 			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 			}
 			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 			result = append(result, ToolCallStyle.Render(headerLine))
 		}
 
 		if b.DoneSummary != "" {
-			summary := truncateOneLine(b.DoneSummary, width-30)
+			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), width-30)
 			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ ✓ %s", summary)))
 		} else if b.ResultContent != "" {
-			displayResult := toolCollapsedResultContent(b.ToolName, b.ResultContent)
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, b.ResultContent))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, width-30)
 			if b.toolResultIsError() {
@@ -319,24 +330,24 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			toolName := ToolCallStyle.Render(b.ToolName)
 			headerLine := "  " + prefix + " " + toolName
 			if mainPart != "" || grayPart != "" {
-				headerLine += " " + mainPart
+				headerLine += " " + sanitizeToolDisplayText(mainPart)
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 				}
 			} else if showParamSummary && paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 			}
 			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 			result = append(result, headerLine)
 		} else {
 			headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
 			if mainPart != "" || grayPart != "" {
-				headerLine += " " + mainPart
+				headerLine += " " + sanitizeToolDisplayText(mainPart)
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 				}
 			} else if showParamSummary && paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 			}
 			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 			styledHeader := ToolCallStyle.Render(headerLine)
@@ -348,7 +359,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		if paramSummary == "" || b.ToolName == "Bash" {
 			_, _, _, _, _, _, paramLines := b.toolHeaderMeta()
 			for _, line := range paramLines {
-				for _, wrapped := range wrapText(line, contentWidth) {
+				for _, wrapped := range wrapText(sanitizeToolDisplayText(line), contentWidth) {
 					result = append(result, DimStyle.Render("    "+wrapped))
 				}
 			}
@@ -393,7 +404,24 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 		return 0
 	}
 	displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
-	_, hidden, _ := toolExpandedResultLines(displayResult, contentWidth, false, b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled())
+	if b.ToolName == "Delete" {
+		displayResult = sanitizeToolDisplayText(displayResult)
+		nonEmpty := 0
+		for _, line := range strings.Split(strings.TrimRight(displayResult, "\n"), "\n") {
+			if strings.TrimSpace(line) != "" {
+				nonEmpty++
+			}
+		}
+		if nonEmpty > 1 {
+			return 1
+		}
+		return 0
+	}
+	resLines := strings.Split(strings.TrimRight(displayResult, "\n"), "\n")
+	if len(resLines) > maxToolCallCompactResultLines+1 {
+		return len(resLines) - maxToolCallCompactResultLines
+	}
+	_, hidden := toolExpandedResultLines(displayResult, contentWidth, false)
 	return hidden
 }
 
@@ -468,9 +496,9 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		if maxMain := contentWidth - 20 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
 			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
 		}
-		toolHeaderLine += " " + mainPart
+		toolHeaderLine += " " + sanitizeToolDisplayText(mainPart)
 		if grayPart != "" {
-			toolHeaderLine += " " + DimStyle.Render(grayPart)
+			toolHeaderLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 		}
 	}
 	toolHeaderLine = appendToolProgressSuffix(toolHeaderLine, b.ToolProgress, cardWidth-4)
@@ -535,7 +563,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 					}
 				} else {
 					displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
-					lines, hidden, usedMD := toolExpandedResultLines(displayResult, contentWidth, expanded, b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled())
+					lines, hidden := toolExpandedResultLines(displayResult, contentWidth, expanded)
 					if !expanded && collapsedPreviewLine != "" && compactToolPreviewDuplicatesResult(collapsedPreviewLine, lines) {
 						lines = nil
 					}
@@ -544,11 +572,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 						lineStyle = ErrorStyle
 					}
 					for _, line := range lines {
-						if usedMD {
-							result = append(result, "    "+line)
-						} else {
-							result = append(result, lineStyle.Render(toolResultIndent+line))
-						}
+						result = append(result, lineStyle.Render(toolResultIndent+line))
 					}
 					if !expanded && hidden > 0 {
 						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
@@ -700,17 +724,8 @@ func (b *Block) renderToolResult(width int) []string {
 	}
 	header := renderHeader(fmt.Sprintf("%s %s:", headerPrefix, b.ToolName))
 	result := []string{header}
-	cardBgStylePre := lipgloss.NewStyle().Background(style.GetBackground())
-	if !b.IsError && !b.toolResultIsError() && !b.toolResultIsCancelled() && toolResultLooksLikeMarkdown(sanitizeToolDisplayText(b.Content)) {
-		mdLines := renderMarkdownContent(sanitizeToolDisplayText(b.Content), contentWidth)
-		mdLines = preserveCardBg(mdLines, toolCardBg)
-		for _, line := range mdLines {
-			result = append(result, padLineToDisplayWidthWithStyle(cardBgStylePre, "    "+line, cardWidth))
-		}
-	} else {
-		for _, line := range wrapText(sanitizeToolDisplayText(b.Content), contentWidth) {
-			result = append(result, "    "+renderBody(line))
-		}
+	for _, line := range wrapText(sanitizeToolDisplayText(b.Content), contentWidth) {
+		result = append(result, "    "+renderBody(line))
 	}
 	return renderPrewrappedToolCard(style, cardWidth, ToolLabelStyle.Render("TOOL RESULT"), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

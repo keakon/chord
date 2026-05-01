@@ -105,7 +105,7 @@ curl -I https://api.openai.com/v1
 - 重新执行同样的 `Read`、`Bash`、`WebFetch` 或本地 shell 操作
 - 如果最新版本里仍能复现，请同时保留原始文件/输出和截图
 
-最近的构建会在这些界面中按字面显示 ANSI-rich 外部文本，而不会再次执行其中嵌入的终端 escape/control sequence；这也包括裸 carriage return / `\r` 进度刷新文本。这样既能查看原始序列内容，也不会再让诊断 dump 或其他原始终端输出污染周围卡片的渲染。
+最近的构建会在这些界面中按字面显示 ANSI-rich 外部文本，而不会再次执行其中嵌入的终端 escape/control sequence；这也包括裸 carriage return / `\r` 进度刷新文本。这样既能查看原始序列内容，也不会再让诊断 dump 或其他原始终端输出污染周围卡片的渲染。普通工具结果即使包含看起来像 Markdown 的标题、列表、表格或代码块，也会按纯文本处理，避免日志、diff、JSON/YAML 或抓取页面被意外重新排版。
 
 ## 切换 tab 或重新获焦后出现画面错乱
 

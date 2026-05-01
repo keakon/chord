@@ -142,7 +142,7 @@ func formatParamValue(v any) string {
 	}
 	switch val := v.(type) {
 	case string:
-		return val
+		return sanitizeToolDisplayText(val)
 	case float64:
 		return fmt.Sprintf("%.0f", val)
 	case bool:
@@ -161,7 +161,7 @@ func formatParamValue(v any) string {
 }
 
 func displayToolPath(path, workingDir string) string {
-	path = strings.TrimSpace(path)
+	path = sanitizeToolDisplayText(strings.TrimSpace(path))
 	if path == "" {
 		return ""
 	}
@@ -188,7 +188,7 @@ func displayToolPath(path, workingDir string) string {
 }
 
 func displayToolDir(path, workingDir string) string {
-	path = strings.TrimSpace(path)
+	path = sanitizeToolDisplayText(strings.TrimSpace(path))
 	if path == "" {
 		return ""
 	}

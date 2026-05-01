@@ -41,10 +41,10 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		headerLine = ToolCallStyle.Render(headerLine)
 	}
 	if title != "" {
-		headerLine += " " + title
+		headerLine += " " + sanitizeToolDisplayText(title)
 	}
 	if subType != "" {
-		headerLine += " " + DimStyle.Render("("+subType+")")
+		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}
 	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 	if b.toolExecutionIsQueued() && !isActive {
@@ -66,7 +66,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		case strings.TrimSpace(b.DoneSummary) != "":
 			appendCollapsedSummaryLines(&result, b.DoneSummary, width-30, ToolResultStyle)
 		case hasResultText:
-			summary := truncateOneLine(taskToolCollapsedHandleSummary(b.ResultContent), width-24)
+			summary := truncateOneLine(sanitizeToolDisplayText(taskToolCollapsedHandleSummary(b.ResultContent)), width-24)
 			result = append(result, ToolResultStyle.Render("  ▸ ↳ "+summary))
 		case b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "":
 			appendCollapsedSummaryLines(&result, b.ResultContent, width-30, ErrorStyle)
@@ -104,7 +104,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		}
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
-			for _, line := range toolExpandedTextLines(b.DoneSummary, contentWidth) {
+			for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 				result = append(result, "    "+line)
 			}
 		}
@@ -225,7 +225,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)
 		selectedOptions, customAnswers := splitQuestionSelections(q, answer)
 		if q.Header != "" {
-			result = append(result, QuestionSeparatorStyle.Render("  ▸ "+q.Header))
+			result = append(result, QuestionSeparatorStyle.Render("  ▸ "+sanitizeToolDisplayText(q.Header)))
 		}
 		if q.Question != "" {
 			qText := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
@@ -243,18 +243,19 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			result = append(result, DimStyle.Render("    Mode: "+mode))
 			result = append(result, DimStyle.Render("    Options:"))
 			for i, opt := range q.Options {
+				displayLabel := sanitizeToolDisplayText(opt.Label)
 				marker := " "
-				if _, ok := selectedOptions[opt.Label]; ok {
+				if _, ok := selectedOptions[displayLabel]; ok {
 					marker = "✓"
 				}
-				optPrefix := fmt.Sprintf("      %s %d. %s", marker, i+1, opt.Label)
+				optPrefix := fmt.Sprintf("      %s %d. %s", marker, i+1, displayLabel)
 				optLine := optPrefix
 				if opt.Description != "" {
 					descWidth := contentWidth - runewidth.StringWidth(optPrefix)
 					if descWidth < 0 {
 						descWidth = 0
 					}
-					optLine += DimStyle.Render(" — " + truncateOneLine(opt.Description, descWidth))
+					optLine += DimStyle.Render(" — " + truncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth))
 				}
 				result = append(result, optLine)
 			}
@@ -316,16 +317,17 @@ func splitQuestionSelections(question tools.QuestionItem, answer tools.QuestionA
 
 	labels := make(map[string]struct{}, len(question.Options))
 	for _, opt := range question.Options {
-		labels[opt.Label] = struct{}{}
+		labels[sanitizeToolDisplayText(opt.Label)] = struct{}{}
 	}
 
 	customAnswers := make([]string, 0, len(answer.Selected))
 	for _, sel := range answer.Selected {
-		if _, ok := labels[sel]; ok {
-			selectedOptions[sel] = struct{}{}
+		displaySel := sanitizeToolDisplayText(sel)
+		if _, ok := labels[displaySel]; ok {
+			selectedOptions[displaySel] = struct{}{}
 			continue
 		}
-		customAnswers = append(customAnswers, sel)
+		customAnswers = append(customAnswers, displaySel)
 	}
 	return selectedOptions, customAnswers
 }
@@ -375,7 +377,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 
 	if b.Collapsed {
 		if args.Reason != "" {
-			reasonSummary := truncateOneLine(args.Reason, contentWidth-10)
+			reasonSummary := truncateOneLine(sanitizeToolDisplayText(args.Reason), contentWidth-10)
 			result = append(result, DimStyle.Render("    reason: "+reasonSummary))
 		}
 		if summary := formatToolResultSummaryLine(b); summary != "" {
@@ -388,7 +390,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 	} else {
 		if args.Reason != "" {
 			result = append(result, DimStyle.Render("    reason:"))
-			for _, line := range wrapText(args.Reason, contentWidth-4) {
+			for _, line := range wrapText(sanitizeToolDisplayText(args.Reason), contentWidth-4) {
 				result = append(result, DimStyle.Render("      "+line))
 			}
 		}
@@ -400,16 +402,16 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			if ok {
 				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 				if handle.Status != "" {
-					result = append(result, DimStyle.Render("    status: "+handle.Status))
+					result = append(result, DimStyle.Render("    status: "+sanitizeToolDisplayText(handle.Status)))
 				}
 				if handle.TaskID != "" && !b.Collapsed {
-					result = append(result, DimStyle.Render("    task_id: "+handle.TaskID))
+					result = append(result, DimStyle.Render("    task_id: "+sanitizeToolDisplayText(handle.TaskID)))
 				}
 				if handle.AgentID != "" {
-					result = append(result, DimStyle.Render("    agent_id: "+handle.AgentID))
+					result = append(result, DimStyle.Render("    agent_id: "+sanitizeToolDisplayText(handle.AgentID)))
 				}
 				if handle.Message != "" {
-					result = append(result, DimStyle.Render("    message: "+handle.Message))
+					result = append(result, DimStyle.Render("    message: "+sanitizeToolDisplayText(handle.Message)))
 				}
 			} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
@@ -520,16 +522,16 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			if ok {
 				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 				if handle.Status != "" {
-					result = append(result, DimStyle.Render("    status: "+handle.Status))
+					result = append(result, DimStyle.Render("    status: "+sanitizeToolDisplayText(handle.Status)))
 				}
 				if handle.TaskID != "" && !b.Collapsed {
-					result = append(result, DimStyle.Render("    task_id: "+handle.TaskID))
+					result = append(result, DimStyle.Render("    task_id: "+sanitizeToolDisplayText(handle.TaskID)))
 				}
 				if handle.AgentID != "" {
-					result = append(result, DimStyle.Render("    agent_id: "+handle.AgentID))
+					result = append(result, DimStyle.Render("    agent_id: "+sanitizeToolDisplayText(handle.AgentID)))
 				}
 				if handle.Message != "" {
-					result = append(result, DimStyle.Render("    message: "+handle.Message))
+					result = append(result, DimStyle.Render("    message: "+sanitizeToolDisplayText(handle.Message)))
 				}
 			} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))

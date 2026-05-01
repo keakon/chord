@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -194,69 +193,33 @@ func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.
 	}
 }
 
-func TestCompactToolCardMarkdownHeadingKeepsCardBackgroundAcrossTrailingSpaces(t *testing.T) {
+func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Skill",
-		Content:                `{"name":"skill-creator","result":"<path>/tmp/skills/skill-creator/SKILL.md</path>"}`,
-		ResultContent:          "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n\n# Skill Creator\n\n- Step one\n- Step two\n</skill>",
+		ToolName:               "WebFetch",
+		Content:                `{"url":"https://example.com"}`,
+		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```\n\n- item one\n- item two",
 		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
-	lines := block.Render(120, "")
-	if len(lines) == 0 {
-		t.Fatal("expected rendered tool block")
-	}
-
-	var target string
-	for _, line := range lines {
-		plain := stripANSI(line)
-		if strings.Contains(plain, "Skill Creator") {
-			target = line
-			break
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"## Ready", "```go", "fmt.Println(1)", "- item one", "- item two"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected markdown-looking tool result content to remain literal (%q), got:\n%s", want, joined)
 		}
 	}
-	if target == "" {
-		t.Fatalf("failed to locate markdown heading line in render output: %q", strings.Join(lines, "\n"))
+	if strings.Contains(joined, "• item one") {
+		t.Fatalf("ordinary tool result must not render markdown bullets, got:\n%s", joined)
 	}
-
-	buf := newScreenBuffer(ansi.StringWidth(target), 1)
-	uv.NewStyledString(target).Draw(buf, buf.Bounds())
-	cells := buf.Line(0)
-	if len(cells) == 0 {
-		t.Fatal("expected rendered cells")
-	}
-
-	cardBg := lipgloss.Color(currentTheme.ToolCallBg)
-	seenHeading := false
-	trailingCardBgSpaces := 0
-	for _, cell := range cells {
-		if cell.IsZero() || cell.Content == "" {
-			continue
-		}
-		if cell.Content == "S" {
-			seenHeading = true
-			continue
-		}
-		if seenHeading && cell.Content == " " {
-			if !colorsEqual(cell.Style.Bg, cardBg) {
-				t.Fatalf("trailing space background = %v, want card bg %v", cell.Style.Bg, cardBg)
-			}
-			trailingCardBgSpaces++
-		}
-	}
-	if !seenHeading {
-		t.Fatal("expected to observe markdown heading cells")
-	}
-	if trailingCardBgSpaces == 0 {
-		t.Fatal("expected to observe trailing spaces after markdown heading")
+	if strings.Contains(joined, "GO") {
+		t.Fatalf("ordinary tool result must not use assistant-style fenced code rendering, got:\n%s", joined)
 	}
 }
 
-func TestCompactToolCardMarkdownKeepsCardBackgroundWithoutPerLinePadding(t *testing.T) {
+func TestExpandedSkillResultUsesPlainTextForMarkdownLookingContent(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		ID:                     1,
@@ -268,49 +231,14 @@ func TestCompactToolCardMarkdownKeepsCardBackgroundWithoutPerLinePadding(t *test
 		ToolCallDetailExpanded: true,
 	}
 
-	lines := block.Render(120, "")
-	if len(lines) == 0 {
-		t.Fatal("expected rendered tool block")
-	}
-
-	var target string
-	for _, line := range lines {
-		plain := stripANSI(line)
-		if strings.Contains(plain, "Skill Creator") {
-			target = line
-			break
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"# Skill Creator", "- Step one", "- Step two"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected expanded Skill result to keep literal markdown-looking text %q, got:\n%s", want, joined)
 		}
 	}
-	if target == "" {
-		t.Fatalf("failed to locate markdown heading line in render output: %q", strings.Join(lines, "\n"))
-	}
-
-	buf := newScreenBuffer(ansi.StringWidth(target), 1)
-	uv.NewStyledString(target).Draw(buf, buf.Bounds())
-	cells := buf.Line(0)
-	if len(cells) == 0 {
-		t.Fatal("expected rendered cells")
-	}
-
-	cardBg := lipgloss.Color(currentTheme.ToolCallBg)
-	seenHeading := false
-	trailingCardBgSpaces := 0
-	for _, cell := range cells {
-		if cell.IsZero() || cell.Content == "" {
-			continue
-		}
-		if cell.Content == "S" {
-			seenHeading = true
-		}
-		if seenHeading && cell.Content == " " && colorsEqual(cell.Style.Bg, cardBg) {
-			trailingCardBgSpaces++
-		}
-	}
-	if !seenHeading {
-		t.Fatal("expected to observe markdown heading cells")
-	}
-	if trailingCardBgSpaces == 0 {
-		t.Fatal("expected to observe card-background padding after markdown heading")
+	if strings.Contains(joined, "• Step one") {
+		t.Fatalf("expanded Skill result should not render markdown bullets, got:\n%s", joined)
 	}
 }
 
@@ -762,6 +690,21 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	}
 }
 
+func TestToolExpandedResultLinesHiddenCountDoesNotDoubleCountFirstHiddenLine(t *testing.T) {
+	lines := make([]string, maxToolCallCompactResultLines+2)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i+1)
+	}
+
+	visible, hidden := toolExpandedResultLines(strings.Join(lines, "\n"), 100, false)
+	if len(visible) != maxToolCallCompactResultLines {
+		t.Fatalf("visible lines = %d, want %d", len(visible), maxToolCallCompactResultLines)
+	}
+	if hidden != 2 {
+		t.Fatalf("hidden lines = %d, want 2", hidden)
+	}
+}
+
 func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	block := &Block{
 		ID:                 1,
@@ -784,6 +727,170 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 		if strings.Contains(joined, seg) {
 			t.Fatalf("queued tool should not render active spinner segment %q; got:\n%s", seg, joined)
 		}
+	}
+}
+
+func TestGenericToolHeaderAndCollapsedResultEscapesANSIRichText(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Glob",
+		Content:       `{"pattern":"\u001b[33m*.go\u001b[0m","path":"\u001b[35m/tmp/repo\u001b[0m"}`,
+		Collapsed:     true,
+		ResultContent: "\x1b[31minternal/tui/app.go\x1b[0m\ninternal/tui/block.go",
+		ResultDone:    true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected generic tool card to not contain raw ESC: %q", joined)
+	}
+	for _, want := range []string{`\x1b[33m*.go\x1b[0m`, `\x1b[35m/tmp/repo\x1b[0m`, "2 files"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected generic tool card to contain %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
+	block := &Block{
+		ID:        1,
+		Type:      BlockToolCall,
+		ToolName:  "Bash",
+		Content:   `{"command":"printf '\u001b[32mok\u001b[0m'","description":"\u001b[36mdesc\u001b[0m"}`,
+		Collapsed: true,
+		ResultContent: strings.Join([]string{
+			"\x1b[31mline-1\x1b[0m",
+			"line-2",
+			"line-3",
+			"line-4",
+			"line-5",
+			"line-6",
+		}, "\n"),
+		ResultDone: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected Bash card to not contain raw ESC: %q", joined)
+	}
+	for _, want := range []string{`\x1b[36mdesc\x1b[0m`, `\x1b[31mline-1\x1b[0m`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected Bash card to contain %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
+	lines := make([]string, 50000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%05d", i)
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Bash",
+		Content:       `{"command":"cat huge.log","description":"show huge log"}`,
+		Collapsed:     true,
+		ResultContent: strings.Join(lines, "\n"),
+		ResultDone:    true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "line-00000") {
+		t.Fatalf("expected collapsed Bash preview to show first line, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "line-49999") {
+		t.Fatalf("collapsed Bash preview should not render the hidden tail, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "49999 more lines · [space] expand") {
+		t.Fatalf("expected cheap hidden-line hint for large output, got:\n%s", joined)
+	}
+}
+
+func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Question",
+		Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
+		ResultContent: `[{"header":"\u001b[31mHDR\u001b[0m","selected":["\u001b[34mA\u001b[0m","\u001b[33mcustom\u001b[0m"]}]`,
+		ResultDone:    true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected Question card to not contain raw ESC: %q", joined)
+	}
+	for _, want := range []string{`\x1b[31mHDR\x1b[0m`, `\x1b[32mone\x1b[0m`, `\x1b[34mA\x1b[0m`, `\x1b[35mdesc\x1b[0m`, `\x1b[33mcustom\x1b[0m`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected Question card to contain %q, got:\n%s", want, joined)
+		}
+	}
+	if !strings.Contains(joined, `✓ 1. \x1b[34mA\x1b[0m`) {
+		t.Fatalf("expected sanitized selected option label to stay checked, got:\n%s", joined)
+	}
+}
+
+func TestDelegateAndControlCardsEscapeStructuredFields(t *testing.T) {
+	cases := []struct {
+		name  string
+		block *Block
+		want  []string
+	}{
+		{
+			name: "delegate",
+			block: &Block{
+				ID:            1,
+				Type:          BlockToolCall,
+				ToolName:      "Delegate",
+				Collapsed:     false,
+				Content:       `{"description":"run \u001b[32mworker\u001b[0m","agent_type":"\u001b[36mreviewer\u001b[0m"}`,
+				ResultContent: `{"status":"started","task_id":"adhoc-1","agent_id":"\u001b[31mreviewer-1\u001b[0m","message":"\u001b[33mrunning\u001b[0m"}`,
+				ResultDone:    true,
+			},
+			want: []string{`\x1b[32mworker\x1b[0m`, `\x1b[36mreviewer\x1b[0m`, `\x1b[31mreviewer-1\x1b[0m`, `\x1b[33mrunning\x1b[0m`},
+		},
+		{
+			name: "cancel",
+			block: &Block{
+				ID:            2,
+				Type:          BlockToolCall,
+				ToolName:      "Cancel",
+				Collapsed:     false,
+				Content:       `{"target_task_id":"adhoc-7","reason":"\u001b[35mstop now\u001b[0m"}`,
+				ResultContent: `{"status":"stopped","task_id":"adhoc-7","agent_id":"\u001b[31mreviewer-2\u001b[0m","message":"\u001b[33mstopped\u001b[0m"}`,
+				ResultDone:    true,
+			},
+			want: []string{`\x1b[35mstop now\x1b[0m`, `\x1b[31mreviewer-2\x1b[0m`, `\x1b[33mstopped\x1b[0m`},
+		},
+		{
+			name: "notify",
+			block: &Block{
+				ID:            3,
+				Type:          BlockToolCall,
+				ToolName:      "Notify",
+				Collapsed:     false,
+				Content:       `{"target_task_id":"adhoc-5","message":"\u001b[36mplease continue\u001b[0m","kind":"\u001b[34mreply\u001b[0m"}`,
+				ResultContent: `{"status":"delivered","task_id":"adhoc-5","agent_id":"\u001b[31mreviewer-3\u001b[0m","message":"\u001b[33mdelivered\u001b[0m"}`,
+				ResultDone:    true,
+			},
+			want: []string{`\x1b[36mplease continue\x1b[0m`, `\x1b[34mreply\x1b[0m`, `\x1b[31mreviewer-3\x1b[0m`, `\x1b[33mdelivered\x1b[0m`},
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			joined := stripANSI(strings.Join(tt.block.Render(120, ""), "\n"))
+			if strings.ContainsRune(joined, '\x1b') {
+				t.Fatalf("expected %s card to not contain raw ESC: %q", tt.name, joined)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("expected %s card to contain %q, got:\n%s", tt.name, want, joined)
+				}
+			}
+		})
 	}
 }
 
@@ -1002,7 +1109,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			content:     `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
 			result:      "Delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
 			wantPrefix:  "✓▾ Delete",
-			wantVisible: "• examples/compression-config.yaml",
+			wantVisible: "- examples/compression-config.yaml",
 		},
 		{
 			name:        "grep",
@@ -1176,7 +1283,7 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	}
 }
 
-func TestExpandedTaskDescriptionRendersMarkdown(t *testing.T) {
+func TestExpandedTaskDescriptionUsesPlainTextForMarkdownLookingContent(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	desc := "## Plan\n- item one\n- item two\n\n```go\nfmt.Println(\"ok\")\n```"
 	block := &Block{
@@ -1186,21 +1293,20 @@ func TestExpandedTaskDescriptionRendersMarkdown(t *testing.T) {
 		Content:                `{"description":` + strconv.Quote(desc) + `,"agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
 		ResultDone:             true,
-		ToolCallDetailExpanded: false,
+		ToolCallDetailExpanded: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "Description:") {
 		t.Fatalf("expected expanded Delegate to show description heading; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Plan") {
-		t.Fatalf("expected markdown heading text in Delegate description; got:\n%s", joined)
+	for _, want := range []string{"## Plan", "- item one", "- item two", "```go", `fmt.Println("ok")`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected Delegate description to keep literal markdown-looking text %q, got:\n%s", want, joined)
+		}
 	}
-	if !strings.Contains(joined, "• item one") {
-		t.Fatalf("expected markdown bullet rendering in Delegate description; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "fmt.Println(\"ok\")") {
-		t.Fatalf("expected fenced code content in Delegate description; got:\n%s", joined)
+	if strings.Contains(joined, "• item one") {
+		t.Fatalf("Delegate description should not render markdown bullets; got:\n%s", joined)
 	}
 }
 
@@ -2250,9 +2356,8 @@ func TestRenderTodoCall_WithItems(t *testing.T) {
 	}
 }
 
-func TestToolResultMarkdownTableKeepsEmailLinksInline(t *testing.T) {
+func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -2264,20 +2369,15 @@ func TestToolResultMarkdownTableKeepsEmailLinksInline(t *testing.T) {
 		ResultContent:          "The report shows 1 expired account email entry:\n\n| Account ID | Email | Expiration Date |\n|------------|-------|-----------------|\n| a20158b8-... | gfwgfwgfwgfw@gmail.com | 2026-04-02 |\n\nThese accounts need to sign in again.",
 	}
 
-	joinedANSI := strings.Join(block.Render(100, ""), "\n")
-	if strings.Contains(joinedANSI, "[1]:") {
-		t.Fatalf("expected tool result markdown table links to stay inline, got footer list:\n%s", joinedANSI)
-	}
-	joinedPlain := stripANSI(stripOSC8ToolTest(joinedANSI))
-	if !strings.Contains(joinedPlain, "gfwgfwgfwgfw@gmail.com") {
-		t.Fatalf("expected tool result table to keep email inside table, got %q", joinedPlain)
-	}
-	if !strings.Contains(joinedPlain, "These accounts need to sign in again") {
-		t.Fatalf("expected trailing paragraph after tool result table, got %q", joinedPlain)
+	joinedPlain := stripANSI(stripOSC8ToolTest(strings.Join(block.Render(100, ""), "\n")))
+	for _, want := range []string{"| Account ID | Email | Expiration Date |", "gfwgfwgfwgfw@gmail.com", "These accounts need to sign in again."} {
+		if !strings.Contains(joinedPlain, want) {
+			t.Fatalf("expected tool result to keep table-like content literal (%q), got %q", want, joinedPlain)
+		}
 	}
 }
 
-func TestTaskDoneSummaryRendersMarkdownWhenExpanded(t *testing.T) {
+func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	doneSummary := "## Findings\n- item one\n- item two\n\n```go\nfmt.Println(\"ok\")\n```"
 	block := &Block{
@@ -2295,13 +2395,12 @@ func TestTaskDoneSummaryRendersMarkdownWhenExpanded(t *testing.T) {
 	if !strings.Contains(joined, "Completed:") {
 		t.Fatalf("expected Completed section, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Findings") {
-		t.Fatalf("expected markdown heading text, got:\n%s", joined)
+	for _, want := range []string{"## Findings", "- item one", "- item two", "```go", `fmt.Println("ok")`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected done summary to keep literal markdown-looking text %q, got:\n%s", want, joined)
+		}
 	}
-	if !strings.Contains(joined, "• item one") {
-		t.Fatalf("expected markdown bullet rendering, got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "fmt.Println(\"ok\")") {
-		t.Fatalf("expected fenced code content, got:\n%s", joined)
+	if strings.Contains(joined, "• item one") {
+		t.Fatalf("done summary should not render markdown bullets, got:\n%s", joined)
 	}
 }

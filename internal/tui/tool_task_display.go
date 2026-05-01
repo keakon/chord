@@ -38,8 +38,8 @@ func parseTaskToolArgs(argsJSON string) taskToolArgs {
 	}
 	var parsed taskToolArgs
 	_ = json.Unmarshal([]byte(argsJSON), &parsed)
-	parsed.Description = strings.TrimSpace(parsed.Description)
-	parsed.AgentType = strings.TrimSpace(parsed.AgentType)
+	parsed.Description = sanitizeToolDisplayText(strings.TrimSpace(parsed.Description))
+	parsed.AgentType = sanitizeToolDisplayText(strings.TrimSpace(parsed.AgentType))
 	return parsed
 }
 
@@ -136,26 +136,26 @@ func taskToolExpandedHandleLines(result string) []string {
 		if trimmed == "" {
 			return nil
 		}
-		return []string{trimmed}
+		return []string{sanitizeToolDisplayText(trimmed)}
 	}
 	var lines []string
 	if handle.AgentID != "" {
-		lines = append(lines, "agent_id: "+handle.AgentID)
+		lines = append(lines, "agent_id: "+sanitizeToolDisplayText(handle.AgentID))
 	}
 	if handle.PreviousAgentID != "" {
-		lines = append(lines, "previous_agent_id: "+handle.PreviousAgentID)
+		lines = append(lines, "previous_agent_id: "+sanitizeToolDisplayText(handle.PreviousAgentID))
 	}
 	if handle.TaskID != "" {
-		lines = append(lines, "task_id: "+handle.TaskID)
+		lines = append(lines, "task_id: "+sanitizeToolDisplayText(handle.TaskID))
 	}
 	if handle.Status != "" {
-		lines = append(lines, "status: "+handle.Status)
+		lines = append(lines, "status: "+sanitizeToolDisplayText(handle.Status))
 	}
 	if handle.Rehydrated {
 		lines = append(lines, "rehydrated: true")
 	}
 	if handle.Message != "" {
-		lines = append(lines, "message: "+handle.Message)
+		lines = append(lines, "message: "+sanitizeToolDisplayText(handle.Message))
 	}
 	return lines
 }
@@ -166,8 +166,8 @@ func parseCancelToolArgs(argsJSON string) cancelToolArgs {
 	}
 	var parsed cancelToolArgs
 	_ = json.Unmarshal([]byte(argsJSON), &parsed)
-	parsed.TargetTaskID = strings.TrimSpace(parsed.TargetTaskID)
-	parsed.Reason = strings.TrimSpace(parsed.Reason)
+	parsed.TargetTaskID = sanitizeToolDisplayText(strings.TrimSpace(parsed.TargetTaskID))
+	parsed.Reason = sanitizeToolDisplayText(strings.TrimSpace(parsed.Reason))
 	return parsed
 }
 
@@ -177,9 +177,9 @@ func parseNotifyToolArgs(argsJSON string) notifyToolArgs {
 	}
 	var parsed notifyToolArgs
 	_ = json.Unmarshal([]byte(argsJSON), &parsed)
-	parsed.TargetTaskID = strings.TrimSpace(parsed.TargetTaskID)
-	parsed.Message = strings.TrimSpace(parsed.Message)
-	parsed.Kind = strings.TrimSpace(parsed.Kind)
+	parsed.TargetTaskID = sanitizeToolDisplayText(strings.TrimSpace(parsed.TargetTaskID))
+	parsed.Message = sanitizeToolDisplayText(strings.TrimSpace(parsed.Message))
+	parsed.Kind = sanitizeToolDisplayText(strings.TrimSpace(parsed.Kind))
 	return parsed
 }
 

@@ -18,7 +18,6 @@ var (
 	diffAddBg = currentTheme.DiffAddLineBg
 	diffDelBg = currentTheme.DiffDelLineBg
 
-	mdListLineRe  = regexp.MustCompile(`(?m)^[\t ]*[-*+][\t ]+\S`)
 	lspDiagLineRe = regexp.MustCompile(`^\s*\d+:\d+`)
 
 	// lspSeverityRe matches "[E]", "[W]", "[I]", "[H]" prefixes in LSP diagnostic output.
@@ -43,20 +42,6 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 		return false
 	}
 	return true
-}
-
-func toolResultLooksLikeMarkdown(s string) bool {
-	t := strings.TrimSpace(s)
-	if t == "" {
-		return false
-	}
-	if strings.HasPrefix(t, "#") {
-		return true
-	}
-	if strings.Contains(s, "```") {
-		return true
-	}
-	return mdListLineRe.MatchString(s)
 }
 
 func toolCollapsedSummaryText(s string) string {
@@ -101,9 +86,6 @@ func toolExpandedTextLines(s string, width int) []string {
 	if trimmed == "" {
 		return nil
 	}
-	if toolResultLooksLikeMarkdown(trimmed) {
-		return renderMarkdownContent(trimmed, width)
-	}
 	return wrapText(trimmed, width)
 }
 
@@ -144,19 +126,33 @@ func toolCollapsedVisibleLineCount(s string, width int) int {
 	if trimmed == "" {
 		return 0
 	}
-	if toolResultLooksLikeMarkdown(trimmed) {
-		return len(renderMarkdownContent(trimmed, width))
-	}
 	return len(wrapText(trimmed, width))
 }
 
-func toolExpandedResultLines(displayResult string, width int, expanded bool, allowMarkdown bool) ([]string, int, bool) {
+func toolPlainTextWrappedLineCount(text string, width int, limit int) (count int, truncated bool) {
+	if width <= 0 {
+		width = 80
+	}
+	if text == "" {
+		return 0, false
+	}
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		lineCount := len(wrapText(line, width))
+		if lineCount == 0 {
+			lineCount = 1
+		}
+		count += lineCount
+		if limit > 0 && count > limit {
+			return count, true
+		}
+	}
+	return count, false
+}
+
+func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]string, int) {
 	trimmed := strings.TrimSpace(displayResult)
 	if trimmed == "" {
-		return nil, 0, false
-	}
-	if allowMarkdown && expanded && toolResultLooksLikeMarkdown(trimmed) {
-		return renderMarkdownContent(trimmed, width), 0, true
+		return nil, 0
 	}
 	resLines := strings.Split(strings.TrimRight(displayResult, "\n"), "\n")
 	n := len(resLines)
@@ -171,12 +167,16 @@ func toolExpandedResultLines(displayResult string, width int, expanded bool, all
 	hidden := 0
 	if !expanded {
 		visible := len(out)
-		total := len(toolExpandedTextLines(displayResult, width))
-		if total > visible {
+		total, truncated := toolPlainTextWrappedLineCount(displayResult, width, visible+1)
+		if truncated && n > lim {
+			// Avoid wrapping the entire hidden tail in collapsed mode. This is a
+			// cheap logical-line suffix, not an exact wrapped-line count.
+			hidden = n - lim
+		} else if total > visible {
 			hidden = total - visible
 		}
 	}
-	return out, hidden, false
+	return out, hidden
 }
 
 func toolSummaryLine(line string) string {
@@ -264,25 +264,25 @@ func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
 		return "cancelled", false
 	}
 	if b.toolResultIsError() {
-		if timedOut := bashTimeoutSummary(b.ResultContent); timedOut != "" {
+		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(b.ResultContent)); timedOut != "" {
 			return timedOut, true
 		}
-		if line := bashFirstNonEmptyLine(bashErrorBody(b.ResultContent)); line != "" {
+		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorBody(b.ResultContent))); line != "" {
 			return truncateOneLine(line, 120), true
 		}
-		if line := bashFirstNonEmptyLine(b.ResultContent); line != "" {
+		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(b.ResultContent)); line != "" {
 			return truncateOneLine(line, 120), true
 		}
-		if exit := bashExitCodeFromError(b.ResultContent); exit != "" {
+		if exit := sanitizeToolDisplayText(bashExitCodeFromError(b.ResultContent)); exit != "" {
 			return exit, true
 		}
 		return "failed", true
 	}
 	_, stdout := bashSplitResultStreams(b)
-	if line := bashFirstNonEmptyLine(stdout); line != "" {
+	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(stdout)); line != "" {
 		return truncateOneLine(line, 120), false
 	}
-	if line := bashFirstNonEmptyLine(strings.TrimSpace(b.ResultContent)); line != "" {
+	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent))); line != "" {
 		return truncateOneLine(line, 120), false
 	}
 	return "completed", false

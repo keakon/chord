@@ -85,6 +85,7 @@ func wrapIndentedText(text string, width int) []string {
 }
 
 func appendQuestionAnswerLines(dst []string, text, firstPrefix, continuationPrefix string, width int) []string {
+	text = sanitizeToolDisplayText(text)
 	if width <= 0 {
 		width = 80
 	}
