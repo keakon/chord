@@ -767,7 +767,7 @@ func TestHeadlessSubscribeFiltersEvents(t *testing.T) {
 	}
 }
 
-func TestHeadlessSubscribeAllowsNotification(t *testing.T) {
+func TestHeadlessSubscribeNotificationDoesNotDuplicateIdle(t *testing.T) {
 	state := &headlessState{}
 	cmd := headlessCommand{
 		Type:   "subscribe",
@@ -783,18 +783,8 @@ func TestHeadlessSubscribeAllowsNotification(t *testing.T) {
 	}
 
 	envs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(envs) != 1 {
-		t.Fatalf("len(envs) = %d, want 1", len(envs))
-	}
-	if envs[0].Type != "notification" {
-		t.Fatalf("env type = %q, want notification", envs[0].Type)
-	}
-	payload, ok := envs[0].Payload.(headlessNotification)
-	if !ok {
-		t.Fatalf("payload type = %T, want headlessNotification", envs[0].Payload)
-	}
-	if payload.Reason != "idle" {
-		t.Fatalf("notification reason = %q, want idle", payload.Reason)
+	if len(envs) != 0 {
+		t.Fatalf("len(envs) = %d, want 0; idle should not be emitted as notification", len(envs))
 	}
 }
 
@@ -1244,15 +1234,15 @@ func TestHeadlessNotificationEvents(t *testing.T) {
 
 	state = &headlessState{subscriptions: map[string]bool{"notification": true, "idle": true}, pendingOutcome: "completed"}
 	idleEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(idleEnvs) != 2 || idleEnvs[0].Type != "notification" || idleEnvs[0].Payload.(headlessNotification).Reason != "idle" || idleEnvs[1].Type != "idle" {
-		t.Fatalf("idle envs = %#v, want notification(reason=idle) + idle", idleEnvs)
+	if len(idleEnvs) != 1 || idleEnvs[0].Type != "idle" {
+		t.Fatalf("idle envs = %#v, want idle only", idleEnvs)
 	}
 
-	// Notification is also sent on idle with error outcome.
+	// Idle with error outcome is also represented by a single idle envelope.
 	state = &headlessState{subscriptions: map[string]bool{"notification": true, "idle": true}, pendingOutcome: "error", lastError: "something failed"}
 	idleErrorEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(idleErrorEnvs) != 2 || idleErrorEnvs[0].Type != "notification" || idleErrorEnvs[0].Payload.(headlessNotification).Reason != "error" || idleErrorEnvs[0].Payload.(headlessNotification).Message != "something failed" {
-		t.Fatalf("idle error envs = %#v, want notification(reason=error, message=something failed) + idle", idleErrorEnvs)
+	if len(idleErrorEnvs) != 1 || idleErrorEnvs[0].Type != "idle" {
+		t.Fatalf("idle error envs = %#v, want idle only", idleErrorEnvs)
 	}
 }
 

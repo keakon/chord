@@ -32,6 +32,7 @@
 - 改进排队中的工具调用徽标：保持右侧留白，并在工具标题宽度不足时隐藏。
 - 改进 assistant/thinking 流、压缩摘要和状态卡的 TUI Markdown 渲染缓存。
 - 修复类似 Markdown 的工具输出在折叠状态下隐藏行数计算不准确的问题。
+- 修复 headless idle 事件：Chord 现在只发送一个 `idle` envelope，不再额外发送重复的 ready `notification` envelope；gateway 应自行把 idle 状态渲染给用户。
 
 ## 0.1.0 - 2026-04-29
 

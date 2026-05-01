@@ -53,40 +53,6 @@ type headlessEnvelope struct {
 	Payload any    `json:"payload,omitempty"`
 }
 
-type headlessNotification struct {
-	Message string `json:"message"`
-	Reason  string `json:"reason,omitempty"`
-	AgentID string `json:"agent_id,omitempty"`
-}
-
-func buildHeadlessNotification(ev agent.AgentEvent, state *headlessState) *headlessEnvelope {
-	if state == nil || !state.isSubscribed("notification") {
-		return nil
-	}
-	switch ev.(type) {
-	case agent.IdleEvent:
-		reason := "idle"
-		if state.pendingOutcome == "error" || state.pendingOutcome == "cancelled" {
-			reason = state.pendingOutcome
-		}
-		return &headlessEnvelope{Type: "notification", Payload: headlessNotification{
-			Message: headlessIdleNotificationText(state),
-			Reason:  reason,
-		}}
-	}
-	return nil
-}
-
-func headlessIdleNotificationText(state *headlessState) string {
-	if state == nil {
-		return "Chord: Ready for input"
-	}
-	if strings.TrimSpace(state.lastError) != "" {
-		return state.lastError
-	}
-	return "Chord: Ready for input"
-}
-
 // stdoutWriter serializes JSON envelopes to stdout via a single goroutine.
 type stdoutWriter struct {
 	enc *json.Encoder
@@ -171,11 +137,6 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 	defer state.mu.Unlock()
 
 	var out []*headlessEnvelope
-	appendNotification := func() {
-		if n := buildHeadlessNotification(ev, state); n != nil {
-			out = append(out, n)
-		}
-	}
 
 	switch e := ev.(type) {
 	case agent.AgentActivityEvent:
@@ -213,7 +174,6 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 			}})
 		}
 	case agent.IdleEvent:
-		appendNotification()
 		state.busy = false
 		state.phase = ""
 		state.phaseDetail = ""

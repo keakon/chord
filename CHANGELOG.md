@@ -32,6 +32,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
 - Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
 - Fixed collapsed tool result hidden-line counts for markdown-like output.
+- Fixed headless idle events so Chord emits a single `idle` envelope instead of also sending a duplicate ready `notification` envelope; gateways should render the idle state themselves.
 
 ## 0.1.0 - 2026-04-29
 
