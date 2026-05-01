@@ -91,7 +91,7 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 	if err != nil {
 		summary.ParseErr = err
 		summary.Warnings = append(summary.Warnings, "Unable to parse arguments; showing raw payload")
-		raw := strings.TrimSpace(argsJSON)
+		raw := sanitizeToolDisplayText(strings.TrimSpace(argsJSON))
 		if raw == "" {
 			raw = "(empty)"
 		}
@@ -494,9 +494,9 @@ func confirmFormatValue(value any) string {
 	case nil:
 		return "null"
 	case string:
-		return v
+		return sanitizeToolDisplayText(v)
 	case []string:
-		return strings.Join(v, "\n")
+		return sanitizeToolDisplayText(strings.Join(v, "\n"))
 	case bool:
 		return strconv.FormatBool(v)
 	case float64:
@@ -595,7 +595,7 @@ func renderConfirmFields(fields []confirmSummaryField, width int, detailed bool)
 }
 
 func renderConfirmField(field confirmSummaryField, width int, detailed bool) []string {
-	value := field.value(detailed)
+	value := sanitizeToolDisplayText(field.value(detailed))
 	if value == "" {
 		value = "(empty)"
 	}

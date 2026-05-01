@@ -86,7 +86,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		if b.UserLocalShellFailed {
 			bashLines = append(bashLines, ErrorStyle.Render("  ↳ Error:"))
 		}
-		for _, line := range wrapText(b.UserLocalShellResult, contentWidth) {
+		for _, line := range wrapText(sanitizeToolDisplayText(b.UserLocalShellResult), contentWidth) {
 			bashLines = append(bashLines, DimStyle.Render("    "+line))
 		}
 	default:
@@ -94,13 +94,13 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false, true)
 		if b.UserLocalShellResult != "" {
 			lineCount := strings.Count(b.UserLocalShellResult, "\n") + 1
-			summary := truncateOneLine(b.UserLocalShellResult, width-30)
+			summary := truncateOneLine(sanitizeToolDisplayText(b.UserLocalShellResult), width-30)
 			if b.UserLocalShellFailed {
 				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s (%d lines)", summary, lineCount)))
 			} else {
 				bashLines = append(bashLines, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s (%d lines)", summary, lineCount)))
 			}
-			if hidden := len(wrapText(b.UserLocalShellResult, contentWidth)) - 1; hidden > 0 {
+			if hidden := len(wrapText(sanitizeToolDisplayText(b.UserLocalShellResult), contentWidth)) - 1; hidden > 0 {
 				bashLines = append(bashLines, renderToolExpandHint("  ", hidden))
 			}
 		}

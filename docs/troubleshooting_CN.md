@@ -89,13 +89,23 @@ curl -I https://api.openai.com/v1
 
 ## 会话恢复 / restore 行为说明
 
-最近的一轮内部清理删除了一个已经无效的旧 LLM responses-session reset 路径，并把会话边界处理统一收口到当前 provider / session identifier 上。对普通使用者来说这应当是无感变更；但如果你在排查会话恢复或 key/model 切换行为，建议：
+最近的一轮内部清理删除了一个已经无效的旧 LLM responses-session reset 路径，并把会话边界处理统一收口到当前 provider / session identifier 上。对普通使用者来说这应当是无感变更；但如果你在排查会话恢复、plan execution 或 key/model 切换行为，建议：
 
 - 先确认使用的是最新构建，而不是拿 1.0 前旧版本行为做对照
-- 在 `--continue`、`--resume`、新建会话或 fork 会话之后，以当前行为为准，不要再假设存在一个额外的手动 responses-session reset 步骤
+- 在 `--continue`、`--resume`、新建会话、fork 会话或 plan execution 之后，以当前行为为准，不要再假设存在一个额外的手动 responses-session reset 步骤
 - 如果你怀疑 Codex/OpenAI 的会话边界有回归，请使用最新构建采集日志，确保日志反映的是清理后的传输层生命周期
 
 这次改动并没有删除会话恢复能力；删除的是一条已经不再影响 HTTP 请求行为的旧内部 reset 管线，同时保留并收敛了当前仍有效的 WebSocket / session 生命周期处理。
+
+## 在查看日志 / dump / shell 输出时，TUI 卡片出现异色、背景泄漏或换行错乱
+
+如果你在查看诊断 dump、原始命令输出或其他外部文本时，工具卡片、本地 shell 结果、问题对话框或确认摘要出现异常颜色、背景泄漏或换行错乱：
+
+- 升级到包含外部文本渲染修复的版本
+- 重新执行同样的 `Read`、`Bash`、`WebFetch` 或本地 shell 操作
+- 如果最新版本里仍能复现，请同时保留原始文件/输出和截图
+
+最近的构建会在这些界面中按字面显示 ANSI-rich 外部文本，而不会再次执行其中嵌入的终端 escape/control sequence；这也包括裸 carriage return / `\r` 进度刷新文本。这样既能查看原始序列内容，也不会再让诊断 dump 或其他原始终端输出污染周围卡片的渲染。
 
 ## 长会话里转录区底部内容滚不到
 

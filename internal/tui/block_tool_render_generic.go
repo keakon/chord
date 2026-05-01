@@ -369,14 +369,14 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			if b.ToolName == tools.NameDelete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				lineStyle = ToolResultExpandedStyle
 			}
-			displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
+			displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
 			for _, line := range wrapText(displayResult, contentWidth) {
 				result = append(result, lineStyle.Render("    "+line))
 			}
 		}
 		if b.DoneSummary != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
-			for _, line := range wrapText(b.DoneSummary, contentWidth) {
+			for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
@@ -534,7 +534,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
 					}
 				} else {
-					displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
+					displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
 					lines, hidden, usedMD := toolExpandedResultLines(displayResult, contentWidth, expanded, b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled())
 					if !expanded && collapsedPreviewLine != "" && compactToolPreviewDuplicatesResult(collapsedPreviewLine, lines) {
 						lines = nil
@@ -558,7 +558,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
-			for _, line := range toolExpandedTextLines(b.DoneSummary, contentWidth) {
+			for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 				result = append(result, "    "+line)
 			}
 		}
@@ -678,7 +678,7 @@ func (b *Block) renderToolResult(width int) []string {
 		body = append(body, ToolCallStyle.Render(fmt.Sprintf("  %s %s", prefix, b.ToolName)))
 		lim := min(lineCount, maxToolCallCompactResultLines)
 		for i := range lim {
-			for _, w := range wrapText(contentLines[i], contentWidth) {
+			for _, w := range wrapText(sanitizeToolDisplayText(contentLines[i]), contentWidth) {
 				body = append(body, DimStyle.Render(toolResultIndent+w))
 			}
 		}
@@ -701,14 +701,14 @@ func (b *Block) renderToolResult(width int) []string {
 	header := renderHeader(fmt.Sprintf("%s %s:", headerPrefix, b.ToolName))
 	result := []string{header}
 	cardBgStylePre := lipgloss.NewStyle().Background(style.GetBackground())
-	if !b.IsError && !b.toolResultIsError() && !b.toolResultIsCancelled() && toolResultLooksLikeMarkdown(b.Content) {
-		mdLines := renderMarkdownContent(b.Content, contentWidth)
+	if !b.IsError && !b.toolResultIsError() && !b.toolResultIsCancelled() && toolResultLooksLikeMarkdown(sanitizeToolDisplayText(b.Content)) {
+		mdLines := renderMarkdownContent(sanitizeToolDisplayText(b.Content), contentWidth)
 		mdLines = preserveCardBg(mdLines, toolCardBg)
 		for _, line := range mdLines {
 			result = append(result, padLineToDisplayWidthWithStyle(cardBgStylePre, "    "+line, cardWidth))
 		}
 	} else {
-		for _, line := range wrapText(b.Content, contentWidth) {
+		for _, line := range wrapText(sanitizeToolDisplayText(b.Content), contentWidth) {
 			result = append(result, "    "+renderBody(line))
 		}
 	}

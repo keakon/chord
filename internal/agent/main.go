@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1671,6 +1672,7 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
+	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 
 	// Freeze the new session's tool/system surface before installing the
 	// execution-specific prompt so the first execution request sees a stable

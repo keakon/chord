@@ -85,7 +85,7 @@ func toolCollapsedSummaryText(s string) string {
 }
 
 func appendCollapsedSummaryLines(result *[]string, summary string, width int, style lipgloss.Style) {
-	trimmed := strings.TrimSpace(summary)
+	trimmed := strings.TrimSpace(sanitizeToolDisplayText(summary))
 	if trimmed == "" {
 		return
 	}
@@ -97,7 +97,7 @@ func appendCollapsedSummaryLines(result *[]string, summary string, width int, st
 }
 
 func toolExpandedTextLines(s string, width int) []string {
-	trimmed := strings.TrimSpace(s)
+	trimmed := strings.TrimSpace(sanitizeToolDisplayText(s))
 	if trimmed == "" {
 		return nil
 	}
@@ -108,7 +108,7 @@ func toolExpandedTextLines(s string, width int) []string {
 }
 
 func normalizedCompactToolPreviewText(s string) string {
-	trimmed := strings.TrimSpace(s)
+	trimmed := strings.TrimSpace(sanitizeToolDisplayText(s))
 	if trimmed == "" {
 		return ""
 	}
@@ -202,7 +202,7 @@ func toolCancelledDetailText(result string) string {
 func appendCancelledResultLines(result []string, content string, width int) []string {
 	result = append(result, DimStyle.Render("  ↳ Cancelled"))
 	if detail := toolCancelledDetailText(content); detail != "" {
-		for _, line := range wrapText(detail, width) {
+		for _, line := range wrapText(sanitizeToolDisplayText(detail), width) {
 			result = append(result, DimStyle.Render("    "+line))
 		}
 	}
@@ -221,7 +221,7 @@ func appendToolElapsedFooter(result []string, b *Block) []string {
 }
 
 func appendErrorResultLines(result []string, content string, width int) []string {
-	trimmed := strings.TrimSpace(content)
+	trimmed := strings.TrimSpace(sanitizeToolDisplayText(content))
 	if trimmed == "" {
 		return result
 	}
@@ -569,27 +569,14 @@ func highlightCodeLines(h *codeHighlighter, lines []string, bgTerm string) []str
 	return out
 }
 
-func isReadLineNumberPrefix(s string) bool {
-	trimmed := strings.TrimSpace(s)
-	if trimmed == "" {
-		return false
-	}
-	for _, r := range trimmed {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func sanitizeReadDisplayText(s string) string {
+func sanitizeToolDisplayText(s string) string {
 	if s == "" {
 		return ""
 	}
 	needsSanitization := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if (c < 0x20 && c != '\t') || c == 0x7f {
+		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
 			needsSanitization = true
 			break
 		}
@@ -603,10 +590,15 @@ func sanitizeReadDisplayText(s string) string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
-		case c == '\t':
+		case c == '\r':
+			if i+1 < len(s) && s[i+1] == '\n' {
+				continue
+			}
+			b.WriteString(`\r`)
+		case c == '\t' || c == '\n':
 			b.WriteByte(c)
 		case c < 0x20 || c == 0x7f:
-			b.WriteString(readDisplayControlLiteral(c))
+			b.WriteString(toolDisplayControlLiteral(c))
 		default:
 			b.WriteByte(c)
 		}
@@ -614,7 +606,7 @@ func sanitizeReadDisplayText(s string) string {
 	return b.String()
 }
 
-func readDisplayControlLiteral(c byte) string {
+func toolDisplayControlLiteral(c byte) string {
 	switch c {
 	case '\a':
 		return `\a`
@@ -629,6 +621,19 @@ func readDisplayControlLiteral(c byte) string {
 	}
 }
 
+func isReadLineNumberPrefix(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	for _, r := range trimmed {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func parseReadDisplayLines(result string) ([]readDisplayLine, string) {
 	if result == "" {
 		return nil, ""
@@ -640,12 +645,12 @@ func parseReadDisplayLines(result string) ([]readDisplayLine, string) {
 	for _, line := range rawLines {
 		line = strings.TrimSuffix(line, "\r")
 		if before, after, ok := strings.Cut(line, "\t"); ok && isReadLineNumberPrefix(before) {
-			content := sanitizeReadDisplayText(after)
+			content := sanitizeToolDisplayText(after)
 			rows = append(rows, readDisplayLine{IsCode: true, LineNo: strings.TrimSpace(before), Content: content})
 			codeLines = append(codeLines, content)
 			continue
 		}
-		rows = append(rows, readDisplayLine{Content: sanitizeReadDisplayText(line)})
+		rows = append(rows, readDisplayLine{Content: sanitizeToolDisplayText(line)})
 	}
 
 	return rows, strings.Join(codeLines, "\n")

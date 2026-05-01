@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 var osc8RegexToolTest = regexp.MustCompile(`\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)`)
@@ -1790,6 +1791,154 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected rendered Read card to contain %q, got:\n%s", want, plain)
 		}
+	}
+}
+
+func TestBashResultEscapesANSIRichOutput(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "Bash",
+		Content:                `{"command":"printf test"}`,
+		ResultContent:          "\x1b[31mred\x1b[0m\nplain",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected rendered Bash card to not contain raw ESC: %q", joined)
+	}
+	if !strings.Contains(joined, `\x1b[31mred\x1b[0m`) {
+		t.Fatalf("expected Bash output to show ANSI literally, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "plain") {
+		t.Fatalf("expected Bash output to keep plain text, got:\n%s", joined)
+	}
+}
+
+func TestQuestionFallbackResultEscapesANSIRichOutput(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Question",
+		Content:       `{"questions":[{"header":"mode","question":"Pick one"}]}`,
+		ResultDone:    true,
+		ResultContent: "\x1b[35muser typed answer\x1b[0m",
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected Question card to not contain raw ESC: %q", joined)
+	}
+	if !strings.Contains(joined, `\x1b[35muser typed answer\x1b[0m`) {
+		t.Fatalf("expected Question fallback result to show ANSI literally, got:\n%s", joined)
+	}
+}
+
+func TestNotifyExpandedEscapesANSIRichMessageAndResult(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "Notify",
+		Collapsed:              false,
+		Content:                `{"target_task_id":"adhoc-5","message":"\u001b[36mreply now\u001b[0m","kind":"reply"}`,
+		ResultContent:          "\x1b[33mdelivered\x1b[0m",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected Notify card to not contain raw ESC: %q", joined)
+	}
+	for _, want := range []string{`\x1b[36mreply now\x1b[0m`, `\x1b[33mdelivered\x1b[0m`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected Notify card to contain %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) {
+	m := NewModel(nil)
+	m.width = 100
+	m.theme = DefaultTheme()
+	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{
+		Header:   "\u001b[31munsafe\u001b[0m",
+		Question: "line1\n\u001b[32mline2\u001b[0m",
+		Options:  []tools.QuestionOption{{Label: "one", Description: "\u001b[34mdesc\u001b[0m"}},
+	}}}
+	m.question.input = newQuestionTextarea(m.width)
+
+	view := stripANSI(m.renderQuestionDialog())
+	if strings.ContainsRune(view, '\x1b') {
+		t.Fatalf("expected question dialog to not contain raw ESC: %q", view)
+	}
+	for _, want := range []string{`\x1b[31munsafe\x1b[0m`, `\x1b[32mline2\x1b[0m`, `\x1b[34mdesc\x1b[0m`} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected question dialog to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestRenderConfirmFieldEscapesANSIRichLiteralValue(t *testing.T) {
+	field := newConfirmLiteralField("Command", "\x1b[31mrm -rf /tmp/demo\x1b[0m", true)
+	lines := renderConfirmField(field, 60, true)
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected confirm field to not contain raw ESC: %q", joined)
+	}
+	if !strings.Contains(joined, `\x1b[31mrm -rf /tmp/demo\x1b[0m`) {
+		t.Fatalf("expected confirm field to show ANSI literally, got:\n%s", joined)
+	}
+}
+
+func TestLocalShellResultEscapesANSIRichOutput(t *testing.T) {
+	block := &Block{
+		ID:                   1,
+		Type:                 BlockUser,
+		UserLocalShellCmd:    "printf demo",
+		UserLocalShellResult: "\x1b[32mok\x1b[0m",
+		Collapsed:            false,
+	}
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(joined, '\x1b') {
+		t.Fatalf("expected local shell card to not contain raw ESC: %q", joined)
+	}
+	if !strings.Contains(joined, `\x1b[32mok\x1b[0m`) {
+		t.Fatalf("expected local shell result to show ANSI literally, got:\n%s", joined)
+	}
+}
+
+func TestSanitizeToolDisplayTextEscapesBareCarriageReturnLiterally(t *testing.T) {
+	got := sanitizeToolDisplayText("progress 10%\rprogress 90%")
+	if containsRawCarriageReturnForTest(got) {
+		t.Fatalf("expected sanitized text to not contain raw carriage return: %q", got)
+	}
+	if !strings.Contains(got, `progress 10%\rprogress 90%`) {
+		t.Fatalf("expected bare carriage return to display literally, got %q", got)
+	}
+}
+
+func TestSanitizeToolDisplayTextPreservesCRLFAsLogicalNewline(t *testing.T) {
+	got := sanitizeToolDisplayText("line1\r\nline2")
+	if containsRawCarriageReturnForTest(got) {
+		t.Fatalf("expected CRLF sanitization to not contain raw carriage return: %q", got)
+	}
+	if got != "line1\nline2" {
+		t.Fatalf("sanitizeToolDisplayText(CRLF) = %q, want %q", got, "line1\nline2")
+	}
+}
+
+func TestCollapsedSummaryEscapesBareCarriageReturnLiterally(t *testing.T) {
+	var lines []string
+	appendCollapsedSummaryLines(&lines, "phase 1\rphase 2", 80, ToolResultStyle)
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if containsRawCarriageReturnForTest(joined) {
+		t.Fatalf("expected collapsed summary to not contain raw carriage return: %q", joined)
+	}
+	if !strings.Contains(joined, `phase 1\rphase 2`) {
+		t.Fatalf("expected collapsed summary to show bare carriage return literally, got:\n%s", joined)
 	}
 }
 

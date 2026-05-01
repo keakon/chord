@@ -7,6 +7,7 @@ import (
 )
 
 func firstDisplayLine(s string) string {
+	s = sanitizeToolDisplayText(s)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	if before, _, ok := strings.Cut(s, "\n"); ok {
@@ -16,6 +17,7 @@ func firstDisplayLine(s string) string {
 }
 
 func continuationDisplayLines(s string) []string {
+	s = sanitizeToolDisplayText(s)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	parts := strings.Split(s, "\n")

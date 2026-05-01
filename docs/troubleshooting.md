@@ -89,13 +89,23 @@ If `--continue` or `--resume` does not appear to work as expected:
 
 ## Session resume / restore behavior notes
 
-Recent internal cleanup removed an unused legacy LLM responses-session reset path and consolidated session-boundary handling onto the active provider/session identifiers. This should be user-transparent, but if you are diagnosing session resume or model/key-switch behavior:
+Recent internal cleanup removed an unused legacy LLM responses-session reset path and consolidated session-boundary handling onto the active provider/session identifiers. This should be user-transparent, but if you are diagnosing session resume, plan execution, or model/key-switch behavior:
 
 - make sure you are testing on the latest build rather than comparing against older pre-1.0 behavior
-- after `--continue`, `--resume`, new-session, or fork-session flows, rely on current behavior rather than older assumptions about a separate manual responses-session reset step
+- after `--continue`, `--resume`, new-session, fork-session, or plan-execution flows, rely on current behavior rather than older assumptions about a separate manual responses-session reset step
 - if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
 
 This change does not remove session resume support; it only deletes obsolete internal reset plumbing that no longer affected HTTP request behavior and keeps the active WebSocket/session lifecycle tied to the current session identifier.
+
+## TUI cards show strange colors or broken layout when viewing logs / dumps / shell output
+
+If a tool card, local shell result, question dialog, or confirmation summary used to show unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:
+
+- upgrade to a build that includes the external-text rendering fix
+- retry the same `Read`, `Bash`, `WebFetch`, or local shell action
+- if you still see corruption, save the original file/output and a screenshot together
+
+Recent builds now display ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences.
 
 ## Bottom transcript rows are unreachable in long sessions
 

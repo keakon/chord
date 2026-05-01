@@ -112,6 +112,36 @@ func TestStartPlanExecutionKeepsExecutionPromptAcrossRefresh(t *testing.T) {
 	}
 }
 
+func TestStartPlanExecutionPropagatesNewSessionIDToProvider(t *testing.T) {
+	projectRoot := t.TempDir()
+	planPath := filepath.Join(projectRoot, "plan.md")
+	if err := os.WriteFile(planPath, []byte("# Plan\n\n- task\n"), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+	})
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	providerImpl := &sessionAwareStubProvider{}
+	a.llmClient = llm.NewClient(providerCfg, providerImpl, "test-model", 1024, "")
+
+	a.startPlanExecution(planPath, "builder")
+	if got, want := providerImpl.sessionID, filepath.Base(a.sessionDir); got != want {
+		t.Fatalf("provider sessionID = %q, want %q", got, want)
+	}
+}
+
 func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWithDelegateAvailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	planPath := filepath.Join(projectRoot, "plan.md")

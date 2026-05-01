@@ -528,7 +528,7 @@ func extractToolParamsWithParsed(keys []string, vals map[string]string, maxWidth
 		return ""
 	}
 	if len(keys) == 1 {
-		v := vals[keys[0]]
+		v := sanitizeToolDisplayText(vals[keys[0]])
 		if maxWidth > 10 && runewidth.StringWidth(v) > maxWidth {
 			v = runewidth.Truncate(v, maxWidth, "…")
 		}
@@ -541,7 +541,7 @@ func extractToolParamsWithParsed(keys []string, vals map[string]string, maxWidth
 	fixedWidth := 0
 	for i, k := range keys {
 		prefix := k + ": "
-		entries[i] = entry{k, vals[k], prefix}
+		entries[i] = entry{k, sanitizeToolDisplayText(vals[k]), prefix}
 		fixedWidth += runewidth.StringWidth(prefix)
 	}
 	fixedWidth += runewidth.StringWidth(sep) * (len(keys) - 1)
@@ -625,11 +625,11 @@ func extractToolParamsLinesWithParsed(toolName string, keys []string, vals map[s
 func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidth int) {
 	const indent = "    "
 	marker, iconSt := todoCallStatusMarker(item.Status)
-	idDisp := strings.TrimSpace(item.ID)
+	idDisp := strings.TrimSpace(sanitizeToolDisplayText(item.ID))
 	if idDisp != "" && !strings.HasSuffix(idDisp, ".") {
 		idDisp += "."
 	}
-	content := strings.TrimSpace(item.Content)
+	content := strings.TrimSpace(sanitizeToolDisplayText(item.Content))
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
 	content = strings.ReplaceAll(content, "\n", " ")
@@ -667,7 +667,7 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 	for _, wline := range wrapped[1:] {
 		*result = append(*result, indent+pad+bodyStyle.Render(wline))
 	}
-	if af := strings.TrimSpace(item.ActiveForm); af != "" && item.Status == "in_progress" {
+	if af := strings.TrimSpace(sanitizeToolDisplayText(item.ActiveForm)); af != "" && item.Status == "in_progress" {
 		af = strings.ReplaceAll(strings.ReplaceAll(af, "\r\n", " "), "\n", " ")
 		afPad := strings.Repeat(" ", prefixCols-runewidth.StringWidth(indent))
 		for _, wl := range wrapText(af, wrapW) {

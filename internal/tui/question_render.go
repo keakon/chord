@@ -84,9 +84,9 @@ func (m *Model) renderQuestionDialog() string {
 	total := len(m.question.request.Questions)
 
 	// Title line with optional progress indicator.
-	titleText := fmt.Sprintf("❓ %s", q.Header)
+	titleText := fmt.Sprintf("❓ %s", sanitizeToolDisplayText(q.Header))
 	if total > 1 {
-		titleText = fmt.Sprintf("❓ %s  (%d / %d)", q.Header, m.question.currentQ+1, total)
+		titleText = fmt.Sprintf("❓ %s  (%d / %d)", sanitizeToolDisplayText(q.Header), m.question.currentQ+1, total)
 	}
 	title := QuestionSeparatorStyle.Render(titleText)
 
@@ -94,7 +94,7 @@ func (m *Model) renderQuestionDialog() string {
 	lines = append(lines, title, "")
 
 	// Question text — split on <br> and newlines for multi-line display.
-	qRaw := strings.ReplaceAll(q.Question, "<br>", "\n")
+	qRaw := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
 	for _, qLine := range strings.Split(qRaw, "\n") {
 		for _, wrapped := range wrapText(qLine, innerWidth-4) {
 			lines = append(lines, QuestionTextStyle.Render(wrapped))
@@ -120,12 +120,12 @@ func (m *Model) renderQuestionDialog() string {
 				numKey = fmt.Sprintf("%d.", i+1)
 			}
 
-			labelText := strings.TrimSpace(fmt.Sprintf("%s %s %s", numKey, marker, opt.Label))
+			labelText := strings.TrimSpace(fmt.Sprintf("%s %s %s", numKey, marker, sanitizeToolDisplayText(opt.Label)))
 			textPlain := labelText
 			if i != currentOption && opt.Description != "" {
 				maxDescWidth := innerWidth - runewidth.StringWidth(labelText) - 4
 				if maxDescWidth > 10 {
-					desc := truncateOneLine(opt.Description, maxDescWidth)
+					desc := truncateOneLine(sanitizeToolDisplayText(opt.Description), maxDescWidth)
 					textPlain += DimStyle.Render("  " + desc)
 				}
 			}
@@ -191,6 +191,7 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 	if strings.TrimSpace(description) == "" {
 		return nil
 	}
+	description = sanitizeToolDisplayText(description)
 	prefix := " " + strings.Repeat(" ", runewidth.StringWidth(numKey)+3)
 	wrapWidth := innerWidth - 2
 	if wrapWidth < 10 {
