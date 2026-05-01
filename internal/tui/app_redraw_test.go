@@ -40,19 +40,23 @@ func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	now := time.Now()
 
-	m.lastForegroundAt = time.Time{}
-	if cmd := m.maybePostHostRedrawFallbackCmd("scroll-flush", 1, now); cmd != nil {
-		t.Fatal("scroll fallback should not arm without a recent focus")
-	}
+	for _, reason := range []string{"scroll-flush", "content-boundary", "live-append"} {
+		t.Run(reason, func(t *testing.T) {
+			m.lastForegroundAt = time.Time{}
+			if cmd := m.maybePostHostRedrawFallbackCmd(reason, 1, now); cmd != nil {
+				t.Fatalf("%s fallback should not arm without a recent focus", reason)
+			}
 
-	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Millisecond)
-	if cmd := m.maybePostHostRedrawFallbackCmd("scroll-flush", 2, now); cmd != nil {
-		t.Fatal("scroll fallback should not arm outside the post-focus window")
-	}
+			m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Millisecond)
+			if cmd := m.maybePostHostRedrawFallbackCmd(reason, 2, now); cmd != nil {
+				t.Fatalf("%s fallback should not arm outside the post-focus window", reason)
+			}
 
-	m.lastForegroundAt = now.Add(-time.Second)
-	if cmd := m.maybePostHostRedrawFallbackCmd("scroll-flush", 3, now); cmd == nil {
-		t.Fatal("scroll fallback should arm inside the post-focus window")
+			m.lastForegroundAt = now.Add(-time.Second)
+			if cmd := m.maybePostHostRedrawFallbackCmd(reason, 3, now); cmd == nil {
+				t.Fatalf("%s fallback should arm inside the post-focus window", reason)
+			}
+		})
 	}
 }
 
@@ -165,6 +169,43 @@ func TestPostHostRedrawFallbackTriggersLateScrollRedraw(t *testing.T) {
 	}
 	if m.lastHostRedrawReason != "scroll-flush-fallback" {
 		t.Fatalf("lastHostRedrawReason = %q, want scroll-flush-fallback", m.lastHostRedrawReason)
+	}
+}
+
+func TestPostHostRedrawFallbackTriggersLateContentBoundaryRedraw(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.hostRedrawGeneration = 4
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+
+	cmd := m.handlePostHostRedrawFallback(postHostRedrawFallbackMsg{generation: 4, reason: "content-boundary"})
+	if cmd == nil {
+		t.Fatal("matching content-boundary fallback should schedule a host redraw")
+	}
+	if m.lastHostRedrawReason != "content-boundary-fallback" {
+		t.Fatalf("lastHostRedrawReason = %q, want content-boundary-fallback", m.lastHostRedrawReason)
+	}
+}
+
+func TestHostRedrawForContentBoundaryCmdReturnsFallbackWhenThrottledNearFocusRestore(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.displayState = stateForeground
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-time.Second)
+	m.lastHostRedrawAt = now.Add(-time.Second)
+	m.lastHostRedrawReason = "focus-restore"
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawForContentBoundaryCmd("content-boundary")
+	if cmd == nil {
+		t.Fatal("throttled content-boundary should arm a fallback near focus restore")
+	}
+	if m.lastHostRedrawReason != "focus-restore" {
+		t.Fatalf("lastHostRedrawReason = %q, want unchanged focus-restore", m.lastHostRedrawReason)
+	}
+	if m.hostRedrawGeneration != 7 {
+		t.Fatalf("hostRedrawGeneration = %d, want unchanged 7", m.hostRedrawGeneration)
 	}
 }
 

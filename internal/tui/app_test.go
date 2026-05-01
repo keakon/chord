@@ -226,9 +226,10 @@ func TestContentBoundaryRedrawThrottlesAgainstRecentHostRedraw(t *testing.T) {
 	m.SetFocusResizeFreezeEnabled(true)
 	m.lastHostRedrawAt = time.Now().Add(-contentBoundaryHostRedrawMinInterval / 2)
 	m.lastHostRedrawReason = "scroll-flush"
+	m.lastForegroundAt = time.Time{}
 
 	if cmd := m.hostRedrawForContentBoundaryCmd("content-boundary"); cmd != nil {
-		t.Fatal("content boundary redraw should be throttled after a recent host redraw")
+		t.Fatal("content boundary redraw should be throttled after a recent host redraw when not in the post-focus window")
 	}
 	if m.lastHostRedrawReason != "scroll-flush" {
 		t.Fatalf("lastHostRedrawReason = %q, want scroll-flush", m.lastHostRedrawReason)

@@ -39,6 +39,13 @@ const (
 	// ordinary scroll into a double-clear sequence.
 	scrollFlushFallbackRedrawDelay = 900 * time.Millisecond
 
+	// contentBoundaryFallbackRedrawDelay schedules a late redraw when a
+	// content-boundary redraw was suppressed by the slower content-boundary
+	// throttle during the focus-recovery window. This keeps ordinary steady-state
+	// updates single-pass, but gives Ghostty/cmux one more chance to clear stale
+	// cells after tab restore without waiting for another user action.
+	contentBoundaryFallbackRedrawDelay = 900 * time.Millisecond
+
 	// scrollFlushFallbackAfterFocusWindow limits the late scroll redraw to the
 	// host-recovery window right after regaining focus, which keeps normal
 	// in-session scrolling behavior unchanged.
@@ -117,6 +124,9 @@ func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 		since := time.Since(m.lastHostRedrawAt)
 		if since < contentBoundaryHostRedrawMinInterval {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s content_boundary_throttled=true since_last=%s last_reason=%s", reason, since.Truncate(time.Millisecond), m.lastHostRedrawReason)
+			if fallback := m.maybePostHostRedrawFallbackCmd(reason, m.hostRedrawGeneration, time.Now()); fallback != nil {
+				return fallback
+			}
 			return nil
 		}
 	}
@@ -124,15 +134,24 @@ func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 }
 
 func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64, now time.Time) tea.Cmd {
-	if m == nil || reason != "scroll-flush" || m.lastForegroundAt.IsZero() {
+	if m == nil || m.lastForegroundAt.IsZero() {
 		return nil
 	}
+	reason = strings.TrimSpace(reason)
 	sinceFocus := now.Sub(m.lastForegroundAt)
 	if sinceFocus < 0 || sinceFocus > scrollFlushFallbackAfterFocusWindow {
 		return nil
 	}
-	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
-	return postHostRedrawFallbackCmd(generation, reason, scrollFlushFallbackRedrawDelay)
+	switch reason {
+	case "scroll-flush":
+		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
+		return postHostRedrawFallbackCmd(generation, reason, scrollFlushFallbackRedrawDelay)
+	case "content-boundary", "live-append":
+		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
+		return postHostRedrawFallbackCmd(generation, reason, contentBoundaryFallbackRedrawDelay)
+	default:
+		return nil
+	}
 }
 
 func (m *Model) hostRedrawCmd(reason string) tea.Cmd {

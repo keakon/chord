@@ -289,10 +289,15 @@ func (m *Model) handlePostHostRedrawFallback(msg postHostRedrawFallbackMsg) tea.
 		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d current=%d", reason, msg.generation, m.hostRedrawGeneration)
 		return nil
 	}
-	if reason != "scroll-flush" {
+	switch reason {
+	case "scroll-flush":
+		m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
+		return m.hostRedrawCmd("scroll-flush-fallback")
+	case "content-boundary", "live-append":
+		m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
+		return m.hostRedrawCmd("content-boundary-fallback")
+	default:
 		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d unsupported=true", reason, msg.generation)
 		return nil
 	}
-	m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
-	return m.hostRedrawCmd("scroll-flush-fallback")
 }

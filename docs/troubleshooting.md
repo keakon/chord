@@ -107,6 +107,16 @@ If a tool card, local shell result, question dialog, or confirmation summary use
 
 Recent builds now display ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences.
 
+## Screen corruption after switching tabs or refocusing the terminal
+
+If the TUI occasionally shows stale rows, horizontal line artifacts, or partially broken tool cards right after switching tabs or returning focus to the terminal window:
+
+- upgrade to a build that includes the latest post-focus redraw fix
+- if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
+- if it still reproduces on the latest build, capture a diagnostics bundle and a screenshot together
+
+Recent builds add a delayed fallback redraw for `content-boundary` / `live-append` updates that arrive during the short recovery window after focus returns. This specifically reduces cases where Ghostty-class terminals recover focus, immediately receive new tool results, and briefly display stale cells before the next full redraw.
+
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
