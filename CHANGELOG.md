@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Fixed long-session TUI transcript clipping where late updates to older background status cards could undercount transcript height after spill/hydrate recovery, making the bottom rows or even several final cards unreachable.
 - Removed the deprecated `blockers_remaining` field from the SubAgent `Complete` tool arguments and `CompletionEnvelope`; SubAgents must report non-blocking caveats via `remaining_limitations` and signal true blockers through the Escalate or `blocked` mailbox path instead of `Complete`.
 - Unified SubAgent artifact representation: mailbox messages, durable task records, per-instance meta files, and the in-memory runtime state now reference artifacts via a single `ArtifactRef` / `[]ArtifactRef` shape; removed the parallel `artifact_ids` / `artifact_rel_paths` / `artifact_type` fields and the related legacy adapter.
 - Replaced remaining hard-coded tool-name string literals (`Read` / `Write` / `Edit` / `Delete` / `Grep` / `Glob`) across TUI rendering, search, hooks, agent execution paths, and edit tracking with the centralized `tools.NameXxx` constants.

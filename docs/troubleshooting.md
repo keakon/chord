@@ -87,6 +87,16 @@ If `--continue` or `--resume` does not appear to work as expected:
 - try explicitly using `--resume <session-id>`
 - check whether restore is only slow rather than actually lost
 
+## Bottom transcript rows are unreachable in long sessions
+
+If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
+
+- upgrade to a build that includes the latest TUI transcript clipping fixes
+- pay special attention to whether the issue starts after long-running background jobs or durable status updates in a long session
+- if it still reproduces on the latest build, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
+
+Recent builds fix a transcript-height accounting bug where late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
+
 ## Performance issues
 
 If scrolling, streaming output, or large message rendering feels noticeably slow:

@@ -215,7 +215,7 @@ func (v *Viewport) MaterializeBlockByID(id int) *Block {
 func (v *Viewport) FindStatusBlockByBackgroundObject(id string) (*Block, bool) {
 	for _, block := range v.blocks {
 		if block.Type == BlockStatus && block.BackgroundObjectID == id {
-			return block, true
+			return v.materialize(block), true
 		}
 	}
 	return nil, false
