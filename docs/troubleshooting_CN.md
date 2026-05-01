@@ -115,7 +115,7 @@ curl -I https://api.openai.com/v1
 - 如果画面已经错乱，轻微调整终端窗口尺寸，或切走再切回，通常可以强制触发一次完整重绘
 - 如果最新版本里仍能复现，请同时保留 diagnostics bundle 和截图
 
-最近的构建为焦点恢复后的短暂宿主恢复窗口新增了延迟 fallback redraw：当 `content-boundary` / `live-append` 更新恰好在重新获焦后立即到达时，会补一轮更晚的重绘，降低 Ghostty 一类终端在下一次完整 redraw 之前短暂显示 stale cells 的概率。
+最近的构建覆盖了两类焦点恢复 redraw 场景：一类是重新获焦后立即到达的更新，另一类是终端处于后台期间已经发生的转录区/布局变化。检测到后台变化后，Chord 会等待 focus-settle 完成，再强制触发 host redraw，并安排延迟 fallback。diagnostics bundle 也会记录 background-dirty 状态和输入分隔线坐标，便于把残留的 stale-display 现象与内部最终 screen buffer 对照。
 
 ## 长会话里转录区底部内容滚不到
 

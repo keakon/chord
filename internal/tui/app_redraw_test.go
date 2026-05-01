@@ -209,6 +209,72 @@ func TestHostRedrawForContentBoundaryCmdReturnsFallbackWhenThrottledNearFocusRes
 	}
 }
 
+func TestBackgroundDirtyFocusRedrawDefersUntilFocusSettleWhenFrozen(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.displayState = stateBackground
+	m.focusResizeFrozen = true
+	m.lastBackgroundAt = time.Now().Add(-time.Second)
+	m.markBackgroundDirty("agent-event")
+	if !m.backgroundDirty {
+		t.Fatal("background dirty should be recorded while backgrounded")
+	}
+
+	_ = m.handleFocusMsg()
+	if !m.backgroundDirty {
+		t.Fatal("background dirty should stay pending while focus resize is frozen")
+	}
+	if m.lastHostRedrawReason == "background-dirty-focus" {
+		t.Fatal("background dirty redraw should not run before focus-settle unfreezes")
+	}
+
+	m.focusResizeGeneration = 3
+	settle := m.handleFocusResizeSettle(focusResizeSettleMsg{generation: 3})
+	if settle == nil {
+		t.Fatal("focus-settle should schedule redraw commands")
+	}
+	if m.backgroundDirty {
+		t.Fatal("background dirty should be consumed on focus-settle")
+	}
+	if m.lastHostRedrawReason != "background-dirty-focus" {
+		t.Fatalf("lastHostRedrawReason = %q, want background-dirty-focus", m.lastHostRedrawReason)
+	}
+}
+
+func TestBackgroundDirtyFocusRedrawConsumesDirtyImmediatelyWithoutFreeze(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(false)
+	m.displayState = stateBackground
+	m.lastBackgroundAt = time.Now().Add(-time.Second)
+	m.markBackgroundDirty("agent-event")
+	if !m.backgroundDirty {
+		t.Fatal("background dirty should be recorded while backgrounded")
+	}
+
+	_ = m.handleFocusMsg()
+	if m.backgroundDirty {
+		t.Fatal("background dirty should be consumed on focus")
+	}
+	if m.lastHostRedrawReason == "background-dirty-focus" {
+		t.Fatalf("host redraw should be skipped when focus resize mitigation is disabled, got %q", m.lastHostRedrawReason)
+	}
+}
+
+func TestPostHostRedrawFallbackTriggersBackgroundDirtyFocusFallback(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.hostRedrawGeneration = 4
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+
+	cmd := m.handlePostHostRedrawFallback(postHostRedrawFallbackMsg{generation: 4, reason: "background-dirty-focus"})
+	if cmd == nil {
+		t.Fatal("matching background-dirty-focus fallback should schedule a host redraw")
+	}
+	if m.lastHostRedrawReason != "background-dirty-focus-fallback" {
+		t.Fatalf("lastHostRedrawReason = %q, want background-dirty-focus-fallback", m.lastHostRedrawReason)
+	}
+}
+
 func TestHostRedrawSequenceKeepsWindowSizeForNonFlushReasons(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	cmds := m.hostRedrawSequence("focus-restore")

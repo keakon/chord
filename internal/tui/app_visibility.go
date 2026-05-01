@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -114,6 +115,40 @@ func (m *Model) handleBlurMsg() tea.Cmd {
 	return nil
 }
 
+func (m *Model) markBackgroundDirty(reason string) {
+	if m == nil || m.displayState != stateBackground {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unspecified"
+	}
+	m.backgroundDirty = true
+	m.backgroundDirtyReason = reason
+	m.backgroundDirtyAt = time.Now()
+	m.backgroundDirtyCount++
+	m.recordTUIDiagnostic("background-dirty", "reason=%s count=%d layout_main=%dx%d input_h=%d viewport=%dx%d", reason, m.backgroundDirtyCount, m.layout.main.Dx(), m.layout.main.Dy(), m.inputAreaHeight(), debugViewportWidth(m.viewport), debugViewportHeight(m.viewport))
+}
+
+func (m *Model) consumeBackgroundDirtyFocusRedraw(stage string, now time.Time) tea.Cmd {
+	if m == nil || !m.backgroundDirty {
+		return nil
+	}
+	dirtyReason := m.backgroundDirtyReason
+	dirtyCount := m.backgroundDirtyCount
+	dirtyAt := m.backgroundDirtyAt
+	sinceDirty := time.Duration(0)
+	if !dirtyAt.IsZero() {
+		sinceDirty = now.Sub(dirtyAt)
+	}
+	m.recordTUIDiagnostic("background-dirty-focus-redraw", "stage=%s reason=%s count=%d since_dirty=%s freeze=%t", stage, dirtyReason, dirtyCount, sinceDirty.Truncate(time.Millisecond), m.focusResizeFrozen)
+	m.backgroundDirty = false
+	m.backgroundDirtyReason = ""
+	m.backgroundDirtyAt = time.Time{}
+	m.backgroundDirtyCount = 0
+	return m.hostRedrawCmd("background-dirty-focus")
+}
+
 // handleFocusMsg records a terminal focus event and transitions the model back
 // to foreground state. It schedules a redraw to restore the UI promptly.
 func (m *Model) handleFocusMsg() tea.Cmd {
@@ -152,6 +187,11 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 	}
 	if !m.useFocusResizeFreeze && !(m.mode == ModeImageViewer && m.imageViewer.Open) {
 		cmds = append(cmds, m.imageProtocolCmdWithReason("focus-restore"))
+	}
+	if m.backgroundDirty && !m.focusResizeFrozen {
+		cmds = append(cmds, m.consumeBackgroundDirtyFocusRedraw("focus", now))
+	} else if m.backgroundDirty {
+		m.recordTUIDiagnostic("background-dirty-focus-defer", "reason=%s count=%d frozen=%t", m.backgroundDirtyReason, m.backgroundDirtyCount, m.focusResizeFrozen)
 	}
 
 	return tea.Batch(cmds...)

@@ -296,6 +296,9 @@ func (m *Model) handlePostHostRedrawFallback(msg postHostRedrawFallbackMsg) tea.
 	case "content-boundary", "live-append":
 		m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
 		return m.hostRedrawCmd("content-boundary-fallback")
+	case "background-dirty-focus":
+		m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
+		return m.hostRedrawCmd("background-dirty-focus-fallback")
 	default:
 		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d unsupported=true", reason, msg.generation)
 		return nil

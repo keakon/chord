@@ -115,7 +115,7 @@ If the TUI occasionally shows stale rows, horizontal line artifacts, or partiall
 - if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
 - if it still reproduces on the latest build, capture a diagnostics bundle and a screenshot together
 
-Recent builds add a delayed fallback redraw for `content-boundary` / `live-append` updates that arrive during the short recovery window after focus returns. This specifically reduces cases where Ghostty-class terminals recover focus, immediately receive new tool results, and briefly display stale cells before the next full redraw.
+Recent builds add redraw protection for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord now waits for focus-settle and then forces a host redraw with a delayed fallback. Diagnostics bundles also include background-dirty state and input separator coordinates so any remaining stale-display cases can be compared against the final internal screen buffer.
 
 ## Bottom transcript rows are unreachable in long sessions
 

@@ -108,6 +108,9 @@ func (e *agentEventEffects) merge(other agentEventEffects) {
 }
 
 func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
+	if !msg.closed {
+		m.markBackgroundDirty("agent-event")
+	}
 	if msg.closed {
 		// Event channel closed (e.g. remote connection dropped). Reset streaming
 		// state so the UI does not stay stuck on "streaming (Xs)".

@@ -193,6 +193,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "focus_resize_frozen: %t\n", m.focusResizeFrozen)
 	fmt.Fprintf(&sb, "last_foreground_at: %s\n", debugTimeString(m.lastForegroundAt))
 	fmt.Fprintf(&sb, "last_background_at: %s\n", debugTimeString(m.lastBackgroundAt))
+	fmt.Fprintf(&sb, "background_dirty: %t reason=%q at=%s count=%d\n", m.backgroundDirty, safe(m.backgroundDirtyReason), debugTimeString(m.backgroundDirtyAt), m.backgroundDirtyCount)
 	fmt.Fprintf(&sb, "background_idle_since: %s\n", debugTimeString(m.backgroundIdleSince))
 	fmt.Fprintf(&sb, "last_sweep_at: %s\n", debugTimeString(m.lastSweepAt))
 	fmt.Fprintf(&sb, "idle_sweep_generation: %d scheduled=%t\n", m.idleSweepGeneration, m.idleSweepScheduled)
@@ -228,6 +229,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "attachments: %s\n", debugRectString(layout.attachments))
 	fmt.Fprintf(&sb, "queue: %s\n", debugRectString(layout.queue))
 	fmt.Fprintf(&sb, "input: %s\n", debugRectString(layout.input))
+	fmt.Fprintf(&sb, "input_separator_row: %d input_height=%d input_area_height=%d\n", layout.input.Min.Y, layout.input.Dy(), m.inputAreaHeight())
 	fmt.Fprintf(&sb, "toast: %s\n", debugRectString(layout.toast))
 	fmt.Fprintf(&sb, "status: %s\n", debugRectString(layout.status))
 

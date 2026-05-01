@@ -118,6 +118,7 @@ func (m *Model) markStreamRenderDirty() {
 	if m == nil {
 		return
 	}
+	m.markBackgroundDirty("stream-render")
 	m.streamRenderDeferNext = true
 	m.streamRenderDeferred = true
 	m.streamRenderForceView = false

@@ -28,7 +28,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Improved AGENTS.md handling by adding stable system-prompt framing only when repository guidance exists, while keeping AGENTS.md contents in the session `<system-reminder>` context layer.
 - Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
-- Fixed Ghostty/tab focus-restore artifacts by upgrading the delayed post-focus redraw into a strong host redraw (`ClearScreen + RequestWindowSize + redraw-settle`), so late stale cells are actively repaired instead of waiting for a later incidental repaint.
+- Fixed Ghostty/tab focus-restore artifacts by tracking transcript/layout changes that occur while the terminal is backgrounded, forcing a host redraw after focus-settle when those background changes are observed, and recording background-dirty plus input-separator diagnostics to make any remaining stale-display cases easier to investigate.
 - Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
 - Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
 - Fixed collapsed tool result hidden-line counts for markdown-like output.

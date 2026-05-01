@@ -146,7 +146,7 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 	case "scroll-flush":
 		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
 		return postHostRedrawFallbackCmd(generation, reason, scrollFlushFallbackRedrawDelay)
-	case "content-boundary", "live-append":
+	case "content-boundary", "live-append", "background-dirty-focus":
 		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
 		return postHostRedrawFallbackCmd(generation, reason, contentBoundaryFallbackRedrawDelay)
 	default:

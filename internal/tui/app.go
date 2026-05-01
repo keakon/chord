@@ -397,6 +397,10 @@ type Model struct {
 	hostRedrawGeneration     uint64
 	lastHostRedrawAt         time.Time
 	lastHostRedrawReason     string
+	backgroundDirty          bool
+	backgroundDirtyReason    string
+	backgroundDirtyAt        time.Time
+	backgroundDirtyCount     int
 	screenBuf                uv.ScreenBuffer
 	// screenBlankLine caches one EmptyCell-filled row matching the current
 	// screen buffer width, so Draw can clear the reused buffer with row copies
