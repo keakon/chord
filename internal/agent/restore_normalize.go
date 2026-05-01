@@ -7,6 +7,14 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// normalizeRestoredMessages applies compatibility repairs only to messages loaded
+// from persisted sessions.
+//
+// This restore-time layer is intentionally scoped to historical or interrupted
+// session data. New session writes should be persisted in canonical form and must
+// not rely on normalization here for correctness. When adding a rule, document
+// the legacy or interrupted shape it repairs and prefer fixing new writes at the
+// source.
 func normalizeRestoredMessages(msgs []message.Message) []message.Message {
 	if len(msgs) == 0 {
 		return msgs

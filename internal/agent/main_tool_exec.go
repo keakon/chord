@@ -190,7 +190,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 		trackedFilePath string
 		deleteLocks     *deleteLockSet
 	)
-	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == "MultiEdit" || tc.Name == tools.NameDelete {
+	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NameDelete {
 		if tc.Name == tools.NameDelete {
 			locks, err := acquireDeleteLocks(a.fileTrack, a.instanceID, tc.Args)
 			if err != nil {
@@ -213,8 +213,8 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 		}
 	}
 
-	// Write/Edit/MultiEdit: acquire write lock before execution, release after.
-	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == "MultiEdit") {
+	// Write/Edit: acquire write lock before execution, release after.
+	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := a.fileTrack.AcquireWrite(trackedFilePath, a.instanceID, currentHash); err != nil {
 			if _, ok := errors.AsType[*filelock.ExternalModificationError](err); ok {
