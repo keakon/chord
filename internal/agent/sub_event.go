@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -12,12 +12,8 @@ import (
 // All state modifications happen in this single thread; user messages arrive
 // via the inputCh channel.
 func (s *SubAgent) runLoop() {
-	slog.Info("SubAgent event loop started",
-		"instance", s.instanceID,
-		"task_id", s.taskID,
-		"agent_def", s.agentDefName,
-	)
-	defer slog.Info("SubAgent event loop stopped", "instance", s.instanceID)
+	log.Infof("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
+	defer log.Infof("SubAgent event loop stopped instance=%v", s.instanceID)
 
 	for {
 		s.refillInputChannelFromOverflow()
@@ -77,8 +73,7 @@ func (s *SubAgent) runLoop() {
 				if len(merged) > 0 {
 					persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 					if persistedResults > 0 {
-						slog.Info("SubAgent: persisted interrupted tool-call results during shutdown",
-							"agent", s.instanceID, "count", persistedResults)
+						log.Infof("SubAgent: persisted interrupted tool-call results during shutdown agent=%v count=%v", s.instanceID, persistedResults)
 					}
 					emitCancelledToolResults(s.parent.emitToTUI, merged)
 					s.parent.emitActivity(s.instanceID, ActivityIdle, "")

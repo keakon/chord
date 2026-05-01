@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -66,12 +66,7 @@ func (a *MainAgent) emitUsageEvent(event analytics.UsageEvent) {
 		return
 	}
 	if err := a.usageLedger.AppendEvent(event); err != nil {
-		slog.Warn("failed to append usage ledger event",
-			"agent_id", event.AgentID,
-			"purpose", event.Purpose,
-			"running_model_ref", event.RunningModelRef,
-			"error", err,
-		)
+		log.Warnf("failed to append usage ledger event agent_id=%v purpose=%v running_model_ref=%v error=%v", event.AgentID, event.Purpose, event.RunningModelRef, err)
 	}
 }
 

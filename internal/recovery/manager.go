@@ -6,8 +6,8 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,7 +228,7 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 	var err error
 	msg, err = r.persistImageParts(msg)
 	if err != nil {
-		slog.Warn("failed to persist image parts, storing inline", "error", err)
+		log.Warnf("failed to persist image parts, storing inline error=%v", err)
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -282,8 +282,7 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 			if err != io.EOF {
 				// Last record may be truncated due to crash mid-write.
 				// Log at debug level and return what we have so far.
-				slog.Debug("truncated record at end of JSONL, stopping recovery here",
-					"agent", agentID, "err", err)
+				log.Debugf("truncated record at end of JSONL, stopping recovery here agent=%v err=%v", agentID, err)
 			}
 			break
 		}
@@ -292,7 +291,7 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 			if p.Type == "image" && p.ImagePath != "" && len(p.Data) == 0 {
 				data, err := os.ReadFile(p.ImagePath)
 				if err != nil {
-					slog.Warn("failed to load image from disk", "path", p.ImagePath, "error", err)
+					log.Warnf("failed to load image from disk path=%v error=%v", p.ImagePath, err)
 					continue
 				}
 				msg.Parts[i].Data = data

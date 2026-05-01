@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 )
@@ -463,9 +463,9 @@ func (a *MainAgent) logToolTraceExecutionRunning(call PendingToolCall, at time.T
 	}
 	switch {
 	case totalQueuedLatency >= time.Second:
-		slog.Warn("tool queue latency trace", attrs...)
+		log.Warnf("tool queue latency trace attrs=%v", attrs)
 	case totalQueuedLatency >= 200*time.Millisecond:
-		slog.Info("tool queue latency trace", attrs...)
+		log.Infof("tool queue latency trace attrs=%v", attrs)
 	}
 	cleanup()
 }

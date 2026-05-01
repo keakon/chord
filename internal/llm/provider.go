@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -506,7 +506,7 @@ func (p *ProviderConfig) SetOAuthRefresher(
 		var clientErr error
 		httpClient, clientErr = NewHTTPClientWithProxy(proxyURL, 30*time.Second)
 		if clientErr != nil {
-			slog.Warn("failed to create OAuth refresh HTTP client with proxy, using default", "proxy", proxyURL, "error", clientErr)
+			log.Warnf("failed to create OAuth refresh HTTP client with proxy, using default proxy=%v error=%v", proxyURL, clientErr)
 		}
 	}
 	p.oauthRefresher = &OAuthRefresher{
@@ -661,9 +661,7 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		if selectedKS.Key == "" || isExpiringSoon(selectedKS.OAuthInfo.Expires) {
 			if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
 				// Log warning but continue with the old token (might still work).
-				slog.Warn("failed to refresh OAuth token on-demand",
-					"provider", p.name,
-					"error", err)
+				log.Warnf("failed to refresh OAuth token on-demand provider=%v error=%v", p.name, err)
 			}
 		}
 	}
@@ -871,7 +869,7 @@ func (p *ProviderConfig) TryRefreshOAuthKey(ctx context.Context, key string) (st
 	refreshedKey := oauthKS.Key
 	p.mu.Unlock()
 	if err != nil {
-		slog.Warn("OAuth token refresh on auth error failed", "provider", p.name, "error", err)
+		log.Warnf("OAuth token refresh on auth error failed provider=%v error=%v", p.name, err)
 		return "", false, err
 	}
 	return refreshedKey, true, nil
@@ -1046,7 +1044,7 @@ func (p *ProviderConfig) markInvalid(key string, status config.OAuthCredentialSt
 		return
 	}
 	if err := refresher.persistCredentialStatus(match, status); err != nil {
-		slog.Warn("failed to persist invalid OAuth credential status", "provider", p.name, "status", status, "error", err)
+		log.Warnf("failed to persist invalid OAuth credential status provider=%v status=%v error=%v", p.name, status, err)
 	}
 }
 
@@ -1206,7 +1204,7 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		}()
 		snaps, err := fetchFn(key, accountID)
 		if err != nil {
-			slog.Debug("codex usage poll failed", "provider", providerName, "error", err)
+			log.Debugf("codex usage poll failed provider=%v error=%v", providerName, err)
 			return
 		}
 		for _, snap := range snaps {
@@ -1308,7 +1306,7 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	p.mu.Lock()
 
 	if err != nil {
-		slog.Warn("OAuth token refresh failed", "provider", p.name, "error", err)
+		log.Warnf("OAuth token refresh failed provider=%v error=%v", p.name, err)
 		return err
 	}
 
@@ -1318,7 +1316,7 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 		return true, nil
 	})
 	if persistErr != nil {
-		slog.Warn("failed to persist refreshed OAuth token", "provider", p.name, "error", persistErr)
+		log.Warnf("failed to persist refreshed OAuth token provider=%v error=%v", p.name, persistErr)
 		persistedCred = newCred
 	}
 	if persistedCred == nil {
@@ -1334,7 +1332,7 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	if persistedCred.Email != "" {
 		ks.OAuthInfo.Email = persistedCred.Email
 	}
-	slog.Info("OAuth token refreshed", "provider", p.name)
+	log.Infof("OAuth token refreshed provider=%v", p.name)
 
 	return nil
 }

@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -162,7 +162,7 @@ func (a *MainAgent) UpdateTodos(todos []tools.TodoItem) error {
 			UsageByModel:           usageSnap.ByModel,
 			UsageByAgent:           usageSnap.ByAgent,
 		}); err != nil {
-			slog.Warn("failed to save todo snapshot", "error", err)
+			log.Warnf("failed to save todo snapshot error=%v", err)
 		}
 	}
 	a.todoMu.Unlock()

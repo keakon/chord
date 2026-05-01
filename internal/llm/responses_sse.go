@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -284,12 +284,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	switch eventType {
 	case "response.output_item.added":
 		if len(eventData) == 0 {
-			slog.Debug("responses: skip empty output_item.added")
+			log.Debug("responses: skip empty output_item.added")
 			return nil, nil, false, nil
 		}
 		var added responseOutputItemAdded
 		if err := responsesSSEUnmarshal(eventData, &added); err != nil {
-			slog.Debug("responses: skip unparseable output_item.added", "err", err, "data_len", len(eventData))
+			log.Debugf("responses: skip unparseable output_item.added err=%v data_len=%v", err, len(eventData))
 			return nil, nil, false, nil
 		}
 		addedIdx := added.OutputIndex
@@ -306,7 +306,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				toolCallID = added.Item.ID
 			}
 			if state.finalizedCalls[toolCallID] {
-				slog.Debug("responses: skip duplicate function_call (already finalized)", "tool", added.Item.Name, "call_id", toolCallID, "output_index", addedIdx)
+				log.Debugf("responses: skip duplicate function_call (already finalized) tool=%v call_id=%v output_index=%v", added.Item.Name, toolCallID, addedIdx)
 				return nil, nil, false, nil
 			}
 			state.toolCalls[addedIdx] = &responsesToolAccumulator{id: toolCallID, name: added.Item.Name}
@@ -355,7 +355,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	case "response.reasoning_summary_text.delta":
 		var delta responseReasoningSummaryTextDelta
 		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
-			slog.Debug("responses: skip unparseable reasoning_summary_text.delta", "err", err)
+			log.Debugf("responses: skip unparseable reasoning_summary_text.delta err=%v", err)
 			return nil, nil, false, nil
 		}
 		if delta.Delta != "" && state.cb != nil {
@@ -366,7 +366,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	case "response.reasoning_summary_text.done":
 		var done responseReasoningSummaryTextDone
 		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
-			slog.Debug("responses: skip unparseable reasoning_summary_text.done", "err", err)
+			log.Debugf("responses: skip unparseable reasoning_summary_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
 		if state.cb != nil {
@@ -383,7 +383,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		var done responseOutputItemDone
 		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
-			slog.Debug("responses: skip unparseable output_item.done", "err", err)
+			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
 		if done.Item.Type == "function_call" {
@@ -518,7 +518,7 @@ func logResponsesSSEDecodeFailure(reader io.Reader, chunkIndex int, eventType st
 			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 		}
 	}
-	slog.Warn("responses: failed to decode SSE payload", attrs...)
+	log.Warnf("responses: failed to decode SSE payload attrs=%v", "<missing>")
 }
 
 func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType string, data []byte, readErr error) {
@@ -548,7 +548,7 @@ func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType s
 			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 		}
 	}
-	slog.Warn("responses: SSE event ended before delimiter", attrs...)
+	log.Warnf("responses: SSE event ended before delimiter attrs=%v", "<missing>")
 }
 
 func quoteASCIIBytesTail(data []byte, limit int) string {

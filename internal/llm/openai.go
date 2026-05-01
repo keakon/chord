@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -255,17 +255,12 @@ func (o *OpenAIProvider) CompleteStream(
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, o.provider.CompressEnabled())
 
-	slog.Debug("openai request",
-		"model", model,
-		"max_tokens", maxTokens,
-		"messages", len(messages),
-		"tools", len(tools),
-	)
+	log.Debugf("openai request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))
 
 	// Send request.
 	start := time.Now()
 	if o.proxyScheme != "" {
-		slog.Debug("LLM request via proxy", "provider", "openai", "scheme", o.proxyScheme)
+		log.Debugf("LLM request via proxy provider=%v scheme=%v", "openai", o.proxyScheme)
 	}
 	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := o.client.Do(req)
@@ -291,7 +286,7 @@ func (o *OpenAIProvider) CompleteStream(
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
 		// Discard any remaining body content to ensure clean connection reuse.
 		io.Copy(io.Discard, httpResp.Body)
-		slog.Debug("openai error response", "status", httpResp.StatusCode, "body_len", len(errBody))
+		log.Debugf("openai error response status=%v body_len=%v", httpResp.StatusCode, len(errBody))
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		// Dump error response if enabled.
 		if o.dumpWriter != nil {
@@ -306,7 +301,7 @@ func (o *OpenAIProvider) CompleteStream(
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
-					slog.Warn("failed to write LLM dump", "error", wErr)
+					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
 			}()
 		}
@@ -339,7 +334,7 @@ func (o *OpenAIProvider) CompleteStream(
 				dump.Error = parseErr.Error()
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
-				slog.Warn("failed to write LLM dump", "error", wErr)
+				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}
@@ -427,9 +422,7 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 				// responses from some models (e.g. GLM) that omit these fields.
 				// Sending them would cause 400 errors from the API.
 				if tc.ID == "" || tc.Name == "" {
-					slog.Warn("skipping tool call with empty id or name in history",
-						"tool", tc.Name, "id", tc.ID,
-					)
+					log.Warnf("skipping tool call with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
 					continue
 				}
 				// Sanitize tool call arguments: ensure they are valid JSON
@@ -438,10 +431,7 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 				// the API server when it tries to parse the arguments field.
 				args := tc.Args
 				if len(args) == 0 || !json.Valid(args) {
-					slog.Warn("sanitizing invalid tool call args in conversation history",
-						"tool", tc.Name, "id", tc.ID,
-						"raw_args", string(args),
-					)
+					log.Warnf("sanitizing invalid tool call args in conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
 					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 				}
 				// The OpenAI Chat Completions API requires function.arguments
@@ -475,7 +465,7 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 			// Skip tool results with empty call id — they correspond to malformed
 			// tool calls (e.g. from GLM) that were also skipped above.
 			if msg.ToolCallID == "" {
-				slog.Warn("skipping tool result with empty tool_call_id in history")
+				log.Warn("skipping tool result with empty tool_call_id in history")
 				continue
 			}
 			result = append(result, openAIMessage{
@@ -788,9 +778,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					// Output was truncated by max_tokens. Any in-progress tool
 					// calls have incomplete arguments and must be discarded.
 					truncated = true
-					slog.Warn("LLM output truncated (finish_reason=length), discarding incomplete tool calls",
-						"pending_tool_calls", len(toolCalls),
-					)
+					log.Warnf("LLM output truncated (finish_reason=length), discarding incomplete tool calls pending_tool_calls=%v", len(toolCalls))
 					finalizeToolCalls(toolCalls, &resp, cb, true)
 				}
 			}
@@ -848,10 +836,7 @@ func finalizeToolCalls(
 	// warning so the caller can surface an appropriate error message.
 	if truncated {
 		for idx, acc := range toolCalls {
-			slog.Warn("discarding truncated tool call",
-				"tool", acc.name, "id", acc.id,
-				"partial_args", acc.args.String(),
-			)
+			log.Warnf("discarding truncated tool call tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
 			delete(toolCalls, idx)
 		}
 		return
@@ -876,10 +861,7 @@ func finalizeToolCalls(
 		// chunk and the fragment-decoding loop above was not reached (e.g. when
 		// the proxy sends a non-streaming response disguised as streaming).
 		if len(args) > 0 && args[0] == '"' {
-			slog.Debug("tool call args were JSON string, unwrapping",
-				"tool", acc.name,
-				"raw_args", acc.args.String(),
-			)
+			log.Debugf("tool call args were JSON string, unwrapping tool=%v raw_args=%v", acc.name, acc.args.String())
 			var decoded string
 			if err := json.Unmarshal(args, &decoded); err == nil {
 				args = json.RawMessage(decoded)
@@ -891,23 +873,18 @@ func finalizeToolCalls(
 		// downstream tool execution gets a clear error instead of corrupting
 		// the conversation history with malformed JSON.
 		if !json.Valid(args) {
-			slog.Warn("tool call has invalid JSON args, replacing with error object",
-				"tool", acc.name, "id", acc.id,
-				"raw_args", string(args),
-			)
+			log.Warnf("tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 			args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 		}
 		// Discard tool calls with empty id or name — some models (e.g. GLM) omit
 		// these fields, producing history entries that cause 400 errors on
 		// subsequent requests (Responses API requires a non-empty call_id).
 		if acc.id == "" || acc.name == "" {
-			slog.Warn("discarding tool call with empty id or name",
-				"tool", acc.name, "id", acc.id,
-			)
+			log.Warnf("discarding tool call with empty id or name tool=%v id=%v", acc.name, acc.id)
 			delete(toolCalls, idx)
 			continue
 		}
-		slog.Debug("finalized tool call", "tool", acc.name, "id", acc.id, "args", string(args))
+		log.Debugf("finalized tool call tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
 			ID:   acc.id,
 			Name: acc.name,

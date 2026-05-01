@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sort"
 	"strings"
 
@@ -13,7 +13,7 @@ import (
 func (a *MainAgent) handleLoopAssessment(evt Event) {
 	payload, ok := evt.Payload.(*LoopAssessment)
 	if !ok || payload == nil {
-		slog.Warn("handleLoopAssessment: invalid payload type", "payload_type", fmt.Sprintf("%T", evt.Payload))
+		log.Warnf("handleLoopAssessment: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	if !a.loopState.Enabled {

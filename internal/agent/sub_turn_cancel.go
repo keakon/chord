@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 )
 
 func (s *SubAgent) cancelCurrentTurnFromLoop() {
@@ -29,18 +29,9 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	turn.PendingToolMeta = nil
 	persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 	if persistedResults > 0 {
-		slog.Info("SubAgent: persisted interrupted tool-call results after cancellation",
-			"agent", s.instanceID,
-			"turn_id", turn.ID,
-			"count", persistedResults,
-		)
+		log.Infof("SubAgent: persisted interrupted tool-call results after cancellation agent=%v turn_id=%v count=%v", s.instanceID, turn.ID, persistedResults)
 	}
 	emitCancelledToolResults(s.parent.emitToTUI, merged)
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
-	slog.Info("SubAgent current turn cancelled by user",
-		"agent", s.instanceID,
-		"turn_id", turn.ID,
-		"pending_tools", pending,
-		"cancelled_tools", len(merged),
-	)
+	log.Infof("SubAgent current turn cancelled by user agent=%v turn_id=%v pending_tools=%v cancelled_tools=%v", s.instanceID, turn.ID, pending, len(merged))
 }

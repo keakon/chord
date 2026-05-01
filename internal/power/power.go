@@ -3,7 +3,7 @@
 package power
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sync"
 	"time"
 )
@@ -108,9 +108,9 @@ func (m *Manager) UpdateActivity(agentID string, activity ActivityType) {
 		}
 		// Acquire immediately.
 		if err := m.backend.Acquire(); err != nil {
-			slog.Warn("power: failed to acquire sleep prevention", "error", err)
+			log.Warnf("power: failed to acquire sleep prevention error=%v", err)
 		} else {
-			slog.Debug("power: acquired sleep prevention", "trigger_agent", agentID, "activity", activity)
+			log.Debugf("power: acquired sleep prevention trigger_agent=%v activity=%v", agentID, activity)
 			m.held = true
 		}
 		return
@@ -137,9 +137,9 @@ func (m *Manager) UpdateActivity(agentID string, activity ActivityType) {
 				return
 			}
 			if err := m.backend.Release(); err != nil {
-				slog.Warn("power: failed to release sleep prevention", "error", err)
+				log.Warnf("power: failed to release sleep prevention error=%v", err)
 			} else {
-				slog.Debug("power: released sleep prevention")
+				log.Debug("power: released sleep prevention")
 				m.held = false
 			}
 		})
@@ -147,7 +147,7 @@ func (m *Manager) UpdateActivity(agentID string, activity ActivityType) {
 
 	// Log activity transitions for debugging.
 	if existed && prev != activity {
-		slog.Debug("power: activity transition", "agent", agentID, "from", prev, "to", activity, "held", m.held)
+		log.Debugf("power: activity transition agent=%v from=%v to=%v held=%v", agentID, prev, activity, m.held)
 	}
 }
 
@@ -180,7 +180,7 @@ func (m *Manager) Close() error {
 
 	if m.held {
 		if err := m.backend.Release(); err != nil {
-			slog.Warn("power: failed to release on close", "error", err)
+			log.Warnf("power: failed to release on close error=%v", err)
 		}
 		m.held = false
 	}

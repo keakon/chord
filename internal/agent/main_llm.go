@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -127,7 +127,7 @@ func (a *MainAgent) ensureMainModelPolicy() error {
 		select {
 		case <-waitCh:
 		case <-time.After(2 * time.Second):
-			slog.Warn("main model policy build wait timed out; proceeding with current client")
+			log.Warn("main model policy build wait timed out; proceeding with current client")
 			return nil
 		}
 		a.mainModelPolicyMu.Lock()
@@ -495,10 +495,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			// Confirmed toasts must be keyed off the model that actually emitted output.
 			emitConfirmedSwitchToast(confirmedRef, confirmedReason)
 		case "error":
-			slog.Warn("LLM stream error delta",
-				"text", delta.Text,
-				"instance", a.instanceID,
-			)
+			log.Warnf("LLM stream error delta text=%v instance=%v", delta.Text, a.instanceID)
 		case "rollback":
 			// Provider requested rollback of the currently streamed assistant
 			// output (e.g. incremental chain invalid). Drop speculative tool cards
@@ -521,7 +518,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		"message_count": len(messages),
 	})
 	if hookErr != nil {
-		slog.Warn("on_before_llm_call hook error", "error", hookErr)
+		log.Warnf("on_before_llm_call hook error error=%v", hookErr)
 	} else if hookResult != nil {
 		switch hookResult.Action {
 		case hook.ActionBlock:
@@ -531,7 +528,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			}
 			return nil, fmt.Errorf("LLM request %s", msg)
 		case hook.ActionModify:
-			slog.Warn("on_before_llm_call hook returned modify action; modifying LLM requests is not supported, continuing")
+			log.Warn("on_before_llm_call hook returned modify action; modifying LLM requests is not supported, continuing")
 		}
 	}
 
@@ -565,9 +562,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		// Per plan §4: if oversize + compaction running, suspend and wait for
 		// compaction to apply, then retry instead of surfacing an immediate error.
 		if llm.IsContextLengthExceeded(err) && a.IsCompactionRunning() {
-			slog.Info("LLM context length exceeded while compaction running; suspending LLM call",
-				"error", err,
-			)
+			log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
 			return nil, &contextLengthExceededPendingCompactionError{inner: err}
 		}
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
@@ -601,14 +596,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		if reason == "" {
 			reason = "error"
 		}
-		slog.Warn("switched to fallback model",
-			"reason", reason,
-			"from", selectedRef,
-			"to", callStatus.RunningModelRef,
-		)
+		log.Warnf("switched to fallback model reason=%v from=%v to=%v", reason, selectedRef, callStatus.RunningModelRef)
 	}
 	if prevRunningRef != "" && prevRunningRef != selectedRef && callStatus.RunningModelRef == selectedRef {
-		slog.Info("switched back to selected model", "model", selectedRef)
+		log.Infof("switched back to selected model model=%v", selectedRef)
 	}
 
 	// Record token usage for context compression decisions.
@@ -648,7 +639,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				a.recordToolTraceOnAfterLLMCallDone(callID, finishedAt)
 			}
 			if hookErr != nil {
-				slog.Warn("on_after_llm_call hook error", "error", hookErr)
+				log.Warnf("on_after_llm_call hook error error=%v", hookErr)
 				return
 			}
 			if hookResult == nil {
@@ -656,21 +647,21 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			}
 			switch hookResult.Action {
 			case hook.ActionBlock:
-				slog.Warn("on_after_llm_call hook returned block; ignored in background execution", "message", hookResult.Message)
+				log.Warnf("on_after_llm_call hook returned block; ignored in background execution message=%v", hookResult.Message)
 			case hook.ActionModify:
-				slog.Warn("on_after_llm_call hook returned modify action; modifying LLM responses is not supported, continuing")
+				log.Warn("on_after_llm_call hook returned modify action; modifying LLM responses is not supported, continuing")
 			}
 		}(callIDs)
 	} else {
 		go func() {
 			if hookResult, hookErr := a.fireHook(context.Background(), hook.OnAfterLLMCall, turnID, hookCtxData); hookErr != nil {
-				slog.Warn("on_after_llm_call hook error", "error", hookErr)
+				log.Warnf("on_after_llm_call hook error error=%v", hookErr)
 			} else if hookResult != nil {
 				switch hookResult.Action {
 				case hook.ActionBlock:
-					slog.Warn("on_after_llm_call hook returned block; ignored in background execution", "message", hookResult.Message)
+					log.Warnf("on_after_llm_call hook returned block; ignored in background execution message=%v", hookResult.Message)
 				case hook.ActionModify:
-					slog.Warn("on_after_llm_call hook returned modify action; modifying LLM responses is not supported, continuing")
+					log.Warn("on_after_llm_call hook returned modify action; modifying LLM responses is not supported, continuing")
 				}
 			}
 		}()

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
@@ -90,11 +90,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Turn isolation: discard stale results.
 	if s.turn == nil || result.TurnID != s.turn.ID {
-		slog.Debug("SubAgent: discarding stale tool result",
-			"agent", s.instanceID,
-			"result_turn", result.TurnID,
-			"current_turn", s.currentTurnID(),
-		)
+		log.Debugf("SubAgent: discarding stale tool result agent=%v result_turn=%v current_turn=%v", s.instanceID, result.TurnID, s.currentTurnID())
 		return
 	}
 
@@ -112,13 +108,11 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		result.Audit,
 	))
 	if hookErr != nil {
-		slog.Warn("SubAgent on_before_tool_result_append hook error",
-			"agent", s.instanceID, "error", hookErr)
+		log.Warnf("SubAgent on_before_tool_result_append hook error agent=%v error=%v", s.instanceID, hookErr)
 	} else if hookResult != nil {
 		switch hookResult.Action {
 		case hook.ActionBlock:
-			slog.Warn("SubAgent on_before_tool_result_append returned block; ignoring",
-				"agent", s.instanceID)
+			log.Warnf("SubAgent on_before_tool_result_append returned block; ignoring agent=%v", s.instanceID)
 		case hook.ActionModify:
 			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
 		}
@@ -165,8 +159,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Persist tool result.
 	go func() {
 		if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
-			slog.Warn("SubAgent: failed to persist tool result",
-				"agent", s.instanceID, "error", err)
+			log.Warnf("SubAgent: failed to persist tool result agent=%v error=%v", s.instanceID, err)
 		}
 	}()
 
@@ -224,22 +217,14 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	s.turn.nextToolBatch = 0
 	if abnormalInBatch > 0 {
 		s.turn.MalformedCount++
-		slog.Warn("SubAgent: batch contained abnormal tool call arguments",
-			"agent", s.instanceID,
-			"abnormal_count", abnormalInBatch,
-			"consecutive_rounds", s.turn.MalformedCount,
-		)
+		log.Warnf("SubAgent: batch contained abnormal tool call arguments agent=%v abnormal_count=%v consecutive_rounds=%v", s.instanceID, abnormalInBatch, s.turn.MalformedCount)
 	} else {
 		s.turn.MalformedCount = 0
 	}
 	s.turn.malformedInBatch = 0
 
 	if s.turn.MalformedCount >= maxMalformedToolCalls {
-		slog.Warn("SubAgent: aborting turn due to repeated malformed tool call args",
-			"agent", s.instanceID,
-			"count", s.turn.MalformedCount,
-			"threshold", maxMalformedToolCalls,
-		)
+		log.Warnf("SubAgent: aborting turn due to repeated malformed tool call args agent=%v count=%v threshold=%v", s.instanceID, s.turn.MalformedCount, maxMalformedToolCalls)
 		s.sendEvent(Event{
 			Type: EventAgentError,
 			Payload: fmt.Errorf(
@@ -252,8 +237,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 
 	if results, err := s.runToolBatchHooks(s.turn.Ctx, s.turn); err != nil {
-		slog.Warn("SubAgent on_tool_batch_complete hook error",
-			"agent", s.instanceID, "error", err)
+		log.Warnf("SubAgent on_tool_batch_complete hook error agent=%v error=%v", s.instanceID, err)
 	} else {
 		for _, job := range results {
 			if shouldAppendAutomationResult(job.Hook, job.Result) {

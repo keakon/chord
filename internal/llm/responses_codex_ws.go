@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -188,7 +188,7 @@ func (r *ResponsesProvider) codexWSCloseConnUnlocked(reason string) bool {
 	if hadConn {
 		_ = r.codexWSConn.Close()
 		r.codexWSConn = nil
-		slog.Debug("responses codex ws: connection closed", "reason", reason)
+		log.Debugf("responses codex ws: connection closed reason=%v", reason)
 	}
 	r.codexWSPromptCacheKey = ""
 	return hadConn
@@ -209,12 +209,7 @@ func (r *ResponsesProvider) resetCodexWebSocketChain(reason string) {
 	r.codexWSLastInpSig = ""
 	r.codexWSLastReqSig = ""
 	if hadConn || hadPrevRespID || hadReqSig {
-		slog.Debug("responses codex ws: chain reset",
-			"reason", reason,
-			"had_conn", hadConn,
-			"had_previous_response_id", hadPrevRespID,
-			"had_request_signature", hadReqSig,
-		)
+		log.Debugf("responses codex ws: chain reset reason=%v had_conn=%v had_previous_response_id=%v had_request_signature=%v", reason, hadConn, hadPrevRespID, hadReqSig)
 	}
 }
 
@@ -395,7 +390,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 				dump.Error = parseErr.Error()
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
-				slog.Warn("failed to write LLM dump", "error", wErr)
+				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}
@@ -655,21 +650,10 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		useIncremental = true
 		wireInput = fullInput[baselineLen:]
 		prevID = r.codexWSLastRespID
-		slog.Debug("responses codex ws incremental decision",
-			"result", "hit",
-			"reason", reason,
-			"baseline_len", baselineLen,
-			"delta_len", len(wireInput),
-			"model", model,
-		)
+		log.Debugf("responses codex ws incremental decision result=%v reason=%v baseline_len=%v delta_len=%v model=%v", "hit", reason, baselineLen, len(wireInput), model)
 	} else {
 		wireInput = fullInput
-		slog.Debug("responses codex ws incremental decision",
-			"result", "miss",
-			"reason", reason,
-			"input_len", len(fullInput),
-			"model", model,
-		)
+		log.Debugf("responses codex ws incremental decision result=%v reason=%v input_len=%v model=%v", "miss", reason, len(fullInput), model)
 	}
 
 	env := codexWSResponseCreate{
@@ -709,16 +693,9 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		r.codexWSLastRespID = resp.ProviderResponseID
 	} else {
 		r.codexWSLastRespID = ""
-		slog.Debug("responses: codex ws completed without response id; incremental chain not advanced",
-			"model", model,
-		)
+		log.Debugf("responses: codex ws completed without response id; incremental chain not advanced model=%v", model)
 	}
-	slog.Debug("responses codex ws baseline updated",
-		"model", model,
-		"baseline_len", baselineLen,
-		"output_items", len(outputItems),
-		"request_signature_set", r.codexWSLastReqSig != "",
-	)
+	log.Debugf("responses codex ws baseline updated model=%v baseline_len=%v output_items=%v request_signature_set=%v", model, baselineLen, len(outputItems), r.codexWSLastReqSig != "")
 
 	return resp, useIncremental, nil
 }

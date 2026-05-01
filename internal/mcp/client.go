@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sort"
 	"strings"
 	"sync"
@@ -142,12 +142,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("mcp initialize %s: decode result: %w", c.name, err)
 	}
 
-	slog.Info("mcp server initialized",
-		"name", c.name,
-		"server", c.serverInfo.ServerInfo.Name,
-		"version", c.serverInfo.ServerInfo.Version,
-		"protocol", c.serverInfo.ProtocolVersion,
-	)
+	log.Infof("mcp server initialized name=%v server=%v version=%v protocol=%v", c.name, c.serverInfo.ServerInfo.Name, c.serverInfo.ServerInfo.Version, c.serverInfo.ProtocolVersion)
 
 	// Send the initialized notification (required by MCP spec).
 	notif := JSONRPCNotification{
@@ -155,7 +150,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		Method:  "notifications/initialized",
 	}
 	if err := c.transport.Notify(ctx, notif); err != nil {
-		slog.Warn("mcp initialized notification failed", "name", c.name, "error", err)
+		log.Warnf("mcp initialized notification failed name=%v error=%v", c.name, err)
 	}
 
 	return nil
@@ -183,7 +178,7 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 		return nil, fmt.Errorf("mcp tools/list %s: decode: %w", c.name, err)
 	}
 
-	slog.Info("mcp tools discovered", "server", c.name, "count", len(result.Tools))
+	log.Infof("mcp tools discovered server=%v count=%v", c.name, len(result.Tools))
 	return result.Tools, nil
 }
 
@@ -423,7 +418,7 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 				Error:       "must specify either command or url",
 			}
 			m.setEndpointStatus(status)
-			slog.Warn("mcp server invalid config", "name", name, "error", status.Error)
+			log.Warnf("mcp server invalid config name=%v error=%v", name, status.Error)
 			continue
 		}
 
@@ -431,9 +426,9 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 		m.setEndpointStatus(status)
 		if err != nil {
 			if status.Pending {
-				slog.Info("mcp server initialization canceled", "name", name, "error", err)
+				log.Infof("mcp server initialization canceled name=%v error=%v", name, err)
 			} else {
-				slog.Warn("mcp server initialization failed", "name", name, "attempts", status.Attempt, "error", err)
+				log.Warnf("mcp server initialization failed name=%v attempts=%v error=%v", name, status.Attempt, err)
 			}
 			continue
 		}
@@ -840,7 +835,7 @@ func (m *Manager) Close() {
 	defer m.mu.Unlock()
 	for name, c := range m.clients {
 		if err := c.Close(); err != nil {
-			slog.Warn("mcp server close error", "name", name, "error", err)
+			log.Warnf("mcp server close error name=%v error=%v", name, err)
 		}
 	}
 	m.clients = make(map[string]*Client)

@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -302,12 +302,12 @@ func loadAgentsMDWithWorkDir(projectRoot, workDir string) string {
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			if !os.IsNotExist(rerr) {
-				slog.Warn("failed to read AGENTS.md", "path", path, "error", rerr)
+				log.Warnf("failed to read AGENTS.md path=%v error=%v", path, rerr)
 			}
 			continue
 		}
 		if c := strings.TrimSpace(string(data)); c != "" {
-			slog.Info("loaded AGENTS.md", "path", path, "size", len(c))
+			log.Infof("loaded AGENTS.md path=%v size=%v", path, len(c))
 			sections = append(sections, c)
 		}
 	}
@@ -338,7 +338,7 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 			continue
 		}
 		if len(ruleset) > 0 && ruleset.Evaluate("Skill", s.Name) == permission.ActionDeny {
-			slog.Debug("skill denied by permission, skipping from visible list", "skill", s.Name)
+			log.Debugf("skill denied by permission, skipping from visible list skill=%v", s.Name)
 			continue
 		}
 		entries = append(entries, tools.SkillListingEntry{Name: s.Name, Desc: s.Description})

@@ -2,9 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"github.com/keakon/golog/log"
 	"image"
 	"io"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -555,13 +555,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	m.updateRightPanelVisible()
 	m.recalcViewportSize()
 	if a != nil {
-		slog.Debug("tui model init timing",
-			"startup_restore_pending", m.startupRestorePending,
-			"blocks", len(m.viewport.blocks),
-			"width", m.width,
-			"height", m.height,
-			"total_ms", time.Since(initStarted).Milliseconds(),
-		)
+		log.Debugf("tui model init timing startup_restore_pending=%v blocks=%v width=%v height=%v total_ms=%v", m.startupRestorePending, len(m.viewport.blocks), m.width, m.height, time.Since(initStarted).Milliseconds())
 	}
 	return m
 }
@@ -703,7 +697,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update terminal title from the restored session's first user message.
 		m.updateTerminalTitleFromRestoredSession()
 		if staleErr != nil {
-			slog.Warn("tui runtime cache reset failed", "error", staleErr)
+			log.Warnf("tui runtime cache reset failed error=%v", staleErr)
 		}
 		return m, tea.Batch(m.imageProtocolCmd(), m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay))
 

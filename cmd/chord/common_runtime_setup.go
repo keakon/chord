@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
@@ -37,7 +37,7 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 	if ac.Cfg != nil && ac.Cfg.PreventSleep != nil && *ac.Cfg.PreventSleep {
 		powerMgr = power.NewManager(power.NewBackend())
 		ac.MainAgent.SetActivityObserver(&activityObserverAdapter{mgr: powerMgr})
-		slog.Info("prevent_sleep enabled: activity-based sleep prevention active")
+		log.Info("prevent_sleep enabled: activity-based sleep prevention active")
 	}
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
@@ -159,7 +159,7 @@ func startRuntimeMCP(ac *AppContext) {
 				var err error
 				mcpTools, err = mcp.DiscoverAllTools(ac.Ctx, ac.MCPMgr)
 				if err != nil {
-					slog.Warn("MCP tool discovery failed", "error", err)
+					log.Warnf("MCP tool discovery failed error=%v", err)
 				}
 				block = mcp.ConnectedServersPromptBlock(ac.Ctx, ac.MCPMgr)
 			}
@@ -184,12 +184,12 @@ func startRuntimeWarmups(ac *AppContext) {
 	}
 	go func() {
 		if err := ac.MainAgent.PrewarmModelPolicy(); err != nil {
-			slog.Warn("main-agent model policy prewarm failed", "error", err)
+			log.Warnf("main-agent model policy prewarm failed error=%v", err)
 		}
 	}()
 	go func() {
 		if ac.MainAgent.ReloadAgentsMD() {
-			slog.Info("project AGENTS.md loaded asynchronously")
+			log.Info("project AGENTS.md loaded asynchronously")
 		}
 	}()
 }

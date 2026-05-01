@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -60,17 +60,17 @@ func toastTickCmdForLevel(level string, generation uint64) tea.Cmd {
 
 // logToastExpired logs a toast that expired naturally.
 func logToastExpired(t *toastItem) {
-	slog.Info("toast expired", "level", t.Level, "message", t.Message, "category", t.Category)
+	log.Infof("toast expired level=%v message=%v category=%v", t.Level, t.Message, t.Category)
 }
 
 // logToastPreempted logs a toast that was replaced by a higher-priority one.
 func logToastPreempted(t *toastItem, byLevel string) {
-	slog.Info("toast preempted", "level", t.Level, "message", t.Message, "category", t.Category, "by", byLevel)
+	log.Infof("toast preempted level=%v message=%v category=%v by=%v", t.Level, t.Message, t.Category, byLevel)
 }
 
 // logToastMerged logs a toast that was replaced in queue by a newer one of the same category.
 func logToastMerged(oldMsg, newMsg string, level string) {
-	slog.Info("toast merged", "level", level, "message", newMsg, "replaced", oldMsg)
+	log.Infof("toast merged level=%v message=%v replaced=%v", level, newMsg, oldMsg)
 }
 
 // enqueueToast enqueues a toast with no category (no merge behavior).

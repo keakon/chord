@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os/exec"
 	"strings"
 	"time"
@@ -238,7 +238,7 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("timeout must be a positive integer")
 	}
 	if a.Description != "" {
-		slog.Debug("bash tool", "description", a.Description, "command", a.Command)
+		log.Debugf("bash tool description=%v command=%v", a.Description, a.Command)
 	}
 
 	timeoutInfo := ResolveBashTimeout(a.Timeout)

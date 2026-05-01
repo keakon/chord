@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strconv"
 	"strings"
 	"time"
@@ -599,12 +599,7 @@ func (m *Model) renderStatusBar() string {
 		if m.inflightDraftBelongsToAgent(statusActiveID) && (sa.Type == "" || sa.Type == agent.ActivityIdle) {
 			logKey := statusActiveID + "|" + m.inflightDraft.ID
 			if m.statusBarSyntheticConnectingLogKey != logKey {
-				slog.Debug("tui status bar using synthetic connecting fallback",
-					"agent_id", statusActiveID,
-					"draft_id", m.inflightDraft.ID,
-					"draft_age", time.Since(m.inflightDraft.QueuedAt).Round(time.Millisecond),
-					"status_type", sa.Type,
-				)
+				log.Debugf("tui status bar using synthetic connecting fallback agent_id=%v draft_id=%v draft_age=%v status_type=%v", statusActiveID, m.inflightDraft.ID, time.Since(m.inflightDraft.QueuedAt).Round(time.Millisecond), sa.Type)
 				m.statusBarSyntheticConnectingLogKey = logKey
 			}
 			sa = agent.AgentActivityEvent{AgentID: statusActiveID, Type: agent.ActivityConnecting}

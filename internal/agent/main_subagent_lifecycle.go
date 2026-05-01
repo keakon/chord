@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"strings"
 
@@ -166,7 +166,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		return
 	}
 	for _, id := range toClose {
-		slog.Info("closing subagent via lifecycle GC", "agent_id", id, "user_turn", a.explicitUserTurnCount)
+		log.Infof("closing subagent via lifecycle GC agent_id=%v user_turn=%v", id, a.explicitUserTurnCount)
 		finalState := SubAgentStateCancelled
 		if sub := a.subAgentByID(id); sub != nil {
 			finalState = sub.State()

@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 )
 
@@ -49,7 +49,7 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	}
 	sub := a.subAgentByID(evt.SourceID)
 	if sub == nil {
-		slog.Debug("dropping subagent progress update from abandoned agent", "agent_id", evt.SourceID)
+		log.Debugf("dropping subagent progress update from abandoned agent agent_id=%v", evt.SourceID)
 		return
 	}
 	summary := strings.TrimSpace(payload.Summary)
@@ -60,7 +60,7 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
-	slog.Info("SubAgent progress updated", "agent", evt.SourceID, "summary_len", len(summary))
+	log.Infof("SubAgent progress updated agent=%v summary_len=%v", evt.SourceID, len(summary))
 }
 
 func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {

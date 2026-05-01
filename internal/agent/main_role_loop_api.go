@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sort"
 	"strings"
 
@@ -14,7 +14,7 @@ import (
 // Goroutine-safe (posts to eventCh).
 func (a *MainAgent) SwitchRole(role string) {
 	if err := a.switchRole(role, false); err != nil {
-		slog.Warn("SwitchRole failed", "role", role, "error", err)
+		log.Warnf("SwitchRole failed role=%v error=%v", role, err)
 		return
 	}
 	a.emitToTUI(RoleChangedEvent{Role: role})

@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -168,10 +168,7 @@ func (m *Model) markRequestProgressBaseline(agentID string) {
 	}
 	state, ok := m.requestProgress[agentID]
 	if !ok {
-		slog.Debug("request progress baseline skipped",
-			"agent_id", agentID,
-			"reason", "no_state",
-		)
+		log.Debugf("request progress baseline skipped agent_id=%v reason=%v", agentID, "no_state")
 		return
 	}
 	state.BaseBytes = state.VisibleBytes

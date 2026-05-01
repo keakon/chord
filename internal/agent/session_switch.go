@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -60,9 +60,7 @@ func (a *MainAgent) requestSessionControl(kind, sessionID string) {
 func (a *MainAgent) handleSessionControlEvent(evt Event) {
 	payload, ok := evt.Payload.(*sessionControlPayload)
 	if !ok {
-		slog.Error("handleSessionControlEvent: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleSessionControlEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 
@@ -74,7 +72,7 @@ func (a *MainAgent) handleSessionControlEvent(evt Event) {
 	case sessionControlFork:
 		a.handleForkSessionCommand(payload.MsgIndex)
 	default:
-		slog.Warn("handleSessionControlEvent: unknown kind", "kind", payload.Kind)
+		log.Warnf("handleSessionControlEvent: unknown kind kind=%v", payload.Kind)
 	}
 }
 
@@ -104,7 +102,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
-			slog.Warn("new session: failed to release old session lock", "error", releaseErr)
+			log.Warnf("new session: failed to release old session lock error=%v", releaseErr)
 		}
 	}
 	a.sessionLock = newLock
@@ -133,14 +131,11 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 
 	stoppedBackground := tools.StopAllSpawnedForSessionSwitch()
 	if stoppedBackground > 0 {
-		slog.Info("terminated background objects for session switch", "count", stoppedBackground, "instance", a.instanceID)
+		log.Infof("terminated background objects for session switch count=%v instance=%v", stoppedBackground, a.instanceID)
 	}
 
 	if abandoned := a.abandonSubAgentsForSessionSwitch(); abandoned > 0 {
-		slog.Info("abandoned running subagents for session switch",
-			"count", abandoned,
-			"instance", a.instanceID,
-		)
+		log.Infof("abandoned running subagents for session switch count=%v instance=%v", abandoned, a.instanceID)
 	}
 
 	return oldRecovery, turnCtx
@@ -272,8 +267,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: "fork"})
 	msgs := a.ctxMgr.Snapshot()
 	if msgIndex < 0 || msgIndex >= len(msgs) {
-		slog.Warn("handleForkSessionCommand: msgIndex out of range",
-			"msgIndex", msgIndex, "len", len(msgs))
+		log.Warnf("handleForkSessionCommand: msgIndex out of range msgIndex=%v len=%v", msgIndex, len(msgs))
 		a.setIdleAndDrainPending()
 		return
 	}
@@ -283,10 +277,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	forkMsg := msgs[msgIndex]
 	forkedFrom := filepath.Base(a.sessionDir)
 	if forkMsg.Role != "user" {
-		slog.Warn("handleForkSessionCommand: msgIndex does not point to a user message",
-			"msgIndex", msgIndex,
-			"role", forkMsg.Role,
-		)
+		log.Warnf("handleForkSessionCommand: msgIndex does not point to a user message msgIndex=%v role=%v", msgIndex, forkMsg.Role)
 		a.setIdleAndDrainPending()
 		return
 	}
@@ -336,7 +327,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
-			slog.Warn("fork session: failed to release old session lock", "error", releaseErr)
+			log.Warnf("fork session: failed to release old session lock error=%v", releaseErr)
 		}
 	}
 	a.sessionLock = newLock

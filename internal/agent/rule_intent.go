@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
@@ -58,12 +58,7 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 		err = fmt.Errorf("unknown rule scope %d", intent.Scope)
 	}
 	if err != nil {
-		slog.Warn("failed to add permission overlay rule",
-			"tool", toolName,
-			"pattern", intent.Pattern,
-			"scope", scope.String(),
-			"err", err,
-		)
+		log.Warnf("failed to add permission overlay rule tool=%v pattern=%v scope=%v err=%v", toolName, intent.Pattern, scope.String(), err)
 		if a.outputCh != nil {
 			a.emitToTUI(ToastEvent{
 				Message: fmt.Sprintf("Failed to add rule: %v", err),

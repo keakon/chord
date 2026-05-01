@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,12 +33,12 @@ func loadCustomCommands(ac *AppContext) {
 		GlobalCfgPath:  globalCfgPath,
 	})
 	for _, w := range warnings {
-		slog.Warn("custom command", "warning", w)
+		log.Warnf("custom command warning=%v", w)
 	}
 	if len(defs) > 0 {
 		ac.LoadedCommands = defs
 		ac.MainAgent.SetCustomCommands(defs)
-		slog.Info("custom commands loaded", "count", len(defs))
+		log.Infof("custom commands loaded count=%v", len(defs))
 	}
 }
 
@@ -119,14 +119,14 @@ func refreshSkills(ac *AppContext) {
 		skillLoader := skill.NewLoader(skillDirs)
 		loadedSkills, skillErr := skillLoader.ScanMeta()
 		if skillErr != nil {
-			slog.Warn("skill loading failed", "error", skillErr)
+			log.Warnf("skill loading failed error=%v", skillErr)
 			ac.MainAgent.MarkSkillsReady()
 			return
 		}
 		ac.LoadedSkills = loadedSkills
 		ac.MainAgent.SetSkills(loadedSkills)
 		if len(loadedSkills) > 0 {
-			slog.Info("skills discovered", "count", len(loadedSkills))
+			log.Infof("skills discovered count=%v", len(loadedSkills))
 		}
 	}()
 }

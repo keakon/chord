@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 )
 
 func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
@@ -54,12 +54,7 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause
 
 	persistedResults := s.persistInterruptedToolResults(merged, status, cause)
 	if persistedResults > 0 {
-		slog.Info("SubAgent: persisted interrupted tool-call results after interrupt",
-			"agent", s.instanceID,
-			"turn_id", s.turn.ID,
-			"count", persistedResults,
-			"status", status,
-		)
+		log.Infof("SubAgent: persisted interrupted tool-call results after interrupt agent=%v turn_id=%v count=%v status=%v", s.instanceID, s.turn.ID, persistedResults, status)
 	}
 	switch status {
 	case ToolResultStatusError:
@@ -68,12 +63,6 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause
 		emitCancelledToolResults(s.parent.emitToTUI, merged)
 	}
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
-	slog.Info("SubAgent current turn interrupted",
-		"agent", s.instanceID,
-		"turn_id", s.turn.ID,
-		"pending_tools", pending,
-		"closed_tools", len(merged),
-		"status", status,
-	)
+	log.Infof("SubAgent current turn interrupted agent=%v turn_id=%v pending_tools=%v closed_tools=%v status=%v", s.instanceID, s.turn.ID, pending, len(merged), status)
 	return true
 }

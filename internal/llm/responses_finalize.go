@@ -2,7 +2,7 @@ package llm
 
 import (
 	"encoding/json"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sort"
 
 	"github.com/keakon/chord/internal/message"
@@ -53,8 +53,7 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 			args = json.RawMessage("{}")
 		}
 		args = unwrapJSONString(args)
-		slog.Warn("responses: recovering tool call from response.completed output (output_item.added was missed)",
-			"tool", out.Name, "call_id", callID)
+		log.Warnf("responses: recovering tool call from response.completed output (output_item.added was missed) tool=%v call_id=%v", out.Name, callID)
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
 			ID:   callID,
 			Name: out.Name,
@@ -90,10 +89,7 @@ func finalizeOneResponsesToolCall(
 		return
 	}
 	if truncated {
-		slog.Warn("discarding truncated tool call in responses API",
-			"tool", acc.name, "id", acc.id,
-			"partial_args", acc.args.String(),
-		)
+		log.Warnf("discarding truncated tool call in responses API tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
 		delete(toolCalls, idx)
 		return
 	}
@@ -105,13 +101,10 @@ func finalizeOneResponsesToolCall(
 	}
 	args = unwrapJSONString(args)
 	if !json.Valid(args) {
-		slog.Warn("tool call has invalid JSON args in responses API",
-			"tool", acc.name, "id", acc.id,
-			"raw_args", string(args),
-		)
+		log.Warnf("tool call has invalid JSON args in responses API tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 		args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 	}
-	slog.Debug("finalized tool call (responses API)", "tool", acc.name, "id", acc.id, "args", string(args))
+	log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 	resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
 		ID:   acc.id,
 		Name: acc.name,
@@ -146,10 +139,7 @@ func finalizeResponsesToolCalls(
 
 	if truncated {
 		for idx, acc := range toolCalls {
-			slog.Warn("discarding truncated tool call in responses API",
-				"tool", acc.name, "id", acc.id,
-				"partial_args", acc.args.String(),
-			)
+			log.Warnf("discarding truncated tool call in responses API tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
 			delete(toolCalls, idx)
 		}
 		return
@@ -173,15 +163,12 @@ func finalizeResponsesToolCalls(
 		// mid-tool-call), treat as truncation: do not append malformed, set StopReason so agent
 		// does not count as malformed and can suggest new conversation / max_output_tokens.
 		if !json.Valid(args) {
-			slog.Warn("discarding incomplete tool call (invalid JSON, likely output truncation)",
-				"tool", acc.name, "id", acc.id,
-				"partial_args", acc.args.String(),
-			)
+			log.Warnf("discarding incomplete tool call (invalid JSON, likely output truncation) tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
 			resp.StopReason = "length"
 			delete(toolCalls, idx)
 			continue
 		}
-		slog.Debug("finalized tool call (responses API)", "tool", acc.name, "id", acc.id, "args", string(args))
+		log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
 			ID:   acc.id,
 			Name: acc.name,

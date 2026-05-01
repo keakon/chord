@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -14,11 +14,7 @@ import (
 func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Turn isolation: discard stale responses.
 	if s.turn == nil || result.turnID != s.turn.ID {
-		slog.Debug("SubAgent: discarding stale LLM response",
-			"agent", s.instanceID,
-			"result_turn", result.turnID,
-			"current_turn", s.currentTurnID(),
-		)
+		log.Debugf("SubAgent: discarding stale LLM response agent=%v result_turn=%v current_turn=%v", s.instanceID, result.turnID, s.currentTurnID())
 		return
 	}
 
@@ -45,14 +41,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// --- Diagnostic logging (Fix 5) ---
 	isTruncated := resp.StopReason == "max_tokens" || resp.StopReason == "length"
 	if len(malformedCalls) > 0 {
-		slog.Warn("SubAgent: malformed tool calls detected in LLM response",
-			"agent", s.instanceID,
-			"total_tool_calls", len(resp.ToolCalls),
-			"malformed_count", len(malformedCalls),
-			"valid_count", len(validCalls),
-			"stop_reason", resp.StopReason,
-			"last_input_tokens", s.ctxMgr.LastInputTokens(),
-		)
+		log.Warnf("SubAgent: malformed tool calls detected in LLM response agent=%v total_tool_calls=%v malformed_count=%v valid_count=%v stop_reason=%v last_input_tokens=%v", s.instanceID, len(resp.ToolCalls), len(malformedCalls), len(validCalls), resp.StopReason, s.ctxMgr.LastInputTokens())
 	}
 
 	// --- Break feedback loop (Fix 2) ---
@@ -62,28 +51,14 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		s.turn.MalformedCount++
 
 		if isTruncated {
-			slog.Warn("SubAgent: LLM output truncated with malformed tool calls; discarding response and retrying",
-				"agent", s.instanceID,
-				"malformed_count", len(malformedCalls),
-				"valid_count", len(validCalls),
-				"consecutive_rounds", s.turn.MalformedCount,
-				"stop_reason", resp.StopReason,
-			)
+			log.Warnf("SubAgent: LLM output truncated with malformed tool calls; discarding response and retrying agent=%v malformed_count=%v valid_count=%v consecutive_rounds=%v stop_reason=%v", s.instanceID, len(malformedCalls), len(validCalls), s.turn.MalformedCount, resp.StopReason)
 		} else {
-			slog.Warn("SubAgent: all tool calls malformed; discarding response and retrying",
-				"agent", s.instanceID,
-				"malformed_count", len(malformedCalls),
-				"consecutive_rounds", s.turn.MalformedCount,
-			)
+			log.Warnf("SubAgent: all tool calls malformed; discarding response and retrying agent=%v malformed_count=%v consecutive_rounds=%v", s.instanceID, len(malformedCalls), s.turn.MalformedCount)
 		}
 
 		// Abort if too many consecutive retries.
 		if s.turn.MalformedCount >= maxMalformedToolCalls {
-			slog.Warn("SubAgent: aborting turn due to repeated malformed tool call args",
-				"agent", s.instanceID,
-				"count", s.turn.MalformedCount,
-				"threshold", maxMalformedToolCalls,
-			)
+			log.Warnf("SubAgent: aborting turn due to repeated malformed tool call args agent=%v count=%v threshold=%v", s.instanceID, s.turn.MalformedCount, maxMalformedToolCalls)
 			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
 			s.sendEvent(Event{
 				Type: EventAgentError,
@@ -113,12 +88,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if driftDetected {
 		parsed := parseThinkingToolcalls(resp.ReasoningContent)
 		if len(parsed) > 0 {
-			slog.Warn("SubAgent: thinking-toolcall format drift detected; parsed pseudo tool calls from reasoning",
-				"agent", s.instanceID,
-				"compat_thinking_toolcall_enabled", compatEnabled,
-				"thinking_toolcall_marker_hit", resp.ThinkingToolcallMarkerHit,
-				"parsed_tool_calls", len(parsed),
-			)
+			log.Warnf("SubAgent: thinking-toolcall format drift detected; parsed pseudo tool calls from reasoning agent=%v compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v parsed_tool_calls=%v", s.instanceID, compatEnabled, resp.ThinkingToolcallMarkerHit, len(parsed))
 			validCalls = parsed
 			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
 
@@ -134,11 +104,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				})
 			}
 		} else {
-			slog.Warn("SubAgent: thinking-toolcall format drift detected; could not parse pseudo tool calls, entering idle wait",
-				"agent", s.instanceID,
-				"compat_thinking_toolcall_enabled", compatEnabled,
-				"thinking_toolcall_marker_hit", resp.ThinkingToolcallMarkerHit,
-			)
+			log.Warnf("SubAgent: thinking-toolcall format drift detected; could not parse pseudo tool calls, entering idle wait agent=%v compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v", s.instanceID, compatEnabled, resp.ThinkingToolcallMarkerHit)
 			// Debug: log the raw reasoning content for troubleshooting
 			if resp.ReasoningContent != "" {
 				reasoningLen := len(resp.ReasoningContent)
@@ -146,11 +112,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				if reasoningLen > 500 {
 					preview = resp.ReasoningContent[:500] + "...(truncated)"
 				}
-				slog.Debug("SubAgent: unparseable reasoning content",
-					"agent", s.instanceID,
-					"reasoning_len", reasoningLen,
-					"reasoning_preview", preview,
-				)
+				log.Debugf("SubAgent: unparseable reasoning content agent=%v reasoning_len=%v reasoning_preview=%v", s.instanceID, reasoningLen, preview)
 			}
 			s.sendEvent(Event{
 				Type:    EventAgentLog,
@@ -167,23 +129,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Sanitize remaining calls as a safety net (no-op for valid calls).
 	sanitizedCalls := sanitizeToolCallArgs(validCalls)
 	if strings.TrimSpace(resp.Content) != "" || len(sanitizedCalls) > 0 || len(resp.ThinkingBlocks) > 0 {
-		slog.Debug("subagent finalize assistant payload",
-			"agent", s.instanceID,
-			"turn_id", s.turn.ID,
-			"final_content_len", len(resp.Content),
-			"tool_calls", len(sanitizedCalls),
-			"thinking_blocks", len(resp.ThinkingBlocks),
-			"stop_reason", resp.StopReason,
-		)
+		log.Debugf("subagent finalize assistant payload agent=%v turn_id=%v final_content_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", s.instanceID, s.turn.ID, len(resp.Content), len(sanitizedCalls), len(resp.ThinkingBlocks), resp.StopReason)
 	}
 	if strings.TrimSpace(resp.Content) == "" && len(sanitizedCalls) > 0 {
-		slog.Warn("subagent finalized without assistant text",
-			"agent", s.instanceID,
-			"turn_id", s.turn.ID,
-			"tool_calls", len(sanitizedCalls),
-			"thinking_blocks", len(resp.ThinkingBlocks),
-			"stop_reason", resp.StopReason,
-		)
+		log.Warnf("subagent finalized without assistant text agent=%v turn_id=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", s.instanceID, s.turn.ID, len(sanitizedCalls), len(resp.ThinkingBlocks), resp.StopReason)
 	}
 	s.ctxMgr.Append(message.Message{
 		Role:       "assistant",
@@ -209,8 +158,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	persistMsg.Usage = resp.Usage
 	go func() {
 		if err := s.recovery.PersistMessage(s.instanceID, persistMsg); err != nil {
-			slog.Warn("SubAgent: failed to persist assistant message",
-				"agent", s.instanceID, "error", err)
+			log.Warnf("SubAgent: failed to persist assistant message agent=%v error=%v", s.instanceID, err)
 		}
 	}()
 
@@ -312,8 +260,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if s.recovery != nil {
 			go func(msg message.Message) {
 				if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-					slog.Warn("SubAgent: failed to persist Escalate tool result",
-						"agent", s.instanceID, "error", err)
+					log.Warnf("SubAgent: failed to persist Escalate tool result agent=%v error=%v", s.instanceID, err)
 				}
 			}(toolMsg)
 		}
@@ -377,14 +324,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Has regular tool calls to execute in parallel.
 	// If Complete was also in this batch, store it as pending.
 	if taskCompleteCallID != "" {
-		slog.Info("Complete co-returned with other tools; executing others first",
-			"agent", s.instanceID, "other_tools", len(regularToolCalls))
+		log.Infof("Complete co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))
 		s.pendingComplete = taskComplete
 		s.pendingCompleteCallID = taskCompleteCallID
 	}
 	if wakeMainCallID != "" {
-		slog.Info("Escalate co-returned with other tools; executing others first",
-			"agent", s.instanceID, "other_tools", len(regularToolCalls))
+		log.Infof("Escalate co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))
 		s.pendingEscalate = wakeMainReason
 	}
 

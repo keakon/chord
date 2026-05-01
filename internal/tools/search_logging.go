@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 )
 
@@ -15,14 +15,5 @@ func logSlowSearch(toolName, searchPath, pattern, filter string, startedAt time.
 	if scannedCountKey == "" {
 		scannedCountKey = "scanned_files"
 	}
-	slog.Warn("slow search tool",
-		"tool", toolName,
-		"search_path", searchPath,
-		"pattern", pattern,
-		"filter", filter,
-		scannedCountKey, scannedCount,
-		"match_count", matchCount,
-		"truncated", truncated,
-		"duration_ms", duration.Milliseconds(),
-	)
+	log.Warnf("slow search tool tool=%v search_path=%v pattern=%v filter=%v %s=%v match_count=%v truncated=%v duration_ms=%v", toolName, searchPath, pattern, filter, scannedCountKey, scannedCount, matchCount, truncated, duration.Milliseconds())
 }

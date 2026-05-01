@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -116,7 +116,7 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 			return
 		}
 		if !focused.TryEnqueueContextAppend(msg) {
-			slog.Warn("subagent context append rejected", "agent_id", focused.instanceID, "state", focused.State())
+			log.Warnf("subagent context append rejected agent_id=%v state=%v", focused.instanceID, focused.State())
 		}
 		return
 	}
@@ -173,7 +173,7 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 		for name := range configs {
 			names = append(names, name)
 		}
-		slog.Info("agent configs installed", "count", len(configs), "names", names)
+		log.Infof("agent configs installed count=%v names=%v", len(configs), names)
 	}
 
 	// Cache the available subagents using the initial role selection.
@@ -183,10 +183,7 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 	// Rebuild active-role state after configs install or refresh.
 	if selectedRole != "" {
 		a.rebuildRuleset()
-		slog.Info("set active role from agent configs",
-			"role", selectedRole,
-			"total_rules", len(a.effectiveRuleset()),
-		)
+		log.Infof("set active role from agent configs role=%v total_rules=%v", selectedRole, len(a.effectiveRuleset()))
 
 		// Rebuild system prompt to include the selected role instructions.
 		a.refreshSystemPrompt()

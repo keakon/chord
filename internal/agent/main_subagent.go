@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"sort"
 	"strings"
@@ -188,7 +188,7 @@ func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, result *AgentResult) 
 func (a *MainAgent) handleAgentDone(evt Event) {
 	result, ok := evt.Payload.(*AgentResult)
 	if !ok {
-		slog.Error("handleAgentDone: invalid payload type", "payload_type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleAgentDone: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 
@@ -196,7 +196,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	sub := a.subAgents[evt.SourceID]
 	a.mu.RUnlock()
 	if sub == nil {
-		slog.Warn("handleAgentDone: unknown SubAgent", "source", evt.SourceID)
+		log.Warnf("handleAgentDone: unknown SubAgent source=%v", evt.SourceID)
 		return
 	}
 	a.handleSubAgentStateChangedEvent(Event{
@@ -271,18 +271,18 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 	}
 	message += "If you are waiting for user input, continue waiting."
 	sub.InjectUserMessage(message)
-	slog.Info("nudged idle SubAgent", "agent", evt.SourceID, "nudge_count", n)
+	log.Infof("nudged idle SubAgent agent=%v nudge_count=%v", evt.SourceID, n)
 }
 
 func (a *MainAgent) handleAgentNotify(evt Event) {
 	msg, ok := evt.Payload.(string)
 	if !ok {
-		slog.Error("handleAgentNotify: invalid payload type", "payload_type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleAgentNotify: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	sub := a.subAgentByID(evt.SourceID)
 	if sub == nil {
-		slog.Debug("dropping report from abandoned subagent", "agent_id", evt.SourceID)
+		log.Debugf("dropping report from abandoned subagent agent_id=%v", evt.SourceID)
 		return
 	}
 	sub.setState(SubAgentStateRunning, msg)
@@ -306,19 +306,19 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		RequiresAck:  false,
 	}})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
-	slog.Info("SubAgent report received", "agent", evt.SourceID, "message_len", len(msg))
+	log.Infof("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))
 }
 
 func (a *MainAgent) handleEscalate(evt Event) {
 	reason, ok := evt.Payload.(string)
 	if !ok {
-		slog.Error("handleEscalate: invalid payload type", "payload_type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleEscalate: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	slog.Info("SubAgent escalated to owner agent", "source", evt.SourceID, "reason", reason)
+	log.Infof("SubAgent escalated to owner agent source=%v reason=%v", evt.SourceID, reason)
 	sub := a.subAgentByID(evt.SourceID)
 	if sub == nil {
-		slog.Debug("dropping escalate from abandoned subagent", "agent_id", evt.SourceID)
+		log.Debugf("dropping escalate from abandoned subagent agent_id=%v", evt.SourceID)
 		return
 	}
 	a.handleSubAgentStateChangedEvent(Event{
@@ -345,7 +345,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 
 func (a *MainAgent) handleAgentLog(evt Event) {
 	msg, _ := evt.Payload.(string)
-	slog.Info("SubAgent log", "agent", evt.SourceID, "message", msg)
+	log.Infof("SubAgent log agent=%v message=%v", evt.SourceID, msg)
 	a.emitToTUI(InfoEvent{Message: msg, AgentID: evt.SourceID})
 }
 
@@ -358,7 +358,7 @@ func (a *MainAgent) handleResetNudge(evt Event) {
 func (a *MainAgent) handleSpawnFinished(evt Event) {
 	payload, ok := evt.Payload.(*tools.SpawnFinishedPayload)
 	if !ok || payload == nil {
-		slog.Error("handleSpawnFinished: invalid payload type", "payload_type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleSpawnFinished: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	msg := strings.TrimSpace(payload.Message)
@@ -392,7 +392,7 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	sub := a.subAgents[payload.AgentID]
 	a.mu.RUnlock()
 	if sub == nil {
-		slog.Warn("handleSpawnFinished: owner subagent not found", "agent_id", payload.AgentID, "background_id", backgroundID)
+		log.Warnf("handleSpawnFinished: owner subagent not found agent_id=%v background_id=%v", payload.AgentID, backgroundID)
 		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 		return
@@ -402,7 +402,7 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		content = fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, backgroundID, payload.Description, payload.Status)
 	}
 	if !sub.TryEnqueueContextAppend(message.Message{Role: "user", Content: content}) {
-		slog.Warn("handleSpawnFinished: subagent context append rejected", "agent_id", payload.AgentID, "background_id", backgroundID, "state", sub.State())
+		log.Warnf("handleSpawnFinished: subagent context append rejected agent_id=%v background_id=%v state=%v", payload.AgentID, backgroundID, sub.State())
 	} else {
 		sub.ContinueFromContext()
 	}
@@ -432,17 +432,17 @@ func (a *MainAgent) getOrCreateAgentMCP(mcpCfg config.MCPConfig) []tools.Tool {
 		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, AllowedTools: sc.AllowedTools}
 		mgr, err := mcp.NewManagerWithClientInfo(connectCtx, []mcp.ServerConfig{cfg}, a.mcpClientInfo)
 		if err != nil {
-			slog.Warn("failed to create MCP manager for server", "server", name, "error", err)
+			log.Warnf("failed to create MCP manager for server server=%v error=%v", name, err)
 			continue
 		}
 		discovered, err := mcp.DiscoverAllTools(connectCtx, mgr)
 		if err != nil {
-			slog.Warn("failed to discover MCP tools for server", "server", name, "error", err)
+			log.Warnf("failed to discover MCP tools for server server=%v error=%v", name, err)
 			mgr.Close()
 			continue
 		}
 		a.mcpServerCache[name] = &mcpServerEntry{Mgr: mgr, Tools: discovered}
-		slog.Info("subagent MCP server connected", "server", name, "tools", len(discovered))
+		log.Infof("subagent MCP server connected server=%v tools=%v", name, len(discovered))
 		extra = append(extra, discovered...)
 	}
 	return extra
@@ -560,7 +560,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	a.syncTaskRecordFromSub(sub, "")
 	go sub.runLoop()
 	sub.InjectUserMessage(description)
-	slog.Info("SubAgent created and started", "instance", instanceID, "task_id", taskID, "agent_def", agentDef.Name)
+	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
 	return tools.TaskHandle{
 		Status:             "started",

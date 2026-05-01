@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -154,7 +154,7 @@ func (r *ResponsesProvider) Compact(
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
-					slog.Warn("failed to write LLM dump", "error", wErr)
+					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
 			}()
 		}
@@ -186,7 +186,7 @@ func (r *ResponsesProvider) Compact(
 				DurationMS: time.Since(start).Milliseconds(),
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
-				slog.Warn("failed to write LLM dump", "error", wErr)
+				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}

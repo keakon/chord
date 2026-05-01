@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/hook"
@@ -45,12 +45,7 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 				CommitPendingUserMessagesWithoutTurn: true,
 			},
 		})
-		slog.Info("current turn interrupted by user",
-			"turn_id", t.ID,
-			"instance", a.instanceID,
-			"pending_tools", pending,
-			"failed_tools", len(merged),
-		)
+		log.Infof("current turn interrupted by user turn_id=%v instance=%v pending_tools=%v failed_tools=%v", t.ID, a.instanceID, pending, len(merged))
 		cancelled = true
 	}
 	if a.interruptSubAgentTurnsForUserCancel() {
@@ -117,7 +112,7 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 	a.recordEvidenceFromMessage(userMsg)
 	if a.usageLedger != nil {
 		if err := a.usageLedger.SetFirstUserMessage(message.UserPromptPlainText(userMsg)); err != nil {
-			slog.Warn("failed to update usage summary first user message", "error", err)
+			log.Warnf("failed to update usage summary first user message error=%v", err)
 		}
 		a.updateSessionSummary(func(summary *SessionSummary) {
 			if summary == nil {
@@ -223,10 +218,7 @@ func (a *MainAgent) commitPendingUserMessagesWithoutTurn() {
 	}
 	if committed > 0 {
 		a.syncBugTriagePromptFromSnapshot()
-		slog.Debug("committed pending user messages without starting llm turn",
-			"count", committed,
-			"deferred", len(deferred),
-		)
+		log.Debugf("committed pending user messages without starting llm turn count=%v deferred=%v", committed, len(deferred))
 	}
 }
 
@@ -290,11 +282,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	if len(merged) > 0 {
 		persistedResults := a.persistInterruptedToolResults(merged, ToolResultStatusError, context.Canceled)
 		if persistedResults > 0 {
-			slog.Info("persisted interrupted tool-call results before starting replacement turn",
-				"turn_id", turn.ID,
-				"count", persistedResults,
-				"pending_tools", pending,
-			)
+			log.Infof("persisted interrupted tool-call results before starting replacement turn turn_id=%v count=%v pending_tools=%v", turn.ID, persistedResults, pending)
 		}
 		emitFailedToolResults(a.emitToTUI, merged, context.Canceled)
 	}
@@ -331,7 +319,7 @@ func (a *MainAgent) newTurn() {
 	}
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()
-	slog.Debug("new turn created", "turn_id", a.turn.ID)
+	log.Debugf("new turn created turn_id=%v", a.turn.ID)
 }
 
 func (a *MainAgent) currentTurnID() uint64 {
@@ -464,7 +452,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 		return
 	}
 
-	slog.Debug("draining pending user messages", "count", len(batch))
+	log.Debugf("draining pending user messages count=%v", len(batch))
 	a.newTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"runtime"
 	"strings"
 	"sync"
@@ -387,8 +387,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			"message_count": len(messages),
 		})
 		if hookErr != nil {
-			slog.Warn("SubAgent on_before_llm_call hook error",
-				"agent", s.instanceID, "error", hookErr)
+			log.Warnf("SubAgent on_before_llm_call hook error agent=%v error=%v", s.instanceID, hookErr)
 		} else if hookResult != nil {
 			switch hookResult.Action {
 			case hook.ActionBlock:
@@ -402,8 +401,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				}
 				return
 			case hook.ActionModify:
-				slog.Warn("SubAgent on_before_llm_call hook returned modify action; not supported, continuing",
-					"agent", s.instanceID)
+				log.Warnf("SubAgent on_before_llm_call hook returned modify action; not supported, continuing agent=%v", s.instanceID)
 			}
 		}
 
@@ -433,11 +431,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				return
 			}
 			streamingPromoted = true
-			slog.Debug("subagent promoting streaming activity",
-				"agent", s.instanceID,
-				"turn_id", turn.ID,
-				"source", source,
-			)
+			log.Debugf("subagent promoting streaming activity agent=%v turn_id=%v source=%v", s.instanceID, turn.ID, source)
 			s.parent.emitActivity(s.instanceID, ActivityStreaming, "")
 		}
 
@@ -526,10 +520,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 					s.parent.emitActivity(s.instanceID, ActivityType(delta.Status.Type), delta.Status.Detail)
 				}
 			case "error":
-				slog.Warn("SubAgent LLM stream error delta",
-					"text", delta.Text,
-					"agent", s.instanceID,
-				)
+				log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", delta.Text, s.instanceID)
 			case "rollback":
 				if s.turn != nil {
 					s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
@@ -579,8 +570,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				"tool_calls":    len(resp.ToolCalls),
 			})
 			if afterErr != nil {
-				slog.Warn("SubAgent on_after_llm_call hook error",
-					"agent", s.instanceID, "error", afterErr)
+				log.Warnf("SubAgent on_after_llm_call hook error agent=%v error=%v", s.instanceID, afterErr)
 			} else if afterResult != nil {
 				switch afterResult.Action {
 				case hook.ActionBlock:
@@ -594,8 +584,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 					}
 					return
 				case hook.ActionModify:
-					slog.Warn("SubAgent on_after_llm_call hook returned modify action; not supported, continuing",
-						"agent", s.instanceID)
+					log.Warnf("SubAgent on_after_llm_call hook returned modify action; not supported, continuing agent=%v", s.instanceID)
 				}
 			}
 		}
@@ -624,8 +613,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 
 		switch decision.Action {
 		case permission.ActionDeny:
-			slog.Warn("SubAgent: tool call denied by permission",
-				"agent", s.instanceID, "tool", tc.Name, "argument", decision.MatchArgument)
+			log.Warnf("SubAgent: tool call denied by permission agent=%v tool=%v argument=%v", s.instanceID, tc.Name, decision.MatchArgument)
 			return execResult, wrapToolPermissionDenied(tc.Name)
 
 		case permission.ActionAsk:
@@ -640,9 +628,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 			}
 			if !resp.Approved {
 				denyReason := normalizeDenyReason(resp.DenyReason)
-				slog.Info("SubAgent: tool call rejected by user",
-					"agent", s.instanceID, "tool", tc.Name, "argument", decision.MatchArgument,
-					"deny_reason", denyReason)
+				log.Infof("SubAgent: tool call rejected by user agent=%v tool=%v argument=%v deny_reason=%v", s.instanceID, tc.Name, decision.MatchArgument, denyReason)
 				return execResult, wrapToolRejectedByUser(tc.Name, denyReason)
 			}
 			if resp.RuleIntent != nil {
@@ -711,9 +697,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 	// invalid JSON, and return a guiding error instead of letting the tool
 	// fail with an opaque "field required" message.
 	if llm.IsMalformedArgs(tc.Args) {
-		slog.Warn("SubAgent: tool call has malformed args, returning guidance error",
-			"agent", s.instanceID, "tool", tc.Name,
-		)
+		log.Warnf("SubAgent: tool call has malformed args, returning guidance error agent=%v tool=%v", s.instanceID, tc.Name)
 		return execResult, fmt.Errorf(
 			"tool %q was called with malformed arguments (likely due to output "+
 				"truncation at max_tokens). Please reduce the number of parallel "+
@@ -729,9 +713,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 	if llm.IsEmptyArgs(tc.Args) {
 		if tool, ok := s.tools.Get(tc.Name); ok {
 			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				slog.Warn("SubAgent: tool call has empty args but tool requires parameters",
-					"agent", s.instanceID, "tool", tc.Name, "required", req,
-				)
+				log.Warnf("SubAgent: tool call has empty args but tool requires parameters agent=%v tool=%v required=%v", s.instanceID, tc.Name, req)
 				return execResult, fmt.Errorf(
 					"tool %q was called with empty arguments {}. This typically "+
 						"happens when the model's output was truncated at max_tokens. "+
@@ -876,8 +858,7 @@ func (s *SubAgent) newTurn() *Turn {
 		if len(merged) > 0 {
 			persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 			if persistedResults > 0 {
-				slog.Info("SubAgent: persisted interrupted tool-call results before starting new turn",
-					"agent", s.instanceID, "count", persistedResults)
+				log.Infof("SubAgent: persisted interrupted tool-call results before starting new turn agent=%v count=%v", s.instanceID, persistedResults)
 			}
 			emitCancelledToolResults(s.parent.emitToTUI, merged)
 			s.parent.emitActivity(s.instanceID, ActivityIdle, "")
@@ -903,8 +884,7 @@ func (s *SubAgent) newTurn() *Turn {
 		nextToolBatch:         0,
 		activeToolBatchCancel: nil,
 	}
-	slog.Debug("SubAgent: new turn created",
-		"agent", s.instanceID, "turn_id", s.turn.ID)
+	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
 	return s.turn
 }
 

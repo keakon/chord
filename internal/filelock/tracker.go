@@ -3,8 +3,8 @@ package filelock
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"os"
 	"sync"
 )
@@ -36,14 +36,14 @@ func readDiskHash(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Warn("filelock: failed to open file for hashing", "path", path, "err", err)
+			log.Warnf("filelock: failed to open file for hashing path=%v err=%v", path, err)
 		}
 		return ""
 	}
 	defer f.Close()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		slog.Warn("filelock: failed to hash file", "path", path, "err", err)
+		log.Warnf("filelock: failed to hash file path=%v err=%v", path, err)
 		return ""
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))

@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/hook"
@@ -70,10 +70,7 @@ func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string,
 	case resp := <-ch:
 		return resp, nil
 	case <-timer.C:
-		slog.Warn("tool confirmation timed out, auto-denying",
-			"tool", toolName,
-			"timeout", timeout,
-		)
+		log.Warnf("tool confirmation timed out, auto-denying tool=%v timeout=%v", toolName, timeout)
 		return ConfirmResponse{Approved: false}, nil
 	case <-ctx.Done():
 		return ConfirmResponse{}, ctx.Err()
@@ -189,7 +186,7 @@ func (a *MainAgent) awaitQuestionResponse(ctx context.Context, ch <-chan Questio
 func makeRequestID() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		slog.Warn("request ID generation failed, using fallback", "err", err)
+		log.Warnf("request ID generation failed, using fallback err=%v", err)
 		return fmt.Sprintf("req-%d", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%x", buf[:])

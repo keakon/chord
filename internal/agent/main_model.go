@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"maps"
 	"path/filepath"
 	"sort"
@@ -177,10 +177,7 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	}
 
 	if n := a.ctxMgr.RepairOrphanToolMessagesInPlace(); n > 0 {
-		slog.Info("repaired orphan tool messages after LLM client swap",
-			"dropped", n,
-			"model", modelName,
-		)
+		log.Infof("repaired orphan tool messages after LLM client swap dropped=%v model=%v", n, modelName)
 	}
 
 	// Re-install the already-built stable system prompt on the new LLM client
@@ -190,10 +187,7 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 		newClient.SetSystemPrompt(prompt)
 	}
 
-	slog.Info("swapped LLM client",
-		"model", modelName,
-		"context_limit", contextLimit,
-	)
+	log.Infof("swapped LLM client model=%v context_limit=%v", modelName, contextLimit)
 }
 
 // SwitchModel switches the MainAgent to a different model at runtime. The

@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"net"
 	"net/http"
 	"net/url"
@@ -72,7 +72,7 @@ func NewHTTPClientWithProxyAndHeaderTimeout(proxyURL string, totalTimeout, respo
 			default:
 				return nil, fmt.Errorf("unsupported proxy scheme %q", scheme)
 			}
-			slog.Info("LLM HTTP client using proxy", "scheme", scheme)
+			log.Infof("LLM HTTP client using proxy scheme=%v", scheme)
 		}
 	}
 

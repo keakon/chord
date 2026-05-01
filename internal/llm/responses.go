@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -167,11 +167,7 @@ func (r *ResponsesProvider) CompleteStream(
 	// Validate API URL.
 	path := strings.TrimSuffix(url, "/")
 	if !strings.HasSuffix(path, "/responses") {
-		slog.Warn("ResponsesProvider called with non-Responses API URL",
-			"model", model,
-			"api_url", url,
-			"expected", "*/responses",
-		)
+		log.Warnf("ResponsesProvider called with non-Responses API URL model=%v api_url=%v expected=%v", model, url, "*/responses")
 	}
 
 	// Convert messages to Responses API format.
@@ -187,7 +183,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	// Debug: log input length
-	slog.Debug("responses input", "system_prompt_len", len(systemPrompt), "messages_len", len(messages), "api_input_len", len(apiInput))
+	log.Debugf("responses input system_prompt_len=%v messages_len=%v api_input_len=%v", len(systemPrompt), len(messages), len(apiInput))
 
 	// Convert tools.
 	apiTools := convertToolsToResponses(tools)
@@ -211,9 +207,7 @@ func (r *ResponsesProvider) CompleteStream(
 	// Apply suppression at provider level too: even non-OAuth keys on a Codex OAuth
 	// transport provider must not send store=true.
 	if (useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport())) && effectiveStore {
-		slog.Warn("responses: Codex OAuth transport requires store=false on wire; ignoring store config",
-			"model", model,
-		)
+		log.Warnf("responses: Codex OAuth transport requires store=false on wire; ignoring store config model=%v", model)
 		effectiveStore = false
 	}
 
@@ -239,11 +233,7 @@ func (r *ResponsesProvider) CompleteStream(
 		v := false
 		reqBody.Store = &v
 	}
-	slog.Debug("responses: full",
-		"model", model,
-		"store", effectiveStore,
-		"input_len", len(fullInput),
-	)
+	log.Debugf("responses: full model=%v store=%v input_len=%v", model, effectiveStore, len(fullInput))
 	// Set instructions for Codex OAuth transport
 	if useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport()) {
 		instructions := systemPrompt
@@ -257,21 +247,14 @@ func (r *ResponsesProvider) CompleteStream(
 	if useOpenAIOAuth || useCodexTransport {
 		if normalized, changed := normalizeOpenAIOAuthReasoningEffort(ot.ReasoningEffort); changed {
 			if normalized == "" {
-				slog.Warn("omitting unsupported reasoning effort for Codex transport",
-					"requested", ot.ReasoningEffort,
-				)
+				log.Warnf("omitting unsupported reasoning effort for Codex transport requested=%v", ot.ReasoningEffort)
 			} else {
-				slog.Warn("normalizing reasoning effort for Codex transport",
-					"requested", ot.ReasoningEffort,
-					"effective", normalized,
-				)
+				log.Warnf("normalizing reasoning effort for Codex transport requested=%v effective=%v", ot.ReasoningEffort, normalized)
 			}
 			effectiveReasoningEffort = normalized
 		}
 		if effectiveMaxTokens > 0 {
-			slog.Debug("omitting max_output_tokens for Codex transport",
-				"requested", effectiveMaxTokens,
-			)
+			log.Debugf("omitting max_output_tokens for Codex transport requested=%v", effectiveMaxTokens)
 			effectiveMaxTokens = 0
 		}
 	}
@@ -293,15 +276,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
-	slog.Debug("responses request",
-		"model", model,
-		"max_output_tokens", effectiveMaxTokens,
-		"messages", len(messages),
-		"tools", len(tools),
-		"reasoning_effort", effectiveReasoningEffort,
-		"reasoning_summary", ot.ReasoningSummary,
-		"request_bytes", len(bodyBytes),
-	)
+	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, effectiveMaxTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 
 	start := time.Now()
 	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && !r.codexWSStickyDisabled.Load() {
@@ -319,10 +294,7 @@ func (r *ResponsesProvider) CompleteStream(
 			return nil, fmt.Errorf("responses websocket aborted: %w", ctxErr)
 		}
 		if wsUsedIncremental {
-			slog.Warn("responses: Codex WebSocket incremental failed, retrying full request on websocket",
-				"error", wsErr,
-				"model", model,
-			)
+			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
 			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, cb, start)
 			if retryErr == nil {
@@ -342,9 +314,9 @@ func (r *ResponsesProvider) CompleteStream(
 		if isCodexWSProtocolStickyError(wsErr) {
 			r.codexWSStickyDisabled.Store(true)
 			r.resetCodexWebSocketChain("ws_sticky_disabled")
-			slog.Warn("responses: Codex WebSocket disabled for this process after protocol error", "error", wsErr)
+			log.Warnf("responses: Codex WebSocket disabled for this process after protocol error error=%v", wsErr)
 		} else {
-			slog.Warn("responses: Codex WebSocket failed, falling back to HTTP", "error", wsErr)
+			log.Warnf("responses: Codex WebSocket failed, falling back to HTTP error=%v", wsErr)
 			r.resetCodexWebSocketChain("ws_fallback_http")
 		}
 	}
@@ -393,7 +365,7 @@ func (r *ResponsesProvider) sendAndParse(
 	// Send request.
 	start := time.Now()
 	if r.proxyScheme != "" {
-		slog.Debug("LLM request via proxy", "provider", "responses", "scheme", r.proxyScheme)
+		log.Debugf("LLM request via proxy provider=%v scheme=%v", "responses", r.proxyScheme)
 	}
 	if cb != nil {
 		cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
@@ -423,7 +395,7 @@ func (r *ResponsesProvider) sendAndParse(
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
 		// Discard any remaining body content to ensure clean connection reuse.
 		io.Copy(io.Discard, httpResp.Body) //nolint:errcheck
-		slog.Debug("responses error response", "status", httpResp.StatusCode, "body_len", len(errBody))
+		log.Debugf("responses error response status=%v body_len=%v", httpResp.StatusCode, len(errBody))
 		// For preset: codex OAuth 429: parse x-codex-* headers on the error response so
 		// markKeyCooldown can use the window reset time when Retry-After is absent.
 		if useOpenAIOAuth && httpResp.StatusCode == 429 {
@@ -448,7 +420,7 @@ func (r *ResponsesProvider) sendAndParse(
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
-					slog.Warn("failed to write LLM dump", "error", wErr)
+					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
 			}()
 		}
@@ -495,7 +467,7 @@ func (r *ResponsesProvider) sendAndParse(
 			if !snap.TimeoutFiredAt.IsZero() {
 				attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 			}
-			slog.Warn("responses: SSE stream timed out", attrs...)
+			log.Warnf("responses: SSE stream timed out attrs=%v", "<missing>")
 		}
 	}
 
@@ -516,7 +488,7 @@ func (r *ResponsesProvider) sendAndParse(
 				dump.Error = parseErr.Error()
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
-				slog.Warn("failed to write LLM dump", "error", wErr)
+				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}

@@ -2,7 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -152,18 +152,7 @@ func (m *Model) logTranscriptRebuildTiming(reason string, messageCount, blockCou
 	if strings.TrimSpace(reason) == "" || reason == "unspecified" {
 		return
 	}
-	slog.Debug("tui transcript rebuild timing",
-		"reason", reason,
-		"messages", messageCount,
-		"blocks", blockCount,
-		"message_fetch_ms", messagesDuration.Milliseconds(),
-		"build_blocks_ms", blockBuildDuration.Milliseconds(),
-		"clear_settled_ms", clearSettledDuration.Milliseconds(),
-		"replace_blocks_ms", replaceDuration.Milliseconds(),
-		"recalc_viewport_ms", recalcDuration.Milliseconds(),
-		"sidebar_file_edits_ms", sidebarDuration.Milliseconds(),
-		"total_ms", totalDuration.Milliseconds(),
-	)
+	log.Debugf("tui transcript rebuild timing reason=%v messages=%v blocks=%v message_fetch_ms=%v build_blocks_ms=%v clear_settled_ms=%v replace_blocks_ms=%v recalc_viewport_ms=%v sidebar_file_edits_ms=%v total_ms=%v", reason, messageCount, blockCount, messagesDuration.Milliseconds(), blockBuildDuration.Milliseconds(), clearSettledDuration.Milliseconds(), replaceDuration.Milliseconds(), recalcDuration.Milliseconds(), sidebarDuration.Milliseconds(), totalDuration.Milliseconds())
 }
 
 // rebuildSidebarFileEditsFromMessages scans the message history and reconstructs

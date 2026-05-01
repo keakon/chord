@@ -2,7 +2,7 @@ package lsp
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 )
@@ -82,7 +82,7 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 	if !notified && ctx.Err() == nil {
 		// Keep diagnostics wait timeouts out of the tool output so the model only sees
 		// actionable diagnostics; log the timeout for troubleshooting instead.
-		slog.Warn("lsp: diagnostics wait timeout", "path", absPath, "timeout", waitTimeout)
+		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
 	}
 
 	m.recordReviewSnapshot(absPath)
@@ -93,7 +93,7 @@ func (m *Manager) logLSPServiceNote(path, msg string) {
 	if msg == "" {
 		return
 	}
-	slog.Warn("lsp: non-actionable service note suppressed", "path", path, "detail", msg)
+	log.Warnf("lsp: non-actionable service note suppressed path=%v detail=%v", path, msg)
 }
 
 func (m *Manager) anyServerMatchesPath(path string) bool {

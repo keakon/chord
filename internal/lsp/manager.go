@@ -2,7 +2,7 @@ package lsp
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -236,7 +236,7 @@ func (m *Manager) startServer(ctx context.Context, name string, srvCfg config.LS
 
 	client, err := NewClient(ctx, name, srvCfg, m.projectRoot, false)
 	if err != nil {
-		slog.Error("lsp: create client", "name", name, "error", err)
+		log.Errorf("lsp: create client name=%v error=%v", name, err)
 		m.startFailMu.Lock()
 		m.startFail[name] = err.Error()
 		m.startFailMu.Unlock()
@@ -248,7 +248,7 @@ func (m *Manager) startServer(ctx context.Context, name string, srvCfg config.LS
 	}
 	client.SetOnDiagnostics(m.onDiagnostics(name))
 	if err := client.Initialize(ctx); err != nil {
-		slog.Error("lsp: initialize client", "name", name, "error", err)
+		log.Errorf("lsp: initialize client name=%v error=%v", name, err)
 		_ = client.Close(ctx)
 		m.startFailMu.Lock()
 		m.startFail[name] = err.Error()
@@ -263,7 +263,7 @@ func (m *Manager) startServer(ctx context.Context, name string, srvCfg config.LS
 	// Avoids "gopls: not started" when the first call happens before init completes (see crush).
 	const serverReadyTimeout = 15 * time.Second
 	if err := client.WaitForServerReady(ctx, serverReadyTimeout); err != nil {
-		slog.Warn("lsp: server not fully ready, continuing anyway", "name", name, "error", err)
+		log.Warnf("lsp: server not fully ready, continuing anyway name=%v error=%v", name, err)
 		// Still add the client so later calls can succeed; first request may still fail briefly.
 	}
 	m.clientsMu.Lock()
@@ -641,7 +641,7 @@ func (m *Manager) Stop(ctx context.Context) {
 	defer m.clientsMu.Unlock()
 	for name, c := range m.clients {
 		if err := c.Close(ctx); err != nil {
-			slog.Warn("lsp: stop client", "name", name, "error", err)
+			log.Warnf("lsp: stop client name=%v error=%v", name, err)
 		}
 		delete(m.clients, name)
 	}

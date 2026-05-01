@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -248,9 +248,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// just spawn the LLM call and let the oversize-suspend mechanism handle
 	// any context_length_exceeded error that may arise.
 	if a.IsCompactionRunning() {
-		slog.Debug("beginMainLLMAfterPreparation: compaction already running, spawning LLM in parallel",
-			"turn_id", turnID,
-		)
+		log.Debugf("beginMainLLMAfterPreparation: compaction already running, spawning LLM in parallel turn_id=%v", turnID)
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
@@ -331,25 +329,19 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 func (a *MainAgent) handleCompactionReady(evt Event) {
 	draft, ok := evt.Payload.(*compactionDraft)
 	if !ok || draft == nil {
-		slog.Error("handleCompactionReady: invalid payload", "type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleCompactionReady: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		a.resetCompactionState()
 		return
 	}
 
 	pending := a.currentCompactionPendingCall()
 	if !compactionDraftMatchesPending(draft, pending) {
-		slog.Debug("ignoring stale compaction ready event",
-			"draft_plan_id", draft.PlanID,
-			"pending_plan_id", func() uint64 {
-				if pending == nil {
-					return 0
-				}
-				return pending.planID
-			}(),
-			"draft_session_epoch", draft.Target.sessionEpoch,
-			"draft_turn", draft.Target.turnID,
-			"draft_turn_epoch", draft.Target.turnEpoch,
-		)
+		log.Debugf("ignoring stale compaction ready event draft_plan_id=%v pending_plan_id=%v draft_session_epoch=%v draft_turn=%v draft_turn_epoch=%v", draft.PlanID, func() uint64 {
+			if pending == nil {
+				return 0
+			}
+			return pending.planID
+		}(), draft.Target.sessionEpoch, draft.Target.turnID, draft.Target.turnEpoch)
 		return
 	}
 
@@ -386,12 +378,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 
 		// Emit activity to show compaction is ready but waiting for barrier
 		a.emitActivity("main", ActivityCompacting, "context")
-		slog.Info("compaction ready, waiting for continuation barrier",
-			"plan_id", draft.PlanID,
-			"turn_active", turnActive,
-			"pending_llm_call", pending != nil,
-			"has_pending_user", len(a.pendingUserMessages) > 0,
-		)
+		log.Infof("compaction ready, waiting for continuation barrier plan_id=%v turn_active=%v pending_llm_call=%v has_pending_user=%v", draft.PlanID, turnActive, pending != nil, len(a.pendingUserMessages) > 0)
 		return
 	}
 
@@ -402,7 +389,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			class := classifyCompactionFailure(err)
 			a.recordCompactionFailureAnalyticsEvent(err, class, "apply")
 			a.noteCompactionFailure(err)
-			slog.Warn("apply compaction draft failed", "error", err)
+			log.Warnf("apply compaction draft failed error=%v", err)
 			a.emitToTUI(ToastEvent{
 				Message: fmt.Sprintf("Context compaction failed: %v", err),
 				Level:   "warn",
@@ -411,11 +398,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			applySucceeded = true
 		}
 	} else {
-		slog.Info("discarding ready compaction draft due to higher-priority queued work",
-			"turn_id", evt.TurnID,
-			"instance", a.instanceID,
-			"plan_id", draft.PlanID,
-		)
+		log.Infof("discarding ready compaction draft due to higher-priority queued work turn_id=%v instance=%v plan_id=%v", evt.TurnID, a.instanceID, draft.PlanID)
 	}
 
 	pending, _ = a.finishCompactionState()
@@ -439,20 +422,18 @@ func (a *MainAgent) applyReadyDraft() bool {
 
 	// Session switch check
 	if draft.Target.sessionEpoch != a.sessionEpoch {
-		slog.Debug("compaction draft discarded due to session switch")
+		log.Debug("compaction draft discarded due to session switch")
 		return false
 	}
 
-	slog.Info("applying compaction draft at continuation barrier",
-		"plan_id", draft.PlanID,
-		"has_pending_llm", a.compactionState.continuation.kind != "")
+	log.Infof("applying compaction draft at continuation barrier plan_id=%v has_pending_llm=%v", draft.PlanID, a.compactionState.continuation.kind != "")
 
 	applySucceeded := false
 	if err := a.applyCompactionDraft(draft); err != nil {
 		class := classifyCompactionFailure(err)
 		a.recordCompactionFailureAnalyticsEvent(err, class, "apply_barrier")
 		a.noteCompactionFailure(err)
-		slog.Warn("apply compaction draft at barrier failed", "error", err)
+		log.Warnf("apply compaction draft at barrier failed error=%v", err)
 		a.emitToTUI(ToastEvent{
 			Message: fmt.Sprintf("Context compaction failed: %v", err),
 			Level:   "warn",
@@ -474,10 +455,7 @@ func (a *MainAgent) applyReadyDraft() bool {
 		a.resumePendingMainLLMAfterCompaction(pendingCall, applySucceeded)
 	}
 
-	slog.Info("compaction draft applied at barrier",
-		"plan_id", draft.PlanID,
-		"apply_succeeded", applySucceeded,
-	)
+	log.Infof("compaction draft applied at barrier plan_id=%v apply_succeeded=%v", draft.PlanID, applySucceeded)
 
 	return applySucceeded
 }
@@ -488,13 +466,10 @@ func (a *MainAgent) applyReadyDraft() bool {
 func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	pending, ok := evt.Payload.(*pendingMainLLMCall)
 	if !ok || pending == nil {
-		slog.Error("handleCompactionOversizeSuspend: invalid payload", "type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleCompactionOversizeSuspend: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	slog.Info("LLM call suspended due to oversize while compaction running",
-		"turn_id", evt.TurnID,
-		"continuation", pending.continuation,
-	)
+	log.Infof("LLM call suspended due to oversize while compaction running turn_id=%v continuation=%v", evt.TurnID, pending.continuation)
 	// Store as the compaction continuation so it will be resumed after apply
 	a.compactionState.continuation = continuationPlan{
 		kind:             pending.continuation,
@@ -534,9 +509,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		}
 		if !recheckGate {
 			// Compaction failed: abort with guidance instead of retrying recovery.
-			slog.Warn("length recovery auto compaction failed; aborting turn",
-				"turn_id", pending.turnID,
-			)
+			log.Warnf("length recovery auto compaction failed; aborting turn turn_id=%v", pending.turnID)
 			a.emitToTUI(ErrorEvent{
 				Err: fmt.Errorf(
 					"automatic context compaction failed during output-limit recovery; " +
@@ -607,21 +580,18 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		payload = &compactionFailure{err: p}
 	}
 	if payload == nil {
-		slog.Error("handleCompactionFailed: invalid payload", "type", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleCompactionFailed: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 
 	pending := a.currentCompactionPendingCall()
 	if payload.planID != 0 && !compactionFailureMatchesPending(payload, pending) {
-		slog.Debug("ignoring stale compaction failure event",
-			"failure_plan_id", payload.planID,
-			"pending_plan_id", func() uint64 {
-				if pending == nil {
-					return 0
-				}
-				return pending.planID
-			}(),
-		)
+		log.Debugf("ignoring stale compaction failure event failure_plan_id=%v pending_plan_id=%v", payload.planID, func() uint64 {
+			if pending == nil {
+				return 0
+			}
+			return pending.planID
+		}())
 		return
 	}
 
@@ -632,14 +602,14 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		class := classifyCompactionFailure(payload.err)
 		a.recordCompactionFailureAnalyticsEvent(payload.err, class, "async")
 		a.noteCompactionFailure(payload.err)
-		slog.Warn("async context compaction failed", "error", payload.err)
+		log.Warnf("async context compaction failed error=%v", payload.err)
 		a.emitToTUI(ToastEvent{
 			Message: fmt.Sprintf("Context compaction failed: %v", payload.err),
 			Level:   "warn",
 		})
 		a.emitToTUI(CompactionStatusEvent{Status: "failed"})
 	} else if isCancellation {
-		slog.Info("context compaction cancelled by user")
+		log.Info("context compaction cancelled by user")
 		a.emitToTUI(ToastEvent{
 			Message: "Context compaction cancelled",
 			Level:   "info",

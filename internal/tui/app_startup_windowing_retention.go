@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 )
 
@@ -62,25 +62,12 @@ func (m *Model) logStartupDeferredTranscriptRetention(state *startupDeferredTran
 	if state == nil || m.viewport == nil {
 		return
 	}
-	slog.Debug("tui startup transcript retention",
-		"blocks", blocks,
-		"window_start", state.windowStart,
-		"window_end", state.windowEnd,
-		"max_hot_bytes", m.viewport.maxHotBytes,
-	)
+	log.Debugf("tui startup transcript retention blocks=%v window_start=%v window_end=%v max_hot_bytes=%v", blocks, state.windowStart, state.windowEnd, m.viewport.maxHotBytes)
 }
 
 func (m *Model) logStartupDeferredTranscriptExit(state *startupDeferredTranscriptState, reason, trigger string) {
 	if state == nil {
 		return
 	}
-	slog.Debug("tui startup transcript deferred exit",
-		"reason", reason,
-		"trigger", trigger,
-		"blocks", len(state.allBlocks),
-		"window_switches", state.windowSwitchCount,
-		"preheat_ticks", state.preheatTickCount,
-		"preheat_blocks", state.preheatBlocksProcessed,
-		"lifetime_ms", time.Since(state.startedAt).Milliseconds(),
-	)
+	log.Debugf("tui startup transcript deferred exit reason=%v trigger=%v blocks=%v window_switches=%v preheat_ticks=%v preheat_blocks=%v lifetime_ms=%v", reason, trigger, len(state.allBlocks), state.windowSwitchCount, state.preheatTickCount, state.preheatBlocksProcessed, time.Since(state.startedAt).Milliseconds())
 }

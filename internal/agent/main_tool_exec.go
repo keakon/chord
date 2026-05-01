@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
@@ -37,10 +37,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 
 		switch decision.Action {
 		case permission.ActionDeny:
-			slog.Warn("tool call denied by permission",
-				"tool", tc.Name,
-				"argument", decision.MatchArgument,
-			)
+			log.Warnf("tool call denied by permission tool=%v argument=%v", tc.Name, decision.MatchArgument)
 			return execResult, wrapToolPermissionDenied(tc.Name)
 
 		case permission.ActionAsk:
@@ -56,11 +53,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 			}
 			if !resp.Approved {
 				denyReason := normalizeDenyReason(resp.DenyReason)
-				slog.Info("tool call rejected by user",
-					"tool", tc.Name,
-					"argument", decision.MatchArgument,
-					"deny_reason", denyReason,
-				)
+				log.Infof("tool call rejected by user tool=%v argument=%v deny_reason=%v", tc.Name, decision.MatchArgument, denyReason)
 				return execResult, wrapToolRejectedByUser(tc.Name, denyReason)
 			}
 			// Process rule intent if present
@@ -138,9 +131,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	// the model exactly what happened and how to fix it, rather than letting the
 	// tool fail with a generic "field required" message.
 	if llm.IsMalformedArgs(tc.Args) {
-		slog.Warn("tool call has malformed args (sentinel detected), returning guidance error",
-			"tool", tc.Name, "instance", a.instanceID,
-		)
+		log.Warnf("tool call has malformed args (sentinel detected), returning guidance error tool=%v instance=%v", tc.Name, a.instanceID)
 		return execResult, fmt.Errorf(
 			"tool %q was called with malformed arguments (likely due to output "+
 				"truncation at max_tokens). Please reduce the number of parallel "+
@@ -160,9 +151,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	if llm.IsEmptyArgs(tc.Args) {
 		if tool, ok := a.tools.Get(tc.Name); ok {
 			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				slog.Warn("tool call has empty args but tool requires parameters",
-					"tool", tc.Name, "required", req,
-				)
+				log.Warnf("tool call has empty args but tool requires parameters tool=%v required=%v", tc.Name, req)
 				return execResult, fmt.Errorf(
 					"tool %q was called with empty arguments {}. This typically "+
 						"happens when the model's output was truncated at max_tokens. "+

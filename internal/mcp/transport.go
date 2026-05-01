@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -153,13 +153,13 @@ func (t *StdioTransport) readLoop() {
 
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
-			slog.Debug("mcp stdio: ignoring non-JSON line", "line", string(line))
+			log.Debugf("mcp stdio: ignoring non-JSON line line=%v", string(line))
 			continue
 		}
 
 		// Notifications from server (ID == 0 with no result) are logged and dropped.
 		if resp.ID == 0 && resp.Result == nil && resp.Error == nil {
-			slog.Debug("mcp stdio: received server notification", "line", string(line))
+			log.Debugf("mcp stdio: received server notification line=%v", string(line))
 			continue
 		}
 
@@ -173,12 +173,12 @@ func (t *StdioTransport) readLoop() {
 		if ok {
 			ch <- resp
 		} else {
-			slog.Debug("mcp stdio: no waiter for response", "id", resp.ID)
+			log.Debugf("mcp stdio: no waiter for response id=%v", resp.ID)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		slog.Debug("mcp stdio: reader stopped", "error", err)
+		log.Debugf("mcp stdio: reader stopped error=%v", err)
 	}
 
 	// Fail all pending requests.

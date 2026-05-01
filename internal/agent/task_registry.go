@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	stdpath "path"
 	"path/filepath"
@@ -371,7 +371,7 @@ func (a *MainAgent) persistTaskRegistry() {
 	sessionDir := a.sessionDir
 	a.mu.RUnlock()
 	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
-		slog.Warn("failed to persist durable task registry", "session", sessionDir, "error", err)
+		log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
 	}
 }
 

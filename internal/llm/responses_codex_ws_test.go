@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/logtest"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,18 +45,9 @@ func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 
 func TestResetCodexWebSocketChainLogsChainResetWithoutConnectionClosed(t *testing.T) {
 	var buf bytes.Buffer
-	orig := slog.Default()
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	}))
-	slog.SetDefault(logger)
-	defer slog.SetDefault(orig)
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	r := &ResponsesProvider{
 		codexWSLastRespID: "resp-1",

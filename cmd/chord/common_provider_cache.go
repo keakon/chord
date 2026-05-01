@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"sync"
 	"time"
@@ -105,7 +105,7 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 		p.SetOAuthRefresher(tokenURL, clientID, c.authPath, &c.auth, &c.authMu, oauthMap, effectiveProxy)
 		if len(backfills) > 0 {
 			if saveErr := persistOAuthMetadataBackfills(c.authPath, &c.auth, &c.authMu, provName, backfills); saveErr != nil {
-				slog.Warn("failed to persist backfilled OAuth email/account_id", "provider", provName, "error", saveErr)
+				log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", provName, saveErr)
 			}
 		}
 		p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {

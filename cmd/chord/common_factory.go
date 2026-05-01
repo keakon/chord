@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sort"
 	"strings"
 
@@ -55,8 +55,7 @@ func buildSubAgentLLMFactory(
 			firstRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
-			slog.Warn("failed to resolve agent first model-pool entry, falling back to default",
-				"model_ref", agentModels[0], "error", pErr)
+			log.Warnf("failed to resolve agent first model-pool entry, falling back to default model_ref=%v error=%v", agentModels[0], pErr)
 			c := llm.NewClient(providerCfg, llmProvider, modelID,
 				modelCfg.Limit.Output, systemPrompt)
 			c.SetOutputTokenMax(cfg.MaxOutputTokens)
@@ -80,8 +79,7 @@ func buildSubAgentLLMFactory(
 					fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 				)
 				if fbErr != nil {
-					slog.Warn("failed to resolve agent fallback model, skipping",
-						"model_ref", ref, "error", fbErr)
+					log.Warnf("failed to resolve agent fallback model, skipping model_ref=%v error=%v", ref, fbErr)
 					continue
 				}
 				fallbacks = append(fallbacks, llm.FallbackModel{
@@ -144,8 +142,7 @@ func buildMainClientFactory(
 					fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 				)
 				if fbErr != nil {
-					slog.Warn("failed to resolve main-agent model, skipping",
-						"model_ref", ref, "error", fbErr)
+					log.Warnf("failed to resolve main-agent model, skipping model_ref=%v error=%v", ref, fbErr)
 					continue
 				}
 				if config.NormalizeModelRef(ref) == selectedBaseRef && selectedIdx < 0 {
@@ -200,8 +197,7 @@ func buildMainClientFactory(
 						fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 					)
 					if fbErr != nil {
-						slog.Warn("failed to resolve main-agent fallback model, skipping",
-							"model_ref", ref, "error", fbErr)
+						log.Warnf("failed to resolve main-agent fallback model, skipping model_ref=%v error=%v", ref, fbErr)
 						continue
 					}
 					fallbacks = append(fallbacks, llm.FallbackModel{

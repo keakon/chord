@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Replaced the previous `slog`-style logging adapter with direct `golog` usage across the runtime. Logs are now plain golog text output with direct caller attribution; the previous pseudo-structured `level=... msg=... key=value` formatting and default logger `With(...)` context fields are no longer emitted automatically.
 - Fixed `ee`/fork editing for image messages so images restored from session history by path are reloaded and included when the edited user message is sent again.
 - Fixed TUI tool-card rendering so tool arguments/results are shown as terminal-safe plain text: ANSI/control sequences are escaped, Markdown-looking generic tool output is no longer auto-rendered as Markdown, large collapsed Bash results avoid wrapping hidden tails, and collapsed hidden-line hints no longer double-count the first hidden line.
 - Removed obsolete pre-1.0 compatibility paths and dead code across compaction, LLM session handling, LSP test-only helpers, tools, and TUI internals. This cleanup deletes the unused `ResetResponsesSession` / legacy responses-session reset chain, removes the old synchronous compaction fallback path, moves test-only helpers into `_test.go`, deduplicates fallback-summary rendering, finishes centralizing tool-name handling on `tools.NameXxx` constants, and keeps plan-execution session switches aligned with the active provider/session identifier lifecycle.

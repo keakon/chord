@@ -5,8 +5,8 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,12 +118,7 @@ func (w *DumpWriter) Write(dump *LLMDump) error {
 		return fmt.Errorf("write dump file: %w", err)
 	}
 
-	slog.Debug("LLM dump written",
-		"path", path,
-		"size", len(data),
-		"provider", dump.Provider,
-		"model", dump.Model,
-	)
+	log.Debugf("LLM dump written path=%v size=%v provider=%v model=%v", path, len(data), dump.Provider, dump.Model)
 	return nil
 }
 

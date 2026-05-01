@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -68,13 +68,7 @@ func (s *SubAgent) drainPendingToolFailureSets(err error) (emit []PendingToolCal
 	s.turn.TotalToolCalls.Store(0)
 	s.turn.toolExecutionBatches = nil
 	s.turn.nextToolBatch = 0
-	slog.Warn("SubAgent: failing pending tool calls after terminal error",
-		"agent", s.instanceID,
-		"turn_id", s.turn.ID,
-		"pending_tools", pending,
-		"failed_tools", len(merged),
-		"error", err,
-	)
+	log.Warnf("SubAgent: failing pending tool calls after terminal error agent=%v turn_id=%v pending_tools=%v failed_tools=%v error=%v", s.instanceID, s.turn.ID, pending, len(merged), err)
 	return merged, failedExec
 }
 
@@ -85,10 +79,7 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 	orig := len(calls)
 	calls = filterPendingCallsForDeclaredTools(s.ctxMgr, calls)
 	if len(calls) < orig {
-		slog.Warn("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history",
-			"agent", s.instanceID,
-			"dropped", orig-len(calls),
-		)
+		log.Warnf("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history agent=%v dropped=%v", s.instanceID, orig-len(calls))
 	}
 	if len(calls) == 0 {
 		return 0
@@ -109,8 +100,7 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 		s.ctxMgr.Append(toolMsg)
 		if s.recovery != nil {
 			if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
-				slog.Warn("SubAgent: failed to persist interrupted tool result",
-					"agent", s.instanceID, "call_id", call.CallID, "error", err)
+				log.Warnf("SubAgent: failed to persist interrupted tool result agent=%v call_id=%v error=%v", s.instanceID, call.CallID, err)
 			} else {
 				persisted++
 			}
@@ -168,8 +158,7 @@ func (s *SubAgent) RemoveLastMessage() {
 	if s.recovery != nil {
 		remaining := s.ctxMgr.Snapshot()
 		if err := s.recovery.RewriteLog(s.instanceID, remaining); err != nil {
-			slog.Warn("SubAgent.RemoveLastMessage: failed to rewrite log",
-				"agent", s.instanceID, "error", err)
+			log.Warnf("SubAgent.RemoveLastMessage: failed to rewrite log agent=%v error=%v", s.instanceID, err)
 		}
 	}
 }

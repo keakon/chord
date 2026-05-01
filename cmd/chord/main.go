@@ -9,7 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -144,12 +144,12 @@ func runRoot(_ *cobra.Command, _ []string) error {
 	// The import of _ "net/http/pprof" registers handlers on http.DefaultServeMux
 	// at init time but has no runtime overhead unless a server is started here.
 	if addr, err := resolvePprofListenAddr(); err != nil {
-		slog.Warn("invalid CHORD_PPROF_PORT; pprof disabled", "error", err)
+		log.Warnf("invalid CHORD_PPROF_PORT; pprof disabled error=%v", err)
 	} else if addr != "" {
 		go func() {
-			slog.Info("pprof listening", "addr", addr)
+			log.Infof("pprof listening addr=%v", addr)
 			if err := http.ListenAndServe(addr, nil); err != nil {
-				slog.Warn("pprof server exited", "error", err)
+				log.Warnf("pprof server exited error=%v", err)
 			}
 		}()
 	}
@@ -241,7 +241,7 @@ func runRoot(_ *cobra.Command, _ []string) error {
 
 	_, tuiErr := p.Run()
 	if err := tuiModel.Close(); err != nil {
-		slog.Warn("tui runtime cache cleanup failed", "error", err)
+		log.Warnf("tui runtime cache cleanup failed error=%v", err)
 	}
 
 	// 4. Graceful shutdown: cancel the current turn and let the agent wind down.
@@ -432,7 +432,7 @@ func resolveModelRef(
 				)
 				if len(backfills) > 0 {
 					if saveErr := persistOAuthMetadataBackfills(authConfigPath, &authCopy, &authMu, provName, backfills); saveErr != nil {
-						slog.Warn("failed to persist backfilled OAuth email/account_id", "provider", provName, "error", saveErr)
+						log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", provName, saveErr)
 					}
 				}
 				provCfg.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {

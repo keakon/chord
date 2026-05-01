@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,9 +162,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 	case agent.AssistantMessageEvent:
 		state.updatedAt = time.Now()
 		if strings.TrimSpace(e.Text) == "" {
-			slog.Warn("headless observed empty assistant_message", "agent_id", e.AgentID, "tool_calls", e.ToolCalls)
+			log.Warnf("headless observed empty assistant_message agent_id=%v tool_calls=%v", e.AgentID, e.ToolCalls)
 		} else {
-			slog.Debug("headless forwarding assistant_message", "agent_id", e.AgentID, "text_len", len(e.Text), "tool_calls", e.ToolCalls)
+			log.Debugf("headless forwarding assistant_message agent_id=%v text_len=%v tool_calls=%v", e.AgentID, len(e.Text), e.ToolCalls)
 		}
 		if state.isSubscribed("assistant_message") {
 			out = append(out, &headlessEnvelope{Type: "assistant_message", Payload: map[string]any{
@@ -354,7 +354,7 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 			case <-t.C:
 				ppid := os.Getppid()
 				if ppid == 1 || (ppid0 != 0 && ppid != ppid0) {
-					slog.Warn("parent process disappeared, exiting", "ppid0", ppid0, "ppid", ppid)
+					log.Warnf("parent process disappeared, exiting ppid0=%v ppid=%v", ppid0, ppid)
 					ac.Cancel()
 					return
 				}
@@ -525,10 +525,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		pendingQuestion := state.pendingQuestion
 		state.mu.Unlock()
 		if pendingConfirm != nil {
-			slog.Info("headless: auto-denying pending confirm for new user message",
-				"request_id", pendingConfirm.RequestID,
-				"tool_name", pendingConfirm.ToolName,
-			)
+			log.Infof("headless: auto-denying pending confirm for new user message request_id=%v tool_name=%v", pendingConfirm.RequestID, pendingConfirm.ToolName)
 			backend.ResolveConfirm("deny", "", "", "", pendingConfirm.RequestID)
 			state.mu.Lock()
 			if state.pendingConfirm != nil && state.pendingConfirm.RequestID == pendingConfirm.RequestID {
@@ -538,10 +535,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			state.mu.Unlock()
 		}
 		if pendingQuestion != nil {
-			slog.Info("headless: auto-cancelling pending question for new user message",
-				"request_id", pendingQuestion.RequestID,
-				"tool_name", pendingQuestion.ToolName,
-			)
+			log.Infof("headless: auto-cancelling pending question for new user message request_id=%v tool_name=%v", pendingQuestion.RequestID, pendingQuestion.ToolName)
 			backend.ResolveQuestion(nil, true, pendingQuestion.RequestID)
 			state.mu.Lock()
 			if state.pendingQuestion != nil && state.pendingQuestion.RequestID == pendingQuestion.RequestID {

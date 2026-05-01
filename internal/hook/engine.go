@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -227,7 +227,7 @@ func (e *CommandEngine) Fire(ctx context.Context, env Envelope) (*Result, error)
 func (e *CommandEngine) FireBackground(ctx context.Context, env Envelope) {
 	go func() {
 		if _, err := e.Fire(ctx, env); err != nil {
-			slog.Warn("background hook execution failed", "point", env.Point, "error", err)
+			log.Warnf("background hook execution failed point=%v error=%v", env.Point, err)
 		}
 	}()
 }
@@ -249,11 +249,7 @@ func (e *CommandEngine) RunAutomation(ctx context.Context, env Envelope) ([]Auto
 			hookDef := h
 			go func() {
 				if _, err := e.runAutomationHook(ctx, env, hookDef); err != nil {
-					slog.Warn("background automation hook failed",
-						"point", env.Point,
-						"hook_name", hookDef.Name,
-						"error", err,
-					)
+					log.Warnf("background automation hook failed point=%v hook_name=%v error=%v", env.Point, hookDef.Name, err)
 				}
 			}()
 			continue
@@ -307,11 +303,7 @@ func (e *CommandEngine) fireSync(ctx context.Context, env Envelope, hooks []Hook
 			}
 		case "", ActionContinue:
 		default:
-			slog.Warn("unknown hook action, treating as continue",
-				"point", env.Point,
-				"hook_name", h.Name,
-				"action", result.Action,
-			)
+			log.Warnf("unknown hook action, treating as continue point=%v hook_name=%v action=%v", env.Point, h.Name, result.Action)
 		}
 	}
 
@@ -767,13 +759,13 @@ func logHook(h HookDef, env Envelope, status string, action string, duration tim
 
 	switch status {
 	case statusFailed, statusTimedOut:
-		slog.Warn("hook execution", attrs...)
+		log.Warnf("hook execution attrs=%v", "<missing>")
 	case statusSkipped:
 		if hookDebugEnabled() {
-			slog.Debug("hook execution", attrs...)
+			log.Debugf("hook execution attrs=%v", "<missing>")
 		}
 	default:
-		slog.Debug("hook execution", attrs...)
+		log.Debugf("hook execution attrs=%v", "<missing>")
 	}
 }
 

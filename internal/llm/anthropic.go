@@ -8,8 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/user"
@@ -217,14 +217,7 @@ func (a *AnthropicProvider) CompleteStream(
 		req.Header.Set("User-Agent", transportCompat.UserAgent)
 	}
 
-	slog.Debug("anthropic request",
-		"model", model,
-		"max_tokens", maxTokens,
-		"thinking_type", at.ThinkingType,
-		"thinking_budget", at.ThinkingBudget,
-		"messages", len(messages),
-		"tools", len(tools),
-	)
+	log.Debugf("anthropic request model=%v max_tokens=%v thinking_type=%v thinking_budget=%v messages=%v tools=%v", model, maxTokens, at.ThinkingType, at.ThinkingBudget, len(messages), len(tools))
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, a.provider.CompressEnabled())
@@ -232,7 +225,7 @@ func (a *AnthropicProvider) CompleteStream(
 	// Send the request.
 	start := time.Now()
 	if a.proxyScheme != "" {
-		slog.Debug("LLM request via proxy", "provider", "anthropic", "scheme", a.proxyScheme)
+		log.Debugf("LLM request via proxy provider=%v scheme=%v", "anthropic", a.proxyScheme)
 	}
 	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := a.client.Do(req)
@@ -268,7 +261,7 @@ func (a *AnthropicProvider) CompleteStream(
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
-					slog.Warn("failed to write LLM dump", "error", wErr)
+					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
 			}()
 		}
@@ -301,7 +294,7 @@ func (a *AnthropicProvider) CompleteStream(
 				dump.Error = parseErr.Error()
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
-				slog.Warn("failed to write LLM dump", "error", wErr)
+				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}
@@ -528,7 +521,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				// Skip tool results with empty id — they correspond to malformed
 				// tool calls (e.g. from GLM) that were also skipped above.
 				if msgs[i].ToolCallID == "" {
-					slog.Warn("skipping tool_result with empty tool_use_id in history")
+					log.Warn("skipping tool_result with empty tool_use_id in history")
 					i++
 					continue
 				}
@@ -574,9 +567,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				// some models (e.g. GLM) that omit these fields cause 400 errors
 				// (Anthropic API requires non-empty tool_use id and name).
 				if tc.ID == "" || tc.Name == "" {
-					slog.Warn("skipping tool_use with empty id or name in history",
-						"tool", tc.Name, "id", tc.ID,
-					)
+					log.Warnf("skipping tool_use with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
 					continue
 				}
 				args := tc.Args
@@ -584,10 +575,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				// sending to the API. Malformed args from a truncated model
 				// response would cause the API to reject the request.
 				if len(args) == 0 || !json.Valid(args) {
-					slog.Warn("sanitizing invalid tool call args in Anthropic conversation history",
-						"tool", tc.Name, "id", tc.ID,
-						"raw_args", string(args),
-					)
+					log.Warnf("sanitizing invalid tool call args in Anthropic conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
 					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 				}
 				content = append(content, anthropicContent{
@@ -614,7 +602,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 
 		default:
 			// Unknown role; skip.
-			slog.Warn("skipping message with unknown role", "role", msg.Role)
+			log.Warnf("skipping message with unknown role role=%v", msg.Role)
 			i++
 		}
 	}

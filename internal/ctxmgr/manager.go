@@ -4,7 +4,7 @@ package ctxmgr
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"sync"
 
 	"github.com/keakon/chord/internal/message"
@@ -140,8 +140,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	defer m.mu.Unlock()
 	repaired, dropped := message.RepairOrphanToolResults(msgs)
 	if dropped > 0 {
-		slog.Warn("ctxmgr: removed orphan tool messages when restoring history",
-			"dropped", dropped)
+		log.Warnf("ctxmgr: removed orphan tool messages when restoring history dropped=%v", dropped)
 	}
 	replaced := make([]message.Message, len(repaired))
 	copy(replaced, repaired)
@@ -441,8 +440,7 @@ func (m *Manager) ReplacePrefixAtomic(
 	// Repair orphan tool results in tail (tool results without matching tool_calls in prefix)
 	repairedTail, dropped := repairOrphanToolResultsInTail(prefix, tail)
 	if dropped > 0 {
-		slog.Warn("ctxmgr: removed orphan tool messages during ReplacePrefixAtomic",
-			"dropped", dropped)
+		log.Warnf("ctxmgr: removed orphan tool messages during ReplacePrefixAtomic dropped=%v", dropped)
 	}
 
 	// Invoke callback with tail to get final message list

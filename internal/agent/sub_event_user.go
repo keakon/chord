@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -21,8 +21,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 
 	go func() {
 		if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-			slog.Warn("SubAgent: failed to persist user message",
-				"agent", s.instanceID, "error", err)
+			log.Warnf("SubAgent: failed to persist user message agent=%v error=%v", s.instanceID, err)
 			return
 		}
 		if ackID := strings.TrimSpace(input.MailboxAckID); ackID != "" {
@@ -70,8 +69,7 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 			persistMsg.Content = message.UserPromptPlainText(msg)
 		}
 		if err := s.recovery.PersistMessage(s.instanceID, persistMsg); err != nil {
-			slog.Warn("SubAgent: failed to persist context-append message",
-				"agent", s.instanceID, "error", err)
+			log.Warnf("SubAgent: failed to persist context-append message agent=%v error=%v", s.instanceID, err)
 			return
 		}
 		if ackID != "" {

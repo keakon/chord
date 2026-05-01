@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -262,7 +262,7 @@ func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath
 	if ledger := analytics.NewUsageLedger(sessionPath, a.projectRoot); ledger != nil {
 		usageStarted := time.Now()
 		if ledgerStats, eventCount, ledgerErr := ledger.BuildSessionStats(); ledgerErr != nil {
-			slog.Warn("failed to rebuild usage stats from usage ledger", "session", sessionPath, "error", ledgerErr)
+			log.Warnf("failed to rebuild usage stats from usage ledger session=%v error=%v", sessionPath, ledgerErr)
 		} else if eventCount > 0 {
 			loaded.UsageStats = ledgerStats
 			loaded.ContextUsage = message.TokenUsage{
@@ -351,13 +351,13 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 
 	usageLedgerDuration, usageLedgerEventCount = a.restoreUsageEvidence(loaded, sessionPath)
 	if mailboxMsgs, mailboxErr := loadSubAgentMailboxMessages(sessionPath); mailboxErr != nil {
-		slog.Warn("failed to load subagent mailbox log", "session", sessionPath, "error", mailboxErr)
+		log.Warnf("failed to load subagent mailbox log session=%v error=%v", sessionPath, mailboxErr)
 	} else {
 		loaded.MailboxMessages = mailboxMsgs
 		loaded.MailboxSeqMax = maxSubAgentMailboxSeq(sessionPath, mailboxMsgs)
 	}
 	if taskRecords, taskErr := loadDurableTaskRecords(sessionPath); taskErr != nil {
-		slog.Warn("failed to load durable task registry", "session", sessionPath, "error", taskErr)
+		log.Warnf("failed to load durable task registry session=%v error=%v", sessionPath, taskErr)
 	} else {
 		loaded.TaskRecords = taskRecords
 	}
@@ -412,21 +412,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		usageFallbackDuration = time.Since(usageFallbackStarted)
 	}
 
-	slog.Debug("session restore load timing",
-		"session", filepath.Base(sessionPath),
-		"messages", len(loaded.Messages),
-		"subagents", len(loaded.SubAgentStates),
-		"usage_events", usageLedgerEventCount,
-		"load_main_ms", mainLoadDuration.Milliseconds(),
-		"normalize_main_ms", normalizeDuration.Milliseconds(),
-		"build_summary_ms", summaryDuration.Milliseconds(),
-		"usage_ledger_ms", usageLedgerDuration.Milliseconds(),
-		"snapshot_ms", snapshotDuration.Milliseconds(),
-		"restore_subagents_ms", subAgentRestoreDuration.Milliseconds(),
-		"todos_fallback_ms", todoFallbackDuration.Milliseconds(),
-		"usage_fallback_ms", usageFallbackDuration.Milliseconds(),
-		"total_ms", time.Since(loadStarted).Milliseconds(),
-	)
+	log.Debugf("session restore load timing session=%v messages=%v subagents=%v usage_events=%v load_main_ms=%v normalize_main_ms=%v build_summary_ms=%v usage_ledger_ms=%v snapshot_ms=%v restore_subagents_ms=%v todos_fallback_ms=%v usage_fallback_ms=%v total_ms=%v", filepath.Base(sessionPath), len(loaded.Messages), len(loaded.SubAgentStates), usageLedgerEventCount, mainLoadDuration.Milliseconds(), normalizeDuration.Milliseconds(), summaryDuration.Milliseconds(), usageLedgerDuration.Milliseconds(), snapshotDuration.Milliseconds(), subAgentRestoreDuration.Milliseconds(), todoFallbackDuration.Milliseconds(), usageFallbackDuration.Milliseconds(), time.Since(loadStarted).Milliseconds())
 
 	return loaded, nil
 }
@@ -462,7 +448,7 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 		}
 		meta, metaErr := loadSubAgentMeta(sessionPath, id)
 		if metaErr != nil {
-			slog.Warn("loadRestoredSubAgentStates: failed to load subagent meta", "id", id, "error", metaErr)
+			log.Warnf("loadRestoredSubAgentStates: failed to load subagent meta id=%v error=%v", id, metaErr)
 		}
 		builder.overlayMeta(meta)
 		taskID := builder.state.TaskID
@@ -478,7 +464,7 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 			msgs = normalizeRestoredMessages(msgs)
 		}
 		if err != nil {
-			slog.Warn("loadRestoredSubAgentStates: failed to load messages, skipping", "id", id, "error", err)
+			log.Warnf("loadRestoredSubAgentStates: failed to load messages, skipping id=%v error=%v", id, err)
 			continue
 		}
 		builder.overlayMailbox(mailboxByAgent[id])
@@ -543,11 +529,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.persistTaskRegistry()
 	if err := a.restoreMainRoleFromSession(loaded.ActiveRole); err != nil {
-		slog.Warn("restore session role failed",
-			"session", loaded.SessionPath,
-			"role", loaded.ActiveRole,
-			"error", err,
-		)
+		log.Warnf("restore session role failed session=%v role=%v error=%v", loaded.SessionPath, loaded.ActiveRole, err)
 	}
 	if loaded.MailboxSeqMax > 0 {
 		a.subAgentMailboxSeq.Store(loaded.MailboxSeqMax)
@@ -725,7 +707,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		if err != nil {
 			agentDef, err = a.resolveAgentDef("builder")
 			if err != nil {
-				slog.Warn("restoreLoadedSubAgents: failed to resolve agent def, skipping", "id", state.InstanceID, "agent_def", agentDefName, "error", err)
+				log.Warnf("restoreLoadedSubAgents: failed to resolve agent def, skipping id=%v agent_def=%v error=%v", state.InstanceID, agentDefName, err)
 				continue
 			}
 		}
@@ -820,12 +802,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		})
 		AdvancePastID(state.InstanceID)
 		restored++
-		slog.Info("SubAgent restored",
-			"instance", state.InstanceID,
-			"task_id", state.TaskID,
-			"agent_def", agentDef.Name,
-			"messages", len(state.Messages),
-		)
+		log.Infof("SubAgent restored instance=%v task_id=%v agent_def=%v messages=%v", state.InstanceID, state.TaskID, agentDef.Name, len(state.Messages))
 	}
 	return restored
 }
@@ -838,13 +815,7 @@ func (a *MainAgent) restoreSessionState(sessionPath string) (sessionRestoreResul
 	}
 	activateStarted := time.Now()
 	result := a.activateLoadedSession(loaded)
-	slog.Debug("session restore activate timing",
-		"session", filepath.Base(sessionPath),
-		"messages", len(loaded.Messages),
-		"subagents", len(loaded.SubAgentStates),
-		"activate_ms", time.Since(activateStarted).Milliseconds(),
-		"total_ms", time.Since(restoreStarted).Milliseconds(),
-	)
+	log.Debugf("session restore activate timing session=%v messages=%v subagents=%v activate_ms=%v total_ms=%v", filepath.Base(sessionPath), len(loaded.Messages), len(loaded.SubAgentStates), time.Since(activateStarted).Milliseconds(), time.Since(restoreStarted).Milliseconds())
 	return result, nil
 }
 
@@ -943,11 +914,7 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 	a.startupResumeSessionID = filepath.Base(result.SessionPath)
 	a.startupResumeLoadedAt = time.Now()
 	a.stateMu.Unlock()
-	slog.Info("session restored at startup",
-		"session", result.SessionPath,
-		"message_count", result.MessageCount,
-		"todo_count", result.TodoCount,
-	)
+	log.Infof("session restored at startup session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
 	// Clean up orphan compaction files from previous cancelled compactions.
 	// Files with status "pending_apply" older than 5 minutes and no backup are
 	// considered orphaned (the compaction was cancelled but cleanup didn't run).
@@ -986,17 +953,13 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
-			slog.Warn("resume: failed to release old session lock", "error", releaseErr)
+			log.Warnf("resume: failed to release old session lock error=%v", releaseErr)
 		}
 	}
 	a.sessionLock = newLock
 	result := a.activateLoadedSession(loaded)
 
-	slog.Info("session resumed via /resume",
-		"source_session", result.SessionPath,
-		"message_count", result.MessageCount,
-		"todo_count", result.TodoCount,
-	)
+	log.Infof("session resumed via /resume source_session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
 
 	a.llmClient.SetSessionID(targetID)
 	a.emitToTUI(SessionRestoredEvent{})

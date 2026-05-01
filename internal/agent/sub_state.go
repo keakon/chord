@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -110,8 +110,7 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 	if s.recovery != nil {
 		go func(msg message.Message) {
 			if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-				slog.Warn("SubAgent: failed to persist Complete tool result",
-					"agent", s.instanceID, "error", err)
+				log.Warnf("SubAgent: failed to persist Complete tool result agent=%v error=%v", s.instanceID, err)
 			}
 		}(toolMsg)
 	}

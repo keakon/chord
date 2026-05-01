@@ -3,7 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -557,7 +557,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		m.cachedStatusBarActivityKey = ""
 		m.cachedStatusBarActivityText = ""
 		m.cachedStatusBarActivityWidth = 0
-		slog.Debug("tui reset request progress for new request cycle", "agent_id", agentID, "turn_id", evt.TurnID)
+		log.Debugf("tui reset request progress for new request cycle agent_id=%v turn_id=%v", agentID, evt.TurnID)
 		return true, effects
 	case agent.CompactionStatusEvent:
 		now := time.Now()

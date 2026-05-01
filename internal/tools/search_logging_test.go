@@ -2,7 +2,10 @@ package tools
 
 import (
 	"bytes"
-	"log/slog"
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/logtest"
 	"strings"
 	"testing"
 	"time"
@@ -10,10 +13,9 @@ import (
 
 func TestLogSlowSearchBelowThresholdSkipsLog(t *testing.T) {
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prev := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(prev)
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	logSlowSearch("Grep", "internal/tui", "needle", "*.go", time.Now(), "scanned_files", 12, 1, false)
 	if buf.Len() != 0 {
@@ -23,16 +25,15 @@ func TestLogSlowSearchBelowThresholdSkipsLog(t *testing.T) {
 
 func TestLogSlowSearchWarnsWithSearchFacts(t *testing.T) {
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prev := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(prev)
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	logSlowSearch("Grep", "internal/tui", "needle", "*.go", time.Now().Add(-slowSearchWarnThreshold-time.Millisecond), "scanned_files", 42, 3, true)
 	got := buf.String()
 	for _, want := range []string{
-		"level=WARN",
-		"msg=\"slow search tool\"",
+		"[W ",
+		"slow search tool",
 		"tool=Grep",
 		"search_path=internal/tui",
 		"pattern=needle",
@@ -50,10 +51,9 @@ func TestLogSlowSearchWarnsWithSearchFacts(t *testing.T) {
 
 func TestLogSlowSearchSupportsToolSpecificCountField(t *testing.T) {
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prev := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(prev)
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	logSlowSearch("Glob", ".", "**/*.go", "", time.Now().Add(-slowSearchWarnThreshold-time.Millisecond), "candidate_count", 17, 4, false)
 	got := buf.String()

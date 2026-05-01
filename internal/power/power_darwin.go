@@ -4,7 +4,7 @@ package power
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -80,7 +80,7 @@ func (b *DarwinBackend) Release() error {
 	case <-time.After(2 * time.Second):
 		// Force kill if it doesn't exit gracefully.
 		if b.cmd != nil && b.cmd.Process != nil {
-			slog.Warn("power: caffeinate did not exit gracefully, killing")
+			log.Warn("power: caffeinate did not exit gracefully, killing")
 			b.cmd.Process.Kill()
 			<-done
 		}

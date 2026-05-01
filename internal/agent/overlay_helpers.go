@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +36,7 @@ func (a *MainAgent) initOverlay() {
 	a.overlay.SetProjectPath(projectPath)
 	a.overlay.SetUserGlobalPath(userGlobalPath)
 	if err := a.overlay.LoadPersistentOverlays(); err != nil {
-		slog.Warn("failed to load permission overlays", "role", roleName, "err", err)
+		log.Warnf("failed to load permission overlays role=%v err=%v", roleName, err)
 	}
 
 	a.stateMu.Lock()

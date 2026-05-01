@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -69,18 +69,13 @@ func isMalformedToolCall(tc message.ToolCall, registry *tools.Registry) bool {
 func (a *MainAgent) handleLLMResponse(evt Event) {
 	// Turn isolation: discard stale responses.
 	if a.turn == nil || evt.TurnID != a.turn.ID {
-		slog.Debug("discarding stale LLM response",
-			"event_turn", evt.TurnID,
-			"current_turn", a.currentTurnID(),
-		)
+		log.Debugf("discarding stale LLM response event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 		return
 	}
 
 	payload, ok := evt.Payload.(*LLMResponsePayload)
 	if !ok {
-		slog.Error("handleLLMResponse: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleLLMResponse: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	handledAt := time.Now()
@@ -91,23 +86,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// finalize.
 	streamedText := a.turn.drainPartialText()
 	if strings.TrimSpace(streamedText) != "" || strings.TrimSpace(payload.Content) != "" {
-		slog.Debug("main finalize assistant payload",
-			"turn_id", evt.TurnID,
-			"final_content_len", len(payload.Content),
-			"streamed_text_len", len(streamedText),
-			"tool_calls", len(payload.ToolCalls),
-			"thinking_blocks", len(payload.ThinkingBlocks),
-			"stop_reason", payload.StopReason,
-		)
+		log.Debugf("main finalize assistant payload turn_id=%v final_content_len=%v streamed_text_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", evt.TurnID, len(payload.Content), len(streamedText), len(payload.ToolCalls), len(payload.ThinkingBlocks), payload.StopReason)
 	}
 	if strings.TrimSpace(streamedText) != "" && strings.TrimSpace(payload.Content) == "" {
-		slog.Warn("main finalize lost streamed assistant text",
-			"turn_id", evt.TurnID,
-			"streamed_text_len", len(streamedText),
-			"tool_calls", len(payload.ToolCalls),
-			"thinking_blocks", len(payload.ThinkingBlocks),
-			"stop_reason", payload.StopReason,
-		)
+		log.Warnf("main finalize lost streamed assistant text turn_id=%v streamed_text_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", evt.TurnID, len(streamedText), len(payload.ToolCalls), len(payload.ThinkingBlocks), payload.StopReason)
 	}
 
 	// --- Classify tool calls as valid or malformed ---
@@ -120,10 +102,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		}
 	}
 	if a.turn.InLengthRecovery && len(validCalls) > 1 {
-		slog.Warn("length recovery response returned multiple tool calls; forcing another recovery round",
-			"tool_call_count", len(validCalls),
-			"recovery_attempt", a.turn.LengthRecoveryCount,
-		)
+		log.Warnf("length recovery response returned multiple tool calls; forcing another recovery round tool_call_count=%v recovery_attempt=%v", len(validCalls), a.turn.LengthRecoveryCount)
 		malformedCalls = append(malformedCalls, validCalls[1:]...)
 		validCalls = validCalls[:1]
 	}
@@ -135,15 +114,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		malformedToolNames = append(malformedToolNames, tc.Name)
 	}
 	if len(malformedCalls) > 0 {
-		slog.Warn("malformed tool calls detected in LLM response",
-			"total_tool_calls", len(payload.ToolCalls),
-			"malformed_count", len(malformedCalls),
-			"valid_count", len(validCalls),
-			"stop_reason", payload.StopReason,
-			"last_input_tokens", a.ctxMgr.LastInputTokens(),
-			"instance", a.instanceID,
-			"hint", "see prior LLM log line with raw_args or partial_args for the invalid payload",
-		)
+		log.Warnf("malformed tool calls detected in LLM response total_tool_calls=%v malformed_count=%v valid_count=%v stop_reason=%v last_input_tokens=%v instance=%v hint=%v", len(payload.ToolCalls), len(malformedCalls), len(validCalls), payload.StopReason, a.ctxMgr.LastInputTokens(), a.instanceID, "see prior LLM log line with raw_args or partial_args for the invalid payload")
 	}
 
 	// --- Break feedback loop (Fix 2) ---
@@ -156,12 +127,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.turn.LastTruncatedToolName = truncatedToolName(malformedToolNames)
 			if a.turn.LengthRecoveryCount < maxLengthRecoveryAttempts {
 				a.turn.LengthRecoveryCount++
-				slog.Warn("LLM output truncated during tool argument generation; retrying with recovery prompt",
-					"tool", a.turn.LastTruncatedToolName,
-					"recovery_attempt", a.turn.LengthRecoveryCount,
-					"max_attempts", maxLengthRecoveryAttempts,
-					"stop_reason", payload.StopReason,
-				)
+				log.Warnf("LLM output truncated during tool argument generation; retrying with recovery prompt tool=%v recovery_attempt=%v max_attempts=%v stop_reason=%v", a.turn.LastTruncatedToolName, a.turn.LengthRecoveryCount, maxLengthRecoveryAttempts, payload.StopReason)
 				a.emitToTUI(ToastEvent{
 					Message: "Response hit the output limit; retrying with a smaller next step",
 					Level:   "warn",
@@ -174,17 +140,9 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.turn.MalformedCount++
 
 			if isTruncated {
-				slog.Warn("LLM output truncated with malformed tool calls; discarding response and retrying",
-					"malformed_count", len(malformedCalls),
-					"valid_count", len(validCalls),
-					"consecutive_rounds", a.turn.MalformedCount,
-					"stop_reason", payload.StopReason,
-				)
+				log.Warnf("LLM output truncated with malformed tool calls; discarding response and retrying malformed_count=%v valid_count=%v consecutive_rounds=%v stop_reason=%v", len(malformedCalls), len(validCalls), a.turn.MalformedCount, payload.StopReason)
 			} else {
-				slog.Warn("all tool calls malformed; discarding response and retrying",
-					"malformed_count", len(malformedCalls),
-					"consecutive_rounds", a.turn.MalformedCount,
-				)
+				log.Warnf("all tool calls malformed; discarding response and retrying malformed_count=%v consecutive_rounds=%v", len(malformedCalls), a.turn.MalformedCount)
 			}
 
 			// Abort the turn if too many consecutive retries.
@@ -194,10 +152,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 					a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
 					return
 				}
-				slog.Warn("aborting turn: too many consecutive malformed tool call rounds",
-					"count", a.turn.MalformedCount,
-					"threshold", maxMalformedToolCalls,
-				)
+				log.Warnf("aborting turn: too many consecutive malformed tool call rounds count=%v threshold=%v", a.turn.MalformedCount, maxMalformedToolCalls)
 				compactHint := ""
 				if a.autoCompactRequested.Load() || a.compactionTriggerForMainLLM().needed() {
 					compactHint = " Try /compact before continuing."
@@ -246,11 +201,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	if driftDetected {
 		parsed := parseThinkingToolcalls(payload.ReasoningContent)
 		if len(parsed) > 0 {
-			slog.Warn("thinking-toolcall format drift detected; parsed pseudo tool calls from reasoning",
-				"compat_thinking_toolcall_enabled", compatEnabled,
-				"thinking_toolcall_marker_hit", payload.ThinkingToolcallMarkerHit,
-				"parsed_tool_calls", len(parsed),
-			)
+			log.Warnf("thinking-toolcall format drift detected; parsed pseudo tool calls from reasoning compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v parsed_tool_calls=%v", compatEnabled, payload.ThinkingToolcallMarkerHit, len(parsed))
 			// Replace validCalls with parsed pseudo calls so they proceed
 			// through the normal execution path below.
 			validCalls = parsed
@@ -267,10 +218,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				})
 			}
 		} else {
-			slog.Warn("thinking-toolcall format drift detected; could not parse pseudo tool calls, falling back to idle",
-				"compat_thinking_toolcall_enabled", compatEnabled,
-				"thinking_toolcall_marker_hit", payload.ThinkingToolcallMarkerHit,
-			)
+			log.Warnf("thinking-toolcall format drift detected; could not parse pseudo tool calls, falling back to idle compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v", compatEnabled, payload.ThinkingToolcallMarkerHit)
 			// Debug: log the raw reasoning content for troubleshooting
 			if payload.ReasoningContent != "" {
 				reasoningLen := len(payload.ReasoningContent)
@@ -278,10 +226,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				if reasoningLen > 500 {
 					preview = payload.ReasoningContent[:500] + "...(truncated)"
 				}
-				slog.Debug("unparseable reasoning content",
-					"reasoning_len", reasoningLen,
-					"reasoning_preview", preview,
-				)
+				log.Debugf("unparseable reasoning content reasoning_len=%v reasoning_preview=%v", reasoningLen, preview)
 			}
 			a.emitToTUI(InfoEvent{
 				Message: "Detected provider thinking pseudo tool-call templates but could not parse them. Please retry or switch model.",
@@ -322,12 +267,9 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	if len(validCalls) == 0 {
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
 		if payload.StopReason == "tool_calls" {
-			slog.Warn("LLM response stop_reason=tool_calls but no tool calls parsed; going idle",
-				"total_tool_calls", len(payload.ToolCalls),
-				"malformed_count", len(malformedCalls),
-			)
+			log.Warnf("LLM response stop_reason=tool_calls but no tool calls parsed; going idle total_tool_calls=%v malformed_count=%v", len(payload.ToolCalls), len(malformedCalls))
 		} else {
-			slog.Debug("LLM response has no tool calls, agent going idle")
+			log.Debug("LLM response has no tool calls, agent going idle")
 		}
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
 			a.turn = nil
@@ -348,11 +290,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	a.emitActivity("main", ActivityExecuting, fmt.Sprintf("%d tools", len(validCalls)))
 	turnID := a.turn.ID
 
-	slog.Debug("executing tool calls",
-		"count", len(validCalls),
-		"batches", len(batches),
-		"turn_id", turnID,
-	)
+	log.Debugf("executing tool calls count=%v batches=%v turn_id=%v", len(validCalls), len(batches), turnID)
 
 	for _, tc := range validCalls {
 		a.turn.recordPendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
@@ -482,10 +420,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) {
 	if a.recovery != nil {
 		a.persistAsync("main", msg)
 	}
-	slog.Debug("saved partial assistant message after stream interruption",
-		"len", len(text),
-		"turn_id", turn.ID,
-	)
+	log.Debugf("saved partial assistant message after stream interruption len=%v turn_id=%v", len(text), turn.ID)
 }
 
 // savePartialAssistantMsg drains any accumulated streaming text from the

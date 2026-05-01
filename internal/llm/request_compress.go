@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"net/http"
 )
 
@@ -20,25 +20,17 @@ func compressRequestBody(req *http.Request, bodyBytes []byte, enabled bool) (*ht
 
 	compressed, err := gzipCompress(bodyBytes)
 	if err != nil {
-		slog.Warn("gzip compression failed, sending uncompressed request", "error", err)
+		log.Warnf("gzip compression failed, sending uncompressed request error=%v", err)
 		return req, bodyBytes
 	}
 	if len(compressed) >= len(bodyBytes) {
-		slog.Debug("gzip did not reduce body size, sending uncompressed",
-			"original", len(bodyBytes),
-			"compressed", len(compressed),
-		)
+		log.Debugf("gzip did not reduce body size, sending uncompressed original=%v compressed=%v", len(bodyBytes), len(compressed))
 		return req, bodyBytes
 	}
-	slog.Debug("request body compressed",
-		"algorithm", "gzip",
-		"original_bytes", len(bodyBytes),
-		"compressed_bytes", len(compressed),
-		"ratio", fmt.Sprintf("%.1f%%", float64(len(compressed))/float64(len(bodyBytes))*100),
-	)
+	log.Debugf("request body compressed algorithm=%v original_bytes=%v compressed_bytes=%v ratio=%v", "gzip", len(bodyBytes), len(compressed), fmt.Sprintf("%.1f%%", float64(len(compressed))/float64(len(bodyBytes))*100))
 	newReq, err := http.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), bytes.NewReader(compressed))
 	if err != nil {
-		slog.Warn("failed to create compressed request, sending uncompressed", "error", err)
+		log.Warnf("failed to create compressed request, sending uncompressed error=%v", err)
 		return req, bodyBytes
 	}
 	for k, vv := range req.Header {

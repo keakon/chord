@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
@@ -14,7 +14,7 @@ func applyProjectConfigOverrides(ac *AppContext, pc *config.Config) {
 		return
 	}
 	ac.ProjectCfg = pc
-	slog.Info("loaded project config")
+	log.Info("loaded project config")
 	if len(pc.LSP) > 0 {
 		if ac.Cfg.LSP == nil {
 			ac.Cfg.LSP = make(config.LSPConfig)

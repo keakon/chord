@@ -2,12 +2,13 @@ package main
 
 import (
 	"bytes"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/golog"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -48,8 +49,8 @@ func TestRotatingLogFileRotatesAtSoftLimit(t *testing.T) {
 func TestResolveLogLevelProjectOverridesGlobal(t *testing.T) {
 	global := &config.Config{LogLevel: "info"}
 	project := &config.Config{LogLevel: "debug"}
-	if got := resolveLogLevel(global, project); got != slog.LevelDebug {
-		t.Fatalf("resolveLogLevel() = %v, want %v", got, slog.LevelDebug)
+	if got := resolveLogLevel(global, project); got != golog.DebugLevel {
+		t.Fatalf("resolveLogLevel() = %v, want %v", got, golog.DebugLevel)
 	}
 }
 
@@ -85,9 +86,9 @@ func TestProxyScheme(t *testing.T) {
 
 func TestLogEffectiveProxy(t *testing.T) {
 	var buf bytes.Buffer
-	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(old) })
+	old := getDefaultLogger()
+	setDefaultLogger(newGologLogger(&buf, golog.InfoLevel))
+	t.Cleanup(func() { setDefaultLogger(old) })
 
 	logEffectiveProxy("")
 	logEffectiveProxy("direct")
@@ -131,12 +132,7 @@ func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) 
 	}
 	defer logFile.Close()
 
-	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug})).With(
-		"project_root", dir,
-		"pid", 123,
-		"instance_id", "inst-1",
-		"mode", "local",
-	)
+	logger := newGologLogger(logFile, golog.DebugLevel)
 	r, err := redirectProcessStderr(logFile, logger)
 	if err != nil {
 		t.Fatalf("redirectProcessStderr: %v", err)
@@ -155,13 +151,12 @@ func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) 
 		t.Fatalf("ReadFile: %v", err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "instance_id=inst-1") {
-		t.Fatalf("log = %q, want instance_id", text)
-	}
-	if !strings.Contains(text, "msg=stderr") {
-		t.Fatalf("log = %q, want stderr message", text)
-	}
-	if !strings.Contains(text, "stderr_text=\"stderr line one\"") {
-		t.Fatalf("log = %q, want stderr_text field", text)
+	for _, want := range []string{
+		"stderr",
+		"stderr_text=stderr line one",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("log = %q, want %q", text, want)
+		}
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/tools"
 )
@@ -54,7 +54,7 @@ func wrapToolDefs(client *Client, defs []MCPToolDef) []tools.Tool {
 	for _, def := range defs {
 		// Validate required fields.
 		if def.Name == "" {
-			slog.Warn("mcp: skipping tool with empty name", "server", client.name)
+			log.Warnf("mcp: skipping tool with empty name server=%v", client.name)
 			continue
 		}
 
@@ -81,8 +81,7 @@ func DiscoverAllTools(ctx context.Context, mgr *Manager) ([]tools.Tool, error) {
 	for serverName, client := range mgr.Clients() {
 		defs, err := client.ListTools(ctx)
 		if err != nil {
-			slog.Warn("mcp tool discovery failed for server",
-				"server", serverName, "error", err)
+			log.Warnf("mcp tool discovery failed for server server=%v error=%v", serverName, err)
 			continue
 		}
 		defs = mgr.filterToolDefs(serverName, defs)
@@ -92,8 +91,7 @@ func DiscoverAllTools(ctx context.Context, mgr *Manager) ([]tools.Tool, error) {
 		for _, t := range serverTools {
 			n := t.Name()
 			if _, dup := seen[n]; dup {
-				slog.Warn("mcp registered tool name collision after sanitize, skipping",
-					"name", n, "server", serverName)
+				log.Warnf("mcp registered tool name collision after sanitize, skipping name=%v server=%v", n, serverName)
 				continue
 			}
 			seen[n] = struct{}{}

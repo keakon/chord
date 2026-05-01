@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
@@ -33,18 +33,10 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	turn.TotalToolCalls.Store(0)
 	turn.toolExecutionBatches = nil
 	turn.nextToolBatch = 0
-	slog.Warn("failing pending tool calls after terminal turn error",
-		"turn_id", turn.ID,
-		"pending_tools", pending,
-		"failed_tools", len(merged),
-		"error", err,
-	)
+	log.Warnf("failing pending tool calls after terminal turn error turn_id=%v pending_tools=%v failed_tools=%v error=%v", turn.ID, pending, len(merged), err)
 	persistedResults := a.persistInterruptedToolResults(failedExec, ToolResultStatusError, err)
 	if persistedResults > 0 {
-		slog.Info("persisted failed tool-call results after terminal turn error",
-			"turn_id", turn.ID,
-			"count", persistedResults,
-		)
+		log.Infof("persisted failed tool-call results after terminal turn error turn_id=%v count=%v", turn.ID, persistedResults)
 	}
 	emitFailedToolResults(a.emitToTUI, merged, err)
 }
@@ -76,9 +68,7 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 	orig := len(calls)
 	calls = filterPendingCallsForDeclaredTools(a.ctxMgr, calls)
 	if len(calls) < orig {
-		slog.Warn("skipping synthetic tool persistence for call_ids absent from assistant history",
-			"dropped", orig-len(calls),
-		)
+		log.Warnf("skipping synthetic tool persistence for call_ids absent from assistant history dropped=%v", orig-len(calls))
 	}
 	if len(calls) == 0 {
 		return 0
@@ -114,18 +104,13 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 func (a *MainAgent) handleToolResult(evt Event) {
 	// Turn isolation.
 	if a.turn == nil || evt.TurnID != a.turn.ID {
-		slog.Debug("discarding stale tool result",
-			"event_turn", evt.TurnID,
-			"current_turn", a.currentTurnID(),
-		)
+		log.Debugf("discarding stale tool result event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 		return
 	}
 
 	payload, ok := evt.Payload.(*ToolResultPayload)
 	if !ok {
-		slog.Error("handleToolResult: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleToolResult: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	a.turn.resolvePendingToolCall(payload.CallID)
@@ -145,11 +130,11 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		payload.Audit,
 	))
 	if hookErr != nil {
-		slog.Warn("on_before_tool_result_append hook error", "error", hookErr)
+		log.Warnf("on_before_tool_result_append hook error error=%v", hookErr)
 	} else if hookResult != nil {
 		switch hookResult.Action {
 		case hook.ActionBlock:
-			slog.Warn("on_before_tool_result_append returned block; ignoring")
+			log.Warn("on_before_tool_result_append returned block; ignoring")
 		case hook.ActionModify:
 			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
 		}
@@ -173,12 +158,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			PlanPath string `json:"plan_path"`
 		}
 		if err := json.Unmarshal([]byte(payload.Result), &pcData); err != nil {
-			slog.Error("handleToolResult: failed to parse Handoff result", "error", err)
+			log.Errorf("handleToolResult: failed to parse Handoff result error=%v", err)
 		} else {
-			slog.Info("Handoff result received; deferring until sibling tools complete",
-				"plan_path", pcData.PlanPath,
-				"pending", a.turn.PendingToolCalls.Load()-1,
-			)
+			log.Infof("Handoff result received; deferring until sibling tools complete plan_path=%v pending=%v", pcData.PlanPath, a.turn.PendingToolCalls.Load()-1)
 			a.pendingHandoff = &HandoffResult{
 				PlanPath: pcData.PlanPath,
 			}
@@ -249,13 +231,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 	}
 
-	slog.Debug("tool result processed",
-		"name", payload.Name,
-		"call_id", payload.CallID,
-		"is_error", isError,
-		"pending", a.turn.PendingToolCalls.Load(),
-		"malformed_in_batch", a.turn.malformedInBatch,
-	)
+	log.Debugf("tool result processed name=%v call_id=%v is_error=%v pending=%v malformed_in_batch=%v", payload.Name, payload.CallID, isError, a.turn.PendingToolCalls.Load(), a.turn.malformedInBatch)
 
 	// When all tool results are in, either start the next finalize-time batch or continue.
 	if a.turn.PendingToolCalls.Load() <= 0 {
@@ -277,10 +253,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			// Partial batch degradation warning: some tool calls in this
 			// batch had empty or malformed arguments. This often indicates
 			// the model's output was truncated near max_tokens.
-			slog.Warn("batch contained abnormal tool call arguments",
-				"abnormal_count", abnormalInBatch,
-				"consecutive_rounds", a.turn.MalformedCount,
-			)
+			log.Warnf("batch contained abnormal tool call arguments abnormal_count=%v consecutive_rounds=%v", abnormalInBatch, a.turn.MalformedCount)
 		} else {
 			a.turn.MalformedCount = 0
 		}
@@ -290,10 +263,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		// many consecutive LLM rounds. This prevents an infinite loop where
 		// the model keeps calling tools with unparseable JSON arguments.
 		if a.turn.MalformedCount >= maxMalformedToolCalls {
-			slog.Warn("aborting turn: too many consecutive malformed tool call rounds",
-				"count", a.turn.MalformedCount,
-				"threshold", maxMalformedToolCalls,
-			)
+			log.Warnf("aborting turn: too many consecutive malformed tool call rounds count=%v threshold=%v", a.turn.MalformedCount, maxMalformedToolCalls)
 			a.emitToTUI(ErrorEvent{
 				Err: fmt.Errorf(
 					"turn aborted: the model produced malformed tool call arguments "+
@@ -308,7 +278,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 
 		if results, err := a.runToolBatchHooks(a.turn.Ctx, a.turn); err != nil {
-			slog.Warn("on_tool_batch_complete hook error", "error", err)
+			log.Warnf("on_tool_batch_complete hook error error=%v", err)
 		} else {
 			for _, job := range results {
 				if shouldAppendAutomationResult(job.Hook, job.Result) {
@@ -339,8 +309,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			pc := a.pendingHandoff
 			a.pendingHandoff = nil
 
-			slog.Info("all sibling tools complete; finalizing Handoff",
-				"plan_path", pc.PlanPath)
+			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v", pc.PlanPath)
 
 			a.lastPlanPath = pc.PlanPath
 
@@ -353,7 +322,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			return
 		}
 
-		slog.Debug("all tool calls complete, calling LLM again", "turn_id", a.turn.ID)
+		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)
 
 		// Let urgent/decision mailbox updates join the next automatic main-agent
 		// continuation once the current tool batch has fully settled.

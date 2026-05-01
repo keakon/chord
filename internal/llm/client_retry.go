@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -30,13 +30,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 	switch delta.Type {
 	case "text", "thinking", "tool_use_start", "tool_use_delta", "tool_use_end":
 		if !t.visible {
-			slog.Debug("llm first visible stream delta",
-				"delta_type", delta.Type,
-				"model_ref", t.providerModel,
-				"key_suffix", t.keySuffix,
-				"key_attempt", t.keyAttempt,
-				"key_total", t.keyCount,
-			)
+			log.Debugf("llm first visible stream delta delta_type=%v model_ref=%v key_suffix=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keySuffix, t.keyAttempt, t.keyCount)
 			t.visible = true
 			if t.onVisibleStart != nil {
 				t.onVisibleStart()
@@ -48,13 +42,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 			if delta.Rollback != nil {
 				reason = delta.Rollback.Reason
 			}
-			slog.Debug("llm visible stream rollback",
-				"model_ref", t.providerModel,
-				"key_suffix", t.keySuffix,
-				"key_attempt", t.keyAttempt,
-				"key_total", t.keyCount,
-				"reason", reason,
-			)
+			log.Debugf("llm visible stream rollback model_ref=%v key_suffix=%v key_attempt=%v key_total=%v reason=%v", t.providerModel, t.keySuffix, t.keyAttempt, t.keyCount, reason)
 		}
 		t.visible = false
 	}
@@ -192,12 +180,7 @@ func (c *Client) completeStreamWithRetry(
 		// Apply backoff delay only between full retry rounds.
 		if round > 0 {
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait)
-			slog.Info("retrying LLM request round",
-				"attempt", round+1,
-				"retry_count", retryCount,
-				"delay", delay,
-				"last_error", lastErr,
-			)
+			log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v last_error=%v", round+1, retryCount, delay, lastErr)
 			if cb != nil {
 				if err := abortIfCancelled(); err != nil {
 					return nil, err
@@ -284,17 +267,11 @@ func (c *Client) completeStreamWithRetry(
 			}
 			t := targets[ti]
 			if skippedProviders[t.provider] {
-				slog.Info("skipping model: provider unreachable (dial/DNS/connect error)",
-					"model", t.modelID,
-					"provider", t.provider.Name(),
-				)
+				log.Infof("skipping model: provider unreachable (dial/DNS/connect error) model=%v provider=%v", t.modelID, t.provider.Name())
 				continue
 			}
 			if t.isFallback {
-				slog.Info("trying fallback model in retry rotation",
-					"model", t.modelID,
-					"attempt", round+1,
-				)
+				log.Infof("trying fallback model in retry rotation model=%v attempt=%v", t.modelID, round+1)
 				if cb != nil {
 					reason := ""
 					if status != nil {
@@ -373,19 +350,11 @@ func (c *Client) completeStreamWithRetry(
 						pendingRoundWait = mergeRoundWait(pendingRoundWait, cooling.RetryAfter)
 						if ti < len(targets)-1 {
 							// Fallback target available: skip to it immediately without waiting.
-							slog.Info("all API keys cooling; trying next model",
-								"model", t.modelID,
-								"provider", t.provider.Name(),
-							)
+							log.Infof("all API keys cooling; trying next model model=%v provider=%v", t.modelID, t.provider.Name())
 						} else {
 							// Last target: wait only between rounds.
 							wait := pendingRoundWait
-							slog.Info("all API keys cooling; waiting before retry",
-								"model", t.modelID,
-								"provider", t.provider.Name(),
-								"attempt", round+1,
-								"retry_after", wait,
-							)
+							log.Infof("all API keys cooling; waiting before retry model=%v provider=%v attempt=%v retry_after=%v", t.modelID, t.provider.Name(), round+1, wait)
 							if cb != nil {
 								if err := abortIfCancelled(); err != nil {
 									return nil, err
@@ -412,11 +381,7 @@ func (c *Client) completeStreamWithRetry(
 					break
 				}
 
-				slog.Debug("LLM request",
-					"model", t.modelID,
-					"key_suffix", keySuffix(apiKey),
-					"max_tokens", effectiveMaxTokens,
-				)
+				log.Debugf("LLM request model=%v key_suffix=%v max_tokens=%v", t.modelID, keySuffix(apiKey), effectiveMaxTokens)
 				modelRef := providerModelRef(t.provider, t.modelID)
 				if t.variant != "" {
 					modelRef = modelRef + "@" + t.variant
@@ -434,12 +399,7 @@ func (c *Client) completeStreamWithRetry(
 					keyCount:      keyCount,
 					onVisibleStart: func() {
 						t.provider.MarkKeySuccess(apiKey)
-						slog.Debug("llm emitting streaming status after visible output",
-							"model_ref", modelRef,
-							"key_suffix", keySuffixValue,
-							"key_attempt", keyAttempt+1,
-							"key_total", keyCount,
-						)
+						log.Debugf("llm emitting streaming status after visible output model_ref=%v key_suffix=%v key_attempt=%v key_total=%v", modelRef, keySuffixValue, keyAttempt+1, keyCount)
 						if cb != nil {
 							cb(message.StreamDelta{
 								Type:   "status",
@@ -482,12 +442,7 @@ func (c *Client) completeStreamWithRetry(
 						lastInputTokens = resp.Usage.InputTokens
 						c.setLastInputTokens(resp.Usage.InputTokens)
 					}
-					slog.Debug("LLM request completed",
-						"model", t.modelID,
-						"input_tokens", inputTok,
-						"output_tokens", outputTok,
-						"stop_reason", resp.StopReason,
-					)
+					log.Debugf("LLM request completed model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.modelID, inputTok, outputTok, resp.StopReason)
 					if status != nil {
 						status.RunningModelRef = providerModelRef(t.provider, t.modelID)
 						if t.variant != "" {
@@ -543,11 +498,7 @@ func (c *Client) completeStreamWithRetry(
 					}
 
 					if !retriable {
-						slog.Error("non-retriable LLM error",
-							"model", t.modelID,
-							"key_suffix", keySuffix(apiKey),
-							"error", err,
-						)
+						log.Errorf("non-retriable LLM error model=%v key_suffix=%v error=%v", t.modelID, keySuffix(apiKey), err)
 						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
 							// fallback-eligible: move on to next model in pool
 							modelDone = true
@@ -561,11 +512,7 @@ func (c *Client) completeStreamWithRetry(
 						t.provider.MarkRecovering(keyForRotationCooldown)
 					}
 
-					slog.Warn("retriable LLM error, trying next key",
-						"model", t.modelID,
-						"key_suffix", keySuffix(apiKey),
-						"error", err,
-					)
+					log.Warnf("retriable LLM error, trying next key model=%v key_suffix=%v error=%v", t.modelID, keySuffix(apiKey), err)
 					if cb != nil && keyAttempt+1 < keyCount {
 						if err := abortIfCancelled(); err != nil {
 							return nil, err
@@ -584,11 +531,7 @@ func (c *Client) completeStreamWithRetry(
 				if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 					status.FallbackReason = classifyFallbackReason(err)
 				}
-				slog.Warn("stream interrupted after visible output; retrying current key",
-					"model", t.modelID,
-					"key_suffix", keySuffix(apiKey),
-					"error", err,
-				)
+				log.Warnf("stream interrupted after visible output; retrying current key model=%v key_suffix=%v error=%v", t.modelID, keySuffix(apiKey), err)
 				if cb != nil {
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
@@ -625,12 +568,7 @@ func (c *Client) completeStreamWithRetry(
 					if resp.StopReason == "length" || resp.StopReason == "max_tokens" {
 						emptyErr = &EmptyTruncationError{}
 					}
-					slog.Warn("model returned empty response, trying next key",
-						"model", t.modelID,
-						"provider", t.provider.Name(),
-						"stop_reason", resp.StopReason,
-						"key_suffix", keySuffix(apiKey),
-					)
+					log.Warnf("model returned empty response, trying next key model=%v provider=%v stop_reason=%v key_suffix=%v", t.modelID, t.provider.Name(), resp.StopReason, keySuffix(apiKey))
 					lastErr = emptyErr
 					t.provider.MarkRecovering(apiKey)
 					resp = nil
@@ -649,10 +587,7 @@ func (c *Client) completeStreamWithRetry(
 			}
 			// Stop immediately only for permanent failures (auth, permission, malformed request).
 			if modelDone && isPermanentFailure(lastErr) {
-				slog.Error("LLM permanent failure, giving up",
-					"model", startModelID,
-					"error", lastErr,
-				)
+				log.Errorf("LLM permanent failure, giving up model=%v error=%v", startModelID, lastErr)
 				return nil, lastErr
 			}
 		} // end targets loop
@@ -669,11 +604,7 @@ func (c *Client) completeStreamWithRetry(
 		retryCount = nextRetryCount(retryCount, roundHadUsableReply)
 	} // end attempts loop
 
-	slog.Error("LLM all retries exhausted",
-		"max_attempts", maxAttempts,
-		"model", startModelID,
-		"error", lastErr,
-	)
+	log.Errorf("LLM all retries exhausted max_attempts=%v model=%v error=%v", maxAttempts, startModelID, lastErr)
 	return nil, lastErr
 }
 

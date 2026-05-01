@@ -2,10 +2,11 @@ package main
 
 import (
 	"bufio"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/keakon/golog"
 )
 
 func writeStartupStderrNotice(logPath string, err error) {
@@ -35,7 +36,7 @@ type stderrRedirect struct {
 	doneCh    chan struct{}
 }
 
-func redirectProcessStderr(logFile *os.File, logger *slog.Logger) (*stderrRedirect, error) {
+func redirectProcessStderr(logFile *os.File, logger *golog.Logger) (*stderrRedirect, error) {
 	if logFile == nil || logger == nil {
 		return nil, nil
 	}
@@ -66,7 +67,7 @@ func redirectProcessStderr(logFile *os.File, logger *slog.Logger) (*stderrRedire
 	return r, nil
 }
 
-func (r *stderrRedirect) consume(logger *slog.Logger) {
+func (r *stderrRedirect) consume(logger *golog.Logger) {
 	defer close(r.doneCh)
 	reader := bufio.NewReader(r.pipeRead)
 	for {
@@ -80,7 +81,7 @@ func (r *stderrRedirect) consume(logger *slog.Logger) {
 	}
 }
 
-func (r *stderrRedirect) logLine(logger *slog.Logger, line string) {
+func (r *stderrRedirect) logLine(logger *golog.Logger, line string) {
 	if logger == nil {
 		return
 	}
@@ -88,7 +89,7 @@ func (r *stderrRedirect) logLine(logger *slog.Logger, line string) {
 	if trimmed == "" {
 		return
 	}
-	logger.Warn("stderr", "stderr_text", trimmed)
+	logger.Warnf("stderr stderr_text=%v", trimmed)
 }
 
 func (r *stderrRedirect) Rebind(logFile *os.File) error {

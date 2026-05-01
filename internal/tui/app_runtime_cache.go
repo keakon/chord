@@ -2,7 +2,7 @@ package tui
 
 import (
 	"context"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -72,7 +72,7 @@ func (m *Model) startRuntimeCacheCleanup() tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := mgr.CleanupStaleSessions(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("tui runtime cache stale cleanup failed", "error", err)
+				log.Warnf("tui runtime cache stale cleanup failed error=%v", err)
 			}
 		}(m.runtimeCacheMgr)
 		return nil
@@ -114,12 +114,12 @@ func (m *Model) prepareRuntimeCacheSession(reset bool) (*ViewportSpillStore, run
 func (m *Model) finishRuntimeCacheSessionSwap(oldStore *ViewportSpillStore, oldHandle runtimeCacheSessionHandle) {
 	if oldStore != nil {
 		if err := oldStore.Close(); err != nil {
-			slog.Warn("close previous viewport spill store failed", "error", err)
+			log.Warnf("close previous viewport spill store failed error=%v", err)
 		}
 	}
 	if oldHandle != nil {
 		if err := oldHandle.Remove(); err != nil {
-			slog.Warn("remove previous session runtime cache failed", "error", err)
+			log.Warnf("remove previous session runtime cache failed error=%v", err)
 		}
 	}
 }

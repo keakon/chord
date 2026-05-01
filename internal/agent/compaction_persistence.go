@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -98,14 +98,14 @@ func cleanupOrphanCompactionFiles(absHistoryPath string) {
 	}
 	// Remove the history .md file
 	if err := os.Remove(absHistoryPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("failed to remove orphan history file", "path", absHistoryPath, "error", err)
+		log.Warnf("failed to remove orphan history file path=%v error=%v", absHistoryPath, err)
 	}
 	// Remove the .status.json file
 	metaPath := compactionHistoryMetaPath(absHistoryPath)
 	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("failed to remove orphan history meta file", "path", metaPath, "error", err)
+		log.Warnf("failed to remove orphan history meta file path=%v error=%v", metaPath, err)
 	}
-	slog.Debug("cleaned up orphan compaction files", "history_path", absHistoryPath)
+	log.Debugf("cleaned up orphan compaction files history_path=%v", absHistoryPath)
 }
 
 // cleanupStalePendingCompactions scans sessionDir for history-N.status.json files
@@ -148,7 +148,7 @@ func cleanupStalePendingCompactions(sessionDir string, maxAge time.Duration) {
 		backupPath := filepath.Join(sessionDir, fmt.Sprintf("main.pre-compress-%s.jsonl", indexStr))
 		if _, err := os.Stat(backupPath); err == nil {
 			// Backup exists - this might be a failed apply, leave it for manual inspection
-			slog.Debug("skipping orphan cleanup: backup file exists", "meta_path", metaPath, "backup_path", backupPath)
+			log.Debugf("skipping orphan cleanup: backup file exists meta_path=%v backup_path=%v", metaPath, backupPath)
 			continue
 		}
 		// Safe to clean up
@@ -264,7 +264,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 			}
 		}
 		if err := a.usageLedger.RewriteFirstUserMessage(firstUser); err != nil {
-			slog.Warn("failed to rewrite usage summary first user message after compaction", "error", err)
+			log.Warnf("failed to rewrite usage summary first user message after compaction error=%v", err)
 		} else {
 			originalFirstUser := ""
 			if usageSummary, sumErr := a.usageLedger.Summary(); sumErr == nil && usageSummary != nil {
@@ -376,6 +376,6 @@ func (a *MainAgent) saveRecoverySnapshot() {
 		UsageByModel:            usageSnap.ByModel,
 		UsageByAgent:            usageSnap.ByAgent,
 	}); err != nil {
-		slog.Warn("failed to save recovery snapshot", "error", err)
+		log.Warnf("failed to save recovery snapshot error=%v", err)
 	}
 }

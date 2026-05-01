@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -118,10 +118,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 	case 429:
 		now := time.Now()
 		if until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
-			slog.Warn("API key quota exhausted, marking unavailable until reset",
-				"key_suffix", keySuffix(key),
-				"until", until,
-			)
+			log.Warnf("API key quota exhausted, marking unavailable until reset key_suffix=%v until=%v", keySuffix(key), until)
 			provider.MarkQuotaExhaustedUntil(key, until)
 			return markKeyCooldownResult{cooldownApplied: true}
 		}
@@ -132,10 +129,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		if cooldown > time.Minute {
 			cooldown = time.Minute
 		}
-		slog.Warn("API key rate limited, marking cooldown",
-			"key_suffix", keySuffix(key),
-			"cooldown", cooldown,
-		)
+		log.Warnf("API key rate limited, marking cooldown key_suffix=%v cooldown=%v", keySuffix(key), cooldown)
 		provider.MarkCooldown(key, cooldown)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 401:
@@ -143,22 +137,15 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		// refresh so the next key-loop iteration can reuse the credential slot
 		// with the fresh token.
 		if refreshedKey, ok, refreshErr := provider.TryRefreshOAuthKey(ctx, key); ok {
-			slog.Info("OAuth token refreshed after 401, key ready for retry",
-				"key_suffix", keySuffix(key),
-			)
+			log.Infof("OAuth token refreshed after 401, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
 		} else if config.IsRefreshTokenInvalid(refreshErr) {
-			slog.Warn("OAuth refresh token invalid, permanently removing key",
-				"key_suffix", keySuffix(key),
-			)
+			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
 			return markKeyCooldownResult{cooldownApplied: true}
 		}
 		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
-			slog.Warn("OAuth account deactivated, permanently removing key",
-				"key_suffix", keySuffix(key),
-				"code", apiErr.Code,
-			)
+			log.Warnf("OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
 			provider.MarkDeactivated(key)
 			return markKeyCooldownResult{
 				cooldownApplied:      true,
@@ -166,30 +153,21 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				deactivatedEmail:     info.Email,
 			}
 		}
-		slog.Warn("API key authentication failed, marking cooldown",
-			"key_suffix", keySuffix(key),
-		)
+		log.Warnf("API key authentication failed, marking cooldown key_suffix=%v", keySuffix(key))
 		provider.MarkCooldown(key, time.Minute)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 403:
 		// Same rationale as 401: OAuth token may have been revoked/expired.
 		if refreshedKey, ok, refreshErr := provider.TryRefreshOAuthKey(ctx, key); ok {
-			slog.Info("OAuth token refreshed after 403, key ready for retry",
-				"key_suffix", keySuffix(key),
-			)
+			log.Infof("OAuth token refreshed after 403, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
 		} else if config.IsRefreshTokenInvalid(refreshErr) {
-			slog.Warn("OAuth refresh token invalid, permanently removing key",
-				"key_suffix", keySuffix(key),
-			)
+			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
 			return markKeyCooldownResult{cooldownApplied: true}
 		}
 		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
-			slog.Warn("OAuth account deactivated (403), permanently removing key",
-				"key_suffix", keySuffix(key),
-				"code", apiErr.Code,
-			)
+			log.Warnf("OAuth account deactivated (403), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
 			provider.MarkDeactivated(key)
 			return markKeyCooldownResult{
 				cooldownApplied:      true,
@@ -197,9 +175,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				deactivatedEmail:     info.Email,
 			}
 		}
-		slog.Warn("API key permission denied, marking cooldown",
-			"key_suffix", keySuffix(key),
-		)
+		log.Warnf("API key permission denied, marking cooldown key_suffix=%v", keySuffix(key))
 		provider.MarkCooldown(key, time.Minute)
 		return markKeyCooldownResult{cooldownApplied: true}
 	default:

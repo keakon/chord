@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -119,7 +119,7 @@ func (c *Client) registerHandlers() {
 	c.client.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		var par protocol.PublishDiagnosticsParams
 		if err := json.Unmarshal(params, &par); err != nil {
-			slog.Error("lsp: unmarshal publishDiagnostics", "error", err)
+			log.Errorf("lsp: unmarshal publishDiagnostics error=%v", err)
 			return
 		}
 		c.diagnosticsMu.Lock()
@@ -163,14 +163,14 @@ func (c *Client) Kill() { c.client.Kill() }
 // exit on them.
 func (c *Client) Close(ctx context.Context) error {
 	if err := c.client.Shutdown(ctx); err != nil {
-		slog.Warn("lsp: shutdown client", "error", err)
+		log.Warnf("lsp: shutdown client error=%v", err)
 		if ctx != nil && ctx.Err() != nil {
 			c.client.Kill()
 			return ctx.Err()
 		}
 	}
 	if err := c.client.Exit(); err != nil {
-		slog.Warn("lsp: exit client", "error", err)
+		log.Warnf("lsp: exit client error=%v", err)
 		if ctx != nil && ctx.Err() != nil {
 			c.client.Kill()
 			return ctx.Err()
@@ -337,7 +337,7 @@ func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, 
 		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
 	}
 	if err := applyWorkspaceEdit(par.Edit); err != nil {
-		slog.Error("lsp: applyWorkspaceEdit", "error", err)
+		log.Errorf("lsp: applyWorkspaceEdit error=%v", err)
 		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
 	}
 	return protocol.ApplyWorkspaceEditResult{Applied: true}, nil

@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 )
@@ -115,15 +115,7 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 	m.restartStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay)
 	hiddenBefore := start
 	hiddenAfter := len(state.allBlocks) - end
-	slog.Debug("tui startup transcript window switch",
-		"trigger", strings.TrimSpace(trigger),
-		"window_start", start,
-		"window_end", end,
-		"window_blocks", len(windowed),
-		"hidden_before", hiddenBefore,
-		"hidden_after", hiddenAfter,
-		"total_ms", time.Since(started).Milliseconds(),
-	)
+	log.Debugf("tui startup transcript window switch trigger=%v window_start=%v window_end=%v window_blocks=%v hidden_before=%v hidden_after=%v total_ms=%v", strings.TrimSpace(trigger), start, end, len(windowed), hiddenBefore, hiddenAfter, time.Since(started).Milliseconds())
 	return true
 }
 
@@ -168,11 +160,7 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 			block.InvalidateCache()
 		}
 	}
-	slog.Debug("tui startup transcript windowed",
-		"blocks", len(blocks),
-		"hidden_blocks", hiddenCount,
-		"window_blocks", len(windowed),
-	)
+	log.Debugf("tui startup transcript windowed blocks=%v hidden_blocks=%v window_blocks=%v", len(blocks), hiddenCount, len(windowed))
 	m.logStartupDeferredTranscriptRetention(state, len(blocks))
 	return windowed
 }
@@ -310,11 +298,6 @@ func (m *Model) maybeHydrateStartupDeferredTranscript(trigger string) bool {
 	m.startupDeferredTranscript = nil
 	m.startupDeferredPreheatGeneration++
 	m.viewport.enforceHotBudget()
-	slog.Debug("tui startup transcript hydrate timing",
-		"trigger", strings.TrimSpace(trigger),
-		"blocks", len(state.allBlocks),
-		"hidden_blocks", state.hiddenBlocks,
-		"total_ms", time.Since(started).Milliseconds(),
-	)
+	log.Debugf("tui startup transcript hydrate timing trigger=%v blocks=%v hidden_blocks=%v total_ms=%v", strings.TrimSpace(trigger), len(state.allBlocks), state.hiddenBlocks, time.Since(started).Milliseconds())
 	return true
 }

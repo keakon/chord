@@ -1,7 +1,7 @@
 package llm
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -68,9 +68,7 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 				// some models (e.g. GLM) that omit these fields cause 400 errors
 				// (Responses API requires a non-empty call_id).
 				if tc.ID == "" || tc.Name == "" {
-					slog.Warn("skipping function_call with empty id or name in history",
-						"tool", tc.Name, "id", tc.ID,
-					)
+					log.Warnf("skipping function_call with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
 					continue
 				}
 				result = append(result, responsesInputItem{
@@ -85,7 +83,7 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 			// Skip tool results with empty call id — they correspond to malformed
 			// tool calls (e.g. from GLM) that were also skipped above.
 			if msg.ToolCallID == "" {
-				slog.Warn("skipping function_call_output with empty call_id in history")
+				log.Warn("skipping function_call_output with empty call_id in history")
 				continue
 			}
 			// Tool results become function_call_output items.

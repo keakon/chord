@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,9 +19,7 @@ import (
 
 func (a *MainAgent) scheduleCompaction(manual bool) bool {
 	if a.IsCompactionRunning() {
-		slog.Debug("context compaction already in progress; skipping duplicate schedule",
-			"manual", manual,
-		)
+		log.Debugf("context compaction already in progress; skipping duplicate schedule manual=%v", manual)
 		if manual {
 			a.emitToTUI(InfoEvent{Message: "Context compaction is already in progress"})
 		}
@@ -89,17 +87,14 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 		return
 	}
 	if a.isUsageDrivenAutoCompactSuppressed() {
-		slog.Debug("automatic context compaction suppressed after repeated failures",
-			"suppressed_until_turn", a.autoCompactFailureState.SuppressedUntilTurn,
-			"current_turn", a.usageDrivenAutoCompactCheckTurn(),
-		)
+		log.Debugf("automatic context compaction suppressed after repeated failures suppressed_until_turn=%v current_turn=%v", a.autoCompactFailureState.SuppressedUntilTurn, a.usageDrivenAutoCompactCheckTurn())
 		return
 	}
 	if a.IsCompactionRunning() {
 		return
 	}
 	if a.turn != nil {
-		slog.Warn("automatic context compaction skipped: agent not idle")
+		log.Warn("automatic context compaction skipped: agent not idle")
 		return
 	}
 	a.scheduleCompaction(false)
@@ -127,11 +122,7 @@ func (a *MainAgent) trySkipUsageDrivenCompactionAfterShrink(snapshot []message.M
 	if estimate >= thresholdTokens {
 		return false
 	}
-	slog.Debug("skipping durable compaction after pre-request shrink",
-		"estimated_tokens", estimate,
-		"threshold_tokens", thresholdTokens,
-		"message_count", len(snapshot),
-	)
+	log.Debugf("skipping durable compaction after pre-request shrink estimated_tokens=%v threshold_tokens=%v message_count=%v", estimate, thresholdTokens, len(snapshot))
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
 	return true
@@ -292,7 +283,7 @@ func (a *MainAgent) fireBeforeCompressHook(snapshot []message.Message, manual bo
 		"manual":         manual,
 	}
 	if _, err := a.fireHook(a.parentCtx, hook.OnBeforeCompress, 0, beforeData); err != nil {
-		slog.Warn("on_before_compress hook error", "error", err)
+		log.Warnf("on_before_compress hook error error=%v", err)
 	}
 }
 
@@ -358,10 +349,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 			}
 			meta.ExportedAt = existing.ExportedAt
 		} else if !os.IsNotExist(err) {
-			slog.Warn("failed to read compaction history meta before apply", "path", d.AbsHistoryMetaPath, "error", err)
+			log.Warnf("failed to read compaction history meta before apply path=%v error=%v", d.AbsHistoryMetaPath, err)
 		}
 		if err := writeCompactionHistoryMeta(d.AbsHistoryMetaPath, meta); err != nil {
-			slog.Warn("failed to update compaction history meta", "path", d.AbsHistoryMetaPath, "error", err)
+			log.Warnf("failed to update compaction history meta path=%v error=%v", d.AbsHistoryMetaPath, err)
 		}
 	}
 
@@ -389,18 +380,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 
 	a.sessionReminderInjected.Store(false)
 
-	slog.Info("context compacted (async)",
-		"mode", modeLabel,
-		"summary_mode", d.SummaryMode,
-		"backend", d.Backend,
-		"profile", d.Profile,
-		"model", d.ModelRef,
-		"history_path", d.AbsHistoryPath,
-		"backup_path", backupPath,
-		"archived_messages", d.ArchivedCount,
-		"evidence_artifacts", d.EvidenceArtifacts,
-		"head_split", headSplit,
-	)
+	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)
 	if _, err := a.fireHook(a.parentCtx, hook.OnAfterCompress, 0, map[string]any{
 		"message_count":      a.ctxMgr.MessageCount(),
 		"context_tokens":     a.ctxMgr.LastTotalContextTokens(),
@@ -414,7 +394,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		"history_path":       d.RelHistoryPath,
 		"backup_path":        backupPath,
 	}); err != nil {
-		slog.Warn("on_after_compress hook error", "error", err)
+		log.Warnf("on_after_compress hook error error=%v", err)
 	}
 	return nil
 }
@@ -493,11 +473,7 @@ func (a *MainAgent) callCompactionEndpoint(client *llm.Client, fallbackModelRef,
 	if err := validateCompactionSummary(summary); err != nil {
 		return "", modelRef, err
 	}
-	slog.Debug("compaction endpoint produced summary",
-		"prompt_bytes", promptBytes,
-		"response_bytes", respBytes,
-		"summary_len", len(summary),
-	)
+	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes=%v summary_len=%v", promptBytes, respBytes, len(summary))
 	return summary, modelRef, nil
 }
 
@@ -578,7 +554,7 @@ func (a *MainAgent) newCompactionClient(ref string) (*llm.Client, int, error) {
 		if _, rebuilt, rbErr := a.rebuildCompactionClientWithExtendedHeaderTimeout(client); rbErr == nil && rebuilt != nil {
 			return rebuilt, contextLimit, nil
 		} else if rbErr != nil {
-			slog.Warn("failed to rebuild compaction client with extended header timeout", "model", ref, "error", rbErr)
+			log.Warnf("failed to rebuild compaction client with extended header timeout model=%v error=%v", ref, rbErr)
 		}
 		return client, contextLimit, nil
 	}
@@ -588,11 +564,7 @@ func (a *MainAgent) newCompactionClient(ref string) (*llm.Client, int, error) {
 		return nil, 0, err
 	}
 
-	slog.Warn("failed to create compact model client, falling back to selected model",
-		"compact_model", ref,
-		"selected_model", selected,
-		"error", err,
-	)
+	log.Warnf("failed to create compact model client, falling back to selected model compact_model=%v selected_model=%v error=%v", ref, selected, err)
 	client, _, contextLimit, selErr := a.modelSwitchFactory(selected)
 	if selErr != nil {
 		return nil, 0, fmt.Errorf("compact model failed (%v); selected model fallback also failed: %w", err, selErr)
@@ -600,7 +572,7 @@ func (a *MainAgent) newCompactionClient(ref string) (*llm.Client, int, error) {
 	if _, rebuilt, rbErr := a.rebuildCompactionClientWithExtendedHeaderTimeout(client); rbErr == nil && rebuilt != nil {
 		return rebuilt, contextLimit, nil
 	} else if rbErr != nil {
-		slog.Warn("failed to rebuild fallback compaction client with extended header timeout", "model", selected, "error", rbErr)
+		log.Warnf("failed to rebuild fallback compaction client with extended header timeout model=%v error=%v", selected, rbErr)
 	}
 	return client, contextLimit, nil
 }

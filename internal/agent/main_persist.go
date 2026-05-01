@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -33,7 +33,7 @@ func (a *MainAgent) runPersistLoop() {
 		}
 		if entry.recovery != nil {
 			if err := entry.recovery.PersistMessage(entry.agentID, entry.msg); err != nil {
-				slog.Warn("failed to persist message", "agent_id", entry.agentID, "error", err)
+				log.Warnf("failed to persist message agent_id=%v error=%v", entry.agentID, err)
 			}
 		}
 	}
@@ -74,11 +74,7 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 		callID = msg.ToolCallID
 		a.recordToolTracePersistBlock(callID, blocked)
 	}
-	slog.Warn("persistAsync enqueue blocked",
-		"role", msg.Role,
-		"tool_call_id", callID,
-		"blocked_ms", blocked.Milliseconds(),
-	)
+	log.Warnf("persistAsync enqueue blocked role=%v tool_call_id=%v blocked_ms=%v", msg.Role, callID, blocked.Milliseconds())
 }
 
 // flushPersist blocks until all persistence requests queued before this call

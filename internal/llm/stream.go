@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/keakon/golog/log"
 	"io"
-	"log/slog"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -273,10 +273,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					// Even in the normal content_block_stop path, the model
 					// could produce malformed JSON (rare but possible).
 					if !json.Valid(tc.Args) {
-						slog.Warn("Anthropic tool call has invalid JSON args at content_block_stop",
-							"tool", block.toolName, "id", block.toolID,
-							"raw_args", string(tc.Args),
-						)
+						log.Warnf("Anthropic tool call has invalid JSON args at content_block_stop tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(tc.Args))
 						tc.Args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 					}
 					resp.ToolCalls = append(resp.ToolCalls, tc)
@@ -364,10 +361,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		case "tool_use":
 			if truncated {
 				// Output was truncated; tool call arguments are incomplete.
-				slog.Warn("discarding truncated Anthropic tool call",
-					"tool", block.toolName, "id", block.toolID,
-					"partial_input", block.toolInput.String(),
-				)
+				log.Warnf("discarding truncated Anthropic tool call tool=%v id=%v partial_input=%v", block.toolName, block.toolID, block.toolInput.String())
 			} else {
 				args := json.RawMessage(block.toolInput.String())
 				if len(args) == 0 {
@@ -375,10 +369,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				}
 				// Validate JSON — stream may have been interrupted mid-argument.
 				if !json.Valid(args) {
-					slog.Warn("Anthropic tool call has invalid JSON args, replacing with error object",
-						"tool", block.toolName, "id", block.toolID,
-						"raw_args", string(args),
-					)
+					log.Warnf("Anthropic tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(args))
 					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
 				}
 				resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{

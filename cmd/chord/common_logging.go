@@ -1,13 +1,15 @@
 package main
 
 import (
-	"log/slog"
 	"strings"
+
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 )
 
-func resolveLogLevel(globalCfg, projectCfg *config.Config) slog.Level {
+func resolveLogLevel(globalCfg, projectCfg *config.Config) golog.Level {
 	levelName := "info"
 	if globalCfg != nil && strings.TrimSpace(globalCfg.LogLevel) != "" {
 		levelName = strings.TrimSpace(globalCfg.LogLevel)
@@ -17,18 +19,18 @@ func resolveLogLevel(globalCfg, projectCfg *config.Config) slog.Level {
 	}
 	switch levelName {
 	case "debug":
-		return slog.LevelDebug
+		return golog.DebugLevel
 	case "warn":
-		return slog.LevelWarn
+		return golog.WarnLevel
 	case "error":
-		return slog.LevelError
+		return golog.ErrorLevel
 	default:
-		return slog.LevelInfo
+		return golog.InfoLevel
 	}
 }
 
 func debugLoggingEnabled(globalCfg, projectCfg *config.Config) bool {
-	return resolveLogLevel(globalCfg, projectCfg) <= slog.LevelDebug
+	return resolveLogLevel(globalCfg, projectCfg) <= golog.DebugLevel
 }
 
 // logEffectiveProxy logs the effective proxy mode at startup for debugging
@@ -36,11 +38,11 @@ func debugLoggingEnabled(globalCfg, projectCfg *config.Config) bool {
 func logEffectiveProxy(effectiveProxy string) {
 	switch {
 	case effectiveProxy == "":
-		slog.Info("proxy: using environment (HTTP_PROXY/HTTPS_PROXY) or direct if unset")
+		log.Info("proxy: using environment (HTTP_PROXY/HTTPS_PROXY) or direct if unset")
 	case effectiveProxy == "direct":
-		slog.Info("proxy: disabled (direct)")
+		log.Info("proxy: disabled (direct)")
 	default:
-		slog.Info("proxy: configured", "scheme", proxyScheme(effectiveProxy))
+		log.Infof("proxy: configured scheme=%v", proxyScheme(effectiveProxy))
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -765,7 +765,7 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 	// Keep a lazy rebuild fallback when the role has no explicit model list.
 	a.mainModelPolicyDirty.Store(!appliedModel)
 
-	slog.Info("switched MainAgent role", "role", roleName, "clear_history", clearHistory, "model_ref", a.ProviderModelRef())
+	log.Infof("switched MainAgent role role=%v clear_history=%v model_ref=%v", roleName, clearHistory, a.ProviderModelRef())
 	// Persist the active role immediately so a later resume/startup restore does
 	// not fall back to the default builder role.
 	a.saveRecoverySnapshot()
@@ -858,7 +858,7 @@ const sessionEndHookGrace = 300 * time.Millisecond
 // (up to the given timeout). The caller should cancel the context passed to
 // Run as well.
 func (a *MainAgent) Shutdown(timeout time.Duration) error {
-	slog.Info("agent shutting down", "instance", a.instanceID, "timeout", timeout)
+	log.Infof("agent shutting down instance=%v timeout=%v", a.instanceID, timeout)
 	deadline := time.Now().Add(timeout)
 	remaining := func() time.Duration {
 		left := time.Until(deadline)
@@ -872,7 +872,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		hookBudget := min(sessionEndHookGrace, grace)
 		hookCtx, cancel := context.WithTimeout(context.Background(), hookBudget)
 		if _, err := a.fireHook(hookCtx, hook.OnSessionEnd, 0, map[string]any{}); err != nil {
-			slog.Warn("on_session_end hook error", "error", err)
+			log.Warnf("on_session_end hook error error=%v", err)
 		}
 		cancel()
 	}
@@ -897,7 +897,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	a.mu.RUnlock()
 	stoppedBackground := tools.StopAllSpawnedForShutdown()
 	if stoppedBackground > 0 {
-		slog.Info("terminated background objects for shutdown", "count", stoppedBackground, "instance", a.instanceID)
+		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)
 	}
 
 	// Close SubAgent-exclusive MCP managers (sentinels with Mgr==nil are
@@ -905,7 +905,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	a.mcpServerCacheMu.Lock()
 	for name, entry := range a.mcpServerCache {
 		if entry.Mgr != nil {
-			slog.Info("closing subagent MCP server", "server", name)
+			log.Infof("closing subagent MCP server server=%v", name)
 			entry.Mgr.Close()
 		}
 	}
@@ -921,10 +921,10 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 			select {
 			case <-a.persistDone:
 			case <-time.After(wait):
-				slog.Warn("persist loop did not drain within shutdown budget, continuing")
+				log.Warn("persist loop did not drain within shutdown budget, continuing")
 			}
 		} else {
-			slog.Warn("shutdown budget exhausted before persist loop drain")
+			log.Warn("shutdown budget exhausted before persist loop drain")
 		}
 	}
 
@@ -937,10 +937,10 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		select {
 		case <-done:
 		case <-time.After(wait):
-			slog.Warn("compaction workers did not drain within shutdown budget, continuing")
+			log.Warn("compaction workers did not drain within shutdown budget, continuing")
 		}
 	} else {
-		slog.Warn("shutdown budget exhausted before compaction workers drain")
+		log.Warn("shutdown budget exhausted before compaction workers drain")
 	}
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
@@ -997,7 +997,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 			UsageByModel:            usageSnap.ByModel,
 			UsageByAgent:            usageSnap.ByAgent,
 		}); err != nil {
-			slog.Warn("failed to save final recovery snapshot", "error", err)
+			log.Warnf("failed to save final recovery snapshot error=%v", err)
 		}
 
 		a.recovery.Close()
@@ -1005,7 +1005,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	if a.sessionLock != nil {
 		if err := a.sessionLock.Release(); err != nil {
-			slog.Warn("failed to release session lock on shutdown", "error", err)
+			log.Warnf("failed to release session lock on shutdown error=%v", err)
 		}
 	}
 
@@ -1235,7 +1235,7 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	if len(batch) == 0 {
 		return
 	}
-	slog.Debug("injecting pending user messages with tool results", "count", len(batch))
+	log.Debugf("injecting pending user messages with tool results count=%v", len(batch))
 	for _, item := range consumed {
 		a.ctxMgr.Append(item.msg)
 		a.recordEvidenceFromMessage(item.msg)
@@ -1270,13 +1270,11 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 			}
 		}
 	default:
-		slog.Error("handleUserMessage: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleUserMessage: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 
-	slog.Debug("handling user message", "content_len", len(content))
+	log.Debugf("handling user message content_len=%v", len(content))
 
 	// /export and /model: never queue or send to the model.
 	if a.handleLocalOnlySlashCommands(content, parts) {
@@ -1325,9 +1323,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	pending, ok := evt.Payload.(pendingUserMessage)
 	if !ok {
-		slog.Error("handlePendingDraftUpsert: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handlePendingDraftUpsert: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	pending.DraftID = strings.TrimSpace(pending.DraftID)
@@ -1368,9 +1364,7 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 func (a *MainAgent) handlePendingDraftRemove(evt Event) {
 	draftID, ok := evt.Payload.(string)
 	if !ok {
-		slog.Error("handlePendingDraftRemove: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handlePendingDraftRemove: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	draftID = strings.TrimSpace(draftID)
@@ -1380,7 +1374,7 @@ func (a *MainAgent) handlePendingDraftRemove(evt Event) {
 	var removed bool
 	a.pendingUserMessages, removed = removePendingDraft(a.pendingUserMessages, draftID)
 	if !removed {
-		slog.Debug("pending mirrored draft already absent", "draft_id", draftID)
+		log.Debugf("pending mirrored draft already absent draft_id=%v", draftID)
 	}
 }
 
@@ -1417,18 +1411,13 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	// Turn isolation: ignore duplicate/stale cancel events so an old cancellation
 	// cannot force a newer turn back to idle.
 	if a.turn == nil || evt.TurnID == 0 || evt.TurnID != a.turn.ID {
-		slog.Debug("discarding stale turn cancellation",
-			"event_turn", evt.TurnID,
-			"current_turn", a.currentTurnID(),
-		)
+		log.Debugf("discarding stale turn cancellation event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 		return
 	}
 
 	payload, ok := evt.Payload.(*TurnCancelledPayload)
 	if !ok {
-		slog.Error("handleTurnCancelled: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleTurnCancelled: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	if payload == nil {
@@ -1445,10 +1434,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	}
 	persistedResults := a.persistInterruptedToolResults(payload.Calls, status, context.Canceled)
 	if persistedResults > 0 {
-		slog.Info("persisted interrupted tool-call results after cancellation",
-			"turn_id", evt.TurnID,
-			"count", persistedResults,
-		)
+		log.Infof("persisted interrupted tool-call results after cancellation turn_id=%v count=%v", evt.TurnID, persistedResults)
 	}
 	if payload.MarkToolCallsFailed {
 		emitFailedToolResults(a.emitToTUI, payload.Calls, context.Canceled)
@@ -1473,9 +1459,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 func (a *MainAgent) handleAgentError(evt Event) {
 	err, ok := evt.Payload.(error)
 	if !ok {
-		slog.Error("handleAgentError: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleAgentError: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 
@@ -1484,18 +1468,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	if evt.SourceID == "main" || evt.SourceID == "" {
 		// Turn isolation: discard errors from cancelled/stale turns.
 		if a.turn != nil && evt.TurnID != 0 && evt.TurnID != a.turn.ID {
-			slog.Debug("discarding stale error",
-				"event_turn", evt.TurnID,
-				"current_turn", a.currentTurnID(),
-			)
+			log.Debugf("discarding stale error event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 			return
 		}
 
-		slog.Error("agent error",
-			"error", err,
-			"turn_id", evt.TurnID,
-			"instance", a.instanceID,
-		)
+		log.Errorf("agent error error=%v turn_id=%v instance=%v", err, evt.TurnID, a.instanceID)
 		a.savePartialAssistantMsg()
 		a.failPendingToolCalls(a.turn, err)
 		a.fireHookBackground(a.parentCtx, hook.OnAgentError, evt.TurnID, map[string]any{
@@ -1512,10 +1489,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 
 	// SubAgent error: clean up the failed agent (same as handleAgentDone minus
 	// LLM review).
-	slog.Error("SubAgent error",
-		"error", err,
-		"source", evt.SourceID,
-	)
+	log.Errorf("SubAgent error error=%v source=%v", err, evt.SourceID)
 
 	var emitCalls, persistCalls []PendingToolCall
 	a.mu.RLock()
@@ -1527,10 +1501,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	if len(persistCalls) > 0 && sub != nil {
 		persistedResults := sub.persistInterruptedToolResults(persistCalls, ToolResultStatusError, err)
 		if persistedResults > 0 {
-			slog.Info("persisted failed sub-agent tool-call results after terminal error",
-				"agent", evt.SourceID,
-				"count", persistedResults,
-			)
+			log.Infof("persisted failed sub-agent tool-call results after terminal error agent=%v count=%v", evt.SourceID, persistedResults)
 		}
 	}
 	if len(emitCalls) > 0 {
@@ -1635,13 +1606,11 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 		return
 	}
 
-	slog.Info("starting plan execution",
-		"plan_path", planPath,
-	)
+	log.Infof("starting plan execution plan_path=%v", planPath)
 
 	newSessionDir, err := a.createRuntimeSessionDir()
 	if err != nil {
-		slog.Warn("failed to create session dir for plan execution", "error", err)
+		log.Warnf("failed to create session dir for plan execution error=%v", err)
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("create execution session: %w", err)})
 		a.setIdleAndDrainPending()
 		return
@@ -1666,7 +1635,7 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
-			slog.Warn("execution session: failed to release old session lock", "error", releaseErr)
+			log.Warnf("execution session: failed to release old session lock error=%v", releaseErr)
 		}
 	}
 	a.sessionLock = newLock
@@ -1709,7 +1678,7 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	})
 	if a.usageLedger != nil {
 		if err := a.usageLedger.SetFirstUserMessage(fmt.Sprintf("Execute the plan at %s", planPath)); err != nil {
-			slog.Warn("failed to update usage summary first user message", "error", err)
+			log.Warnf("failed to update usage summary first user message error=%v", err)
 		}
 		a.updateSessionSummary(func(summary *SessionSummary) {
 			if summary == nil {
@@ -1928,9 +1897,7 @@ type executePlanPayload struct {
 func (a *MainAgent) handleExecutePlanEvent(evt Event) {
 	p, ok := evt.Payload.(*executePlanPayload)
 	if !ok {
-		slog.Error("handleExecutePlanEvent: invalid payload type",
-			"payload_type", fmt.Sprintf("%T", evt.Payload),
-		)
+		log.Errorf("handleExecutePlanEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	a.startPlanExecution(p.PlanPath, p.AgentName)

@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"path/filepath"
 	"strings"
 
@@ -67,14 +67,7 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 		return messages
 	}
 	if result.TruncatedFiles > 0 || result.OmittedFiles > 0 {
-		slog.Debug("compaction key-file context bounded",
-			"loaded_files", result.LoadedFiles,
-			"truncated_files", result.TruncatedFiles,
-			"omitted_files", result.OmittedFiles,
-			"total_bytes", result.TotalBytes,
-			"max_file_bytes", compactionInjectedFileMaxBytes,
-			"max_total_bytes", compactionInjectedFilesMaxBytes,
-		)
+		log.Debugf("compaction key-file context bounded loaded_files=%v truncated_files=%v omitted_files=%v total_bytes=%v max_file_bytes=%v max_total_bytes=%v", result.LoadedFiles, result.TruncatedFiles, result.OmittedFiles, result.TotalBytes, compactionInjectedFileMaxBytes, compactionInjectedFilesMaxBytes)
 	}
 
 	injected := message.Message{

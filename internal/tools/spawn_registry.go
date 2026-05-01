@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,7 +118,7 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 	r.mu.Unlock()
 
 	go r.run(ctx, proc)
-	slog.Debug("spawned process started", "id", id, "kind", req.Kind, "command", req.Command, "max_runtime_sec", proc.MaxRuntimeSec, "agent_id", proc.AgentID)
+	log.Debugf("spawned process started id=%v kind=%v command=%v max_runtime_sec=%v agent_id=%v", id, req.Kind, req.Command, proc.MaxRuntimeSec, proc.AgentID)
 	return proc, nil
 }
 

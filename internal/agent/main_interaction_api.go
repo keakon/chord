@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -161,7 +161,7 @@ func (a *MainAgent) RemoveLastMessage() {
 	if a.recovery != nil {
 		remaining := a.ctxMgr.Snapshot()
 		if err := a.recovery.RewriteLog("main", remaining); err != nil {
-			slog.Warn("RemoveLastMessage: failed to rewrite main log", "error", err)
+			log.Warnf("RemoveLastMessage: failed to rewrite main log error=%v", err)
 		}
 	}
 }
@@ -170,7 +170,7 @@ func (a *MainAgent) RemoveLastMessage() {
 // any new user message.
 func (a *MainAgent) handleContinueFromContext(_ Event) {
 	if a.turn != nil {
-		slog.Debug("handleContinueFromContext: ignored, turn already active")
+		log.Debug("handleContinueFromContext: ignored, turn already active")
 		return
 	}
 	if a.loopState.Enabled {
