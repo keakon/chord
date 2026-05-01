@@ -73,6 +73,7 @@ Currently supported:
 - Paste images from the clipboard
 - Attach image files to the currently focused agent's message
 - View images directly in supported terminals
+- Edit/fork historical user messages that contain images; path-restored images are reloaded when the edited message is sent again
 
 Common actions:
 

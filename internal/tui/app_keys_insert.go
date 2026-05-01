@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -279,7 +280,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				parts = []message.ContentPart{{Type: "text", Text: value}}
 			}
 			for _, a := range m.attachments {
-				parts = append(parts, message.ContentPart{Type: "image", MimeType: a.MimeType, Data: a.Data, FileName: a.FileName})
+				data := a.Data
+				if len(data) == 0 && strings.TrimSpace(a.ImagePath) != "" {
+					var err error
+					data, err = os.ReadFile(a.ImagePath)
+					if err != nil {
+						return m.enqueueToast(fmt.Sprintf("Failed to read image %s: %v", a.FileName, err), "error")
+					}
+				}
+				parts = append(parts, message.ContentPart{Type: "image", MimeType: a.MimeType, Data: data, ImagePath: a.ImagePath, FileName: a.FileName})
 			}
 			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now()}
 			m.attachments = nil

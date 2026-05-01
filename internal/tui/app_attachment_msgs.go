@@ -67,9 +67,10 @@ func (m *Model) pickImageFile() tea.Cmd {
 			return attachmentReadyMsg{err: fmt.Errorf("failed to read image: %w", err)}
 		}
 		return attachmentReadyMsg{attachment: Attachment{
-			FileName: filepath.Base(path),
-			MimeType: mimeType,
-			Data:     data,
+			FileName:  filepath.Base(path),
+			MimeType:  mimeType,
+			Data:      data,
+			ImagePath: path,
 		}}
 	}
 }

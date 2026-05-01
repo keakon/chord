@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -3015,6 +3016,45 @@ func TestForkSessionEventBackfillsTextInlinePastesAndImages(t *testing.T) {
 	}
 	if got := m.attachments[0].MimeType; got != "image/png" {
 		t.Fatalf("attachment mime = %q, want image/png", got)
+	}
+}
+
+func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeNormal
+
+	imagePath := filepath.Join(t.TempDir(), "screenshot.png")
+	imageData := []byte{0x89, 'P', 'N', 'G'}
+	if err := os.WriteFile(imagePath, imageData, 0o600); err != nil {
+		t.Fatalf("write image fixture: %v", err)
+	}
+
+	parts := []message.ContentPart{
+		{Type: "text", Text: "what is this?"},
+		{Type: "image", MimeType: "image/png", ImagePath: imagePath, FileName: "screenshot.png"},
+	}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ForkSessionEvent{Parts: parts}})
+	applyTestCmd(t, &m, cmd)
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	sent := backend.sentMultipart[0]
+	if got := len(sent); got != 2 {
+		t.Fatalf("sent parts = %d, want 2", got)
+	}
+	img := sent[1]
+	if img.Type != "image" {
+		t.Fatalf("sent[1].Type = %q, want image", img.Type)
+	}
+	if !bytes.Equal(img.Data, imageData) {
+		t.Fatalf("sent image data = %v, want %v", img.Data, imageData)
+	}
+	if img.ImagePath != imagePath {
+		t.Fatalf("sent image path = %q, want %q", img.ImagePath, imagePath)
 	}
 }
 
