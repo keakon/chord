@@ -221,6 +221,15 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	compatCfg := llmClient.ThinkingToolcallCompat() // use snapshot for consistency with llmClient
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
+	// Snapshot the turn pointer once so the stream callback never races with
+	// setIdleAndDrainPending() clearing a.turn. The callback should only operate
+	// on this snapshot (which may be nil).
+	turn := a.currentTurn()
+	turnID := uint64(0)
+	if turn != nil {
+		turnID = turn.ID
+	}
+
 	toolDefs := a.mainLLMToolDefinitions()
 
 	// The stream callback runs on the goroutine that owns the HTTP response
@@ -354,8 +363,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		switch delta.Type {
 		case "text":
 			textAccum.WriteString(delta.Text)
-			if a.turn != nil {
-				a.turn.appendPartialText(delta.Text)
+			if turn != nil {
+				turn.appendPartialText(delta.Text)
 			}
 			if textLastEmit.IsZero() {
 				// Emit the first delta immediately for perceived responsiveness.
@@ -414,8 +423,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			flushTextDelta() // flush any pending text before the tool call block
 			promoteStreamingActivity("tool_use_start")
 			if delta.ToolCall != nil {
-				if a.turn != nil {
-					a.turn.recordStreamingToolCall(PendingToolCall{
+				if turn != nil {
+					turn.recordStreamingToolCall(PendingToolCall{
 						CallID:   delta.ToolCall.ID,
 						Name:     delta.ToolCall.Name,
 						ArgsJSON: delta.ToolCall.Input,
@@ -428,9 +437,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				})
 			}
 		case "tool_use_delta":
-			if delta.ToolCall != nil && a.turn != nil && delta.ToolCall.ID != "" && delta.ToolCall.Input != "" {
+			if delta.ToolCall != nil && turn != nil && delta.ToolCall.ID != "" && delta.ToolCall.Input != "" {
 				promoteStreamingActivity("tool_use_delta")
-				accumulated := a.turn.appendStreamingToolCallInput(delta.ToolCall.ID, delta.ToolCall.Name, delta.ToolCall.Input, "")
+				accumulated := turn.appendStreamingToolCallInput(delta.ToolCall.ID, delta.ToolCall.Name, delta.ToolCall.Input, "")
 				if accumulated != "" {
 					a.emitToTUI(ToolCallUpdateEvent{
 						ID:       delta.ToolCall.ID,
@@ -440,11 +449,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				}
 			}
 		case "tool_use_end":
-			if delta.ToolCall != nil && a.turn != nil && delta.ToolCall.ID != "" {
+			if delta.ToolCall != nil && turn != nil && delta.ToolCall.ID != "" {
 				callID := delta.ToolCall.ID
 				callName := strings.TrimSpace(delta.ToolCall.Name)
 				argsJSON := ""
-				if call, ok := a.turn.getStreamingToolCall(callID); ok {
+				if call, ok := turn.getStreamingToolCall(callID); ok {
 					if callName == "" {
 						callName = call.Name
 					}
@@ -499,9 +508,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			// Provider requested rollback of the currently streamed assistant
 			// output (e.g. incremental chain invalid). Drop speculative tool cards
 			// and ask TUI to remove in-flight assistant/thinking blocks.
-			if a.turn != nil {
-				a.turn.drainPartialText() // discard rolled-back text
-				a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+			if turn != nil {
+				turn.drainPartialText() // discard rolled-back text
+				a.discardSpeculativeStreamToolsAndClearToolTrace(turn)
 			}
 			reason := ""
 			if delta.Rollback != nil {
@@ -512,7 +521,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 
 	// Hook: on_before_llm_call (before LLM call).
-	hookResult, hookErr := a.fireHook(ctx, hook.OnBeforeLLMCall, a.currentTurnID(), map[string]any{
+	hookResult, hookErr := a.fireHook(ctx, hook.OnBeforeLLMCall, turnID, map[string]any{
 		"model":         modelName,
 		"message_count": len(messages),
 	})
@@ -533,9 +542,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	resp, err := llmClient.CompleteStream(ctx, messages, toolDefs, callback)
 	completeStreamReturnedAt := time.Now()
-	a.recordToolTraceCallLLMReturned(a.turn, completeStreamReturnedAt)
-	if err == nil && a.turn != nil {
-		a.recordTurnStreamingToolUseEnd(a.turn, time.Now())
+	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
+	if err == nil && turn != nil {
+		a.recordTurnStreamingToolUseEnd(turn, time.Now())
 	}
 	// Final flush: emit any text accumulated in the last batch window.
 	// This is the critical path for burst-delivery proxies that send all
@@ -609,7 +618,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.autoCompactRequested.Store(true)
 	}
 
-	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, a.currentTurnID(), resp.Usage)
+	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage)
 
 	// Hook: on_after_llm_call (after LLM call).
 	inputTok, outputTok := 0, 0
@@ -617,7 +626,6 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		inputTok = resp.Usage.InputTokens
 		outputTok = resp.Usage.OutputTokens
 	}
-	turnID := a.currentTurnID()
 	hookCtxData := map[string]any{
 		"model":         modelName,
 		"input_tokens":  inputTok,

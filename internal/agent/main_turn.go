@@ -322,11 +322,22 @@ func (a *MainAgent) newTurn() {
 	log.Debugf("new turn created turn_id=%v", a.turn.ID)
 }
 
+func (a *MainAgent) currentTurn() *Turn {
+	if a == nil {
+		return nil
+	}
+	a.turnMu.Lock()
+	t := a.turn
+	a.turnMu.Unlock()
+	return t
+}
+
 func (a *MainAgent) currentTurnID() uint64 {
-	if a.turn == nil {
+	turn := a.currentTurn()
+	if turn == nil {
 		return 0
 	}
-	return a.turn.ID
+	return turn.ID
 }
 
 // setIdleAndDrainPending marks the agent idle (turn = nil), emits IdleEvent, then

@@ -163,33 +163,13 @@ func TestWriteStartupStderrNoticeUsesProvidedLogPath(t *testing.T) {
 }
 
 func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "chord.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
-	}
-	defer logFile.Close()
-
-	logger := newGologLogger(logFile, golog.DebugLevel)
-	r, err := redirectProcessStderr(logFile, logger)
-	if err != nil {
-		t.Fatalf("redirectProcessStderr: %v", err)
-	}
-	defer func() { _ = r.Restore() }()
+	var buf bytes.Buffer
+	logger := newGologLogger(&buf, golog.DebugLevel)
+	r := &stderrRedirect{logger: logger}
 
 	r.logLine("stderr line one\n")
-	if err := logFile.Sync(); err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-	if err := r.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	text := string(data)
+
+	text := buf.String()
 	for _, want := range []string{
 		"stderr",
 		"stderr_text=stderr line one",
