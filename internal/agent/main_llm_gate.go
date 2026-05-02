@@ -153,7 +153,7 @@ func (a *MainAgent) mainLLMToolDefinitions() []message.ToolDefinition {
 
 // freezeToolSurface captures the current visible tool definitions as the
 // agent's frozen surface. Called once by ensureSessionBuilt after MCP tools
-// (if any) are registered. See docs/architecture/prompt-and-context-engineering.md §6.
+// (if any) are registered.
 func (a *MainAgent) freezeToolSurface() {
 	defs := llmToolDefinitionsFromVisibleTools(a.mainVisibleLLMTools())
 	snapshot := append([]message.ToolDefinition(nil), defs...)
@@ -352,11 +352,9 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	}
 	a.compactionState.discard = false
 
-	// Determine whether to apply now or defer to continuation barrier
-	// Per plan §3.2:
-	//   case A (a.turn == nil or at barrier): apply now
-	//   case B (pendingMainLLMCall != nil, oversize pending): apply now + resume pending
-	//   case C (turn active, LLM/tool still running): defer to readyDraft
+	// Determine whether to apply now or defer to the continuation barrier.
+	// Apply immediately when there is no active turn or an oversize LLM call is
+	// suspended; otherwise defer until the active LLM/tool work reaches a barrier.
 	asyncPath := draft.HeadSplit > 0 && a.compactionState.headSplit > 0
 	turnActive := a.turn != nil
 	canApplyNow := !turnActive || a.compactionState.oversizeSuspended
@@ -460,9 +458,9 @@ func (a *MainAgent) applyReadyDraft() bool {
 	return applySucceeded
 }
 
-// handleCompactionOversizeSuspend handles an LLM call that was suspended due to
-// context length exceeded while compaction is running. Per plan §4, the call
-// is saved as a pendingMainLLMCall and will be resumed after compaction applies.
+// handleCompactionOversizeSuspend saves an LLM call that was suspended because
+// context length was exceeded while compaction was running. The call is resumed
+// after compaction applies.
 func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	pending, ok := evt.Payload.(*pendingMainLLMCall)
 	if !ok || pending == nil {

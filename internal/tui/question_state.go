@@ -94,7 +94,7 @@ func (m Model) QuestionCh() chan<- QuestionRequest { return m.questionCh }
 // arrives.
 //
 // If timeout > 0 the call returns an error automatically after that duration,
-// matching the confirm_timeout behaviour described in §17.4 of ARCHITECTURE.md.
+// matching confirm_timeout behaviour.
 func MakeQuestionFunc(reqCh chan<- QuestionRequest, timeout time.Duration) tools.QuestionFunc {
 	return func(ctx context.Context, questions []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
 		responseCh := make(chan QuestionResult, 1)

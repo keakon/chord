@@ -177,17 +177,17 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	}
 
 	if n := a.ctxMgr.RepairOrphanToolMessagesInPlace(); n > 0 {
-		log.Infof("repaired orphan tool messages after LLM client swap dropped=%v model=%v", n, modelName)
+		log.Debugf("repaired orphan tool messages after LLM client swap dropped=%v model=%v", n, modelName)
 	}
 
 	// Re-install the already-built stable system prompt on the new LLM client
 	// so the model-side state matches ctxMgr. This does not rebuild the prompt
-	// — see docs/architecture/prompt-and-context-engineering.md §3.3.
+
 	if prompt := a.ctxMgr.SystemPrompt().Content; prompt != "" {
 		newClient.SetSystemPrompt(prompt)
 	}
 
-	log.Infof("swapped LLM client model=%v context_limit=%v", modelName, contextLimit)
+	log.Debugf("swapped LLM client model=%v context_limit=%v", modelName, contextLimit)
 }
 
 // SwitchModel switches the MainAgent to a different model at runtime. The

@@ -193,8 +193,8 @@ func classifyContextLengthExceeded(apiErr *APIError) bool {
 
 // shouldFallback determines whether the error warrants falling back to an
 // alternative model once the current model's keys are exhausted.
-// See docs/ARCHITECTURE.md §14.3. Ordering vs key rotation is implemented in
-// client.completeStreamWithRetry (e.g. isPerKeyTimeoutRetry for read timeouts).
+// Ordering vs key rotation is implemented in client.completeStreamWithRetry
+// (e.g. isPerKeyTimeoutRetry for read timeouts).
 func shouldFallback(err error) bool {
 	// NoUsableKeysError: configured credentials exist but every key is permanently disabled.
 	var noUsable *NoUsableKeysError
@@ -342,7 +342,7 @@ func isPerKeyTimeoutRetry(err error) bool {
 // by selecting another key (same-key exponential backoff is not used for
 // timeouts). client.completeStreamWithRetry may treat some errors as key-
 // retriable even when isRetriable is false (401/403, isPerKeyTimeoutRetry).
-// See docs/ARCHITECTURE.md §14.3.
+
 func isRetriable(err error) bool {
 	// User/system cancellation (e.g. Ctrl+C → turn cancel): never rotate keys or rounds.
 	if errors.Is(err, context.Canceled) {

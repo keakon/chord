@@ -497,7 +497,7 @@ func writeSkillMDWithFM(t *testing.T, path string, fm map[string]any, body strin
 	}
 }
 
-// ---------- Phase 2: Frontmatter extensions ----------
+// ---------- Frontmatter extensions ----------
 
 func TestParseFrontmatter_WhenToUse(t *testing.T) {
 	input := `---
@@ -690,7 +690,7 @@ func TestLoadMeta_ExtendedFrontmatter(t *testing.T) {
 	}
 }
 
-// ---------- Phase 3: Sidecar metadata ----------
+// ---------- Sidecar metadata ----------
 
 func TestSidecarMetadata_ChordYaml(t *testing.T) {
 	dir := t.TempDir()
@@ -839,9 +839,9 @@ func TestNoSidecarWhenMissing(t *testing.T) {
 	}
 }
 
-// ---------- Phase 2: WorkDir chain ----------
+// ---------- WorkDir chain ----------
 
-// ---------- Phase 1: LazyWatcher ----------
+// ---------- LazyWatcher ----------
 
 func TestLazyWatcher_StartStop(t *testing.T) {
 	dir := t.TempDir()

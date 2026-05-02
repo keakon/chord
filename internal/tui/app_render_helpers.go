@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
 
@@ -58,21 +57,6 @@ func toastTickCmdForLevel(level string, generation uint64) tea.Cmd {
 	})
 }
 
-// logToastExpired logs a toast that expired naturally.
-func logToastExpired(t *toastItem) {
-	log.Infof("toast expired level=%v message=%v category=%v", t.Level, t.Message, t.Category)
-}
-
-// logToastPreempted logs a toast that was replaced by a higher-priority one.
-func logToastPreempted(t *toastItem, byLevel string) {
-	log.Infof("toast preempted level=%v message=%v category=%v by=%v", t.Level, t.Message, t.Category, byLevel)
-}
-
-// logToastMerged logs a toast that was replaced in queue by a newer one of the same category.
-func logToastMerged(oldMsg, newMsg string, level string) {
-	log.Infof("toast merged level=%v message=%v replaced=%v", level, newMsg, oldMsg)
-}
-
 // enqueueToast enqueues a toast with no category (no merge behavior).
 func (m *Model) enqueueToast(msg, level string) tea.Cmd {
 	return m.enqueueToastWithCategory(msg, level, "")
@@ -115,7 +99,6 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 
 	// Preempt: new toast has strictly higher priority than the active one.
 	if toastLevelPriority(t.Level) > toastLevelPriority(m.activeToast.Level) {
-		logToastPreempted(m.activeToast, t.Level)
 		m.activeToast = &t
 		m.toastGeneration++
 		if m.shouldPriorityFlushToast(t.Level) {
@@ -129,7 +112,6 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 	if t.Category != "" {
 		for i := len(m.toastQueue) - 1; i >= 0; i-- {
 			if m.toastQueue[i].Category == t.Category {
-				logToastMerged(m.toastQueue[i].Message, t.Message, t.Level)
 				m.toastQueue = append(m.toastQueue[:i], m.toastQueue[i+1:]...)
 				break
 			}

@@ -69,8 +69,7 @@ func shouldEnableBugTriagePrompt(messages []message.Message) bool {
 func (a *MainAgent) setBugTriagePromptActive(active bool) {
 	a.bugTriagePromptActive.Store(active)
 	// No system-prompt refresh: the bug triage hint is delivered as a per-turn
-	// overlay via buildTurnOverlayMessages. See
-	// docs/architecture/prompt-and-context-engineering.md §5.
+	// overlay via buildTurnOverlayMessages.
 }
 
 func (a *MainAgent) syncBugTriagePromptFromSnapshot() {

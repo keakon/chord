@@ -60,7 +60,7 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
-	log.Infof("SubAgent progress updated agent=%v summary_len=%v", evt.SourceID, len(summary))
+	log.Debugf("SubAgent progress updated agent=%v summary_len=%v", evt.SourceID, len(summary))
 }
 
 func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {

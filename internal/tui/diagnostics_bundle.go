@@ -138,7 +138,7 @@ func (m *Model) buildDiagnosticsBundle(now time.Time, trigger string) (diagnosti
 	if err != nil {
 		return diagnosticsBundleData{}, err
 	}
-	logName, logTail := collectDiagnosticLogTail(locator.LogsDir, baseDir, m.instanceID)
+	logName, logTail := collectDiagnosticLogTail(locator.LogsDir, baseDir, os.Getpid())
 	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, bundlePath, logName)
 	return diagnosticsBundleData{
 		bundlePath: bundlePath,
@@ -167,7 +167,7 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 		fmt.Fprintf(&sb, "session: %s\n", summary)
 	}
 	if strings.TrimSpace(m.instanceID) != "" {
-		fmt.Fprintf(&sb, "instance_id: %s\n", sanitizeDiagnosticText(m.instanceID, baseDir))
+		fmt.Fprintf(&sb, "process_instance_id: %s\n", sanitizeDiagnosticText(m.instanceID, baseDir))
 	}
 	if strings.TrimSpace(logName) != "" {
 		fmt.Fprintf(&sb, "runtime_log_tail: %s\n", sanitizeDiagnosticText(logName, baseDir))
@@ -193,8 +193,8 @@ func (m *Model) sessionSummaryString() string {
 	return strings.Join(parts, " ")
 }
 
-func collectDiagnosticLogTail(logsDir, baseDir, instanceID string) (string, string) {
-	if strings.TrimSpace(logsDir) == "" || strings.TrimSpace(instanceID) == "" {
+func collectDiagnosticLogTail(logsDir, baseDir string, pid int) (string, string) {
+	if strings.TrimSpace(logsDir) == "" || pid <= 0 {
 		return "", ""
 	}
 	entries, err := os.ReadDir(logsDir)
@@ -224,7 +224,7 @@ func collectDiagnosticLogTail(logsDir, baseDir, instanceID string) (string, stri
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].modTime.After(cands[j].modTime) })
 	for _, cand := range cands {
-		tail, ok := readSanitizedLogTail(cand.path, baseDir, instanceID)
+		tail, ok := readSanitizedLogTail(cand.path, baseDir, pid)
 		if !ok || strings.TrimSpace(tail) == "" {
 			continue
 		}
@@ -248,7 +248,7 @@ func isRuntimeLogFile(name string) bool {
 	return err == nil
 }
 
-func readSanitizedLogTail(path, baseDir, instanceID string) (string, bool) {
+func readSanitizedLogTail(path, baseDir string, pid int) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false
@@ -273,7 +273,10 @@ func readSanitizedLogTail(path, baseDir, instanceID string) (string, bool) {
 	if len(lines) > diagnosticLogTailLines {
 		lines = lines[len(lines)-diagnosticLogTailLines:]
 	}
-	instanceMarker := "instance_id=" + instanceID
+	pidMarker := ""
+	if pid > 0 {
+		pidMarker = "pid=" + strconv.Itoa(pid)
+	}
 	filtered := make([]string, 0, len(lines))
 	captureStderr := false
 	for _, line := range lines {
@@ -284,19 +287,16 @@ func readSanitizedLogTail(path, baseDir, instanceID string) (string, bool) {
 			}
 			continue
 		}
-		hasInstanceField := strings.Contains(line, "instance_id=")
-		if strings.Contains(line, instanceMarker) {
+		if pidMarker != "" && containsLogField(line, pidMarker) {
 			filtered = append(filtered, sanitizeDiagnosticText(line, baseDir))
 			captureStderr = true
 			continue
 		}
-		if hasInstanceField {
-			captureStderr = false
+		if captureStderr && !containsLogFieldPrefix(line, "pid=") {
+			filtered = append(filtered, sanitizeDiagnosticText(line, baseDir))
 			continue
 		}
-		if captureStderr {
-			filtered = append(filtered, sanitizeDiagnosticText(line, baseDir))
-		}
+		captureStderr = false
 	}
 	for len(filtered) > 0 && strings.TrimSpace(filtered[0]) == "" {
 		filtered = filtered[1:]
@@ -308,6 +308,48 @@ func readSanitizedLogTail(path, baseDir, instanceID string) (string, bool) {
 		return "", false
 	}
 	return strings.Join(filtered, "\n") + "\n", true
+}
+
+func containsLogField(line, field string) bool {
+	for start := 0; ; {
+		idx := strings.Index(line[start:], field)
+		if idx < 0 {
+			return false
+		}
+		pos := start + idx
+		if isLogFieldStart(line, pos) && isLogFieldEnd(line, pos+len(field)) {
+			return true
+		}
+		start = pos + len(field)
+		if start >= len(line) {
+			return false
+		}
+	}
+}
+
+func containsLogFieldPrefix(line, prefix string) bool {
+	for start := 0; ; {
+		idx := strings.Index(line[start:], prefix)
+		if idx < 0 {
+			return false
+		}
+		pos := start + idx
+		if isLogFieldStart(line, pos) {
+			return true
+		}
+		start = pos + len(prefix)
+		if start >= len(line) {
+			return false
+		}
+	}
+}
+
+func isLogFieldStart(line string, pos int) bool {
+	return pos == 0 || line[pos-1] == ' ' || line[pos-1] == '['
+}
+
+func isLogFieldEnd(line string, pos int) bool {
+	return pos >= len(line) || line[pos] == ' ' || line[pos] == ']'
 }
 
 func sanitizeDiagnosticText(s, baseDir string) string {

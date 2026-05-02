@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// samplePlan is the example from ARCHITECTURE.md §4.3.
+// samplePlan is a representative plan document used by parser tests.
 const samplePlan = `# Implement user authentication
 
 ## Constraints

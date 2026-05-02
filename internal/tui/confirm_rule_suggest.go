@@ -31,7 +31,7 @@ func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd 
 	case "webfetch":
 		return suggestWebFetchPatterns(argsJSON)
 	case "delete":
-		// Delete: no candidates per plan
+		// Delete approvals are path-specific; do not suggest reusable rule candidates.
 		return nil
 	case "read", "grep", "glob", "lsp", "skill":
 		return normalizePatternCandidates([]PatternCandidate{

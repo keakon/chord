@@ -518,7 +518,7 @@ func logResponsesSSEDecodeFailure(reader io.Reader, chunkIndex int, eventType st
 			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 		}
 	}
-	log.Warnf("responses: failed to decode SSE payload attrs=%v", "<missing>")
+	log.Warnf("responses: failed to decode SSE payload %v", attrs)
 }
 
 func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType string, data []byte, readErr error) {
@@ -548,7 +548,7 @@ func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType s
 			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 		}
 	}
-	log.Warnf("responses: SSE event ended before delimiter attrs=%v", "<missing>")
+	log.Warnf("responses: SSE event ended before delimiter %v", attrs)
 }
 
 func quoteASCIIBytesTail(data []byte, limit int) string {

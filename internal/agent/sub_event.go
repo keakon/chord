@@ -12,8 +12,8 @@ import (
 // All state modifications happen in this single thread; user messages arrive
 // via the inputCh channel.
 func (s *SubAgent) runLoop() {
-	log.Infof("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
-	defer log.Infof("SubAgent event loop stopped instance=%v", s.instanceID)
+	log.Debugf("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
+	defer log.Debugf("SubAgent event loop stopped instance=%v", s.instanceID)
 
 	for {
 		s.refillInputChannelFromOverflow()
@@ -73,7 +73,7 @@ func (s *SubAgent) runLoop() {
 				if len(merged) > 0 {
 					persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 					if persistedResults > 0 {
-						log.Infof("SubAgent: persisted interrupted tool-call results during shutdown agent=%v count=%v", s.instanceID, persistedResults)
+						log.Debugf("SubAgent: persisted interrupted tool-call results during shutdown agent=%v count=%v", s.instanceID, persistedResults)
 					}
 					emitCancelledToolResults(s.parent.emitToTUI, merged)
 					s.parent.emitActivity(s.instanceID, ActivityIdle, "")

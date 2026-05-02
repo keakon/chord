@@ -166,7 +166,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		return
 	}
 	for _, id := range toClose {
-		log.Infof("closing subagent via lifecycle GC agent_id=%v user_turn=%v", id, a.explicitUserTurnCount)
+		log.Debugf("closing subagent via lifecycle GC agent_id=%v user_turn=%v", id, a.explicitUserTurnCount)
 		finalState := SubAgentStateCancelled
 		if sub := a.subAgentByID(id); sub != nil {
 			finalState = sub.State()

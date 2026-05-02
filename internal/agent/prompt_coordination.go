@@ -8,7 +8,7 @@ import (
 func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
 	blocks := make([]string, 0, 3)
 	// bugTriagePromptBlock is delivered as a per-turn overlay, not part of the
-	// stable system prompt. See docs/architecture/prompt-and-context-engineering.md §5.
+	// stable system prompt.
 	if block := strings.TrimSpace(a.todoWorkflowPromptBlock()); block != "" {
 		blocks = append(blocks, block)
 	}

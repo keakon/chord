@@ -281,9 +281,8 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 	} else {
 		a.loopState.ConsecutiveNoProgress++
 	}
-	// Stall detector: check thresholds before continuing.
-	// Plan specifies: 2 consecutive → suspected_stall (with explicit gap),
-	//                  3 consecutive → budget_exhausted (stop).
+	// Stall detector: two consecutive no-progress rounds mark suspected_stall;
+	// three consecutive rounds exhaust the loop budget.
 	if a.loopState.ConsecutiveNoProgress >= 3 {
 		return &LoopAssessment{
 			Action:  LoopAssessmentActionBudgetExhausted,

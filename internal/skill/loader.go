@@ -36,7 +36,7 @@ type Meta struct {
 	Model        string   // optional: override model for fork context
 	Effort       string   // optional: effort level for fork context
 	AllowedTools []string // optional: tool allowlist for fork context
-	Paths        []string // optional: conditional activation glob patterns (Phase 3)
+	Paths        []string // optional: conditional activation glob patterns
 }
 
 // Skill represents a fully loaded skill definition.
@@ -170,7 +170,7 @@ func LoadMeta(path string) (*Meta, error) {
 		Paths:        fm.Paths,
 	}
 
-	// Phase 3: apply sidecar metadata if present (overrides frontmatter).
+	// Apply sidecar metadata if present (overrides frontmatter).
 	loadSidecarMeta(rootDir, meta)
 
 	return meta, nil

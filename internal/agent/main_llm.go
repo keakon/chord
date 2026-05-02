@@ -50,7 +50,7 @@ func modelNameFromRef(providerModelRef string) string {
 // waitGitStatus blocks until the async git status fetch is done. The result
 // is injected into the first user message by injectGitStatusIntoFirstUserMessage
 // and is not part of the stable system prompt, so no system-prompt refresh is
-// needed. See docs/architecture/prompt-and-context-engineering.md §5.
+// needed.
 func (a *MainAgent) waitGitStatus(ctx context.Context) {
 	if a.gitStatusReady == nil {
 		return
@@ -196,13 +196,12 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	// Inject the <system-reminder> meta user message carrying AGENTS.md +
 	// currentDate before the first user message. This is a per-request overlay;
-	// it never enters ctxMgr or the session jsonl. See
-	// docs/architecture/prompt-and-context-engineering.md §4.
+	// it never enters ctxMgr or the session jsonl.
 	messages = a.injectSessionContextReminder(messages)
 
 	// Assemble per-turn overlays (SubAgent mailbox, bug triage hint, loop
 	// continuation) and prepend them before the first user message. Overlays
-	// never modify the stable system prompt. See §5 of the doc above.
+	// never modify the stable system prompt.
 	messages = injectTurnOverlays(messages, a.buildTurnOverlayMessages())
 
 	// Emit early activity event so the TUI shows "connecting" immediately,
@@ -559,8 +558,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				Level:   "error",
 			})
 		}
-		// Per plan §4: if oversize + compaction running, suspend and wait for
-		// compaction to apply, then retry instead of surfacing an immediate error.
+		// If the context is oversized while compaction is running, suspend and wait
+		// for compaction to apply, then retry instead of surfacing an immediate error.
 		if llm.IsContextLengthExceeded(err) && a.IsCompactionRunning() {
 			log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
 			return nil, &contextLengthExceededPendingCompactionError{inner: err}

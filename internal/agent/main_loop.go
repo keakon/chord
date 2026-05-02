@@ -17,7 +17,7 @@ import (
 //	go agent.Run(ctx)
 func (a *MainAgent) Run(ctx context.Context) error {
 	a.started.Store(true)
-	log.Infof("agent event loop started instance=%v model=%v", a.instanceID, a.modelName)
+	log.Debugf("agent event loop started instance=%v model=%v", a.instanceID, a.modelName)
 	if _, err := a.fireHook(ctx, hook.OnSessionStart, 0, map[string]any{}); err != nil {
 		log.Warnf("on_session_start hook error error=%v", err)
 	}
@@ -34,7 +34,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	a.startPersistLoop()
 
 	defer func() {
-		log.Infof("agent event loop stopped instance=%v", a.instanceID)
+		log.Debugf("agent event loop stopped instance=%v", a.instanceID)
 		// 1. Signal interactive senders to stop.
 		close(a.stoppingCh)
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.

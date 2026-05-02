@@ -15,8 +15,8 @@ const (
 
 // Note: We intentionally do NOT call runtime.GC() during idle sweep.
 // The primary memory reduction mechanism is:
-// 1. Dropping render caches for off-screen blocks (Phase 3)
-// 2. Shrinking hot budget to force aggressive spill (Phase 4)
+// - Dropping render caches for off-screen blocks
+// - Shrinking hot budget to force aggressive spill
 //
 // Explicit GC is only worth considering if:
 // - Cache drop + aggressive spill don't reduce RSS enough
@@ -139,10 +139,10 @@ func (m *Model) performIdleSweep() {
 	if m.viewport == nil {
 		return
 	}
-	// Phase 3: drop render caches for off-screen blocks.
+	// Drop render caches for off-screen blocks.
 	m.viewport.DropOffScreenCaches()
 
-	// Phase 4: shrink hot budget for aggressive spill.
+	// Shrink hot budget for aggressive spill.
 	cadence := m.currentCadence()
 	if cadence.aggressiveHotBudget {
 		m.viewport.ShrinkHotBudget()

@@ -34,6 +34,7 @@ type stderrRedirect struct {
 	pipeRead  *os.File
 	pipeWrite *os.File
 	doneCh    chan struct{}
+	logger    *golog.Logger
 }
 
 func redirectProcessStderr(logFile *os.File, logger *golog.Logger) (*stderrRedirect, error) {
@@ -62,18 +63,19 @@ func redirectProcessStderr(logFile *os.File, logger *golog.Logger) (*stderrRedir
 		pipeRead:  pipeRead,
 		pipeWrite: pipeWrite,
 		doneCh:    make(chan struct{}),
+		logger:    logger,
 	}
-	go r.consume(logger)
+	go r.consume()
 	return r, nil
 }
 
-func (r *stderrRedirect) consume(logger *golog.Logger) {
+func (r *stderrRedirect) consume() {
 	defer close(r.doneCh)
 	reader := bufio.NewReader(r.pipeRead)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
-			r.logLine(logger, line)
+			r.logLine(line)
 		}
 		if err != nil {
 			return
@@ -81,15 +83,27 @@ func (r *stderrRedirect) consume(logger *golog.Logger) {
 	}
 }
 
-func (r *stderrRedirect) logLine(logger *golog.Logger, line string) {
-	if logger == nil {
-		return
-	}
+func (r *stderrRedirect) logLine(line string) {
 	trimmed := strings.TrimRight(line, "\r\n")
 	if trimmed == "" {
 		return
 	}
+	r.mu.Lock()
+	logger := r.logger
+	r.mu.Unlock()
+	if logger == nil {
+		return
+	}
 	logger.Warnf("stderr stderr_text=%v", trimmed)
+}
+
+func (r *stderrRedirect) SetLogger(logger *golog.Logger) {
+	if r == nil || logger == nil {
+		return
+	}
+	r.mu.Lock()
+	r.logger = logger
+	r.mu.Unlock()
 }
 
 func (r *stderrRedirect) Rebind(logFile *os.File) error {

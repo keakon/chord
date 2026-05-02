@@ -759,13 +759,13 @@ func logHook(h HookDef, env Envelope, status string, action string, duration tim
 
 	switch status {
 	case statusFailed, statusTimedOut:
-		log.Warnf("hook execution attrs=%v", "<missing>")
+		log.Warnf("hook execution %v", attrs)
 	case statusSkipped:
 		if hookDebugEnabled() {
-			log.Debugf("hook execution attrs=%v", "<missing>")
+			log.Debugf("hook execution %v", attrs)
 		}
 	default:
-		log.Debugf("hook execution attrs=%v", "<missing>")
+		log.Debugf("hook execution %v", attrs)
 	}
 }
 

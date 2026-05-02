@@ -148,7 +148,7 @@ curl -I https://api.openai.com/v1
 
 默认日志目录：`${XDG_STATE_HOME:-~/.local/state}/chord/logs/`。当前日志文件是 `chord.log`；轮转文件是 `chord.log.1` 和 `chord.log.2`。
 
-当前构建使用 golog 原生纯文本日志格式，例如 `[I 2026-05-02 12:00:00 file:123] message key=value`。其中的 key-value 片段只应视为便于人工阅读的文本，不是稳定的结构化日志 schema；运行时 logger 不再输出旧的 `level=... msg=...` 伪结构化行。
+当前构建使用 golog 原生纯文本日志格式，例如 `[I 2026-05-02 12:00:00 file:123 pwd=/path/to/workspace pid=1234 sid=20260502015258426] message key=value`。其中的 key-value 片段只应视为便于人工阅读的文本，不是稳定的结构化日志 schema；运行时 logger 不再输出旧的 `level=... msg=...` 伪结构化行。
 
 可以通过 `--logs-dir <path>` 或环境变量 `CHORD_LOGS_DIR=<path>` 覆盖。快速复现并收集日志：
 

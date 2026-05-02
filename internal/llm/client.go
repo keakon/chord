@@ -295,7 +295,7 @@ func (c *Client) SupportsInput(modality string) bool {
 // according to isRetriable/shouldFallback plus overrides (401/403, response-
 // phase timeouts via isPerKeyTimeoutRetry). Connection-establishment timeouts
 // skip remaining keys on the provider and may skip other models on the same
-// provider (skipRemainingModelsOnProvider). See docs/ARCHITECTURE.md §14.1–14.3.
+// provider (skipRemainingModelsOnProvider).
 //
 // Retries happen in full rounds with exponential backoff between rounds; each
 // round walks the model pool and each model's selectable keys.

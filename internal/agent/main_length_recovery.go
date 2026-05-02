@@ -36,7 +36,7 @@ func (a *MainAgent) beginLengthRecoveryRetry(toolName string, turnID uint64, tur
 	})
 	// Use request-scoped overlay instead of durable ctxMgr append so the
 	// recovery prompt does not survive compaction. See
-	// docs/architecture/prompt-and-context-engineering.md.
+
 	a.pendingRecoveryPrompt = recoveryPrompt
 	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
 	a.prepareSubAgentMailboxBatchForTurnContinuation()

@@ -25,7 +25,7 @@ const (
 	EventPendingDraftUpsert = "pending_draft_upsert"
 	EventPendingDraftRemove = "pending_draft_remove"
 
-	// Phase 2a event types for multi-agent orchestration.
+	// Multi-agent orchestration event types.
 	EventAgentDone               = "agent_done"       // SubAgent completed its task
 	EventAgentIdle               = "agent_idle"       // SubAgent idle timeout (no tool calls, no Complete)
 	EventAgentNotify             = "agent_notify"     // SubAgent non-blocking notify update
@@ -565,7 +565,7 @@ type QuestionRequestEvent struct {
 func (QuestionRequestEvent) agentEvent() {}
 
 // ---------------------------------------------------------------------------
-// Granular activity tracking (Phase 2c)
+// Granular activity tracking
 // ---------------------------------------------------------------------------
 
 // ActivityType represents the specific technical state of an agent's LLM or tool loop.

@@ -142,7 +142,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("mcp initialize %s: decode result: %w", c.name, err)
 	}
 
-	log.Infof("mcp server initialized name=%v server=%v version=%v protocol=%v", c.name, c.serverInfo.ServerInfo.Name, c.serverInfo.ServerInfo.Version, c.serverInfo.ProtocolVersion)
+	log.Debugf("mcp server initialized name=%v server=%v version=%v protocol=%v", c.name, c.serverInfo.ServerInfo.Name, c.serverInfo.ServerInfo.Version, c.serverInfo.ProtocolVersion)
 
 	// Send the initialized notification (required by MCP spec).
 	notif := JSONRPCNotification{
@@ -178,7 +178,7 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 		return nil, fmt.Errorf("mcp tools/list %s: decode: %w", c.name, err)
 	}
 
-	log.Infof("mcp tools discovered server=%v count=%v", c.name, len(result.Tools))
+	log.Debugf("mcp tools discovered server=%v count=%v", c.name, len(result.Tools))
 	return result.Tools, nil
 }
 
@@ -426,7 +426,7 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 		m.setEndpointStatus(status)
 		if err != nil {
 			if status.Pending {
-				log.Infof("mcp server initialization canceled name=%v error=%v", name, err)
+				log.Debugf("mcp server initialization canceled name=%v error=%v", name, err)
 			} else {
 				log.Warnf("mcp server initialization failed name=%v attempts=%v error=%v", name, status.Attempt, err)
 			}

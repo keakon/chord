@@ -148,7 +148,7 @@ Check logs first when you encounter:
 
 Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`. The current log file is `chord.log`; rotated files are `chord.log.1` and `chord.log.2`.
 
-Current builds write logs in golog's plain text format, for example `[I 2026-05-02 12:00:00 file:123] message key=value`. Treat key-value fragments as human-readable text, not as a stable structured logging schema; older `level=... msg=...` pseudo-structured lines are no longer emitted by the runtime logger.
+Current builds write logs in golog's plain text format, for example `[I 2026-05-02 12:00:00 file:123 pwd=/path/to/workspace pid=1234 sid=20260502015258426] message key=value`. Treat key-value fragments as human-readable text, not as a stable structured logging schema; older `level=... msg=...` pseudo-structured lines are no longer emitted by the runtime logger.
 
 Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`. To reproduce and collect logs quickly:
 

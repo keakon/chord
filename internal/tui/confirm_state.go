@@ -130,12 +130,8 @@ func confirmTimeoutTick() tea.Cmd {
 // user input.
 //
 // If timeout > 0 the call returns ConfirmDeny automatically after that
-// duration, matching the behaviour described in §17.4 of ARCHITECTURE.md.
-//
-// Phase 1b note: when a timeout fires the TUI confirmation dialog remains
-// visible until the user presses a key (which sends a stale result that is
-// silently dropped by resolveConfirm's non-blocking send). Phase 2 will add
-// an explicit dialog auto-close signal via a dedicated cancel channel.
+// duration.
+
 func MakeConfirmFunc(reqCh chan<- ConfirmRequest, resCh <-chan ConfirmResult, timeout time.Duration) func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed []string) (agent.ConfirmResponse, error) {
 	return func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed []string) (agent.ConfirmResponse, error) {
 		request := ConfirmRequest{

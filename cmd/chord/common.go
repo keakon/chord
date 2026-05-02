@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,6 +13,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/command"
@@ -69,6 +71,8 @@ type AppContext struct {
 	LoadedCommands []*command.Definition
 	LogWriter      *rotatingLogFile
 	StderrRedirect *stderrRedirect
+	logCtx         logContext
+	logLevel       golog.Level
 	mcpStartOnce   sync.Once
 	skillsLoadOnce sync.Once
 	SessionLock    *recovery.SessionLock
@@ -98,17 +102,13 @@ func (ac *AppContext) GetOrCreateProviderImpl(provName string, cfg config.Provid
 func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*AppContext, error) {
 	ac := &AppContext{}
 
-	// ---------------------------------------------------------------
-	// 1. Signal-driven context for graceful shutdown (§14.5)
-	// ---------------------------------------------------------------
+	// Signal handling and process identity.
 	ac.Ctx, ac.Cancel = signal.NotifyContext(
 		context.Background(), os.Interrupt, syscall.SIGTERM,
 	)
 	ac.InstanceID = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 
-	// ---------------------------------------------------------------
-	// 2. Project root (current working directory)
-	// ---------------------------------------------------------------
+	// Project root.
 	projectRoot, err := os.Getwd()
 	if err != nil {
 		ac.Cancel()
@@ -116,18 +116,14 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 	ac.ProjectRoot = projectRoot
 
-	// ---------------------------------------------------------------
-	// 3. Runtime directory
-	// ---------------------------------------------------------------
+	// Runtime directory.
 	ac.ChordDir = filepath.Join(projectRoot, ".chord")
 	if err := os.MkdirAll(ac.ChordDir, 0o700); err != nil {
 		ac.Cancel()
 		return nil, fmt.Errorf("create .chord directory: %w", err)
 	}
 
-	// ---------------------------------------------------------------
-	// 4. Configuration
-	// ---------------------------------------------------------------
+	// Configuration.
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		ac.Cancel()
@@ -167,12 +163,15 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	logLevel := resolveLogLevel(cfg, nil)
+	ac.logLevel = logLevel
+	logCtx := logContext{PWD: projectRoot, PID: os.Getpid()}
+	ac.logCtx = logCtx
 
 	logPath := filepath.Join(pathLocator.LogsDir, "chord.log")
 	logWriter, logErr := newRotatingLogFile(logPath)
 	if logErr == nil {
 		ac.LogWriter = logWriter
-		logger := newGologLogger(logWriter, logLevel)
+		logger := newGologLoggerWithContext(logWriter, logLevel, logCtx)
 		if redirect, redirectErr := redirectProcessStderr(logWriter.CurrentFile(), logger); redirectErr != nil {
 			writeStartupStderrNotice(logPath, redirectErr)
 		} else {
@@ -181,7 +180,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 		setDefaultLogger(logger)
 	} else {
-		fallbackLogger := newStderrGologLogger(logLevel)
+		fallbackLogger := newStderrGologLoggerWithContext(logLevel, logCtx)
 		setDefaultLogger(fallbackLogger)
 		log.Warnf("runtime log unavailable; using stderr path=%v error=%v", logPath, logErr)
 	}
@@ -192,15 +191,17 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	projectConfigPath := filepath.Join(projectRoot, ".chord", "config.yaml")
 	if pc, err := config.LoadConfigFromPath(projectConfigPath); err == nil {
 		applyProjectConfigOverrides(ac, pc)
-		log.Infof("loaded project config path=%v", projectConfigPath)
+		log.Debugf("loaded project config path=%v", projectConfigPath)
 	}
 
 	if ac.ProjectCfg != nil && ac.ProjectCfg.LogLevel != "" {
-		logLevel = resolveLogLevel(ac.Cfg, ac.ProjectCfg)
+		ac.logLevel = resolveLogLevel(ac.Cfg, ac.ProjectCfg)
 		if ac.LogWriter != nil {
-			setDefaultLogger(newGologLogger(ac.LogWriter, logLevel))
+			logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
+			setDefaultLogger(logger)
+			ac.StderrRedirect.SetLogger(logger)
 		} else {
-			setDefaultLogger(newStderrGologLogger(logLevel))
+			setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
 		}
 	}
 
@@ -245,9 +246,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 	}
 
-	// ---------------------------------------------------------------
-	// 7. Auth — load API keys
-	// ---------------------------------------------------------------
+	// Auth and API keys.
 	authPath := filepath.Join(pathLocator.ConfigHome, "auth.yaml")
 
 	auth, err := config.LoadAuthConfig(authPath)
@@ -261,9 +260,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	creds := auth[ac.ProviderName]
 	apiKeys := config.ExtractAPIKeys(creds)
 
-	// ---------------------------------------------------------------
-	// 8. Resolve the active model from config.
-	// ---------------------------------------------------------------
+	// Active model.
 	cfgProvider, ok := cfg.Providers[ac.ProviderName]
 	if !ok {
 		ac.cleanup()
@@ -297,9 +294,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 	ac.ModelID = modelID
 
-	// ---------------------------------------------------------------
-	// 10. LLM client (provider-based, streaming)
-	// ---------------------------------------------------------------
+	// LLM client.
 	ac.ProviderCache = &providerCache{
 		m:        make(map[string]*llm.ProviderConfig),
 		impls:    make(map[string]llm.Provider),
@@ -332,7 +327,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		return nil, err
 	}
 	if providerCfg.Type() == config.ProviderTypeResponses {
-		log.Infof("using Responses API model=%v api_url=%v", modelID, providerCfg.APIURL())
+		log.Debugf("using Responses API model=%v api_url=%v", modelID, providerCfg.APIURL())
 	}
 
 	llmClient := llm.NewClient(
@@ -353,28 +348,30 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	log.Infof("configuration loaded model=%v max_output_tokens=%v context_window=%v", modelID, modelCfg.Limit.Output, modelCfg.Limit.Context)
 
-	// ---------------------------------------------------------------
-	// 11. Session directory (tool output truncation, logs, etc.)
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 11: creating session directory")
+	// Session directory.
 	sessionPlan, err := planSessionStartup(projectLocator.ProjectSessionsDir, sessionOpts)
 	if err != nil {
 		ac.cleanup()
 		return nil, err
 	}
 	ac.SessionDir = sessionPlan.SessionDir
-	log.Debugf("[DEBUG-BOOT] step 11: session dir created session_dir=%v restore=%v", ac.SessionDir, sessionPlan.RestoreOnStartup)
+	ac.logCtx.SID = filepath.Base(ac.SessionDir)
+	if ac.LogWriter != nil {
+		logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
+		setDefaultLogger(logger)
+		ac.StderrRedirect.SetLogger(logger)
+	} else {
+		setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
+	}
 
 	// Acquire exclusive cross-process ownership of the session directory.
 	// This prevents two Chord processes from concurrently writing the same session.
-	log.Debug("[DEBUG-BOOT] step 11: acquiring session lock")
 	if sessionLock, lockErr := recovery.AcquireSessionLock(ac.SessionDir); lockErr != nil {
 		ac.cleanup()
 		return nil, fmt.Errorf("acquire session lock: %w", lockErr)
 	} else {
 		ac.SessionLock = sessionLock
 	}
-	log.Debug("[DEBUG-BOOT] step 11: session lock acquired")
 
 	// Enable LLM dump when effective log_level is "debug".
 	if debugLoggingEnabled(ac.Cfg, ac.ProjectCfg) {
@@ -391,21 +388,14 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Debugf("LLM dump enabled dir=%v", dumpDir)
 	}
 
-	// ---------------------------------------------------------------
-	// 12. Context manager (conversation history + compression)
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 12: creating context manager")
+	// Context manager.
 	ac.CtxMgr = ctxmgr.NewManager(
 		modelCfg.Limit.Context,
 		cfg.Context.AutoCompact,
 		cfg.Context.CompactThreshold,
 	)
-	log.Debug("[DEBUG-BOOT] step 12: context manager created")
 
-	// ---------------------------------------------------------------
-	// 13. Tool registry — register the basic tools.
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 13: registering tools")
+	// Tool registry.
 	ac.Registry = tools.NewRegistry()
 	ac.Registry.Register(tools.ReadTool{})
 	ac.Registry.Register(tools.WriteTool{})
@@ -418,7 +408,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Warnf("shell detection failed, using bash as default error=%v", err)
 		detectedShell = shell.ShellBash
 	}
-	log.Infof("detected shell for command execution shell=%v", detectedShell.String())
+	log.Debugf("detected shell for command execution shell=%v", detectedShell.String())
 	ac.Registry.Register(tools.NewBashTool(detectedShell.String()))
 
 	ac.Registry.Register(tools.NewSpawnTool(detectedShell.String()))
@@ -429,11 +419,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.HandoffTool{})
 	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
-	// ---------------------------------------------------------------
-	// 13a. MCP servers — discover and register tools.
-	// ---------------------------------------------------------------
+	// MCP servers.
 	mcpConfigs := mcp.ServerConfigsFromConfig(cfg.MCP)
-	log.Debugf("[DEBUG-BOOT] step 13a: MCP servers config_count=%v", len(mcpConfigs))
 	if ac.ProjectCfg != nil {
 		mcpConfigs = append(mcpConfigs, mcp.ServerConfigsFromConfig(ac.ProjectCfg.MCP)...)
 	}
@@ -455,7 +442,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 					} else {
 						for _, t := range mcpTools {
 							ac.Registry.Register(t)
-							log.Infof("registered MCP tool name=%v", t.Name())
+							log.Debugf("registered MCP tool name=%v", t.Name())
 						}
 					}
 					syncMCPPromptBlock = mcp.ConnectedServersPromptBlock(ac.Ctx, mgr)
@@ -464,25 +451,19 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 	}
 
-	// ---------------------------------------------------------------
-	// 14. Hook engine.
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 14: hook engine")
+	// Hook engine.
 	hookDefs := hookDefsFromConfig(cfg.Hooks)
 	if ac.ProjectCfg != nil {
 		hookDefs = append(hookDefs, hookDefsFromConfig(ac.ProjectCfg.Hooks)...)
 	}
 	if len(hookDefs) > 0 {
 		ac.HookEngine = hook.NewCommandEngineFromList(hookDefs)
-		log.Infof("hook engine loaded hook_count=%v", len(hookDefs))
+		log.Debugf("hook engine loaded hook_count=%v", len(hookDefs))
 	} else {
 		ac.HookEngine = &hook.NoopEngine{}
 	}
 
-	// ---------------------------------------------------------------
-	// 15. Agent (event loop + LLM interaction)
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 15: creating MainAgent")
+	// Main agent.
 	ac.MainAgent = agent.NewMainAgent(
 		ac.Ctx, llmClient, ac.CtxMgr, ac.Registry, ac.HookEngine,
 		ac.SessionDir, modelID, projectRoot,
@@ -490,7 +471,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		mcp.ClientInfo{Name: "chord", Version: Version},
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
-	log.Debug("[DEBUG-BOOT] step 15: MainAgent created, setting up session lock and callbacks")
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
@@ -507,6 +487,14 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 			return
 		}
 		ac.SessionDir = sessionDir
+		ac.logCtx.SID = filepath.Base(sessionDir)
+		if ac.LogWriter != nil {
+			logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
+			setDefaultLogger(logger)
+			ac.StderrRedirect.SetLogger(logger)
+		} else {
+			setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
+		}
 		if debugLoggingEnabled(ac.Cfg, ac.ProjectCfg) && ac.ProviderCache != nil && ac.ProviderCache.dumpWriter != nil {
 			ac.ProviderCache.dumpWriter.SetDir(filepath.Join(sessionDir, "dumps", "llm"))
 		}
@@ -520,25 +508,17 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 	ensureRuntimeLSP(ac)
 	configureRuntimeStateProviders(ac)
-	log.Debug("[DEBUG-BOOT] step 15: LSP and state providers configured")
 
-	// ---------------------------------------------------------------
-	// 15b. Phase 2a tools — require agent references.
-	// ---------------------------------------------------------------
-	// TodoWrite is always registered; Delegate is registered later (15d) after
-	// agent configs are loaded, only when subagent-mode agents are available.
+	// Agent-bound tools.
+	// TodoWrite is always registered; Delegate is registered later after agent
+	// configs are loaded, only when subagent-mode agents are available.
 	ac.Registry.Register(tools.NewTodoWriteTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewSkillTool(ac.MainAgent))
 
-	// ---------------------------------------------------------------
-	// 15c. LLM factory for SubAgents.
-	// ---------------------------------------------------------------
+	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))
 
-	// ---------------------------------------------------------------
-	// 15d. Agent definitions.
-	// ---------------------------------------------------------------
-	log.Debugf("[DEBUG-BOOT] step 15d: agent definitions configs_err=%v configs_count=%v", agentConfigsErr, len(agentConfigs))
+	// Agent definitions.
 	if agentConfigsErr != nil {
 		ac.cleanup()
 		return nil, fmt.Errorf("load agent configs: %w", agentConfigsErr)
@@ -548,14 +528,12 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		for name := range agentConfigs {
 			names = append(names, name)
 		}
-		log.Infof("agent definitions resolved count=%v names=%v", len(agentConfigs), names)
+		log.Debugf("agent definitions resolved count=%v names=%v", len(agentConfigs), names)
 	}
 	if agentConfigs != nil {
 		ac.MainAgent.SetAgentConfigs(agentConfigs)
 	}
-	// ---------------------------------------------------------------
-	// 15e. Model switch factory.
-	// ---------------------------------------------------------------
+	// Model switch factory.
 	ac.MainAgent.SetModelSwitchFactory(buildMainClientFactory(ac, cfg, auth))
 
 	if sessionPlan.RestoreOnStartup {
@@ -574,16 +552,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	ac.MainAgent.SetAvailableModelsFn(buildAvailableModelsFn(ac, cfg, auth))
 
-	// ---------------------------------------------------------------
-	// 15a. Skill loading.
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 15a: skill loading")
+	// Skill loading.
 	startAsyncSkillLoad(ac)
 
-	// ---------------------------------------------------------------
-	// 15b. Custom command loading (synchronous — needed before first input).
-	// ---------------------------------------------------------------
-	log.Debug("[DEBUG-BOOT] step 15b: custom command loading")
+	// Custom command loading (synchronous — needed before first input).
 	loadCustomCommands(ac)
 
 	applyInitialMCPPromptState(ac, asyncMCP, len(mcpConfigs) > 0, syncMCPPromptBlock)

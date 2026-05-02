@@ -155,7 +155,6 @@ type SubAgent struct {
 
 	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
 	// construction. Kept stable so the provider request prefix does not drift.
-	// See docs/architecture/prompt-and-context-engineering.md §6.
 	frozenToolDefs []message.ToolDefinition
 
 	// repMu serialises access to the RepetitionDetector from concurrent
@@ -290,7 +289,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		subTools.Register(tools.NewNotifyTool(sender, cfg.Parent, notifyVisible, notifyVisible && delegateVisible))
 	}
 
-	// Build the SubAgent's own context manager (no auto_compress per §3.2).
+	// Build the SubAgent's own context manager; sub-agents do not auto-compact.
 	ctxMgr := ctxmgr.NewManager(0, false, 0)
 
 	s = &SubAgent{
@@ -344,8 +343,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	})
 
 	// Capture session-level context (AGENTS.md + currentDate) as a meta user
-	// message and freeze the tool surface. Mirrors MainAgent. See
-	// docs/architecture/prompt-and-context-engineering.md §§4,6.
+	// message and freeze the tool surface. Mirrors MainAgent.
 	s.cachedSessionReminderContent = buildSessionContextReminder(s.agentsMD, time.Now())
 	s.frozenToolDefs = append(
 		[]message.ToolDefinition(nil),
@@ -989,7 +987,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 
-	// 2. Dynamic environment information (no git status per §6.6).
+	// Dynamic environment information (no git status for sub-agents).
 	venvLine := ""
 	if s.venvPath != "" {
 		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", s.venvPath)
@@ -1000,12 +998,12 @@ func (s *SubAgent) buildSystemPrompt() string {
   Today's date: %s%s
 </env>`, s.workDir, runtime.GOOS, time.Now().Format("Mon Jan 2 2006"), venvLine))
 
-	// 3. Task description (core difference from MainAgent).
+	// Task description (core difference from MainAgent).
 	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, s.taskCompletionInstruction()))
 
-	// 4. AGENTS.md is delivered as a <system-reminder> meta user message via
+	// AGENTS.md is delivered as a <system-reminder> meta user message via
 	//    cachedSessionReminder (mirrors MainAgent). It does not belong in the
-	//    stable system prompt. See docs/architecture/prompt-and-context-engineering.md §4.
+	//    stable system prompt.
 
 	if block := s.availableSkillsPromptBlock(); block != "" {
 		parts = append(parts, block)

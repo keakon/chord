@@ -467,7 +467,7 @@ func (r *ResponsesProvider) sendAndParse(
 			if !snap.TimeoutFiredAt.IsZero() {
 				attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 			}
-			log.Warnf("responses: SSE stream timed out attrs=%v", "<missing>")
+			log.Warnf("responses: SSE stream timed out %v", attrs)
 		}
 	}
 

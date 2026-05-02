@@ -11,7 +11,7 @@ import (
 // continuation — without touching the stable system prompt or ctxMgr. Each
 // returned message is wrapped as <system-reminder>...</system-reminder> and
 // prepended to the real user turn by callLLM. None of them are persisted to
-// the session jsonl. See docs/architecture/prompt-and-context-engineering.md §5.
+// the session jsonl.
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	var overlays []message.Message
 

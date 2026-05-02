@@ -173,7 +173,7 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 		for name := range configs {
 			names = append(names, name)
 		}
-		log.Infof("agent configs installed count=%v names=%v", len(configs), names)
+		log.Debugf("agent configs installed count=%v names=%v", len(configs), names)
 	}
 
 	// Cache the available subagents using the initial role selection.
@@ -183,7 +183,7 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 	// Rebuild active-role state after configs install or refresh.
 	if selectedRole != "" {
 		a.rebuildRuleset()
-		log.Infof("set active role from agent configs role=%v total_rules=%v", selectedRole, len(a.effectiveRuleset()))
+		log.Debugf("set active role from agent configs role=%v total_rules=%v", selectedRole, len(a.effectiveRuleset()))
 
 		// Rebuild system prompt to include the selected role instructions.
 		a.refreshSystemPrompt()

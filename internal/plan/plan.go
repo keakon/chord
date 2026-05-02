@@ -12,7 +12,7 @@
 //	### 2. Another task (depends: 1) [in_progress]
 //	Description with dependency and status marker.
 //
-// See ARCHITECTURE.md §4.3 and Appendix B for the full specification.
+// The parser accepts the Markdown task-list format used by the plan-execute workflow.
 package plan
 
 import (

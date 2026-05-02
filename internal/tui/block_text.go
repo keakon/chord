@@ -232,8 +232,8 @@ func preserveBackground(line, bgColor string) string {
 // preserveCardBg re-inserts the card's background ANSI sequence after every
 // full reset (\x1b[0m) and explicit background reset (\x1b[49m) in each line.
 // This prevents inner Render() calls and glamour's ANSI output from breaking
-// the outer card's background color — the same class of issue as §1.24 but at
-// the card level rather than the tool-call level.
+// the outer card's background color when nested ANSI-rendered content resets
+// the terminal style.
 func preserveCardBg(lines []string, bgColorNum string) []string {
 	for i, line := range lines {
 		if line == "" {

@@ -84,10 +84,49 @@ func TestProxyScheme(t *testing.T) {
 	}
 }
 
+func TestGologLoggerWithContextAddsInstanceFields(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newGologLoggerWithContext(&buf, golog.InfoLevel, logContext{
+		PWD:     "/tmp/workspace",
+		PID:     1234,
+		SID:     "20260502015258426",
+		AgentID: "sub-agent1",
+	})
+	logger.Info("hello")
+
+	text := buf.String()
+	for _, want := range []string{
+		"pwd=/tmp/workspace",
+		"pid=1234",
+		"sid=20260502015258426",
+		"agent=sub-agent1",
+		"] hello",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("log output = %q, want %q", text, want)
+		}
+	}
+}
+
+func TestGologLoggerWithContextOmitsMainAgent(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newGologLoggerWithContext(&buf, golog.InfoLevel, logContext{
+		PWD:     "/tmp/workspace",
+		PID:     1234,
+		SID:     "20260502015258426",
+		AgentID: "main",
+	})
+	logger.Info("hello")
+
+	if text := buf.String(); strings.Contains(text, "agent=") {
+		t.Fatalf("log output = %q, want no agent field", text)
+	}
+}
+
 func TestLogEffectiveProxy(t *testing.T) {
 	var buf bytes.Buffer
 	old := getDefaultLogger()
-	setDefaultLogger(newGologLogger(&buf, golog.InfoLevel))
+	setDefaultLogger(newGologLogger(&buf, golog.DebugLevel))
 	t.Cleanup(func() { setDefaultLogger(old) })
 
 	logEffectiveProxy("")
@@ -139,7 +178,7 @@ func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) 
 	}
 	defer func() { _ = r.Restore() }()
 
-	r.logLine(logger, "stderr line one\n")
+	r.logLine("stderr line one\n")
 	if err := logFile.Sync(); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -158,5 +197,25 @@ func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) 
 		if !strings.Contains(text, want) {
 			t.Fatalf("log = %q, want %q", text, want)
 		}
+	}
+}
+
+func TestRedirectProcessStderrUsesUpdatedLogger(t *testing.T) {
+	var buf bytes.Buffer
+	r := &stderrRedirect{logger: newGologLoggerWithContext(&buf, golog.DebugLevel, logContext{PID: 1})}
+
+	r.logLine("before session\n")
+	r.SetLogger(newGologLoggerWithContext(&buf, golog.DebugLevel, logContext{PID: 1, SID: "20260502015258426"}))
+	r.logLine("after session\n")
+
+	text := buf.String()
+	if !strings.Contains(text, "before session") || !strings.Contains(text, "after session") {
+		t.Fatalf("log output = %q, want both stderr lines", text)
+	}
+	if strings.Contains(text, "sid=20260502015258426] stderr stderr_text=before session") {
+		t.Fatalf("pre-session stderr unexpectedly had sid: %q", text)
+	}
+	if !strings.Contains(text, "sid=20260502015258426] stderr stderr_text=after session") {
+		t.Fatalf("updated stderr logger did not include sid: %q", text)
 	}
 }

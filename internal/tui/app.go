@@ -309,11 +309,11 @@ type Model struct {
 	// It should return a new AgentForTUI on success, or an error after exhausting retries.
 	reconnectFunc func() (agent.AgentForTUI, error)
 
-	// Agent view isolation (Phase 2a)
+	// Agent view isolation.
 	// Empty string = main agent / show all blocks.
 	focusedAgentID string
 
-	// Multi-agent sidebar (Phase 2a)
+	// Multi-agent sidebar.
 	sidebar Sidebar
 
 	// Toast notifications
@@ -349,7 +349,7 @@ type Model struct {
 	infoPanelHitBoxes          []infoPanelSectionHitBox
 	infoPanelRenderCursorY     int
 
-	// Layout for ultraviolet layered drawing (Phase 4)
+	// Layered drawing layout.
 	layout tuiLayout
 
 	// rightPanelVisible tracks whether the right panel (info + agents) is shown.

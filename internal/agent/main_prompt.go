@@ -59,7 +59,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 	}
 	// AGENTS.md is injected as a <system-reminder> user message via
 	// injectSessionContextReminder to keep the stable system prompt
-	// small and cacheable. See docs/architecture/prompt-and-context-engineering.md §4.
+	// small and cacheable.
 	if block := a.availableSkillsPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
@@ -307,7 +307,7 @@ func loadAgentsMDWithWorkDir(projectRoot, workDir string) string {
 			continue
 		}
 		if c := strings.TrimSpace(string(data)); c != "" {
-			log.Infof("loaded AGENTS.md path=%v size=%v", path, len(c))
+			log.Debugf("loaded AGENTS.md path=%v size=%v", path, len(c))
 			sections = append(sections, c)
 		}
 	}

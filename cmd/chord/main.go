@@ -154,7 +154,7 @@ func runRoot(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	// 1. Initialize the full application context (config, auth, LLM, agent, tools, etc.)
+	// Initialize the full application context (config, auth, LLM, agent, tools, etc.).
 	ac, err := initApp(true, "local", sessionStartupOptions{
 		ContinueLatest: flagContinueSession,
 		ResumeID:       resumeID,
@@ -174,7 +174,7 @@ func runRoot(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
-	// 2. Prepare the TUI model against the current MainAgent state before the
+	// Prepare the TUI model against the current MainAgent state before the
 	// runtime consumes startup-resume pending state. This keeps the first frame's
 	// loading/disabled UI accurate for --continue/--resume startup.
 	var opts []tea.ProgramOption
@@ -224,13 +224,13 @@ func runRoot(_ *cobra.Command, _ []string) error {
 		tuiModel.SetDesktopNotification(osc9, terminalOut)
 	}
 
-	// 3. Wire up confirmFn, questionFn, QuestionTool, LSP/MCP status, start event loop.
+	// Wire up confirmFn, questionFn, QuestionTool, LSP/MCP status, and start the event loop.
 	rt, err = createRuntime(ac)
 	if err != nil {
 		return err
 	}
 
-	// 4. Run the TUI directly against the in-process MainAgent.
+	// Run the TUI directly against the in-process MainAgent.
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))
 
 	p := tea.NewProgram(&tuiModel, opts...)
@@ -244,7 +244,7 @@ func runRoot(_ *cobra.Command, _ []string) error {
 		log.Warnf("tui runtime cache cleanup failed error=%v", err)
 	}
 
-	// 4. Graceful shutdown: cancel the current turn and let the agent wind down.
+	// Graceful shutdown: cancel the current turn and let the agent wind down.
 	shutdownLocalRuntime(ac, rt, localExitIdleWait)
 	rtClosed = true
 	acClosed = true

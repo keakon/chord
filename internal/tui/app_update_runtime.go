@@ -149,7 +149,6 @@ func (m *Model) handleToastTick() tea.Cmd {
 	if m.renderFreezeActive && shouldBreakFreezeForToastLevel(m.activeToast.Level) {
 		m.exitRenderFreeze()
 	}
-	logToastExpired(m.activeToast)
 	m.activeToast = nil
 	if len(m.toastQueue) > 0 {
 		next := m.toastQueue[0]

@@ -506,7 +506,7 @@ func (b *Block) renderAssistant(width int) []string {
 
 	var out []string
 
-	// 1. Thinking block (if any)
+	// Thinking block (if any).
 	hasThinking := false
 	for _, p := range b.ThinkingParts {
 		if strings.TrimSpace(removeTrailingCursorGlyph(p)) != "" {
@@ -521,7 +521,7 @@ func (b *Block) renderAssistant(width int) []string {
 		// renderThinkingParts with the same innerWidth
 		tLines := b.renderThinkingParts(innerWidth)
 		if len(tLines) > 0 {
-			// Re-insert card bg after inner ANSI resets (§1.25).
+			// Re-insert card background after inner ANSI resets.
 			thinkBg := currentTheme.ThinkingCardBg
 			tLines = preserveCardBg(tLines, thinkBg)
 			out = append(out, renderPrewrappedCard(tStyle, innerWidth, tLines, thinkBg, railANSISeq("thinking", b.Focused))...)
@@ -529,7 +529,7 @@ func (b *Block) renderAssistant(width int) []string {
 		}
 	}
 
-	// 2. Assistant block body
+	// Assistant block body.
 	hasContent := strings.TrimSpace(bodyContent) != "" || (summary.HasMeta && !b.Streaming)
 	if !hasContent && !b.Streaming && !hasThinking {
 		return nil
@@ -653,7 +653,7 @@ func (b *Block) renderAssistant(width int) []string {
 			assistantSoftWraps = append(assistantSoftWraps, softWrap)
 		}
 
-		// Re-insert card bg after inner ANSI resets (§1.25).
+		// Re-insert card background after inner ANSI resets.
 		assBg := currentTheme.AssistantCardBg
 		assistantLines = preserveCardBg(assistantLines, assBg)
 		cardLines := renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railANSISeq("assistant", b.Focused))
@@ -839,7 +839,7 @@ func (b *Block) renderThinking(width int) []string {
 		rawLines = append(rawLines, "  "+footer)
 	}
 
-	// Re-insert card bg after inner ANSI resets (§1.25).
+	// Re-insert card background after inner ANSI resets.
 	thinkBg2 := currentTheme.ThinkingCardBg
 	rawLines = preserveCardBg(rawLines, thinkBg2)
 	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railANSISeq("thinking", b.Focused))

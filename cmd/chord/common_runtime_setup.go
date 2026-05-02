@@ -37,7 +37,7 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 	if ac.Cfg != nil && ac.Cfg.PreventSleep != nil && *ac.Cfg.PreventSleep {
 		powerMgr = power.NewManager(power.NewBackend())
 		ac.MainAgent.SetActivityObserver(&activityObserverAdapter{mgr: powerMgr})
-		log.Info("prevent_sleep enabled: activity-based sleep prevention active")
+		log.Debug("prevent_sleep enabled: activity-based sleep prevention active")
 	}
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
@@ -189,7 +189,7 @@ func startRuntimeWarmups(ac *AppContext) {
 	}()
 	go func() {
 		if ac.MainAgent.ReloadAgentsMD() {
-			log.Info("project AGENTS.md loaded asynchronously")
+			log.Debug("project AGENTS.md loaded asynchronously")
 		}
 	}()
 }

@@ -355,7 +355,7 @@ type MainAgent struct {
 	activeConfig *config.AgentConfig            // currently active role (nil = no role set yet; defaults to builder)
 	agentConfigs map[string]*config.AgentConfig // pre-loaded: built-in → global → project (highest priority)
 
-	// Phase 2a: Multi-agent orchestration fields.
+	// Multi-agent orchestration fields.
 	mu                       sync.RWMutex                  // protects subAgents/taskRecords for cross-goroutine access
 	subAgents                map[string]*SubAgent          // instanceID → live SubAgent
 	taskRecords              map[string]*DurableTaskRecord // taskID → durable task record
@@ -394,8 +394,7 @@ type MainAgent struct {
 	todoItems []tools.TodoItem
 	todoMu    sync.RWMutex
 
-	// Minimal loop-controller runtime state. Phase 1 keeps this local to the
-	// MainAgent and only drives post-assistant stop assessment.
+	// Minimal loop-controller runtime state for post-assistant stop assessment.
 	loopState loopRuntimeState
 	// pendingLoopContinuation is a request-scoped continuation notice shown to
 	// the user and injected into the next continued LLM request only.
@@ -489,7 +488,6 @@ type MainAgent struct {
 	// carrying AGENTS.md + currentDate. Built once ensureSessionBuilt completes.
 	// Injected before the first user message only once per session-head, then
 	// suppressed until resetSessionBuildState. Not persisted to ctxMgr or jsonl.
-	// See docs/architecture/prompt-and-context-engineering.md.
 	cachedSessionReminderContent atomic.Pointer[string]
 	// sessionReminderInjected is true after cachedSessionReminderContent has been
 	// injected into an LLM call for the current session-head.
@@ -499,8 +497,7 @@ type MainAgent struct {
 	// ensureSessionBuilt time. Kept stable for the life of the agent instance
 	// so the provider request prefix (system prompt + tools[]) does not drift
 	// and prompt cache / Responses previous_response_id remain effective.
-	// Cleared by resetSessionBuildState on session-head events. See
-	// docs/architecture/prompt-and-context-engineering.md §6.
+	// Cleared by resetSessionBuildState on session-head events.
 	frozenToolDefs atomic.Pointer[[]message.ToolDefinition]
 
 	// rateLimitMu protects per-provider rate-limit snapshots for cross-goroutine access.
@@ -655,7 +652,6 @@ func (a *MainAgent) SetMCPServersPromptBlock(block string) {
 	// discoverability snapshot is in place when ensureSessionBuilt freezes it.
 	// Post-first-turn: MCP connection changes are runtime state and must not
 	// invalidate the frozen prefix; the current snapshot stays in place.
-	// See docs/architecture/prompt-and-context-engineering.md §3.3, §6.3.
 	if !a.sessionBuilt.Load() {
 		a.refreshSystemPrompt()
 	}
@@ -1452,8 +1448,8 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 // handleAgentError emits the error to the TUI and logs it. An IdleEvent is
 // also sent so the TUI knows the agent is ready for new input.
 //
-// If SourceID is "main" or empty, this is the MainAgent's own error (existing
-// Phase 1 behavior). If SourceID identifies a SubAgent, the agent is cleaned
+// If SourceID is "main" or empty, this is the MainAgent's own error.
+// If SourceID identifies a SubAgent, the agent is cleaned
 // up: file locks released, focus switched, map entry removed, semaphore freed,
 // and context cancelled.
 func (a *MainAgent) handleAgentError(evt Event) {
@@ -1826,9 +1822,8 @@ Path: %s
 // gate (agentsMDReady) so ensureSessionBuilt can proceed. The content is
 // consumed the next time ensureSessionBuilt rebuilds the session-context
 // reminder (on session-head events). Mid-session edits to AGENTS.md are not
-// picked up until the next /new, /resume, or equivalent reset — AGENTS.md is
-// treated as a session-scope snapshot (see
-// docs/architecture/prompt-and-context-engineering.md §4.2).
+// picked up until the next /new, /resume, or equivalent reset; AGENTS.md is
+// treated as a session-scope snapshot.
 func (a *MainAgent) ReloadAgentsMD() bool {
 	content := loadAgentsMDWithWorkDir(a.projectRoot, a.cachedWorkDir)
 

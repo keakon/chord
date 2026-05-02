@@ -16,7 +16,7 @@ import (
 // NewHTTPClientWithProxy creates an *http.Client with proxy support and granular timeouts.
 // proxyURL can be: "http://...", "https://...", "socks5://...", "direct", or "" (default).
 //
-// Timeout strategy (per ARCHITECTURE.md §5.1a):
+// Timeout strategy:
 //   - totalTimeout: overall request deadline (5 min for non-streaming safety net)
 //   - DialContext.Timeout: 60s connection establishment
 //   - ResponseHeaderTimeout: 60s waiting for first response byte
@@ -24,8 +24,8 @@ import (
 //   - For streaming, the per-chunk read timeout is handled at the SSE reader level,
 //     not at the Transport level (Transport has no per-read timeout knob).
 //
-// When these fire, resulting errors are classified in errors.go (§14.3) to decide
-// whether to rotate keys vs skip the provider in the model pool.
+// When these fire, resulting errors are classified to decide whether to rotate
+// keys or skip the provider in the model pool.
 // NewHTTPClientWithProxyAndHeaderTimeout creates an *http.Client with proxy support,
 // caller-controlled total timeout, and caller-controlled response header timeout.
 // Connection-establishment timeout semantics remain unchanged.

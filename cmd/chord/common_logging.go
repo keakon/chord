@@ -38,11 +38,11 @@ func debugLoggingEnabled(globalCfg, projectCfg *config.Config) bool {
 func logEffectiveProxy(effectiveProxy string) {
 	switch {
 	case effectiveProxy == "":
-		log.Info("proxy: using environment (HTTP_PROXY/HTTPS_PROXY) or direct if unset")
+		log.Debug("proxy: using environment (HTTP_PROXY/HTTPS_PROXY) or direct if unset")
 	case effectiveProxy == "direct":
-		log.Info("proxy: disabled (direct)")
+		log.Debug("proxy: disabled (direct)")
 	default:
-		log.Infof("proxy: configured scheme=%v", proxyScheme(effectiveProxy))
+		log.Debugf("proxy: configured scheme=%v", proxyScheme(effectiveProxy))
 	}
 }
 

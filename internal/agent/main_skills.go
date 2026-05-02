@@ -21,7 +21,7 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 		for i, s := range skills {
 			names[i] = s.Name
 		}
-		log.Infof("skills discovered count=%v names=%v", len(skills), names)
+		log.Debugf("skills discovered count=%v names=%v", len(skills), names)
 	}
 	a.skillsMu.Lock()
 	for name, meta := range a.invokedSkills {

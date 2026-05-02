@@ -38,7 +38,7 @@ func loadCustomCommands(ac *AppContext) {
 	if len(defs) > 0 {
 		ac.LoadedCommands = defs
 		ac.MainAgent.SetCustomCommands(defs)
-		log.Infof("custom commands loaded count=%v", len(defs))
+		log.Debugf("custom commands loaded count=%v", len(defs))
 	}
 }
 
@@ -56,7 +56,7 @@ func skillLoadDirsForWorkDir(ac *AppContext, cwd string) []string {
 		filepath.Join(ac.ProjectRoot, ".agents", "skills"),
 		filepath.Join(ac.ConfigHome, "skills"),
 	}
-	// Phase 2: workDir chain discovery — walk from projectRoot to cwd,
+	// Walk from projectRoot to cwd,
 	// collecting .agents/skills at each level. Deeper dirs come first
 	// (higher priority in first-wins deduplication).
 	if chain := WorkDirSkillChain(ac.ProjectRoot, cwd); len(chain) > 0 {
@@ -126,7 +126,7 @@ func refreshSkills(ac *AppContext) {
 		ac.LoadedSkills = loadedSkills
 		ac.MainAgent.SetSkills(loadedSkills)
 		if len(loadedSkills) > 0 {
-			log.Infof("skills discovered count=%v", len(loadedSkills))
+			log.Debugf("skills discovered count=%v", len(loadedSkills))
 		}
 	}()
 }

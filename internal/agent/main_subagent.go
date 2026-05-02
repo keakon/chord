@@ -306,7 +306,7 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		RequiresAck:  false,
 	}})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
-	log.Infof("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))
+	log.Debugf("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))
 }
 
 func (a *MainAgent) handleEscalate(evt Event) {
@@ -345,7 +345,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 
 func (a *MainAgent) handleAgentLog(evt Event) {
 	msg, _ := evt.Payload.(string)
-	log.Infof("SubAgent log agent=%v message=%v", evt.SourceID, msg)
+	log.Debugf("SubAgent log agent=%v message=%v", evt.SourceID, msg)
 	a.emitToTUI(InfoEvent{Message: msg, AgentID: evt.SourceID})
 }
 
@@ -442,7 +442,7 @@ func (a *MainAgent) getOrCreateAgentMCP(mcpCfg config.MCPConfig) []tools.Tool {
 			continue
 		}
 		a.mcpServerCache[name] = &mcpServerEntry{Mgr: mgr, Tools: discovered}
-		log.Infof("subagent MCP server connected server=%v tools=%v", name, len(discovered))
+		log.Debugf("subagent MCP server connected server=%v tools=%v", name, len(discovered))
 		extra = append(extra, discovered...)
 	}
 	return extra
