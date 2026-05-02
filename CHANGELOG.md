@@ -30,6 +30,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.
 - Fixed categorized loop blocked messages rendering as unnamed status cards.
 - Fixed Ghostty/tab focus-restore artifacts by tracking transcript/layout changes that occur while the terminal is backgrounded, forcing a host redraw after focus-settle when those background changes are observed, and recording background-dirty plus input-separator diagnostics to make any remaining stale-display cases easier to investigate.
+- Fixed Ghostty/cmux stale display where separator lines could appear duplicated after rapid scroll/resize/layout changes; Chord now clears to end-of-line per rendered row in those terminals to avoid leftover cells.
 - Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
 - Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
 - Fixed collapsed tool result hidden-line counts for markdown-like output.

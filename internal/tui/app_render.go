@@ -382,7 +382,20 @@ func (m *Model) View() tea.View {
 	canvas := m.screenBuf
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	v.Content = canvas.Render()
+	rendered := canvas.Render()
+	if m.useFocusResizeFreeze {
+		// UV's Render() may emit empty lines without trailing spaces. In Ghostty/cmux
+		// this can leave stale cells behind (notably “phantom” duplicate separators)
+		// when layout rows move.
+		//
+		// Clearing to end-of-line on every row ensures blank rows actively overwrite
+		// any previous content without requiring an extra ClearScreen. This adds an
+		// extra O(n) pass over the rendered frame and slightly increases output size,
+		// so keep it scoped to terminals where the workaround is needed.
+		v.Content = eraseToEOLPerLine(rendered)
+	} else {
+		v.Content = rendered
+	}
 	m.cachedFullView = v
 	m.cachedFullViewValid = true
 	if m.renderFreezeActive {
@@ -393,6 +406,35 @@ func (m *Model) View() tea.View {
 	m.streamRenderDeferred = m.streamRenderDeferNext
 	m.streamRenderDeferNext = false
 	return v
+}
+
+const ansiEraseToEOL = "\x1b[0K"
+
+func eraseToEOLPerLine(s string) string {
+	if s == "" {
+		return ansiEraseToEOL
+	}
+	if !strings.Contains(s, "\n") {
+		return s + ansiEraseToEOL
+	}
+	// Add "erase to end of line" before every newline, and at the end of the
+	// final line, so that rows that render as empty still actively clear any
+	// stale terminal cells.
+	newlines := strings.Count(s, "\n")
+	var b strings.Builder
+	b.Grow(len(s) + (newlines+1)*len(ansiEraseToEOL))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			b.WriteString(ansiEraseToEOL)
+			b.WriteByte('\n')
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	if len(s) == 0 || s[len(s)-1] != '\n' {
+		b.WriteString(ansiEraseToEOL)
+	}
+	return b.String()
 }
 
 // ensureScreenBuffer reuses the existing UV screen buffer across View() calls.
