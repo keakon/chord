@@ -79,8 +79,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/keakon/golog v0.0.0-20260502025539-27a204d70aac h1:UewrasGgV16dKU9YdTEJ+0SyyTBT9nnBFKRyj6xeyDo=
-github.com/keakon/golog v0.0.0-20260502025539-27a204d70aac/go.mod h1:eiN1P12Xfzgefazs96mOt9Iikcwmj4FxVzJeCuOgFdk=
+github.com/keakon/golog v0.2.0 h1:Z+IFIkuqMqi8k5lJyYQkMFilVeVNGN5LgLgzxhPjsrE=
+github.com/keakon/golog v0.2.0/go.mod h1:eiN1P12Xfzgefazs96mOt9Iikcwmj4FxVzJeCuOgFdk=
 github.com/keakon/x/powernap v0.0.0-20260330063338-2b2cb686f9cc h1:F094BTHUkLo2iFSLaicUaPdhVddMTmDjDPFO+L1dTB4=
 github.com/keakon/x/powernap v0.0.0-20260330063338-2b2cb686f9cc/go.mod h1:cmdl5zlP5mR8TF2Y68UKc7hdGUDiSJ2+4hk0h04Hsx4=
 github.com/klauspost/cpuid/v2 v2.2.9 h1:66ze0taIn2H33fBvCkXuv9BmCwDfafmiIVpKV9kKGuY=
