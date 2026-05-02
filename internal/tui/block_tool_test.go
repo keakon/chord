@@ -276,9 +276,10 @@ func TestCollapsedBashToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	// Short output (3 lines ≤ threshold): shown inline, no expand hint.
-	if strings.Contains(joined, "[space] expand") {
-		t.Fatalf("did not expect collapsed Bash with short output to show expand hint; got:\n%s", joined)
+	// Short output: stdout is already shown inline, but expanded mode still adds
+	// exit status + stream headers, so we should still show an expand hint.
+	if !strings.Contains(joined, "[space] expand") {
+		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
 		t.Fatalf("expected all output lines to be shown inline for short output; got:\n%s", joined)
@@ -598,10 +599,10 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "echo first") || !strings.Contains(joined, "echo second") {
 		t.Fatalf("expected collapsed Bash to show command preview lines; got:\n%s", joined)
 	}
-	// Short output (1 line) triggers inline mode: full command is shown,
-	// no expand hint is needed.
-	if strings.Contains(joined, "[space] expand") {
-		t.Fatalf("did not expect collapsed Bash with short output to show expand hint; got:\n%s", joined)
+	// Even when stdout/stderr are fully visible inline, expanded mode still adds
+	// exit status + stream headers, so we should show an expand hint.
+	if !strings.Contains(joined, "[space] expand") {
+		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
 		t.Fatalf("expected collapsed Bash with short output to show full command; got:\n%s", joined)
@@ -624,9 +625,10 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	// Short output (3 lines ≤ threshold): everything shown inline, no expand hint.
-	if strings.Contains(joined, "[space] expand") {
-		t.Fatalf("did not expect collapsed Bash with short output to show expand hint; got:\n%s", joined)
+	// Short output: all stdout/stderr are shown inline, but expanded mode still
+	// adds exit status + stream headers, so we should show an expand hint.
+	if !strings.Contains(joined, "[space] expand") {
+		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
 		t.Fatalf("expected full command to be shown for short output; got:\n%s", joined)

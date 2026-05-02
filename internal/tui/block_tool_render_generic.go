@@ -425,20 +425,100 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 	return hidden
 }
 
-func compactToolResultForceExpanded(toolName string, hidden int) bool {
-	if hidden != 1 {
-		return false
+func compactToolHiddenParamLines(toolName string, keys []string, vals map[string]string, mainPart string, contentWidth int, expanded bool) int {
+	if expanded || mainPart != "" || len(keys) == 0 || toolName == "Skill" {
+		return 0
 	}
-	switch toolName {
-	case "Delete", "Grep", "Glob":
-		return true
-	default:
-		return false
+	// In compact mode we show only the first param line; Complete shows no param
+	// lines until expanded.
+	start := 1
+	if toolName == "Complete" {
+		start = 0
 	}
+	if start >= len(keys) {
+		return 0
+	}
+	hidden := 0
+	for _, k := range keys[start:] {
+		line := fmt.Sprintf("%s: %s", k, vals[k])
+		hidden += len(wrapIndentedText(line, contentWidth))
+	}
+	return hidden
+}
+
+func bashCollapsedShortDetailHiddenLines(b *Block, vals map[string]string, contentWidth int) int {
+	if b == nil || contentWidth <= 0 || !b.ResultDone {
+		return 0
+	}
+	// Collapsed short Bash output already shows all stdout/stderr and (often)
+	// the full command. Expanded view adds meta lines and an exit/stdout/stderr
+	// framing.
+	hidden := 0
+	meta := bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)
+	hidden += len(meta)
+	if exitLabel := bashExpandedExitLine(b); exitLabel != "" {
+		hidden += len(wrapIndentedText(exitLabel, contentWidth))
+	}
+	stderr, stdout := bashSplitResultStreams(b)
+	if stderr != "" {
+		hidden++ // "Stderr:" heading
+	}
+	if stdout != "" {
+		hidden++ // "Stdout:" heading
+	}
+	return hidden
+}
+
+func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]string, mainPart string, contentWidth int, expanded bool) int {
+	if b == nil || contentWidth <= 0 || expanded || !toolUsesCompactDetailToggle(b.ToolName) {
+		return 0
+	}
+	hidden := 0
+	hidden += compactToolHiddenParamLines(b.ToolName, keys, vals, mainPart, contentWidth, expanded)
+
+	// Result differences.
+	if strings.TrimSpace(b.ResultContent) != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
+		switch b.ToolName {
+		case "Bash":
+			if bashCollapsedResultIsShort(b, contentWidth) {
+				hidden += bashCollapsedShortDetailHiddenLines(b, vals, contentWidth)
+			} else {
+				hidden += compactToolHiddenResultLines(b, contentWidth)
+			}
+		case "Skill":
+			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+				displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
+				hidden += toolCollapsedVisibleLineCount(displayResult, contentWidth)
+			} else {
+				hidden += compactToolHiddenResultLines(b, contentWidth)
+			}
+		case "Complete":
+			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+				if more := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; more > 0 {
+					hidden += more
+				}
+			} else {
+				hidden += compactToolHiddenResultLines(b, contentWidth)
+			}
+		default:
+			hidden += compactToolHiddenResultLines(b, contentWidth)
+		}
+	}
+	return hidden
+}
+
+func compactToolResultForceExpanded(_ string, hidden int) bool {
+	return hidden == 1
 }
 
 func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
-	return compactToolResultForceExpanded(b.ToolName, compactToolHiddenResultLines(b, contentWidth))
+	if b == nil {
+		return false
+	}
+	keys, vals := b.toolArgsParsed()
+	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
+	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
+	return compactToolResultForceExpanded(b.ToolName, hidden)
 }
 
 func compactToolContentWidthForRenderWidth(width int) int {
@@ -477,10 +557,15 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	}
 	contentWidth := compactToolContentWidthForRenderWidth(width)
 	collapsedPreviewLine := ""
+	expandHintAdded := false
 
 	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
 	keys, vals := b.toolArgsParsed()
 	_, mainPart, grayPart, collapsedMain, collapsedGray, collapsedOK, _ := b.toolHeaderMeta()
+	hiddenDetail := 0
+	if !expanded {
+		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
+	}
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	if b.ToolName == "Bash" && !expanded && collapsedOK {
 		mainPart, grayPart = collapsedMain, collapsedGray
@@ -543,6 +628,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 			} else if !bashCollapsedResultIsShort(b, contentWidth) {
 				if hidden := bashCollapsedCommandHiddenLines(vals["command"], contentWidth) + bashCollapsedResultHiddenLines(b, contentWidth); hidden > 0 {
 					result = append(result, renderToolExpandHint(toolHintIndent, hidden))
+					expandHintAdded = true
 				}
 			}
 		} else {
@@ -560,6 +646,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 					appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-10, ToolResultStyle)
 					if hidden := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; hidden > 0 {
 						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
+						expandHintAdded = true
 					}
 				} else {
 					displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
@@ -576,6 +663,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 					}
 					if !expanded && hidden > 0 {
 						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
+						expandHintAdded = true
 					}
 				}
 			}
@@ -586,6 +674,13 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 				result = append(result, "    "+line)
 			}
 		}
+	}
+
+	// If the expanded view would reveal additional lines (params or result),
+	// show a hint even when the collapsed rendering path hid all such content.
+	if !expanded && !expandHintAdded && hiddenDetail > 0 {
+		result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
+		expandHintAdded = true
 	}
 	result = appendToolElapsedFooter(result, b)
 
