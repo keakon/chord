@@ -1,8 +1,9 @@
 package tools
 
 import (
-	"github.com/keakon/golog/log"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 const slowSearchWarnThreshold = 750 * time.Millisecond

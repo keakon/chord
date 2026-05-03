@@ -73,8 +73,6 @@ const (
 	TypeStats = "stats"
 	// TypeInfo carries informational messages.
 	TypeInfo = "info"
-	// TypeNotification carries a user-facing notification that gateway clients should surface.
-	TypeNotification = "notification"
 	// TypeAgentDone signals a SubAgent completed its task.
 	TypeAgentDone = "agent_done"
 	// TypeAgentStatus carries agent lifecycle updates.
@@ -257,13 +255,6 @@ type StatsPayload struct {
 // InfoPayload is the payload for TypeInfo.
 type InfoPayload struct {
 	Message string `json:"message"`
-	AgentID string `json:"agent_id,omitempty"`
-}
-
-// NotificationPayload is the payload for TypeNotification.
-type NotificationPayload struct {
-	Message string `json:"message"`
-	Reason  string `json:"reason,omitempty"`
 	AgentID string `json:"agent_id,omitempty"`
 }
 

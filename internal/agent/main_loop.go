@@ -3,9 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
 )

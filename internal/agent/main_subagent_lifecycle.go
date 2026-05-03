@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"github.com/keakon/golog/log"
 	"os"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/tools"
 )

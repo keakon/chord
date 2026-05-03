@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"os"
 	stdpath "path"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"

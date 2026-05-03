@@ -2,10 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"

@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/skill"

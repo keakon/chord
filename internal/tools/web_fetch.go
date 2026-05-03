@@ -15,12 +15,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/keakon/chord/internal/config"
 	readability "github.com/mackee/go-readability"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
 	"golang.org/x/net/proxy"
 	"golang.org/x/text/transform"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 const (

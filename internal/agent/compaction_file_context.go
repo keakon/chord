@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"github.com/keakon/golog/log"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"

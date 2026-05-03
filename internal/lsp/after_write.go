@@ -2,9 +2,10 @@ package lsp
 
 import (
 	"context"
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 const diagnosticsWaitTimeout = 3 * time.Second

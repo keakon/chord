@@ -1,12 +1,14 @@
 package tui
 
 import (
-	"charm.land/lipgloss/v2"
 	"fmt"
-	"github.com/keakon/chord/internal/agent"
-	"github.com/mattn/go-runewidth"
 	"strings"
 	"time"
+
+	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 func formatBusyTotalWall(d time.Duration) string {

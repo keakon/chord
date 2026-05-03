@@ -1,8 +1,9 @@
 package llm
 
 import (
-	"github.com/keakon/golog/log"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 )

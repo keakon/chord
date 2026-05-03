@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/shell"
 )

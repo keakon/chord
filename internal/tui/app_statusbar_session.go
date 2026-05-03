@@ -1,10 +1,11 @@
 package tui
 
 import (
-	"github.com/mattn/go-runewidth"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func displayWorkingDirForHome(path, home string) string {

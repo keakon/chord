@@ -2,9 +2,10 @@ package tui
 
 import (
 	"context"
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	tea "charm.land/bubbletea/v2"
 

@@ -3,8 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"path/filepath"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/message"

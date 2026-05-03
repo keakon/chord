@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"

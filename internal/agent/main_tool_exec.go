@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/filelock"

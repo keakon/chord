@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"io"
 	"net/http"
 	"regexp"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	sonicjson "github.com/bytedance/sonic"
 

@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Removed the deprecated headless `notification` envelope type: dropped `protocol.TypeNotification` and `protocol.NotificationPayload`, and removed `"notification"` from the headless subscription allowlist. No code path emitted this envelope anymore; gateways should render the user-visible ready/idle state from the `idle` envelope.
 - Replaced the previous `slog`-style logging adapter with direct `golog` usage across the runtime. Logs are now plain golog text output with direct caller attribution; the previous pseudo-structured `level=... msg=... key=value` formatting and default logger `With(...)` context fields are no longer emitted automatically.
 - Fixed `ee`/fork editing for image messages so images restored from session history by path are reloaded and included when the edited user message is sent again.
 - Fixed TUI tool-card rendering so tool arguments/results are shown as terminal-safe plain text: ANSI/control sequences are escaped, Markdown-looking generic tool output is no longer auto-rendered as Markdown, large collapsed Bash results avoid wrapping hidden tails, and collapsed hidden-line hints no longer double-count the first hidden line.

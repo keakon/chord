@@ -1,8 +1,9 @@
 package tui
 
 import (
-	"github.com/keakon/golog/log"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 const startupDeferredTranscriptAggressiveHotBytes int64 = 1 << 20 // 1 MiB

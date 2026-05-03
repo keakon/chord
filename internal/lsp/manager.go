@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,7 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	pnprotocol "github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+
 	"github.com/keakon/chord/internal/config"
 )
 

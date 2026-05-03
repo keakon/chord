@@ -6,13 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/spf13/cobra"
 
@@ -35,14 +36,16 @@ type headlessState struct {
 	updatedAt       time.Time
 
 	// subscriptions is the set of event types the gateway wants to receive.
-	// If nil or empty, all event types are forwarded (default: all).
+	// If nil, no subscribe command has been received and all event types are
+	// forwarded by default. An explicit empty map means the gateway subscribed
+	// only to unknown/removed event types, so no optional events are forwarded.
 	subscriptions map[string]bool
 }
 
 // isSubscribed returns true if the given event type should be forwarded.
 func (s *headlessState) isSubscribed(eventType string) bool {
-	if len(s.subscriptions) == 0 {
-		return true // default: all events
+	if s.subscriptions == nil {
+		return true // default before subscribe: all events
 	}
 	return s.subscriptions[eventType]
 }
@@ -126,7 +129,6 @@ var headlessEventTypes = map[string]bool{
 	"toast":              true,
 	"tool_result":        true,
 	"assistant_rollback": true,
-	"notification":       true,
 	"todos":              true,
 }
 

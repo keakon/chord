@@ -3,12 +3,13 @@ package llm
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"

@@ -3,10 +3,11 @@ package filelock
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/keakon/golog/log"
 )
 
 // ConflictError is returned when a file write conflicts with another agent's

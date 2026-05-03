@@ -507,10 +507,6 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 	return hidden
 }
 
-func compactToolResultForceExpanded(_ string, hidden int) bool {
-	return hidden == 1
-}
-
 func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 	if b == nil {
 		return false
@@ -518,7 +514,7 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 	keys, vals := b.toolArgsParsed()
 	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
 	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
-	return compactToolResultForceExpanded(b.ToolName, hidden)
+	return hidden == 1
 }
 
 func compactToolContentWidthForRenderWidth(width int) int {

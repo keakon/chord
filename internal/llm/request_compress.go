@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"net/http"
+
+	"github.com/keakon/golog/log"
 )
 
 // compressRequestBody conditionally compresses the request body when enabled.

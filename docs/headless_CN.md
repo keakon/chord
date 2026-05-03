@@ -48,7 +48,6 @@ go run ./cmd/chord/ headless
 - `question_request`：需要用户回答
 - `idle`：agent 已回到可接收输入状态
 - `error`：运行时出错
-- `notification`：适合外层系统转成用户提醒
 
 示例——assistant 消息事件：
 

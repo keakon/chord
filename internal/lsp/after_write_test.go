@@ -9,6 +9,7 @@ import (
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+
 	"github.com/keakon/chord/internal/config"
 )
 

@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/gorilla/websocket"
 

@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/keakon/golog/log"
 	"sort"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"

@@ -3,9 +3,10 @@
 package power
 
 import (
-	"github.com/keakon/golog/log"
 	"sync"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 // ActivityType mirrors agent.ActivityType to avoid a direct import cycle.

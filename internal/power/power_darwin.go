@@ -4,11 +4,12 @@ package power
 
 import (
 	"context"
-	"github.com/keakon/golog/log"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 // DarwinBackend uses the caffeinate command to prevent idle sleep.

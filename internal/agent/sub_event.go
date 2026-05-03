@@ -2,8 +2,9 @@ package agent
 
 import (
 	"context"
-	"github.com/keakon/golog/log"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 )

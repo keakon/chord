@@ -3,6 +3,15 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/config"
@@ -17,13 +26,6 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/golog/log"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 // keyed by server name. Entries whose Mgr is nil are sentinels: the server

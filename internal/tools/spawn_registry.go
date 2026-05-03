@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/shell"
 )

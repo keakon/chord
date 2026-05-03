@@ -2,13 +2,15 @@ package tools
 
 import (
 	"bytes"
+
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/logtest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/logtest"
 )
 
 func TestLogSlowSearchBelowThresholdSkipsLog(t *testing.T) {

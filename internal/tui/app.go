@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"github.com/keakon/golog/log"
 	"image"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"

@@ -4,8 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/tools"

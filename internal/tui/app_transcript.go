@@ -2,9 +2,10 @@ package tui
 
 import (
 	"encoding/json"
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/convformat"

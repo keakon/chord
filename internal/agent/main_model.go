@@ -2,11 +2,12 @@ package agent
 
 import (
 	"fmt"
-	"github.com/keakon/golog/log"
 	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"

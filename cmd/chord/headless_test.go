@@ -767,29 +767,8 @@ func TestHeadlessSubscribeFiltersEvents(t *testing.T) {
 	}
 }
 
-func TestHeadlessSubscribeNotificationDoesNotDuplicateIdle(t *testing.T) {
-	state := &headlessState{}
-	cmd := headlessCommand{
-		Type:   "subscribe",
-		Events: []string{"notification"},
-	}
-	to := newTestOut()
-	backend := &mockBackend{}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
-
-	items := to.drain()
-	if len(items) != 1 || items[0].Type != "subscribe_response" {
-		t.Fatalf("expected subscribe_response, got %v", items)
-	}
-
-	envs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(envs) != 0 {
-		t.Fatalf("len(envs) = %d, want 0; idle should not be emitted as notification", len(envs))
-	}
-}
-
 func TestHeadlessSubscribeAllByDefault(t *testing.T) {
-	state := &headlessState{} // no subscriptions = all events
+	state := &headlessState{} // no subscribe command = all events
 
 	// All events should pass through by default
 	envs := filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "working"}, state)
@@ -805,6 +784,42 @@ func TestHeadlessSubscribeAllByDefault(t *testing.T) {
 	envs = filterHeadlessEvent(agent.AssistantMessageEvent{Text: "hello"}, state)
 	if len(envs) == 0 {
 		t.Error("assistant_message event should pass through by default")
+	}
+}
+
+func TestHeadlessSubscribeUnknownOnlyDoesNotFallBackToAll(t *testing.T) {
+	state := &headlessState{}
+	cmd := headlessCommand{
+		Type:   "subscribe",
+		Events: []string{"notification"},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+
+	items := to.drain()
+	if len(items) != 1 || items[0].Type != "subscribe_response" {
+		t.Fatalf("expected subscribe_response, got %v", items)
+	}
+
+	state.mu.Lock()
+	subs := state.subscriptions
+	state.mu.Unlock()
+	if subs == nil {
+		t.Fatal("subscriptions = nil, want explicit empty subscription set")
+	}
+	if len(subs) != 0 {
+		t.Fatalf("subscriptions = %#v, want empty set", subs)
+	}
+
+	if envs := filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "working"}, state); len(envs) != 0 {
+		t.Fatalf("activity envs = %#v, want none for unknown-only subscription", envs)
+	}
+	if envs := filterHeadlessEvent(agent.IdleEvent{}, state); len(envs) != 0 {
+		t.Fatalf("idle envs = %#v, want none for unknown-only subscription", envs)
+	}
+	if envs := filterHeadlessEvent(agent.AssistantMessageEvent{Text: "hello"}, state); len(envs) != 0 {
+		t.Fatalf("assistant envs = %#v, want none for unknown-only subscription", envs)
 	}
 }
 
@@ -1213,8 +1228,8 @@ func TestHeadlessToolResultEvent(t *testing.T) {
 	}
 }
 
-func TestHeadlessNotificationEvents(t *testing.T) {
-	state := &headlessState{subscriptions: map[string]bool{"notification": true, "confirm_request": true, "question_request": true, "error": true, "idle": true}}
+func TestHeadlessEventEnvelopeTypes(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"confirm_request": true, "question_request": true, "error": true, "idle": true}}
 
 	confirmEnvs := filterHeadlessEvent(agent.ConfirmRequestEvent{ToolName: "Edit", RequestID: "req-1"}, state)
 	if len(confirmEnvs) != 1 || confirmEnvs[0].Type != "confirm_request" {
@@ -1232,14 +1247,14 @@ func TestHeadlessNotificationEvents(t *testing.T) {
 		t.Fatalf("error envs = %#v, want error only", errorEnvs)
 	}
 
-	state = &headlessState{subscriptions: map[string]bool{"notification": true, "idle": true}, pendingOutcome: "completed"}
+	state = &headlessState{subscriptions: map[string]bool{"idle": true}, pendingOutcome: "completed"}
 	idleEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
 	if len(idleEnvs) != 1 || idleEnvs[0].Type != "idle" {
 		t.Fatalf("idle envs = %#v, want idle only", idleEnvs)
 	}
 
 	// Idle with error outcome is also represented by a single idle envelope.
-	state = &headlessState{subscriptions: map[string]bool{"notification": true, "idle": true}, pendingOutcome: "error", lastError: "something failed"}
+	state = &headlessState{subscriptions: map[string]bool{"idle": true}, pendingOutcome: "error", lastError: "something failed"}
 	idleErrorEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
 	if len(idleErrorEnvs) != 1 || idleErrorEnvs[0].Type != "idle" {
 		t.Fatalf("idle error envs = %#v, want idle only", idleErrorEnvs)

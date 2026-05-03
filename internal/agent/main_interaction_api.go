@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"

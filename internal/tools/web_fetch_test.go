@@ -11,9 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/config"
 	readability "github.com/mackee/go-readability"
 	"golang.org/x/net/html"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 func TestHTMLToMarkdownHandlesTopLevelListItems(t *testing.T) {

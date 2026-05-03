@@ -7,6 +7,12 @@ This repository is intended for open-source contributors. Development can be don
 ## Prerequisites
 
 - Go 1.26+
+- Go quality tools:
+
+```bash
+go install golang.org/x/tools/cmd/goimports@latest
+go install honnef.co/go/tools/cmd/staticcheck@latest
+```
 
 ## Build
 
@@ -20,7 +26,7 @@ Enable commit hooks once:
 ./scripts/setup-git-hooks.sh
 ```
 
-This installs `.githooks/pre-commit`, which runs `gofmt` on staged `.go` files before each commit.
+This installs `.githooks/pre-commit`, which runs `goimports` and `gofmt` on staged `.go` files before each commit.
 
 ## Run
 
@@ -33,6 +39,7 @@ go run ./cmd/chord/
 Before submitting a PR, please run:
 
 ```bash
+goimports -l -local github.com/keakon/chord .
 go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 # CI requires total coverage >= 65.0%.

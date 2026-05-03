@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
-	"gopkg.in/yaml.v3"
 )
 
 // ---------------------------------------------------------------------------

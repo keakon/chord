@@ -3,12 +3,13 @@ package llm
 import (
 	"context"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"golang.org/x/net/proxy"
 )

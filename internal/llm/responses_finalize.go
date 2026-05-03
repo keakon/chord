@@ -2,8 +2,9 @@ package llm
 
 import (
 	"encoding/json"
-	"github.com/keakon/golog/log"
 	"sort"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 )

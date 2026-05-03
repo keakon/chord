@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"github.com/keakon/golog/log"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 func (t *Turn) recordPendingToolCall(call PendingToolCall) {

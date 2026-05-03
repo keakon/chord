@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/ctxmgr"

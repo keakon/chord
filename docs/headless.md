@@ -48,7 +48,6 @@ Example — send a user message:
 - `question_request`: user input is required
 - `idle`: the agent is ready to receive input again
 - `error`: runtime error
-- `notification`: suitable for outer systems to turn into user notifications
 
 Example — assistant message event:
 

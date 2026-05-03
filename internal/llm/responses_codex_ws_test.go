@@ -5,16 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/logtest"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/logtest"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"

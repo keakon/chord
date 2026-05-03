@@ -6,7 +6,6 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/message"

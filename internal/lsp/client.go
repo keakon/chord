@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/keakon/golog/log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	powertransport "github.com/charmbracelet/x/powernap/pkg/transport"
+
 	"github.com/keakon/chord/internal/config"
 )
 

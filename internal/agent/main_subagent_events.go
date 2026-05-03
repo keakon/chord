@@ -2,8 +2,9 @@ package agent
 
 import (
 	"fmt"
-	"github.com/keakon/golog/log"
 	"strings"
+
+	"github.com/keakon/golog/log"
 )
 
 func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
