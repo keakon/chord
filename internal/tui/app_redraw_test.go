@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,15 +68,15 @@ func TestPostFocusSettleFallbackSkipsWhenStrongHostRedrawAlreadyRanAfterFocus(t 
 	now := time.Now()
 	m.lastForegroundAt = now
 	m.lastHostRedrawAt = now.Add(100 * time.Millisecond)
-	m.lastHostRedrawReason = "post-focus-settle-redraw"
+	m.lastHostRedrawReason = "focus-restore"
 
 	if cmd := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 7, fallback: true}); cmd != nil {
-		t.Fatalf("fallback redraw should skip when strong host redraw already ran after focus, got %#v", cmd)
+		t.Fatalf("fallback redraw should skip when a later strong host redraw already ran after focus, got %#v", cmd)
 	}
 }
 
 func TestPostFocusSettleFallbackIgnoresWeakHostRedrawAfterFocus(t *testing.T) {
-	tests := []string{"content-boundary", "live-append", "scroll-flush", "stream-flush"}
+	tests := []string{"content-boundary", "live-append", "scroll-flush", "stream-flush", "background-dirty-focus", "post-focus-settle-redraw"}
 	for _, reason := range tests {
 		t.Run(reason, func(t *testing.T) {
 			m := NewModelWithSize(nil, 120, 40)
@@ -97,7 +98,34 @@ func TestPostFocusSettleFallbackIgnoresWeakHostRedrawAfterFocus(t *testing.T) {
 	}
 }
 
-func TestPostFocusSettleRedrawSuppressesLaterFallback(t *testing.T) {
+func TestFocusResizeSettleArmsPostFocusFallback(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.focusResizeFrozen = true
+	m.focusResizeGeneration = 11
+
+	cmd := m.handleFocusResizeSettle(focusResizeSettleMsg{generation: 11})
+	if cmd == nil {
+		t.Fatal("focus-settle should schedule redraw commands")
+	}
+	if m.focusResizeFrozen {
+		t.Fatal("focus-settle should unfreeze resize handling")
+	}
+
+	events := m.snapshotTUIDiagnosticEvents()
+	found := false
+	for _, evt := range events {
+		if evt.Kind == "post-focus-settle-fallback-arm" && strings.Contains(evt.Detail, "generation=11") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("recent events missing post-focus-settle-fallback-arm: %#v", events)
+	}
+}
+
+func TestPostFocusSettleRedrawDoesNotSuppressLaterFallback(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.focusResizeGeneration = 9
@@ -114,8 +142,12 @@ func TestPostFocusSettleRedrawSuppressesLaterFallback(t *testing.T) {
 	}
 
 	m.lastForegroundAt = now
-	if fallback := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 9, fallback: true}); fallback != nil {
-		t.Fatalf("fallback should skip after strong post-focus settle redraw, got %#v", fallback)
+	fallback := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 9, fallback: true})
+	if fallback == nil {
+		t.Fatal("fallback should still run after post-focus-settle-redraw when no later strong redraw replaced it")
+	}
+	if m.lastHostRedrawReason != "post-focus-settle-fallback" {
+		t.Fatalf("lastHostRedrawReason = %q, want post-focus-settle-fallback", m.lastHostRedrawReason)
 	}
 }
 

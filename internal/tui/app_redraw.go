@@ -32,6 +32,14 @@ const (
 	// long after focus restore.
 	postFocusSettleRedrawDelay = 500 * time.Millisecond
 
+	// postFocusSettleFallbackDelay is a later follow-up redraw armed from
+	// focus-settle so Ghostty/cmux still get one more strong recovery pass
+	// if the earlier post-focus-settle redraw lands inside the host's longer
+	// invalidation window. Combined with the initial 500ms redraw, this keeps
+	// the final fallback around ~2s after focus-settle without delaying the
+	// common-case recovery path for every focus change.
+	postFocusSettleFallbackDelay = 1500 * time.Millisecond
+
 	// scrollFlushFallbackRedrawDelay is a follow-up redraw for scroll flushes that
 	// happen shortly after a focus restore. In Ghostty/cmux the initial scroll
 	// redraw can still race with the host's lingering surface recovery; a later
@@ -73,6 +81,12 @@ func postFocusSettleRedrawCmd(generation int) tea.Cmd {
 	})
 }
 
+func postFocusSettleFallbackCmd(generation int) tea.Cmd {
+	return tea.Tick(postFocusSettleFallbackDelay, func(time.Time) tea.Msg {
+		return postFocusSettleRedrawMsg{generation: generation, fallback: true}
+	})
+}
+
 func postHostRedrawFallbackCmd(generation uint64, reason string, delay time.Duration) tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg {
 		return postHostRedrawFallbackMsg{generation: generation, reason: reason}
@@ -81,7 +95,7 @@ func postHostRedrawFallbackCmd(generation uint64, reason string, delay time.Dura
 
 func hostRedrawSuppressesPostFocusFallback(reason string) bool {
 	switch strings.TrimSpace(reason) {
-	case "content-boundary", "live-append", "scroll-flush", "stream-flush":
+	case "content-boundary", "live-append", "scroll-flush", "stream-flush", "background-dirty-focus", "post-focus-settle-redraw":
 		return false
 	default:
 		return true

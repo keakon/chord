@@ -64,6 +64,9 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 	m.focusResizeFrozen = false
 	gen := m.focusResizeGeneration
 	backgroundDirtyRedrawCmd := m.consumeBackgroundDirtyFocusRedraw("focus-settle", time.Now())
+	postRedrawCmd := postFocusSettleRedrawCmd(gen)
+	postFallbackCmd := postFocusSettleFallbackCmd(gen)
+	m.recordTUIDiagnostic("post-focus-settle-fallback-arm", "generation=%d delay=%s mode=%s", gen, postFocusSettleFallbackDelay, debugModeString(m.mode))
 	if m.mode == ModeImageViewer {
 		return tea.Batch(
 			tea.Sequence(
@@ -72,7 +75,8 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 				imageProtocolReplayCmd(gen, "focus-settle:image-viewer", 50*time.Millisecond),
 			),
 			backgroundDirtyRedrawCmd,
-			postFocusSettleRedrawCmd(gen),
+			postRedrawCmd,
+			postFallbackCmd,
 		)
 	}
 	return tea.Batch(
@@ -82,7 +86,8 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 			imageProtocolReplayCmd(gen, "focus-settle:inline-replay", 50*time.Millisecond),
 		),
 		backgroundDirtyRedrawCmd,
-		postFocusSettleRedrawCmd(gen),
+		postRedrawCmd,
+		postFallbackCmd,
 	)
 }
 
