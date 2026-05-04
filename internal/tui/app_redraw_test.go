@@ -268,8 +268,38 @@ func TestBackgroundDirtyFocusRedrawDefersUntilFocusSettleWhenFrozen(t *testing.T
 	if m.backgroundDirty {
 		t.Fatal("background dirty should be consumed on focus-settle")
 	}
-	if m.lastHostRedrawReason != "background-dirty-focus" {
-		t.Fatalf("lastHostRedrawReason = %q, want background-dirty-focus", m.lastHostRedrawReason)
+	if m.lastHostRedrawReason == "background-dirty-focus" {
+		t.Fatalf("focus-settle should fold background-dirty recovery into its own redraw, got %q", m.lastHostRedrawReason)
+	}
+
+	events := m.snapshotTUIDiagnosticEvents()
+	found := false
+	for _, evt := range events {
+		if evt.Kind == "background-dirty-focus-redraw" && strings.Contains(evt.Detail, "stage=focus-settle") && strings.Contains(evt.Detail, "issue_host_redraw=false") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("recent events missing folded background-dirty focus-settle redraw marker: %#v", events)
+	}
+}
+
+func TestBackgroundDirtyFocusRedrawConsumesWithoutHostRedrawWhenRequested(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.displayState = stateForeground
+	m.markBackgroundDirty("agent-event")
+
+	cmd := m.consumeBackgroundDirtyFocusRedrawWithOptions("focus-settle", time.Now(), false)
+	if cmd != nil {
+		t.Fatalf("expected no host redraw command when issueHostRedraw=false, got %#v", cmd)
+	}
+	if m.backgroundDirty {
+		t.Fatal("background dirty should be cleared even when host redraw is folded into another recovery path")
+	}
+	if m.lastHostRedrawReason != "" {
+		t.Fatalf("lastHostRedrawReason = %q, want empty", m.lastHostRedrawReason)
 	}
 }
 

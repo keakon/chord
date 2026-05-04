@@ -63,7 +63,11 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 	}
 	m.focusResizeFrozen = false
 	gen := m.focusResizeGeneration
-	backgroundDirtyRedrawCmd := m.consumeBackgroundDirtyFocusRedraw("focus-settle", time.Now())
+	// focus-settle already performs the strong recovery redraw for this focus cycle
+	// (ClearScreen + RequestWindowSize). If background activity dirtied the view
+	// while blurred, consume that state here but fold it into the in-flight
+	// focus-settle redraw instead of stacking a second concurrent host redraw.
+	backgroundDirtyRedrawCmd := m.consumeBackgroundDirtyFocusRedrawWithOptions("focus-settle", time.Now(), false)
 	postRedrawCmd := postFocusSettleRedrawCmd(gen)
 	postFallbackCmd := postFocusSettleFallbackCmd(gen)
 	m.recordTUIDiagnostic("post-focus-settle-fallback-arm", "generation=%d delay=%s mode=%s", gen, postFocusSettleFallbackDelay, debugModeString(m.mode))

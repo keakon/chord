@@ -131,6 +131,10 @@ func (m *Model) markBackgroundDirty(reason string) {
 }
 
 func (m *Model) consumeBackgroundDirtyFocusRedraw(stage string, now time.Time) tea.Cmd {
+	return m.consumeBackgroundDirtyFocusRedrawWithOptions(stage, now, true)
+}
+
+func (m *Model) consumeBackgroundDirtyFocusRedrawWithOptions(stage string, now time.Time, issueHostRedraw bool) tea.Cmd {
 	if m == nil || !m.backgroundDirty {
 		return nil
 	}
@@ -141,11 +145,14 @@ func (m *Model) consumeBackgroundDirtyFocusRedraw(stage string, now time.Time) t
 	if !dirtyAt.IsZero() {
 		sinceDirty = now.Sub(dirtyAt)
 	}
-	m.recordTUIDiagnostic("background-dirty-focus-redraw", "stage=%s reason=%s count=%d since_dirty=%s freeze=%t", stage, dirtyReason, dirtyCount, sinceDirty.Truncate(time.Millisecond), m.focusResizeFrozen)
+	m.recordTUIDiagnostic("background-dirty-focus-redraw", "stage=%s reason=%s count=%d since_dirty=%s freeze=%t issue_host_redraw=%t", stage, dirtyReason, dirtyCount, sinceDirty.Truncate(time.Millisecond), m.focusResizeFrozen, issueHostRedraw)
 	m.backgroundDirty = false
 	m.backgroundDirtyReason = ""
 	m.backgroundDirtyAt = time.Time{}
 	m.backgroundDirtyCount = 0
+	if !issueHostRedraw {
+		return nil
+	}
 	return m.hostRedrawCmd("background-dirty-focus")
 }
 
