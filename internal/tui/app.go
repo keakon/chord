@@ -391,6 +391,8 @@ type Model struct {
 	lastImageProtocolReason  string
 	lastImageProtocolSummary string
 	hostRedrawGeneration     uint64
+	hostRedrawFrameNonce     uint64
+	hostRedrawFrameApplied   uint64
 	lastHostRedrawAt         time.Time
 	lastHostRedrawReason     string
 	backgroundDirty          bool

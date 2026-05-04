@@ -70,6 +70,7 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 	backgroundDirtyRedrawCmd := m.consumeBackgroundDirtyFocusRedrawWithOptions("focus-settle", time.Now(), false)
 	postRedrawCmd := postFocusSettleRedrawCmd(gen)
 	postFallbackCmd := postFocusSettleFallbackCmd(gen)
+	m.markNextViewReplay()
 	m.recordTUIDiagnostic("post-focus-settle-fallback-arm", "generation=%d delay=%s mode=%s", gen, postFocusSettleFallbackDelay, debugModeString(m.mode))
 	if m.mode == ModeImageViewer {
 		return tea.Batch(

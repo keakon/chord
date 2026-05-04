@@ -3326,6 +3326,73 @@ func TestFocusResizeSettleIgnoresStaleGeneration(t *testing.T) {
 	}
 }
 
+func TestFocusSettleMarksNextFrameForForcedReplay(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.focusResizeFrozen = true
+	m.focusResizeGeneration = 11
+
+	before := m.hostRedrawFrameNonce
+	cmd := m.handleFocusResizeSettle(focusResizeSettleMsg{generation: 11})
+	if cmd == nil {
+		t.Fatal("focus-settle should schedule redraw commands")
+	}
+	if m.hostRedrawFrameNonce != before+1 {
+		t.Fatalf("hostRedrawFrameNonce = %d, want %d", m.hostRedrawFrameNonce, before+1)
+	}
+}
+
+func TestHostRedrawCmdMarksNextFrameForForcedReplay(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+
+	before := m.hostRedrawFrameNonce
+	cmd := m.hostRedrawCmd("scroll-flush")
+	if cmd == nil {
+		t.Fatal("host redraw should schedule command")
+	}
+	if m.hostRedrawFrameNonce != before+1 {
+		t.Fatalf("hostRedrawFrameNonce = %d, want %d", m.hostRedrawFrameNonce, before+1)
+	}
+}
+
+func TestViewForcesFreshRawFrameAfterHostRedrawWithoutVisualChange(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "alpha"})
+
+	initialRaw := m.View().Content
+	initialPlain := stripANSI(initialRaw)
+
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+	if cmd := m.hostRedrawCmd("scroll-flush"); cmd == nil {
+		t.Fatal("host redraw should schedule command")
+	}
+
+	replayedRaw := m.View().Content
+	replayedPlain := stripANSI(replayedRaw)
+	if replayedPlain != initialPlain {
+		t.Fatalf("visual content changed after forced replay:\ninitial=%q\nreplayed=%q", initialPlain, replayedPlain)
+	}
+	if replayedRaw == initialRaw {
+		t.Fatalf("raw content should differ after forced replay to bypass Bubble Tea viewEquals; raw=%q", replayedRaw)
+	}
+	if !strings.HasSuffix(replayedRaw, ansiNoopSGR) {
+		t.Fatalf("replayed raw content should end with %q, got %q", ansiNoopSGR, replayedRaw)
+	}
+
+	againRaw := m.View().Content
+	againPlain := stripANSI(againRaw)
+	if againPlain != initialPlain {
+		t.Fatalf("visual content changed on subsequent frame:\ninitial=%q\nagain=%q", initialPlain, againPlain)
+	}
+	if strings.HasSuffix(againRaw, ansiNoopSGR) {
+		t.Fatalf("forced replay marker should only be applied once per host redraw, got %q", againRaw)
+	}
+}
+
 func TestPostFocusSettleRedrawTriggersStrongHostRedraw(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)

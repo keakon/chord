@@ -396,6 +396,15 @@ func (m *Model) View() tea.View {
 	} else {
 		v.Content = rendered
 	}
+	if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
+		// Bubble Tea's renderer short-circuits when the next View is byte-for-byte
+		// identical to the previous one. After a host-side ClearScreen, Ghostty/cmux
+		// still need the frame to be replayed even if the logical UI state did not
+		// change. Appending a no-op SGR sequence keeps the frame visually identical
+		// while forcing Bubble Tea to treat it as a fresh view and redraw the canvas.
+		v.Content += ansiNoopSGR
+		m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
+	}
 	m.cachedFullView = v
 	m.cachedFullViewValid = true
 	if m.renderFreezeActive {
@@ -409,6 +418,7 @@ func (m *Model) View() tea.View {
 }
 
 const ansiEraseToEOL = "\x1b[0K"
+const ansiNoopSGR = "\x1b[m"
 
 func eraseToEOLPerLine(s string) string {
 	if s == "" {
