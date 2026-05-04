@@ -378,89 +378,12 @@ func (m *Model) resetPendingScrollFlush() {
 	m.scrollFlushGeneration++
 }
 
+// invalidateDrawCaches clears every per-render cache the draw pipeline owns.
+// viewCacheState only contains fields that are safe to bulk reset; runtime
+// state such as animation/ticker bookkeeping and startup transcript windowing
+// lives in renderRuntimeState and must survive cache invalidation.
 func (m *Model) invalidateDrawCaches() {
+	m.viewCacheState = viewCacheState{cachedMainSearchBlockIndex: -1}
 	m.statusBarAgentSnapshotDirty = true
-	m.cachedMainSpinnerFrame = ""
-	m.streamRenderDeferred = false
-	m.streamRenderForceView = false
-	m.streamRenderDeferNext = false
-	m.cachedFullView = tea.View{}
-	m.cachedFullViewValid = false
-	m.renderFreezeActive = false
-	m.renderFreezeReason = ""
-	m.renderFreezeEnteredAt = time.Time{}
-	m.cachedFrozenView = tea.View{}
-	m.cachedFrozenViewValid = false
-	m.cachedMainSearchBlockIndex = -1
-	m.cachedMainSelActive = false
-	m.cachedMainSel = SelectionRange{}
-	m.cachedMainKey = ""
-	m.cachedMainRender = cachedRenderable{}
-	m.cachedInputMode = ModeInsert
-	m.cachedInputWidth = 0
-	m.cachedInputHeight = 0
-	m.cachedInputSuppressed = false
-	m.cachedInputSelectionAlive = false
-	m.cachedInputFocused = false
-	m.cachedInputBangMode = false
-	m.cachedInputValue = ""
-	m.cachedInputLine = 0
-	m.cachedInputColumn = 0
-	m.cachedInputScrollY = 0
-	m.cachedInputSelection = inputSelection{}
-	m.cachedInputKey = ""
-	m.cachedInputRender = cachedRenderable{}
-	m.cachedInputCursor = tea.Cursor{}
-	m.cachedInputCursorOK = false
-	m.cachedStatusChordDisplay = ""
-	m.cachedStatusSessionSwitchKey = ""
-	m.cachedStatusActivitiesKey = ""
-	m.cachedStatusKey = ""
-	m.cachedStatusRender = cachedRenderable{}
-	m.cachedStatusBarModeKey = ""
-	m.cachedStatusBarModePill = ""
-	m.cachedStatusBarViewingKey = ""
-	m.cachedStatusBarViewingPill = ""
-	m.cachedStatusBarPillsKey = ""
-	m.cachedStatusBarLeftSide = ""
-	m.cachedStatusBarLeftW = 0
-	m.cachedStatusBarRightKey = ""
-	m.cachedStatusBarRightSide = ""
-	m.cachedStatusBarRightWidth = 0
-	m.cachedStatusBarRightStart = 0
-	m.cachedStatusBarPathValue = ""
-	m.cachedStatusBarPathShown = ""
-	m.cachedStatusBarActivityKey = ""
-	m.cachedStatusBarActivityText = ""
-	m.cachedStatusBarActivityWidth = 0
-	m.cachedSepWidth = 0
-	m.cachedSepTheme = ""
-	m.cachedSepBusy = false
-	m.cachedSepInsert = false
-	m.cachedSepFrame = 0
-	m.cachedSepResult = ""
-	m.cachedQueuePresent = false
-	m.cachedQueueWidth = 0
-	m.cachedQueueHeight = 0
-	m.cachedQueueKey = ""
-	m.cachedQueueRender = cachedRenderable{}
-	m.cachedAttachmentsPresent = false
-	m.cachedAttachKey = ""
-	m.cachedAttachRender = cachedRenderable{}
-	m.cachedToastKey = ""
-	m.cachedToastRender = cachedRenderable{}
-	m.cachedHelpKey = ""
-	m.cachedHelpRender = cachedRenderable{}
-	m.cachedDirKey = ""
-	m.cachedDirRender = cachedRenderable{}
-	m.renderSlashCacheWidth = 0
-	m.renderSlashCacheTheme = ""
-	m.renderSlashCacheValue = ""
-	m.renderSlashCacheSel = 0
-	m.renderSlashCacheText = ""
-	m.cachedInfoPanelW = 0
-	m.cachedInfoPanelH = 0
-	m.cachedInfoPanelFP = ""
-	m.cachedInfoPanelOut = ""
 	m.infoPanelHitBoxes = nil
 }

@@ -288,13 +288,8 @@ type Model struct {
 	slashCompleteSelected int            // index into current completion list
 	customCommands        []slashCommand // extra commands injected from config
 
-	renderSlashCacheWidth int
-	renderSlashCacheTheme string
-	renderSlashCacheValue string
-	renderSlashCacheSel   int
-	renderSlashCacheText  string
-
 	activityRuntimeState
+	renderRuntimeState
 	renderCacheState
 	viewCacheState
 	toolArgRenderState map[string]toolArgRenderState

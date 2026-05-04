@@ -26,8 +26,33 @@ type startupRestoreState struct {
 	startupRestorePending bool
 }
 
+type renderRuntimeState struct {
+	animRunning                      bool
+	statusBarTickGeneration          uint64
+	statusBarTickScheduled           bool
+	terminalTitleTickRunning         bool
+	terminalTitleTickGeneration      uint64
+	terminalTitleRequestBlinkOff     bool
+	startupDeferredTranscript        *startupDeferredTranscriptState
+	startupDeferredPreheatGeneration uint64
+}
+
+// slashRenderCache memoizes the rendered slash-completion popup so identical
+// composer state reuses the previous output. All zero values mean "miss".
+type slashRenderCache struct {
+	width int
+	theme string
+	value string
+	sel   int
+	text  string
+}
+
+// viewCacheState aggregates render-layer caches that the draw loop invalidates
+// in bulk. Every field MUST satisfy "zero value == invalid cache" so
+// invalidateDrawCaches can simply re-zero the struct (see app_cached_render.go).
+// The single exception is cachedMainSearchBlockIndex (-1 == no search), which
+// invalidateDrawCaches re-applies after the zero-out.
 type viewCacheState struct {
-	animRunning                        bool
 	streamRenderDeferred               bool
 	streamRenderForceView              bool
 	streamRenderDeferNext              bool
@@ -61,9 +86,6 @@ type viewCacheState struct {
 	cachedInputRender                  cachedRenderable
 	cachedInputCursor                  tea.Cursor
 	cachedInputCursorOK                bool
-	cachedStatusChordDisplay           string
-	cachedStatusSessionSwitchKey       string
-	cachedStatusActivitiesKey          string
 	cachedStatusKey                    string
 	cachedStatusRender                 cachedRenderable
 	cachedStatusBarModeKey             string
@@ -98,20 +120,12 @@ type viewCacheState struct {
 	cachedAttachRender                 cachedRenderable
 	cachedToastKey                     string
 	cachedToastRender                  cachedRenderable
-	cachedHelpKey                      string
 	cachedHelpRender                   cachedRenderable
-	cachedDirKey                       string
 	cachedDirRender                    cachedRenderable
 	cachedInfoPanelW                   int
 	cachedInfoPanelH                   int
 	cachedInfoPanelFP                  string
 	cachedInfoPanelOut                 string
-	statusBarTickGeneration            uint64
-	statusBarTickScheduled             bool
-	terminalTitleTickRunning           bool
-	terminalTitleTickGeneration        uint64
-	terminalTitleRequestBlinkOff       bool
-	localShellStartedAt                time.Time
 	statusBarAgentSnapshot             statusBarAgentSnapshot
 	statusBarSyntheticConnectingLogKey string
 	cachedStatusBarSessionValue        string
@@ -121,6 +135,5 @@ type viewCacheState struct {
 	cachedModelPillEffW                int
 	cachedModelPillLeftW               int
 	cachedModelPill                    string
-	startupDeferredTranscript          *startupDeferredTranscriptState
-	startupDeferredPreheatGeneration   uint64
+	slashCache                         slashRenderCache
 }

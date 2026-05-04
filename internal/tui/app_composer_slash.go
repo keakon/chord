@@ -239,12 +239,12 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	if sel < 0 {
 		sel = 0
 	}
-	if m.renderSlashCacheText != "" &&
-		m.renderSlashCacheWidth == m.width &&
-		m.renderSlashCacheTheme == m.theme.Name &&
-		m.renderSlashCacheValue == value &&
-		m.renderSlashCacheSel == sel {
-		return m.renderSlashCacheText
+	if m.slashCache.text != "" &&
+		m.slashCache.width == m.width &&
+		m.slashCache.theme == m.theme.Name &&
+		m.slashCache.value == value &&
+		m.slashCache.sel == sel {
+		return m.slashCache.text
 	}
 
 	help := DimStyle.Render("Tab complete  ↑/↓ select  Esc close")
@@ -288,11 +288,13 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 
 	body := strings.Join(lines, "\n")
 	out := DirectoryBorderStyle.Width(contentWidth + 2).Render(body)
-	m.renderSlashCacheWidth = m.width
-	m.renderSlashCacheTheme = m.theme.Name
-	m.renderSlashCacheValue = value
-	m.renderSlashCacheSel = sel
-	m.renderSlashCacheText = out
+	m.slashCache = slashRenderCache{
+		width: m.width,
+		theme: m.theme.Name,
+		value: value,
+		sel:   sel,
+		text:  out,
+	}
 	return out
 }
 

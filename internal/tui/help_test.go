@@ -88,7 +88,7 @@ func TestSlashCompletionDropdownUsesRenderCache(t *testing.T) {
 	if first == "" {
 		t.Fatal("expected slash completion dropdown")
 	}
-	if m.renderSlashCacheText != first {
+	if m.slashCache.text != first {
 		t.Fatal("expected slash dropdown cache to store rendered text")
 	}
 
@@ -102,8 +102,8 @@ func TestSlashCompletionDropdownUsesRenderCache(t *testing.T) {
 	if third == "" {
 		t.Fatal("expected slash completion dropdown after selection change")
 	}
-	if m.renderSlashCacheSel != 2 {
-		t.Fatalf("renderSlashCacheSel = %d, want 2", m.renderSlashCacheSel)
+	if m.slashCache.sel != 2 {
+		t.Fatalf("slashCache.sel = %d, want 2", m.slashCache.sel)
 	}
 	if third == first {
 		t.Fatal("selection change should produce a different cached dropdown render")

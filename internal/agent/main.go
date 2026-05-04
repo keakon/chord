@@ -879,36 +879,8 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// snapshot is saved below and must not be overwritten).
 	a.shuttingDown.Store(true)
 
-	// Cancel the active turn first so tool executions and LLM calls abort.
-	a.turnMu.Lock()
-	if a.turn != nil {
-		a.turn.Cancel()
-	}
-	a.turnMu.Unlock()
-
-	// Cancel all SubAgents.
-	a.mu.RLock()
-	for _, sub := range a.subAgents {
-		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on client exit")
-		sub.cancel()
-	}
-	a.mu.RUnlock()
-	stoppedBackground := tools.StopAllSpawnedForShutdown()
-	if stoppedBackground > 0 {
-		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)
-	}
-
-	// Close SubAgent-exclusive MCP managers (sentinels with Mgr==nil are
-	// main-agent servers, already closed by ac.MCPMgr.Close() in AppContext).
-	a.mcpServerCacheMu.Lock()
-	for name, entry := range a.mcpServerCache {
-		if entry.Mgr != nil {
-			log.Infof("closing subagent MCP server server=%v", name)
-			entry.Mgr.Close()
-		}
-	}
-	a.mcpServerCache = nil
-	a.mcpServerCacheMu.Unlock()
+	a.cancelActiveWork()
+	a.closeSubAgentMCPServers()
 
 	// Close the persistence channel and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
@@ -943,58 +915,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
 	if a.recovery != nil {
-		a.todoMu.RLock()
-		todoStates := snapshotTodos(a.todoItems)
-		a.todoMu.RUnlock()
-
-		// Collect active agent snapshots.
-		a.mu.RLock()
-		agents := make([]recovery.AgentSnapshot, 0, len(a.subAgents))
-		for _, sub := range a.subAgents {
-			state := sub.State()
-			summary := sub.LastSummary()
-			pendingComplete := sub.PendingCompleteIntent()
-			agentSnap := recovery.AgentSnapshot{
-				InstanceID:            sub.instanceID,
-				TaskID:                sub.taskID,
-				AgentDefName:          sub.agentDefName,
-				TaskDesc:              sub.taskDesc,
-				OwnerAgentID:          sub.OwnerAgentID(),
-				OwnerTaskID:           sub.OwnerTaskID(),
-				Depth:                 sub.Depth(),
-				JoinToOwner:           sub.joinToOwner,
-				State:                 string(state),
-				LastSummary:           summary,
-				PendingCompleteIntent: pendingComplete != nil,
-			}
-			if pendingComplete != nil {
-				agentSnap.PendingCompleteSummary = pendingComplete.Summary
-				agentSnap.PendingCompleteEnvelope = marshalCompletionEnvelope(pendingComplete.Envelope)
-			}
-			agents = append(agents, agentSnap)
-		}
-		a.mu.RUnlock()
-
-		usageSnap := a.usageTracker.SessionStats()
-		if err := a.recovery.SaveSnapshot(&recovery.SessionSnapshot{
-			Todos:                   todoStates,
-			ActiveAgents:            agents,
-			ModelName:               a.ModelName(),
-			ActiveRole:              a.CurrentRole(),
-			CreatedAt:               time.Now(),
-			LastInputTokens:         a.ctxMgr.LastInputTokens(),
-			LastTotalContextTokens:  a.ctxMgr.LastTotalContextTokens(),
-			ActiveBackgroundObjects: spawnStatesForSnapshot(),
-			UsageInputTokens:        usageSnap.InputTokens,
-			UsageOutputTokens:       usageSnap.OutputTokens,
-			UsageCacheReadTokens:    usageSnap.CacheReadTokens,
-			UsageCacheWriteTokens:   usageSnap.CacheWriteTokens,
-			UsageReasoningTokens:    usageSnap.ReasoningTokens,
-			UsageLLMCalls:           usageSnap.LLMCalls,
-			UsageEstimatedCost:      usageSnap.EstimatedCost,
-			UsageByModel:            usageSnap.ByModel,
-			UsageByAgent:            usageSnap.ByAgent,
-		}); err != nil {
+		if err := a.recovery.SaveSnapshot(a.buildShutdownSnapshot()); err != nil {
 			log.Warnf("failed to save final recovery snapshot error=%v", err)
 		}
 
@@ -1025,6 +946,101 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 	}
 	return fmt.Errorf("agent shutdown timed out after %v", timeout)
+}
+
+// cancelActiveWork aborts the active turn (if any), cancels every live
+// SubAgent, and stops orphaned background objects (Bash spawns, etc.). It is
+// the first phase of [MainAgent.Shutdown] and runs synchronously so tool
+// executions and LLM calls observe cancellation before snapshot/persist work
+// begins.
+func (a *MainAgent) cancelActiveWork() {
+	a.turnMu.Lock()
+	if a.turn != nil {
+		a.turn.Cancel()
+	}
+	a.turnMu.Unlock()
+
+	a.mu.RLock()
+	for _, sub := range a.subAgents {
+		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on client exit")
+		sub.cancel()
+	}
+	a.mu.RUnlock()
+
+	if stoppedBackground := tools.StopAllSpawnedForShutdown(); stoppedBackground > 0 {
+		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)
+	}
+}
+
+// closeSubAgentMCPServers tears down SubAgent-exclusive MCP managers. Sentinel
+// entries (Mgr==nil) point at main-agent servers which are owned by AppContext
+// and closed elsewhere. Resets the cache so post-shutdown lookups fail
+// explicitly.
+func (a *MainAgent) closeSubAgentMCPServers() {
+	a.mcpServerCacheMu.Lock()
+	defer a.mcpServerCacheMu.Unlock()
+	for name, entry := range a.mcpServerCache {
+		if entry.Mgr != nil {
+			log.Infof("closing subagent MCP server server=%v", name)
+			entry.Mgr.Close()
+		}
+	}
+	a.mcpServerCache = nil
+}
+
+// buildShutdownSnapshot collects todos, sub-agent states, and current usage
+// totals into a [recovery.SessionSnapshot] suitable for the final shutdown
+// snapshot.
+func (a *MainAgent) buildShutdownSnapshot() *recovery.SessionSnapshot {
+	a.todoMu.RLock()
+	todoStates := snapshotTodos(a.todoItems)
+	a.todoMu.RUnlock()
+
+	a.mu.RLock()
+	agents := make([]recovery.AgentSnapshot, 0, len(a.subAgents))
+	for _, sub := range a.subAgents {
+		pendingComplete := sub.PendingCompleteIntent()
+		agentSnap := recovery.AgentSnapshot{
+			InstanceID:            sub.instanceID,
+			TaskID:                sub.taskID,
+			AgentDefName:          sub.agentDefName,
+			TaskDesc:              sub.taskDesc,
+			OwnerAgentID:          sub.OwnerAgentID(),
+			OwnerTaskID:           sub.OwnerTaskID(),
+			Depth:                 sub.Depth(),
+			JoinToOwner:           sub.joinToOwner,
+			State:                 string(sub.State()),
+			LastSummary:           sub.LastSummary(),
+			PendingCompleteIntent: pendingComplete != nil,
+		}
+		if pendingComplete != nil {
+			agentSnap.PendingCompleteSummary = pendingComplete.Summary
+			agentSnap.PendingCompleteEnvelope = marshalCompletionEnvelope(pendingComplete.Envelope)
+		}
+		agents = append(agents, agentSnap)
+	}
+	a.mu.RUnlock()
+
+	usageSnap := a.usageTracker.SessionStats()
+	return &recovery.SessionSnapshot{
+		Todos:                   todoStates,
+		ActiveAgents:            agents,
+		ModelName:               a.ModelName(),
+		ActiveRole:              a.CurrentRole(),
+		CreatedAt:               time.Now(),
+		LastInputTokens:         a.ctxMgr.LastInputTokens(),
+		LastTotalContextTokens:  a.ctxMgr.LastTotalContextTokens(),
+		ActiveBackgroundObjects: spawnStatesForSnapshot(),
+		UsageInputTokens:        usageSnap.InputTokens,
+		UsageOutputTokens:       usageSnap.OutputTokens,
+		UsageCacheReadTokens:    usageSnap.CacheReadTokens,
+		UsageCacheWriteTokens:   usageSnap.CacheWriteTokens,
+		UsageReasoningTokens:    usageSnap.ReasoningTokens,
+		UsageLLMCalls:           usageSnap.LLMCalls,
+		UsageEstimatedCost:      usageSnap.EstimatedCost,
+		UsageByModel:            usageSnap.ByModel,
+		UsageByAgent:            usageSnap.ByAgent,
+	}
 }
 
 // ---------------------------------------------------------------------------

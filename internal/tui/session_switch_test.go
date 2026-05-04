@@ -2471,7 +2471,6 @@ func TestRebuildViewportFromMessagesClearsTimingState(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-10 * time.Second)
 	m.activityLastChanged["main"] = time.Now().Add(-9 * time.Second)
 	m.turnBusyStartedAt["main"] = time.Now().Add(-90 * time.Second)
-	m.localShellStartedAt = time.Now().Add(-5 * time.Second)
 	m.backgroundIdleSince = time.Now().Add(-6 * time.Minute)
 	m.lastSweepAt = time.Now().Add(-1 * time.Minute)
 	m.idleSweepScheduled = true
@@ -2490,9 +2489,6 @@ func TestRebuildViewportFromMessagesClearsTimingState(t *testing.T) {
 	}
 	if _, ok := m.turnBusyStartedAt["main"]; ok {
 		t.Fatal("turnBusyStartedAt should be cleared on restore")
-	}
-	if !m.localShellStartedAt.IsZero() {
-		t.Fatalf("localShellStartedAt = %v, want zero", m.localShellStartedAt)
 	}
 	if !m.backgroundIdleSince.IsZero() {
 		t.Fatalf("backgroundIdleSince = %v, want zero", m.backgroundIdleSince)

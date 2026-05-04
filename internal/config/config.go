@@ -261,7 +261,7 @@ func EffectiveStore(providerStore, modelStore *bool) bool {
 }
 
 // SupportsInput reports whether the model accepts the given input modality.
-// When Modalities is nil, defaults to ["text", "image"] for backward compatibility.
+// When Modalities is unset, defaults to ["text", "image"].
 func (m *ModelConfig) SupportsInput(modality string) bool {
 	if m.Modalities == nil {
 		return modality == "text" || modality == "image"

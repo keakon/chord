@@ -220,7 +220,6 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "cached_main_text_len: %d\n", len(m.cachedMainRender.text))
 	fmt.Fprintf(&sb, "cached_input_key: %q\n", safe(m.cachedInputKey))
 	fmt.Fprintf(&sb, "cached_status_key: %q\n", safe(m.cachedStatusKey))
-	fmt.Fprintf(&sb, "cached_dir_key: %q\n", safe(m.cachedDirKey))
 
 	fmt.Fprintf(&sb, "\n[layout]\n")
 	fmt.Fprintf(&sb, "area: %s\n", debugRectString(layout.area))

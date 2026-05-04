@@ -19,16 +19,43 @@ func (i OverlayListItem) selectable() bool {
 	return !i.Disabled && !i.Header
 }
 
+// widthKeyedRenderCache memoizes a width-keyed string render. Both
+// OverlayList and OverlayTable embed it so they share invalidate / lookup /
+// store semantics: a non-zero version doubles as a "dirty" signal for outer
+// view caches that fingerprint the overlay between paints.
+type widthKeyedRenderCache struct {
+	version uint64
+	width   int
+	text    string
+	valid   bool
+}
+
+func (c *widthKeyedRenderCache) invalidate() {
+	c.version++
+	c.valid = false
+}
+
+func (c *widthKeyedRenderCache) lookup(width int) (string, bool) {
+	if c.valid && c.width == width {
+		return c.text, true
+	}
+	return "", false
+}
+
+func (c *widthKeyedRenderCache) store(width int, text string) string {
+	c.width = width
+	c.text = text
+	c.valid = true
+	return text
+}
+
 type OverlayList struct {
 	items      []OverlayListItem
 	cursor     int
 	offset     int
 	maxVisible int
 
-	renderVersion    uint64
-	renderCacheWidth int
-	renderCacheText  string
-	renderCacheValid bool
+	renderCache widthKeyedRenderCache
 }
 
 func NewOverlayList(items []OverlayListItem, maxVisible int) *OverlayList {
@@ -38,8 +65,7 @@ func NewOverlayList(items []OverlayListItem, maxVisible int) *OverlayList {
 }
 
 func (l *OverlayList) invalidateRenderCache() {
-	l.renderVersion++
-	l.renderCacheValid = false
+	l.renderCache.invalidate()
 }
 
 func (l *OverlayList) SetItems(items []OverlayListItem) {
@@ -173,15 +199,15 @@ func (l *OverlayList) RenderVersion() uint64 {
 	if l == nil {
 		return 0
 	}
-	return l.renderVersion
+	return l.renderCache.version
 }
 
 func (l *OverlayList) Render(width int) string {
 	if width <= 0 {
 		width = 1
 	}
-	if l.renderCacheValid && l.renderCacheWidth == width {
-		return l.renderCacheText
+	if cached, ok := l.renderCache.lookup(width); ok {
+		return cached
 	}
 	start, end := l.WindowRange()
 	lines := make([]string, 0, end-start)
@@ -216,10 +242,7 @@ func (l *OverlayList) Render(width int) string {
 		lines = append(lines, line)
 	}
 	out := strings.Join(lines, "\n")
-	l.renderCacheWidth = width
-	l.renderCacheText = out
-	l.renderCacheValid = true
-	return out
+	return l.renderCache.store(width, out)
 }
 
 func (l *OverlayList) ensureVisible() {

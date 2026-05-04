@@ -69,13 +69,6 @@ func (o TruncateOptions) defaults() TruncateOptions {
 	return o
 }
 
-// TruncateOutput truncates output that exceeds MaxOutputLines or MaxOutputBytes
-// using the default "head+tail" strategy. It is a convenience wrapper around
-// TruncateOutputWithOptions and maintains backward compatibility.
-func TruncateOutput(output string, sessionDir string) TruncateResult {
-	return TruncateOutputWithOptions(output, sessionDir, TruncateOptions{})
-}
-
 // countLines returns the number of lines in s, matching strings.Split(s, "\n") boundaries.
 func countLines(s string) int {
 	if s == "" {

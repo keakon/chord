@@ -4446,8 +4446,8 @@ func TestRenderStatusBarShowsLocalShellWhenPending(t *testing.T) {
 	m.workingDir = "/tmp"
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
-	m.localShellStartedAt = time.Now().Add(-5 * time.Second)
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo hi", UserLocalShellPending: true})
+	startedAt := time.Now().Add(-5 * time.Second)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	plain := stripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Shell") {
@@ -4849,9 +4849,37 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	}
 }
 
+func TestStatusBarIgnoresMainLocalShellStartWhenFocusedOnSubAgentWithoutPendingShell(t *testing.T) {
+	backend := &sessionControlAgent{
+		events: make(chan agent.AgentEvent, 1),
+		subAgents: []agent.SubAgentInfo{{
+			InstanceID:   "agent-1",
+			AgentDefName: "reviewer",
+			TaskDesc:     "check code",
+		}},
+	}
+	m := NewModelWithSize(backend, 140, 24)
+	startedAt := time.Now().Add(-5 * time.Second)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
+	m.setFocusedAgent("agent-1")
+
+	if m.viewport.HasUserLocalShellPending() {
+		t.Fatal("sub-agent viewport should not report pending local shell from main view")
+	}
+	if _, ok := m.latestStatusStartWall("agent-1"); ok {
+		t.Fatal("latestStatusStartWall should ignore main-view local shell when focused on sub-agent without pending shell")
+	}
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, statusBarStartedLabel()) {
+		t.Fatalf("status bar should not inherit main-view local shell start time after focus switch, got %q", plain)
+	}
+}
+
 func TestRenderStatusBarLocalShellDropsStartedWhenWidthIsTight(t *testing.T) {
-	m := NewModel(nil)
-	m.localShellStartedAt = time.Now().Add(-5 * time.Second)
+	m := NewModelWithSize(nil, 140, 24)
+	startedAt := time.Now().Add(-5 * time.Second)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	wide := stripANSI(m.renderStatusBarLocalShell(200))
 	if !strings.Contains(wide, statusBarStartedLabel()) {
@@ -4868,12 +4896,40 @@ func TestRenderStatusBarLocalShellDropsStartedWhenWidthIsTight(t *testing.T) {
 }
 
 func TestRenderStatusBarLocalShellUsesCompactStartedLabelInCompactLayout(t *testing.T) {
-	m := NewModel(nil)
-	m.localShellStartedAt = time.Now().Add(-5 * time.Second)
+	m := NewModelWithSize(nil, 140, 24)
+	startedAt := time.Now().Add(-5 * time.Second)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	compact := stripANSI(m.renderStatusBarLocalShell(36))
 	if !strings.Contains(compact, statusBarStartedLabel()) {
 		t.Fatalf("compact local shell render should use started label; got %q", compact)
+	}
+}
+
+func TestStatusBarUsesVisiblePendingLocalShellStartByFocusedAgentView(t *testing.T) {
+	backend := &sessionControlAgent{
+		events: make(chan agent.AgentEvent, 1),
+		subAgents: []agent.SubAgentInfo{{
+			InstanceID:   "agent-1",
+			AgentDefName: "reviewer",
+			TaskDesc:     "check code",
+		}},
+	}
+	m := NewModelWithSize(backend, 140, 24)
+	mainStarted := time.Date(2024, 6, 15, 15, 4, 0, 0, time.Local)
+	subStarted := time.Date(2024, 6, 15, 15, 6, 0, 0, time.Local)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo main", UserLocalShellPending: true, StartedAt: mainStarted})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockUser, AgentID: "agent-1", UserLocalShellCmd: "echo sub", UserLocalShellPending: true, StartedAt: subStarted})
+
+	plain := stripANSI(m.renderStatusBar())
+	if !strings.Contains(plain, "15:04") || strings.Contains(plain, "15:06") {
+		t.Fatalf("main view should use main pending shell start time, got %q", plain)
+	}
+
+	m.setFocusedAgent("agent-1")
+	plain = stripANSI(m.renderStatusBar())
+	if !strings.Contains(plain, "15:06") || strings.Contains(plain, "15:04") {
+		t.Fatalf("sub-agent view should use sub-agent pending shell start time, got %q", plain)
 	}
 }
 

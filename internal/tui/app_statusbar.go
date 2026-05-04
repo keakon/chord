@@ -882,7 +882,7 @@ func statusBarLeftPillsKey(modeText, viewingLabel, viewingColor string, extraPil
 	return b.String()
 }
 
-func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, anchorAt time.Time, activity agent.AgentActivityEvent, localShellStartedAt time.Time) string {
+func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, anchorAt time.Time, activity agent.AgentActivityEvent, pendingLocalShellStartedAt time.Time) string {
 	var b strings.Builder
 	b.Grow(96)
 	b.WriteString(mode)
@@ -905,8 +905,8 @@ func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, an
 	b.WriteByte('|')
 	b.WriteString(activity.Detail)
 	b.WriteByte('|')
-	if !localShellStartedAt.IsZero() {
-		b.WriteString(strconv.FormatInt(localShellStartedAt.Unix(), 10))
+	if !pendingLocalShellStartedAt.IsZero() {
+		b.WriteString(strconv.FormatInt(pendingLocalShellStartedAt.Unix(), 10))
 	}
 	return b.String()
 }

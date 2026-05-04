@@ -1,5 +1,7 @@
 package tui
 
+import "time"
+
 // DirectoryEntry is one row in the message-directory overlay (Ctrl+J).
 type DirectoryEntry struct {
 	BlockIndex int
@@ -76,6 +78,22 @@ func (v *Viewport) HasUserLocalShellPending() bool {
 		}
 	}
 	return false
+}
+
+func (v *Viewport) LatestVisiblePendingUserLocalShellStartedAt() (time.Time, bool) {
+	if v == nil {
+		return time.Time{}, false
+	}
+	var latest time.Time
+	for _, b := range v.visibleBlocks() {
+		if b != nil && b.Type == BlockUser && b.UserLocalShellCmd != "" && b.UserLocalShellPending && !b.StartedAt.IsZero() && b.StartedAt.After(latest) {
+			latest = b.StartedAt
+		}
+	}
+	if latest.IsZero() {
+		return time.Time{}, false
+	}
+	return latest, true
 }
 
 func (v *Viewport) HasPendingToolWork() bool {

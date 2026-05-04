@@ -206,6 +206,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			shellID := m.nextBlockID
 			m.nextBlockID++
 			userBlock := &Block{ID: shellID, Type: BlockUser, Content: userLine, AgentID: m.focusedAgentID, ImageCount: 0, Collapsed: true, UserLocalShellCmd: cmdStr, UserLocalShellPending: strings.TrimSpace(cmdStr) != "", MsgIndex: -1}
+			if userBlock.UserLocalShellPending {
+				userBlock.StartedAt = time.Now()
+			}
 			m.appendViewportBlock(userBlock)
 			m.recalcViewportSize()
 			if strings.TrimSpace(cmdStr) == "" {
@@ -215,7 +218,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				m.markBlockSettled(userBlock)
 				return m.enqueueToast("Empty command after !", "warn")
 			}
-			m.localShellStartedAt = time.Now()
 			wd, _ := os.Getwd()
 			return tea.Batch(shellBangCmd(wd, userLine, cmdStr, m.focusedAgentID, shellID), m.startAnimTick())
 		}

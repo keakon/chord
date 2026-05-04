@@ -178,7 +178,7 @@ func (m Model) latestStatusStartWall(agentID string) (time.Time, bool) {
 			latest = t
 		}
 	}
-	if t := m.localShellStartedAt; !t.IsZero() && t.After(latest) {
+	if t, ok := latestVisiblePendingUserLocalShellStartedWall(m.viewport); ok && t.After(latest) {
 		latest = t
 	}
 	if t := m.workStartedAt[statusBarTimingAnchor(agentID)]; !t.IsZero() && t.After(latest) {
@@ -190,15 +190,23 @@ func (m Model) latestStatusStartWall(agentID string) (time.Time, bool) {
 	return latest, true
 }
 
+func latestVisiblePendingUserLocalShellStartedWall(v *Viewport) (time.Time, bool) {
+	if v == nil {
+		return time.Time{}, false
+	}
+	return v.LatestVisiblePendingUserLocalShellStartedAt()
+}
+
 func (m Model) renderStatusBarLocalShell(maxWidth int) string {
+	startedAt, _ := latestVisiblePendingUserLocalShellStartedWall(m.viewport)
 	elapsed := ""
-	if !m.localShellStartedAt.IsZero() {
-		elapsed = formatStatusBarElapsed(time.Since(m.localShellStartedAt))
+	if !startedAt.IsZero() {
+		elapsed = formatStatusBarElapsed(time.Since(startedAt))
 	}
 	text := "Shell" + elapsed
 	started := ""
-	if !m.localShellStartedAt.IsZero() {
-		started = DimStyle.Render(" · " + formatStatusBarStartedAt(m.localShellStartedAt))
+	if !startedAt.IsZero() {
+		started = DimStyle.Render(" · " + formatStatusBarStartedAt(startedAt))
 	}
 	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(NeonAccentColor(1800 * time.Millisecond)))
 	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.StatusFg))

@@ -13,10 +13,7 @@ type OverlayTable struct {
 	items         []OverlayTableItem
 	showSelection bool // when false, no cursor row / arrow gutter (e.g. usage stats tables)
 
-	renderVersion    uint64
-	renderCacheWidth int
-	renderCacheText  string
-	renderCacheValid bool
+	renderCache widthKeyedRenderCache
 }
 
 type TableColumn struct {
@@ -44,8 +41,7 @@ func NewOverlayTable(columns []TableColumn, items []OverlayTableItem, maxVisible
 }
 
 func (t *OverlayTable) invalidateRenderCache() {
-	t.renderVersion++
-	t.renderCacheValid = false
+	t.renderCache.invalidate()
 }
 
 // SetShowSelection controls whether the table renders a cursor highlight and ▸ gutter.
@@ -116,7 +112,7 @@ func (t *OverlayTable) RenderVersion() uint64 {
 	if t == nil {
 		return 0
 	}
-	return t.renderVersion
+	return t.renderCache.version
 }
 
 func (t *OverlayTable) SelectedItem() (OverlayTableItem, bool) {
@@ -135,8 +131,8 @@ func (t *OverlayTable) Render(width int) string {
 	if width <= 0 {
 		width = 1
 	}
-	if t.renderCacheValid && t.renderCacheWidth == width {
-		return t.renderCacheText
+	if cached, ok := t.renderCache.lookup(width); ok {
+		return cached
 	}
 	statusColWidth := t.statusGutterWidth()
 	colWidths := t.columnWidths(width)
@@ -187,10 +183,7 @@ func (t *OverlayTable) Render(width int) string {
 		lines = append(lines, line)
 	}
 	out := strings.Join(lines, "\n")
-	t.renderCacheWidth = width
-	t.renderCacheText = out
-	t.renderCacheValid = true
-	return out
+	return t.renderCache.store(width, out)
 }
 
 func (t *OverlayTable) columnWidths(width int) []int {

@@ -299,7 +299,7 @@ func (t *StdioTransport) removePending(id int) {
 }
 
 // ---------------------------------------------------------------------------
-// HTTPTransport — Streamable HTTP + legacy JSON POST (MCP remote servers).
+// HTTPTransport — Streamable HTTP / JSON-over-HTTP (MCP remote servers).
 //
 // Supports:
 //   - application/json single JSON-RPC response (simple HTTP MCP)

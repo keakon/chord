@@ -132,9 +132,6 @@ func (m *Model) handleShellBangResult(msg shellBangResultMsg) tea.Cmd {
 		m.updateViewportBlock(blk)
 		m.markBlockSettled(blk)
 	}
-	if m.viewport == nil || !m.viewport.HasUserLocalShellPending() {
-		m.localShellStartedAt = time.Time{}
-	}
 	m.recalcViewportSize()
 	if m.agent != nil {
 		m.agent.AppendContextMessage(localShellContextMessage(msg.userLine, msg.cmd, msg.output, msg.err))

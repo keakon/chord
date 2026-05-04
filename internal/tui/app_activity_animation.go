@@ -155,7 +155,6 @@ func (m *Model) resetTimingStateForSessionRestore() {
 	clear(m.workStartedAt)
 	clear(m.turnBusyStartedAt)
 	clear(m.streamLastDeltaAt)
-	m.localShellStartedAt = time.Time{}
 	m.stopActiveAnimationIfIdle()
 	m.backgroundIdleSince = time.Time{}
 	m.lastSweepAt = time.Time{}
