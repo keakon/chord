@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -91,7 +93,7 @@ func TestClientInitializeRegistersHandlersBeforeInitializeAndSyncsWorkspaceConfi
 			return nil
 		},
 	}
-	options := map[string]any{"typeCheckingMode": "strict"}
+	options := map[string]any{"python": map[string]any{"analysis": map[string]any{"typeCheckingMode": "strict"}}}
 	c := &Client{
 		client: fake,
 		cfg:    config.LSPServerConfig{Options: options},
@@ -109,7 +111,7 @@ func TestClientInitializeRegistersHandlersBeforeInitializeAndSyncsWorkspaceConfi
 
 	handler := fake.registeredHandlers["workspace/configuration"]
 	params, err := json.Marshal(protocol.ConfigurationParams{
-		Items: []protocol.ConfigurationItem{{Section: "python"}, {Section: "python.analysis"}},
+		Items: []protocol.ConfigurationItem{{Section: "python"}, {Section: "python.analysis"}, {Section: "missing"}},
 	})
 	if err != nil {
 		t.Fatalf("Marshal(ConfigurationParams): %v", err)
@@ -118,9 +120,132 @@ func TestClientInitializeRegistersHandlersBeforeInitializeAndSyncsWorkspaceConfi
 	if err != nil {
 		t.Fatalf("workspace/configuration handler error = %v", err)
 	}
-	want := []any{options, options}
+	want := []any{
+		map[string]any{"analysis": map[string]any{"typeCheckingMode": "strict"}},
+		map[string]any{"typeCheckingMode": "strict"},
+		map[string]any{},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("workspace/configuration result = %#v, want %#v", got, want)
+	}
+}
+
+func TestPrepareWorkspaceSettingsDiscoversPyrightUnixVirtualenv(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got := discoverPythonInterpreterForGOOS(root, "linux")
+	if got != pythonPath {
+		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want %q", got, pythonPath)
+	}
+}
+
+func TestPrepareWorkspaceSettingsDoesNotDiscoverWindowsVirtualenvOnUnix(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "Scripts", "python.exe")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("MZ\x90\x00"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got := discoverPythonInterpreterForGOOS(root, "linux")
+	if got != "" {
+		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want empty", got)
+	}
+}
+
+func TestPrepareWorkspaceSettingsDiscoversPyrightWindowsVirtualenv(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "Scripts", "python.exe")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("MZ\x90\x00"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got := discoverPythonInterpreterForGOOS(root, "windows")
+	if got != pythonPath {
+		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want %q", got, pythonPath)
+	}
+}
+
+func TestPrepareWorkspaceSettingsUsesDiscoveredPyrightVirtualenv(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver"}, root)
+	want := map[string]any{"python": map[string]any{"pythonPath": pythonPath}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPrepareWorkspaceSettingsKeepsExplicitInterpreter(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	explicit := map[string]any{"python": map[string]any{"pythonPath": "/custom/python"}}
+	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	if !reflect.DeepEqual(got, explicit) {
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, explicit)
+	}
+}
+
+func TestPrepareWorkspaceSettingsMakesExplicitRelativeInterpreterAbsolute(t *testing.T) {
+	root := t.TempDir()
+	explicit := map[string]any{"python": map[string]any{"pythonPath": ".venv/bin/python"}}
+	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	want := map[string]any{"python": map[string]any{"pythonPath": filepath.Join(root, ".venv", "bin", "python")}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPrepareWorkspaceSettingsMakesExplicitRelativeVenvPathAbsolute(t *testing.T) {
+	root := t.TempDir()
+	explicit := map[string]any{"python": map[string]any{"venvPath": ".venvs", "venv": "py311"}}
+	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	want := map[string]any{"python": map[string]any{"venvPath": filepath.Join(root, ".venvs"), "venv": "py311"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCloneSettingsDeepCopiesSlices(t *testing.T) {
+	original := map[string]any{
+		"python": map[string]any{
+			"analysis": map[string]any{
+				"extraPaths": []any{"src", "lib"},
+			},
+		},
+	}
+	cloned := cloneSettings(original)
+	nestedClone := cloned["python"].(map[string]any)["analysis"].(map[string]any)["extraPaths"].([]any)
+	nestedClone[0] = "mutated"
+	nestedOriginal := original["python"].(map[string]any)["analysis"].(map[string]any)["extraPaths"].([]any)
+	if nestedOriginal[0] != "src" {
+		t.Fatalf("cloneSettings slice mutation leaked to original: %#v", nestedOriginal)
 	}
 }
 

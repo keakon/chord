@@ -86,10 +86,53 @@ lsp:
   gopls:
     command: gopls
     file_types: [".go"]
-    root_markers: [".git", "go.mod"]
+    root_markers: ["go.work", "go.mod", ".git"]
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+  typescript:
+    command: typescript-language-server
+    args: ["--stdio"]
+    file_types: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
+    root_markers: ["tsconfig.json", "jsconfig.json", "package.json", ".git"]
+  rust-analyzer:
+    command: rust-analyzer
+    file_types: [".rs"]
+    root_markers: ["Cargo.toml", "rust-project.json"]
 ```
 
-是否可用取决于本机是否已安装对应语言服务器。
+是否可用取决于本机是否已安装对应语言服务器。对于 Pyright，如果未配置 Python 解释器，Chord 会自动使用 LSP root 下的项目本地虚拟环境，并按当前运行平台探测对应布局：类 Unix 系统（包括 WSL）查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`；Windows 查找 `.venv\Scripts\python.exe`、`venv\Scripts\python.exe` 和 `env\Scripts\python.exe`。WSL 自动发现会有意避开 Windows 虚拟环境中的 `Scripts\python.exe`；建议在 WSL 内创建 Linux venv，确需自定义解释器时再显式配置 `python.pythonPath`。
+
+如果某个语言服务器只应该在包含特定项目标记的目录内运行，可以配置 `root_markers`。如果省略它，则只由 `file_types` 决定该 server 是否处理某个文件。
+
+对 Python 来说，通常更建议不要默认配置 `root_markers`。在 Chord 当前的 LSP 模型里，`root_markers` 只决定 Pyright 是否为某个文件启动；它不会把 Pyright 的工作区根目录重定向到最近的 `pyproject.toml` 或 `pyrightconfig.json`。因此，把 Python root markers 作为默认推荐配置，往往只会让合法的独立脚本或轻量项目无法启用 Pyright，却不能改善 workspace root 的选择。如果你确实需要更严格的项目范围控制，再按仓库实际情况显式添加 `root_markers`。
+
+通常不需要手动设置 `python.pythonPath`。当未显式配置解释器时，Chord 已经会在 LSP root 下自动发现项目本地的 `.venv`、`venv` 或 `env`。只有当你需要覆盖这套自动发现逻辑、改用自定义解释器路径时，才需要设置 `python.pythonPath`。同样，`python.analysis` 也是按需启用的 Pyright 行为调优项，例如调整类型检查严格度。对于这类配置，请使用嵌套的 `options` section，例如：
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python.analysis:
+        typeCheckingMode: strict
+```
+
+如果你确实需要显式覆盖解释器，再在同样的嵌套 `options` 结构下添加 `python.pythonPath`：
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python:
+        pythonPath: .venv/bin/python
+```
 
 ## MCP
 

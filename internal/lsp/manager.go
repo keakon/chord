@@ -392,6 +392,10 @@ func pathExists(p string) bool {
 	return err == nil
 }
 
+func relPathEscapesDir(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func pathUnderDir(path, dir string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -405,7 +409,7 @@ func pathUnderDir(path, dir string) bool {
 	if err != nil {
 		return false
 	}
-	return !strings.HasPrefix(rel, "..")
+	return !relPathEscapesDir(rel)
 }
 
 // clientForPathLocked returns a client that handles path; caller must hold at least RLock.

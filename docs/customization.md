@@ -86,10 +86,53 @@ lsp:
   gopls:
     command: gopls
     file_types: [".go"]
-    root_markers: [".git", "go.mod"]
+    root_markers: ["go.work", "go.mod", ".git"]
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+  typescript:
+    command: typescript-language-server
+    args: ["--stdio"]
+    file_types: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
+    root_markers: ["tsconfig.json", "jsconfig.json", "package.json", ".git"]
+  rust-analyzer:
+    command: rust-analyzer
+    file_types: [".rs"]
+    root_markers: ["Cargo.toml", "rust-project.json"]
 ```
 
-Availability depends on whether the corresponding language server is installed locally.
+Availability depends on whether the corresponding language server is installed locally. For Pyright, Chord automatically uses a project-local virtual environment under the LSP root when no Python interpreter is configured. It probes the platform-appropriate layout: `.venv/bin/python`, `venv/bin/python`, and `env/bin/python` on Unix-like systems, including WSL; `.venv\Scripts\python.exe`, `venv\Scripts\python.exe`, and `env\Scripts\python.exe` on Windows. WSL auto-discovery intentionally does not select Windows virtual environments under `Scripts\python.exe`; create a Linux venv inside WSL or configure `python.pythonPath` explicitly if you need a custom interpreter.
+
+Use `root_markers` when a language server should only run inside directories containing specific project markers. If omitted, `file_types` alone controls whether the server handles a file.
+
+For Python, `root_markers` is usually better left unset. In Chord's current LSP model, `root_markers` only decides whether Pyright starts for a file; it does not re-root Pyright to the nearest `pyproject.toml` or `pyrightconfig.json`. Adding Python root markers by default therefore tends to make Pyright unavailable for valid standalone scripts or lightweight projects without improving workspace-root selection. If you need stricter project scoping, add `root_markers` explicitly for your repo.
+
+You usually do not need to set `python.pythonPath` manually. When no interpreter is configured, Chord already auto-detects a project-local `.venv`, `venv`, or `env` under the LSP root. Set `python.pythonPath` only when you need to override that detection with a custom interpreter path. Likewise, `python.analysis` settings are optional tuning knobs for Pyright behavior such as type-checking strictness. Use nested `options` sections for server settings, for example:
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python.analysis:
+        typeCheckingMode: strict
+```
+
+If you need to override the interpreter explicitly, add `python.pythonPath` under the same nested `options` structure:
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python:
+        pythonPath: .venv/bin/python
+```
 
 ## MCP
 

@@ -11,6 +11,39 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestRelPathEscapesDir(t *testing.T) {
+	if !relPathEscapesDir("..") {
+		t.Fatal("relPathEscapesDir should reject parent directory")
+	}
+	if !relPathEscapesDir(filepath.Join("..", "outside.go")) {
+		t.Fatal("relPathEscapesDir should reject paths outside directory")
+	}
+	if relPathEscapesDir("..foo") {
+		t.Fatal("relPathEscapesDir should allow sibling-like names inside directory")
+	}
+	if relPathEscapesDir(filepath.Join("sub", "..foo")) {
+		t.Fatal("relPathEscapesDir should allow nested names starting with dots")
+	}
+}
+
+func TestClientHandlesFileAllowsDotDotPrefixWithinRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "..foo.go")
+	client := &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	if !client.HandlesFile(path) {
+		t.Fatal("HandlesFile should allow files inside root whose name starts with '..'")
+	}
+}
+
+func TestClientHandlesFileRejectsOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(filepath.Dir(root), "outside.go")
+	client := &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	if client.HandlesFile(path) {
+		t.Fatal("HandlesFile should reject files outside root")
+	}
+}
+
 func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(&config.Config{

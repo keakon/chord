@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -60,6 +61,7 @@ type Client struct {
 
 // NewClient creates an LSP client and starts the server process. Call Initialize next.
 func NewClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd string, debug bool) (*Client, error) {
+	cfg.Options = prepareWorkspaceSettings(name, cfg, cwd)
 	c := &Client{
 		name:        name,
 		cwd:         cwd,
@@ -143,10 +145,153 @@ func (c *Client) handleWorkspaceConfiguration(_ context.Context, _ string, param
 	}
 	settings := c.workspaceSettings()
 	result := make([]any, len(configParams.Items))
-	for i := range result {
-		result[i] = settings
+	for i, item := range configParams.Items {
+		result[i] = settingsForSection(settings, item.Section)
 	}
 	return result, nil
+}
+
+func settingsForSection(settings map[string]any, section string) any {
+	if section == "" {
+		return settings
+	}
+	var current any = settings
+	for part := range strings.SplitSeq(section, ".") {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return map[string]any{}
+		}
+		next, ok := m[part]
+		if !ok {
+			return map[string]any{}
+		}
+		current = next
+	}
+	return current
+}
+
+func prepareWorkspaceSettings(name string, cfg config.LSPServerConfig, cwd string) map[string]any {
+	settings := cloneSettings(cfg.Options)
+	if !isPyrightServer(name, cfg) {
+		return settings
+	}
+	if normalizePythonInterpreterSettings(settings, cwd) || hasPythonVenvSetting(settings) {
+		return settings
+	}
+	pythonPath := discoverPythonInterpreter(cwd)
+	if pythonPath == "" {
+		return settings
+	}
+	pythonSettings, _ := settings["python"].(map[string]any)
+	if pythonSettings == nil {
+		pythonSettings = make(map[string]any)
+		settings["python"] = pythonSettings
+	}
+	pythonSettings["pythonPath"] = pythonPath
+	return settings
+}
+
+func cloneSettings(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = cloneSettingValue(v)
+	}
+	return out
+}
+
+// cloneSettingValue deep-copies values that may show up in YAML-decoded LSP
+// options trees: nested maps and slices. Other values (strings, numbers,
+// bools) are immutable and copied by value; pointer-bearing user types are
+// not expected here and are preserved as-is.
+func cloneSettingValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return cloneSettings(val)
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = cloneSettingValue(item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func isPyrightServer(name string, cfg config.LSPServerConfig) bool {
+	serverName := strings.ToLower(name)
+	command := strings.ToLower(filepath.Base(cfg.Command))
+	return strings.Contains(serverName, "pyright") || strings.Contains(command, "pyright")
+}
+
+func hasPythonVenvSetting(settings map[string]any) bool {
+	pythonSettings, _ := settings["python"].(map[string]any)
+	if pythonSettings != nil {
+		if nonEmptyString(pythonSettings["venvPath"]) || nonEmptyString(pythonSettings["venv"]) {
+			return true
+		}
+	}
+	return nonEmptyString(settings["venvPath"]) || nonEmptyString(settings["venv"])
+}
+
+func normalizePythonInterpreterSettings(settings map[string]any, cwd string) bool {
+	pythonSettings, _ := settings["python"].(map[string]any)
+	if pythonSettings == nil {
+		return false
+	}
+	normalizePathSetting(pythonSettings, "pythonPath", cwd)
+	normalizePathSetting(pythonSettings, "defaultInterpreterPath", cwd)
+	normalizePathSetting(pythonSettings, "venvPath", cwd)
+	return nonEmptyString(pythonSettings["pythonPath"]) || nonEmptyString(pythonSettings["defaultInterpreterPath"])
+}
+
+func normalizePathSetting(settings map[string]any, key string, cwd string) bool {
+	value, ok := settings[key].(string)
+	if !ok || strings.TrimSpace(value) == "" || filepath.IsAbs(value) || cwd == "" {
+		return false
+	}
+	settings[key] = filepath.Join(cwd, value)
+	return true
+}
+
+func nonEmptyString(v any) bool {
+	s, ok := v.(string)
+	return ok && strings.TrimSpace(s) != ""
+}
+
+func discoverPythonInterpreter(cwd string) string {
+	return discoverPythonInterpreterForGOOS(cwd, runtime.GOOS)
+}
+
+func discoverPythonInterpreterForGOOS(cwd, goos string) string {
+	if cwd == "" {
+		return ""
+	}
+	for _, dir := range []string{".venv", "venv", "env"} {
+		if goos == "windows" {
+			if p := filepath.Join(cwd, dir, "Scripts", "python.exe"); executableFileExistsForGOOS(p, goos) {
+				return p
+			}
+			continue
+		}
+		if p := filepath.Join(cwd, dir, "bin", "python"); executableFileExistsForGOOS(p, goos) {
+			return p
+		}
+	}
+	return ""
+}
+
+func executableFileExistsForGOOS(path, goos string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if goos == "windows" {
+		// Windows does not honor Unix-style executable bits; rely on the
+		// caller to probe `.exe` paths so existence + regular-file is enough.
+		return true
+	}
+	return info.Mode()&0111 != 0
 }
 
 func (c *Client) workspaceSettings() map[string]any {
@@ -194,7 +339,7 @@ func (c *Client) HandlesFile(path string) bool {
 		return false
 	}
 	rel, err := filepath.Rel(c.cwd, abs)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || relPathEscapesDir(rel) {
 		return false
 	}
 	if len(c.cfg.FileTypes) == 0 {
