@@ -67,6 +67,34 @@ func TestListSessionsPreservesOriginalFirstUserMessageAcrossCompaction(t *testin
 	}
 }
 
+func TestFirstUserMessageFromFileSkipsCompactionSummary(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.jsonl")
+	first := message.Message{
+		Role:                "user",
+		Content:             "[Context Summary]\n## Goal\n…",
+		IsCompactionSummary: true,
+	}
+	second := message.Message{Role: "user", Content: "what is up"}
+	enc := func(m message.Message) []byte {
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return append(b, '\n')
+	}
+	if err := os.WriteFile(mainPath, append(enc(first), enc(second)...), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := FirstUserMessageFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("FirstUserMessageFromFile: %v", err)
+	}
+	if got != "what is up" {
+		t.Fatalf("FirstUserMessageFromFile = %q, want %q", got, "what is up")
+	}
+}
+
 func TestPersistAndLoad_Roundtrip(t *testing.T) {
 	rm, _ := newTestManager(t)
 	defer rm.Close()

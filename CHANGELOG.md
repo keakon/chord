@@ -43,6 +43,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed collapsed tool result hidden-line counts for markdown-like output.
 - Fixed headless idle events so Chord emits a single `idle` envelope instead of also sending a duplicate ready `notification` envelope; gateways should render the idle state themselves.
 
+- Fixed compaction follow-up behavior in three related cases: preserved/restored terminal titles now ignore compaction-summary pollution more reliably across old and newly compacted sessions; auto-compaction continuation no longer emits duplicate idle transitions when a barrier apply fails; and active title animation now always re-synchronizes the terminal-title ticker before resuming spinner-driven activity.
+
 ## 0.1.0 - 2026-04-29
 
 - Initial public release of Chord.

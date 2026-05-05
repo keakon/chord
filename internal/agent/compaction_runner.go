@@ -39,8 +39,19 @@ func (a *MainAgent) scheduleCompaction(manual bool) bool {
 
 // scheduleCompactionAsync starts a non-blocking compaction. The main event loop
 // continues processing events while compaction runs in the background.
+//
+// Manual /compact uses a compactionResumeIdle continuation: when the summary
+// is applied the agent goes back to idle and waits for the user. Automatic
+// compaction (usage-driven / threshold-based) uses compactionResumeAutoContinue
+// so the agent proactively spawns a new LLM turn with the compacted context
+// after the summary is applied — otherwise the work would silently stall the
+// moment auto compaction succeeds while no fresh user input is queued.
 func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger) {
-	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{kind: compactionResumeIdle, turnEpoch: target.turnEpoch}, trigger.Manual)
+	resumeKind := compactionResumeAutoContinue
+	if trigger.Manual {
+		resumeKind = compactionResumeIdle
+	}
+	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{kind: resumeKind, turnEpoch: target.turnEpoch}, trigger.Manual)
 }
 
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
@@ -308,6 +319,13 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	headSplit := d.HeadSplit
 
+	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,
+	// because the rewrite callback runs while ctxmgr's write lock is held and
+	// cannot itself call Snapshot() (which RLocks the same mutex). Pulling the
+	// snapshot here keeps rewriteSessionAfterCompaction lock-free with respect
+	// to ctxmgr.
+	originalFirstUserHint := a.captureOriginalFirstUserHint()
+
 	// Use ReplacePrefixAtomic: replace [0, headSplit) with d.NewMessages,
 	// preserving [headSplit:) as tail. The under callback atomically rewrites
 	// the session file.
@@ -320,7 +338,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 
 		// Rewrite session file atomically
 		var rewriteErr error
-		backupPath, rewriteErr = a.rewriteSessionAfterCompaction(d.Index, newMessages)
+		backupPath, rewriteErr = a.rewriteSessionAfterCompaction(d.Index, newMessages, originalFirstUserHint)
 		if rewriteErr != nil {
 			return nil, fmt.Errorf("rewrite compacted session: %w", rewriteErr)
 		}

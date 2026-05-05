@@ -399,17 +399,28 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	// UI stuck in streaming state. Use blocking send (with shutdown guard) so it
 	// is never silently discarded.
 
-	// Continuation barrier: apply any ready compaction draft before going idle
+	// Continuation barrier: apply any ready compaction draft before going idle.
+	// If the resume path already owns the idle barrier (for example, it emitted
+	// IdleEvent/drained pending input itself or started a new turn), do not do it
+	// again here.
+	handledIdleBarrier := false
 	if a.compactionState.readyDraft != nil {
-		if a.applyReadyDraft() {
-			// Apply succeeded, reset activity
-			a.emitActivity("main", ActivityIdle, "")
-		}
+		_, handledIdleBarrier = a.applyReadyDraft()
+		// Always reset activity so the TUI spinner never stays on Compacting,
+		// regardless of apply success. Previously only the success branch did
+		// this and a failed apply would leave activity stuck at Compacting.
+		a.emitActivity("main", ActivityIdle, "")
+		// Successful auto-continue resumes by starting a new turn before the
+		// outer idle path runs; failed auto-continue and manual idle continuations
+		// may also emit IdleEvent/drain inside resumePendingMainLLMAfterCompaction.
+		// In all of those cases the helper reports handledIdleBarrier=true.
 	}
 
-	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+	if !handledIdleBarrier {
+		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+	}
 	a.fireHookBackground(a.parentCtx, hook.OnIdle, turnID, map[string]any{})
-	if !pausePendingDrain {
+	if !pausePendingDrain && !handledIdleBarrier {
 		a.drainPendingUserMessages()
 	}
 	if a.turn == nil && !skipMailboxDrain {

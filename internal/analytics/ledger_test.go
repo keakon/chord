@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
@@ -101,6 +102,63 @@ func TestRewriteFirstUserMessagePreservesOriginalFirstUserMessage(t *testing.T) 
 	}
 	if summary.OriginalFirstUserMessage != "original first request" {
 		t.Fatalf("OriginalFirstUserMessage = %q", summary.OriginalFirstUserMessage)
+	}
+}
+
+func TestRewriteFirstUserMessageWithOriginalSeedsHintWhenNothingKnown(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	// Note: SetFirstUserMessage is intentionally NOT called — this mirrors
+	// the legacy / brand-new-session case where the ledger has no cached
+	// original first user message yet. main.jsonl is also absent.
+	if err := ledger.RewriteFirstUserMessageWithOriginal(
+		"[Context Summary]\n## Goal\n…",
+		"hello world", // hint captured by the caller before main.jsonl rewrite
+	); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginal: %v", err)
+	}
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage == "" {
+		t.Fatal("FirstUserMessage is empty")
+	}
+	if summary.OriginalFirstUserMessage != "hello world" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want %q", summary.OriginalFirstUserMessage, "hello world")
+	}
+}
+
+func TestFirstUserMessageLockedSkipsCompactionSummary(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.jsonl")
+	// Write a main.jsonl whose first user message is a compaction summary.
+	// firstUserMessageLocked must skip it so the ledger never adopts the
+	// summary as the original first user message.
+	first := message.Message{
+		Role:                "user",
+		Content:             "[Context Summary]\n## Goal\n…",
+		IsCompactionSummary: true,
+	}
+	second := message.Message{
+		Role:    "user",
+		Content: "real second user message",
+	}
+	enc := func(m message.Message) []byte {
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return append(b, '\n')
+	}
+	payload := append(enc(first), enc(second)...)
+	if err := os.WriteFile(mainPath, payload, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	got := ledger.firstUserMessageLocked()
+	if got != "real second user message" {
+		t.Fatalf("firstUserMessageLocked = %q, want %q", got, "real second user message")
 	}
 }
 

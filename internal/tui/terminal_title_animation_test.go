@@ -289,3 +289,50 @@ func TestResetTimingStateForSessionRestoreStopsTerminalTitleTicker(t *testing.T)
 		t.Fatal("session restore timing reset should stop terminal title ticker immediately")
 	}
 }
+
+// TestTerminalTitleTickerSurvivesActivityRoundTrip reproduces the regression
+// where the title spinner stops after activity transitions Streaming →
+// Compacting → Streaming. With the syncTerminalTitleTickerWithCadence fix the
+// ticker should be running again at the end of the round trip.
+func TestTerminalTitleTickerSurvivesActivityRoundTrip(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.terminalTitleBase = "round trip"
+
+	// Streaming → ticker on
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{
+		Type:    agent.ActivityStreaming,
+		AgentID: "main",
+	}}); cmd == nil {
+		t.Fatal("Streaming activity should schedule animation work")
+	}
+	if !m.terminalTitleTickRunning {
+		t.Fatal("title ticker should be running after Streaming activity")
+	}
+	genAfterStreaming := m.terminalTitleTickGeneration
+
+	// Compacting → ticker off (Compacting is treated as no-animation)
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{
+		Type:    agent.ActivityCompacting,
+		AgentID: "main",
+	}}); cmd != nil {
+		_ = cmd()
+	}
+	if m.terminalTitleTickRunning {
+		t.Fatal("title ticker should be stopped during Compacting")
+	}
+
+	// Streaming again → ticker should be running again
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{
+		Type:    agent.ActivityStreaming,
+		AgentID: "main",
+	}}); cmd == nil {
+		t.Fatal("returning to Streaming should schedule animation work")
+	}
+	if !m.terminalTitleTickRunning {
+		t.Fatal("title ticker should resume after activity returns to Streaming")
+	}
+	if m.terminalTitleTickGeneration <= genAfterStreaming {
+		t.Fatalf("ticker generation should advance on resume; got %d, prev %d",
+			m.terminalTitleTickGeneration, genAfterStreaming)
+	}
+}

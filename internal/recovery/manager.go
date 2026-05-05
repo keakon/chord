@@ -510,6 +510,13 @@ func firstUserMessageFromFile(mainPath string) (string, error) {
 		if msg.Role != "user" {
 			continue
 		}
+		// Skip compaction summary messages: after a compaction has rewritten
+		// main.jsonl the first user message is the synthesised summary itself.
+		// Returning that here would poison callers that persist this value as
+		// the original first user message (e.g. usage-summary.json).
+		if msg.IsCompactionSummary {
+			continue
+		}
 		s := message.UserPromptPlainText(msg)
 		s = strings.ReplaceAll(s, "\r\n", " ")
 		s = strings.ReplaceAll(s, "\n", " ")

@@ -43,6 +43,8 @@
 - 修复类似 Markdown 的工具输出在折叠状态下隐藏行数计算不准确的问题。
 - 修复 headless idle 事件：Chord 现在只发送一个 `idle` envelope，不再额外发送重复的 ready `notification` envelope；gateway 应自行把 idle 状态渲染给用户。
 
+- 修复一组 compaction 后续行为问题：恢复/保留终端标题时，会更可靠地忽略被 compaction 摘要污染的首条消息；自动 compaction 在 continuation barrier apply 失败时不再重复发送 idle 转换；活动标题动画在恢复 spinner 驱动状态前也会始终重新同步 terminal-title ticker。
+
 ## 0.1.0 - 2026-04-29
 
 - Chord 首次公开发布。

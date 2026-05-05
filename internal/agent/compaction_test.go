@@ -485,7 +485,7 @@ func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 		Manual:         true,
 	}
 
-	if !a.applyReadyDraft() {
+	if ok, _ := a.applyReadyDraft(); !ok {
 		t.Fatal("applyReadyDraft() = false, want true")
 	}
 	if a.compactionState.running {
@@ -1464,6 +1464,70 @@ func TestCompactionInputBudgetUsesOneSixthOfContext(t *testing.T) {
 	}
 }
 
+func TestApplyReadyDraftAutoContinueFailureEmitsSingleIdleEvent(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue})
+	a.compactionState.headSplit = 1
+	a.compactionState.readyDraft = &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "summary", IsCompactionSummary: true}},
+		HeadSplit:      1,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		RelHistoryPath: "history-1.md",
+		SummaryMode:    "truncate_only",
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+	}
+	// Force applyCompactionDraft to fail by making the backup path a directory,
+	// so rewriteSessionAfterCompaction cannot rename main.jsonl over it.
+	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "before compaction"}); err != nil {
+		t.Fatalf("PersistMessage before compaction: %v", err)
+	}
+	backupPath := filepath.Join(a.sessionDir, "main.pre-compress-1.jsonl")
+	if err := os.MkdirAll(backupPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(backupPath): %v", err)
+	}
+
+	a.setIdleAndDrainPending()
+
+	idleCount := 0
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if _, ok := evt.(IdleEvent); ok {
+			idleCount++
+		}
+	}
+	if idleCount != 1 {
+		t.Fatalf("IdleEvent count = %d, want 1", idleCount)
+	}
+	if a.turn != nil {
+		t.Fatal("expected no active turn after failed auto-continue barrier apply")
+	}
+}
+
+func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummary(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	if a.usageLedger == nil {
+		t.Fatal("newTestMainAgent should initialize usageLedger")
+	}
+	if err := a.usageLedger.RewriteFirstUserMessageWithOriginal("[Context Summary]\n## Goal\n- compacted", ""); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginal polluted summary: %v", err)
+	}
+	original := "Original user request from disk"
+	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: original}); err != nil {
+		t.Fatalf("PersistMessage original user: %v", err)
+	}
+	if err := a.recovery.PersistMessage("main", message.Message{Role: "assistant", Content: "ack"}); err != nil {
+		t.Fatalf("PersistMessage assistant: %v", err)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != original {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want %q", got, original)
+	}
+}
+
 func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -1485,7 +1549,7 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	}
 
 	// Rewrite session with compaction summary as first message
-	_, err := a.rewriteSessionAfterCompaction(1, []message.Message{compactionMsg})
+	_, err := a.rewriteSessionAfterCompaction(1, []message.Message{compactionMsg}, "")
 	if err != nil {
 		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
 	}

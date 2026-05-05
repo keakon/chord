@@ -164,9 +164,14 @@ func (m *Model) syncTerminalTitleTickerWithCadence() tea.Cmd {
 		m.stopTerminalTitleTicker()
 		return nil
 	}
-	if m.terminalTitleTickRunning {
-		return nil
-	}
+	// Always bounce the ticker through stop+start rather than early-returning
+	// when it happens to already be running. The previous behaviour silently
+	// skipped a restart after activity toggled through a non-animated state
+	// (e.g. Compacting) and back, leaving the terminal title frozen on a
+	// static frame because the in-flight tick command had been stale-gated by
+	// the generation counter bump in stopTerminalTitleTicker. Stop+start is
+	// cheap (two OSC writes) and guarantees the next tick chain is live.
+	m.stopTerminalTitleTicker()
 	return m.startTerminalTitleTicker()
 }
 

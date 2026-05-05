@@ -35,11 +35,26 @@ func (m Model) hasActiveAnimation() bool {
 // startActiveAnimation routes activity-driven animation restarts through the
 // shared guarded entry point so viewport animation and terminal-title spinner
 // remain in sync.
+//
+// It always synchronises the terminal-title ticker first — previously this was
+// skipped whenever m.animRunning was still true from a previous activity, which
+// allowed the terminal title spinner to get stuck when activity transitioned
+// into and back out of a non-animated state (e.g. Streaming → Compacting →
+// Streaming). Syncing unconditionally is cheap and keeps the title ticker's
+// lifecycle strictly aligned with hasActiveAnimation().
 func (m *Model) startActiveAnimation() tea.Cmd {
-	if m.animRunning || !m.hasActiveAnimation() {
-		return m.syncTerminalTitleState()
+	titleCmd := m.syncTerminalTitleState()
+	if !m.hasActiveAnimation() {
+		return titleCmd
 	}
-	return m.startAnimTick()
+	if m.animRunning {
+		return titleCmd
+	}
+	tickCmd := m.startAnimTick()
+	if tickCmd == nil {
+		return titleCmd
+	}
+	return tea.Batch(titleCmd, tickCmd)
 }
 
 // stopActiveAnimationIfIdle immediately tears down both the visual animation

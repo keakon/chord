@@ -220,7 +220,58 @@ func nextCompactionIndex(sessionDir string) (int, error) {
 	return maxIndex + 1, nil
 }
 
-func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message) (string, error) {
+// captureOriginalFirstUserHint returns the best-known original first user
+// message. It must be called BEFORE the on-disk main.jsonl has been replaced
+// (otherwise FirstUserMessageFromFile would read the new compacted content).
+// It is also safe to call without holding the ctxmgr write lock — Snapshot()
+// is RLock-only.
+//
+// Order of preference:
+//  1. ledger's already-set OriginalFirstUserMessage (cheapest, authoritative)
+//  2. usage-summary.json's OriginalFirstUserMessage
+//  3. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
+//  4. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
+//  5. usage-summary.json's FirstUserMessage as a last resort for older sessions
+//     whose summary predates OriginalFirstUserMessage persistence
+//
+// Returns "" if no candidate is found; the caller may then fall back further.
+func (a *MainAgent) captureOriginalFirstUserHint() string {
+	if a == nil {
+		return ""
+	}
+	var usageSummaryFirstUser string
+	if a.usageLedger != nil {
+		if v := strings.TrimSpace(a.usageLedger.OriginalFirstUserMessage()); v != "" {
+			return v
+		}
+		if usageSummary, err := a.usageLedger.Summary(); err == nil && usageSummary != nil {
+			if v := strings.TrimSpace(usageSummary.OriginalFirstUserMessage); v != "" {
+				return v
+			}
+			usageSummaryFirstUser = strings.TrimSpace(usageSummary.FirstUserMessage)
+		}
+	}
+	mainPath := filepath.Join(a.sessionDir, "main.jsonl")
+	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
+		if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
+			if v := strings.TrimSpace(first); v != "" {
+				return v
+			}
+		}
+	}
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Role != "user" || msg.IsCompactionSummary {
+			continue
+		}
+		candidate := strings.TrimSpace(message.UserPromptPlainText(msg))
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return usageSummaryFirstUser
+}
+
+func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {
 	a.flushPersist()
 
 	mainPath := filepath.Join(a.sessionDir, "main.jsonl")
@@ -228,6 +279,45 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	hadMain := false
 	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
 		hadMain = true
+	}
+
+	// Use the hint captured before main.jsonl was rewritten (see
+	// applyCompactionDraftAsync). If the hint is empty for whatever reason,
+	// retry from the ledger / pre-rewrite file as a defence in depth — but
+	// note that we are inside ReplacePrefixAtomic's callback (write-locked
+	// against ctxmgr), so we MUST NOT call ctxMgr.Snapshot() here.
+	originalFirstUser := strings.TrimSpace(originalFirstUserHint)
+	if originalFirstUser == "" && a.usageLedger != nil {
+		if v := strings.TrimSpace(a.usageLedger.OriginalFirstUserMessage()); v != "" {
+			originalFirstUser = v
+		} else if usageSummary, err := a.usageLedger.Summary(); err == nil && usageSummary != nil {
+			if v := strings.TrimSpace(usageSummary.OriginalFirstUserMessage); v != "" {
+				originalFirstUser = v
+			}
+		}
+	}
+	if originalFirstUser == "" && hadMain {
+		if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
+			originalFirstUser = strings.TrimSpace(first)
+		}
+	}
+	if originalFirstUser == "" {
+		for _, msg := range messages {
+			if msg.Role != "user" || msg.IsCompactionSummary {
+				continue
+			}
+			if v := strings.TrimSpace(message.UserPromptPlainText(msg)); v != "" {
+				originalFirstUser = v
+				break
+			}
+		}
+	}
+	if originalFirstUser == "" && a.usageLedger != nil {
+		if usageSummary, err := a.usageLedger.Summary(); err == nil && usageSummary != nil {
+			if v := strings.TrimSpace(usageSummary.FirstUserMessage); v != "" {
+				originalFirstUser = v
+			}
+		}
 	}
 
 	if a.recovery != nil {
@@ -264,20 +354,22 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 				}
 			}
 		}
-		if err := a.usageLedger.RewriteFirstUserMessage(firstUser); err != nil {
+		if err := a.usageLedger.RewriteFirstUserMessageWithOriginal(firstUser, originalFirstUser); err != nil {
 			log.Warnf("failed to rewrite usage summary first user message after compaction error=%v", err)
 		} else {
-			originalFirstUser := ""
+			summaryOriginal := originalFirstUser
 			if usageSummary, sumErr := a.usageLedger.Summary(); sumErr == nil && usageSummary != nil {
-				originalFirstUser = strings.TrimSpace(usageSummary.OriginalFirstUserMessage)
+				if v := strings.TrimSpace(usageSummary.OriginalFirstUserMessage); v != "" {
+					summaryOriginal = v
+				}
 			}
 			a.updateSessionSummary(func(summary *SessionSummary) {
 				if summary == nil {
 					return
 				}
 				summary.FirstUserMessage = strings.TrimSpace(firstUser)
-				if originalFirstUser != "" {
-					summary.OriginalFirstUserMessage = originalFirstUser
+				if summaryOriginal != "" {
+					summary.OriginalFirstUserMessage = summaryOriginal
 				}
 			})
 		}

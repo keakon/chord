@@ -266,24 +266,24 @@ func (m *Model) tryContinue() tea.Cmd {
 	switch last.Role {
 	case "user", "tool":
 		m.agent.ContinueFromContext()
-		return m.startAnimTick()
+		return m.startActiveAnimation()
 	case "assistant":
 		if len(last.ToolCalls) > 0 {
 			m.agent.ContinueFromContext()
-			return m.startAnimTick()
+			return m.startActiveAnimation()
 		}
 		if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
 			m.agent.RemoveLastMessage()
 			m.agent.ContinueFromContext()
-			return m.startAnimTick()
+			return m.startActiveAnimation()
 		}
 		if last.StopReason == "stop" || last.StopReason == "end_turn" {
 			draft := queuedDraft{Content: "continue"}
 			m.finalizeTurn()
-			return tea.Batch(m.startAnimTick(), m.sendDraft(draft))
+			return tea.Batch(m.startActiveAnimation(), m.sendDraft(draft))
 		}
 		m.agent.ContinueFromContext()
-		return m.startAnimTick()
+		return m.startActiveAnimation()
 	}
 	return nil
 }

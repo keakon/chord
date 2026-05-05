@@ -45,6 +45,12 @@ const (
 	compactionResumeMainLLM        compactionContinuationKind = "main_llm"
 	compactionResumeLengthRecovery compactionContinuationKind = "length_recovery"
 	compactionResumeIdle           compactionContinuationKind = "idle"
+	// compactionResumeAutoContinue is used by threshold-based / usage-driven
+	// auto compaction: once the durable summary is applied, the agent should
+	// proactively start a new turn with the compacted context so the model
+	// can continue progressing the task without user prompting. Manual
+	// /compact still uses compactionResumeIdle (no auto continue).
+	compactionResumeAutoContinue compactionContinuationKind = "auto_continue"
 )
 
 // pendingMainLLMCall remembers which continuation should resume after async compaction.
@@ -221,7 +227,7 @@ func compactionFailureMatchesPending(payload *compactionFailure, pending *pendin
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
 	// Continuation barrier: apply any ready compaction draft first
 	if a.compactionState.readyDraft != nil {
-		a.applyReadyDraft()
+		_, _ = a.applyReadyDraft()
 		// Reset activity after applying
 		a.emitActivity("main", ActivityIdle, "")
 	}
@@ -258,7 +264,12 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	target.turnID = turnID
 	target.turnEpoch = a.currentTurnEpoch()
 	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{
-		kind:             compactionResumeIdle,
+		// Threshold-based compaction is automatic: once the durable summary
+		// applies we want the agent to keep working on the compacted context.
+		// resumePendingMainLLMAfterCompaction's compactionResumeAutoContinue
+		// branch is responsible for spawning the next LLM call when the turn
+		// has already finished.
+		kind:             compactionResumeAutoContinue,
 		turnID:           turnID,
 		turnEpoch:        target.turnEpoch,
 		agentErrSourceID: agentErrSourceID,
@@ -365,13 +376,23 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		// Defer application to the next continuation barrier.
 		a.compactionState.readyDraft = draft
 
-		// Store pending call info for resume after application
+		// Store pending call info for resume after application.
+		// Do NOT overwrite an existing oversize-suspend / main_llm continuation
+		// here: handleCompactionOversizeSuspend (and other paths that arm a
+		// stronger resume kind) may have already set it and the pending
+		// snapshot for this deferred branch is weaker. Preserving the stronger
+		// kind ensures the suspended LLM call gets resumed after apply.
 		if pending != nil {
-			a.compactionState.continuation = continuationPlan{
-				kind:             pending.continuation,
-				turnID:           pending.turnID,
-				turnEpoch:        pending.turnEpoch,
-				agentErrSourceID: pending.agentErrSourceID,
+			preserve := a.compactionState.oversizeSuspended ||
+				a.compactionState.continuation.kind == compactionResumeMainLLM ||
+				a.compactionState.continuation.kind == compactionResumeLengthRecovery
+			if !preserve {
+				a.compactionState.continuation = continuationPlan{
+					kind:             pending.continuation,
+					turnID:           pending.turnID,
+					turnEpoch:        pending.turnEpoch,
+					agentErrSourceID: pending.agentErrSourceID,
+				}
 			}
 		}
 
@@ -406,14 +427,14 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		a.drainPendingUserMessages()
 		return
 	}
-	a.resumePendingMainLLMAfterCompaction(pending, applySucceeded)
+	_ = a.resumePendingMainLLMAfterCompaction(pending, applySucceeded)
 }
 
 // applyReadyDraft applies the compaction draft that was waiting for the continuation barrier.
 // This is called from barrier events (beginMainLLMAfterPreparation, IdleEvent).
-func (a *MainAgent) applyReadyDraft() bool {
+func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier bool) {
 	if a.compactionState.readyDraft == nil {
-		return false
+		return false, false
 	}
 
 	draft := a.compactionState.readyDraft
@@ -422,12 +443,11 @@ func (a *MainAgent) applyReadyDraft() bool {
 	// Session switch check
 	if draft.Target.sessionEpoch != a.sessionEpoch {
 		log.Debug("compaction draft discarded due to session switch")
-		return false
+		return false, false
 	}
 
 	log.Infof("applying compaction draft at continuation barrier plan_id=%v has_pending_llm=%v", draft.PlanID, a.compactionState.continuation.kind != "")
 
-	applySucceeded := false
 	if err := a.applyCompactionDraft(draft); err != nil {
 		class := classifyCompactionFailure(err)
 		a.recordCompactionFailureAnalyticsEvent(err, class, "apply_barrier")
@@ -451,12 +471,12 @@ func (a *MainAgent) applyReadyDraft() bool {
 
 	// Resume pending call, if any.
 	if pendingCall != nil {
-		a.resumePendingMainLLMAfterCompaction(pendingCall, applySucceeded)
+		handledIdleBarrier = a.resumePendingMainLLMAfterCompaction(pendingCall, applySucceeded)
 	}
 
-	log.Infof("compaction draft applied at barrier plan_id=%v apply_succeeded=%v", draft.PlanID, applySucceeded)
+	log.Infof("compaction draft applied at barrier plan_id=%v apply_succeeded=%v handled_idle_barrier=%v", draft.PlanID, applySucceeded, handledIdleBarrier)
 
-	return applySucceeded
+	return applySucceeded, handledIdleBarrier
 }
 
 // handleCompactionOversizeSuspend saves an LLM call that was suspended because
@@ -478,33 +498,78 @@ func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	}
 	a.compactionState.oversizeSuspended = true
 }
-func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMCall, recheckGate bool) {
+func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMCall, recheckGate bool) (handledIdleBarrier bool) {
 	if pending == nil {
-		return
+		return false
 	}
 	if pending.sessionEpoch != a.sessionEpoch {
-		return
+		return false
 	}
 	if pending.continuation == compactionResumeIdle {
 		if a.turn != nil {
-			return
+			return false
 		}
 		if recheckGate {
 			a.maybeRunAutoCompaction()
 			if a.IsCompactionRunning() {
-				return
+				return true
 			}
 		}
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 		a.drainPendingUserMessages()
-		return
+		return true
+	}
+	if pending.continuation == compactionResumeAutoContinue {
+		// Automatic compaction just applied (or failed). Unlike the idle
+		// continuation we want the agent to keep going, because auto
+		// compaction was triggered by the agent itself with no fresh user
+		// input queued to wake the loop on its own.
+		if !recheckGate {
+			// Compaction failed/cancelled: surface idle state and let the
+			// user take over. Do not restart the loop on a failed snapshot.
+			a.emitActivity("main", ActivityIdle, "")
+			if a.turn == nil {
+				a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+				a.drainPendingUserMessages()
+				return true
+			}
+			return false
+		}
+		if a.turn != nil {
+			// A parallel LLM/tool turn is still running; its own finalize
+			// path (setIdleAndDrainPending) will invoke applyReadyDraft
+			// and re-enter this function once turn becomes nil. Just
+			// refresh the activity so the spinner reflects reality.
+			a.emitActivity("main", ActivityIdle, "")
+			return false
+		}
+		// Guard against competing automatic compaction re-arming.
+		a.maybeRunAutoCompaction()
+		if a.IsCompactionRunning() {
+			return true
+		}
+		// Spawn a fresh turn on the compacted context so the model keeps
+		// making progress. Mirrors handleContinueFromContext.
+		if a.loopState.Enabled {
+			a.loopState.State = LoopStateExecuting
+			a.emitLoopStateChanged()
+		}
+		a.newTurn()
+		a.processPendingUserMessagesBeforeLLMInTurn()
+		if a.turn == nil {
+			return true
+		}
+		turnID := a.turn.ID
+		turnCtx := a.turn.Ctx
+		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
+		return true
 	}
 	if pending.continuation == compactionResumeLengthRecovery {
 		if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
-			return
+			return false
 		}
 		if pending.sessionEpoch != a.sessionEpoch {
-			return
+			return false
 		}
 		if !recheckGate {
 			// Compaction failed: abort with guidance instead of retrying recovery.
@@ -522,52 +587,53 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			})
 			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
 			a.setIdleAndDrainPending()
-			return
+			return true
 		}
 		// Keep length-recovery continuation aligned with regular main continuation:
 		// merge deferred user input first so recovery request sees the same prompt surface.
 		a.processPendingUserMessagesBeforeLLMInTurn()
 		if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
-			return
+			return false
 		}
 		if pending.sessionEpoch != a.sessionEpoch {
-			return
+			return false
 		}
 		// Compaction succeeded: resume recovery request with single-tool constraint.
 		a.beginLengthRecoveryRetry(a.turn.LastTruncatedToolName, pending.turnID, a.turn.Ctx)
-		return
+		return true
 	}
 	if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
-		return
+		return false
 	}
 	// Deferred events may have queued additional user input for the same turn.
 	// Merge that input before deciding how to resume the main-agent continuation.
 	a.processPendingUserMessagesBeforeLLMInTurn()
 	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
-		return
+		return false
 	}
 	if pending.sessionEpoch != a.sessionEpoch {
-		return
+		return false
 	}
 	if pending.continuation == compactionResumeIdle {
 		if a.turn != nil {
-			return
+			return false
 		}
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 		a.drainPendingUserMessages()
-		return
+		return true
 	}
 	if recheckGate {
 		// Queued user input or reports can still change the prompt surface after a
 		// successful compaction commit. Re-enter the same pre-request compaction gate so
 		// any newly armed automatic request is still honored on resume.
 		a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
-		return
+		return true
 	}
 	// If compaction itself failed, do not immediately retry the same gate; resume
 	// the pending continuation directly to avoid an infinite compaction loop.
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, a.ctxMgr.Snapshot(), pending.agentErrSourceID)
+	return true
 }
 
 func (a *MainAgent) handleCompactionFailed(evt Event) {
@@ -629,5 +695,5 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		a.drainPendingUserMessages()
 		return
 	}
-	a.resumePendingMainLLMAfterCompaction(pending, false)
+	_ = a.resumePendingMainLLMAfterCompaction(pending, false)
 }

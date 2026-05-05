@@ -138,7 +138,18 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 // RewriteFirstUserMessage replaces the cached first-user preview and updates
 // usage-summary.json so session lists stay in sync after session rewrites.
 func (l *UsageLedger) RewriteFirstUserMessage(content string) error {
+	return l.RewriteFirstUserMessageWithOriginal(content, "")
+}
+
+// RewriteFirstUserMessageWithOriginal behaves like RewriteFirstUserMessage but
+// allows the caller to seed OriginalFirstUserMessage when neither the ledger
+// nor the on-disk summary has it set yet. This is used by the compaction
+// rewrite path where the original first user message must be captured before
+// main.jsonl is replaced with the compaction summary; otherwise the fallback
+// would read the summary itself.
+func (l *UsageLedger) RewriteFirstUserMessageWithOriginal(content, originalHint string) error {
 	preview := usageFirstUserPreview(content)
+	originalPreview := usageFirstUserPreview(originalHint)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -149,6 +160,9 @@ func (l *UsageLedger) RewriteFirstUserMessage(content string) error {
 	}
 	if l.originalFirstUserMessage == "" && summary != nil {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
+	}
+	if l.originalFirstUserMessage == "" && originalPreview != "" {
+		l.originalFirstUserMessage = originalPreview
 	}
 	if l.originalFirstUserMessage == "" {
 		l.originalFirstUserMessage = l.firstUserMessageLocked()
@@ -718,6 +732,12 @@ func (l *UsageLedger) firstUserMessageLocked() string {
 			break
 		}
 		if msg.Role != "user" {
+			continue
+		}
+		// Skip compaction summary messages: when called after a compaction has
+		// already rewritten main.jsonl, the first user message is the summary
+		// itself; using it here would poison OriginalFirstUserMessage.
+		if msg.IsCompactionSummary {
 			continue
 		}
 		preview := usageFirstUserPreview(message.UserPromptPlainText(msg))
