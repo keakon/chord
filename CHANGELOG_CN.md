@@ -44,6 +44,7 @@
 - 修复 headless idle 事件：Chord 现在只发送一个 `idle` envelope，不再额外发送重复的 ready `notification` envelope；gateway 应自行把 idle 状态渲染给用户。
 
 - 修复一组 compaction 后续行为问题：恢复/保留终端标题时，会更可靠地忽略被 compaction 摘要污染的首条消息；自动 compaction 在 continuation barrier apply 失败时不再重复发送 idle 转换；活动标题动画在恢复 spinner 驱动状态前也会始终重新同步 terminal-title ticker。
+- 调整自动（usage / 阈值触发）compaction 的续期行为：durable summary 应用完成后，agent 现在会主动在压缩后的上下文上启动新的 LLM turn 继续推进任务，而不是回到 idle 等待用户再次输入。手动 `/compact` 仍然返回 idle。loop 模式会在自动续 turn 时同步推进 loop state。
 - 改进 compaction 后会话列表预览/终端标题的准确性：不再通过文本内容推断 compaction 摘要，而是在 `usage-summary.json` 和 session summary 中持久化显式元数据（`*_is_compaction_summary` 标志）并据此决策。不兼容变更：旧版本创建/压缩的会话可能仍会显示被污染的标题/预览，直到用本版本再次进行 compaction。
 
 ## 0.1.0 - 2026-04-29

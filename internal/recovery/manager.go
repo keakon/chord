@@ -409,7 +409,7 @@ type SessionInfo struct {
 	FirstUserMessage                            string    // preview of first user message (truncated, newlines replaced)
 	FirstUserMessageIsCompactionSummary         bool      // true when FirstUserMessage is the synthetic compaction summary
 	OriginalFirstUserMessage                    string    // original first user message, preserved across compaction
-	OriginalFirstUserMessageIsCompactionSummary bool      // true only for explicitly marked polluted summaries
+	OriginalFirstUserMessageIsCompactionSummary bool      // legacy-only: true when older sessions persisted a compaction summary as the original; current code always writes false
 	ForkedFrom                                  string    // parent session ID when this session was created via fork
 	Locked                                      bool      // true when another live Chord process currently holds session.lock
 }

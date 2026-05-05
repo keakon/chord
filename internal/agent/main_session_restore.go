@@ -975,7 +975,7 @@ type SessionSummary struct {
 	FirstUserMessage                            string
 	FirstUserMessageIsCompactionSummary         bool
 	OriginalFirstUserMessage                    string // preserved across compaction
-	OriginalFirstUserMessageIsCompactionSummary bool
+	OriginalFirstUserMessageIsCompactionSummary bool   // legacy-only: see recovery.SessionInfo
 	ForkedFrom                                  string
 	Locked                                      bool
 }

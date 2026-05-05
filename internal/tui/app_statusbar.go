@@ -589,9 +589,9 @@ func (m *Model) renderStatusBar() string {
 		m.statusBarSyntheticConnectingLogKey = ""
 		cacheActivity = true
 		if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
-			activityKey = statusBarActivityKey("idle", availableCenter, compactIdle, ts, agent.AgentActivityEvent{}, time.Time{})
+			activityKey = statusBarActivityKey("idle", availableCenter, compactIdle, ts, agent.AgentActivityEvent{})
 		} else {
-			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{}, time.Time{})
+			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 		}
 	case m.isFocusedAgentBusy():
 		// inflightDraft makes us "busy" before AgentActivityEvent arrives; if the
@@ -615,9 +615,9 @@ func (m *Model) renderStatusBar() string {
 		m.statusBarSyntheticConnectingLogKey = ""
 		cacheActivity = true
 		if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
-			activityKey = statusBarActivityKey("idle", availableCenter, compactIdle, ts, agent.AgentActivityEvent{}, time.Time{})
+			activityKey = statusBarActivityKey("idle", availableCenter, compactIdle, ts, agent.AgentActivityEvent{})
 		} else {
-			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{}, time.Time{})
+			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 		}
 	}
 	if cacheActivity {
@@ -882,7 +882,7 @@ func statusBarLeftPillsKey(modeText, viewingLabel, viewingColor string, extraPil
 	return b.String()
 }
 
-func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, anchorAt time.Time, activity agent.AgentActivityEvent, pendingLocalShellStartedAt time.Time) string {
+func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, anchorAt time.Time, activity agent.AgentActivityEvent) string {
 	var b strings.Builder
 	b.Grow(96)
 	b.WriteString(mode)
@@ -904,10 +904,6 @@ func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, an
 	b.WriteString(string(activity.Type))
 	b.WriteByte('|')
 	b.WriteString(activity.Detail)
-	b.WriteByte('|')
-	if !pendingLocalShellStartedAt.IsZero() {
-		b.WriteString(strconv.FormatInt(pendingLocalShellStartedAt.Unix(), 10))
-	}
 	return b.String()
 }
 
