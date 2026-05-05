@@ -1754,6 +1754,73 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	}
 }
 
+func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	args := `{"todos":[{"id":"1","content":"a","status":"pending"}]}`
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-todo-static-queued-1",
+		Name:     "TodoWrite",
+		AgentID:  "",
+		ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "call-todo-static-queued-1",
+		Name:              "TodoWrite",
+		AgentID:           "",
+		ArgsJSON:          args,
+		ArgsStreamingDone: true,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-todo-static-queued-1")
+	if !ok {
+		t.Fatal("expected todo tool block")
+	}
+	if !block.toolExecutionIsQueued() {
+		t.Fatalf("expected queued tool state, got %q", block.ToolExecutionState)
+	}
+
+	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	if joinedA != joinedB {
+		t.Fatalf("queued todo card should not animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	}
+}
+
+func TestTodoWriteCompletedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	args := `{"todos":[{"id":"1","content":"a","status":"completed"}]}`
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-todo-static-done-1",
+		Name:     "TodoWrite",
+		AgentID:  "",
+		ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-todo-static-done-1",
+		Name:     "TodoWrite",
+		ArgsJSON: args,
+		Result:   "- [x] 1. a\n",
+		Status:   agent.ToolResultStatusSuccess,
+		AgentID:  "",
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-todo-static-done-1")
+	if !ok {
+		t.Fatal("expected todo tool block")
+	}
+	if !block.ResultDone {
+		t.Fatal("expected todo tool block to be marked done")
+	}
+
+	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	if joinedA != joinedB {
+		t.Fatalf("completed todo card should not animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	}
+}
+
 func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
@@ -1831,6 +1898,35 @@ func TestToolCallUpdateEventCreatesMissingToolBlock(t *testing.T) {
 	}
 	if block.ToolProgress == nil {
 		t.Fatal("expected streaming arg progress on created tool block")
+	}
+}
+
+func TestToolCallUpdateEventArgsStreamingDoneCreatesQueuedNonAnimatingToolBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	args := `{"todos":[{"id":"1","content":"a","status":"pending"}]}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "call-missing-update-done-1",
+		Name:              "TodoWrite",
+		AgentID:           "",
+		ArgsJSON:          args,
+		ArgsStreamingDone: true,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-missing-update-done-1")
+	if !ok {
+		t.Fatal("expected ToolCallUpdateEvent to create a missing tool block")
+	}
+	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
+		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
+	}
+	if block.ToolProgress != nil {
+		t.Fatalf("expected no transient arg progress on queued block, got %+v", *block.ToolProgress)
+	}
+	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	if joinedA != joinedB {
+		t.Fatalf("queued block created from final arg update should not animate\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
 }
 

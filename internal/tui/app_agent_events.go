@@ -679,6 +679,9 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				delete(m.toolArgRenderState, evt.ID)
 				if block != nil {
 					block.StartedAt = time.Time{}
+					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
+						block.ToolExecutionState = agent.ToolCallExecutionStateQueued
+					}
 					if block.ToolProgress != nil {
 						block.ToolProgress = nil
 					}
