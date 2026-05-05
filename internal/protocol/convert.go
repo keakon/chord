@@ -188,11 +188,13 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		}
 		for _, s := range e.Sessions {
 			payload.Sessions = append(payload.Sessions, SessionSummaryPayload{
-				ID:                       s.ID,
-				LastModTime:              s.LastModTime,
-				FirstUserMessage:         s.FirstUserMessage,
-				OriginalFirstUserMessage: s.OriginalFirstUserMessage,
-				ForkedFrom:               s.ForkedFrom,
+				ID:                                  s.ID,
+				LastModTime:                         s.LastModTime,
+				FirstUserMessage:                    s.FirstUserMessage,
+				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
+				OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
+				OriginalFirstUserMessageIsCompactionSummary: s.OriginalFirstUserMessageIsCompactionSummary,
+				ForkedFrom: s.ForkedFrom,
 			})
 		}
 		env, err = NewEnvelope(TypeSessionSelectRequest, payload)
@@ -410,10 +412,13 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 		list := make([]agent.SessionSummary, 0, len(p.Sessions))
 		for _, s := range p.Sessions {
 			list = append(list, agent.SessionSummary{
-				ID:               s.ID,
-				LastModTime:      s.LastModTime,
-				FirstUserMessage: s.FirstUserMessage,
-				ForkedFrom:       s.ForkedFrom,
+				ID:                                  s.ID,
+				LastModTime:                         s.LastModTime,
+				FirstUserMessage:                    s.FirstUserMessage,
+				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
+				OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
+				OriginalFirstUserMessageIsCompactionSummary: s.OriginalFirstUserMessageIsCompactionSummary,
+				ForkedFrom: s.ForkedFrom,
 			})
 		}
 		return agent.SessionSelectEvent{Sessions: list}, nil

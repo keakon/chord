@@ -121,6 +121,11 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 			}
 			if summary.FirstUserMessage == "" {
 				summary.FirstUserMessage = message.UserPromptPlainText(userMsg)
+				summary.FirstUserMessageIsCompactionSummary = userMsg.IsCompactionSummary
+			}
+			if summary.OriginalFirstUserMessage == "" && !userMsg.IsCompactionSummary {
+				summary.OriginalFirstUserMessage = message.UserPromptPlainText(userMsg)
+				summary.OriginalFirstUserMessageIsCompactionSummary = false
 			}
 		})
 	}
@@ -405,11 +410,16 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	// again here.
 	handledIdleBarrier := false
 	if a.compactionState.readyDraft != nil {
-		_, handledIdleBarrier = a.applyReadyDraft()
-		// Always reset activity so the TUI spinner never stays on Compacting,
-		// regardless of apply success. Previously only the success branch did
-		// this and a failed apply would leave activity stuck at Compacting.
-		a.emitActivity("main", ActivityIdle, "")
+		var applySucceeded bool
+		applySucceeded, handledIdleBarrier = a.applyReadyDraft()
+		if !handledIdleBarrier {
+			// No continuation took ownership of the idle barrier, so make sure a
+			// failed apply does not leave the TUI stuck on Compacting. Successful
+			// unhandled applies can fall through to the normal idle path.
+			if !applySucceeded {
+				a.emitActivity("main", ActivityIdle, "")
+			}
+		}
 		// Successful auto-continue resumes by starting a new turn before the
 		// outer idle path runs; failed auto-continue and manual idle continuations
 		// may also emit IdleEvent/drain inside resumePendingMainLLMAfterCompaction.

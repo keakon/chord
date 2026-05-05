@@ -304,11 +304,13 @@ type QuestionRequestPayload struct {
 
 // SessionSummaryPayload is one session entry for the session picker (TypeSessionSelectRequest).
 type SessionSummaryPayload struct {
-	ID                       string    `json:"id"`
-	LastModTime              time.Time `json:"last_mod_time"`
-	FirstUserMessage         string    `json:"first_user_message"`
-	OriginalFirstUserMessage string    `json:"original_first_user_message,omitempty"`
-	ForkedFrom               string    `json:"forked_from,omitempty"`
+	ID                                          string    `json:"id"`
+	LastModTime                                 time.Time `json:"last_mod_time"`
+	FirstUserMessage                            string    `json:"first_user_message"`
+	FirstUserMessageIsCompactionSummary         bool      `json:"first_user_message_is_compaction_summary,omitempty"`
+	OriginalFirstUserMessage                    string    `json:"original_first_user_message,omitempty"`
+	OriginalFirstUserMessageIsCompactionSummary bool      `json:"original_first_user_message_is_compaction_summary,omitempty"`
+	ForkedFrom                                  string    `json:"forked_from,omitempty"`
 }
 
 // SessionSelectRequestPayload is the payload for TypeSessionSelectRequest when the server sends the list.

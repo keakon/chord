@@ -403,13 +403,15 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 // display (e.g. session picker). LastModTime is the mtime of main.jsonl;
 // FirstUserMessage is a short preview of the first user message.
 type SessionInfo struct {
-	ID                       string    // directory name (e.g. Unix millisecond timestamp)
-	Path                     string    // full path to session directory
-	LastModTime              time.Time // last write to main.jsonl
-	FirstUserMessage         string    // preview of first user message (truncated, newlines replaced)
-	OriginalFirstUserMessage string    // original first user message, preserved across compaction
-	ForkedFrom               string    // parent session ID when this session was created via fork
-	Locked                   bool      // true when another live Chord process currently holds session.lock
+	ID                                          string    // directory name (e.g. Unix millisecond timestamp)
+	Path                                        string    // full path to session directory
+	LastModTime                                 time.Time // last write to main.jsonl
+	FirstUserMessage                            string    // preview of first user message (truncated, newlines replaced)
+	FirstUserMessageIsCompactionSummary         bool      // true when FirstUserMessage is the synthetic compaction summary
+	OriginalFirstUserMessage                    string    // original first user message, preserved across compaction
+	OriginalFirstUserMessageIsCompactionSummary bool      // true only for explicitly marked polluted summaries
+	ForkedFrom                                  string    // parent session ID when this session was created via fork
+	Locked                                      bool      // true when another live Chord process currently holds session.lock
 }
 
 // maxFirstUserMessagePreview is the max rune count for FirstUserMessage in SessionInfo.
@@ -449,20 +451,23 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		}
 		lastModTime := info.ModTime()
 		firstUser, _ := firstUserMessageFromFile(mainPath)
+		firstUserIsCompactionSummary := false
 		originalFirstUser := ""
+		originalFirstUserIsCompactionSummary := false
 		if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
 			if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
 				lastModTime = summary.LastUpdatedAt
 			}
 			if summary.FirstUserMessage != "" {
 				firstUser = summary.FirstUserMessage
+				firstUserIsCompactionSummary = summary.FirstUserMessageIsCompactionSummary
 			}
 			if summary.OriginalFirstUserMessage != "" {
 				originalFirstUser = summary.OriginalFirstUserMessage
+				originalFirstUserIsCompactionSummary = summary.OriginalFirstUserMessageIsCompactionSummary
 			}
 		}
-		if originalFirstUser == "" {
-			// Fallback: use current first user message (may be compaction summary).
+		if originalFirstUser == "" && !firstUserIsCompactionSummary {
 			originalFirstUser = firstUser
 		}
 		locked, err := sessionDirLockedByLiveOwner(sessionPath)
@@ -476,13 +481,15 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			forkedFrom = meta.ForkedFrom
 		}
 		list = append(list, SessionInfo{
-			ID:                       entry.Name(),
-			Path:                     sessionPath,
-			LastModTime:              lastModTime,
-			FirstUserMessage:         firstUser,
-			OriginalFirstUserMessage: originalFirstUser,
-			ForkedFrom:               forkedFrom,
-			Locked:                   locked,
+			ID:                                  entry.Name(),
+			Path:                                sessionPath,
+			LastModTime:                         lastModTime,
+			FirstUserMessage:                    firstUser,
+			FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
+			OriginalFirstUserMessage:            originalFirstUser,
+			OriginalFirstUserMessageIsCompactionSummary: originalFirstUserIsCompactionSummary,
+			ForkedFrom: forkedFrom,
+			Locked:     locked,
 		})
 	}
 	return list, nil
@@ -545,19 +552,23 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 	}
 	lastModTime := info.ModTime()
 	firstUser, _ := firstUserMessageFromFile(mainPath)
+	firstUserIsCompactionSummary := false
 	originalFirstUser := ""
+	originalFirstUserIsCompactionSummary := false
 	if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
 		if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
 			lastModTime = summary.LastUpdatedAt
 		}
 		if summary.FirstUserMessage != "" {
 			firstUser = summary.FirstUserMessage
+			firstUserIsCompactionSummary = summary.FirstUserMessageIsCompactionSummary
 		}
 		if summary.OriginalFirstUserMessage != "" {
 			originalFirstUser = summary.OriginalFirstUserMessage
+			originalFirstUserIsCompactionSummary = summary.OriginalFirstUserMessageIsCompactionSummary
 		}
 	}
-	if originalFirstUser == "" {
+	if originalFirstUser == "" && !firstUserIsCompactionSummary {
 		originalFirstUser = firstUser
 	}
 	locked, err := sessionDirLockedByLiveOwner(sessionPath)
@@ -569,13 +580,15 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		forkedFrom = meta.ForkedFrom
 	}
 	return &SessionInfo{
-		ID:                       filepath.Base(sessionPath),
-		Path:                     sessionPath,
-		LastModTime:              lastModTime,
-		FirstUserMessage:         firstUser,
-		OriginalFirstUserMessage: originalFirstUser,
-		ForkedFrom:               forkedFrom,
-		Locked:                   locked,
+		ID:                                  filepath.Base(sessionPath),
+		Path:                                sessionPath,
+		LastModTime:                         lastModTime,
+		FirstUserMessage:                    firstUser,
+		FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
+		OriginalFirstUserMessage:            originalFirstUser,
+		OriginalFirstUserMessageIsCompactionSummary: originalFirstUserIsCompactionSummary,
+		ForkedFrom: forkedFrom,
+		Locked:     locked,
 	}
 }
 

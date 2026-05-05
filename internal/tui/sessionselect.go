@@ -381,11 +381,21 @@ func (m *Model) sessionSelectMaxVisible() int {
 	return maxVisible
 }
 
-func sessionSelectPreviewText(s agent.SessionSummary) string {
-	preview := s.OriginalFirstUserMessage
-	if preview == "" {
-		preview = s.FirstUserMessage
+func sessionSummaryPreview(summary agent.SessionSummary) string {
+	if summary.OriginalFirstUserMessage != "" && !summary.OriginalFirstUserMessageIsCompactionSummary {
+		return summary.OriginalFirstUserMessage
 	}
+	if summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {
+		return summary.FirstUserMessage
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		return summary.OriginalFirstUserMessage
+	}
+	return summary.FirstUserMessage
+}
+
+func sessionSelectPreviewText(s agent.SessionSummary) string {
+	preview := sessionSummaryPreview(s)
 	if preview == "" {
 		preview = "(no first message)"
 	}

@@ -57,26 +57,28 @@ type UsageAggregate struct {
 
 // SessionUsageSummary is the materialized session-level view of usage.jsonl.
 type SessionUsageSummary struct {
-	Version                  int                                   `json:"version"`
-	SessionID                string                                `json:"session_id"`
-	ProjectID                string                                `json:"project_id,omitempty"`
-	ProjectPath              string                                `json:"project_path,omitempty"`
-	CreatedAt                time.Time                             `json:"created_at,omitempty"`
-	LastUpdatedAt            time.Time                             `json:"last_updated_at,omitempty"`
-	LastEventID              string                                `json:"last_event_id,omitempty"`
-	EventCount               int64                                 `json:"event_count,omitempty"`
-	Timezone                 string                                `json:"timezone,omitempty"`
-	FirstUserMessage         string                                `json:"first_user_message,omitempty"`
-	OriginalFirstUserMessage string                                `json:"original_first_user_message,omitempty"`
-	Status                   string                                `json:"status,omitempty"`
-	UsageTotal               UsageAggregate                        `json:"usage_total"`
-	ByProvider               map[string]*UsageAggregate            `json:"by_provider,omitempty"`
-	ByModelRef               map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
-	ByAgent                  map[string]*UsageAggregate            `json:"by_agent,omitempty"`
-	ByPurpose                map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
-	ByDate                   map[string]*UsageAggregate            `json:"by_date,omitempty"`
-	ByDateModelRef           map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
-	ByDateAgent              map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
+	Version                                     int                                   `json:"version"`
+	SessionID                                   string                                `json:"session_id"`
+	ProjectID                                   string                                `json:"project_id,omitempty"`
+	ProjectPath                                 string                                `json:"project_path,omitempty"`
+	CreatedAt                                   time.Time                             `json:"created_at,omitempty"`
+	LastUpdatedAt                               time.Time                             `json:"last_updated_at,omitempty"`
+	LastEventID                                 string                                `json:"last_event_id,omitempty"`
+	EventCount                                  int64                                 `json:"event_count,omitempty"`
+	Timezone                                    string                                `json:"timezone,omitempty"`
+	FirstUserMessage                            string                                `json:"first_user_message,omitempty"`
+	FirstUserMessageIsCompactionSummary         bool                                  `json:"first_user_message_is_compaction_summary,omitempty"`
+	OriginalFirstUserMessage                    string                                `json:"original_first_user_message,omitempty"`
+	OriginalFirstUserMessageIsCompactionSummary bool                                  `json:"original_first_user_message_is_compaction_summary,omitempty"`
+	Status                                      string                                `json:"status,omitempty"`
+	UsageTotal                                  UsageAggregate                        `json:"usage_total"`
+	ByProvider                                  map[string]*UsageAggregate            `json:"by_provider,omitempty"`
+	ByModelRef                                  map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
+	ByAgent                                     map[string]*UsageAggregate            `json:"by_agent,omitempty"`
+	ByPurpose                                   map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
+	ByDate                                      map[string]*UsageAggregate            `json:"by_date,omitempty"`
+	ByDateModelRef                              map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
+	ByDateAgent                                 map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
 }
 
 // UsageLedger manages append-only usage.jsonl and usage-summary.json.
@@ -138,16 +140,21 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 // RewriteFirstUserMessage replaces the cached first-user preview and updates
 // usage-summary.json so session lists stay in sync after session rewrites.
 func (l *UsageLedger) RewriteFirstUserMessage(content string) error {
-	return l.RewriteFirstUserMessageWithOriginal(content, "")
+	return l.rewriteFirstUserMessage(content, "", false)
 }
 
-// RewriteFirstUserMessageWithOriginal behaves like RewriteFirstUserMessage but
-// allows the caller to seed OriginalFirstUserMessage when neither the ledger
-// nor the on-disk summary has it set yet. This is used by the compaction
-// rewrite path where the original first user message must be captured before
-// main.jsonl is replaced with the compaction summary; otherwise the fallback
-// would read the summary itself.
-func (l *UsageLedger) RewriteFirstUserMessageWithOriginal(content, originalHint string) error {
+// RewriteFirstUserMessageWithOriginalForCompaction behaves like
+// RewriteFirstUserMessage but marks the rewritten first-user preview as a
+// synthetic compaction summary and allows the caller to seed
+// OriginalFirstUserMessage when neither the ledger nor the on-disk summary has
+// it set yet. This is used by the compaction rewrite path where the original
+// first user message must be captured before main.jsonl is replaced with the
+// compaction summary; otherwise the fallback would read the summary itself.
+func (l *UsageLedger) RewriteFirstUserMessageWithOriginalForCompaction(content, originalHint string) error {
+	return l.rewriteFirstUserMessage(content, originalHint, true)
+}
+
+func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firstUserIsCompactionSummary bool) error {
 	preview := usageFirstUserPreview(content)
 	originalPreview := usageFirstUserPreview(originalHint)
 
@@ -158,7 +165,7 @@ func (l *UsageLedger) RewriteFirstUserMessageWithOriginal(content, originalHint 
 	if err != nil {
 		return err
 	}
-	if l.originalFirstUserMessage == "" && summary != nil {
+	if l.originalFirstUserMessage == "" && summary != nil && !summary.OriginalFirstUserMessageIsCompactionSummary {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
 	}
 	if l.originalFirstUserMessage == "" && originalPreview != "" {
@@ -169,8 +176,10 @@ func (l *UsageLedger) RewriteFirstUserMessageWithOriginal(content, originalHint 
 	}
 	l.firstUserMessage = preview
 	summary.FirstUserMessage = preview
-	if summary.OriginalFirstUserMessage == "" {
+	summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
+	if summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessageIsCompactionSummary {
 		summary.OriginalFirstUserMessage = l.originalFirstUserMessage
+		summary.OriginalFirstUserMessageIsCompactionSummary = false
 	}
 	return l.writeSummaryLocked(summary)
 }

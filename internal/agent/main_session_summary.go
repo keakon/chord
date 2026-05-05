@@ -85,12 +85,14 @@ func buildSessionSummaryForDir(sessionDir string, locked bool) *SessionSummary {
 			}
 			if usageSummary.FirstUserMessage != "" {
 				summary.FirstUserMessage = usageSummary.FirstUserMessage
+				summary.FirstUserMessageIsCompactionSummary = usageSummary.FirstUserMessageIsCompactionSummary
 			}
 			if usageSummary.OriginalFirstUserMessage != "" {
 				summary.OriginalFirstUserMessage = usageSummary.OriginalFirstUserMessage
+				summary.OriginalFirstUserMessageIsCompactionSummary = usageSummary.OriginalFirstUserMessageIsCompactionSummary
 			}
 		}
-		if summary.OriginalFirstUserMessage == "" {
+		if summary.OriginalFirstUserMessage == "" && !summary.FirstUserMessageIsCompactionSummary {
 			summary.OriginalFirstUserMessage = summary.FirstUserMessage
 		}
 	}

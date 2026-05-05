@@ -354,7 +354,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 				}
 			}
 		}
-		if err := a.usageLedger.RewriteFirstUserMessageWithOriginal(firstUser, originalFirstUser); err != nil {
+		if err := a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(firstUser, originalFirstUser); err != nil {
 			log.Warnf("failed to rewrite usage summary first user message after compaction error=%v", err)
 		} else {
 			summaryOriginal := originalFirstUser
@@ -368,8 +368,10 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 					return
 				}
 				summary.FirstUserMessage = strings.TrimSpace(firstUser)
+				summary.FirstUserMessageIsCompactionSummary = true
 				if summaryOriginal != "" {
 					summary.OriginalFirstUserMessage = summaryOriginal
+					summary.OriginalFirstUserMessageIsCompactionSummary = false
 				}
 			})
 		}

@@ -105,17 +105,17 @@ func TestRewriteFirstUserMessagePreservesOriginalFirstUserMessage(t *testing.T) 
 	}
 }
 
-func TestRewriteFirstUserMessageWithOriginalSeedsHintWhenNothingKnown(t *testing.T) {
+func TestRewriteFirstUserMessageWithOriginalForCompactionSeedsHintWhenNothingKnown(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")
 	// Note: SetFirstUserMessage is intentionally NOT called — this mirrors
-	// the legacy / brand-new-session case where the ledger has no cached
-	// original first user message yet. main.jsonl is also absent.
-	if err := ledger.RewriteFirstUserMessageWithOriginal(
+	// the brand-new-session case where the ledger has no cached original first
+	// user message yet. main.jsonl is also absent.
+	if err := ledger.RewriteFirstUserMessageWithOriginalForCompaction(
 		"[Context Summary]\n## Goal\n…",
 		"hello world", // hint captured by the caller before main.jsonl rewrite
 	); err != nil {
-		t.Fatalf("RewriteFirstUserMessageWithOriginal: %v", err)
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction: %v", err)
 	}
 	summary, err := ledger.Summary()
 	if err != nil {
@@ -124,8 +124,14 @@ func TestRewriteFirstUserMessageWithOriginalSeedsHintWhenNothingKnown(t *testing
 	if summary.FirstUserMessage == "" {
 		t.Fatal("FirstUserMessage is empty")
 	}
+	if !summary.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = false, want true")
+	}
 	if summary.OriginalFirstUserMessage != "hello world" {
 		t.Fatalf("OriginalFirstUserMessage = %q, want %q", summary.OriginalFirstUserMessage, "hello world")
+	}
+	if summary.OriginalFirstUserMessageIsCompactionSummary {
+		t.Fatal("OriginalFirstUserMessageIsCompactionSummary = true, want false")
 	}
 }
 

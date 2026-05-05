@@ -1512,8 +1512,8 @@ func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummar
 	if a.usageLedger == nil {
 		t.Fatal("newTestMainAgent should initialize usageLedger")
 	}
-	if err := a.usageLedger.RewriteFirstUserMessageWithOriginal("[Context Summary]\n## Goal\n- compacted", ""); err != nil {
-		t.Fatalf("RewriteFirstUserMessageWithOriginal polluted summary: %v", err)
+	if err := a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction("[Context Summary]\n## Goal\n- compacted", ""); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction polluted summary: %v", err)
 	}
 	original := "Original user request from disk"
 	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: original}); err != nil {
@@ -1565,5 +1565,11 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	// FirstUserMessage should be updated to reflect compaction summary
 	if summary.FirstUserMessage == "" {
 		t.Error("FirstUserMessage should not be empty after compaction")
+	}
+	if !summary.FirstUserMessageIsCompactionSummary {
+		t.Error("FirstUserMessageIsCompactionSummary = false, want true after compaction")
+	}
+	if summary.OriginalFirstUserMessageIsCompactionSummary {
+		t.Error("OriginalFirstUserMessageIsCompactionSummary = true, want false after compaction")
 	}
 }

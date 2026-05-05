@@ -225,11 +225,22 @@ func compactionFailureMatchesPending(payload *compactionFailure, pending *pendin
 // the event-loop goroutine after any context mutations for this round
 // (e.g. processPendingUserMessagesBeforeLLMInTurn).
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
-	// Continuation barrier: apply any ready compaction draft first
+	// Continuation barrier: apply any ready compaction draft first. When the
+	// apply path resumes a saved continuation (handled=true), it owns control
+	// flow from here; otherwise this fresh pre-request path should continue on
+	// the compacted context. Failed applies fall back to idle rather than running
+	// the same stale gate again.
 	if a.compactionState.readyDraft != nil {
-		_, _ = a.applyReadyDraft()
-		// Reset activity after applying
-		a.emitActivity("main", ActivityIdle, "")
+		applySucceeded, handled := a.applyReadyDraft()
+		if handled {
+			return
+		}
+		if !applySucceeded {
+			a.emitActivity("main", ActivityIdle, "")
+			a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+			a.drainPendingUserMessages()
+			return
+		}
 	}
 
 	snapshot := a.ctxMgr.Snapshot()

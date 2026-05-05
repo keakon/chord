@@ -44,6 +44,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed headless idle events so Chord emits a single `idle` envelope instead of also sending a duplicate ready `notification` envelope; gateways should render the idle state themselves.
 
 - Fixed compaction follow-up behavior in three related cases: preserved/restored terminal titles now ignore compaction-summary pollution more reliably across old and newly compacted sessions; auto-compaction continuation no longer emits duplicate idle transitions when a barrier apply fails; and active title animation now always re-synchronizes the terminal-title ticker before resuming spinner-driven activity.
+- Improved session preview/title correctness after compaction by persisting explicit metadata in `usage-summary.json` and session summaries (`*_is_compaction_summary` flags) instead of inferring compaction from text content. Breaking change: sessions created/compacted by older versions may still show polluted titles/previews until they are compacted again with this version.
 
 ## 0.1.0 - 2026-04-29
 

@@ -54,6 +54,32 @@ func newSessionSelectTestModel(options []agent.SessionSummary) Model {
 	return m
 }
 
+func TestSessionSummaryPreviewUsesExplicitCompactionMetadata(t *testing.T) {
+	userTypedHeader := agent.SessionSummary{
+		OriginalFirstUserMessage: "[Context Summary]\n## Goal\nuser typed this",
+	}
+	if got := sessionSelectPreviewText(userTypedHeader); got != "[Context Summary] ## Goal user typed this" {
+		t.Fatalf("preview for user-authored header = %q", got)
+	}
+
+	pollutedOriginal := agent.SessionSummary{
+		FirstUserMessage:                            "real request",
+		OriginalFirstUserMessage:                    "[Context Summary]\n## Goal\nsummary",
+		OriginalFirstUserMessageIsCompactionSummary: true,
+	}
+	if got := sessionSelectPreviewText(pollutedOriginal); got != "real request" {
+		t.Fatalf("preview for explicitly polluted original = %q, want real request", got)
+	}
+
+	currentOnlyCompaction := agent.SessionSummary{
+		FirstUserMessage:                    "[Context Summary]\n## Goal\nsummary",
+		FirstUserMessageIsCompactionSummary: true,
+	}
+	if got := sessionSelectPreviewText(currentOnlyCompaction); got != "[Context Summary] ## Goal summary" {
+		t.Fatalf("preview for current compaction-only summary = %q", got)
+	}
+}
+
 func TestBuildSessionSearchCorpusAndFilterSessionOptions(t *testing.T) {
 	options := testSessionSummaries()
 	corpus := buildSessionSearchCorpus(options)

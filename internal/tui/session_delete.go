@@ -89,10 +89,7 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 	if target == nil {
 		return ""
 	}
-	preview := strings.TrimSpace(target.OriginalFirstUserMessage)
-	if preview == "" {
-		preview = strings.TrimSpace(target.FirstUserMessage)
-	}
+	preview := strings.TrimSpace(sessionSummaryPreview(*target))
 	if preview == "" {
 		preview = "(no first message)"
 	}
