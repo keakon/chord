@@ -338,7 +338,11 @@ func (m *Model) consumeScrollFlush(msg scrollFlushTickMsg) tea.Cmd {
 	delta := m.pendingScrollDelta
 	m.pendingScrollDelta = 0
 	m.applyWheelScrollDelta(delta)
-	return m.refreshInlineImagesIfViewportMoved(prevOffset, m.hostRedrawCmd("scroll-flush"))
+	var extra []tea.Cmd
+	if m.viewport != nil && m.viewport.offset != prevOffset {
+		extra = append(extra, m.hostRedrawCmd("scroll-flush"))
+	}
+	return m.refreshInlineImagesIfViewportMoved(prevOffset, extra...)
 }
 
 func (m *Model) applyWheelScrollDelta(delta int) {
