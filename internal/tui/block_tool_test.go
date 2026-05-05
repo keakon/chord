@@ -709,13 +709,14 @@ func TestToolExpandedResultLinesHiddenCountDoesNotDoubleCountFirstHiddenLine(t *
 
 func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	block := &Block{
-		ID:                 1,
-		Type:               BlockToolCall,
-		ToolName:           "Bash",
-		Content:            `{"command":"command -v benchstat || true"}`,
-		Collapsed:          true,
-		ResultDone:         false,
-		ToolExecutionState: agent.ToolCallExecutionStateQueued,
+		ID:                         1,
+		Type:                       BlockToolCall,
+		ToolName:                   "Bash",
+		Content:                    `{"command":"command -v benchstat || true"}`,
+		Collapsed:                  true,
+		ResultDone:                 false,
+		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
+		ToolQueuedByExecutionEvent: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
@@ -2193,12 +2194,13 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		ID:                 1,
-		Type:               BlockToolCall,
-		ToolName:           "Notify",
-		Collapsed:          true,
-		Content:            `{"target_task_id":"adhoc-slot","message":"continue","kind":"follow_up"}`,
-		ToolExecutionState: agent.ToolCallExecutionStateQueued,
+		ID:                         1,
+		Type:                       BlockToolCall,
+		ToolName:                   "Notify",
+		Collapsed:                  true,
+		Content:                    `{"target_task_id":"adhoc-slot","message":"continue","kind":"follow_up"}`,
+		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
+		ToolQueuedByExecutionEvent: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
@@ -2210,12 +2212,13 @@ func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
 func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		ID:                 1,
-		Type:               BlockToolCall,
-		ToolName:           "Cancel",
-		Collapsed:          true,
-		Content:            `{"target_task_id":"adhoc-7","reason":"stopped"}`,
-		ToolExecutionState: agent.ToolCallExecutionStateQueued,
+		ID:                         1,
+		Type:                       BlockToolCall,
+		ToolName:                   "Cancel",
+		Collapsed:                  true,
+		Content:                    `{"target_task_id":"adhoc-7","reason":"stopped"}`,
+		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
+		ToolQueuedByExecutionEvent: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
@@ -2227,12 +2230,13 @@ func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
 func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		ID:                 1,
-		Type:               BlockToolCall,
-		ToolName:           "Question",
-		Collapsed:          false,
-		Content:            `{"questions":[{"header":"确认","question":"继续吗？","multiple":false,"options":[{"label":"继续","description":"继续执行"}]}]}`,
-		ToolExecutionState: agent.ToolCallExecutionStateQueued,
+		ID:                         1,
+		Type:                       BlockToolCall,
+		ToolName:                   "Question",
+		Collapsed:                  false,
+		Content:                    `{"questions":[{"header":"确认","question":"继续吗？","multiple":false,"options":[{"label":"继续","description":"继续执行"}]}]}`,
+		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
+		ToolQueuedByExecutionEvent: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))

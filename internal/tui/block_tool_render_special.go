@@ -47,7 +47,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}
 	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-	if b.toolExecutionIsQueued() && !isActive {
+	if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent && !isActive {
 		headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
 	}
 
@@ -149,7 +149,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() {
+		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
 		}
 		result = append(result, styledHeader)
@@ -215,7 +215,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() {
+		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
 		}
 		result = append(result, styledHeader)
@@ -369,7 +369,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName) + " " + target
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() {
+		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
 		}
 		result = append(result, styledHeader)
@@ -489,7 +489,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		}
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() {
+		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
 		}
 		result = append(result, styledHeader)

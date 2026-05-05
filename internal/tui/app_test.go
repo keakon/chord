@@ -1743,14 +1743,18 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
 		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
-	if !strings.Contains(joined, "Queued") {
-		t.Fatalf("expected queued header badge; got:\n%s", joined)
+	if block.ToolQueuedByExecutionEvent {
+		t.Fatalf("expected speculative queued state (not execution queued)")
 	}
-	for _, seg := range activeToolSpinnerSegments {
-		if strings.Contains(joined, seg) {
-			t.Fatalf("queued todo tool should not render spinner segment %q; got:\n%s", seg, joined)
-		}
+	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	if !strings.Contains(joined, "▖ TodoWrite") {
+		t.Fatalf("expected speculative queued TodoWrite to keep spinner indicator; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "Queued") {
+		t.Fatalf("did not expect queued header badge for speculative queued TodoWrite; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "⋯") {
+		t.Fatalf("did not expect execution-queued glyph for speculative queued TodoWrite; got:\n%s", joined)
 	}
 }
 
@@ -1782,8 +1786,11 @@ func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 
 	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
-	if joinedA != joinedB {
-		t.Fatalf("queued todo card should not animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	if joinedA == joinedB {
+		t.Fatalf("expected speculative queued todo card to animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	}
+	if strings.Contains(joinedA, "Queued") || strings.Contains(joinedB, "Queued") {
+		t.Fatalf("did not expect execution-queue badge on speculative queued todo card\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
 }
 
@@ -1818,6 +1825,52 @@ func TestTodoWriteCompletedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
 	if joinedA != joinedB {
 		t.Fatalf("completed todo card should not animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	}
+}
+
+func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	args := `{"path":"internal/tui/app_agent_events.go","offset":0,"limit":1}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-read-done-late-update-1",
+		Name:     "Read",
+		AgentID:  "",
+		ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-read-done-late-update-1",
+		Name:     "Read",
+		AgentID:  "",
+		ArgsJSON: args,
+		Result:   "ok",
+		Status:   agent.ToolResultStatusSuccess,
+	}})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "call-read-done-late-update-1",
+		Name:              "Read",
+		AgentID:           "",
+		ArgsJSON:          args,
+		ArgsStreamingDone: true,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-read-done-late-update-1")
+	if !ok {
+		t.Fatal("expected read tool block")
+	}
+	if !block.ResultDone {
+		t.Fatal("expected tool block to remain done")
+	}
+	if block.ToolExecutionState == agent.ToolCallExecutionStateQueued {
+		t.Fatalf("did not expect finished tool to be downgraded to queued")
+	}
+	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	if strings.Contains(joined, "⋯") {
+		t.Fatalf("did not expect queued glyph in finished tool render; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "✓") {
+		t.Fatalf("expected finished tool render to contain ✓; got:\n%s", joined)
 	}
 }
 
@@ -1925,8 +1978,11 @@ func TestToolCallUpdateEventArgsStreamingDoneCreatesQueuedNonAnimatingToolBlock(
 	}
 	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
-	if joinedA != joinedB {
-		t.Fatalf("queued block created from final arg update should not animate\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	if joinedA == joinedB {
+		t.Fatalf("expected queued block created from final arg update to animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	}
+	if strings.Contains(joinedA, "Queued") || strings.Contains(joinedB, "Queued") {
+		t.Fatalf("did not expect execution-queue badge on queued block created from final arg update\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
 }
 

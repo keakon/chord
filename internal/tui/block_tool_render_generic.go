@@ -351,7 +351,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			}
 			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 			styledHeader := ToolCallStyle.Render(headerLine)
-			if b.toolExecutionIsQueued() {
+			if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 				styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
 			}
 			result = append(result, styledHeader)
@@ -583,7 +583,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 	}
 	toolHeaderLine = appendToolProgressSuffix(toolHeaderLine, b.ToolProgress, cardWidth-4)
-	if b.toolExecutionIsQueued() && !isActive {
+	if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent && !isActive {
 		toolHeaderLine = renderQueuedToolHeaderBadge(toolHeaderLine, cardWidth)
 	}
 	result = append(result, toolHeaderLine)
@@ -700,7 +700,20 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		return styled
 	}
 	if b.toolExecutionIsQueued() {
-		return DimStyle.Render(queuedToolGlyph)
+		if b.ToolQueuedByExecutionEvent {
+			return DimStyle.Render(queuedToolGlyph)
+		}
+		if spinnerFrame != "" {
+			iconColor := NeonAccentColor(1800 * time.Millisecond)
+			styled := lipgloss.NewStyle().Foreground(lipgloss.Color(iconColor)).Render(spinnerFrame)
+			if strings.HasSuffix(styled, "\x1b[0m") {
+				styled = styled[:len(styled)-len("\x1b[0m")] + "\x1b[39m"
+			} else if strings.HasSuffix(styled, "\x1b[m") {
+				styled = styled[:len(styled)-len("\x1b[m")] + "\x1b[39m"
+			}
+			return styled
+		}
+		return DimStyle.Render("…")
 	}
 	if b.ToolName == "Delegate" {
 		if b.toolResultIsError() {

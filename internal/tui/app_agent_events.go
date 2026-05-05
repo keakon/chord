@@ -681,6 +681,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 					block.StartedAt = time.Time{}
 					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
 						block.ToolExecutionState = agent.ToolCallExecutionStateQueued
+						block.ToolQueuedByExecutionEvent = false
 					}
 					if block.ToolProgress != nil {
 						block.ToolProgress = nil
@@ -711,8 +712,12 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			// (execution-state events arrive only after the model response finalizes).
 			// Mark as queued so fully-formed cards (notably TodoWrite) stop animating
 			// while we wait for execution to begin.
-			if block.StartedAt.IsZero() && (block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
+			//
+			// Do not downgrade already-finished tool calls. Fast tools can emit
+			// ToolResultEvent before the final ArgsStreamingDone update arrives.
+			if !block.ResultDone && block.StartedAt.IsZero() && (block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
 				block.ToolExecutionState = agent.ToolCallExecutionStateQueued
+				block.ToolQueuedByExecutionEvent = false
 				updated = true
 			}
 			if block.ToolProgress != nil {
@@ -739,6 +744,13 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.ToolCallExecutionEvent:
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
+		if block != nil {
+			if evt.State == agent.ToolCallExecutionStateQueued {
+				block.ToolQueuedByExecutionEvent = true
+			} else if evt.State == agent.ToolCallExecutionStateRunning {
+				block.ToolQueuedByExecutionEvent = false
+			}
+		}
 		if evt.State == agent.ToolCallExecutionStateRunning && block != nil && block.StartedAt.IsZero() {
 			block.StartedAt = time.Now()
 			m.markRequestProgressBaseline(evt.AgentID)
@@ -755,6 +767,11 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if block.ToolExecutionState != evt.State {
 			block.ToolExecutionState = evt.State
 			updated = true
+		}
+		if evt.State == agent.ToolCallExecutionStateQueued {
+			block.ToolQueuedByExecutionEvent = true
+		} else if evt.State == agent.ToolCallExecutionStateRunning {
+			block.ToolQueuedByExecutionEvent = false
 		}
 		if block.ToolProgress != nil {
 			block.ToolProgress = nil
@@ -807,6 +824,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ResultStatus = evt.Status
 			block.ResultDone = true
 			block.ToolExecutionState = ""
+			block.ToolQueuedByExecutionEvent = false
 			block.ToolProgress = nil
 			if evt.Diff != "" {
 				block.Diff = evt.Diff
