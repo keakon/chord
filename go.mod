@@ -18,7 +18,7 @@ require (
 	github.com/dgraph-io/ristretto/v2 v2.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/keakon/golog v0.2.0
+	github.com/keakon/golog v0.3.0
 	github.com/mackee/go-readability v0.3.1
 	github.com/mattn/go-runewidth v0.0.20
 	github.com/muesli/cancelreader v0.2.2
