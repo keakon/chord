@@ -23,8 +23,15 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return m.handleSuperCopy()
 	}
 	// Super+V (cmd+v) – smart paste, same as ctrl+v.
-	if isSuperV(msg) && m.mode == ModeInsert {
-		return m.pasteFromClipboard()
+	if isSuperV(msg) {
+		switch m.mode {
+		case ModeInsert:
+			return m.pasteFromClipboard()
+		case ModeConfirm:
+			if m.confirm.editing || m.confirm.denyingWithReason {
+				return m.pasteFromClipboard()
+			}
+		}
 	}
 
 	switch m.mode {

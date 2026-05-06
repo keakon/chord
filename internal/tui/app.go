@@ -788,8 +788,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openImageViewer(msg.blockID, msg.imageIndex)
 		return m, m.imageProtocolCmd()
 
-	// -- clipboard text paste (ctrl+v fallback when no image) -----------
+	// -- clipboard text paste (ctrl+v/cmd+v fallback when no image) --------
 	case clipboardTextMsg:
+		if m.mode == ModeConfirm && m.confirm.editing {
+			m.confirm.editInput.InsertString(string(msg))
+			m.recalcViewportSize()
+			return m, nil
+		}
+		if m.mode == ModeConfirm && m.confirm.denyingWithReason {
+			m.confirm.denyReasonInput.InsertString(string(msg))
+			m.recalcViewportSize()
+			return m, nil
+		}
 		m.input.ClearSelection()
 		if m.input.InsertLargePaste(string(msg)) {
 			m.input.syncHeight()
