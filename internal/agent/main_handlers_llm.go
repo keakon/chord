@@ -324,6 +324,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			}
 			orphans = append(orphans, c)
 		}
+		if a.turn.streamingToolExec != nil {
+			discarded := a.turn.streamingToolExec.DiscardExcept(validCallIDs, "filtered")
+			logStreamingToolDiscard("filtered", discarded)
+		}
 		a.clearToolTraceForCalls(orphans)
 	}
 }
@@ -336,20 +340,46 @@ func (a *MainAgent) startNextToolBatch(turn *Turn) {
 		turn.activeToolBatchCancel()
 		turn.activeToolBatchCancel = nil
 	}
-	if turn.nextToolBatch >= len(turn.toolExecutionBatches) {
-		turn.PendingToolCalls.Store(0)
-		return
+	for turn.nextToolBatch < len(turn.toolExecutionBatches) {
+		batch := turn.toolExecutionBatches[turn.nextToolBatch]
+		turn.nextToolBatch++
+		if a.promoteStreamingToolBatch(turn, batch) {
+			return
+		}
 	}
-	batch := turn.toolExecutionBatches[turn.nextToolBatch]
-	turn.nextToolBatch++
+	turn.PendingToolCalls.Store(0)
+}
+
+func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBatch) bool {
+	turnID := turn.ID
+	pendingCalls := make([]message.ToolCall, 0, len(batch.Calls))
+	promoted := false
+	for _, tc := range batch.Calls {
+		if turn.streamingToolExec != nil {
+			if payload, ok, drift := turn.streamingToolExec.Promote(tc); ok {
+				promoted = true
+				turn.PendingToolCalls.Add(1)
+				turn.recordPendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
+				payload.TurnID = turnID
+				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
+				continue
+			} else if drift {
+				log.Debugf("speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
+			}
+		}
+		pendingCalls = append(pendingCalls, tc)
+	}
 	turn.PendingToolCalls.Store(int32(len(batch.Calls)))
+	if len(pendingCalls) == 0 {
+		return promoted
+	}
+	batch.Calls = pendingCalls
 	batchCtx := turn.Ctx
 	var batchCancel context.CancelFunc
 	if batch.AbortSiblingsOnError {
 		batchCtx, batchCancel = context.WithCancel(turn.Ctx)
 		turn.activeToolBatchCancel = batchCancel
 	}
-	turnID := turn.ID
 	batchPending := make([]PendingToolCall, 0, len(batch.Calls))
 	for _, tc := range batch.Calls {
 		batchPending = append(batchPending, PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
@@ -398,6 +428,7 @@ func (a *MainAgent) startNextToolBatch(turn *Turn) {
 			})
 		}(tc)
 	}
+	return true
 }
 
 // savePartialAssistantMsgForTurn drains any accumulated streaming text from the

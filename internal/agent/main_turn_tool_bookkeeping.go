@@ -499,6 +499,10 @@ func (a *MainAgent) discardSpeculativeStreamToolsAndClearToolTrace(t *Turn) {
 	if a == nil || t == nil {
 		return
 	}
+	if t.streamingToolExec != nil {
+		discarded := t.streamingToolExec.DiscardAll("turn_cancel")
+		logStreamingToolDiscard("turn_cancel", discarded)
+	}
 	spec := t.drainStreamingToolCalls()
 	if len(spec) > 0 {
 		emitCancelledToolResults(a.emitToTUI, spec)

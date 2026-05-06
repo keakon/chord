@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -459,6 +460,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 						callName = call.Name
 					}
 					argsJSON = call.ArgsJSON
+				}
+				decision := evaluateSpeculativeExecutionPolicy(a.tools, a.effectiveRuleset(), callName, json.RawMessage(argsJSON))
+				logSpeculativeExecutionDecision(callID, callName, decision)
+				if decision.Allowed && turn.streamingToolExec != nil {
+					turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
 				}
 				a.recordToolTraceToolUseEnd(callID, callName, "", time.Now())
 				a.emitToTUI(ToolCallUpdateEvent{

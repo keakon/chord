@@ -269,6 +269,39 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	return execResult, nil
 }
 
+// executeToolCallSpeculative runs a safe read-only tool without firing hooks,
+// repetition detection, or file-tracker commits. Results are UI-only until the
+// finalized call promotes them through the normal handleToolResult path.
+func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	if err := validateToolArgsAgainstSchema(a.tools, tc.Name, tc.Args); err != nil {
+		return execResult, err
+	}
+	agentCtx := buildToolExecContext(ctx, tc, a.instanceID, "", a.sessionDir, a, a.emitToTUI)
+	artifactKey := tc.ID
+	if strings.TrimSpace(artifactKey) == "" {
+		artifactKey = tc.Name + "-anonymous"
+	}
+	result, err := a.tools.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	if err != nil {
+		if result != "" {
+			truncated := tools.TruncateOutputWithOptions(result, a.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
+			content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, err)
+			content = tools.AppendArtifactGuidance(content, truncated,
+				"Process it with Read(path, limit, offset) or Grep(path=...) in chunks. Use the Delegate tool only when you need a separate agent for substantial multi-step work on this content.")
+			execResult.Result = content
+			return execResult, err
+		}
+		return execResult, err
+	}
+	truncated := tools.TruncateOutputWithOptions(result, a.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
+	content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, nil)
+	content = tools.AppendArtifactGuidance(content, truncated,
+		"Process it with Read(path, limit, offset) or Grep(path=...) in chunks. Use the Delegate tool only when you need a separate agent for substantial multi-step work on this content.")
+	execResult.Result = content
+	return execResult, nil
+}
+
 // normalizeDenyReason trims, collapses newlines, and limits length of a deny reason.
 func normalizeDenyReason(reason string) string {
 	reason = strings.TrimSpace(reason)

@@ -86,6 +86,7 @@ type Turn struct {
 	toolExecutionBatches               []toolExecutionBatch
 	nextToolBatch                      int
 	activeToolBatchCancel              context.CancelFunc
+	streamingToolExec                  *StreamingToolExecutor
 }
 
 // PendingToolCall records the minimal metadata needed to close a pending tool

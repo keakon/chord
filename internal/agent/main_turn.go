@@ -323,6 +323,7 @@ func (a *MainAgent) newTurn() {
 		nextToolBatch:         0,
 		activeToolBatchCancel: nil,
 	}
+	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()
 	log.Debugf("new turn created turn_id=%v", a.turn.ID)
