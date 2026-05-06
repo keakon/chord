@@ -274,8 +274,17 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	for i := range maxVisible {
 		c := matches[i]
 		line := fmt.Sprintf("%s  %s", c.Cmd, c.Desc)
-		if runewidth.StringWidth(line) > contentWidth-4 {
-			line = runewidth.Truncate(line, contentWidth-4, "…")
+		lineLimit := contentWidth
+		if i == sel {
+			lineLimit -= runewidth.StringWidth(" ▸ ")
+		} else {
+			lineLimit -= runewidth.StringWidth("   ")
+		}
+		if lineLimit < 1 {
+			lineLimit = 1
+		}
+		if runewidth.StringWidth(line) > lineLimit {
+			line = runewidth.Truncate(line, lineLimit, "…")
 		}
 
 		if i == sel {
