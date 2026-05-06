@@ -220,6 +220,8 @@ func SetProviderDumpWriter(p Provider, w *DumpWriter) {
 		impl.SetDumpWriter(w)
 	case *AnthropicProvider:
 		impl.SetDumpWriter(w)
+	case *GeminiProvider:
+		impl.SetDumpWriter(w)
 	case *ResponsesProvider:
 		impl.SetDumpWriter(w)
 	}

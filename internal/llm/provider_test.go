@@ -592,22 +592,18 @@ func TestMarkCooldownSaturatesWithoutOverflow(t *testing.T) {
 
 // --- NewProviderConfig ---
 
-func TestNewProviderConfig_DefaultURLs(t *testing.T) {
-	tests := []struct {
-		providerType string
-		expectedURL  string
-	}{
-		{"openai", "https://api.openai.com/v1/chat/completions"},
-		{"anthropic", "https://api.anthropic.com/v1/messages"},
-		{"google", "https://generativelanguage.googleapis.com/v1beta/models"},
-		{"unknown", ""},
+func TestNewProviderConfig_NoDefaultURLForProviderTypes(t *testing.T) {
+	tests := []string{
+		config.ProviderTypeChatCompletions,
+		config.ProviderTypeMessages,
+		config.ProviderTypeGenerateContent,
 	}
 
-	for _, tt := range tests {
-		cfg := config.ProviderConfig{Type: tt.providerType}
+	for _, providerType := range tests {
+		cfg := config.ProviderConfig{Type: providerType}
 		p := NewProviderConfig("test", cfg, []string{"key"})
-		if p.APIURL() != tt.expectedURL {
-			t.Errorf("type=%q: got URL %q, want %q", tt.providerType, p.APIURL(), tt.expectedURL)
+		if p.APIURL() != "" {
+			t.Errorf("type=%q: got URL %q, want empty", providerType, p.APIURL())
 		}
 	}
 }

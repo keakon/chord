@@ -117,7 +117,9 @@ Please read the current project structure first, then summarize its main modules
 ## 6. Common startup commands
 
 ```bash
-# Normal startup; the model is determined by the builder agent's model_pools config
+# Normal startup; the active model is the first pool in the agent's model_pools list.
+# After startup, run /models to inspect pool status, or /models <pool> / Ctrl+P to switch.
+# Full pool configuration: ./configuration.md#model-pools-selecting-providermodel
 chord
 
 # Resume the most recent session
@@ -125,7 +127,14 @@ chord --continue
 
 # Resume a specific session
 chord --resume 20260428064910975
+
+# Create or enter a chord-managed git worktree so this task's sessions and
+# cache stay isolated from the rest of the project. Combine with --continue
+# or --resume to act on the worktree's own session history.
+chord --worktree feat-auth
 ```
+
+For full worktree workflow (list/remove, cross-worktree resume, headless integration), see [Worktrees](./usage.md#worktrees).
 
 ## 7. Next
 

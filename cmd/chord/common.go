@@ -332,10 +332,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	effectiveProxy := llm.ResolveEffectiveProxy(cfgProvider.Proxy, cfg.Proxy)
 	logEffectiveProxy(effectiveProxy)
-	if providerCfg.Type() == "google" {
-		ac.cleanup()
-		return nil, fmt.Errorf("google provider not yet implemented")
-	}
 	var llmProvider llm.Provider
 	llmProvider, err = ac.GetOrCreateProviderImpl(ac.ProviderName, cfgProvider, providerCfg, modelID)
 	if err != nil {

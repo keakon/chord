@@ -200,7 +200,7 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "manual")
 	runTestGit(t, repo, "worktree", "add", "-b", "manual-branch", other)
 
-	infos, err := List(ctx, repo)
+	infos, err := List(ctx, repo, "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 		t.Errorf("List missed chord worktrees: %+v", names)
 	}
 	for _, i := range infos {
-		if !strings.HasPrefix(i.Branch, BranchPrefix) {
+		if !strings.HasPrefix(i.Branch, DefaultBranchPrefix) {
 			t.Errorf("List included non-chord branch: %s", i.Branch)
 		}
 	}
@@ -372,5 +372,86 @@ func TestIsInsideLinkedWorktree_LinkedTrue(t *testing.T) {
 	}
 	if !got {
 		t.Errorf("linked worktree path reported as not linked")
+	}
+}
+
+func TestNormalizeBranchPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"empty falls back to default", "", DefaultBranchPrefix, false},
+		{"whitespace falls back to default", "   ", DefaultBranchPrefix, false},
+		{"trailing slash kept", "myteam/", "myteam/", false},
+		{"slash appended when missing", "myteam", "myteam/", false},
+		{"nested namespace allowed", "agents/chord", "agents/chord/", false},
+		{"leading slash rejected", "/foo", "", true},
+		{"leading dash rejected", "-foo", "", true},
+		{"dot-dot rejected", "foo..bar", "", true},
+		{"double slash rejected", "foo//bar", "", true},
+		{"whitespace inside rejected", "foo bar", "", true},
+		{"reserved char rejected", "foo:bar", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeBranchPrefix(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got %q", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("NormalizeBranchPrefix(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreate_RespectsCustomBranchPrefix(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	prefix, err := NormalizeBranchPrefix("myteam")
+	if err != nil {
+		t.Fatalf("NormalizeBranchPrefix: %v", err)
+	}
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl, BranchPrefix: prefix})
+	if err != nil {
+		t.Fatalf("Create with custom prefix: %v", err)
+	}
+	if info.Branch != "myteam/feat" {
+		t.Errorf("Branch = %q, want %q", info.Branch, "myteam/feat")
+	}
+
+	// List with the same prefix sees it; List with a different prefix
+	// (e.g. the default) does not.
+	got, err := List(ctx, repo, prefix)
+	if err != nil {
+		t.Fatalf("List custom: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "feat" || got[0].Branch != "myteam/feat" {
+		t.Errorf("List with prefix %q = %+v, want one entry with Branch=myteam/feat", prefix, got)
+	}
+	defGot, err := List(ctx, repo, "")
+	if err != nil {
+		t.Fatalf("List default: %v", err)
+	}
+	if len(defGot) != 0 {
+		t.Errorf("List with default prefix returned non-chord/* worktree: %+v", defGot)
+	}
+
+	// Remove must use the same prefix to find the worktree; using the
+	// default prefix should fail with not-found.
+	if err := Remove(ctx, repo, "feat", RemoveOptions{Force: true}, pl); err == nil {
+		t.Errorf("Remove with default prefix unexpectedly succeeded for myteam/feat")
+	}
+	if err := Remove(ctx, repo, "feat", RemoveOptions{Force: true, BranchPrefix: prefix}, pl); err != nil {
+		t.Errorf("Remove with matching prefix: %v", err)
 	}
 }

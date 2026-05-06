@@ -16,10 +16,11 @@ A lightweight, local-first terminal coding agent. Low resource usage, reliable l
 - **Image input** — paste or attach images, preview them in supported terminals, and send to multimodal models.
 - **LSP-backed coding context** — connect local language servers for static diagnostics and semantic navigation such as definition/references/implementation.
 - **Reliable long sessions** — compaction algorithm compresses long sessions into context summaries while preserving the information needed to continue work.
+- **Named model pools** — group models into reusable pools (`base`, `fast`, `strong`, …) and switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool, and the runtime falls back through the ordered list automatically. See [Model pools](./docs/configuration.md#model-pools-selecting-providermodel).
 - **Provider/model/key routing** — multiple provider, model, and API key configuration with automatic retry, failover, and load balancing.
 - **Codex quota visibility** — display remaining Codex subscription quota and reset time in real time.
 - **Multi-agent collaboration** — main agent with focused subagents, inspect their contexts and switch between views.
-- **Parallel tasks via git worktrees** — `chord --worktree [name]` spins up an isolated chord-managed worktree (with its own sessions/cache) so multiple tasks on the same repository run side by side without crosstalk.
+- **Parallel tasks via git worktrees** — `chord --worktree [name]` spins up an isolated chord-managed worktree (with its own sessions/cache) so multiple tasks on the same repository run side by side without crosstalk. See [Worktrees](./docs/usage.md#worktrees).
 - **Remote control** — `chord headless` exposes a stdio JSONL control plane; with `chord-gateway`, control Chord from WeChat, Feishu, and other chat surfaces.
 - **Power-aware runtime** — prevents system sleep while work is active and allows sleep again when Chord becomes idle.
 

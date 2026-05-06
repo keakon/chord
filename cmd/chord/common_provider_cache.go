@@ -55,9 +55,11 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 				normalized.Type = config.ProviderTypeChatCompletions
 			case strings.HasSuffix(path, "/messages"):
 				normalized.Type = config.ProviderTypeMessages
+			case strings.HasSuffix(path, "/models"):
+				normalized.Type = config.ProviderTypeGenerateContent
 			default:
-				return cfg, fmt.Errorf("could not auto-detect type for provider %q, please explicitly set 'type' field (allowed: %s, %s, %s)",
-					provName, config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses)
+				return cfg, fmt.Errorf("could not auto-detect type for provider %q, please explicitly set 'type' field (allowed: %s, %s, %s, %s)",
+					provName, config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 			}
 		}
 	}
@@ -65,13 +67,20 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 	// Validate type is one of the allowed values
 	validType := false
 	switch normalized.Type {
-	case config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses:
+	case config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent:
 		validType = true
 	}
 	if !validType {
-		return cfg, fmt.Errorf("invalid provider type %q for %q (allowed values: %s, %s, %s)",
+		return cfg, fmt.Errorf("invalid provider type %q for %q (allowed values: %s, %s, %s, %s)",
 			normalized.Type, provName,
-			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses)
+			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
+	}
+
+	if normalized.Type == config.ProviderTypeGenerateContent {
+		apiURL := strings.TrimSuffix(strings.TrimSpace(normalized.APIURL), "/")
+		if apiURL == "" || !strings.HasSuffix(apiURL, "/models") {
+			return cfg, fmt.Errorf("provider %q type %q requires api_url ending in /models", provName, config.ProviderTypeGenerateContent)
+		}
 	}
 
 	return normalized, nil
@@ -150,6 +159,12 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeChatCompletions, provName, pErr)
 		}
 		impl = p
+	case config.ProviderTypeGenerateContent:
+		p, pErr := llm.NewGeminiProvider(providerCfg, effectiveProxy)
+		if pErr != nil {
+			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeGenerateContent, provName, pErr)
+		}
+		impl = p
 	case config.ProviderTypeResponses:
 		p, pErr := llm.NewResponsesProvider(providerCfg, effectiveProxy)
 		if pErr != nil {
@@ -163,9 +178,9 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 		}
 		impl = p
 	default:
-		return nil, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s)",
+		return nil, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s, %s)",
 			providerType, provName,
-			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses)
+			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 	}
 	if c.dumpWriter != nil {
 		llm.SetProviderDumpWriter(impl, c.dumpWriter)

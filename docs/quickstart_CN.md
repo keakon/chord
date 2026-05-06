@@ -117,7 +117,9 @@ headless 模式说明见 [Headless 集成](./headless_CN.md)。
 ## 6. 常用启动方式
 
 ```bash
-# 正常启动；模型由 builder agent 的 model_pools 配置决定
+# 正常启动；当前模型取自该 agent 的 model_pools 列表中的第一个池。
+# 启动后用 /models 查看池状态，或 /models <pool> / Ctrl+P 切换池。
+# 完整配置说明：./configuration_CN.md#模型池指定-provider-与-model
 chord
 
 # 恢复最近会话
@@ -125,7 +127,13 @@ chord --continue
 
 # 恢复指定会话
 chord --resume 20260428064910975
+
+# 创建或进入 chord 管理的 git worktree，让该任务的 session、缓存与项目主干隔离；
+# 可与 --continue / --resume 组合，作用于该 worktree 自身的会话历史。
+chord --worktree feat-auth
 ```
+
+worktree 列表/移除、跨 worktree resume 与 headless 集成等完整用法见 [Worktree 用法](./usage_CN.md#worktree)。
 
 ## 7. 下一步阅读
 

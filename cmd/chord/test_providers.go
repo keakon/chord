@@ -116,12 +116,20 @@ func testProviders(providerFilter string) error {
 				continue
 			}
 			provider = p
+		case config.ProviderTypeGenerateContent:
+			p, err := llm.NewGeminiProvider(providerConfig, proxyURL)
+			if err != nil {
+				fmt.Printf("  ❌ Failed to create %s provider: %v\n\n", config.ProviderTypeGenerateContent, err)
+				continue
+			}
+			provider = p
 		default:
-			fmt.Printf("  ⚠️  Unknown provider type: %q (allowed values: %s, %s, %s)\n\n",
+			fmt.Printf("  ⚠️  Unknown provider type: %q (allowed values: %s, %s, %s, %s)\n\n",
 				normalizedCfg.Type,
 				config.ProviderTypeChatCompletions,
 				config.ProviderTypeMessages,
-				config.ProviderTypeResponses)
+				config.ProviderTypeResponses,
+				config.ProviderTypeGenerateContent)
 			continue
 		}
 

@@ -508,10 +508,16 @@ func resolveModelRef(
 			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeResponses, ref, pErr)
 		}
 		impl = p
+	case config.ProviderTypeGenerateContent:
+		p, pErr := llm.NewGeminiProvider(provCfg, effectiveProxy)
+		if pErr != nil {
+			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeGenerateContent, ref, pErr)
+		}
+		impl = p
 	default:
-		return nil, nil, "", 0, 0, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s)",
+		return nil, nil, "", 0, 0, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s, %s)",
 			normalizedProviderCfg.Type, ref,
-			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses)
+			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 	}
 
 	return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.Context, nil

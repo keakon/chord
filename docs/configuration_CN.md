@@ -76,12 +76,28 @@ providers:
           output: 128000
 ```
 
+### Google Gemini
+
+```yaml
+providers:
+  gemini:
+    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    models:
+      gemini-2.5-flash:
+        limit:
+          context: 1048576
+          output: 65536
+```
+
+Gemini 需要把 `api_url` 设置为 `/models` 基础路径。Chord 会根据 `/models` 后缀自动识别为 `type: generate-content`，所以可以省略 `type`。不要在 `api_url` 中包含模型名或 `:streamGenerateContent?alt=sse`；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（例如 `gemini-2.5-flash`）就是发送给 Gemini 的模型 ID。
+
 如果省略 `type`，Chord 会根据 provider 配置自动识别：
 
 - `preset: codex` → `responses`
 - `api_url` 以 `/responses` 结尾 → `responses`
 - `api_url` 以 `/chat/completions` 结尾 → `chat-completions`
 - `api_url` 以 `/messages` 结尾 → `messages`
+- `api_url` 以 `/models` 结尾 → `generate-content`
 
 如果不匹配这些规则，需要显式设置 `type`。
 

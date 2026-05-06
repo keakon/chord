@@ -13,6 +13,7 @@ const (
 	ProviderTypeChatCompletions = "chat-completions"
 	ProviderTypeMessages        = "messages"
 	ProviderTypeResponses       = "responses"
+	ProviderTypeGenerateContent = "generate-content"
 )
 
 // Config is the top-level configuration for the chord agent.

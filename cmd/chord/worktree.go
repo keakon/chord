@@ -58,11 +58,15 @@ func newWorktreeListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			branchPrefix, err := startupBranchPrefix()
+			if err != nil {
+				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
+			}
 			mainRoot, err := worktree.GitMainRoot(ctx, cwd)
 			if err != nil {
 				return err
 			}
-			infos, err := worktree.List(ctx, mainRoot)
+			infos, err := worktree.List(ctx, mainRoot, branchPrefix)
 			if err != nil {
 				return err
 			}
@@ -141,7 +145,11 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := worktree.Remove(ctx, cwd, name, worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch}, pl); err != nil {
+			branchPrefix, err := startupBranchPrefix()
+			if err != nil {
+				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
+			}
+			if err := worktree.Remove(ctx, cwd, name, worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix}, pl); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "Removed worktree %s\n", name)
@@ -152,6 +160,6 @@ func newWorktreeRemoveCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even when the worktree is dirty; force-delete the branch")
-	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the chord/<name> branch (only if merged; pass --force to override)")
+	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the worktree's branch (only if merged; pass --force to override)")
 	return cmd
 }

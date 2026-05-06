@@ -212,14 +212,8 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 	if apiURL == "" {
 		// Default based on type/profile.
 		switch {
-		case cfg.Type == "openai" && cfg.Preset == config.ProviderPresetCodex:
+		case cfg.Type == config.ProviderTypeResponses && cfg.Preset == config.ProviderPresetCodex:
 			apiURL = config.OpenAICodexResponsesURL
-		case cfg.Type == "openai":
-			apiURL = "https://api.openai.com/v1/chat/completions"
-		case cfg.Type == "anthropic":
-			apiURL = "https://api.anthropic.com/v1/messages"
-		case cfg.Type == "google":
-			apiURL = "https://generativelanguage.googleapis.com/v1beta/models"
 		}
 	}
 
@@ -1279,7 +1273,7 @@ func (p *ProviderConfig) Name() string {
 	return p.name
 }
 
-// Type returns the provider type (anthropic, openai, google).
+// Type returns the provider type.
 func (p *ProviderConfig) Type() string {
 	return p.typeName
 }

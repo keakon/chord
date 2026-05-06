@@ -16,10 +16,11 @@
 - **图片输入**：粘贴或附加图片，在支持的终端中预览，并发送给多模态模型。
 - **LSP 加持的编码上下文**：连接本地 language server，获取静态诊断和 definition、references、implementation 等语义导航能力。
 - **长会话更可靠**：compaction 算法将长会话压缩为上下文摘要，尽量保留后续工作所需的信息。
+- **命名模型池**：把模型分组到可复用的 pool（如 `base`、`fast`、`strong`），运行时通过 `/models` 或 `Ctrl+P` 即时切换当前池。每个 agent 各选其池，运行时会按池内顺序自动 fallback。详见 [模型池](./docs/configuration_CN.md#模型池指定-provider-与-model)。
 - **Provider / model / key 调度**：多 provider、model 和 API key 配置，支持自动重试、故障切换和负载均衡。
 - **Codex 额度实时可见**：实时显示 Codex 订阅的剩余额度和重置时间。
 - **多 Agent 协作**：主 Agent 与多个 SubAgent 协作，可查看各自上下文并切换视图。
-- **基于 git worktree 的并行任务**：`chord --worktree [name]` 一键创建/进入 chord 管理的独立 worktree（独享 session 与缓存），同一项目可同时跑多个任务互不干扰。
+- **基于 git worktree 的并行任务**：`chord --worktree [name]` 一键创建/进入 chord 管理的独立 worktree（独享 session 与缓存），同一项目可同时跑多个任务互不干扰。详见 [Worktree 用法](./docs/usage_CN.md#worktree)。
 - **远程操控**：`chord headless` 提供 stdio JSONL 控制面，配合 `chord-gateway` 可通过微信、飞书等聊天入口操控。
 - **电源状态友好**：工作进行中自动阻止系统休眠，空闲后允许系统恢复正常休眠。
 

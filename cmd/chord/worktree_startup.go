@@ -39,6 +39,24 @@ func startupPathLocator() (*config.PathLocator, error) {
 	return config.ResolvePathLocator(cfg, startupPathOptions())
 }
 
+// startupBranchPrefix returns the normalized worktree branch prefix from
+// config.yaml (`worktree.branch_prefix`), falling back to the default
+// "chord/" when unset. Errors propagate so a bad config value surfaces at
+// startup instead of silently falling back to the default.
+func startupBranchPrefix() (string, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// Same rationale as startupPathLocator: only truly broken disk
+		// state fails LoadConfig; degrade to default rather than abort
+		// the whole startup.
+		return worktree.DefaultBranchPrefix, nil
+	}
+	if cfg == nil {
+		return worktree.DefaultBranchPrefix, nil
+	}
+	return worktree.NormalizeBranchPrefix(cfg.Worktree.BranchPrefix)
+}
+
 // prepareStartupWorktree creates or reuses a chord-managed worktree for
 // the requested name, updates the repo index, switches the process cwd
 // into the worktree, and returns Info describing it. Callers should
@@ -57,14 +75,19 @@ func prepareStartupWorktree(ctx context.Context, name string) (*worktree.Info, e
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage paths: %w", err)
 	}
+	branchPrefix, err := startupBranchPrefix()
+	if err != nil {
+		return nil, fmt.Errorf("resolve worktree branch_prefix: %w", err)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
 	info, err := worktree.Create(ctx, worktree.CreateOptions{
-		Name:        name,
-		RepoRoot:    cwd,
-		PathLocator: pl,
+		Name:         name,
+		RepoRoot:     cwd,
+		PathLocator:  pl,
+		BranchPrefix: branchPrefix,
 	})
 	if err != nil {
 		return nil, err

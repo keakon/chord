@@ -77,12 +77,28 @@ providers:
           output: 128000
 ```
 
+### Google Gemini
+
+```yaml
+providers:
+  gemini:
+    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    models:
+      gemini-2.5-flash:
+        limit:
+          context: 1048576
+          output: 65536
+```
+
+For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-2.5-flash`, is the model ID sent to Gemini.
+
 If `type` is omitted, Chord auto-detects it from provider config:
 
 - `preset: codex` → `responses`
 - `api_url` ending in `/responses` → `responses`
 - `api_url` ending in `/chat/completions` → `chat-completions`
 - `api_url` ending in `/messages` → `messages`
+- `api_url` ending in `/models` → `generate-content`
 
 If none of these rules match, set `type` explicitly.
 

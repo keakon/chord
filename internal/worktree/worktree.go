@@ -12,17 +12,72 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-// BranchPrefix is the marker that identifies a chord-managed branch in
-// `git worktree list --porcelain` output.
-const BranchPrefix = "chord/"
+// DefaultBranchPrefix is the prefix used for chord-managed branches when
+// the caller does not override it (`<prefix><slug>` is the branch name).
+// `git worktree list --porcelain` is filtered by this prefix to identify
+// chord-managed worktrees.
+const DefaultBranchPrefix = "chord/"
+
+// NormalizeBranchPrefix returns a usable branch prefix for the worktree
+// machinery: empty input falls back to DefaultBranchPrefix; otherwise
+// the input is trimmed, validated for git-branch safety, and a trailing
+// "/" is appended when missing. The returned string always ends with
+// "/" so callers can concatenate `prefix + slug` directly.
+func NormalizeBranchPrefix(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return DefaultBranchPrefix, nil
+	}
+	// Reject characters that git itself disallows in ref names. We don't
+	// try to be exhaustive (git's own check is the source of truth at
+	// `worktree add` time); we just guard against the most common typos
+	// that would silently bypass the prefix filter or shell out badly.
+	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "-") {
+		return "", fmt.Errorf("worktree branch_prefix %q must not start with %q", s, string(s[0]))
+	}
+	if strings.Contains(s, "..") || strings.Contains(s, "//") {
+		return "", fmt.Errorf("worktree branch_prefix %q contains forbidden sequence", s)
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '.' || c == '_' || c == '-' || c == '/':
+			// allowed
+		default:
+			return "", fmt.Errorf("worktree branch_prefix %q contains forbidden character %q", s, string(c))
+		}
+	}
+	if !strings.HasSuffix(s, "/") {
+		s += "/"
+	}
+	return s, nil
+}
+
+// effectiveBranchPrefix is the package-internal counterpart used by the
+// Create/List/Remove paths: it accepts a possibly-empty caller-supplied
+// prefix and falls back to DefaultBranchPrefix without re-validating
+// (validation belongs to NormalizeBranchPrefix at the cmd-layer entry
+// point so configuration errors surface at startup).
+func effectiveBranchPrefix(s string) string {
+	if s == "" {
+		return DefaultBranchPrefix
+	}
+	if !strings.HasSuffix(s, "/") {
+		return s + "/"
+	}
+	return s
+}
 
 // Info describes one chord-managed worktree on disk and in the repo
 // index. The same struct is returned by Create, List, and ResolveByName
 // so callers can route a single value through any of those entry points.
 type Info struct {
-	Slug       string // bare slug (no chord/ prefix)
+	Slug       string // bare slug (no branch-prefix)
 	Name       string // user-facing name; equal to Slug for v1
-	Branch     string // full branch including chord/ prefix
+	Branch     string // full branch including branch-prefix (e.g. "chord/<slug>")
 	Path       string // canonical worktree root
 	RepoRoot   string // canonical main repo root
 	RepoID     string // RepoIDFor(RepoRoot)
@@ -46,6 +101,11 @@ type CreateOptions struct {
 	// PathLocator supplies the global state directory under which
 	// <stateDir>/worktrees/<repoID>/<slug> lives.
 	PathLocator *config.PathLocator
+	// BranchPrefix overrides DefaultBranchPrefix when non-empty. The
+	// trailing "/" is added automatically. Callers should pass the
+	// already-normalized value from NormalizeBranchPrefix when they need
+	// validation; raw empty is accepted and falls back to default.
+	BranchPrefix string
 }
 
 // RemoveOptions controls Remove. By default Remove protects the worktree
@@ -55,9 +115,13 @@ type RemoveOptions struct {
 	// and force-deletes the branch (`git branch -D`). Has no effect on
 	// the cwd-self-removal guard.
 	Force bool
-	// DeleteBranch removes the chord/<slug> branch using `git branch -d`
+	// DeleteBranch removes the chord-managed branch using `git branch -d`
 	// (refused unless merged). Implied by Force.
 	DeleteBranch bool
+	// BranchPrefix scopes the lookup of the worktree's name to a specific
+	// prefix. Empty falls back to DefaultBranchPrefix. Must match the
+	// prefix Create used, otherwise the worktree won't be found.
+	BranchPrefix string
 }
 
 // Create either creates a new git worktree at
@@ -91,7 +155,8 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 		return nil, fmt.Errorf("nested worktree creation refused: %s is inside a linked worktree; create from the main repo", rootIn)
 	}
 	repoID := RepoIDFor(mainRoot)
-	branch := BranchPrefix + opts.Name
+	prefix := effectiveBranchPrefix(opts.BranchPrefix)
+	branch := prefix + opts.Name
 	wantPath := filepath.Join(opts.PathLocator.StateDir, "worktrees", repoID, opts.Name)
 
 	// Fast-resume: branch already registered to a worktree.
@@ -163,10 +228,11 @@ func guardWorktreePath(path string) error {
 }
 
 // List returns chord-managed worktrees discovered via
-// `git worktree list --porcelain`, filtered by branch prefix `chord/`.
-// It does NOT consult the repo index; callers wanting LastUsedAt etc.
-// should merge with LoadRepoIndex separately.
-func List(ctx context.Context, repoRoot string) ([]Info, error) {
+// `git worktree list --porcelain`, filtered by the configured branch
+// prefix (DefaultBranchPrefix when branchPrefix is empty). It does NOT
+// consult the repo index; callers wanting LastUsedAt etc. should merge
+// with LoadRepoIndex separately.
+func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 	mainRoot, err := GitMainRoot(ctx, repoRoot)
 	if err != nil {
 		return nil, err
@@ -175,14 +241,15 @@ func List(ctx context.Context, repoRoot string) ([]Info, error) {
 	if err != nil {
 		return nil, err
 	}
+	prefix := effectiveBranchPrefix(branchPrefix)
 	repoID := RepoIDFor(mainRoot)
 	var infos []Info
 	for _, e := range parseWorktreeListPorcelain(out) {
 		br := shortBranch(e.Branch)
-		if !strings.HasPrefix(br, BranchPrefix) {
+		if !strings.HasPrefix(br, prefix) {
 			continue
 		}
-		slug := strings.TrimPrefix(br, BranchPrefix)
+		slug := strings.TrimPrefix(br, prefix)
 		path, _ := canonicalDir(e.Path)
 		infos = append(infos, Info{
 			Slug:     slug,
@@ -198,12 +265,14 @@ func List(ctx context.Context, repoRoot string) ([]Info, error) {
 }
 
 // ResolveByName returns the worktree with the given name (= slug in v1),
-// or an error when not found.
-func ResolveByName(ctx context.Context, repoRoot, name string) (*Info, error) {
+// or an error when not found. branchPrefix scopes the search; empty
+// falls back to DefaultBranchPrefix and must match the prefix Create
+// used.
+func ResolveByName(ctx context.Context, repoRoot, name, branchPrefix string) (*Info, error) {
 	if err := ValidateSlug(name); err != nil {
 		return nil, err
 	}
-	infos, err := List(ctx, repoRoot)
+	infos, err := List(ctx, repoRoot, branchPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +297,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	if pathLocator == nil {
 		return fmt.Errorf("remove worktree: nil PathLocator")
 	}
-	info, err := ResolveByName(ctx, repoRoot, name)
+	info, err := ResolveByName(ctx, repoRoot, name, opts.BranchPrefix)
 	if err != nil {
 		return err
 	}

@@ -4,14 +4,17 @@
 
 ## 未发布
 
-- 修复 slash 命令补全下拉列表：当命令数量超过 8 个时，使用上下键选择会自动滚动可见窗口，确保当前选中的命令始终可见。
-- 修复 `/new`：执行后会清空侧边栏 EDITED FILES 区域，不再保留上一 session 的文件列表。
+## 0.4.0 - 2026-05-07
 
-- 在默认 TUI 命令和 `chord headless` 中新增 `--worktree [name]`：在启动前创建或进入一个 chord 管理的 git worktree。worktree 路径为 `<state-dir>/worktrees/<repo-id>/<slug>`，分支名 `chord/<slug>`；每个 worktree 拥有独立的 ProjectKey，session、runtime cache 与 exports 自动隔离。`--worktree` 可与 `--continue` / `--resume` 组合，作用域为该 worktree 自身的会话。值为空时按 `task-YYYYMMDD-HHMMSS` 自动命名；分支 `chord/<name>` 已挂在某个 worktree 时会直接复用（fast resume）。`chord headless` 启动时若使用 `--worktree`，`ready` 事件 payload 新增 `worktree: { name, branch, path, repo_root }` 字段。
+- 在默认 TUI 命令和 `chord headless` 中新增 `--worktree [name]`：在启动前创建或进入一个 chord 管理的 git worktree。worktree 路径为 `<state-dir>/worktrees/<repo-id>/<slug>`，分支名 `chord/<slug>`（若配置了 `worktree.branch_prefix`，则为 `<branch_prefix><slug>`）；每个 worktree 拥有独立的 ProjectKey，session、runtime cache 与 exports 自动隔离。`--worktree` 可与 `--continue` / `--resume` 组合，作用域为该 worktree 自身的会话。值为空时按 `task-YYYYMMDD-HHMMSS` 自动命名；分支已挂在某个 worktree 时会直接复用（fast resume）。`chord headless` 启动时若使用 `--worktree`，`ready` 事件 payload 新增 `worktree: { name, branch, path, repo_root }` 字段。
 - 新增 `chord worktree` 命令组：`list`（按最近使用排序列出当前仓库的 chord 管理 worktree）、`remove <name>`（删除 worktree 目录及其 sessions/cache/exports，默认保留分支；`--delete-branch` 仅在已合并时删除分支，`--force` 强制删除脏工作区与分支）。创建/进入 worktree 属于启动级动作，由 `chord --worktree` flag 承担、不归属 `chord worktree` 子命令；如需"进入并继续"，使用 `chord --worktree <name> --continue`。
 - 新增 `chord resume <session-id>`：根据 session metadata 自动定位会话所在的 worktree（或主仓库），切换目录后继续；与仅在当前项目内恢复的 `chord -r <id>` 互补。
-- `config.yaml` 新增 `worktree.branch_prefix` 与 `worktree.require_clean`。
+- `config.yaml` 新增 `worktree.branch_prefix`：覆盖默认的 `chord/` 分支前缀（同时影响 `git worktree list --porcelain` 的过滤）。空值回退为 `chord/`；末尾未带 `/` 时会自动补齐；会产生非法 git ref 的取值（以 `/` 或 `-` 开头、包含 `..` / `//` / 空白字符、或含 `[a-zA-Z0-9._/-]` 之外的字符）会在启动时直接报错。
 - 扩展每会话的 `session-meta.json`：新增 `repo_id`、`repo_root`、`worktree_name`、`worktree_branch`、`worktree_path`、`is_main_worktree` 字段。已有 session 保持兼容；只含 worktree 字段的元数据文件现在能被正确识别。
+- 新增 Google Gemini 一等公民 provider（`type: generate-content`，`api_url` 以 `/models` 结尾）：支持流式文本/工具/思考输出、多模态内联图片、function calling 工具，以及带 `Retry-After` 解析的 Gemini 形态错误响应。
+- 修复本地 slash 命令（`/export`、`/models`）：现在始终在主 agent 的事件循环中执行，而不是从 TUI 输入 goroutine 直接调用。此前在 LLM 重试中途提交这两个命令可能会清掉当前 turn，使 UI 卡在"忙碌"状态且无法取消；同时 cancel-busy 按键路径在 agent 报告无活动 turn 时也能正确恢复。
+- 修复 slash 命令补全下拉列表：当命令数量超过 8 个时，使用上下键选择会自动滚动可见窗口，确保当前选中的命令始终可见。
+- 修复 `/new`：执行后会清空侧边栏 EDITED FILES 区域，不再保留上一 session 的文件列表。
 
 ## 0.3.0 - 2026-05-07
 

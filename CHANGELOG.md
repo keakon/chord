@@ -4,14 +4,17 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
-- Fixed slash completion dropdown so scrolling with arrow keys keeps the selected command visible when the list exceeds 8 entries.
-- Fixed `/new` so it clears the sidebar EDITED FILES section instead of preserving the previous session's file list.
+## 0.4.0 - 2026-05-07
 
-- Added `--worktree [name]` to both the default TUI command and `chord headless` for creating or entering a chord-managed git worktree at startup. Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` with branch `chord/<slug>`; each worktree gets its own ProjectKey so sessions, runtime cache, and exports are isolated automatically. `--worktree` may be combined with `--continue` / `--resume` to act on the worktree's own session history. Auto-named when the value is empty (`task-YYYYMMDD-HHMMSS`); `chord/<name>` already attached to a worktree is reused (fast resume). Headless `ready` event payload now carries `worktree: { name, branch, path, repo_root }` when launched with `--worktree`.
+- Added `--worktree [name]` to both the default TUI command and `chord headless` for creating or entering a chord-managed git worktree at startup. Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` with branch `chord/<slug>` (or `<branch_prefix><slug>` when `worktree.branch_prefix` is configured); each worktree gets its own ProjectKey so sessions, runtime cache, and exports are isolated automatically. `--worktree` may be combined with `--continue` / `--resume` to act on the worktree's own session history. Auto-named when the value is empty (`task-YYYYMMDD-HHMMSS`); a branch already attached to a worktree is reused (fast resume). Headless `ready` event payload now carries `worktree: { name, branch, path, repo_root }` when launched with `--worktree`.
 - Added `chord worktree` command group: `list` (chord-managed worktrees of the current repo, sorted by recency) and `remove <name>` (deletes the worktree directory and the worktree's sessions/cache/exports while preserving the branch by default; use `--delete-branch` to delete only-if-merged or `--force` for unconditional removal of dirty trees and the branch). Creating/entering a worktree is a startup-level action and lives on the `chord --worktree` flag, not under `chord worktree`; for "enter and continue", use `chord --worktree <name> --continue`.
 - Added `chord resume <session-id>`: locates the chord-managed worktree (or main repo) the session belongs to, switches into it, and resumes — complements `chord -r <id>`, which only resumes within the current project.
-- Added `worktree.branch_prefix` and `worktree.require_clean` to `config.yaml`.
+- Added `worktree.branch_prefix` to `config.yaml`: overrides the default `chord/` prefix used for branch names and `git worktree list --porcelain` filtering. Empty falls back to `chord/`; trailing `/` is appended automatically; values that would produce malformed git refs (leading `/` or `-`, `..`, `//`, whitespace, or non-`[a-zA-Z0-9._/-]` characters) are rejected at startup.
 - Extended per-session `session-meta.json` with `repo_id`, `repo_root`, `worktree_name`, `worktree_branch`, `worktree_path`, and `is_main_worktree`. Existing sessions remain compatible; metadata files containing only worktree fields are now correctly recognized.
+- Added Google Gemini as a first-class provider (`type: generate-content`, `api_url` ending in `/models`); supports streaming text/tool/thinking output, multimodal inline images, function-calling tools, and Gemini-shaped error responses with `Retry-After` handling.
+- Fixed local-only slash commands (`/export`, `/models`) so they always run on the main agent's event loop instead of from the TUI input goroutine. Previously, submitting one of these while an LLM call was retrying could clear the active turn mid-flight, leaving the UI stuck in a "busy" state with no way to cancel; the cancel-busy key path now also recovers gracefully when the agent reports no active turn.
+- Fixed slash completion dropdown so scrolling with arrow keys keeps the selected command visible when the list exceeds 8 entries.
+- Fixed `/new` so it clears the sidebar EDITED FILES section instead of preserving the previous session's file list.
 
 ## 0.3.0 - 2026-05-07
 
