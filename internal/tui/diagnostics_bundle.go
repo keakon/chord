@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
 )
 
@@ -153,11 +153,10 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Chord diagnostics bundle\n")
 	fmt.Fprintf(&sb, "generated_at: %s\n", now.Format(time.RFC3339Nano))
+	writeBuildInfoDiagnostics(&sb, buildinfo.Current(), baseDir)
 	fmt.Fprintf(&sb, "trigger: %s\n", strings.TrimSpace(trigger))
 	fmt.Fprintf(&sb, "bundle_path: %s\n", sanitizeDiagnosticText(bundlePath, baseDir))
 	fmt.Fprintf(&sb, "working_dir: %s\n", sanitizeDiagnosticText(baseDir, baseDir))
-	fmt.Fprintf(&sb, "goos: %s\n", runtime.GOOS)
-	fmt.Fprintf(&sb, "goarch: %s\n", runtime.GOARCH)
 	fmt.Fprintf(&sb, "term: %s\n", sanitizeDiagnosticText(os.Getenv("TERM"), baseDir))
 	fmt.Fprintf(&sb, "term_program: %s\n", sanitizeDiagnosticText(os.Getenv("TERM_PROGRAM"), baseDir))
 	fmt.Fprintf(&sb, "term_program_version: %s\n", sanitizeDiagnosticText(os.Getenv("TERM_PROGRAM_VERSION"), baseDir))
@@ -175,6 +174,12 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 		fmt.Fprintf(&sb, "runtime_log_tail: (not found)\n")
 	}
 	return sb.String()
+}
+
+func writeBuildInfoDiagnostics(sb *strings.Builder, info buildinfo.Info, baseDir string) {
+	for _, field := range info.Fields() {
+		fmt.Fprintf(sb, "%s: %s\n", field.Key, sanitizeDiagnosticText(field.Value, baseDir))
+	}
 }
 
 func (m *Model) sessionSummaryString() string {

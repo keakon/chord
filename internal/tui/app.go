@@ -742,7 +742,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendLocalStatusCard("DIAGNOSTICS", formatDiagnosticsStatusCard(msg.path))
 		return m, tea.Batch(
 			m.enqueueToast("Diagnostics bundle exported", "info"),
-			m.hostRedrawCmd("diagnostics-bundle"),
 		)
 
 	case attachmentReadyMsg:

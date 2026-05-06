@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -185,7 +186,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Warnf("runtime log unavailable; using stderr path=%v error=%v", logPath, logErr)
 	}
 
-	log.Info("chord starting")
+	log.Infof("chord starting %s", buildinfo.Current().LogString())
 
 	// Try to load project-level config (.chord/config.yaml).
 	projectConfigPath := filepath.Join(projectRoot, ".chord", "config.yaml")

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/buildinfo"
 )
 
 const maxTUIDiagnosticEvents = 128
@@ -178,6 +180,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Chord TUI diagnostics dump\n")
 	fmt.Fprintf(&sb, "generated_at: %s\n", now.Format(time.RFC3339Nano))
+	writeBuildInfoDiagnostics(&sb, buildinfo.Current(), baseDir)
 	fmt.Fprintf(&sb, "trigger: %s\n", strings.TrimSpace(trigger))
 	fmt.Fprintf(&sb, "working_dir: %s\n", safe(baseDir))
 	fmt.Fprintf(&sb, "dump_path: %s\n", safe(outputPath))

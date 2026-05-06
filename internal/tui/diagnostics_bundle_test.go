@@ -150,4 +150,20 @@ func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 	if !strings.Contains(meta, "process_instance_id: 111-222") {
 		t.Fatalf("metadata = %q, want process_instance_id", meta)
 	}
+	for _, want := range []string{
+		"chord_version:",
+		"chord_commit:",
+		"chord_build_time:",
+		"chord_vcs_time:",
+		"chord_dirty:",
+		"go_version:",
+		"goos:",
+		"goarch:",
+		"executable_path:",
+		"executable_mtime:",
+	} {
+		if !strings.Contains(meta, want) {
+			t.Fatalf("metadata missing %q\n%s", want, meta)
+		}
+	}
 }

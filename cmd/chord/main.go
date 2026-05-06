@@ -98,6 +98,7 @@ func main() {
 		},
 		RunE: runRoot,
 	}
+	rootCmd.SetVersionTemplate(cliVersionTemplate())
 
 	rootCmd.PersistentFlags().StringVar(&flagAPIBase, "api-base", "",
 		"API base URL (overrides CHORD_API_BASE env var)")

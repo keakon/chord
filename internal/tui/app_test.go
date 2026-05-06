@@ -493,6 +493,14 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"hot_budget_dirty",
 		"hot_bytes_dirty",
 		"max_hot_bytes",
+		"chord_version:",
+		"chord_commit:",
+		"chord_build_time:",
+		"chord_vcs_time:",
+		"chord_dirty:",
+		"go_version:",
+		"executable_path:",
+		"executable_mtime:",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Fatalf("dump missing %q\n%s", want, dump)
@@ -545,10 +553,10 @@ func TestDiagnosticsBundleSuccessTriggersStatusCardAndRedraw(t *testing.T) {
 		t.Fatalf("Update returned %T, want *Model", updated)
 	}
 	if cmd == nil {
-		t.Fatal("successful diagnostics export should schedule toast and redraw commands")
+		t.Fatal("successful diagnostics export should schedule toast command")
 	}
-	if model.lastHostRedrawReason != "diagnostics-bundle" {
-		t.Fatalf("lastHostRedrawReason = %q, want diagnostics-bundle", model.lastHostRedrawReason)
+	if model.lastHostRedrawReason == "diagnostics-bundle" {
+		t.Fatalf("diagnostics export should not force host redraw; got %q", model.lastHostRedrawReason)
 	}
 	blocks := model.viewport.visibleBlocks()
 	if len(blocks) == 0 {

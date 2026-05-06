@@ -4,6 +4,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Added build identity metadata to diagnostics and startup logs. `chord --version`, diagnostics bundles, and TUI dumps now include or expose build/VCS/runtime details such as commit, dirty state, build time when injected, VCS time, Go version, and executable mtime. MCP client info continues to use the bare application version string.
+
 ## 0.2.0 - 2026-05-05
 
 - Refactored the TUI render-cache layout so `viewCacheState` contains only draw-loop caches that are safe to bulk reset, while animation/ticker/local-shell/startup-transcript bookkeeping lives in a separate runtime state and survives `invalidateDrawCaches`. The cache invalidator remains a struct re-zero (preserving the `cachedMainSearchBlockIndex = -1` invariant) instead of an 80-line list of per-field assignments. Removed the unused `cachedDirKey`, `cachedHelpKey`, `cachedStatusActivitiesKey`, `cachedStatusChordDisplay`, and `cachedStatusSessionSwitchKey` fields, grouped the five `renderSlashCache*` fields into a `slashRenderCache` substruct (`m.slashCache`), and consolidated the duplicated `renderVersion / renderCacheWidth / renderCacheText / renderCacheValid` quartet on `OverlayList` and `OverlayTable` into a shared `widthKeyedRenderCache` embedded in both.
