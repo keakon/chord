@@ -117,6 +117,8 @@ curl -I https://api.openai.com/v1
 
 最近的构建覆盖了两类焦点恢复 redraw 场景：一类是重新获焦后立即到达的更新，另一类是终端处于后台期间已经发生的转录区/布局变化。检测到后台变化后，Chord 会等待 focus-settle，先触发一次强 host redraw，并为同一轮 focus 周期显式挂上一轮更晚的 fallback redraw。即使较早的 `post-focus-settle-redraw` 已经执行，这轮更晚的 `post-focus-settle-fallback` 也不会被它自己取消，因此 Ghostty/cmux 在宿主 surface invalidation 持续更久时仍会再得到一次恢复机会。diagnostics bundle 也会记录 background-dirty 状态和 fallback 已 arm 的事件，便于把残留的 stale-display 现象与内部最终 screen buffer 对照。
 
+补充：如果你在画面错乱时看到类似 `;250m pyright` 的残片，这通常不是 LSP 内容本身，而是终端控制序列（ANSI/OSC）被截断后露出的尾部字符。新版本已将 terminal window title 的更新改为通过 Bubble Tea 的 `View().WindowTitle` 输出，避免直接写 stdout 与渲染输出交错导致的序列串屏。
+
 ## 长会话里转录区底部内容滚不到
 
 如果你看到最后几行转录内容像被裁掉、最后一个卡片几乎贴着输入分隔线，或者已经滚到底但最新对话仍有一部分不可见：

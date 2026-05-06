@@ -117,6 +117,8 @@ If the TUI occasionally shows stale rows, horizontal line artifacts, or partiall
 
 Recent builds add redraw protection for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord now waits for focus-settle, forces a strong host redraw, and explicitly arms a later fallback redraw for the same focus cycle. That late `post-focus-settle-fallback` pass stays armed even if the earlier `post-focus-settle-redraw` already ran, so Ghostty/cmux still get one more recovery pass when the host surface invalidation outlasts the first redraw. Diagnostics bundles also include background-dirty state and the fallback-arming event so any remaining stale-display cases can be compared against the final internal screen buffer.
 
+Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated terminal control sequence (ANSI/OSC). Newer builds route terminal window-title updates through Bubble Tea's `View().WindowTitle` instead of writing OSC sequences directly to stdout, avoiding interleaving with renderer output.
+
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
