@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -119,6 +120,34 @@ func TestGzipCompress(t *testing.T) {
 
 	if !bytes.Equal(decompressed, data) {
 		t.Error("decompressed data does not match original")
+	}
+}
+
+func TestDefaultHTTPClientSendsOnlyGzipAcceptEncoding(t *testing.T) {
+	var gotAcceptEncoding string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := NewHTTPClientWithProxy("direct", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewHTTPClientWithProxy returned error: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL, bytes.NewReader([]byte(`{"model":"test"}`)))
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do returned error: %v", err)
+	}
+	resp.Body.Close()
+
+	if gotAcceptEncoding != "gzip" {
+		t.Fatalf("Accept-Encoding = %q, want %q", gotAcceptEncoding, "gzip")
 	}
 }
 
