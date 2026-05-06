@@ -1245,6 +1245,32 @@ func TestSessionSwitchStartedEventUpdatesStatusBarAndRestoredClearsIt(t *testing
 	}
 }
 
+func TestSessionRestoredEventClearsEditedFilesForEmptyNewSession(t *testing.T) {
+	backend := &sessionControlAgent{
+		messages: []message.Message{{Role: "assistant", Content: "old message"}},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.refreshSidebar()
+
+	// simulate previous session had edited files
+	m.sidebar.AddFileEdit("main", "handler.go", 1, 0)
+	m.sidebar.AddFileEdit("main", "main.go", 2, 1)
+	if got := len(m.sidebar.agents[0].EditedFiles); got != 2 {
+		t.Fatalf("seed: edited files count = %d, want 2", got)
+	}
+
+	// simulate /new: agent resets session to empty messages
+	backend.messages = nil
+	m.beginSessionSwitch("new", "")
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+
+	if got := len(m.sidebar.agents[0].EditedFiles); got != 0 {
+		t.Fatalf("edited files count after new session restore = %d, want 0 (files=%v)", got, m.sidebar.agents[0].EditedFiles)
+	}
+}
+
 func TestSessionRestoredEventRebuildsTranscriptAndTodoOrder(t *testing.T) {
 	backend := &sessionControlAgent{
 		messages: []message.Message{{Role: "assistant", Content: "old message"}},

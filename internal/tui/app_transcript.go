@@ -110,6 +110,9 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	messagesStarted := time.Now()
 	msgs := m.agent.GetMessages()
 	messagesDuration := time.Since(messagesStarted)
+	sidebarStarted := time.Now()
+	m.rebuildSidebarFileEditsFromMessages(msgs)
+	sidebarDuration := time.Since(sidebarStarted)
 	if len(msgs) == 0 {
 		m.viewport.sticky = true
 		replaceStarted := time.Now()
@@ -118,14 +121,14 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 		recalcStarted := time.Now()
 		m.recalcViewportSize()
 		recalcDuration := time.Since(recalcStarted)
-		m.logTranscriptRebuildTiming(reason, 0, 0, messagesDuration, 0, 0, replaceDuration, recalcDuration, 0, time.Since(rebuildStarted))
+		m.logTranscriptRebuildTiming(reason, 0, 0, messagesDuration, 0, 0, replaceDuration, recalcDuration, sidebarDuration, time.Since(rebuildStarted))
 		return
 	}
 	blockBuildStarted := time.Now()
 	blocks := m.rebuildBlocksFromMessages(msgs)
 	blockBuildDuration := time.Since(blockBuildStarted)
 	if len(blocks) == 0 {
-		m.logTranscriptRebuildTiming(reason, len(msgs), 0, messagesDuration, blockBuildDuration, 0, 0, 0, 0, time.Since(rebuildStarted))
+		m.logTranscriptRebuildTiming(reason, len(msgs), 0, messagesDuration, blockBuildDuration, 0, 0, 0, sidebarDuration, time.Since(rebuildStarted))
 		return
 	}
 	clearSettledStarted := time.Now()
@@ -143,9 +146,6 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	recalcDuration := time.Since(recalcStarted)
 	m.maybeEnforceStartupDeferredTranscriptRetention()
 	replaceDuration := time.Since(replaceStarted)
-	sidebarStarted := time.Now()
-	m.rebuildSidebarFileEditsFromMessages(msgs)
-	sidebarDuration := time.Since(sidebarStarted)
 	m.logTranscriptRebuildTiming(reason, len(msgs), len(blocks), messagesDuration, blockBuildDuration, clearSettledDuration, replaceDuration, recalcDuration, sidebarDuration, time.Since(rebuildStarted))
 }
 

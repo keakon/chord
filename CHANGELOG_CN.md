@@ -5,6 +5,7 @@
 ## 未发布
 
 - 修复 slash 命令补全下拉列表：当命令数量超过 8 个时，使用上下键选择会自动滚动可见窗口，确保当前选中的命令始终可见。
+- 修复 `/new`：执行后会清空侧边栏 EDITED FILES 区域，不再保留上一 session 的文件列表。
 
 - 在默认 TUI 命令和 `chord headless` 中新增 `--worktree [name]`：在启动前创建或进入一个 chord 管理的 git worktree。worktree 路径为 `<state-dir>/worktrees/<repo-id>/<slug>`，分支名 `chord/<slug>`；每个 worktree 拥有独立的 ProjectKey，session、runtime cache 与 exports 自动隔离。`--worktree` 可与 `--continue` / `--resume` 组合，作用域为该 worktree 自身的会话。值为空时按 `task-YYYYMMDD-HHMMSS` 自动命名；分支 `chord/<name>` 已挂在某个 worktree 时会直接复用（fast resume）。`chord headless` 启动时若使用 `--worktree`，`ready` 事件 payload 新增 `worktree: { name, branch, path, repo_root }` 字段。
 - 新增 `chord worktree` 命令组：`list`（按最近使用排序列出当前仓库的 chord 管理 worktree）、`remove <name>`（删除 worktree 目录及其 sessions/cache/exports，默认保留分支；`--delete-branch` 仅在已合并时删除分支，`--force` 强制删除脏工作区与分支）。创建/进入 worktree 属于启动级动作，由 `chord --worktree` flag 承担、不归属 `chord worktree` 子命令；如需"进入并继续"，使用 `chord --worktree <name> --continue`。
