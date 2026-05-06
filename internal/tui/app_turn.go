@@ -63,6 +63,7 @@ func (m *Model) finalizeAssistantBlock() {
 			m.removeViewportBlockByID(m.currentAssistantBlock.ID)
 			m.currentAssistantBlock = nil
 			m.assistantBlockAppended = false
+			m.flushPendingLocalStatusCards()
 			return
 		}
 		m.currentAssistantBlock.InvalidateCache()
@@ -74,6 +75,7 @@ func (m *Model) finalizeAssistantBlock() {
 		m.currentAssistantBlock = nil
 		m.assistantBlockAppended = false
 	}
+	m.flushPendingLocalStatusCards()
 }
 
 // isASCIILettersOnly returns true if s contains only ASCII letters (a-zA-Z).
@@ -92,7 +94,6 @@ func isASCIILettersOnly(s string) bool {
 
 func (m *Model) finalizeTurn() {
 	m.finalizeAssistantBlock()
-	m.flushPendingLocalStatusCards()
 }
 
 func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {

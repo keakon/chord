@@ -367,6 +367,33 @@ func TestFinalizeTurnFlushesDeferredLocalStatusCards(t *testing.T) {
 	}
 }
 
+func TestFinalizeAssistantBlockFlushesDeferredLocalStatusCards(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "streaming", Streaming: true}
+	m.nextBlockID++
+	m.currentAssistantBlock = block
+	m.assistantBlockAppended = true
+	m.appendViewportBlock(block)
+	m.pendingLocalStatusCards = []localStatusCard{{title: "DIAGNOSTICS", content: "bundle ready"}}
+
+	m.finalizeAssistantBlock()
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("visible block count = %d, want 2 after assistant finalize", len(blocks))
+	}
+	last := blocks[len(blocks)-1]
+	if last.StatusTitle != "DIAGNOSTICS" || last.Content != "bundle ready" {
+		t.Fatalf("last block = %#v, want diagnostics status card", last)
+	}
+	if got := len(m.pendingLocalStatusCards); got != 0 {
+		t.Fatalf("pendingLocalStatusCards = %d, want 0", got)
+	}
+	if m.currentAssistantBlock != nil {
+		t.Fatal("currentAssistantBlock should be finalized")
+	}
+}
+
 func TestTUIDiagnosticRingBufferKeepsNewestEvents(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	for i := 0; i < maxTUIDiagnosticEvents+5; i++ {
