@@ -4,9 +4,13 @@
 
 ## 未发布
 
-- 新增模型池（model pool）支持：`AgentConfig.Models` 从扁平列表改为 `map[string][]string`（池名 → 有序模型引用列表）。所有 agent（包括 primary）必须定义至少一个池；池名由用户自定义，不做保留（如 "default"、"base"、"fast"、"strong" 均为合法池名）。未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。运行时 `RuntimeModelPoolPolicy` 管理当前主角色池、按 agent 覆盖以及 last-picked 追踪，并按项目持久化状态。`/model` 命令替换为 `/models`，支持子命令：`status`（显示当前池和可用池）、`<pool>`（设置当前视图对象的池）和 `--agent <name> <pool>`（为指定 agent 固定池）。TUI 弹窗改为池选择器（不再支持单模型选择）。Agent 现在可通过 `model_pools` 字段引用 `config.yaml` 中全局定义的模型池，实现跨 agent 复用；`models` 与 `model_pools` 互斥。不兼容变更：agent 旧的扁平列表模型配置格式不再接受；agent 必须通过 `model_pools` 引用一个或多个池，且池必须定义在 `config.yaml` 顶层的 `model_pools` 中。
+- 新增运行时模型池（model pool）：
+  - **不兼容变更：** agent 模型配置现在必须通过 `model_pools` 引用 `config.yaml` 顶层定义的一个或多个池；旧的 per-agent 扁平 `models` 列表不再接受。内部 `AgentConfig.Models` 现在表示为 `map[string][]string`（池名 → 有序模型引用列表）。
+  - 所有 agent（包括 `primary`）必须定义至少一个池。池名由用户自定义且不做保留，例如 `default`、`base`、`fast`、`strong` 均为合法池名。未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
+  - Agent 可通过 `model_pools` 复用全局定义的池；配置中的内联 `models` 与 `model_pools` 互斥。运行时池策略会按项目持久化当前角色池、按 agent 覆盖以及 last-picked 状态。
+  - `/model` 命令替换为 `/models`，支持 `status`、`<pool>` 和 `--agent <name> <pool>` 子命令。TUI 选择器现在选择模型池，而不是单个模型。
+  - agent 忙碌时选择模型池会自动排队，等下一次用户消息发送时应用，与排队用户输入保持一致。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理，不再由后台 goroutine 直接改动视图状态。
 - 在 diagnostics 与启动日志中加入构建身份信息。`chord --version`、diagnostics bundle 和 TUI dump 现在会包含或展示 commit、dirty 状态、注入的 build time、VCS time、Go 版本和可执行文件 mtime 等信息；MCP client info 继续使用精简的应用版本号。
-- agent 忙碌时选择模型池会自动排队，等下一次用户消息发送时应用，与排队用户输入保持一致。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理（不再由后台 goroutine 直接改动视图状态），避免 data race。
 - 修复 SKILLS 侧边栏状态：`Skill` 工具加载失败不再被标记为已加载（绿色），未发现/不存在的 skill 不再显示，且移除旧的 "(loaded)" 后缀。
 - 修复 Codex RATE LIMIT 信息面板：倒计时到期后不再卡在 "1s"；当窗口到达 reset 时间点时会隐藏倒计时，并触发一次尽力而为的用量刷新，使新窗口尽快更新展示。
 
