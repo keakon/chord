@@ -49,7 +49,12 @@ func (v *Viewport) DropOffScreenCaches() {
 	visibleEnd := v.offset + v.height + margin
 
 	currentLine := 0
-	for _, block := range v.visibleBlocks() {
+	blocks := v.visibleBlocks()
+	for i, block := range blocks {
+		leading := v.blockLeadingSpacing(blocks, i)
+		if leading > 0 {
+			currentLine += leading
+		}
 		blockLines, ok := v.cachedLineCount(block, v.width)
 		if !ok {
 			return

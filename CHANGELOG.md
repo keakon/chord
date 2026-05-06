@@ -34,7 +34,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed TUI tool cards so queued badges and wrapped content keep consistent right-side padding.
 - Added session-scoped `SaveArtifact` and `ReadArtifact` tools for SubAgent handoff artifacts, with persistence through mailbox, task registry, snapshots, and session restore.
 - Improved SubAgent coordination snapshots to surface recent completion metadata, artifact references, write scope, and suspected stalls.
-- Fixed transcript selection column handling for tab-expanded rendered lines.
+- Fixed TUI transcript viewport drift that could accumulate in long sessions, clipping the last card/padding and causing mouse selection to hit the wrong rows.
 - Fixed TUI transcript mouse selection copy so drag-selected text keeps the final character when copied with `Cmd+C`, and documented transcript copying behavior.
 - Improved loop verification continuations so `verify` assessments inject a dedicated `LOOP VERIFY` notice with explicit verification guidance, and documented `/loop on [target]`.
 - Fixed LSP sidebar diagnostics so clean post-edit self-reviews persist `0E/0W` snapshots and clear stale errors after syntax issues are resolved.

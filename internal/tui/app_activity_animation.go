@@ -147,10 +147,14 @@ func clearBlocksTiming(blocks []*Block) {
 }
 
 func (m *Model) markBlockSettled(b *Block) {
-	if b == nil {
+	if m == nil || b == nil {
 		return
 	}
+	// SettledAt can affect rendering (notably elapsed footers). Ensure caches and
+	// viewport line spans reflect the final, settled state.
 	b.SettledAt = time.Now()
+	b.InvalidateCache()
+	m.updateViewportBlock(b)
 }
 
 func clearBlocksSettledAt(blocks []*Block) {

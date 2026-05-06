@@ -125,7 +125,10 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 - pay special attention to whether the issue starts after long-running background jobs or durable status updates in a long session
 - if it still reproduces on the latest build, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
 
-Recent builds fix a transcript-height accounting bug where late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
+Recent builds fix two transcript-height accounting bugs:
+
+- Late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
+- Background idle-sweep cache dropping could miscompute offscreen line offsets when turn-spacing lines were present, causing scroll/selection drift that grew over time.
 
 ## Performance issues
 
