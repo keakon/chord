@@ -19,6 +19,7 @@
 - **Provider / model / key 调度**：多 provider、model 和 API key 配置，支持自动重试、故障切换和负载均衡。
 - **Codex 额度实时可见**：实时显示 Codex 订阅的剩余额度和重置时间。
 - **多 Agent 协作**：主 Agent 与多个 SubAgent 协作，可查看各自上下文并切换视图。
+- **基于 git worktree 的并行任务**：`chord --worktree [name]` 一键创建/进入 chord 管理的独立 worktree（独享 session 与缓存），同一项目可同时跑多个任务互不干扰。
 - **远程操控**：`chord headless` 提供 stdio JSONL 控制面，配合 `chord-gateway` 可通过微信、飞书等聊天入口操控。
 - **电源状态友好**：工作进行中自动阻止系统休眠，空闲后允许系统恢复正常休眠。
 

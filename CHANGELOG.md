@@ -2,6 +2,14 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+- Added `--worktree [name]` to both the default TUI command and `chord headless` for creating or entering a chord-managed git worktree at startup. Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` with branch `chord/<slug>`; each worktree gets its own ProjectKey so sessions, runtime cache, and exports are isolated automatically. `--worktree` may be combined with `--continue` / `--resume` to act on the worktree's own session history. Auto-named when the value is empty (`task-YYYYMMDD-HHMMSS`); `chord/<name>` already attached to a worktree is reused (fast resume). Headless `ready` event payload now carries `worktree: { name, branch, path, repo_root }` when launched with `--worktree`.
+- Added `chord worktree` command group: `list` (chord-managed worktrees of the current repo, sorted by recency) and `remove <name>` (deletes the worktree directory and the worktree's sessions/cache/exports while preserving the branch by default; use `--delete-branch` to delete only-if-merged or `--force` for unconditional removal of dirty trees and the branch). Creating/entering a worktree is a startup-level action and lives on the `chord --worktree` flag, not under `chord worktree`; for "enter and continue", use `chord --worktree <name> --continue`.
+- Added `chord resume <session-id>`: locates the chord-managed worktree (or main repo) the session belongs to, switches into it, and resumes — complements `chord -r <id>`, which only resumes within the current project.
+- Added `worktree.branch_prefix` and `worktree.require_clean` to `config.yaml`.
+- Extended per-session `session-meta.json` with `repo_id`, `repo_root`, `worktree_name`, `worktree_branch`, `worktree_path`, and `is_main_worktree`. Existing sessions remain compatible; metadata files containing only worktree fields are now correctly recognized.
+
 ## 0.3.0 - 2026-05-07
 
 - Added runtime model pools:

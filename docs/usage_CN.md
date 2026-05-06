@@ -41,10 +41,25 @@ Chord 会为当前项目维护持久化会话。
 - `chord`：新建会话
 - `chord --continue`：恢复当前项目最近的非空会话
 - `chord --resume <session-id>`：恢复指定会话
+- `chord resume <session-id>`：跨 worktree 恢复 — 自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
 
 退出时，如果当前会话可恢复，Chord 会打印对应的恢复命令。
+
+## Worktree
+
+需要在同一项目里并行做多个任务且互不干扰时，Chord 可以为任务创建独立的 git worktree：
+
+- `chord --worktree`：创建或进入一个 chord 管理的 worktree（不指定名字时自动按时间戳生成）
+- `chord --worktree feat-auth`：创建或进入名为 `feat-auth` 的 worktree（分支 `chord/feat-auth`）；可与 `--continue` / `--resume` 组合，作用于该 worktree 自身的会话历史
+- `chord headless -d <repo> --worktree feat-auth`：headless 同款行为；`ready` 事件 payload 包含 worktree 的 `name`、`branch`、`path`、`repo_root`
+- `chord worktree list`：列出当前仓库的 chord 管理 worktree
+- `chord worktree remove <name>`：删除 worktree 及其 sessions/cache/exports；默认保留分支。`--delete-branch` 仅在已合并时删除分支；`--force` 强制删除脏 worktree 和分支。
+
+创建/进入 worktree 属于启动级动作（会改变 chord 运行所在的 project），所以它放在 `chord` 的 flag 上、不归属 `chord worktree` 子命令；后者只承担纯管理操作（`list`、`remove`）。
+
+Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之外），每个 worktree 拥有独立的 project key，session 与 cache 自动隔离。worktree 仅包含被 git 追踪的文件；主仓库未提交的改动不会自动带过去。
 
 ## 常用本地控制命令
 

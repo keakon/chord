@@ -19,6 +19,7 @@ A lightweight, local-first terminal coding agent. Low resource usage, reliable l
 - **Provider/model/key routing** — multiple provider, model, and API key configuration with automatic retry, failover, and load balancing.
 - **Codex quota visibility** — display remaining Codex subscription quota and reset time in real time.
 - **Multi-agent collaboration** — main agent with focused subagents, inspect their contexts and switch between views.
+- **Parallel tasks via git worktrees** — `chord --worktree [name]` spins up an isolated chord-managed worktree (with its own sessions/cache) so multiple tasks on the same repository run side by side without crosstalk.
 - **Remote control** — `chord headless` exposes a stdio JSONL control plane; with `chord-gateway`, control Chord from WeChat, Feishu, and other chat surfaces.
 - **Power-aware runtime** — prevents system sleep while work is active and allows sleep again when Chord becomes idle.
 

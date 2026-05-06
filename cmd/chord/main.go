@@ -37,6 +37,7 @@ var (
 	flagAPIBase         string
 	flagContinueSession bool
 	flagResumeSession   string
+	flagWorktree        string
 
 	// Path policy overrides (CLI > env > config.yaml paths.* > XDG defaults).
 	// These map to CHORD_* env vars so internal config/path resolvers stay centralized.
@@ -121,8 +122,11 @@ func main() {
 		"Continue the latest non-empty session in the current project")
 	rootCmd.Flags().StringVarP(&flagResumeSession, "resume", "r", "",
 		"Resume a specific session ID in the current project")
+	rootCmd.Flags().StringVar(&flagWorktree, "worktree", "",
+		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
+	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd())
+	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		// context.Canceled is expected on signal-driven shutdown — exit cleanly.
@@ -135,10 +139,23 @@ func main() {
 
 // runRoot is the main execution path for TUI mode. In local mode, the TUI
 // runs in-process with the MainAgent — no IPC, no socket, no server spawn.
-func runRoot(_ *cobra.Command, _ []string) error {
+func runRoot(cmd *cobra.Command, _ []string) error {
 	resumeID := strings.TrimSpace(flagResumeSession)
 	if flagContinueSession && resumeID != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
+	}
+
+	// --worktree: create/enter the worktree before initApp so the rest of
+	// the startup sees it as the project root. flagWorktreeStartupInfo is
+	// nil when entered via the worktree resume subcommand or another path
+	// that has already prepared the worktree.
+	if cmd != nil && cmd.Flags().Changed("worktree") && flagWorktreeStartupInfo == nil {
+		info, err := prepareStartupWorktree(context.Background(), flagWorktree)
+		if err != nil {
+			return err
+		}
+		flagWorktreeStartupInfo = info
+		flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 	}
 
 	// pprof: enabled only when CHORD_PPROF_PORT is set (e.g. "6060").
@@ -160,6 +177,7 @@ func runRoot(_ *cobra.Command, _ []string) error {
 	ac, err := initApp(true, "local", sessionStartupOptions{
 		ContinueLatest: flagContinueSession,
 		ResumeID:       resumeID,
+		NewSessionMeta: flagWorktreeStartupMeta,
 	})
 	if err != nil {
 		return err

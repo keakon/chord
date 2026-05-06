@@ -41,10 +41,25 @@ Common workflows:
 - `chord`: create a new session
 - `chord --continue`: resume the most recent non-empty session for this project
 - `chord --resume <session-id>`: resume a specific session
+- `chord resume <session-id>`: resume a session in any chord-managed worktree of the current repository (auto-locates the worktree)
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
+
+## Worktrees
+
+For working on multiple tasks in parallel without crosstalk, Chord can create and run inside dedicated git worktrees:
+
+- `chord --worktree`: create or enter a chord-managed worktree (auto-named when no name is given)
+- `chord --worktree feat-auth`: create or enter the worktree named `feat-auth` (branch `chord/feat-auth`); combine with `--continue` or `--resume` to act on the worktree's own session history
+- `chord headless -d <repo> --worktree feat-auth`: same in headless mode; the `ready` event payload includes the worktree's `name`, `branch`, `path`, and `repo_root`
+- `chord worktree list`: list chord-managed worktrees of the current repository
+- `chord worktree remove <name>`: delete the worktree and its sessions/cache/exports; the branch is preserved by default. Pass `--delete-branch` to delete only-if-merged or `--force` to force-remove a dirty worktree and its branch.
+
+Creating/entering a worktree is a startup-level action (it changes the project chord runs in), so it lives on the `chord` flag rather than under `chord worktree`. The `worktree` subcommand only owns pure management operations (`list`, `remove`).
+
+Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` (outside the repository) and each gets its own project key, so sessions and caches are isolated automatically. Worktrees contain only tracked files; uncommitted changes in the main repository are not copied across.
 
 ## Local slash commands
 

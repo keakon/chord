@@ -11,6 +11,11 @@ import (
 type sessionStartupOptions struct {
 	ContinueLatest bool
 	ResumeID       string
+	// NewSessionMeta is written via recovery.SaveSessionMeta when the
+	// startup creates a fresh session. Resumed/continued sessions keep
+	// their original metadata untouched. Used by the worktree path to
+	// stamp worktree provenance into the session's metadata file.
+	NewSessionMeta *recovery.SessionMeta
 }
 
 type sessionStartupPlan struct {
@@ -42,6 +47,11 @@ func planSessionStartup(sessionsDir string, opts sessionStartupOptions) (session
 	sessionDir, err := createNewSessionDir(sessionsDir)
 	if err != nil {
 		return sessionStartupPlan{}, err
+	}
+	if opts.NewSessionMeta != nil {
+		if err := recovery.SaveSessionMeta(sessionDir, *opts.NewSessionMeta); err != nil {
+			return sessionStartupPlan{}, fmt.Errorf("save session meta: %w", err)
+		}
 	}
 	return sessionStartupPlan{SessionDir: sessionDir}, nil
 }

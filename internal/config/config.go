@@ -40,6 +40,7 @@ type Config struct {
 	MaxOutputTokens int                 `json:"max_output_tokens" yaml:"max_output_tokens"`                     // global output token cap (0 = use DefaultOutputTokenMax)
 	Proxy           string              `json:"proxy,omitempty" yaml:"proxy,omitempty"`                         // global proxy URL (http/https/socks5), empty = no proxy
 	WebFetch        WebFetchConfig      `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                 // WebFetch-specific options
+	Worktree        WorktreeConfig      `json:"worktree,omitempty" yaml:"worktree,omitempty"`                   // git worktree integration options
 }
 
 // WebFetchConfig controls WebFetch runtime behavior.

@@ -14,10 +14,32 @@ const sessionMetaFile = "session-meta.json"
 // transcript itself.
 type SessionMeta struct {
 	ForkedFrom string `json:"forked_from,omitempty"`
+	// Worktree provenance: identifies the chord-managed git worktree the
+	// session ran in. Empty for sessions in a non-worktree (main) project.
+	// All fields populated together by the worktree startup path.
+	RepoID         string `json:"repo_id,omitempty"`
+	RepoRoot       string `json:"repo_root,omitempty"`
+	WorktreeName   string `json:"worktree_name,omitempty"`
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	IsMainWorktree bool   `json:"is_main_worktree,omitempty"`
+}
+
+// IsZero reports whether m carries no useful information; used by Load to
+// avoid surfacing empty metadata files as non-nil to callers.
+func (m SessionMeta) IsZero() bool {
+	return m.ForkedFrom == "" &&
+		m.RepoID == "" &&
+		m.RepoRoot == "" &&
+		m.WorktreeName == "" &&
+		m.WorktreeBranch == "" &&
+		m.WorktreePath == "" &&
+		!m.IsMainWorktree
 }
 
 // LoadSessionMeta reads session metadata for sessionDir. It returns (nil, nil)
-// when no metadata file exists.
+// when no metadata file exists or when the file decodes to a zero-valued
+// SessionMeta (i.e. carries no useful information).
 func LoadSessionMeta(sessionDir string) (*SessionMeta, error) {
 	path := filepath.Join(sessionDir, sessionMetaFile)
 	data, err := os.ReadFile(path)
@@ -31,7 +53,7 @@ func LoadSessionMeta(sessionDir string) (*SessionMeta, error) {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parse session meta: %w", err)
 	}
-	if meta.ForkedFrom == "" {
+	if meta.IsZero() {
 		return nil, nil
 	}
 	return &meta, nil

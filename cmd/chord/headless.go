@@ -288,6 +288,7 @@ func newHeadlessCmd() *cobra.Command {
 		flagHeadlessDir      string
 		flagHeadlessContinue bool
 		flagHeadlessResume   string
+		flagHeadlessWorktree string
 	)
 
 	cmd := &cobra.Command{
@@ -306,6 +307,7 @@ Examples:
   chord headless -d /path/to/project
   chord headless --continue
   chord headless --resume <session-id>
+  chord headless -d /path/to/project --worktree feat-auth
 
 Model pool control commands:
   {"type":"models","action":"status"}
@@ -317,6 +319,14 @@ Model pool control commands:
 				if err := os.Chdir(flagHeadlessDir); err != nil {
 					return fmt.Errorf("change to session-dir %q: %w", flagHeadlessDir, err)
 				}
+			}
+			if cmd.Flags().Changed("worktree") {
+				info, err := prepareStartupWorktree(context.Background(), flagHeadlessWorktree)
+				if err != nil {
+					return err
+				}
+				flagWorktreeStartupInfo = info
+				flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 			}
 			if flagHeadlessContinue {
 				flagContinueSession = true
@@ -334,6 +344,8 @@ Model pool control commands:
 	cmd.Flags().StringVarP(&flagHeadlessDir, "session-dir", "d", "", "Project directory (session directory)")
 	cmd.Flags().BoolVarP(&flagHeadlessContinue, "continue", "c", false, "Continue the latest session")
 	cmd.Flags().StringVarP(&flagHeadlessResume, "resume", "r", "", "Resume a specific session ID")
+	cmd.Flags().StringVar(&flagHeadlessWorktree, "worktree", "", "Create or enter a chord-managed git worktree by name (auto-named when empty)")
+	cmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
 	return cmd
 }
@@ -343,6 +355,7 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 	ac, err := initApp(false, "headless", sessionStartupOptions{
 		ContinueLatest: flagContinueSession,
 		ResumeID:       flagResumeSession,
+		NewSessionMeta: flagWorktreeStartupMeta,
 	})
 	if err != nil {
 		return err
@@ -384,11 +397,20 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 	sessionID := filepath.Base(ac.SessionDir)
 
 	// Emit a one-time ready marker so gateways can detect successful init.
+	readyPayload := map[string]any{
+		"session_id": sessionID,
+	}
+	if flagWorktreeStartupInfo != nil {
+		readyPayload["worktree"] = map[string]any{
+			"name":      flagWorktreeStartupInfo.Name,
+			"branch":    flagWorktreeStartupInfo.Branch,
+			"path":      flagWorktreeStartupInfo.Path,
+			"repo_root": flagWorktreeStartupInfo.RepoRoot,
+		}
+	}
 	out.emit(headlessEnvelope{
-		Type: "ready",
-		Payload: map[string]any{
-			"session_id": sessionID,
-		},
+		Type:    "ready",
+		Payload: readyPayload,
 	})
 
 	// Event loop: forward filtered events to stdout

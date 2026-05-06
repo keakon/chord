@@ -2,6 +2,14 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
+## 未发布
+
+- 在默认 TUI 命令和 `chord headless` 中新增 `--worktree [name]`：在启动前创建或进入一个 chord 管理的 git worktree。worktree 路径为 `<state-dir>/worktrees/<repo-id>/<slug>`，分支名 `chord/<slug>`；每个 worktree 拥有独立的 ProjectKey，session、runtime cache 与 exports 自动隔离。`--worktree` 可与 `--continue` / `--resume` 组合，作用域为该 worktree 自身的会话。值为空时按 `task-YYYYMMDD-HHMMSS` 自动命名；分支 `chord/<name>` 已挂在某个 worktree 时会直接复用（fast resume）。`chord headless` 启动时若使用 `--worktree`，`ready` 事件 payload 新增 `worktree: { name, branch, path, repo_root }` 字段。
+- 新增 `chord worktree` 命令组：`list`（按最近使用排序列出当前仓库的 chord 管理 worktree）、`remove <name>`（删除 worktree 目录及其 sessions/cache/exports，默认保留分支；`--delete-branch` 仅在已合并时删除分支，`--force` 强制删除脏工作区与分支）。创建/进入 worktree 属于启动级动作，由 `chord --worktree` flag 承担、不归属 `chord worktree` 子命令；如需"进入并继续"，使用 `chord --worktree <name> --continue`。
+- 新增 `chord resume <session-id>`：根据 session metadata 自动定位会话所在的 worktree（或主仓库），切换目录后继续；与仅在当前项目内恢复的 `chord -r <id>` 互补。
+- `config.yaml` 新增 `worktree.branch_prefix` 与 `worktree.require_clean`。
+- 扩展每会话的 `session-meta.json`：新增 `repo_id`、`repo_root`、`worktree_name`、`worktree_branch`、`worktree_path`、`is_main_worktree` 字段。已有 session 保持兼容；只含 worktree 字段的元数据文件现在能被正确识别。
+
 ## 0.3.0 - 2026-05-07
 
 - 新增运行时模型池（model pool）：
