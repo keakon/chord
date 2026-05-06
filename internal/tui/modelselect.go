@@ -11,6 +11,15 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+type pendingModelSwitchState struct {
+	target agent.ModelPoolSelectorTarget
+	pool   string
+}
+
+type modelSwitchResultMsg struct {
+	err error
+}
+
 type modelSelectState struct {
 	target     agent.ModelPoolSelectorTarget
 	poolNames  []string
@@ -24,8 +33,58 @@ type modelSelectState struct {
 	renderCachePoolNames  string
 }
 
-type modelSwitchResultMsg struct {
-	err error
+func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool string) tea.Cmd {
+	if m == nil || m.agent == nil {
+		return nil
+	}
+	ag := m.agent
+	switch target.Kind {
+	case agent.ModelPoolSelectorTargetAgentOverride:
+		currentPool := ""
+		if current, ok := ag.AgentOverridePoolName(target.AgentName); ok {
+			currentPool = current
+		} else if len(m.modelSelect.poolNames) > 0 {
+			currentPool = m.modelSelect.poolNames[0]
+		}
+		if pool == currentPool {
+			return nil
+		}
+		return func() tea.Msg {
+			return modelSwitchResultMsg{err: ag.SetAgentModelPool(target.AgentName, pool)}
+		}
+	default:
+		if pool == ag.MainRoleCurrentPoolName() {
+			return nil
+		}
+		return func() tea.Msg {
+			return modelSwitchResultMsg{err: ag.SetCurrentRolePool(pool)}
+		}
+	}
+}
+
+// applyPendingPoolSwitch synchronously applies a deferred pool switch and
+// clears the pending state. It is called before sending the next user draft
+// so the upcoming turn runs under the requested pool. Errors are returned as
+// modelSwitchResultMsg cmd so state updates stay on the Bubble Tea Update path.
+func (m *Model) applyPendingPoolSwitch() tea.Cmd {
+	if m.pendingModelSwitch == nil {
+		return nil
+	}
+	ps := m.pendingModelSwitch
+	m.pendingModelSwitch = nil
+	if m.agent == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		var err error
+		switch ps.target.Kind {
+		case agent.ModelPoolSelectorTargetAgentOverride:
+			err = m.agent.SetAgentModelPool(ps.target.AgentName, ps.pool)
+		default:
+			err = m.agent.SetCurrentRolePool(ps.pool)
+		}
+		return modelSwitchResultMsg{err: err}
+	}
 }
 
 func (m *Model) openModelSelect() {
@@ -157,37 +216,13 @@ func (m *Model) selectPoolAtCursor() tea.Cmd {
 	ag := m.agent
 	var switchCmd tea.Cmd
 	if ag != nil {
+		target := m.modelSelect.target
 		if m.isAgentBusy() {
-			block := &Block{
-				ID:      m.nextBlockID,
-				Type:    BlockStatus,
-				Content: "Agent busy, cancel current turn before switching pool",
-			}
-			m.nextBlockID++
-			m.appendViewportBlock(block)
-			m.markBlockSettled(block)
+			// Defer switching pools until the current turn finishes.
+			m.pendingModelSwitch = &pendingModelSwitchState{target: target, pool: pool}
+			switchCmd = m.enqueueToast(fmt.Sprintf("Model pool switch to %q queued", pool), "info")
 		} else {
-			target := m.modelSelect.target
-			switch target.Kind {
-			case agent.ModelPoolSelectorTargetAgentOverride:
-				currentPool := ""
-				if current, ok := ag.AgentOverridePoolName(target.AgentName); ok {
-					currentPool = current
-				} else if len(m.modelSelect.poolNames) > 0 {
-					currentPool = m.modelSelect.poolNames[0]
-				}
-				if pool != currentPool {
-					switchCmd = func() tea.Msg {
-						return modelSwitchResultMsg{err: ag.SetAgentModelPool(target.AgentName, pool)}
-					}
-				}
-			default:
-				if pool != ag.MainRoleCurrentPoolName() {
-					switchCmd = func() tea.Msg {
-						return modelSwitchResultMsg{err: ag.SetCurrentRolePool(pool)}
-					}
-				}
-			}
+			switchCmd = m.switchModelPoolNow(target, pool)
 		}
 	}
 	prevMode := m.modelSelect.prevMode

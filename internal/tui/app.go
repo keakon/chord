@@ -253,6 +253,10 @@ type Model struct {
 
 	// Model selector state
 	modelSelect modelSelectState
+	// pendingModelSwitch holds a deferred model pool switch requested while the
+	// agent was busy. It is applied immediately before the next user request is
+	// sent so the next turn runs under the selected pool.
+	pendingModelSwitch *pendingModelSwitchState
 
 	// Session picker state (/resume)
 	sessionSelect sessionSelectState
