@@ -2,7 +2,7 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.3.0 - 2026-05-07
 
 - Added runtime model pools:
   - **Breaking:** agent model configuration must now reference one or more top-level `model_pools` from `config.yaml`; the previous flat per-agent `models` list is no longer accepted. Internally, `AgentConfig.Models` is now a `map[string][]string` (pool name → ordered model refs).
@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed SKILLS sidebar state: failed `Skill` tool calls no longer appear as loaded/green, unknown skills are hidden until discovered, and the legacy "(loaded)" suffix is removed.
 - Fixed Codex RATE LIMIT panel behavior: reset countdowns no longer stick at "1s" after expiry; when a window reaches its reset timestamp the timer is hidden and Chord triggers a best-effort usage refresh so the next window appears promptly.
 - Fixed deferred TUI diagnostics/export status cards so cards queued during assistant streaming appear as soon as the current assistant block finishes instead of waiting until the agent becomes idle.
+- Fixed `Cmd+V` clipboard text paste in permission-confirmation edit and deny-reason inputs.
 
 ## 0.2.0 - 2026-05-05
 
