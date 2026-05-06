@@ -150,15 +150,14 @@ func formatRateLimitResetTime(w ratelimit.RateLimitWindow) string {
 	}
 
 	d := time.Until(w.ResetsAt)
-	if d < 0 {
-		d = 0
+	// Once the reset timestamp is reached, the snapshot is stale. Hide the timer
+	// so the UI doesn't get stuck showing "1s" indefinitely.
+	if d <= 0 {
+		return ""
 	}
 
 	if d < time.Minute {
 		rounded := ceilDuration(d, time.Second)
-		if rounded < time.Second {
-			rounded = time.Second
-		}
 		return fmt.Sprintf("%ds", int(rounded/time.Second))
 	}
 

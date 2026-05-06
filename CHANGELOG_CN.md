@@ -8,6 +8,7 @@
 - 在 diagnostics 与启动日志中加入构建身份信息。`chord --version`、diagnostics bundle 和 TUI dump 现在会包含或展示 commit、dirty 状态、注入的 build time、VCS time、Go 版本和可执行文件 mtime 等信息；MCP client info 继续使用精简的应用版本号。
 - agent 忙碌时选择模型池会自动排队，等下一次用户消息发送时应用，与排队用户输入保持一致。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理（不再由后台 goroutine 直接改动视图状态），避免 data race。
 - 修复 SKILLS 侧边栏状态：`Skill` 工具加载失败不再被标记为已加载（绿色），未发现/不存在的 skill 不再显示，且移除旧的 "(loaded)" 后缀。
+- 修复 Codex RATE LIMIT 信息面板：倒计时到期后不再卡在 "1s"；当窗口到达 reset 时间点时会隐藏倒计时，并触发一次尽力而为的用量刷新，使新窗口尽快更新展示。
 
 ## 0.2.0 - 2026-05-05
 

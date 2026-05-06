@@ -1182,9 +1182,25 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		p.mu.Unlock()
 		return
 	}
-	if lastOK := p.polledRateLimitSucceededAt[credIdx]; !lastOK.IsZero() && now.Sub(lastOK) < successTTL {
-		p.mu.Unlock()
-		return
+	// Bypass the success TTL once a known reset timestamp has passed; otherwise the
+	// UI may keep showing an expired window (e.g. "100%" with no timer) for up to
+	// successTTL before the next natural poll trigger.
+	force := false
+	if p.polledRateLimitByCredIdx != nil {
+		if snap := p.polledRateLimitByCredIdx[credIdx]; snap != nil {
+			for _, w := range []*ratelimit.RateLimitWindow{snap.Primary, snap.Secondary} {
+				if w != nil && !w.ResetsAt.IsZero() && !w.ResetsAt.After(now) {
+					force = true
+					break
+				}
+			}
+		}
+	}
+	if !force {
+		if lastOK := p.polledRateLimitSucceededAt[credIdx]; !lastOK.IsZero() && now.Sub(lastOK) < successTTL {
+			p.mu.Unlock()
+			return
+		}
 	}
 	if lastAttempt := p.polledRateLimitAttemptedAt[credIdx]; !lastAttempt.IsZero() && now.Sub(lastAttempt) < failureBackoff {
 		p.mu.Unlock()

@@ -46,6 +46,10 @@ Recommendations:
 - reduce concurrency or retries
 - check for accidental looped calls
 
+UI note:
+
+- the right-side RATE LIMIT panel shows the last Codex rate-limit snapshot (e.g. `5h: 42% 2h30m`). When a reset timestamp is reached, the countdown may disappear briefly while Chord refreshes usage; depending on provider semantics (rolling windows), usage may drop gradually rather than jumping straight to 0%.
+
 ## TUI started, but requests fail
 
 Check:

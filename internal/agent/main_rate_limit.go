@@ -156,3 +156,16 @@ func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 	}
 	return client.CurrentRateLimitSnapshotForRef(ref)
 }
+
+// WakeCodexRateLimitPolling triggers an on-demand /wham/usage poll for the
+// currently focused agent's provider, when configured with preset: codex.
+// It is a best-effort hint used by the TUI when a reset timestamp is reached.
+func (a *MainAgent) WakeCodexRateLimitPolling() {
+	client, _ := a.tuiFocusedLLMAndRef()
+	if client == nil {
+		return
+	}
+	if prov := client.ProviderConfig(); prov != nil {
+		prov.WakeCodexRateLimitPolling()
+	}
+}

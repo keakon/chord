@@ -1113,6 +1113,7 @@ func TestFormatRateLimitResetTimeUsesDayHourAndHourMinute(t *testing.T) {
 		d    time.Duration
 		want string
 	}{
+		{name: "expired", d: -1 * time.Second, want: ""},
 		{name: "under1m", d: 45 * time.Second, want: "45s"},
 		{name: "under24h", d: 2*time.Hour + 30*time.Minute, want: "2h30m"},
 		{name: "over24h", d: 49*time.Hour + 15*time.Minute, want: "2d1h"},

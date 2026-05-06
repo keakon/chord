@@ -8,6 +8,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Added build identity metadata to diagnostics and startup logs. `chord --version`, diagnostics bundles, and TUI dumps now include or expose build/VCS/runtime details such as commit, dirty state, build time when injected, VCS time, Go version, and executable mtime. MCP client info continues to use the bare application version string.
 - Model pool selections made while the agent is busy are queued and applied automatically when the next user message is sent, matching the behavior of queued message drafts. Pending-switch failures are now reported back through the TUI update loop (instead of mutating view state from a background goroutine) to avoid data races.
 - Fixed SKILLS sidebar state: failed `Skill` tool calls no longer appear as loaded/green, unknown skills are hidden until discovered, and the legacy "(loaded)" suffix is removed.
+- Fixed Codex RATE LIMIT panel behavior: reset countdowns no longer stick at "1s" after expiry; when a window reaches its reset timestamp the timer is hidden and Chord triggers a best-effort usage refresh so the next window appears promptly.
 
 ## 0.2.0 - 2026-05-05
 

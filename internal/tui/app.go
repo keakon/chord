@@ -873,6 +873,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.keyPoolTickGen {
 			return m, nil
 		}
+		// If a Codex rate-limit reset timestamp has been reached, trigger a usage poll
+		// so the sidebar can move from an expired window to the new one quickly.
+		type codexUsagePoller interface {
+			WakeCodexRateLimitPolling()
+		}
+		if p, ok := m.agent.(codexUsagePoller); ok && m.agent != nil {
+			now := time.Now()
+			if snap := m.agent.CurrentRateLimitSnapshot(); snap != nil {
+				expiredPrimary := snap.Primary != nil && !snap.Primary.ResetsAt.IsZero() && !snap.Primary.ResetsAt.After(now)
+				expiredSecondary := snap.Secondary != nil && !snap.Secondary.ResetsAt.IsZero() && !snap.Secondary.ResetsAt.After(now)
+				if expiredPrimary || expiredSecondary {
+					p.WakeCodexRateLimitPolling()
+				}
+			}
+		}
 		m.invalidateUsageStatsCache()
 		m.refreshSidebar()
 		return m, m.scheduleKeyPoolTick()
