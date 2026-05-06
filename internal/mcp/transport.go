@@ -275,16 +275,21 @@ func (t *StdioTransport) Close() error {
 	// Close stdin to signal the child process.
 	t.stdin.Close()
 
-	// Terminate the child process group.
-	terminateStdioCommand(t.cmd)
+	// Ask the child process group to terminate gracefully.
+	terminateStdioCommand(t.cmd, false)
 
 	// Wait for the reader goroutine to finish (bounded).
 	select {
 	case <-t.done:
 	case <-time.After(stdioKillGrace):
-		// Force kill.
-		terminateStdioCommand(t.cmd)
-		<-t.done
+		// Graceful shutdown timed out — force kill the process group with
+		// SIGKILL, which cannot be trapped, then wait again with a final
+		// bound so a stuck pipe never deadlocks Close.
+		terminateStdioCommand(t.cmd, true)
+		select {
+		case <-t.done:
+		case <-time.After(stdioKillGrace):
+		}
 	}
 
 	// Reap the child process.
