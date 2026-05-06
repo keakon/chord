@@ -30,6 +30,8 @@ Chord 默认会从以下目录发现 Skills：
 
 运行时不会把所有 skill 正文预先注入 system prompt；只有任务明显匹配时，模型才会调用 `Skill` 工具按需加载对应内容。
 
+在 TUI 侧边栏的 **SKILLS** 区块中，只显示当前已发现的 skills。只有当 `Skill` 工具成功加载某个 skill 后，该 skill 才会以绿色显示为已调用；加载失败不会标记，也不会显示未发现/不存在的 skill（直到它被发现）。
+
 最小结构示例：
 
 ```text

@@ -137,6 +137,9 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 			t.Fatalf("skills section missing %q in %q", want, joined)
 		}
 	}
+	if strings.Contains(joined, "(loaded)") {
+		t.Fatalf("skills section should not show legacy loaded suffix, got %q", joined)
+	}
 	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("go-expert")
 	if !strings.Contains(rendered, wantInvoked) {
 		t.Fatalf("invoked skill should use success color; want %q in %q", wantInvoked, rendered)
@@ -144,6 +147,24 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 	wantAvailable := InfoPanelDim.Render("py-expert")
 	if !strings.Contains(rendered, wantAvailable) {
 		t.Fatalf("available skill should use dim color; want %q in %q", wantAvailable, rendered)
+	}
+}
+
+func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.availableSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Discovered: true}}
+	backend.invokedSkills = []*skill.Meta{{Name: "missing-skill", Invoked: true}, {Name: "go-expert", Description: "Go language development expert", Discovered: true, Invoked: true}}
+	m := NewModel(backend)
+
+	rendered := m.renderInfoPanel(40, 24)
+	plain := stripANSI(rendered)
+	section := strings.Join(infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS"), "\n")
+	if strings.Contains(section, "missing-skill") {
+		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
+	}
+	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("go-expert")
+	if !strings.Contains(rendered, wantInvoked) {
+		t.Fatalf("visible invoked skill should remain success-colored; want %q in %q", wantInvoked, rendered)
 	}
 }
 

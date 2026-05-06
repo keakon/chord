@@ -403,12 +403,6 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			}
 			continue
 		}
-		indexByName[name] = len(entries)
-		entries = append(entries, infoPanelSkillEntry{
-			name:        name,
-			description: strings.TrimSpace(sk.Description),
-			invoked:     true,
-		})
 	}
 	if len(entries) == 0 {
 		return ""
@@ -425,9 +419,6 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			lineStyle = invokedStyle
 		}
 		label := entry.name
-		if entry.invoked && entry.description == "" {
-			label += " (loaded)"
-		}
 		labelWidth := lineW - infoPanelCollapsibleContentInset
 		if labelWidth < 1 {
 			labelWidth = 1

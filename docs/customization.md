@@ -30,6 +30,8 @@ Chord discovers Skills from these directories by default:
 
 At runtime, Chord does not preload every skill body into the system prompt. The model calls the `Skill` tool to load matching skill content on demand.
 
+In the TUI, the **SKILLS** panel lists discovered skills. A skill turns green only after the `Skill` tool successfully loads it during the session. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
+
 Minimal structure example:
 
 ```text

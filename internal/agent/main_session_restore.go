@@ -833,28 +833,41 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 		copyMeta.Discovered = true
 		visibleByName[copyMeta.Name] = &copyMeta
 	}
-	invoked := make(map[string]*skill.Meta)
+	assistantSkillCalls := make(map[string]string)
 	for _, msg := range msgs {
 		if msg.Role != "assistant" {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Skill" {
+			if tc.Name != "Skill" || strings.TrimSpace(tc.ID) == "" {
 				continue
 			}
-			name := extractToolArgument(tc.Name, tc.Args)
-			name = strings.TrimSpace(name)
+			name := strings.TrimSpace(extractToolArgument(tc.Name, tc.Args))
 			if name == "" {
 				continue
 			}
-			if meta, ok := visibleByName[name]; ok {
-				copyMeta := *meta
-				copyMeta.Invoked = true
-				invoked[name] = &copyMeta
-				continue
-			}
-			invoked[name] = &skill.Meta{Name: name, Invoked: true}
+			assistantSkillCalls[tc.ID] = name
 		}
+	}
+	if len(assistantSkillCalls) == 0 {
+		return nil
+	}
+	invoked := make(map[string]*skill.Meta)
+	for _, msg := range msgs {
+		if msg.Role != "tool" || strings.TrimSpace(msg.ToolCallID) == "" {
+			continue
+		}
+		name, ok := assistantSkillCalls[msg.ToolCallID]
+		if !ok || strings.HasPrefix(strings.TrimSpace(msg.Content), "Error:") {
+			continue
+		}
+		if meta, ok := visibleByName[name]; ok {
+			copyMeta := *meta
+			copyMeta.Invoked = true
+			invoked[name] = &copyMeta
+			continue
+		}
+		invoked[name] = &skill.Meta{Name: name, Invoked: true}
 	}
 	if len(invoked) == 0 {
 		return nil

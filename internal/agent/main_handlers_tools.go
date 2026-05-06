@@ -88,9 +88,6 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 			Audit:      call.Audit.Clone(),
 		}
 		a.ctxMgr.Append(toolMsg)
-		if call.Name == "Skill" {
-			a.MarkSkillInvokedByName(extractToolArgument(call.Name, json.RawMessage(call.ArgsJSON)))
-		}
 		if a.recovery != nil {
 			a.persistAsync("main", toolMsg)
 		}
@@ -197,7 +194,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		Audit:           payload.Audit.Clone(),
 	}
 	a.ctxMgr.Append(toolMsg)
-	if payload.Name == "Skill" {
+	if payload.Name == "Skill" && !isError {
 		a.MarkSkillInvokedByName(extractToolArgument(payload.Name, json.RawMessage(payload.ArgsJSON)))
 	}
 	a.recordEvidenceFromMessage(toolMsg)
