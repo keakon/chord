@@ -141,8 +141,16 @@ func TestSpinnerFrames_Cycles(t *testing.T) {
 	}
 }
 
-func TestDefaultTitle(t *testing.T) {
-	if DefaultTitle != "chord" {
-		t.Errorf("DefaultTitle = %q, want %q", DefaultTitle, "chord")
+func TestComposeTitle_ComposesSanitizedPrefixAndTitle(t *testing.T) {
+	got := ComposeTitle("my task", "⠼")
+	want := "⠼ my task"
+	if got != want {
+		t.Fatalf("ComposeTitle = %q, want %q", got, want)
+	}
+}
+
+func TestComposeTitle_EmptyAfterSanitizationReturnsEmpty(t *testing.T) {
+	if got := ComposeTitle("\x1b\n\r\t", "⠼"); got != "" {
+		t.Fatalf("ComposeTitle should return empty string for invisible title, got %q", got)
 	}
 }

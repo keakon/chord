@@ -298,6 +298,11 @@ type Model struct {
 	viewCacheState
 	toolArgRenderState map[string]toolArgRenderState
 
+	// terminalTitleView is the effective window title for the next View(). It is
+	// rendered via Bubble Tea's View.WindowTitle, rather than writing directly to
+	// stdout, to avoid interleaving OSC sequences with renderer output.
+	terminalTitleView string
+
 	// Terminal title state
 	terminalTitleBase string // derived from first user message (no spinner)
 	agentHadEvent     bool

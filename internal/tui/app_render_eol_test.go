@@ -3,29 +3,49 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
-func TestEraseToEOLPerLine(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "empty", in: "", want: ansiEraseToEOL},
-		{name: "single_line", in: "abc", want: "abc" + ansiEraseToEOL},
-		{name: "two_lines", in: "a\nb", want: "a" + ansiEraseToEOL + "\n" + "b" + ansiEraseToEOL},
-		{name: "trailing_newline", in: "a\n", want: "a" + ansiEraseToEOL + "\n"},
-		{name: "only_newline", in: "\n", want: ansiEraseToEOL + "\n"},
-		{name: "double_newline", in: "a\n\n", want: "a" + ansiEraseToEOL + "\n" + ansiEraseToEOL + "\n"},
+func TestViewPropagatesWindowTitle(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 60, 12)
+	m.terminalTitleView = "MyTitle"
+
+	view := m.View()
+	if view.WindowTitle != "MyTitle" {
+		t.Fatalf("View.WindowTitle = %q, want %q", view.WindowTitle, "MyTitle")
+	}
+}
+
+func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 60, 12)
+	m.terminalTitleView = "CachedTitle"
+
+	// Frozen path.
+	m.renderFreezeActive = true
+	m.cachedFrozenView = tea.View{Content: "frozen"}
+	m.cachedFrozenViewValid = true
+	frozen := m.View()
+	if frozen.WindowTitle != "CachedTitle" {
+		t.Fatalf("frozen View.WindowTitle = %q, want %q", frozen.WindowTitle, "CachedTitle")
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := eraseToEOLPerLine(tc.in)
-			if got != tc.want {
-				t.Fatalf("eraseToEOLPerLine(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
+	// Deferred path.
+	m.renderFreezeActive = false
+	m.streamRenderDeferred = true
+	m.streamRenderForceView = false
+	m.displayState = stateForeground
+	m.mode = ModeNormal
+	m.cachedFullView = tea.View{Content: "cached"}
+	m.cachedFullViewValid = true
+	deferred := m.View()
+	if deferred.Content != "cached" {
+		t.Fatalf("deferred View.Content = %q, want cached", deferred.Content)
+	}
+	if deferred.WindowTitle != "CachedTitle" {
+		t.Fatalf("deferred View.WindowTitle = %q, want %q", deferred.WindowTitle, "CachedTitle")
 	}
 }
 

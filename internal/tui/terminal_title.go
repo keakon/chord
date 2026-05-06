@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"os"
 	"strings"
 	"time"
 
@@ -58,9 +57,12 @@ func deriveTerminalTitle(raw string) string {
 	return s
 }
 
-// setTerminalTitle writes the current title to stdout via OSC.
+// setTerminalTitle updates the pending View().WindowTitle string.
+// The actual terminal title is emitted by Bubble Tea's renderer, which avoids
+// interleaving OSC sequences with other renderer output.
 func (m *Model) setTerminalTitle(mode terminalTitleMode) {
 	if !terminaltitle.IsTerminal() {
+		m.terminalTitleView = ""
 		return
 	}
 
@@ -72,15 +74,15 @@ func (m *Model) setTerminalTitle(mode terminalTitleMode) {
 	switch mode {
 	case terminalTitleModeSpinner:
 		frame := terminaltitle.NextSpinnerFrame()
-		_ = terminaltitle.SetWindowTitleWithSpinner(os.Stdout, title, frame)
+		m.terminalTitleView = terminaltitle.ComposeTitle(title, frame)
 	case terminalTitleModeRequest:
 		prefix := terminalTitleRequestIcon
 		if m.displayState == stateBackground && m.terminalTitleRequestBlinkOff {
 			prefix = terminalTitleRequestSpacer
 		}
-		_ = terminaltitle.SetWindowTitleWithPrefix(os.Stdout, title, prefix)
+		m.terminalTitleView = terminaltitle.ComposeTitle(title, prefix)
 	default:
-		_ = terminaltitle.SetWindowTitle(os.Stdout, title)
+		m.terminalTitleView = terminaltitle.ComposeTitle(title, "")
 	}
 }
 

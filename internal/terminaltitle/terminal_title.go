@@ -26,6 +26,25 @@ var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // DefaultTitle is the title shown when no user message has been submitted.
 const DefaultTitle = "chord"
 
+// ComposeTitle builds a sanitized window title string that callers can assign
+// to Bubble Tea v2's View.WindowTitle field. It uses the same sanitization
+// rules as SetWindowTitle and SetWindowTitleWithPrefix, but returns the
+// composed title rather than writing OSC sequences.
+//
+// When prefix is empty after sanitization, the returned title is just the
+// sanitized title. When title is empty after sanitization, it returns "".
+func ComposeTitle(title, prefix string) string {
+	cleanTitle := sanitizeTitle(title)
+	if cleanTitle == "" {
+		return ""
+	}
+	cleanPrefix := sanitizeTitlePrefix(prefix)
+	if cleanPrefix == "" {
+		return cleanTitle
+	}
+	return cleanPrefix + " " + cleanTitle
+}
+
 // ---------------------------------------------------------------------------
 // Low-level OSC write
 // ---------------------------------------------------------------------------

@@ -357,10 +357,14 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 // View renders the entire screen (Bubble Tea v2: returns tea.View with Content from buffer).
 func (m *Model) View() tea.View {
 	if m.shouldFreezeRender() {
-		return m.cachedFrozenView
+		v := m.cachedFrozenView
+		v.WindowTitle = m.terminalTitleView
+		return v
 	}
 	if m.shouldDeferStreamRender() {
-		return m.cachedFullView
+		v := m.cachedFullView
+		v.WindowTitle = m.terminalTitleView
+		return v
 	}
 
 	var v tea.View
@@ -396,6 +400,7 @@ func (m *Model) View() tea.View {
 	} else {
 		v.Content = rendered
 	}
+	v.WindowTitle = m.terminalTitleView
 	if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
 		// Bubble Tea's renderer short-circuits when the next View is byte-for-byte
 		// identical to the previous one. After a host-side ClearScreen, Ghostty/cmux
