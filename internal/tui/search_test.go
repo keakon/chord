@@ -95,6 +95,9 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 	if !generic.ResultDone {
 		t.Fatal("generic tool with result should be forced to terminal rendering when revealed by search")
 	}
+	if generic.SettledAt.IsZero() {
+		t.Fatal("generic tool forced done by search should set SettledAt to freeze elapsed rendering")
+	}
 
 	fileEdit := &Block{Type: BlockToolCall, ToolName: "Edit", Collapsed: true, ResultContent: "done"}
 	if !revealSearchMatchedBlock(fileEdit) {

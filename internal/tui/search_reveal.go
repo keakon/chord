@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/tools"
 )
@@ -40,6 +41,12 @@ func revealSearchMatchedBlock(block *Block) bool {
 				}
 				if strings.TrimSpace(block.ResultContent) != "" && !block.ResultDone {
 					block.ResultDone = true
+					// Freeze elapsed-time rendering (e.g. ⏱ footer) so late search-driven
+					// stabilization of partially-recorded tool cards does not cause their
+					// line count to grow over time and drift the viewport.
+					if block.SettledAt.IsZero() {
+						block.SettledAt = time.Now()
+					}
 					changed = true
 				}
 			} else if (block.ResultContent != "" || block.DoneSummary != "") && block.Collapsed {
