@@ -106,6 +106,8 @@ type headlessCommand struct {
 	Content       string   `json:"content,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
 	Action        string   `json:"action,omitempty"`
+	Agent         string   `json:"agent,omitempty"`
+	Pool          string   `json:"pool,omitempty"`
 	FinalArgsJSON string   `json:"final_args_json,omitempty"`
 	EditSummary   string   `json:"edit_summary,omitempty"`
 	DenyReason    string   `json:"deny_reason,omitempty"`
@@ -271,7 +273,7 @@ func isUnsupportedHeadlessCommand(content string) bool {
 		return false
 	}
 	switch fields[0] {
-	case "/model", "/export":
+	case "/export":
 		return true
 	case "/resume":
 		return len(fields) == 1
@@ -303,7 +305,11 @@ If no subscribe command is sent, all event types are forwarded.
 Examples:
   chord headless -d /path/to/project
   chord headless --continue
-  chord headless --resume <session-id>`,
+  chord headless --resume <session-id>
+
+Model pool control commands:
+  {"type":"models","action":"status"}
+  {"type":"models","action":"set_current_role","pool":"thinking"}`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -463,8 +469,44 @@ type headlessBackend interface {
 	ResolveQuestion(answers []string, cancelled bool, requestID string)
 }
 
+type headlessModelsBackend interface {
+	ModelsStatusText() string
+	SetCurrentRolePool(pool string) error
+}
+
 type headlessBackendWithRuleIntent interface {
 	ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSummary, denyReason, requestID string, ruleIntent *agent.ConfirmRuleIntent)
+}
+
+func emitHeadlessModelsResponse(out *stdoutWriter, ok bool, message string, status string) {
+	payload := map[string]any{"ok": ok}
+	if message != "" {
+		payload["message"] = message
+	}
+	if status != "" {
+		payload["status"] = status
+	}
+	out.emit(headlessEnvelope{Type: "models_response", Payload: payload})
+}
+
+func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBackend, out *stdoutWriter) {
+	switch strings.TrimSpace(cmd.Action) {
+	case "", "status":
+		emitHeadlessModelsResponse(out, true, "", backend.ModelsStatusText())
+	case "set_current_role":
+		pool := strings.TrimSpace(cmd.Pool)
+		if pool == "" {
+			emitHeadlessModelsResponse(out, false, "models set_current_role requires pool", "")
+			return
+		}
+		if err := backend.SetCurrentRolePool(pool); err != nil {
+			emitHeadlessModelsResponse(out, false, err.Error(), "")
+			return
+		}
+		emitHeadlessModelsResponse(out, true, "current role pool set", backend.ModelsStatusText())
+	default:
+		emitHeadlessModelsResponse(out, false, "unsupported models action: "+cmd.Action, "")
+	}
 }
 
 // handleHeadlessCommand processes a single command from stdin.
@@ -506,8 +548,12 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Unlock()
 
 	case "send":
-		if isUnsupportedHeadlessCommand(cmd.Content) {
-			fields := strings.Fields(cmd.Content)
+		content := cmd.Content
+		if strings.TrimSpace(content) == "/models" {
+			content = "/models status"
+		}
+		if isUnsupportedHeadlessCommand(content) {
+			fields := strings.Fields(content)
 			out.emit(headlessEnvelope{
 				Type: "error",
 				Payload: map[string]string{
@@ -546,7 +592,15 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			state.updatedAt = time.Now()
 			state.mu.Unlock()
 		}
-		backend.SendUserMessage(cmd.Content)
+		backend.SendUserMessage(content)
+
+	case "models":
+		modelsBackend, ok := backend.(headlessModelsBackend)
+		if !ok {
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "models command is not supported by this backend"}})
+			return
+		}
+		handleHeadlessModelsCommand(cmd, modelsBackend, out)
 
 	case "confirm":
 		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleScope)

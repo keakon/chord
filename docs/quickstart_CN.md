@@ -117,7 +117,7 @@ headless 模式说明见 [Headless 集成](./headless_CN.md)。
 ## 6. 常用启动方式
 
 ```bash
-# 正常启动；模型由 builder agent 的 models 配置决定
+# 正常启动；模型由 builder agent 的 model_pools 配置决定
 chord
 
 # 恢复最近会话

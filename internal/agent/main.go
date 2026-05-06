@@ -460,9 +460,13 @@ type MainAgent struct {
 	mainModelPolicyBuild chan struct{}
 	mainModelPolicyErr   error
 
-	// availableModelsFn returns the list of models the user can switch to.
-	// Set via SetAvailableModelsFn after construction.
-	availableModelsFn func() []ModelOption
+	// modelPoolPolicy manages runtime model pool selection for the current main
+	// role plus explicit per-agent overrides. Set via SetModelPoolPolicy after
+	// construction.
+	modelPoolPolicy *RuntimeModelPoolPolicy
+
+	// modelPoolStatePath is the per-project file path for persisting pool state.
+	modelPoolStatePath string
 
 	// LSP/MCP state providers for TUI sidebar display (set via SetLSPStatusFunc / SetMCPStatusFunc).
 	lspServerListFn   func() []LSPServerDisplay
@@ -780,7 +784,18 @@ func (a *MainAgent) defaultRoleModelRef(cfg *config.AgentConfig) string {
 	if cfg == nil || len(cfg.Models) == 0 {
 		return ""
 	}
-	ref := strings.TrimSpace(cfg.Models[0])
+	if a.modelPoolPolicy != nil {
+		return a.modelPoolPolicy.ResolveInitialModelRef(cfg.Name, cfg)
+	}
+	poolNames := cfg.PoolNames()
+	if len(poolNames) == 0 {
+		return ""
+	}
+	refs := cfg.PoolModels(poolNames[0])
+	if len(refs) == 0 {
+		return ""
+	}
+	ref := strings.TrimSpace(refs[0])
 	if ref == "" {
 		return ""
 	}
@@ -1190,27 +1205,12 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 	return content, filtered
 }
 
-// handleLocalOnlySlashCommands runs /export and /model. These must never
+// handleLocalOnlySlashCommands runs /export and /models. These must never
 // be appended to the conversation or sent to the model. Returns true if handled.
-// Runs even when the agent is busy (not queued). Skipped when the message includes
-// image parts so multimodal input still reaches the model.
+// Runs even when the agent is busy (not queued), including when the submitted
+// message carries image parts.
 func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message.ContentPart) bool {
-	for _, part := range parts {
-		if part.Type == "image" {
-			return false
-		}
-	}
-	c := strings.TrimSpace(content)
-	switch {
-	case c == "/export" || strings.HasPrefix(c, "/export "):
-		a.handleExportCommand(c)
-		return true
-	case c == "/model" || strings.HasPrefix(c, "/model "):
-		a.handleModelCommand(c)
-		return true
-	default:
-		return false
-	}
+	return a.handleTUILocalOnlySlashCommand(content, parts)
 }
 
 // processPendingUserMessagesBeforeLLMInTurn appends queued user messages to the
@@ -1290,7 +1290,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 
 	log.Debugf("handling user message content_len=%v", len(content))
 
-	// /export and /model: never queue or send to the model.
+	// /export and /models: never queue or send to the model.
 	if a.handleLocalOnlySlashCommands(content, parts) {
 		return
 	}

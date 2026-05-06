@@ -27,7 +27,7 @@ Common keys:
 - `gg` / `G`: jump to top / bottom
 - `/`: search messages
 - `Ctrl+J`: open the message directory
-- `Ctrl+P`: switch model
+- `Ctrl+P`: switch the main role model pool
 - `Ctrl+G`: export a diagnostics bundle
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
@@ -52,7 +52,8 @@ These commands are handled by the local runtime and are not sent to the model as
 
 - `/new`: create a new session
 - `/resume`: resume a session
-- `/model`: switch the current running model
+- `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
+- `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/export`: export the current session
 - `/compact`: manually trigger context compaction
 - `/stats`: view usage statistics

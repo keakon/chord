@@ -354,6 +354,24 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	return s
 }
 
+func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimit int) {
+	if s == nil || client == nil {
+		return
+	}
+	prompt := s.buildSystemPrompt()
+	client.SetSystemPrompt(prompt)
+	s.llmClient = client
+	s.modelName = modelName
+	s.ctxMgr.SetMaxTokens(contextLimit)
+	s.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: prompt})
+	providerRef := client.PrimaryModelRef()
+	runningRef := client.RunningModelRef()
+	if runningRef == "" {
+		runningRef = providerRef
+	}
+	s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: providerRef, RunningModelRef: runningRef})
+}
+
 // ---------------------------------------------------------------------------
 // LLM interaction
 // ---------------------------------------------------------------------------

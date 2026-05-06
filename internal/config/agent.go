@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -16,10 +17,21 @@ import (
 //   - .md: YAML frontmatter + Markdown body, where the body becomes SystemPrompt.
 //   - .yaml/.yml: plain YAML document; optional prompt/system_prompt fields become SystemPrompt.
 type AgentConfig struct {
-	Name             string           `json:"name" yaml:"name"`
-	Description      string           `json:"description" yaml:"description"`
-	Mode             string           `json:"mode" yaml:"mode"`
-	Models           []string         `json:"models" yaml:"models"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	Mode        string `json:"mode" yaml:"mode"`
+	// poolOrder preserves the user-declared pool ordering when the agent uses
+	// model_pools: [...]. It is not serialized and may be nil.
+	poolOrder []string `json:"-" yaml:"-"`
+	// Models holds resolved model pool definitions after resolving ModelPools against
+	// config.yaml's top-level model_pools.
+	//
+	// This field is runtime-facing and is populated by ResolveAgentModelPools.
+	// Agent YAML must not define inline models.
+	Models map[string][]string `json:"models,omitempty" yaml:"models,omitempty"`
+	// ModelPools is the user-facing agent configuration: an ordered list of pool names
+	// to look up in config.yaml's top-level model_pools.
+	ModelPools       []string         `json:"model_pools,omitempty" yaml:"model_pools,omitempty"`
 	Temperature      float64          `json:"temperature" yaml:"temperature"`
 	MaxTokens        int              `json:"max_tokens" yaml:"max_tokens"`
 	Variant          string           `json:"variant,omitempty" yaml:"variant,omitempty"`
@@ -72,6 +84,47 @@ func (c DelegationConfig) ChildJoinEnabled() bool {
 // Agents default to subagent mode when Mode is empty.
 func (c *AgentConfig) IsSubAgent() bool {
 	return c.Mode == "" || c.Mode == "subagent"
+}
+
+// PoolNames returns the ordered list of model pool names defined in this agent config.
+//
+// When the agent config uses model_pools: [...], the list order in YAML is preserved
+// (and used as the fallback "first pool"). For inline models: { ... } definitions,
+// YAML map order is not preserved after unmarshal, so we fall back to a sorted order.
+func (c *AgentConfig) PoolNames() []string {
+	if len(c.Models) == 0 {
+		return nil
+	}
+	if len(c.poolOrder) > 0 {
+		out := make([]string, len(c.poolOrder))
+		copy(out, c.poolOrder)
+		return out
+	}
+	// Best effort: keep stable order for inline maps.
+	names := make([]string, 0, len(c.Models))
+	for name := range c.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// HasPool reports whether this agent config defines the named model pool.
+func (c *AgentConfig) HasPool(name string) bool {
+	_, ok := c.Models[name]
+	return ok
+}
+
+// PoolModels returns a copy of the model refs in the named pool.
+// Returns nil if the pool does not exist or is empty.
+func (c *AgentConfig) PoolModels(poolName string) []string {
+	refs, ok := c.Models[poolName]
+	if !ok || len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, len(refs))
+	copy(out, refs)
+	return out
 }
 
 // ParseModelRef splits a model reference into its base ref and optional variant.
@@ -169,19 +222,35 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 		return nil, fmt.Errorf("agent config %s: empty config", path)
 	}
 
-	// Default name to filename (without extension) if not set in YAML.
+	// Inline models: { ... } definitions are deprecated and no longer supported.
+	// Model pools must be defined in config.yaml's top-level model_pools and referenced
+	// from agents via model_pools: [...].
+	if len(cfg.Models) > 0 {
+		return nil, fmt.Errorf("agent config %s: inline models are not supported; define pools in config.yaml model_pools and reference them via model_pools", path)
+	}
+
 	if cfg.Name == "" {
 		base := filepath.Base(path)
 		cfg.Name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 
-	// SubAgent must declare an explicit models list so the fallback chain is deterministic.
-	// Primary agents may omit models and fall back to all configured providers.
-	mode := strings.ToLower(cfg.Mode)
-	if (mode == "subagent" || mode == "") && len(cfg.Models) == 0 {
-		return nil, fmt.Errorf("agent config %s: subagent must define at least one model in 'models'", path)
+	// model_pools list validation.
+	seenPools := make(map[string]struct{})
+	for _, name := range cfg.ModelPools {
+		if name == "" {
+			return nil, fmt.Errorf("agent config %s: model_pools entry must not be empty", path)
+		}
+		if _, dup := seenPools[name]; dup {
+			return nil, fmt.Errorf("agent config %s: model_pools contains duplicate entry %q", path, name)
+		}
+		seenPools[name] = struct{}{}
 	}
 
+	if len(cfg.ModelPools) == 0 {
+		return nil, fmt.Errorf("agent config %s: must define at least one model pool via model_pools", path)
+	}
+
+	cfg.poolOrder = append([]string(nil), cfg.ModelPools...)
 	return cfg, nil
 }
 
@@ -268,6 +337,7 @@ Question: allow
 		Name:        "planner",
 		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
 		Mode:        "primary",
+		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}
 }
@@ -307,6 +377,7 @@ Handoff: deny
 		Name:        "builder",
 		Description: "General-purpose coding agent — the default MainAgent role for implementing features, fixing bugs, writing tests, and refactoring code.",
 		Mode:        "primary",
+		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}
 }
@@ -337,4 +408,89 @@ func ResolveAgentConfigs(projectDir, globalDir string) (map[string]*AgentConfig,
 	}
 
 	return merged, nil
+}
+
+// ResolveAgentModelPools resolves model_pools references in agent configs
+// using the global model_pools definitions from config.yaml.
+// Agents that use model_pools get their Models map populated from the global definitions.
+// Returns an error if any referenced pool name does not exist in globalPools.
+func ResolveAgentModelPools(agents map[string]*AgentConfig, globalPools map[string][]string) error {
+	for name := range globalPools {
+		if name == "" {
+			return fmt.Errorf("config model_pools: pool name must not be empty")
+		}
+	}
+	for agentName, cfg := range agents {
+		if cfg == nil {
+			continue
+		}
+		if len(cfg.ModelPools) == 0 {
+			continue
+		}
+
+		order := make([]string, 0, len(cfg.ModelPools))
+		seen := make(map[string]struct{}, len(cfg.ModelPools))
+		resolved := make(map[string][]string, len(cfg.ModelPools))
+		for _, poolName := range cfg.ModelPools {
+			if _, dup := seen[poolName]; dup {
+				return fmt.Errorf("agent %q: model_pools contains duplicate entry %q", agentName, poolName)
+			}
+			seen[poolName] = struct{}{}
+			order = append(order, poolName)
+
+			refs, ok := globalPools[poolName]
+			if !ok {
+				return fmt.Errorf("agent %q: model_pools references %q which is not defined in config model_pools", agentName, poolName)
+			}
+			if len(refs) == 0 {
+				return fmt.Errorf("agent %q: model_pools references %q which is empty in config model_pools", agentName, poolName)
+			}
+			for _, ref := range refs {
+				if !strings.Contains(ref, "/") {
+					return fmt.Errorf("agent %q: model_pools %q model ref %q must contain '/'", agentName, poolName, ref)
+				}
+			}
+			copied := make([]string, len(refs))
+			copy(copied, refs)
+			resolved[poolName] = copied
+		}
+
+		cfg.poolOrder = append([]string(nil), order...)
+		cfg.Models = resolved
+		cfg.ModelPools = nil
+	}
+
+	return ValidateResolvedAgentModelPools(agents)
+}
+
+func ValidateResolvedAgentModelPools(agents map[string]*AgentConfig) error {
+	for agentName, cfg := range agents {
+		if cfg == nil {
+			continue
+		}
+		if len(cfg.ModelPools) > 0 {
+			return fmt.Errorf("agent %q: model_pools references were not resolved", agentName)
+		}
+		if len(cfg.Models) == 0 {
+			return fmt.Errorf("agent %q: must define at least one model pool (via models or model_pools)", agentName)
+		}
+		hasNonEmptyPool := false
+		for poolName, refs := range cfg.Models {
+			if poolName == "" {
+				return fmt.Errorf("agent %q: pool name must not be empty", agentName)
+			}
+			if len(refs) > 0 {
+				hasNonEmptyPool = true
+			}
+			for _, ref := range refs {
+				if !strings.Contains(ref, "/") {
+					return fmt.Errorf("agent %q: pool %q model ref %q must contain '/'", agentName, poolName, ref)
+				}
+			}
+		}
+		if !hasNonEmptyPool {
+			return fmt.Errorf("agent %q: must define at least one non-empty model pool", agentName)
+		}
+	}
+	return nil
 }

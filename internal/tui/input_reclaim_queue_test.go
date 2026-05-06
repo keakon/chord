@@ -240,7 +240,7 @@ func TestHandleInsertKeyBusyMainAgentSlashBypassesLocalQueue(t *testing.T) {
 	m := NewModel(backend)
 	m.mode = ModeInsert
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming}
-	m.input.SetValue("/model")
+	m.input.SetValue("/models")
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
@@ -250,8 +250,8 @@ func TestHandleInsertKeyBusyMainAgentSlashBypassesLocalQueue(t *testing.T) {
 	if got := len(backend.sentMessages); got != 1 {
 		t.Fatalf("SendUserMessage() calls = %d, want 1", got)
 	}
-	if backend.sentMessages[0] != "/model" {
-		t.Fatalf("sent message = %q, want /model", backend.sentMessages[0])
+	if backend.sentMessages[0] != "/models" {
+		t.Fatalf("sent message = %q, want /models", backend.sentMessages[0])
 	}
 }
 

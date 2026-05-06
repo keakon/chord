@@ -32,7 +32,7 @@ const (
 	ModeConfirm                          // tool permission confirmation dialog
 	ModeQuestion                         // Question tool multi-choice dialog
 	ModeSearch                           // search input active
-	ModeModelSelect                      // model selector overlay
+	ModeModelSelect                      // model pool selector overlay
 	ModeSessionSelect                    // session picker overlay (/resume)
 	ModeSessionDeleteConfirm             // delete-session confirmation overlay from session picker
 	ModeHandoffSelect                    // Handoff agent selector overlay

@@ -51,17 +51,29 @@ type PromptResolver interface {
 	ResolveQuestion(answers []string, cancelled bool, requestID string)
 }
 
-// ModelSelector exposes provider/model identity for the status bar and the
-// model-switch overlay.
+// ModelSelector exposes model identity for the status bar and model pool controls.
 type ModelSelector interface {
-	SwitchModel(providerModel string) error
-	AvailableModels() []ModelOption
 	ProviderModelRef() string
-	// RunningModelRef is the effective provider/model for sidebar display: focused
-	// SubAgent when any, otherwise MainAgent (may differ from ProviderModelRef during fallback).
 	RunningModelRef() string
-	// RunningVariant returns the active variant name for the running model, or empty string if none.
 	RunningVariant() string
+	// CurrentPoolName returns the effective pool name for the agent currently shown
+	// in the TUI (focused SubAgent if any, else current main role), or "" if no pool
+	// policy is configured.
+	CurrentPoolName() string
+	// PoolNames returns the pool names for the agent currently shown in the TUI.
+	PoolNames() []string
+	// MainRoleCurrentPoolName returns the effective pool name for the current main
+	// role regardless of focused SubAgent state.
+	MainRoleCurrentPoolName() string
+	// MainRolePoolNames returns the pool names for the current main role regardless
+	// of focused SubAgent state.
+	MainRolePoolNames() []string
+	// AgentOverridePoolName returns the explicit override for the named agent, if any.
+	AgentOverridePoolName(agentName string) (string, bool)
+	// SetCurrentRolePool sets the current main role's pool.
+	SetCurrentRolePool(pool string) error
+	// SetAgentModelPool sets the named agent's pool.
+	SetAgentModelPool(agentName, pool string) error
 }
 
 // SessionController exposes session lifecycle controls (resume, fork, delete,
@@ -84,7 +96,12 @@ type SessionController interface {
 type SubAgentInspector interface {
 	GetSubAgents() []SubAgentInfo
 	SwitchFocus(agentID string)
+	// FocusedAgentID returns the instance ID of the focused SubAgent, or "" when
+	// the main agent is focused.
 	FocusedAgentID() string
+	// FocusedAgentName returns the agent definition name of the focused SubAgent,
+	// or "" when the main agent is focused.
+	FocusedAgentName() string
 }
 
 // LoopController exposes the post-assistant loop-mode runtime state.

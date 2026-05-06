@@ -173,7 +173,12 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		})
 
 	case agent.ModelSelectEvent:
-		env, err = NewEnvelope(TypeModelSelectRequest, nil)
+		env, err = NewEnvelope(TypeModelSelectRequest, ModelSelectRequestPayload{
+			Target: ModelPoolSelectorTarget{
+				Kind:      ModelPoolSelectorTargetKind(e.Target.Kind),
+				AgentName: e.Target.AgentName,
+			},
+		})
 
 	case agent.RunningModelChangedEvent:
 		env, err = NewEnvelope(TypeRunningModelChanged, RunningModelChangedPayload{
@@ -397,7 +402,11 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 		}
 		return agent.RoleChangedEvent{Role: p.Role}, nil
 	case TypeModelSelectRequest:
-		return agent.ModelSelectEvent{}, nil
+		p, err := ParsePayload[ModelSelectRequestPayload](env)
+		if err != nil {
+			return nil, err
+		}
+		return agent.ModelSelectEvent{Target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetKind(p.Target.Kind), AgentName: p.Target.AgentName}}, nil
 	case TypeRunningModelChanged:
 		p, err := ParsePayload[RunningModelChangedPayload](env)
 		if err != nil {

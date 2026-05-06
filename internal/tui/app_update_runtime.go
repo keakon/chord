@@ -219,14 +219,14 @@ func (m *Model) handleModelSwitchResult(msg modelSwitchResultMsg) tea.Cmd {
 		block := &Block{
 			ID:      m.nextBlockID,
 			Type:    BlockError,
-			Content: fmt.Sprintf("Failed to switch model: %s", msg.err),
+			Content: fmt.Sprintf("Failed to switch model pool: %s", msg.err),
 		}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
 		return nil
 	}
-	// SwitchModel emits its own toast/event; keep local activity clean.
+	// SetCurrentRolePool emits its own toast/event; keep local activity clean.
 	m.markAgentIdle("main")
 	m.stopActiveAnimationIfIdle()
 	return nil

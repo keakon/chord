@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -83,66 +82,16 @@ func (a *MainAgent) SetModelSwitchFactory(fn func(providerModel string) (*llm.Cl
 	a.mainModelPolicyDirty.Store(true)
 }
 
-// SetAvailableModelsFn sets the callback that enumerates models available for
-// runtime switching. Must be called before Run.
-func (a *MainAgent) SetAvailableModelsFn(fn func() []ModelOption) {
-	a.availableModelsFn = fn
+// SetModelPoolPolicy installs the runtime model pool policy. Must be called
+// before Run. statePath is the per-project file for persisting pool selections.
+func (a *MainAgent) SetModelPoolPolicy(policy *RuntimeModelPoolPolicy, statePath string) {
+	a.modelPoolPolicy = policy
+	a.modelPoolStatePath = statePath
 }
 
-// AvailableModels returns the list of models the user can switch to.
-//
-// When a callback is installed via SetAvailableModelsFn, it is used.
-// Otherwise, it falls back to enumerating the merged global+project config's
-// provider/model entries.
-func (a *MainAgent) AvailableModels() []ModelOption {
-	if a.availableModelsFn != nil {
-		return a.availableModelsFn()
-	}
-
-	// Fallback: enumerate configured providers/models from config.
-	providers := make(map[string]config.ProviderConfig)
-	if a.globalConfig != nil {
-		maps.Copy(providers, a.globalConfig.Providers)
-	}
-	if a.projectConfig != nil {
-		maps.Copy(providers, a.projectConfig.Providers) // project overrides global
-	}
-	if len(providers) == 0 {
-		return nil
-	}
-
-	providerNames := make([]string, 0, len(providers))
-	for name := range providers {
-		providerNames = append(providerNames, name)
-	}
-	sort.Strings(providerNames)
-
-	out := make([]ModelOption, 0)
-	for _, providerName := range providerNames {
-		prov := providers[providerName]
-		if len(prov.Models) == 0 {
-			continue
-		}
-		modelIDs := make([]string, 0, len(prov.Models))
-		for id := range prov.Models {
-			modelIDs = append(modelIDs, id)
-		}
-		sort.Strings(modelIDs)
-		for _, modelID := range modelIDs {
-			mc := prov.Models[modelID]
-			out = append(out, ModelOption{
-				ProviderModel: providerName + "/" + modelID,
-				ProviderName:  providerName,
-				ModelID:       modelID,
-				ContextLimit:  mc.Limit.Context,
-				OutputLimit:   mc.Limit.Output,
-			})
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+// ModelPoolPolicy returns the current runtime model pool policy (read-only).
+func (a *MainAgent) ModelPoolPolicy() *RuntimeModelPoolPolicy {
+	return a.modelPoolPolicy
 }
 
 // SwapLLMClient atomically replaces the MainAgent's LLM client, model name,
@@ -191,9 +140,9 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	log.Debugf("swapped LLM client model=%v context_limit=%v", modelName, contextLimit)
 }
 
-// SwitchModel switches the MainAgent to a different model at runtime. The
-// providerModel string is in "provider/model" or "provider/model@variant"
-// format. Thread-safe.
+// SwitchModel switches the MainAgent to a different model at runtime. It is kept
+// for internal tests and pool-driven client rebuilds; user-facing commands should
+// switch pools via /models rather than choosing provider/model refs directly.
 func (a *MainAgent) SwitchModel(providerModel string) error {
 	return a.switchModel(providerModel, true)
 }
@@ -219,6 +168,15 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 
 	a.swapLLMClientWithRef(client, modelName, ctxLimit, providerModel)
 	a.mainModelPolicyDirty.Store(false)
+	if a.modelPoolPolicy != nil {
+		cfg := a.currentActiveConfig()
+		if cfg != nil {
+			effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
+			if effectivePool != "" {
+				a.modelPoolPolicy.SetLastPicked(cfg.Name, effectivePool, providerModel)
+			}
+		}
+	}
 	effectiveRunningRef := client.RunningModelRef()
 	if effectiveRunningRef == "" {
 		effectiveRunningRef = client.PrimaryModelRef()
@@ -245,20 +203,289 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 	return nil
 }
 
-// handleModelCommand processes the /model slash command.
-//   - "/model" (no args): emits ModelSelectEvent so the TUI opens the selector.
-//   - "/model provider/model": switches to the specified model directly.
-func (a *MainAgent) handleModelCommand(content string) {
-	arg := strings.TrimSpace(strings.TrimPrefix(content, "/model"))
+// handleModelsCommand processes the /models slash command.
+//   - "/models": emits ModelSelectEvent so the TUI opens the current-view selector.
+//   - "/models status": shows current pool status as text.
+//   - "/models <pool>": sets the current view's pool (main role or focused SubAgent).
+//   - "/models --agent <name> <pool>": sets the named agent's pool.
+func (a *MainAgent) handleModelsCommand(content string) {
+	arg := strings.TrimSpace(strings.TrimPrefix(content, "/models"))
 	if arg == "" {
-		a.emitToTUI(ModelSelectEvent{})
+		a.emitToTUI(ModelSelectEvent{Target: ModelPoolSelectorTarget{Kind: ModelPoolSelectorTargetCurrentView}})
 		a.setIdleAndDrainPending()
 		return
 	}
-	if err := a.SwitchModel(arg); err != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/model: %w", err)})
+	if arg == "status" {
+		a.handleModelsStatus()
 		a.setIdleAndDrainPending()
 		return
 	}
+	if strings.HasPrefix(arg, "--agent ") {
+		a.handleModelsSetAgent(strings.TrimSpace(strings.TrimPrefix(arg, "--agent ")))
+		a.setIdleAndDrainPending()
+		return
+	}
+	a.handleModelsSetCurrentView(arg)
 	a.setIdleAndDrainPending()
+}
+
+func (a *MainAgent) ModelsStatusText() string {
+	if a.modelPoolPolicy == nil {
+		return "Model pool policy not configured"
+	}
+	var sb strings.Builder
+	currentRolePool := a.modelPoolPolicy.CurrentRole()
+	currentRoleStatus := ""
+	if currentRolePool != "" {
+		// Current role pool is only applied to non-subagent roles.
+		currentRoleDefined := false
+		for _, cfg := range a.agentConfigs {
+			if cfg != nil && !cfg.IsSubAgent() && cfg.HasPool(currentRolePool) {
+				currentRoleDefined = true
+				break
+			}
+		}
+		if !currentRoleDefined {
+			currentRoleStatus = " (missing)"
+		}
+	}
+	sb.WriteString(fmt.Sprintf("Current role pool: %s%s\n", currentRolePool, currentRoleStatus))
+	overrides := a.modelPoolPolicy.Overrides()
+	if len(overrides) > 0 {
+		sb.WriteString("Fixed agent pools:\n")
+		agentNames := make([]string, 0, len(overrides))
+		for name := range overrides {
+			agentNames = append(agentNames, name)
+		}
+		sort.Strings(agentNames)
+		for _, name := range agentNames {
+			pool := overrides[name]
+			cfg := a.agentConfigs[name]
+			status := ""
+			if cfg != nil && !cfg.HasPool(pool) {
+				status = " (missing)"
+			}
+			sb.WriteString(fmt.Sprintf("  %s: %s%s\n", name, pool, status))
+		}
+	}
+	sb.WriteString("\nAgent effective pools:\n")
+	agentNames := make([]string, 0, len(a.agentConfigs))
+	for name := range a.agentConfigs {
+		agentNames = append(agentNames, name)
+	}
+	sort.Strings(agentNames)
+	for _, name := range agentNames {
+		cfg := a.agentConfigs[name]
+		pool := a.modelPoolPolicy.EffectivePool(name, cfg)
+		models := a.modelPoolPolicy.EffectiveModels(name, cfg)
+		if pool == "" {
+			sb.WriteString(fmt.Sprintf("  %s: (no pool)\n", name))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s: %s (%d model(s))\n", name, pool, len(models)))
+		}
+	}
+	return sb.String()
+}
+
+func (a *MainAgent) handleModelsStatus() {
+	a.emitToTUI(InfoEvent{Message: a.ModelsStatusText()})
+}
+
+func (a *MainAgent) handleModelsSetCurrentView(pool string) {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		if err := a.setAgentModelPool(sub.agentDefName, pool, false); err != nil {
+			a.emitToTUI(ErrorEvent{Err: err})
+		}
+		return
+	}
+	if err := a.setCurrentRolePool(pool, true); err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+	}
+}
+
+func (a *MainAgent) handleModelsSetAgent(rest string) {
+	parts := strings.Fields(rest)
+	if len(parts) != 2 {
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/models --agent: usage: /models --agent <name> <pool>")})
+		return
+	}
+	if err := a.setAgentModelPool(parts[0], parts[1], true); err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+	}
+}
+
+func baseModelRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if idx := strings.LastIndex(ref, "@"); idx >= 0 {
+		return strings.TrimSpace(ref[:idx])
+	}
+	return ref
+}
+
+func modelRefInPool(current string, refs []string) bool {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return false
+	}
+	currentBase := baseModelRef(current)
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		refBase := baseModelRef(ref)
+		if ref == current || (currentBase != "" && currentBase == refBase) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool string, oldPool string) error {
+	if cfg == nil || a.modelPoolPolicy == nil {
+		return nil
+	}
+	refs := a.modelPoolPolicy.EffectiveModels(cfg.Name, cfg)
+	if len(refs) == 0 {
+		return nil
+	}
+	current := a.ProviderModelRef()
+	if pool == oldPool && modelRefInPool(current, refs) {
+		return nil
+	}
+	if modelRefInPool(current, refs) {
+		a.modelPoolPolicy.SetLastPicked(cfg.Name, pool, current)
+		return nil
+	}
+	ref := a.modelPoolPolicy.ResolveInitialModelRef(cfg.Name, cfg)
+	if ref == "" {
+		return nil
+	}
+	if err := a.switchModel(ref, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *MainAgent) setCurrentRolePool(pool string, emitToast bool) error {
+	if a.modelPoolPolicy == nil {
+		return fmt.Errorf("/models: model pool policy not configured")
+	}
+	pool = strings.TrimSpace(pool)
+	if pool == "" {
+		return fmt.Errorf("/models: pool name required")
+	}
+
+	activeCfg := a.currentActiveConfig()
+	if activeCfg == nil {
+		return fmt.Errorf("/models: no active agent")
+	}
+	if !activeCfg.HasPool(pool) {
+		return fmt.Errorf("/models: agent %q does not define pool %q", activeCfg.Name, pool)
+	}
+
+	oldPool := a.modelPoolPolicy.CurrentRole()
+	a.modelPoolPolicy.SetCurrentRole(pool)
+
+	cfg := a.currentActiveConfig()
+	if cfg != nil {
+		effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
+		if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, oldPool); err != nil {
+			a.modelPoolPolicy.SetCurrentRole(oldPool)
+			return fmt.Errorf("/models: switch model: %w", err)
+		}
+	}
+	a.saveModelPoolState()
+
+	if emitToast {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Current role pool set to %q", pool), Level: "info"})
+	}
+	return nil
+}
+
+func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *config.AgentConfig, pool string) error {
+	if a.modelPoolPolicy == nil || a.modelSwitchFactory == nil || cfg == nil {
+		return nil
+	}
+	refs := a.modelPoolPolicy.EffectiveModels(agentName, cfg)
+	if len(refs) == 0 {
+		return nil
+	}
+	a.mu.RLock()
+	var targets []*SubAgent
+	for _, sub := range a.subAgents {
+		if sub != nil && sub.agentDefName == agentName {
+			targets = append(targets, sub)
+		}
+	}
+	a.mu.RUnlock()
+	for _, sub := range targets {
+		current := ""
+		if sub.llmClient != nil {
+			current = sub.llmClient.PrimaryModelRef()
+		}
+		if modelRefInPool(current, refs) {
+			a.modelPoolPolicy.SetLastPicked(agentName, pool, current)
+			continue
+		}
+		ref := a.modelPoolPolicy.ResolveInitialModelRef(agentName, cfg)
+		if ref == "" {
+			continue
+		}
+		client, modelName, ctxLimit, err := a.modelSwitchFactory(ref)
+		if err != nil {
+			return fmt.Errorf("create LLM client for %q: %w", ref, err)
+		}
+		if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
+			client.SetSessionID(sid)
+		}
+		sub.switchModel(client, modelName, ctxLimit)
+		a.modelPoolPolicy.SetLastPicked(agentName, pool, client.PrimaryModelRef())
+	}
+	return nil
+}
+
+func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) error {
+	if a.modelPoolPolicy == nil {
+		return fmt.Errorf("/models: model pool policy not configured")
+	}
+	cfg, ok := a.agentConfigs[agentName]
+	if !ok {
+		return fmt.Errorf("/models: unknown agent %q", agentName)
+	}
+	pool = strings.TrimSpace(pool)
+	if pool == "" {
+		return fmt.Errorf("/models: pool name required")
+	}
+	if !cfg.HasPool(pool) {
+		return fmt.Errorf("/models: agent %q does not define pool %q", agentName, pool)
+	}
+
+	prev, hadOverride := a.modelPoolPolicy.AgentOverride(agentName)
+	a.modelPoolPolicy.SetAgentOverride(agentName, pool)
+
+	if cfg.Name == a.CurrentRole() {
+		effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
+		if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, prev); err != nil {
+			if hadOverride {
+				a.modelPoolPolicy.SetAgentOverride(agentName, prev)
+			} else {
+				a.modelPoolPolicy.ClearAgentOverride(agentName)
+			}
+			return fmt.Errorf("/models: switch model: %w", err)
+		}
+	} else if err := a.switchActiveSubAgentsForPoolIfNeeded(agentName, cfg, pool); err != nil {
+		if hadOverride {
+			a.modelPoolPolicy.SetAgentOverride(agentName, prev)
+		} else {
+			a.modelPoolPolicy.ClearAgentOverride(agentName)
+		}
+		return fmt.Errorf("/models: switch model: %w", err)
+	}
+	a.saveModelPoolState()
+
+	if emitToast {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Agent %q pool set to %q", agentName, pool), Level: "info"})
+	}
+	return nil
 }

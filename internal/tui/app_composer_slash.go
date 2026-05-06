@@ -185,7 +185,7 @@ var slashCommands = []slashCommand{
 	{Cmd: "/diagnostics", Desc: "export a diagnostics bundle"},
 	{Cmd: "/export", Desc: "export session (Markdown/JSON)"},
 	{Cmd: "/help", Desc: "show keyboard help"},
-	{Cmd: "/model", Desc: "switch model"},
+	{Cmd: "/models", Desc: "switch current view pool"},
 	{Cmd: "/new", Desc: "start a fresh session"},
 	{Cmd: "/resume", Desc: "resume previous session"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
@@ -286,8 +286,9 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 		}
 	}
 
+	frameWidth := DirectoryBorderStyle.GetHorizontalPadding() + DirectoryBorderStyle.GetHorizontalBorderSize()
 	body := strings.Join(lines, "\n")
-	out := DirectoryBorderStyle.Width(contentWidth + 2).Render(body)
+	out := DirectoryBorderStyle.Width(contentWidth + frameWidth).Render(body)
 	m.slashCache = slashRenderCache{
 		width: m.width,
 		theme: m.theme.Name,

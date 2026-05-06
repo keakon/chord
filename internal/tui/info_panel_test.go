@@ -163,6 +163,25 @@ func TestRenderInfoPanelShowsKeyPoolConfirmedCount(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelPoolUsesValueColor(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.poolNamesByFocus = map[string][]string{"": {"thinking", "non-thinking"}}
+	backend.currentPoolByFocus = map[string]string{"": "thinking"}
+	backend.keysConfirmed = 1
+	backend.keysTotal = 3
+	m := NewModel(backend)
+
+	rendered := m.renderInfoPanel(40, 20)
+	want := InfoPanelValue.Render("Pool: thinking")
+	if !strings.Contains(rendered, want) {
+		t.Fatalf("Pool line should use InfoPanelValue; rendered=%q want fragment=%q", rendered, want)
+	}
+	warn := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg)).Render("Pool: thinking")
+	if strings.Contains(rendered, warn) {
+		t.Fatalf("Pool line should not use key warning color; rendered=%q warn fragment=%q", rendered, warn)
+	}
+}
+
 func TestKeyPoolHealthSeverityThresholds(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -805,7 +824,7 @@ func TestRenderInfoPanelAgentsApplyConfiguredColorToNonFocusedRows(t *testing.T)
 
 func TestRenderInfoPanelAgentsRefreshWhenSelectedRefVariantChanges(t *testing.T) {
 	// Variant info is no longer rendered as a sub-line in the info panel
-	// (it's shown in the model selector label instead). This test now
+	// (it's shown in the pool selector label instead). This test now
 	// verifies that the agent row refreshes correctly when SelectedRef changes.
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)

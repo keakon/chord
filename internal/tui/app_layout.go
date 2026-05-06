@@ -196,23 +196,20 @@ func (m *Model) sessionSelectOptionIndexAt(x, y int) (int, bool) {
 	return idx, true
 }
 
-func (m *Model) modelSelectOptionIndexAt(x, y int) (int, bool) {
-	if len(m.modelSelect.options) == 0 || m.modelSelect.table == nil {
+func (m *Model) poolSelectIndexAt(x, y int) (int, bool) {
+	itemCount := len(m.modelSelect.poolNames)
+	if itemCount == 0 {
 		return 0, false
 	}
 	dialogRect := m.overlayRect(m.renderModelSelectDialog())
 	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
 		return 0, false
 	}
-	start, end := m.modelSelect.table.WindowRange()
-	idx, ok := overlayItemIndexAt(dialogRect, y, 5, start, end-start)
+	idx, ok := overlayItemIndexAt(dialogRect, y, 5, 0, itemCount)
 	if !ok {
 		return 0, false
 	}
-	if idx < 0 || idx >= len(m.modelSelect.options) {
-		return 0, false
-	}
-	if m.modelSelect.options[idx].Header {
+	if idx < 0 || idx >= itemCount {
 		return 0, false
 	}
 	return idx, true

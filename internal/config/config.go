@@ -17,11 +17,12 @@ const (
 
 // Config is the top-level configuration for the chord agent.
 type Config struct {
-	Providers      map[string]ProviderConfig `json:"providers" yaml:"providers"`             // LLM providers
-	Context        ContextConfig             `json:"context" yaml:"context"`                 // context compression settings
-	Skills         SkillsConfig              `json:"skills" yaml:"skills"`                   // additional skill paths
-	ConfirmTimeout int                       `json:"confirm_timeout" yaml:"confirm_timeout"` // confirmation timeout in seconds (0 = infinite, default)
-	Diff           DiffConfig                `json:"diff" yaml:"diff"`                       // TUI diff rendering options
+	Providers      map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
+	ModelPools     map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
+	Context        ContextConfig             `json:"context" yaml:"context"`                             // context compression settings
+	Skills         SkillsConfig              `json:"skills" yaml:"skills"`                               // additional skill paths
+	ConfirmTimeout int                       `json:"confirm_timeout" yaml:"confirm_timeout"`             // confirmation timeout in seconds (0 = infinite, default)
+	Diff           DiffConfig                `json:"diff" yaml:"diff"`                                   // TUI diff rendering options
 	// DesktopNotification, when true, enables OSC 9 idle notifications in local TUI (terminal unfocused). YAML: desktop_notification: true
 	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true

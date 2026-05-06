@@ -115,6 +115,28 @@ const (
 	TypeLSPSidebarStatus = "lsp.sidebar_status"
 )
 
+// ModelPoolSelectorTargetKind identifies which runtime model-pool setting the
+// TUI selector should edit.
+type ModelPoolSelectorTargetKind string
+
+const (
+	ModelPoolSelectorTargetCurrentView   ModelPoolSelectorTargetKind = "current_view"
+	ModelPoolSelectorTargetMainRole      ModelPoolSelectorTargetKind = "main_role"
+	ModelPoolSelectorTargetAgentOverride ModelPoolSelectorTargetKind = "agent_override"
+)
+
+// ModelPoolSelectorTarget describes the explicit target edited by the model-pool selector.
+type ModelPoolSelectorTarget struct {
+	Kind      ModelPoolSelectorTargetKind `json:"kind"`
+	AgentName string                      `json:"agent_name,omitempty"`
+}
+
+// ModelSelectRequestPayload asks the client to open the model-pool selector for a
+// specific runtime target.
+type ModelSelectRequestPayload struct {
+	Target ModelPoolSelectorTarget `json:"target"`
+}
+
 // RunningModelChangedPayload is the payload for TypeRunningModelChanged.
 type RunningModelChangedPayload struct {
 	AgentID          string `json:"agent_id,omitempty"`

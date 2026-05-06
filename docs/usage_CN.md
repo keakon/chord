@@ -27,7 +27,7 @@ Chord 有两条主要使用路径：
 - `gg` / `G`：跳到开头 / 结尾
 - `/`：搜索消息
 - `Ctrl+J`：打开消息目录
-- `Ctrl+P`：切换模型
+- `Ctrl+P`：切换主角色模型池
 - `Ctrl+G`：导出诊断包
 - `q`：双击退出
 - `Ctrl+C`：双击退出
@@ -52,7 +52,8 @@ Chord 会为当前项目维护持久化会话。
 
 - `/new`：新建会话
 - `/resume`：恢复会话
-- `/model`：切换当前运行模型
+- `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
+- `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/export`：导出当前会话
 - `/compact`：手动触发上下文压缩
 - `/stats`：查看用量统计

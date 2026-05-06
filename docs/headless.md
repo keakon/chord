@@ -31,6 +31,7 @@ Common commands:
 - `send`: send a user message
 - `confirm`: approve or reject a confirmation request
 - `question`: answer a question
+- `models`: inspect or change model pools
 - `cancel`: cancel the current turn
 
 Example — send a user message:
@@ -38,6 +39,24 @@ Example — send a user message:
 ```json
 {"type":"send","content":"Please summarize the project structure."}
 ```
+
+Example — inspect model pools:
+
+```json
+{"type":"models","action":"status"}
+```
+
+The response is a `models_response` envelope. Its `status` field contains the same plain-text status shown by `/models status`.
+
+Example — change the current main role pool:
+
+```json
+{"type":"models","action":"set_current_role","pool":"thinking"}
+```
+
+For compatibility, headless also accepts slash commands via `send`, such as `/models status`, `/models thinking`, and `/models --agent reviewer thinking`. In headless mode, bare `/models` is treated as `/models status` because there is no TUI overlay.
+
+`/models status` is a local-only slash command that prints a plain-text snapshot of model-pool state: the current main role pool, any per-agent saved pool selections, and every agent's effective pool. It is intended for humans and simple gateways; structured integrations should prefer the `models` JSON command above.
 
 ## Typical events
 

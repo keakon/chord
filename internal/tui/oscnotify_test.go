@@ -28,15 +28,21 @@ func (loopBusyAgentStub) UpdatePendingUserDraft(string, []message.ContentPart) b
 func (loopBusyAgentStub) RemovePendingUserDraft(string) bool                        { return false }
 func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)     {}
 func (loopBusyAgentStub) ResolveQuestion([]string, bool, string)                    {}
-func (loopBusyAgentStub) SwitchModel(string) error                                  { return nil }
-func (loopBusyAgentStub) AvailableModels() []agent.ModelOption                      { return nil }
 func (loopBusyAgentStub) ProviderModelRef() string                                  { return "" }
 func (loopBusyAgentStub) RunningModelRef() string                                   { return "" }
 func (loopBusyAgentStub) RunningVariant() string                                    { return "" }
+func (loopBusyAgentStub) CurrentPoolName() string                                   { return "" }
+func (loopBusyAgentStub) PoolNames() []string                                       { return nil }
+func (loopBusyAgentStub) MainRoleCurrentPoolName() string                           { return "" }
+func (loopBusyAgentStub) MainRolePoolNames() []string                               { return nil }
+func (loopBusyAgentStub) AgentOverridePoolName(string) (string, bool)               { return "", false }
+func (loopBusyAgentStub) SetCurrentRolePool(string) error                           { return nil }
+func (loopBusyAgentStub) SetAgentModelPool(string, string) error                    { return nil }
 func (loopBusyAgentStub) GetSubAgents() []agent.SubAgentInfo                        { return nil }
 func (loopBusyAgentStub) GetMessages() []message.Message                            { return nil }
 func (loopBusyAgentStub) SwitchFocus(string)                                        {}
 func (loopBusyAgentStub) FocusedAgentID() string                                    { return "" }
+func (loopBusyAgentStub) FocusedAgentName() string                                  { return "" }
 func (loopBusyAgentStub) StartupResumeStatus() (bool, string)                       { return false, "" }
 func (loopBusyAgentStub) ContinueFromContext()                                      {}
 func (loopBusyAgentStub) RemoveLastMessage()                                        {}

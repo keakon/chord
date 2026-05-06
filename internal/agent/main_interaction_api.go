@@ -185,6 +185,15 @@ func (a *MainAgent) handleContinueFromContext(_ Event) {
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
 
+// FocusedAgentName returns the agent definition name of the currently focused
+// SubAgent, or "" if the main agent is focused.
+func (a *MainAgent) FocusedAgentName() string {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return sub.agentDefName
+	}
+	return ""
+}
+
 // FocusedAgentID returns the instance ID of the currently focused SubAgent,
 // or "" if the main agent is focused.
 func (a *MainAgent) FocusedAgentID() string {

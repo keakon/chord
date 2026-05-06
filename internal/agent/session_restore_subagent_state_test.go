@@ -22,7 +22,7 @@ func TestRestoreLoadedSubAgentsKeepsCompletedState(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -62,7 +62,7 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 		"restorer": {
 			Name:       "restorer",
 			Mode:       "subagent",
-			Models:     []string{"test/test-model"},
+			Models:     map[string][]string{"default": {"test/test-model"}},
 			Delegation: config.DelegationConfig{MaxChildren: 2, MaxDepth: 2},
 		},
 	})
@@ -113,7 +113,7 @@ func TestRestoreLoadedSubAgentsDrainsOwnedMailboxAfterOwnerRestore(t *testing.T)
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -209,7 +209,7 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -261,7 +261,7 @@ func TestRestoreSessionAtStartupDoesNotReviveClosedWorkerFromTranscriptOnly(t *t
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -323,7 +323,7 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a2.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -384,7 +384,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
@@ -411,7 +411,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a2.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {

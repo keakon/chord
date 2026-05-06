@@ -640,12 +640,12 @@ func TestSwitchRoleAppliesPrimaryRoleModelImmediately(t *testing.T) {
 		"builder": {
 			Name:   "builder",
 			Mode:   "primary",
-			Models: []string{"build/one", "build/two"},
+			Models: map[string][]string{"default": {"build/one", "build/two"}},
 		},
 		"executor": {
 			Name:   "executor",
 			Mode:   "primary",
-			Models: []string{"exec/one", "exec/two"},
+			Models: map[string][]string{"default": {"exec/one", "exec/two"}},
 		},
 	})
 	a.SetProviderModelRef("build/one")
@@ -719,7 +719,7 @@ func TestAvailableRolesSortsCustomPrimaryRolesDeterministically(t *testing.T) {
 		"zeta":     {Name: "zeta", Mode: "primary"},
 		"alpha":    {Name: "alpha", Mode: "primary"},
 		"reviewer": {Name: "reviewer", Mode: "primary"},
-		"worker":   {Name: "worker", Mode: "subagent", Models: []string{"worker/one"}},
+		"worker":   {Name: "worker", Mode: "subagent", Models: map[string][]string{"default": {"worker/one"}}},
 	})
 
 	got := a.AvailableRoles()
@@ -737,7 +737,7 @@ func TestAvailableAgentsSortsNonBuilderRolesDeterministically(t *testing.T) {
 		"planner": {Name: "planner", Mode: "primary"},
 		"zeta":    {Name: "zeta", Mode: "primary"},
 		"alpha":   {Name: "alpha", Mode: "primary"},
-		"worker":  {Name: "worker", Mode: "subagent", Models: []string{"worker/one"}},
+		"worker":  {Name: "worker", Mode: "subagent", Models: map[string][]string{"default": {"worker/one"}}},
 	})
 	if err := a.switchRole("planner", false); err != nil {
 		t.Fatalf("switchRole: %v", err)
@@ -754,8 +754,8 @@ func TestSwitchRoleAppliesRoleModelWithoutToast(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: []string{"build/one"}},
-		"executor": {Name: "executor", Mode: "primary", Models: []string{"exec/one"}},
+		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: "primary", Models: map[string][]string{"default": {"exec/one"}}},
 	})
 	a.SetProviderModelRef("build/one")
 
@@ -797,8 +797,8 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: []string{"build/one"}},
-		"executor": {Name: "executor", Mode: "primary", Models: []string{"exec/one"}},
+		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: "primary", Models: map[string][]string{"default": {"exec/one"}}},
 	})
 	a.SetProviderModelRef("build/one")
 
@@ -838,11 +838,11 @@ func TestSwitchRoleUsesAgentVariantForPrimaryRoleModel(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Models: []string{"build/one"}},
+		"builder": {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
 		"executor": {
 			Name:    "executor",
 			Mode:    "primary",
-			Models:  []string{"exec/one"},
+			Models:  map[string][]string{"default": {"exec/one"}},
 			Variant: "high",
 		},
 	})
@@ -871,7 +871,7 @@ func TestSwitchRoleWithNoModelsLeavesSelectedModelUntouchedAndDefersPolicy(t *te
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: []string{"build/one"}},
+		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
 		"reviewer": {Name: "reviewer", Mode: "primary"},
 	})
 	a.SetProviderModelRef("build/one")

@@ -5864,7 +5864,7 @@ func TestOpenImageViewerClearsActiveSearchSession(t *testing.T) {
 }
 
 func TestOpenModelSelectClearsActiveSearchSession(t *testing.T) {
-	backend := &sessionControlAgent{availableModels: []agent.ModelOption{{ProviderModel: "main/test"}}}
+	backend := &sessionControlAgent{poolNamesByFocus: map[string][]string{"": {"default"}}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeNormal
 	m.search.State.Active = true
@@ -5879,6 +5879,37 @@ func TestOpenModelSelectClearsActiveSearchSession(t *testing.T) {
 	}
 	if m.search.State.Active || m.search.State.Query != "" {
 		t.Fatalf("search state after openModelSelect = %+v, want cleared", m.search.State)
+	}
+}
+
+func TestOpenModelSelectTargetsFocusedSubAgentPoolList(t *testing.T) {
+	backend := &sessionControlAgent{
+		subAgents: []agent.SubAgentInfo{{InstanceID: "sub-1", AgentDefName: "reviewer"}},
+		focused:   "sub-1",
+		poolNamesByFocus: map[string][]string{
+			"":         {"thinking", "fast"},
+			"reviewer": {"sub-only", "thinking"},
+		},
+		currentPoolByFocus: map[string]string{
+			"":         "fast",
+			"reviewer": "thinking",
+		},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+	m.focusedAgentID = "sub-1"
+
+	m.openModelSelect()
+
+	if m.mode != ModeModelSelect {
+		t.Fatalf("mode = %v, want ModeModelSelect", m.mode)
+	}
+	wantPools := []string{"sub-only", "thinking"}
+	if strings.Join(m.modelSelect.poolNames, ",") != strings.Join(wantPools, ",") {
+		t.Fatalf("poolNames = %v, want %v", m.modelSelect.poolNames, wantPools)
+	}
+	if m.modelSelect.poolCursor != 1 {
+		t.Fatalf("poolCursor = %d, want 1 for focused subagent pool", m.modelSelect.poolCursor)
 	}
 }
 
@@ -6615,24 +6646,49 @@ func TestChordTimeoutStaleGenerationDoesNotClearState(t *testing.T) {
 	}
 }
 
+func TestOpenModelSelectForAgentOverrideUsesExplicitTarget(t *testing.T) {
+	backend := &sessionControlAgent{
+		subAgents: []agent.SubAgentInfo{{InstanceID: "sub-1", AgentDefName: "reviewer"}},
+		focused:   "sub-1",
+		poolNamesByFocus: map[string][]string{
+			"reviewer": {"sub-only", "thinking"},
+		},
+		currentPoolByFocus: map[string]string{
+			"reviewer": "thinking",
+		},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+	m.focusedAgentID = "sub-1"
+
+	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetAgentOverride, AgentName: "reviewer"})
+
+	if m.mode != ModeModelSelect {
+		t.Fatalf("mode = %v, want ModeModelSelect", m.mode)
+	}
+	wantPools := []string{"sub-only", "thinking"}
+	if strings.Join(m.modelSelect.poolNames, ",") != strings.Join(wantPools, ",") {
+		t.Fatalf("poolNames = %v, want %v", m.modelSelect.poolNames, wantPools)
+	}
+	if m.modelSelect.poolCursor != 1 {
+		t.Fatalf("poolCursor = %d, want 1 for current override", m.modelSelect.poolCursor)
+	}
+}
+
 func TestModelSelectorSingleGJumpsToTop(t *testing.T) {
-	backend := &sessionControlAgent{availableModels: []agent.ModelOption{
-		{ProviderName: "one", ProviderModel: "one/a", ModelID: "a"},
-		{ProviderName: "two", ProviderModel: "two/b", ModelID: "b"},
-		{ProviderName: "three", ProviderModel: "three/c", ModelID: "c"},
-	}}
+	backend := &sessionControlAgent{
+		mainRoleCurrentPool: "gamma",
+		poolNamesByFocus:    map[string][]string{"": {"alpha", "beta", "gamma"}},
+	}
 	m := NewModel(backend)
 	m.openModelSelect()
-	if m.modelSelect.table == nil {
-		t.Fatal("expected model selector table")
-	}
-	m.modelSelect.table.list.SetCursor(3)
+	m.modelSelect.poolCursor = 2
 
 	if cmd := m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Text: "g", Code: 'g'})); cmd != nil {
-		t.Fatalf("single g in model selector should not return cmd, got %#v", cmd)
+		t.Fatalf("single g in pool selector should not return cmd, got %#v", cmd)
 	}
-	if got := m.modelSelect.table.list.CursorAt(); got != 1 {
-		t.Fatalf("model selector cursor = %d, want 1 (first selectable row)", got)
+	if got := m.modelSelect.poolCursor; got != 0 {
+		t.Fatalf("pool selector cursor = %d, want 0 (first pool)", got)
 	}
 }
 

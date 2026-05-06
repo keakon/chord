@@ -39,6 +39,14 @@ func applyProjectConfigOverrides(ac *AppContext, pc *config.Config) {
 		v := *pc.WebFetch.Proxy
 		ac.Cfg.WebFetch.Proxy = &v
 	}
+	if len(pc.ModelPools) > 0 {
+		if ac.Cfg.ModelPools == nil {
+			ac.Cfg.ModelPools = make(map[string][]string)
+		}
+		for name, refs := range pc.ModelPools {
+			ac.Cfg.ModelPools[name] = refs
+		}
+	}
 }
 
 func lspServerDisplayList(mgr *lsp.Manager) []agent.LSPServerDisplay {

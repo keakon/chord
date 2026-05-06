@@ -2594,136 +2594,6 @@ func TestRebuildViewportFromMessagesMarksRestoredToolErrorsAndCancellationsDone(
 	}
 }
 
-func TestOpenModelSelectGroupsProvidersAndSearchesProviderOrModel(t *testing.T) {
-	backend := &sessionControlAgent{
-		availableModels: []agent.ModelOption{
-			{ProviderModel: "openai/gpt-5.5", ProviderName: "openai", ModelID: "gpt-5.5", ContextLimit: 1_000_000, OutputLimit: 128_000},
-			{ProviderModel: "azure/gpt-5.5", ProviderName: "azure", ModelID: "gpt-5.5", ContextLimit: 1_000_000, OutputLimit: 128_000},
-			{ProviderModel: "anthropic/claude-opus-4.7", ProviderName: "anthropic", ModelID: "claude-opus-4.7", ContextLimit: 200_000, OutputLimit: 64_000},
-		},
-		providerModelRef: "openai/gpt-5.5",
-	}
-	m := NewModel(backend)
-
-	m.openModelSelect()
-
-	if got := len(m.modelSelect.options); got != 6 {
-		t.Fatalf("len(options) = %d, want 6 (3 headers + 3 models)", got)
-	}
-	if !m.modelSelect.options[0].Header || m.modelSelect.options[0].Provider != "openai" {
-		t.Fatalf("first option = %#v, want openai header to preserve configured order", m.modelSelect.options[0])
-	}
-	if !m.modelSelect.options[2].Header || m.modelSelect.options[2].Provider != "azure" {
-		t.Fatalf("third option = %#v, want azure header", m.modelSelect.options[2])
-	}
-	if !m.modelSelect.options[4].Header || m.modelSelect.options[4].Provider != "anthropic" {
-		t.Fatalf("fifth option = %#v, want anthropic header", m.modelSelect.options[4])
-	}
-	if got := m.modelSelect.table.CursorAt(); got != 1 {
-		t.Fatalf("cursor = %d, want current model index 1", got)
-	}
-
-	if !m.handleModelSelectSearchKey(modelSelectKey("azure").Key()) {
-		t.Fatalf("expected provider search key to be handled")
-	}
-	if m.modelSelect.searchInput != "azure" {
-		t.Fatalf("searchInput = %q, want azure", m.modelSelect.searchInput)
-	}
-	if got := len(m.modelSelect.options); got != 2 {
-		t.Fatalf("len(filtered options) = %d, want 2 (header + model)", got)
-	}
-	if !m.modelSelect.options[0].Header || m.modelSelect.options[0].Provider != "azure" {
-		t.Fatalf("filtered header = %#v, want azure header", m.modelSelect.options[0])
-	}
-	if got := m.modelSelect.table.CursorAt(); got != 1 {
-		t.Fatalf("filtered cursor = %d, want 1", got)
-	}
-
-	for range len("azure") {
-		if !m.handleModelSelectSearchKey(tea.Key{Code: tea.KeyBackspace}) {
-			t.Fatalf("expected backspace to be handled")
-		}
-	}
-	if m.modelSelect.searchInput != "" {
-		t.Fatalf("searchInput after clear = %q, want empty", m.modelSelect.searchInput)
-	}
-	if !m.handleModelSelectSearchKey(modelSelectKey("claude").Key()) {
-		t.Fatalf("expected model search key to be handled")
-	}
-	if got := len(m.modelSelect.options); got != 2 {
-		t.Fatalf("len(model filtered options) = %d, want 2", got)
-	}
-	if !m.modelSelect.options[0].Header || m.modelSelect.options[0].Provider != "anthropic" {
-		t.Fatalf("model filtered header = %#v, want anthropic header", m.modelSelect.options[0])
-	}
-}
-
-func TestBuildModelSelectOptionsKeepsCurrentProviderVisibleWhenFilteredOut(t *testing.T) {
-	models := []agent.ModelOption{
-		{ProviderModel: "openai/gpt-5.5", ProviderName: "openai", ModelID: "gpt-5.5", ContextLimit: 1_000_000, OutputLimit: 128_000},
-		{ProviderModel: "azure/gpt-5.5", ProviderName: "azure", ModelID: "gpt-5.5", ContextLimit: 1_000_000, OutputLimit: 128_000},
-		{ProviderModel: "anthropic/claude-opus-4.7", ProviderName: "anthropic", ModelID: "claude-opus-4.7", ContextLimit: 200_000, OutputLimit: 64_000},
-	}
-
-	options, cursorRef := buildModelSelectOptions(models, "openai/gpt-5.5", "gpt")
-	if got := len(options); got != 4 {
-		t.Fatalf("len(options) = %d, want 4", got)
-	}
-	if !options[0].Header || options[0].Provider != "openai" {
-		t.Fatalf("first option = %#v, want openai header", options[0])
-	}
-	if cursorRef != "openai/gpt-5.5" {
-		t.Fatalf("cursorRef = %q, want openai/gpt-5.5", cursorRef)
-	}
-}
-
-func TestSelectModelAtCursorReturnsSwitchResultMsg(t *testing.T) {
-	backend := &sessionControlAgent{
-		availableModels: []agent.ModelOption{
-			{ProviderModel: "openai/gpt-5.5", ProviderName: "openai", ModelID: "gpt-5.5", ContextLimit: 1_000_000, OutputLimit: 128_000},
-			{ProviderModel: "anthropic/claude-opus-4.7", ProviderName: "anthropic", ModelID: "claude-opus-4.7", ContextLimit: 200_000, OutputLimit: 64_000},
-		},
-		providerModelRef: "openai/gpt-5.5",
-		switchModelErr:   nil,
-	}
-	m := NewModel(backend)
-	m.mode = ModeInsert
-	m.openModelSelect()
-	if m.modelSelect.table == nil {
-		t.Fatal("modelSelect table = nil")
-	}
-	m.modelSelect.table.list.SetCursor(3)
-
-	cmd := m.selectModelAtCursor()
-	if cmd == nil {
-		t.Fatal("selectModelAtCursor() = nil, want batch command")
-	}
-	msg := cmd()
-	gotResult := false
-	switch v := msg.(type) {
-	case tea.BatchMsg:
-		for _, child := range v {
-			if child == nil {
-				continue
-			}
-			if _, ok := child().(modelSwitchResultMsg); ok {
-				gotResult = true
-				break
-			}
-		}
-	case modelSwitchResultMsg:
-		gotResult = true
-	default:
-		t.Fatalf("cmd() = %T, want tea.BatchMsg or modelSwitchResultMsg", msg)
-	}
-	if !gotResult {
-		t.Fatal("batch missing modelSwitchResultMsg")
-	}
-	if len(backend.switchModelCalls) != 1 || backend.switchModelCalls[0] != "anthropic/claude-opus-4.7" {
-		t.Fatalf("SwitchModel() calls = %+v, want [anthropic/claude-opus-4.7]", backend.switchModelCalls)
-	}
-}
-
 func TestRebuildBlocksFromFocusedSubAgentMessagesMarksRestoredToolStates(t *testing.T) {
 	backend := &focusedMessagesAgent{
 		messagesByFocus: map[string][]message.Message{
@@ -2775,6 +2645,17 @@ func (f *focusedMessagesAgent) GetMessages() []message.Message {
 func (f *focusedMessagesAgent) SwitchFocus(agentID string) { f.focused = agentID }
 
 func (f *focusedMessagesAgent) FocusedAgentID() string { return f.focused }
+func (f *focusedMessagesAgent) FocusedAgentName() string {
+	if f.focused == "" {
+		return ""
+	}
+	for _, sub := range f.subAgents {
+		if sub.InstanceID == f.focused {
+			return sub.AgentDefName
+		}
+	}
+	return f.focused
+}
 func (f *focusedMessagesAgent) StartupResumeStatus() (bool, string) {
 	return false, ""
 }
@@ -2784,7 +2665,10 @@ type sessionControlAgent struct {
 	messages                []message.Message
 	messagesByFocus         map[string][]message.Message
 	subAgents               []agent.SubAgentInfo
-	availableModels         []agent.ModelOption
+	poolNamesByFocus        map[string][]string
+	mainRolePoolNames       []string
+	currentPoolByFocus      map[string]string
+	mainRoleCurrentPool     string
 	availableAgents         []string
 	availableRoles          []string
 	currentRole             string
@@ -2818,8 +2702,6 @@ type sessionControlAgent struct {
 	cancelResult            bool
 	cancelCalls             int
 	continueCalls           int
-	switchModelErr          error
-	switchModelCalls        []string
 	loopState               agent.LoopState
 	loopTarget              string
 	loopEnableCalls         int
@@ -2859,13 +2741,6 @@ func (s *sessionControlAgent) ResolveConfirm(action, finalArgsJSON, editSummary,
 }
 func (s *sessionControlAgent) ResolveQuestion(answers []string, cancelled bool, requestID string) {
 }
-func (s *sessionControlAgent) SwitchModel(providerModel string) error {
-	s.switchModelCalls = append(s.switchModelCalls, providerModel)
-	return s.switchModelErr
-}
-func (s *sessionControlAgent) AvailableModels() []agent.ModelOption {
-	return append([]agent.ModelOption(nil), s.availableModels...)
-}
 func (s *sessionControlAgent) ProviderModelRef() string {
 	if s.providerModelRefByFocus != nil {
 		if ref, ok := s.providerModelRefByFocus[s.focused]; ok {
@@ -2893,6 +2768,72 @@ func (s *sessionControlAgent) RunningVariant() string {
 	}
 	return s.runningVariant
 }
+func (s *sessionControlAgent) CurrentPoolName() string {
+	key := s.focused
+	if key != "" {
+		for _, sub := range s.subAgents {
+			if sub.InstanceID == s.focused {
+				key = sub.AgentDefName
+				break
+			}
+		}
+	}
+	if s.currentPoolByFocus != nil {
+		if pool, ok := s.currentPoolByFocus[key]; ok {
+			return pool
+		}
+	}
+	return ""
+}
+func (s *sessionControlAgent) PoolNames() []string {
+	key := s.focused
+	if key != "" {
+		for _, sub := range s.subAgents {
+			if sub.InstanceID == s.focused {
+				key = sub.AgentDefName
+				break
+			}
+		}
+	}
+	if s.poolNamesByFocus != nil {
+		if names, ok := s.poolNamesByFocus[key]; ok {
+			return append([]string(nil), names...)
+		}
+	}
+	return nil
+}
+func (s *sessionControlAgent) MainRoleCurrentPoolName() string {
+	if s.mainRoleCurrentPool != "" {
+		return s.mainRoleCurrentPool
+	}
+	if s.currentPoolByFocus != nil {
+		if pool, ok := s.currentPoolByFocus[""]; ok {
+			return pool
+		}
+	}
+	return ""
+}
+func (s *sessionControlAgent) MainRolePoolNames() []string {
+	if len(s.mainRolePoolNames) > 0 {
+		return append([]string(nil), s.mainRolePoolNames...)
+	}
+	if s.poolNamesByFocus != nil {
+		if names, ok := s.poolNamesByFocus[""]; ok {
+			return append([]string(nil), names...)
+		}
+	}
+	return nil
+}
+func (s *sessionControlAgent) AgentOverridePoolName(agentName string) (string, bool) {
+	if s.currentPoolByFocus != nil {
+		if pool, ok := s.currentPoolByFocus[agentName]; ok {
+			return pool, true
+		}
+	}
+	return "", false
+}
+func (s *sessionControlAgent) SetCurrentRolePool(string) error        { return nil }
+func (s *sessionControlAgent) SetAgentModelPool(string, string) error { return nil }
 func (s *sessionControlAgent) GetSubAgents() []agent.SubAgentInfo {
 	return append([]agent.SubAgentInfo(nil), s.subAgents...)
 }
@@ -2906,6 +2847,19 @@ func (s *sessionControlAgent) GetMessages() []message.Message {
 }
 func (s *sessionControlAgent) SwitchFocus(agentID string) { s.focused = agentID }
 func (s *sessionControlAgent) FocusedAgentID() string     { return s.focused }
+func (s *sessionControlAgent) FocusedAgentName() string {
+	if s.focused == "" {
+		return ""
+	}
+	if s.subAgents != nil {
+		for _, sub := range s.subAgents {
+			if sub.InstanceID == s.focused {
+				return sub.AgentDefName
+			}
+		}
+	}
+	return s.focused
+}
 func (s *sessionControlAgent) StartupResumeStatus() (bool, string) {
 	return s.resumePending, s.startupResumeID
 }

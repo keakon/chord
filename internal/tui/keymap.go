@@ -49,7 +49,7 @@ type KeyMap struct {
 	SwitchRole  []string // cycle main agent role (Tab, only in main agent view)
 
 	// Both Insert and Normal modes
-	SwitchModel []string // open model selector
+	SwitchModel []string // open model pool selector
 	Diagnostics []string // export diagnostics bundle
 }
 

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -107,6 +109,105 @@ func TestSendUserMessageWithPartsRoutesImagesToFocusedSubAgent(t *testing.T) {
 		}
 	default:
 		t.Fatal("focused subagent did not receive multipart input")
+	}
+}
+
+func TestSendUserMessageWithPartsLocalOnlyModelsWhileFocusedSubAgent(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	agents := map[string]*config.AgentConfig{
+		"builder": {
+			Name:       "builder",
+			Mode:       "primary",
+			ModelPools: []string{"base", "fast"},
+		},
+		"reviewer": {
+			Name:       "reviewer",
+			Mode:       "subagent",
+			ModelPools: []string{"base", "fast"},
+		},
+	}
+	globalPools := map[string][]string{
+		"base": {"provider/model-a"},
+		"fast": {"provider/model-b"},
+	}
+	if err := config.ResolveAgentModelPools(agents, globalPools); err != nil {
+		t.Fatalf("ResolveAgentModelPools: %v", err)
+	}
+	a.SetAgentConfigs(agents)
+	a.SetModelPoolPolicy(NewRuntimeModelPoolPolicy(), "")
+	a.SetProviderModelRef("provider/model-a")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+				"model-b": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"test-key"})
+		modelID := strings.TrimPrefix(providerModel, "provider/")
+		return llm.NewClient(providerCfg, stubProvider{}, modelID, 1024, ""), modelID, 8192, nil
+	})
+	sub := newControllableTestSubAgent(t, a, "adhoc-models")
+	sub.agentDefName = "reviewer"
+	a.SwitchFocus(sub.instanceID)
+
+	parts := []message.ContentPart{
+		{Type: "text", Text: "/models fast"},
+		{Type: "image", MimeType: "image/png", Data: []byte{1, 2, 3}, FileName: "shot.png"},
+	}
+	a.SendUserMessageWithParts(parts)
+
+	select {
+	case got := <-sub.inputCh:
+		t.Fatalf("focused subagent unexpectedly received local-only /models payload: %+v", got)
+	default:
+	}
+	if got := a.ModelPoolPolicy().CurrentRole(); got != "" {
+		t.Fatalf("CurrentRole() = %q, want empty when focused subagent pool changes", got)
+	}
+	if got, ok := a.ModelPoolPolicy().AgentOverride(sub.agentDefName); !ok || got != "fast" {
+		t.Fatalf("AgentOverride(%s) = (%q, %v), want (\"fast\", true)", sub.agentDefName, got, ok)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef() = %q, want provider/model-a (main agent unchanged)", got)
+	}
+	foundRunning := false
+	for {
+		select {
+		case evt := <-a.Events():
+			switch e := evt.(type) {
+			case RunningModelChangedEvent:
+				if e.AgentID == sub.instanceID && e.ProviderModelRef == "provider/model-b" {
+					foundRunning = true
+				}
+			}
+		default:
+			if !foundRunning {
+				t.Fatal("missing RunningModelChangedEvent after focused subagent local-only /models switch")
+			}
+			return
+		}
+	}
+}
+
+func TestModelsAgentCommandSetsNamedAgentPool(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	agents := map[string]*config.AgentConfig{
+		"builder":  {Name: "builder", Mode: "primary", ModelPools: []string{"base"}},
+		"reviewer": {Name: "reviewer", Mode: "subagent", ModelPools: []string{"base", "fast"}},
+	}
+	globalPools := map[string][]string{"base": {"provider/model-a"}, "fast": {"provider/model-b"}}
+	if err := config.ResolveAgentModelPools(agents, globalPools); err != nil {
+		t.Fatalf("ResolveAgentModelPools: %v", err)
+	}
+	a.SetAgentConfigs(agents)
+	a.SetModelPoolPolicy(NewRuntimeModelPoolPolicy(), "")
+	a.SendUserMessage("/models --agent reviewer fast")
+
+	if got, ok := a.ModelPoolPolicy().AgentOverride("reviewer"); !ok || got != "fast" {
+		t.Fatalf("AgentOverride(reviewer) = (%q, %v), want (\"fast\", true)", got, ok)
 	}
 }
 

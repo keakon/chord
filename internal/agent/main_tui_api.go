@@ -11,12 +11,29 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func (a *MainAgent) handleTUILocalOnlySlashCommand(content string, parts []message.ContentPart) bool {
+	c := strings.TrimSpace(content)
+	switch {
+	case c == "/export" || strings.HasPrefix(c, "/export "):
+		a.handleExportCommand(c)
+		return true
+	case c == "/models" || strings.HasPrefix(c, "/models "):
+		a.handleModelsCommand(c)
+		return true
+	default:
+		return false
+	}
+}
+
 // SendUserMessage enqueues a user message for processing. It is safe to call
 // from any goroutine (typically the TUI input handler).
 //
 // If a SubAgent is currently focused (via Tab), the message is routed directly
 // to that SubAgent instead of the MainAgent's event loop.
 func (a *MainAgent) SendUserMessage(content string) {
+	if a.handleTUILocalOnlySlashCommand(content, nil) {
+		return
+	}
 	// Route to focused SubAgent if one is active.
 	if focused := a.validFocusedSubAgent(); focused != nil {
 		switch focused.State() {
@@ -53,6 +70,15 @@ func (a *MainAgent) SendUserMessage(content string) {
 
 // SendUserMessageWithParts enqueues a multi-part user message (text + images).
 func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
+	var content string
+	for _, part := range parts {
+		if part.Type == "text" {
+			content += part.Text
+		}
+	}
+	if a.handleTUILocalOnlySlashCommand(content, parts) {
+		return
+	}
 	if focused := a.validFocusedSubAgent(); focused != nil {
 		if focused.State() != SubAgentStateRunning {
 			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})

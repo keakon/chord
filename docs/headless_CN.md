@@ -31,6 +31,7 @@ go run ./cmd/chord/ headless
 - `send`：发送用户消息
 - `confirm`：批准或拒绝确认请求
 - `question`：回答问题
+- `models`：查看或修改模型池
 - `cancel`：取消当前 turn
 
 示例——发送用户消息：
@@ -38,6 +39,24 @@ go run ./cmd/chord/ headless
 ```json
 {"type":"send","content":"请总结一下项目结构。"}
 ```
+
+示例——查看模型池：
+
+```json
+{"type":"models","action":"status"}
+```
+
+响应为 `models_response` envelope，其中 `status` 字段包含与 `/models status` 相同的纯文本状态。
+
+示例——切换当前主角色的池：
+
+```json
+{"type":"models","action":"set_current_role","pool":"thinking"}
+```
+
+为了兼容，headless 也接受通过 `send` 发送的 slash command，例如 `/models status`、`/models thinking` 和 `/models --agent reviewer thinking`。在 headless 模式下，裸 `/models` 会按 `/models status` 处理，因为没有 TUI overlay。
+
+`/models status` 是一个 local-only slash command，用于输出模型池状态的纯文本快照：当前主角色池、各 agent 已保存的池选择，以及每个 agent 的 effective pool。它适合人工查看或简单 gateway；结构化集成应优先使用上面的 `models` JSON 命令。
 
 ## 常见事件
 

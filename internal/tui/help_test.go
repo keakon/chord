@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -107,6 +109,24 @@ func TestSlashCompletionDropdownUsesRenderCache(t *testing.T) {
 	}
 	if third == first {
 		t.Fatal("selection change should produce a different cached dropdown render")
+	}
+}
+
+func TestSlashCompletionDropdownDoesNotWrapModelsCommand(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.mode = ModeInsert
+	m.slashCompleteSelected = 0
+
+	drop := m.renderSlashCompletionDropdown("/mo")
+	if drop == "" {
+		t.Fatal("expected slash completion dropdown")
+	}
+	plain := ansi.Strip(drop)
+	if strings.Contains(plain, "role\npool") || strings.Contains(plain, "role    │\n│ pool") {
+		t.Fatalf("/models command wrapped unexpectedly:\n%s", plain)
+	}
+	if !strings.Contains(plain, "/models  switch current view pool") {
+		t.Fatalf("expected /models command on one line, got:\n%s", plain)
 	}
 }
 

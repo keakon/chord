@@ -609,7 +609,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		return true, effects
 	case agent.ModelSelectEvent:
 		m.inflightDraft = nil
-		m.openModelSelect()
+		m.openModelSelectFor(evt.Target)
 		return true, effects
 	case agent.SessionSelectEvent:
 		effects.addFollowup(m.openSessionSelect(evt.Sessions))

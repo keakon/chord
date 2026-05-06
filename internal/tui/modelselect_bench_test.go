@@ -5,37 +5,23 @@ import (
 	"testing"
 )
 
-func benchmarkModelForModelSelectDialog() Model {
+func benchmarkModelForPoolSelectDialog() Model {
 	m := benchmarkModelForView()
 	m.mode = ModeModelSelect
-	options := make([]ModelSelectOption, 0, 18)
-	for p := 0; p < 3; p++ {
-		provider := fmt.Sprintf("Provider-%d", p+1)
-		options = append(options, ModelSelectOption{Label: provider, Provider: provider, Header: true})
-		for i := 0; i < 5; i++ {
-			options = append(options, ModelSelectOption{
-				Label:     fmt.Sprintf("model-%d-%d", p+1, i+1),
-				Value:     fmt.Sprintf("provider-%d/model-%d", p+1, i+1),
-				Provider:  provider,
-				ModelID:   fmt.Sprintf("model-%d-%d", p+1, i+1),
-				Context:   128000,
-				Output:    16000,
-				IsCurrent: p == 0 && i == 0,
-			})
-		}
+	poolNames := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		poolNames = append(poolNames, fmt.Sprintf("pool-%d", i+1))
 	}
-	m.modelSelect.allOptions = options
-	m.modelSelect.options = options
-	m.modelSelect.searchInput = "model"
-	m.modelSelect.table = newModelSelectTable(options, m.modelSelectMaxVisible())
-	if m.modelSelect.table != nil {
-		m.modelSelect.table.list.SetCursor(modelSelectCursorIndex(options, "provider-1/model-1"))
+	m.modelSelect = modelSelectState{
+		poolNames:  poolNames,
+		poolCursor: 0,
+		prevMode:   ModeNormal,
 	}
 	return m
 }
 
-func BenchmarkRenderModelSelectDialogOpen(b *testing.B) {
-	m := benchmarkModelForModelSelectDialog()
+func BenchmarkRenderPoolSelectDialogOpen(b *testing.B) {
+	m := benchmarkModelForPoolSelectDialog()
 	_ = m.renderModelSelectDialog()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

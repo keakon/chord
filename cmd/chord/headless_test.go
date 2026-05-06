@@ -172,6 +172,18 @@ func (m *mockBackend) ResolveQuestion(answers []string, cancelled bool, requestI
 	m.mu.Unlock()
 }
 
+func (m *mockBackend) ModelsStatusText() string { return "Current role pool: thinking\n" }
+
+func (m *mockBackend) SetCurrentRolePool(pool string) error {
+	m.SendUserMessage("set-current-role:" + pool)
+	return nil
+}
+
+func (m *mockBackend) SetAgentModelPool(agentName, pool string) error {
+	m.SendUserMessage("set-agent:" + agentName + ":" + pool)
+	return nil
+}
+
 func findHeadlessEnvelope(envs []*headlessEnvelope, typ string) *headlessEnvelope {
 	for _, env := range envs {
 		if env != nil && env.Type == typ {
@@ -582,19 +594,92 @@ func TestHeadlessCompactingNoPendingOutcome(t *testing.T) {
 	}
 }
 
+func TestHeadlessBareModelsSendMapsToStatus(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/models"}, backend, state, to.writer(), "test-session")
+
+	backend.mu.Lock()
+	msgs := append([]string(nil), backend.sentMessages...)
+	backend.mu.Unlock()
+	if len(msgs) != 1 || msgs[0] != "/models status" {
+		t.Fatalf("sent messages = %v, want [/models status]", msgs)
+	}
+}
+
+func TestHeadlessModelsCommandStatus(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "models_response")
+	if env == nil {
+		t.Fatal("models_response missing")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["ok"] != true {
+		t.Fatalf("ok = %v, want true", payload["ok"])
+	}
+	if payload["status"] != "Current role pool: thinking\n" {
+		t.Fatalf("status = %q", payload["status"])
+	}
+}
+
+func TestHeadlessModelsCommandSetCurrentRole(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_role", Pool: "fast"}, backend, state, to.writer(), "test-session")
+
+	backend.mu.Lock()
+	msgs := append([]string(nil), backend.sentMessages...)
+	backend.mu.Unlock()
+	want := []string{"set-current-role:fast"}
+	if len(msgs) != len(want) {
+		t.Fatalf("sent messages = %v, want %v", msgs, want)
+	}
+	for i := range want {
+		if msgs[i] != want[i] {
+			t.Fatalf("sent messages = %v, want %v", msgs, want)
+		}
+	}
+
+	responses := 0
+	for _, env := range to.drain() {
+		if env.Type == "models_response" {
+			responses++
+			payload := env.Payload.(map[string]any)
+			if payload["ok"] != true {
+				t.Fatalf("models_response ok = %v, want true", payload["ok"])
+			}
+		}
+	}
+	if responses != 1 {
+		t.Fatalf("models_response count = %d, want 1", responses)
+	}
+}
+
 func TestHeadlessUnsupportedRemoteCommand(t *testing.T) {
 	tests := []struct {
 		content string
 		want    bool
 	}{
-		{"/model gpt-4", true},
+		{"/models", false},
+		{"/models fast", false},
+		{"/models status", false},
+		{"/models --agent reviewer strong", false},
 		{"/new", false},
 		{"/resume abc", false},
 		{"/export", true},
 		{"hello world", false},
 		{"/help", false},
 		{"", false},
-		{"use /model in your code", false}, // /model is not the first word
+		{"use /models in your code", false}, // /model is not the first word
 	}
 
 	for _, tt := range tests {
@@ -978,7 +1063,8 @@ func TestHeadlessSendCommandUnsupportedRejection(t *testing.T) {
 		content string
 		want    bool // true = should be rejected (error envelope emitted)
 	}{
-		{"/model gpt-4", true},
+		{"/models", false},
+		{"/models fast", false},
 		{"/new session", false},
 		{"/resume abc", false},
 		{"/export", true},

@@ -138,20 +138,53 @@ chord auth codex
 chord auth codex --device-code
 ```
 
-## Selecting provider/model
+## Model pools (selecting provider/model)
 
-The main agent's initial provider/model comes from the active `builder` agent
-configuration when it defines `models`. If no `builder` model is configured,
-Chord falls back to the first configured provider/model in alphabetical order.
+Chord selects the active model via **named model pools**.
+
+Pool definitions live in `config.yaml` (global or project-level), and agent configs
+only *reference* pool names. Agent configs cannot define inline pools.
+
+### Define model pools in config.yaml
+
+```yaml
+# ~/.config/chord/config.yaml or .chord/config.yaml
+model_pools:
+  thinking:
+    - anthropic/claude-opus-4.7
+    - openai/gpt-5.5
+  non-thinking:
+    - anthropic/claude-sonnet-4
+```
+
+Project-level `.chord/config.yaml` `model_pools` are merged into the global config
+(same-name pools override).
+
+### Reference pools from agents
 
 ```yaml
 # ~/.config/chord/agents/builder.yaml or .chord/agents/builder.yaml
-models:
-  - anthropic/claude-opus-4.7
-  - openai/gpt-5.5
+name: builder
+mode: primary
+model_pools: [thinking, non-thinking]
 ```
 
-The ordered `models` list is also the runtime fallback pool for that agent.
+```yaml
+# .chord/agents/reviewer.yaml
+name: reviewer
+mode: subagent
+model_pools: [thinking]
+```
+
+When no pool is explicitly selected, Chord falls back to the agent's **first** pool
+in the `model_pools: [...]` list.
+
+At runtime, use `/models` to switch the pool for the **current view** (per project,
+persisted across restarts). In the main view this means the current main role; in a
+SubAgent view it means that SubAgent's agent pool selection. You can also set a named
+agent directly with `/models --agent <name> <pool>`. For SubAgents, the default behavior
+is simply to use the first pool listed in `model_pools: [...]`; switching back to that
+first pool restores the default behavior.
 
 ## Reusing model templates with YAML anchors
 
@@ -376,8 +409,7 @@ Markdown agent example:
 name: backend-coder
 description: Backend developer
 mode: subagent
-models:
-  - anthropic/claude-opus-4.7
+model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -392,8 +424,7 @@ Equivalent YAML agent example:
 name: backend-coder
 description: Backend developer
 mode: subagent
-models:
-  - anthropic/claude-opus-4.7
+model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -406,7 +437,8 @@ Common fields include:
 - `name`: agent name. If omitted, Chord uses the filename without extension.
 - `description`: short description shown to the main agent when delegation is available.
 - `mode`: `subagent` or another role mode; empty defaults to subagent behavior.
-- `models`: ordered model pool for this agent, including fallback order. Inline variants such as `openai/gpt-5.5@high` are supported.
+- `model_pools`: list of pool names this agent can use (ordered). Pool definitions live in `config.yaml` top-level `model_pools`.
+  Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
 - `permission`: per-tool permission policy for this agent.
 - `mcp`: MCP config scoped to this agent.

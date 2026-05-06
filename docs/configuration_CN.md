@@ -137,19 +137,45 @@ chord auth codex
 chord auth codex --device-code
 ```
 
-## 指定 provider 与 model
+## 模型池（指定 provider 与 model）
 
-主 agent 的初始 provider/model 来自当前 `builder` agent 配置中的 `models`。如果没有配置
-`builder` 模型，Chord 会按字母序从已配置的 provider/model 中选择第一个作为兜底。
+Chord 通过**命名模型池**来选择当前使用的模型。
+
+模型池的定义放在 `config.yaml`（全局或项目级）里；agent 配置只能引用池名，不允许在 agent 里内联定义池。
+
+### 在 config.yaml 中定义 model_pools
+
+```yaml
+# ~/.config/chord/config.yaml 或 .chord/config.yaml
+model_pools:
+  thinking:
+    - anthropic/claude-opus-4.7
+    - openai/gpt-5.5
+  non-thinking:
+    - anthropic/claude-sonnet-4
+```
+
+项目级 `.chord/config.yaml` 的 `model_pools` 会合并到全局配置中（同名覆盖）。
+
+### 在 agent 中引用池名
 
 ```yaml
 # ~/.config/chord/agents/builder.yaml 或 .chord/agents/builder.yaml
-models:
-  - anthropic/claude-opus-4.7
-  - openai/gpt-5.5
+name: builder
+mode: primary
+model_pools: [thinking, non-thinking]
 ```
 
-这个有序 `models` 列表同时也是该 agent 运行时的 fallback 模型池。
+```yaml
+# .chord/agents/reviewer.yaml
+name: reviewer
+mode: subagent
+model_pools: [thinking]
+```
+
+未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
+
+运行时可通过 `/models` 切换**当前视图对象**的池（按 project 持久化，重启后仍生效）：在 main 视图中，它作用于当前主角色；在 SubAgent 视图中，它作用于该 agent。也可以通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。对 SubAgent 而言，默认行为就是使用 `model_pools: [...]` 里列出的**第一个**池；如果之后想恢复默认，直接切回第一个池即可。
 
 ## 使用 YAML anchor 复用模型模板
 
@@ -350,8 +376,7 @@ Markdown agent 示例：
 name: backend-coder
 description: Backend developer
 mode: subagent
-models:
-  - anthropic/claude-opus-4.7
+model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -366,8 +391,7 @@ permission:
 name: backend-coder
 description: Backend developer
 mode: subagent
-models:
-  - anthropic/claude-opus-4.7
+model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -380,7 +404,8 @@ prompt: |
 - `name`：agent 名称。省略时使用不带扩展名的文件名。
 - `description`：简短描述，会在 delegation 可用时展示给 main agent。
 - `mode`：`subagent` 或其他角色模式；为空时默认按 subagent 行为处理。
-- `models`：该 agent 的有序模型池，同时决定 fallback 顺序。支持 `openai/gpt-5.5@high` 这样的 inline variant。
+- `model_pools`：该 agent 可使用的模型池名列表（有序）。池定义位于 `config.yaml` 顶层的 `model_pools`。
+  `openai/gpt-5.5@high` 这类 inline variant 写在池定义里。
 - `variant`：当 model ref 没有写 `@variant` 时使用的默认 variant。
 - `permission`：该 agent 的 per-tool 权限策略。
 - `mcp`：作用域限定在该 agent 的 MCP 配置。

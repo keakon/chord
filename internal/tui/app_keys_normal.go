@@ -326,7 +326,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			m.handleSwitchRole()
 		}
 
-	// -- model selector ---------------------------------------------------
+	// -- model pool selector ---------------------------------------------------
 	case keyMatches(key, m.keyMap.SwitchModel):
 		m.openModelSelect()
 	}

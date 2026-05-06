@@ -73,15 +73,22 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render(modelShown)),
 	}
 	keysConfirmed, keysTotal := m.agent.KeyStats()
+	keysStyle := InfoPanelValue
 	if keysTotal > 1 {
-		keysStr := fmt.Sprintf("Keys: %d/%d", keysConfirmed, keysTotal)
-		keysStyle := InfoPanelValue
 		switch keyPoolHealthSeverity(keysConfirmed, keysTotal) {
 		case keyPoolSeverityCritical:
 			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyCriticalFg))
 		case keyPoolSeverityWarn:
 			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg))
 		}
+	}
+	if poolNames := m.agent.PoolNames(); len(poolNames) > 1 {
+		if pool := strings.TrimSpace(m.agent.CurrentPoolName()); pool != "" {
+			modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Pool: "+pool)))
+		}
+	}
+	if keysTotal > 1 {
+		keysStr := fmt.Sprintf("Keys: %d/%d", keysConfirmed, keysTotal)
 		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(keysStyle.Render(keysStr)))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))

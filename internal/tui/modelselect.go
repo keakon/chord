@@ -1,85 +1,90 @@
 package tui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
-	"github.com/keakon/chord/internal/config"
 )
 
-// ---------------------------------------------------------------------------
-// Model selector state and option types
-// ---------------------------------------------------------------------------
-
-// ModelSelectOption describes a single model entry in the selector dialog.
-type ModelSelectOption struct {
-	Label     string // display text (e.g. "claude-opus-4.7")
-	Value     string // provider/model reference (e.g. "anthropic-main/claude-opus-4.7")
-	Provider  string // provider name/group label
-	ModelID   string // model identifier for searching/display
-	Context   int    // context window limit
-	Output    int    // max output tokens
-	IsCurrent bool   // true if this is the currently active model
-	Header    bool   // true for non-selectable provider group header rows
-}
-
-// modelSelectState holds the transient state for the model selector overlay.
 type modelSelectState struct {
-	allOptions  []ModelSelectOption
-	options     []ModelSelectOption
-	table       *OverlayTable
-	current     string // currently active model (provider/model)
-	prevMode    Mode   // mode to restore on cancel
-	searchInput string
+	target     agent.ModelPoolSelectorTarget
+	poolNames  []string
+	poolCursor int
+	prevMode   Mode
 
-	renderCacheWidth       int
-	renderCacheHeight      int
-	renderCacheMaxVisible  int
-	renderCacheSearchInput string
-	renderCacheTableVer    uint64
-	renderCacheText        string
+	renderCacheWidth      int
+	renderCacheHeight     int
+	renderCacheText       string
+	renderCachePoolCursor int
+	renderCachePoolNames  string
 }
 
 type modelSwitchResultMsg struct {
 	err error
 }
 
-// ---------------------------------------------------------------------------
-// Opening the selector
-// ---------------------------------------------------------------------------
-
-// openModelSelect populates the model selector state from the agent's
-// available models and enters ModeModelSelect.
 func (m *Model) openModelSelect() {
+	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetCurrentView})
+}
+
+func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 	if m.agent == nil {
 		return
 	}
+	if target.Kind == "" {
+		target.Kind = agent.ModelPoolSelectorTargetCurrentView
+	}
 
-	models := m.agent.AvailableModels()
-	currentRef := m.agent.ProviderModelRef()
-	allOptions, cursorRef := buildModelSelectOptions(models, currentRef, "")
-	table := newModelSelectTable(allOptions, m.modelSelectMaxVisible())
-	if table != nil {
-		table.list.SetCursor(modelSelectCursorIndex(allOptions, cursorRef))
+	var (
+		poolNames   []string
+		currentPool string
+	)
+	if target.Kind == agent.ModelPoolSelectorTargetCurrentView {
+		if m.focusedAgentID != "" {
+			target.Kind = agent.ModelPoolSelectorTargetAgentOverride
+			target.AgentName = strings.TrimSpace(m.agent.FocusedAgentName())
+			if target.AgentName == "" {
+				return
+			}
+		} else {
+			target.Kind = agent.ModelPoolSelectorTargetMainRole
+		}
+	}
+	if target.Kind == agent.ModelPoolSelectorTargetAgentOverride {
+		poolNames = m.agent.PoolNames()
+		if current, ok := m.agent.AgentOverridePoolName(target.AgentName); ok {
+			currentPool = current
+		} else if len(poolNames) > 0 {
+			currentPool = poolNames[0]
+		}
+	} else {
+		poolNames = m.agent.MainRolePoolNames()
+		currentPool = m.agent.MainRoleCurrentPoolName()
+	}
+
+	poolCursor := 0
+	for i, name := range poolNames {
+		if name == currentPool {
+			poolCursor = i
+			break
+		}
 	}
 
 	prevMode := m.mode
 	if prevMode == ModeModelSelect {
-		// Keep the original non-overlay mode when ModelSelectEvent is emitted repeatedly.
 		prevMode = m.modelSelect.prevMode
 	}
 	m.clearActiveSearch()
 	m.clearChordState()
 	m.modelSelect = modelSelectState{
-		allOptions: allOptions,
-		options:    allOptions,
-		table:      table,
-		current:    currentRef,
+		target:     target,
+		poolNames:  poolNames,
+		poolCursor: poolCursor,
 		prevMode:   prevMode,
 	}
 	if m.mode == ModeInsert {
@@ -89,17 +94,10 @@ func (m *Model) openModelSelect() {
 	m.recalcViewportSize()
 }
 
-// ---------------------------------------------------------------------------
-// Key handling
-// ---------------------------------------------------------------------------
-
-// handleModelSelectKey processes keyboard input while the model selector is
-// open. j/k or up/down navigate, enter selects, esc cancels.
 func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
 	if keyMatches(key, m.keyMap.SwitchModel) || key == "esc" {
-		// Cancel — restore previous mode.
 		prevMode := m.modelSelect.prevMode
 		cmd := m.restoreModeWithIME(prevMode)
 		m.recalcViewportSize()
@@ -118,62 +116,80 @@ func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 
+	itemCount := len(m.modelSelect.poolNames)
 	switch key {
 	case "j", "down":
-		if m.modelSelect.table != nil {
-			m.modelSelect.table.CursorDown()
+		if itemCount > 0 && m.modelSelect.poolCursor < itemCount-1 {
+			m.modelSelect.poolCursor++
 		}
 
 	case "k", "up":
-		if m.modelSelect.table != nil {
-			m.modelSelect.table.CursorUp()
+		if m.modelSelect.poolCursor > 0 {
+			m.modelSelect.poolCursor--
 		}
 
 	case "g":
-		if m.modelSelect.table != nil {
-			m.modelSelect.table.CursorToTop()
-		}
+		m.modelSelect.poolCursor = 0
 
 	case "G":
-		if m.modelSelect.table != nil {
-			m.modelSelect.table.CursorToBottom()
+		if itemCount > 0 {
+			m.modelSelect.poolCursor = itemCount - 1
 		}
 
 	case "enter":
-		return m.selectModelAtCursor()
-	default:
-		if m.handleModelSelectSearchKey(msg.Key()) {
-			return nil
-		}
+		return m.selectPoolAtCursor()
 	}
 
 	return nil
 }
 
-func (m *Model) selectModelAtCursor() tea.Cmd {
-	cursor := 0
-	if m.modelSelect.table != nil {
-		cursor = m.modelSelect.table.CursorAt()
+func (m *Model) selectPoolAtCursor() tea.Cmd {
+	if len(m.modelSelect.poolNames) == 0 || m.modelSelect.poolCursor >= len(m.modelSelect.poolNames) {
+		prevMode := m.modelSelect.prevMode
+		cmd := m.restoreModeWithIME(prevMode)
+		m.recalcViewportSize()
+		if prevMode == ModeInsert {
+			return tea.Batch(cmd, m.input.Focus())
+		}
+		return cmd
 	}
+	pool := m.modelSelect.poolNames[m.modelSelect.poolCursor]
+	ag := m.agent
 	var switchCmd tea.Cmd
-	if cursor >= 0 && cursor < len(m.modelSelect.options) {
-		selected := m.modelSelect.options[cursor]
-		if !selected.Header && !selected.IsCurrent && m.agent != nil {
-			if m.isAgentBusy() {
-				block := &Block{
-					ID:      m.nextBlockID,
-					Type:    BlockStatus,
-					Content: "Agent busy, cancel current turn before switching model",
+	if ag != nil {
+		if m.isAgentBusy() {
+			block := &Block{
+				ID:      m.nextBlockID,
+				Type:    BlockStatus,
+				Content: "Agent busy, cancel current turn before switching pool",
+			}
+			m.nextBlockID++
+			m.appendViewportBlock(block)
+			m.markBlockSettled(block)
+		} else {
+			target := m.modelSelect.target
+			switch target.Kind {
+			case agent.ModelPoolSelectorTargetAgentOverride:
+				currentPool := ""
+				if current, ok := ag.AgentOverridePoolName(target.AgentName); ok {
+					currentPool = current
+				} else if len(m.modelSelect.poolNames) > 0 {
+					currentPool = m.modelSelect.poolNames[0]
 				}
-				m.nextBlockID++
-				m.appendViewportBlock(block)
-				m.markBlockSettled(block)
-			} else {
-				switchCmd = m.switchModelCmd(selected.Value)
+				if pool != currentPool {
+					switchCmd = func() tea.Msg {
+						return modelSwitchResultMsg{err: ag.SetAgentModelPool(target.AgentName, pool)}
+					}
+				}
+			default:
+				if pool != ag.MainRoleCurrentPoolName() {
+					switchCmd = func() tea.Msg {
+						return modelSwitchResultMsg{err: ag.SetCurrentRolePool(pool)}
+					}
+				}
 			}
 		}
 	}
-	// Restore previous mode.
 	prevMode := m.modelSelect.prevMode
 	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
@@ -189,300 +205,88 @@ func (m *Model) selectModelAtCursor() tea.Cmd {
 	return cmd
 }
 
-func (m *Model) switchModelCmd(value string) tea.Cmd {
-	ag := m.agent
-	return func() tea.Msg {
-		if ag == nil {
-			return nil
-		}
-		return modelSwitchResultMsg{err: ag.SwitchModel(value)}
-	}
-}
-
-// modelOptionMatchesCurrent reports whether mo should be treated as the current
-// selection. Exact provider/model@variant matches win; a base-ref fallback is
-// allowed only when no exact variant option exists in the list.
-func modelOptionMatchesCurrent(mo agent.ModelOption, currentRef string) bool {
-	if mo.ProviderModel == currentRef {
-		return true
-	}
-	mb, mv := config.ParseModelRef(mo.ProviderModel)
-	cb, cv := config.ParseModelRef(currentRef)
-	if mb != cb {
-		return false
-	}
-	if mv == cv {
-		return true
-	}
-	return false
-}
-
-func preferredCurrentProvider(models []agent.ModelOption, currentRef string) string {
-	for _, mo := range models {
-		if mo.ProviderModel == currentRef {
-			return mo.ProviderName
-		}
-	}
-	for _, mo := range models {
-		mb, _ := config.ParseModelRef(mo.ProviderModel)
-		cb, _ := config.ParseModelRef(currentRef)
-		if mb == cb {
-			return mo.ProviderName
-		}
-	}
-	return ""
-}
-
-func buildModelSelectLabel(mo agent.ModelOption) string {
-	if _, variant := config.ParseModelRef(mo.ProviderModel); variant != "" {
-		return mo.ModelID + "@" + variant
-	}
-	return mo.ModelID
-}
-
-func buildModelSelectOptions(models []agent.ModelOption, currentRef, query string) ([]ModelSelectOption, string) {
-	if len(models) == 0 {
-		return nil, ""
-	}
-	query = strings.TrimSpace(strings.ToLower(query))
-
-	currentProvider := preferredCurrentProvider(models, currentRef)
-	hasExactCurrent := false
-	currentBaseRef, _ := config.ParseModelRef(currentRef)
-	for _, mo := range models {
-		if mo.ProviderModel == currentRef {
-			hasExactCurrent = true
-			break
-		}
-	}
-
-	options := make([]ModelSelectOption, 0, len(models)+4)
-	cursorRef := ""
-	hasVisibleCurrentProvider := false
-
-	lastProvider := ""
-	for _, mo := range models {
-		if !modelSelectMatchesQuery(mo, query) {
-			continue
-		}
-		if mo.ProviderName != lastProvider {
-			headerLabel := mo.ProviderName
-			options = append(options, ModelSelectOption{
-				Label:    headerLabel,
-				Provider: mo.ProviderName,
-				Header:   true,
-			})
-			lastProvider = mo.ProviderName
-		}
-		isCurrent := modelOptionMatchesCurrent(mo, currentRef)
-		if !isCurrent && !hasExactCurrent {
-			mb, _ := config.ParseModelRef(mo.ProviderModel)
-			if mb == currentBaseRef {
-				isCurrent = true
-			}
-		}
-		if isCurrent {
-			hasVisibleCurrentProvider = true
-		}
-		opt := ModelSelectOption{
-			Label:     buildModelSelectLabel(mo),
-			Value:     mo.ProviderModel,
-			Provider:  mo.ProviderName,
-			ModelID:   mo.ModelID,
-			Context:   mo.ContextLimit,
-			Output:    mo.OutputLimit,
-			IsCurrent: isCurrent,
-		}
-		options = append(options, opt)
-		if isCurrent && cursorRef == "" {
-			cursorRef = mo.ProviderModel
-		}
-	}
-
-	if cursorRef == "" && currentProvider != "" && !hasVisibleCurrentProvider {
-		for _, opt := range options {
-			if !opt.Header && opt.Provider == currentProvider {
-				cursorRef = opt.Value
-				break
-			}
-		}
-	}
-	return options, cursorRef
-}
-
-func modelSelectMatchesQuery(mo agent.ModelOption, query string) bool {
-	if query == "" {
-		return true
-	}
-	haystacks := []string{
-		strings.ToLower(mo.ModelID),
-		strings.ToLower(mo.ProviderName),
-		strings.ToLower(mo.ProviderModel),
-	}
-	for _, h := range haystacks {
-		if strings.Contains(h, query) {
-			return true
-		}
-	}
-	return false
-}
-
-func modelSelectCursorIndex(options []ModelSelectOption, preferredRef string) int {
-	firstSelectable := -1
-	preferredIdx := -1
-	for i, opt := range options {
-		if opt.Header {
-			continue
-		}
-		if firstSelectable == -1 {
-			firstSelectable = i
-		}
-		if preferredRef != "" && opt.Value == preferredRef {
-			preferredIdx = i
-			break
-		}
-	}
-	if preferredIdx >= 0 {
-		return preferredIdx
-	}
-	if firstSelectable >= 0 {
-		return firstSelectable
-	}
-	return 0
-}
-
-func newModelSelectTable(options []ModelSelectOption, maxVisible int) *OverlayTable {
-	tableItems := make([]OverlayTableItem, 0, len(options))
-	for _, opt := range options {
-		if opt.Header {
-			tableItems = append(tableItems, OverlayTableItem{
-				OverlayListItem: OverlayListItem{
-					Label:    opt.Label,
-					Disabled: true,
-					Header:   true,
-				},
-				Cells: []string{opt.Label},
-			})
-			continue
-		}
-		status := ""
-		if opt.IsCurrent {
-			status = "✓"
-		}
-		tableItems = append(tableItems, OverlayTableItem{
-			OverlayListItem: OverlayListItem{
-				ID:       opt.Value,
-				Label:    opt.Label,
-				Selected: opt.IsCurrent,
-			},
-			Cells: []string{
-				opt.Label,
-				formatTokens(opt.Context),
-				formatTokens(opt.Output),
-				status,
-			},
-		})
-	}
-	return NewOverlayTable([]TableColumn{
-		{Title: "Model", Width: 0, Align: 0},
-		{Title: "Context", Width: 8, Align: 1},
-		{Title: "Output", Width: 8, Align: 1},
-		{Title: "Use", Width: 3, Align: 2},
-	}, tableItems, maxVisible)
-}
-
-func (m *Model) refreshModelSelectOptions() {
-	options, cursorRef := buildModelSelectOptions(m.agent.AvailableModels(), m.modelSelect.current, m.modelSelect.searchInput)
-	m.modelSelect.allOptions = options
-	m.modelSelect.options = options
-	m.modelSelect.table = newModelSelectTable(options, m.modelSelectMaxVisible())
-	if m.modelSelect.table != nil {
-		m.modelSelect.table.list.SetCursor(modelSelectCursorIndex(options, cursorRef))
-	}
-}
-
-func (m *Model) handleModelSelectSearchKey(key tea.Key) bool {
-	switch key.Code {
-	case tea.KeyBackspace:
-		if m.modelSelect.searchInput == "" {
-			return false
-		}
-		runes := []rune(m.modelSelect.searchInput)
-		m.modelSelect.searchInput = string(runes[:len(runes)-1])
-		m.refreshModelSelectOptions()
-		return true
-	case tea.KeySpace:
-		m.modelSelect.searchInput += " "
-		m.refreshModelSelectOptions()
-		return true
-	}
-	if key.Text == "" {
-		return false
-	}
-	m.modelSelect.searchInput += key.Text
-	m.refreshModelSelectOptions()
-	return true
-}
-
-func (m *Model) modelSelectMaxVisible() int {
-	maxVisible := m.height/2 - 6
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
-	return maxVisible
-}
-
-// renderModelSelectDialog renders the model selector as a bordered overlay
-// in the input area, following the pattern of the directory overlay.
 func (m *Model) renderModelSelectDialog() string {
-	if len(m.modelSelect.allOptions) == 0 {
+	if len(m.modelSelect.poolNames) == 0 {
 		dialog, _ := RenderOverlay(OverlayConfig{
-			Title:    "Model Selector",
-			Hint:     "type to search  g/G jump  enter select  esc cancel",
+			Title:    modelSelectTitle(m.modelSelect.target),
+			Hint:     "esc cancel",
 			MinWidth: 40,
-			MaxWidth: 90,
-		}, DimStyle.Render("(no models configured)"), 1, image.Rect(0, 0, m.width, m.height))
+			MaxWidth: 60,
+		}, DimStyle.Render("(no pools configured)"), 1, image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
 
-	if m.modelSelect.table == nil {
-		return ""
-	}
-	maxVisible := m.modelSelectMaxVisible()
-	m.modelSelect.table.SetMaxVisible(maxVisible)
-	tableVersion := m.modelSelect.table.RenderVersion()
 	if m.modelSelect.renderCacheText != "" &&
 		m.modelSelect.renderCacheWidth == m.width &&
 		m.modelSelect.renderCacheHeight == m.height &&
-		m.modelSelect.renderCacheMaxVisible == maxVisible &&
-		m.modelSelect.renderCacheSearchInput == m.modelSelect.searchInput &&
-		m.modelSelect.renderCacheTableVer == tableVersion {
+		m.modelSelect.renderCachePoolCursor == m.modelSelect.poolCursor &&
+		m.modelSelect.renderCachePoolNames == strings.Join(m.modelSelect.poolNames, ",") {
 		return m.modelSelect.renderCacheText
 	}
+
+	currentPool := ""
+	if m.agent != nil {
+		if m.modelSelect.target.Kind == agent.ModelPoolSelectorTargetAgentOverride {
+			if current, ok := m.agent.AgentOverridePoolName(m.modelSelect.target.AgentName); ok {
+				currentPool = current
+			} else if len(m.modelSelect.poolNames) > 0 {
+				currentPool = m.modelSelect.poolNames[0]
+			}
+		} else {
+			currentPool = m.agent.MainRoleCurrentPoolName()
+		}
+	}
+
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00"))
+	dimStyle := DimStyle
+
+	var lines []string
+	for i, name := range m.modelSelect.poolNames {
+		if name == currentPool {
+			label := "✓ " + name
+			if i == m.modelSelect.poolCursor {
+				lines = append(lines, cursorStyle.Render("▸ ")+activeStyle.Render(label))
+			} else {
+				lines = append(lines, "  "+activeStyle.Render(label))
+			}
+		} else {
+			label := "  " + name
+			if i == m.modelSelect.poolCursor {
+				lines = append(lines, cursorStyle.Render("▸ ")+dimStyle.Render(label))
+			} else {
+				lines = append(lines, "  "+dimStyle.Render(label))
+			}
+		}
+	}
+	content := strings.Join(lines, "\n")
+
 	overlayCfg := OverlayConfig{
-		Title:    "Model Selector",
-		Hint:     "type to search  j/k move  g/G jump  enter select  esc cancel",
-		MinWidth: 56,
-		MaxWidth: 110,
+		Title:    modelSelectTitle(m.modelSelect.target),
+		Hint:     modelSelectHint(m.modelSelect.target),
+		MinWidth: 30,
+		MaxWidth: 60,
 	}
-	contentWidth := overlayCfg.MaxWidth - 4
-	searchLine := DimStyle.Render("Search: ")
-	if m.modelSelect.searchInput != "" {
-		searchLine += m.modelSelect.searchInput
-	} else {
-		searchLine += DimStyle.Render("(type to filter provider/model)")
-	}
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		ansi.Truncate(searchLine, contentWidth, "…"),
-		"",
-		m.modelSelect.table.Render(contentWidth),
-	)
-	dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), image.Rect(0, 0, m.width, m.height))
+	dialog, _ := RenderOverlay(overlayCfg, content, len(lines), image.Rect(0, 0, m.width, m.height))
+
 	m.modelSelect.renderCacheWidth = m.width
 	m.modelSelect.renderCacheHeight = m.height
-	m.modelSelect.renderCacheMaxVisible = maxVisible
-	m.modelSelect.renderCacheSearchInput = m.modelSelect.searchInput
-	m.modelSelect.renderCacheTableVer = tableVersion
+	m.modelSelect.renderCachePoolCursor = m.modelSelect.poolCursor
+	m.modelSelect.renderCachePoolNames = strings.Join(m.modelSelect.poolNames, ",")
 	m.modelSelect.renderCacheText = dialog
 	return dialog
+}
+
+func modelSelectTitle(target agent.ModelPoolSelectorTarget) string {
+	if target.Kind == agent.ModelPoolSelectorTargetAgentOverride {
+		if strings.TrimSpace(target.AgentName) == "" {
+			return "Agent Model Pool"
+		}
+		return fmt.Sprintf("%s Model Pool", target.AgentName)
+	}
+	return "Main Role Model Pool"
+}
+
+func modelSelectHint(target agent.ModelPoolSelectorTarget) string {
+	return "j/k move  enter select  esc cancel"
 }

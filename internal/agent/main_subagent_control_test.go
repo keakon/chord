@@ -45,7 +45,7 @@ func configureNestedDelegationTestRuntime(a *MainAgent, maxDepth int) {
 		"worker": {
 			Name:        "worker",
 			Mode:        "subagent",
-			Models:      []string{"sample/test-model"},
+			Models:      map[string][]string{"default": {"sample/test-model"}},
 			Delegation:  config.DelegationConfig{MaxChildren: 10, MaxDepth: maxDepth},
 			Description: "Nested worker",
 		},
@@ -1136,7 +1136,7 @@ func TestSendMessageToCompletedTaskRehydratesClosedWorker(t *testing.T) {
 		"restorer": {
 			Name:   "restorer",
 			Mode:   "subagent",
-			Models: []string{"test/test-model"},
+			Models: map[string][]string{"default": {"test/test-model"}},
 		},
 	})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {

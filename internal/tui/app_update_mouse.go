@@ -60,22 +60,20 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.modelSelect.table != nil {
-				m.modelSelect.table.HandleWheel(-3)
+			if m.modelSelect.poolCursor > 0 {
+				m.modelSelect.poolCursor--
 			}
 			return nil
 		case tea.MouseWheelDown:
-			if m.modelSelect.table != nil {
-				m.modelSelect.table.HandleWheel(3)
+			if len(m.modelSelect.poolNames) > 0 && m.modelSelect.poolCursor < len(m.modelSelect.poolNames)-1 {
+				m.modelSelect.poolCursor++
 			}
 			return nil
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			if idx, ok := m.modelSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.modelSelect.table != nil {
-					m.modelSelect.table.list.SetCursor(idx)
-				}
-				return m.selectModelAtCursor()
+			if idx, ok := m.poolSelectIndexAt(mouse.X, mouse.Y); ok {
+				m.modelSelect.poolCursor = idx
+				return m.selectPoolAtCursor()
 			}
 		}
 		return nil

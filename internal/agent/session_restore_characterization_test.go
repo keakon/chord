@@ -40,7 +40,7 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	rm.Close()
 
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	a.SetAgentConfigs(map[string]*config.AgentConfig{"restorer": {Name: "restorer", Mode: "subagent", Models: []string{"test/test-model"}}})
+	a.SetAgentConfigs(map[string]*config.AgentConfig{"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}}})
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client { return newTestLLMClient() })
 
 	metaSub := &SubAgent{instanceID: "worker-1", taskID: "task-from-meta", agentDefName: "restorer", taskDesc: "from meta", ownerAgentID: "owner-from-meta", ownerTaskID: "owner-task-from-meta", depth: 3}

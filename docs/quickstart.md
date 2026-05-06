@@ -117,7 +117,7 @@ Please read the current project structure first, then summarize its main modules
 ## 6. Common startup commands
 
 ```bash
-# Normal startup; the model is determined by the builder agent's models config
+# Normal startup; the model is determined by the builder agent's model_pools config
 chord
 
 # Resume the most recent session

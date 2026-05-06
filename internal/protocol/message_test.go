@@ -729,10 +729,14 @@ func TestProtocolRoundTripAdditionalEvents(t *testing.T) {
 		},
 		{
 			name:  "model select",
-			event: agent.ModelSelectEvent{},
+			event: agent.ModelSelectEvent{Target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetAgentOverride, AgentName: "reviewer"}},
 			check: func(t *testing.T, got agent.AgentEvent) {
-				if _, ok := got.(agent.ModelSelectEvent); !ok {
+				ev, ok := got.(agent.ModelSelectEvent)
+				if !ok {
 					t.Fatalf("expected ModelSelectEvent, got %T", got)
+				}
+				if ev.Target.Kind != agent.ModelPoolSelectorTargetAgentOverride || ev.Target.AgentName != "reviewer" {
+					t.Fatalf("ModelSelectEvent target = %+v", ev.Target)
 				}
 			},
 		},

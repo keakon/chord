@@ -510,7 +510,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		<-a.sem
 		return tools.TaskHandle{}, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before creating SubAgents")
 	}
-	subLLMClient := a.llmFactory("", agentDef.Models, agentDef.Variant)
+	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
 	agentRuleset := a.effectiveRuleset()
 	if agentDef.Permission.Kind != 0 {
 		agentPermRules := permission.ParsePermission(&agentDef.Permission)

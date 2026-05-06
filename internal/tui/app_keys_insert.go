@@ -229,7 +229,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		m.input.Reset()
 		trimmed := strings.TrimSpace(value)
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
-			if trimmed == "/model" || strings.HasPrefix(trimmed, "/model ") ||
+			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
 				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
 				trimmed == "/compact" || trimmed == "/loop" || trimmed == "/loop on" || strings.HasPrefix(trimmed, "/loop on ") || trimmed == "/loop off" {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
@@ -260,6 +260,11 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				m.slashCompleteSelected = 0
 				return m.openRules()
 			}
+		}
+		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && (trimmed == "/models" || strings.HasPrefix(trimmed, "/models ")) {
+			m.recordTUIDiagnostic("agent-command", "%s", trimmed)
+			m.agent.SendUserMessage(value)
+			return nil
 		}
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes {
 			m.finalizeTurn()

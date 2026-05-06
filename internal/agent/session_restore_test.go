@@ -542,12 +542,12 @@ func TestRestoreSessionAtStartupRestoresActiveRoleModelFromSnapshot(t *testing.T
 		"builder": {
 			Name:   "builder",
 			Mode:   "primary",
-			Models: []string{"build/one"},
+			Models: map[string][]string{"default": {"build/one"}},
 		},
 		"executor": {
 			Name:   "executor",
 			Mode:   "primary",
-			Models: []string{"exec/one"},
+			Models: map[string][]string{"default": {"exec/one"}},
 		},
 	})
 	a.SetProviderModelRef("build/one")

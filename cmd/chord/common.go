@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -213,37 +212,60 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		filepath.Join(pathLocator.ConfigHome, "agents"),
 	)
 
-	// Determine active provider name and default model.
-	// Priority: builder agent models[0] > alphabetical fallback.
+	if agentConfigsErr == nil && agentConfigs != nil {
+		if err := config.ResolveAgentModelPools(agentConfigs, cfg.ModelPools); err != nil {
+			agentConfigsErr = err
+		}
+	}
+	if agentConfigsErr != nil {
+		ac.cleanup()
+		return nil, fmt.Errorf("load agent configs: %w", agentConfigsErr)
+	}
+
+	// Load per-project model pool state early so the initial LLM client
+	// can be constructed with the pool-selected model, avoiding an immediate
+	// swap after startup.
+	poolStatePath := config.ModelPoolStatePath(projectLocator.ProjectKey, pathLocator.StateDir)
+	poolState, poolStateErr := config.LoadModelPoolState(poolStatePath)
+	if poolStateErr != nil {
+		log.Warnf("failed to load model pool state, using defaults error=%v", poolStateErr)
+		poolState = &config.ModelPoolState{}
+	}
+	poolPolicy := agent.NewRuntimeModelPoolPolicy()
+	if poolState.CurrentRole != "" {
+		poolPolicy.SetCurrentRole(poolState.CurrentRole)
+	}
+	for agentName, poolName := range poolState.AgentOverrides {
+		poolPolicy.SetAgentOverride(agentName, poolName)
+	}
+
+	// Determine active provider name and default model from builder agent pool.
 	var defaultProviderModel string
 	var defaultVariant string
 	if agentConfigs != nil {
 		if builderCfg, ok := agentConfigs["builder"]; ok && len(builderCfg.Models) > 0 {
-			defaultProviderModel, defaultVariant = config.ParseModelRef(builderCfg.Models[0])
-			if defaultVariant == "" {
-				defaultVariant = builderCfg.Variant
+			if resolvedRef := poolPolicy.ResolveInitialModelRef("builder", builderCfg); resolvedRef != "" {
+				defaultProviderModel, defaultVariant = config.ParseModelRef(resolvedRef)
+			} else if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
+				if firstPoolRefs := builderCfg.PoolModels(poolNames[0]); len(firstPoolRefs) > 0 {
+					defaultProviderModel, defaultVariant = config.ParseModelRef(firstPoolRefs[0])
+					if defaultVariant == "" {
+						defaultVariant = builderCfg.Variant
+					}
+				}
 			}
 		}
 	}
+	if defaultProviderModel == "" {
+		ac.cleanup()
+		return nil, fmt.Errorf("no initial model resolved from builder agent config: ensure builder agent defines at least one non-empty model pool")
+	}
 
 	ac.ProviderName = ""
-	if ac.ProviderName == "" {
-		if defaultProviderModel != "" {
-			parts := strings.SplitN(defaultProviderModel, "/", 2)
-			if len(parts) == 2 {
-				ac.ProviderName = parts[0]
-			}
-		}
-		if ac.ProviderName == "" {
-			// No coder agent config: fall back to alphabetical order.
-			names := make([]string, 0, len(cfg.Providers))
-			for k := range cfg.Providers {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-			if len(names) > 0 {
-				ac.ProviderName = names[0]
-			}
+	if defaultProviderModel != "" {
+		parts := strings.SplitN(defaultProviderModel, "/", 2)
+		if len(parts) == 2 {
+			ac.ProviderName = parts[0]
 		}
 	}
 
@@ -278,15 +300,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 	}
 	if modelID == "" {
-		// No builder agent config: fall back to alphabetical order.
-		modelNames := make([]string, 0, len(cfgProvider.Models))
-		for k := range cfgProvider.Models {
-			modelNames = append(modelNames, k)
-		}
-		sort.Strings(modelNames)
-		if len(modelNames) > 0 {
-			modelID = modelNames[0]
-		}
+		ac.cleanup()
+		return nil, fmt.Errorf("no initial model ID resolved from builder agent config")
 	}
 	modelCfg, ok := cfgProvider.Models[modelID]
 	if !ok {
@@ -520,10 +535,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))
 
 	// Agent definitions.
-	if agentConfigsErr != nil {
-		ac.cleanup()
-		return nil, fmt.Errorf("load agent configs: %w", agentConfigsErr)
-	}
 	if len(agentConfigs) > 0 {
 		names := make([]string, 0, len(agentConfigs))
 		for name := range agentConfigs {
@@ -534,6 +545,26 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	if agentConfigs != nil {
 		ac.MainAgent.SetAgentConfigs(agentConfigs)
 	}
+
+	// Model pool policy: the policy was already initialized before LLM client
+	// construction so the initial client uses the pool-selected model. Install
+	// it on MainAgent now for runtime pool switching.
+	ac.MainAgent.SetModelPoolPolicy(poolPolicy, poolStatePath)
+
+	// Warn if the persisted current role pool is not defined by any agent.
+	if poolState.CurrentRole != "" {
+		poolDefined := false
+		for _, cfg := range agentConfigs {
+			if cfg.HasPool(poolState.CurrentRole) {
+				poolDefined = true
+				break
+			}
+		}
+		if !poolDefined {
+			log.Warnf("model pool state current role pool %q not defined by any agent, falling back to first pool", poolState.CurrentRole)
+		}
+	}
+
 	// Model switch factory.
 	ac.MainAgent.SetModelSwitchFactory(buildMainClientFactory(ac, cfg, auth))
 
@@ -550,8 +581,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		ac.Registry.Register(tools.NewNotifyTool(nil, ac.MainAgent, false, true))
 		ac.Registry.Register(tools.NewCancelTool(ac.MainAgent))
 	}
-
-	ac.MainAgent.SetAvailableModelsFn(buildAvailableModelsFn(ac, cfg, auth))
 
 	// Skill loading.
 	startAsyncSkillLoad(ac)

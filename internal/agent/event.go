@@ -424,9 +424,31 @@ type AgentStatusEvent struct {
 
 func (AgentStatusEvent) agentEvent() {}
 
-// ModelSelectEvent signals the TUI to open the model selector overlay.
-// Emitted in response to the /model slash command (without arguments).
-type ModelSelectEvent struct{}
+// ModelPoolSelectorTargetKind identifies which runtime model-pool setting the
+// TUI selector should edit.
+type ModelPoolSelectorTargetKind string
+
+const (
+	ModelPoolSelectorTargetCurrentView   ModelPoolSelectorTargetKind = "current_view"
+	ModelPoolSelectorTargetMainRole      ModelPoolSelectorTargetKind = "main_role"
+	ModelPoolSelectorTargetAgentOverride ModelPoolSelectorTargetKind = "agent_override"
+)
+
+// ModelPoolSelectorTarget describes the explicit target edited by the model-pool selector.
+// Current-view selection follows the active TUI focus (main role or focused SubAgent).
+// Main role selection changes the current project-scoped role pool. Agent override
+// selection changes the named agent's explicit fixed pool and may also offer a
+// restore-default action.
+type ModelPoolSelectorTarget struct {
+	Kind      ModelPoolSelectorTargetKind `json:"kind"`
+	AgentName string                      `json:"agent_name,omitempty"`
+}
+
+// ModelSelectEvent signals the TUI to open the model pool selector overlay.
+// Emitted in response to /models for the current view.
+type ModelSelectEvent struct {
+	Target ModelPoolSelectorTarget
+}
 
 func (ModelSelectEvent) agentEvent() {}
 

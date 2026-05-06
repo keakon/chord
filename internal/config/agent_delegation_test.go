@@ -13,8 +13,7 @@ func TestLoadAgentConfigParsesDelegationFrontmatter(t *testing.T) {
 	content := `---
 name: worker
 mode: subagent
-models:
-  - sample/test-model
+model_pools: [default]
 delegation:
   max_children: 3
   max_depth: 2
@@ -46,8 +45,7 @@ func TestLoadAgentConfigParsesPlainYAMLDocument(t *testing.T) {
 	path := filepath.Join(dir, "worker.yaml")
 	content := `name: worker
 mode: subagent
-models:
-  - sample/test-model
+model_pools: [default]
 prompt: |
   You are a YAML-defined worker.
 `
@@ -72,8 +70,7 @@ func TestLoadAgentConfigParsesPlainYAMLSystemPromptField(t *testing.T) {
 	path := filepath.Join(dir, "worker.yml")
 	content := `name: worker
 mode: subagent
-models:
-  - sample/test-model
+model_pools: [default]
 system_prompt: |
   Use alternate YAML prompt field.
 `
@@ -96,8 +93,7 @@ func TestLoadAgentConfigRejectsMissingFrontmatterClosingDelimiter(t *testing.T) 
 	content := `---
 name: worker
 mode: subagent
-models:
-  - sample/test-model
+model_pools: [default]
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)

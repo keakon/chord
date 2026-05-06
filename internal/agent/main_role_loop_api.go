@@ -272,12 +272,20 @@ func (a *MainAgent) CurrentRoleConfig() *config.AgentConfig {
 // Entries preserve the original AgentConfig.Models strings, including any
 // inline @variant suffixes.
 // A nil/empty slice means "use global default model only".
+// CurrentRoleModelRefs returns the effective model chain for the active role,
+// resolved through the model pool policy. A nil/empty slice means "use global
+// default model only" (auto mode).
 func (a *MainAgent) CurrentRoleModelRefs() []string {
 	cfg := a.currentActiveConfig()
 	if cfg == nil || len(cfg.Models) == 0 {
 		return nil
 	}
-	out := make([]string, len(cfg.Models))
-	copy(out, cfg.Models)
-	return out
+	if a.modelPoolPolicy != nil {
+		return a.modelPoolPolicy.EffectiveModels(cfg.Name, cfg)
+	}
+	firstPool := cfg.PoolNames()[0]
+	if refs := cfg.PoolModels(firstPool); len(refs) > 0 {
+		return refs
+	}
+	return nil
 }
