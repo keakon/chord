@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"image/color"
 	"testing"
 	"time"
+
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 func TestInvalidateDrawCachesPreservesRuntimeState(t *testing.T) {
@@ -85,5 +88,59 @@ func TestSetThemePreservesDeferredStartupTranscriptRuntimeState(t *testing.T) {
 	}
 	if m.viewport.maxHotBytes != startupDeferredTranscriptAggressiveHotBytes {
 		t.Fatalf("viewport maxHotBytes = %d, want %d after SetTheme", m.viewport.maxHotBytes, startupDeferredTranscriptAggressiveHotBytes)
+	}
+}
+
+func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t *testing.T) {
+	m := NewModel(nil)
+	width := 20
+	buf := uv.NewScreenBuffer(width, 1)
+
+	// Seed the row with styled content that should be cleared.
+	styled := uv.Cell{Content: "─", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
+	for x := 0; x < width; x++ {
+		buf.SetCell(x, 0, &styled)
+	}
+
+	cache := cachedRenderable{lines: [][]uv.Cell{nil}}
+	m.drawCachedRenderableToClearedArea(buf, buf.Bounds(), &cache)
+
+	line := buf.Line(0)
+	for x := 0; x < width; x++ {
+		if !line[x].Equal(&uv.EmptyCell) {
+			t.Fatalf("cell[%d] = %#v, want EmptyCell", x, line[x])
+		}
+	}
+}
+
+func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *testing.T) {
+	m := NewModel(nil)
+	width := 10
+	height := 3
+	buf := uv.NewScreenBuffer(width, height)
+
+	styled := uv.Cell{Content: "X", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			buf.SetCell(x, y, &styled)
+		}
+	}
+
+	// Only provide one source line; the remaining rows must be cleared.
+	cache := cachedRenderable{lines: [][]uv.Cell{{{Content: "A", Width: 1}}}}
+	m.drawCachedRenderableToClearedArea(buf, buf.Bounds(), &cache)
+
+	// First row should be overwritten (starts with "A"), remaining rows empty.
+	row0 := buf.Line(0)
+	if row0[0].Content != "A" {
+		t.Fatalf("row0[0].Content = %q, want %q", row0[0].Content, "A")
+	}
+	for y := 1; y < height; y++ {
+		row := buf.Line(y)
+		for x := 0; x < width; x++ {
+			if !row[x].Equal(&uv.EmptyCell) {
+				t.Fatalf("cell[%d,%d] = %#v, want EmptyCell", x, y, row[x])
+			}
+		}
 	}
 }

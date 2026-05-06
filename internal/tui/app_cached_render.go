@@ -143,7 +143,7 @@ func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
 }
 
 func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rectangle, cache *cachedRenderable) {
-	if cache == nil || len(cache.lines) == 0 || area.Dx() <= 0 || area.Dy() <= 0 {
+	if cache == nil || area.Dx() <= 0 || area.Dy() <= 0 {
 		return
 	}
 	type lineAccessor interface {
@@ -154,14 +154,25 @@ func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rect
 		m.drawCachedRenderable(scr, area, cache)
 		return
 	}
-	maxRows := min(area.Dy(), len(cache.lines))
-	for row := range maxRows {
-		src := cache.lines[row]
-		if len(src) == 0 {
-			continue
-		}
+	// Always clear the full destination region (not just the rows we will draw).
+	// Some terminals can leave stale styled cells behind unless every cell is
+	// overwritten, especially when the new render has fewer lines than the previous
+	// one (e.g. collapsing sections in the info panel).
+	for row := 0; row < area.Dy(); row++ {
 		dst := lines.Line(area.Min.Y + row)
 		if dst == nil || area.Min.X >= len(dst) {
+			continue
+		}
+		rowEnd := min(area.Max.X, len(dst))
+		for i := area.Min.X; i < rowEnd; i++ {
+			dst[i] = uv.EmptyCell
+		}
+
+		if cache == nil || row >= len(cache.lines) {
+			continue
+		}
+		src := cache.lines[row]
+		if len(src) == 0 {
 			continue
 		}
 		end := min(area.Min.X+len(src), area.Max.X)
