@@ -239,6 +239,11 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	if sel < 0 {
 		sel = 0
 	}
+	start := 0
+	if maxVisible > 0 && sel >= maxVisible {
+		start = sel - maxVisible + 1
+	}
+	end := min(len(matches), start+maxVisible)
 	if m.slashCache.text != "" &&
 		m.slashCache.width == m.width &&
 		m.slashCache.theme == m.theme.Name &&
@@ -251,7 +256,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 
 	// Calculate dynamic width based on content
 	contentWidth := runewidth.StringWidth("Tab complete  ↑/↓ select  Esc close")
-	for i := range maxVisible {
+	for i := start; i < end; i++ {
 		c := matches[i]
 		w := runewidth.StringWidth(fmt.Sprintf(" ▸ %s  %s", c.Cmd, c.Desc))
 		if w > contentWidth {
@@ -271,7 +276,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	lines := make([]string, 0, maxVisible+2)
 	lines = append(lines, help, "")
 
-	for i := range maxVisible {
+	for i := start; i < end; i++ {
 		c := matches[i]
 		line := fmt.Sprintf("%s  %s", c.Cmd, c.Desc)
 		lineLimit := contentWidth

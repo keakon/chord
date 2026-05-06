@@ -130,6 +130,24 @@ func TestSlashCompletionDropdownDoesNotWrapModelsCommand(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionDropdownScrollsSelectedCommandIntoView(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.mode = ModeInsert
+	m.slashCompleteSelected = 9
+
+	drop := m.renderSlashCompletionDropdown("/")
+	if drop == "" {
+		t.Fatal("expected slash completion dropdown")
+	}
+	plain := ansi.Strip(drop)
+	if strings.Contains(plain, "/compact") {
+		t.Fatalf("expected dropdown to scroll past first command, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "▸ /stats") {
+		t.Fatalf("expected selected /stats command to be visible, got:\n%s", plain)
+	}
+}
+
 func TestHelpLinesUseColumnsWhenWide(t *testing.T) {
 	m := NewModel(nil)
 
