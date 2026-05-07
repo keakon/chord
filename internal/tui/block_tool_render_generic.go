@@ -276,37 +276,20 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
 		}
 	}
-	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
-
 	var result []string
 	if b.Collapsed {
 		prefix := b.renderToolPrefix(spinnerFrame)
-		if isActive {
-			toolName := ToolCallStyle.Render(b.ToolName)
-			headerLine := "  " + prefix + " " + toolName
-			if mainPart != "" || grayPart != "" {
-				headerLine += " " + sanitizeToolDisplayText(mainPart)
-				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-				}
-			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
+		headerLine := renderToolHeaderLine(prefix, b.ToolName)
+		if mainPart != "" || grayPart != "" {
+			headerLine += " " + sanitizeToolDisplayText(mainPart)
+			if grayPart != "" {
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 			}
-			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-			result = append(result, headerLine)
-		} else {
-			headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
-			if mainPart != "" || grayPart != "" {
-				headerLine += " " + sanitizeToolDisplayText(mainPart)
-				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-				}
-			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
-			}
-			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-			result = append(result, ToolCallStyle.Render(headerLine))
+		} else if paramSummary != "" {
+			headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 		}
+		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
+		result = append(result, headerLine)
 
 		if b.DoneSummary != "" {
 			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), width-30)
@@ -326,36 +309,20 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	} else {
 		prefix := b.renderToolPrefix(spinnerFrame)
 		showParamSummary := (mainPart != "" || grayPart != "" || paramSummary != "") && (paramSummary != "" || mainPart != "" || grayPart != "")
-		if isActive {
-			toolName := ToolCallStyle.Render(b.ToolName)
-			headerLine := "  " + prefix + " " + toolName
-			if mainPart != "" || grayPart != "" {
-				headerLine += " " + sanitizeToolDisplayText(mainPart)
-				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-				}
-			} else if showParamSummary && paramSummary != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
+		headerLine := renderToolHeaderLine(prefix, b.ToolName)
+		if mainPart != "" || grayPart != "" {
+			headerLine += " " + sanitizeToolDisplayText(mainPart)
+			if grayPart != "" {
+				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 			}
-			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-			result = append(result, headerLine)
-		} else {
-			headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
-			if mainPart != "" || grayPart != "" {
-				headerLine += " " + sanitizeToolDisplayText(mainPart)
-				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-				}
-			} else if showParamSummary && paramSummary != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
-			}
-			headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-			styledHeader := ToolCallStyle.Render(headerLine)
-			if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-				styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
-			}
-			result = append(result, styledHeader)
+		} else if showParamSummary && paramSummary != "" {
+			headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
 		}
+		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
+		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
+			headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
+		}
+		result = append(result, headerLine)
 		if paramSummary == "" || b.ToolName == "Bash" {
 			_, _, _, _, _, _, paramLines := b.toolHeaderMeta()
 			for _, line := range paramLines {
@@ -569,10 +536,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
-	toolHeaderLine := ToolCallStyle.Render(fmt.Sprintf("  %s %s", prefix, b.ToolName))
-	if isActive {
-		toolHeaderLine = "  " + prefix + " " + ToolCallStyle.Render(b.ToolName)
-	}
+	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	if mainPart != "" || grayPart != "" {
 		if maxMain := contentWidth - 20 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
 			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
@@ -582,10 +546,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 			toolHeaderLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
 		}
 	}
-	toolHeaderLine = appendToolProgressSuffix(toolHeaderLine, b.ToolProgress, cardWidth-4)
-	if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent && !isActive {
-		toolHeaderLine = renderQueuedToolHeaderBadge(toolHeaderLine, cardWidth)
-	}
+	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
 	if b.ToolName == "Bash" {
@@ -688,51 +649,62 @@ func (b *Block) renderToolPrefix(spinnerFrame string) string {
 	return b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
 }
 
+func styleToolStatusPrefix(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	if strings.HasPrefix(prefix, "✓") {
+		return ToolStatusSuccessStyle.Render("✓") + prefix[len("✓"):]
+	}
+	if strings.HasPrefix(prefix, "✗") {
+		return ToolStatusErrorStyle.Render("✗") + prefix[len("✗"):]
+	}
+	for _, marker := range []string{"◌", queuedToolGlyph, pendingToolGlyph} {
+		if strings.HasPrefix(prefix, marker) {
+			return ToolStatusNeutralStyle.Render(marker) + prefix[len(marker):]
+		}
+	}
+	return prefix
+}
+
+func renderToolHeaderLine(prefix, toolName string) string {
+	return "  " + styleToolStatusPrefix(prefix) + " " + ToolCallStyle.Render(toolName)
+}
+
+func renderAnimatedToolPrefixGlyph(spinnerFrame string) string {
+	iconColor := NeonAccentColor(1800 * time.Millisecond)
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(iconColor)).Render(spinnerFrame)
+	if strings.HasSuffix(styled, "\x1b[0m") {
+		return styled[:len(styled)-len("\x1b[0m")] + "\x1b[39m"
+	}
+	if strings.HasSuffix(styled, "\x1b[m") {
+		return styled[:len(styled)-len("\x1b[m")] + "\x1b[39m"
+	}
+	return styled
+}
+
 func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded bool) string {
 	if b.toolExecutionIsRunning() && spinnerFrame != "" {
-		iconColor := NeonAccentColor(1800 * time.Millisecond)
-		styled := lipgloss.NewStyle().Foreground(lipgloss.Color(iconColor)).Render(spinnerFrame)
-		if strings.HasSuffix(styled, "\x1b[0m") {
-			styled = styled[:len(styled)-len("\x1b[0m")] + "\x1b[39m"
-		} else if strings.HasSuffix(styled, "\x1b[m") {
-			styled = styled[:len(styled)-len("\x1b[m")] + "\x1b[39m"
-		}
-		return styled
+		return renderAnimatedToolPrefixGlyph(spinnerFrame)
 	}
 	if b.toolExecutionIsQueued() {
 		if b.ToolQueuedByExecutionEvent {
-			return DimStyle.Render(queuedToolGlyph)
+			return queuedToolGlyph
 		}
 		if spinnerFrame != "" {
-			iconColor := NeonAccentColor(1800 * time.Millisecond)
-			styled := lipgloss.NewStyle().Foreground(lipgloss.Color(iconColor)).Render(spinnerFrame)
-			if strings.HasSuffix(styled, "\x1b[0m") {
-				styled = styled[:len(styled)-len("\x1b[0m")] + "\x1b[39m"
-			} else if strings.HasSuffix(styled, "\x1b[m") {
-				styled = styled[:len(styled)-len("\x1b[m")] + "\x1b[39m"
-			}
-			return styled
+			return renderAnimatedToolPrefixGlyph(spinnerFrame)
 		}
-		return DimStyle.Render("…")
+		return pendingToolGlyph
 	}
 	if b.ToolName == "Delegate" {
 		if b.toolResultIsError() {
-			if b.Collapsed {
-				return "✗▸"
-			}
-			return "✗▾"
+			return "✗"
 		}
 		if b.toolResultIsCancelled() {
-			if b.Collapsed {
-				return "◌▸"
-			}
-			return "◌▾"
+			return "◌"
 		}
 		if b.ResultDone || strings.TrimSpace(b.ResultContent) != "" {
-			if b.Collapsed {
-				return "✓▸"
-			}
-			return "✓▾"
+			return "✓"
 		}
 		if b.Collapsed {
 			return "▸"
@@ -747,21 +719,12 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "▸"
 		}
 		if b.toolResultIsError() {
-			if compactExpanded {
-				return "✗▾"
-			}
-			return "✗▸"
+			return "✗"
 		}
 		if b.toolResultIsCancelled() {
-			if compactExpanded {
-				return "◌▾"
-			}
-			return "◌▸"
+			return "◌"
 		}
-		if compactExpanded {
-			return "✓▾"
-		}
-		return "✓▸"
+		return "✓"
 	}
 	if b.ResultContent != "" {
 		if b.toolResultIsError() {
@@ -796,14 +759,14 @@ func (b *Block) renderToolResult(width int) []string {
 		contentWidth = 10
 	}
 	if b.Collapsed {
-		prefix := "✓▸"
+		prefix := "✓"
 		if b.IsError || b.toolResultIsError() {
-			prefix = "✗▸"
+			prefix = "✗"
 		} else if b.toolResultIsCancelled() {
-			prefix = "◌▸"
+			prefix = "◌"
 		}
 		var body []string
-		body = append(body, ToolCallStyle.Render(fmt.Sprintf("  %s %s", prefix, b.ToolName)))
+		body = append(body, renderToolHeaderLine(prefix, b.ToolName))
 		lim := min(lineCount, maxToolCallCompactResultLines)
 		for i := range lim {
 			for _, w := range wrapText(sanitizeToolDisplayText(contentLines[i]), contentWidth) {

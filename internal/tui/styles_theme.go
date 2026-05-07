@@ -101,6 +101,10 @@ func applyBlockStyles(t Theme) {
 	ToolResultExpandedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ToolResultExpandedFg))
 
+	ToolStatusSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.InfoPanelSuccessFg))
+	ToolStatusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.ErrorFg))
+	ToolStatusNeutralStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.DimFg))
+
 	// LSP diagnostic lines under Write/Edit tool results; palette matches info panel.
 	LSPErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.InfoPanelDiagErrorFg))
 	LSPWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.InfoPanelDiagWarnFg))

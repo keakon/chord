@@ -109,11 +109,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string
-	headerLine := fmt.Sprintf("  %s %s", prefix, ToolCallStyle.Render(b.ToolName))
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
 		headerLine += " " + DimStyle.Render(filePath)
 	}
-	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
 		return renderPrewrappedToolCard(blockStyle, cardWidth, ToolLabelStyle.Render("TOOL CALL"), result, toolCardBg, railANSISeq("tool", b.Focused))

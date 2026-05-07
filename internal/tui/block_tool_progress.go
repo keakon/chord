@@ -67,6 +67,14 @@ func appendToolProgressSuffix(headerLine string, progress *agent.ToolProgressSna
 	return headerLine
 }
 
+func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot, cardWidth int, queuedByExecutionEvent bool, isRunning bool) string {
+	headerLine = appendToolProgressSuffix(headerLine, progress, cardWidth-4)
+	if queuedByExecutionEvent && !isRunning {
+		headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
+	}
+	return headerLine
+}
+
 func inferToolArgProgress(toolName, argsJSON string) *agent.ToolProgressSnapshot {
 	_ = toolName
 	count := utf8.RuneCountInString(strings.TrimSpace(argsJSON))

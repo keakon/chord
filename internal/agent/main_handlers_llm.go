@@ -442,13 +442,8 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							if r := turn.streamingToolExec.AcquireExecutionSlot(turn.Ctx); r != nil {
 								release = r
 							} else {
-								// Turn/batch cancelled before execution slot was acquired; surface a cancelled result
-								// so PendingToolCalls can resolve and the UI doesn't hang.
-								err := turn.Ctx.Err()
-								if err == nil {
-									err = context.Canceled
-								}
-								a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: err, TurnID: turnID}})
+								// Whole-turn cancellation is closed by EventTurnCancelled; do not
+								// emit an additional tool result for the same pending call.
 								return
 							}
 						}
@@ -501,7 +496,11 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
 					release = r
 				} else {
-					// Batch cancelled before execution slot was acquired.
+					// Batch cancellation needs a synthetic result to resolve the batch, but
+					// whole-turn cancellation is closed by EventTurnCancelled.
+					if turn.Ctx.Err() != nil {
+						return
+					}
 					err := batchCtx.Err()
 					if err == nil {
 						err = context.Canceled

@@ -1780,7 +1780,7 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	if strings.Contains(joined, "Queued") {
 		t.Fatalf("did not expect queued header badge for speculative queued TodoWrite; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "⋯") {
+	if strings.Contains(joined, "⏸") {
 		t.Fatalf("did not expect execution-queued glyph for speculative queued TodoWrite; got:\n%s", joined)
 	}
 }
@@ -1893,7 +1893,7 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 		t.Fatalf("did not expect finished tool to be downgraded to queued")
 	}
 	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	if strings.Contains(joined, "⋯") {
+	if strings.Contains(joined, "⏸") {
 		t.Fatalf("did not expect queued glyph in finished tool render; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "✓") {

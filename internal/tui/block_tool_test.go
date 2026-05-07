@@ -720,7 +720,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
-	if !strings.Contains(joined, "⋯ Bash command -v benchstat || true") {
+	if !strings.Contains(joined, "⏸ Bash command -v benchstat || true") {
 		t.Fatalf("expected queued Bash header; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Queued") {
@@ -977,6 +977,70 @@ func TestActiveToolSpinnerSegmentsRotateClockwise(t *testing.T) {
 	}
 }
 
+func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
+	tests := []struct {
+		name   string
+		block  Block
+		marker string
+		ansi   string
+	}{
+		{
+			name: "success",
+			block: Block{
+				Type:                   BlockToolCall,
+				ToolName:               "Read",
+				Content:                `{"path":"README.md"}`,
+				ResultContent:          "ok",
+				ResultStatus:           agent.ToolResultStatusSuccess,
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			},
+			marker: "✓",
+			ansi:   "\x1b[38;5;82m✓",
+		},
+		{
+			name: "error",
+			block: Block{
+				Type:                   BlockToolCall,
+				ToolName:               "Read",
+				Content:                `{"path":"README.md"}`,
+				ResultContent:          "Error: denied",
+				ResultStatus:           agent.ToolResultStatusError,
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			},
+			marker: "✗",
+			ansi:   "\x1b[38;5;196m✗",
+		},
+		{
+			name: "cancelled",
+			block: Block{
+				Type:                   BlockToolCall,
+				ToolName:               "Read",
+				Content:                `{"path":"README.md"}`,
+				ResultContent:          "Cancelled",
+				ResultStatus:           agent.ToolResultStatusCancelled,
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			},
+			marker: "◌",
+			ansi:   "\x1b[38;5;250m◌",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			joinedANSI := strings.Join(tt.block.Render(80, ""), "\n")
+			joinedPlain := stripANSI(joinedANSI)
+			if !strings.Contains(joinedPlain, tt.marker+" "+tt.block.ToolName) {
+				t.Fatalf("expected plain prefix %q; got:\n%s", tt.marker+" "+tt.block.ToolName, joinedPlain)
+			}
+			if !strings.Contains(joinedANSI, tt.ansi) {
+				t.Fatalf("expected semantic color sequence %q; got:\n%q", tt.ansi, joinedANSI)
+			}
+		})
+	}
+}
+
 func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
@@ -993,7 +1057,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	joinedANSI := strings.Join(lines, "\n")
 	joinedPlain := stripANSI(joinedANSI)
 
-	if !strings.Contains(joinedPlain, "✗▸ Bash false") {
+	if !strings.Contains(joinedPlain, "✗ Bash false") {
 		t.Fatalf("expected collapsed Bash error prefix; got:\n%s", joinedPlain)
 	}
 	if !strings.Contains(joinedPlain, "stdout") {
@@ -1111,7 +1175,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			toolName:    "Delete",
 			content:     `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
 			result:      "Delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
-			wantPrefix:  "✓▾ Delete",
+			wantPrefix:  "✓ Delete",
 			wantVisible: "- examples/compression-config.yaml",
 		},
 		{
@@ -1119,7 +1183,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			toolName:    "Grep",
 			content:     `{"pattern":"TODO"}`,
 			result:      strings.Join([]string{"a.go:1:TODO", "b.go:2:TODO", "c.go:3:TODO", "d.go:4:TODO", "e.go:5:TODO", "f.go:6:TODO", "g.go:7:TODO", "h.go:8:TODO", "i.go:9:TODO", "j.go:10:TODO", "k.go:11:TODO"}, "\n"),
-			wantPrefix:  "✓▾ Grep",
+			wantPrefix:  "✓ Grep",
 			wantVisible: "k.go:11:TODO",
 		},
 		{
@@ -1127,7 +1191,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			toolName:    "Glob",
 			content:     `{"pattern":"**/*.go"}`,
 			result:      strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
-			wantPrefix:  "✓▾ Glob",
+			wantPrefix:  "✓ Glob",
 			wantVisible: "k.go",
 		},
 	}

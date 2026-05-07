@@ -46,7 +46,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string
-	headerLine := fmt.Sprintf("  %s %s", prefix, ToolCallStyle.Render(b.ToolName))
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
 		headerLine += " " + filePath
 	}
@@ -62,7 +62,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			headerLine += " " + DimStyle.Render("("+strings.Join(opts, ", ")+")")
 		}
 	}
-	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 
 	if b.toolResultIsError() && b.ResultContent != "" {

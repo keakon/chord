@@ -34,22 +34,14 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	prefix := b.renderToolPrefix(spinnerFrame)
 
-	headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
-	if isActive {
-		headerLine = "  " + prefix + " " + ToolCallStyle.Render(b.ToolName)
-	} else {
-		headerLine = ToolCallStyle.Render(headerLine)
-	}
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if title != "" {
 		headerLine += " " + sanitizeToolDisplayText(title)
 	}
 	if subType != "" {
 		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}
-	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-	if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent && !isActive {
-		headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
-	}
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 
 	result := []string{headerLine}
 	if b.Collapsed {
@@ -138,22 +130,11 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	_ = json.Unmarshal([]byte(b.Content), &args)
 
 	prefix := b.renderToolPrefix(spinnerFrame)
-	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 
 	var result []string
-	if isActive {
-		headerLine := "  " + prefix + " " + ToolCallStyle.Render(b.ToolName)
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		result = append(result, headerLine)
-	} else {
-		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
-		}
-		result = append(result, styledHeader)
-	}
+	result = append(result, headerLine)
 
 	if b.toolResultIsError() && b.ResultContent != "" {
 		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
@@ -204,22 +185,11 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	}
 
 	prefix := b.renderToolPrefix(spinnerFrame)
-	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 
 	var result []string
-	if isActive {
-		headerLine := "  " + prefix + " " + ToolCallStyle.Render(b.ToolName)
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		result = append(result, headerLine)
-	} else {
-		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
-		}
-		result = append(result, styledHeader)
-	}
+	result = append(result, headerLine)
 
 	for i, q := range args.Questions {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)
@@ -353,7 +323,6 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 
 	args := parseCancelToolArgs(b.Content)
 	prefix := b.renderToolPrefix(spinnerFrame)
-	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 
 	target := extractReadableTarget(args.TargetTaskID)
 	if target == "" {
@@ -361,19 +330,9 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 	}
 
 	var result []string
-	if isActive {
-		headerLine := "  " + prefix + " " + ToolCallStyle.Render(b.ToolName) + " " + target
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		result = append(result, headerLine)
-	} else {
-		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName) + " " + target
-		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		styledHeader := ToolCallStyle.Render(headerLine)
-		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
-		}
-		result = append(result, styledHeader)
-	}
+	headerLine := renderToolHeaderLine(prefix, b.ToolName) + " " + target
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result = append(result, headerLine)
 
 	if b.Collapsed {
 		if args.Reason != "" {
@@ -470,7 +429,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 
 	var result []string
 	if isActive {
-		headerLine := "  " + prefix + " " + ToolCallStyle.Render(b.ToolName)
+		headerLine := renderToolHeaderLine(prefix, b.ToolName)
 		if target != "" {
 			headerLine += " " + target
 		}
@@ -480,7 +439,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		result = append(result, headerLine)
 	} else {
-		headerLine := fmt.Sprintf("  %s %s", prefix, b.ToolName)
+		headerLine := renderToolHeaderLine(prefix, b.ToolName)
 		if target != "" {
 			headerLine += " " + target
 		}
@@ -488,11 +447,10 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			headerLine += " " + DimStyle.Render("("+args.Kind+")")
 		}
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-		styledHeader := ToolCallStyle.Render(headerLine)
 		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-			styledHeader = renderQueuedToolHeaderBadge(styledHeader, cardWidth)
+			headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
 		}
-		result = append(result, styledHeader)
+		result = append(result, headerLine)
 	}
 
 	if b.Collapsed {

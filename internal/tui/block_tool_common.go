@@ -34,7 +34,14 @@ const (
 
 var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
-const queuedToolGlyph = "⋯"
+const queuedToolGlyph = "⏸"
+
+// pendingToolGlyph is used for speculative tool cards that have finished
+// streaming their arguments but have not yet transitioned into an explicit
+// execution-state (running/queued) event.
+//
+// Keep this a single-column glyph (runewidth=1) to avoid header layout drift.
+const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {

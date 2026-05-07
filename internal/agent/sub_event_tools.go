@@ -131,7 +131,11 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
 							release = r
 						} else {
-							// Batch cancelled before execution slot was acquired.
+							// Batch cancellation needs a synthetic result to resolve the batch, but
+							// whole-turn cancellation is closed by the SubAgent interrupt path.
+							if turn.Ctx.Err() != nil {
+								return
+							}
 							err := batchCtx.Err()
 							if err == nil {
 								err = context.Canceled
@@ -195,7 +199,11 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
 					release = r
 				} else {
-					// Batch cancelled before execution slot was acquired.
+					// Batch cancellation needs a synthetic result to resolve the batch, but
+					// whole-turn cancellation is closed by the SubAgent interrupt path.
+					if turn.Ctx.Err() != nil {
+						return
+					}
 					err := batchCtx.Err()
 					if err == nil {
 						err = context.Canceled
