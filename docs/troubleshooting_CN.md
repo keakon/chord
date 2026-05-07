@@ -49,6 +49,7 @@ chord test-providers
 界面说明：
 
 - 右侧 RATE LIMIT 面板展示的是 Codex 最新一次用量/限流快照（例如 `5h: 42% 2h30m`）。当 reset 时间点到达后，倒计时会短暂消失，Chord 会触发一次用量刷新；由于服务端可能使用滚动窗口，刷新后的百分比不一定立即变成 0%，可能是逐步下降。
+- 如果你发现 RATE LIMIT 面板看起来长期不更新，可以把 `log_level: debug` 打开，然后在 `chord.log` 中搜索 `responses codex ws: rate_limits event ...`（收到事件）或 `responses codex ws: rate_limits event ignored ...`（事件未识别/解析失败）。
 
 ## TUI 启动了，但无法正常请求
 

@@ -62,3 +62,23 @@ func TestParseCodexRateLimitWebSocketEventBothWindows(t *testing.T) {
 		t.Fatalf("secondary UsedPct = %v", snap.Secondary.UsedPct)
 	}
 }
+
+func TestParseCodexRateLimitWebSocketEventCreditsOnly(t *testing.T) {
+	payload := []byte(`{
+		"type": "codex.rate_limits",
+		"credits": {"has_credits": true, "unlimited": false, "balance": "123"}
+	}`)
+	snap := ParseCodexRateLimitWebSocketEvent(payload)
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+	if snap.Credits == nil {
+		t.Fatalf("credits = %#v, want non-nil", snap.Credits)
+	}
+	if snap.Credits.Balance != "123" {
+		t.Fatalf("balance=%q want 123", snap.Credits.Balance)
+	}
+	if snap.Primary != nil || snap.Secondary != nil {
+		t.Fatalf("expected nil windows primary=%#v secondary=%#v", snap.Primary, snap.Secondary)
+	}
+}

@@ -262,3 +262,21 @@ func KeySnapshotRecoveryDuration(snap *KeyRateLimitSnapshot, now time.Time) time
 	_ = now
 	return 0
 }
+
+// SnapshotExpiredAt reports whether this snapshot is known to have reached its reset time.
+// A snapshot is treated as expired when any non-zero window reset timestamp is <= now.
+// When all reset timestamps are unknown (zero), it returns false.
+func SnapshotExpiredAt(snap *KeyRateLimitSnapshot, now time.Time) bool {
+	if snap == nil {
+		return false
+	}
+	for _, w := range []*RateLimitWindow{snap.Primary, snap.Secondary} {
+		if w == nil {
+			continue
+		}
+		if !w.ResetsAt.IsZero() && !w.ResetsAt.After(now) {
+			return true
+		}
+	}
+	return false
+}

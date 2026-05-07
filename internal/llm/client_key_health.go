@@ -54,11 +54,17 @@ func (c *Client) CurrentRateLimitSnapshotForRef(ref string) *ratelimit.KeyRateLi
 	if prov == nil {
 		return nil
 	}
-	if snap := prov.CurrentInlineRateLimitSnapshot(); snap != nil {
-		return snap
+
+	now := time.Now()
+	inline := prov.CurrentInlineRateLimitSnapshot()
+	if inline != nil && !ratelimit.SnapshotExpiredAt(inline, now) {
+		return inline
 	}
-	if snap := prov.CurrentPolledRateLimitSnapshot(); snap != nil {
-		return snap
+	if polled := prov.CurrentPolledRateLimitSnapshot(); polled != nil {
+		return polled
+	}
+	if inline != nil {
+		return inline
 	}
 	return prov.CurrentKeySnapshot()
 }

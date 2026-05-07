@@ -470,12 +470,40 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			return nil, nil, fmt.Errorf("codex ws api error: %s", string(msg))
 		}
 		if hdr.Type == "codex.rate_limits" {
-			if snap := ratelimit.ParseCodexRateLimitWebSocketEvent(msg); snap != nil && r.provider != nil {
-				snap.Provider = r.provider.Name()
+			snap := ratelimit.ParseCodexRateLimitWebSocketEvent(msg)
+			providerName := ""
+			if r.provider != nil {
+				providerName = r.provider.Name()
+			}
+			if snap == nil {
+				// Debug-only breadcrumbs: helps distinguish "server didn't send" vs
+				// "client failed to parse" when rate-limit UI looks stale.
+				log.Debugf("responses codex ws: rate_limits event ignored provider=%v key_suffix=%v payload_len=%v", providerName, keySuffix(apiKey), len(msg))
+				continue
+			}
+			snap.Provider = providerName
+			if r.provider != nil {
 				r.provider.UpdateKeySnapshot(apiKey, snap)
-				if cb != nil {
-					cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+			}
+
+			formatWindow := func(w *ratelimit.RateLimitWindow) string {
+				if w == nil {
+					return "-"
 				}
+				reset := "-"
+				if !w.ResetsAt.IsZero() {
+					reset = w.ResetsAt.UTC().Format(time.RFC3339)
+				}
+				return fmt.Sprintf("pct=%.2f window=%dm resets_at=%s", w.UsedPct, w.WindowMinutes, reset)
+			}
+			credits := "-"
+			if snap.Credits != nil {
+				credits = fmt.Sprintf("has=%v unlimited=%v balance=%q", snap.Credits.HasCredits, snap.Credits.Unlimited, snap.Credits.Balance)
+			}
+			log.Debugf("responses codex ws: rate_limits event provider=%v key_suffix=%v limit_id=%v plan=%v primary={%s} secondary={%s} credits={%s}", providerName, keySuffix(apiKey), snap.LimitID, snap.PlanType, formatWindow(snap.Primary), formatWindow(snap.Secondary), credits)
+
+			if cb != nil {
+				cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
 			}
 			continue
 		}

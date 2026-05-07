@@ -2,6 +2,7 @@ package agent
 
 import (
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -144,11 +145,18 @@ func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
 		return nil
 	}
+
+	now := time.Now()
 	a.rateLimitMu.RLock()
 	snap := a.rateLimitSnaps[providerName]
 	a.rateLimitMu.RUnlock()
 	if snap != nil {
-		return snap
+		// Inline snapshots can become stale across a reset window. When we know the
+		// reset timestamp has been reached, fall back to provider/client selection
+		// so a fresh /wham/usage snapshot can be displayed.
+		if snap.Source != ratelimit.SnapshotSourceInlineKey || !ratelimit.SnapshotExpiredAt(snap, now) {
+			return snap
+		}
 	}
 	client, ref := a.tuiFocusedLLMAndRef()
 	if client == nil {

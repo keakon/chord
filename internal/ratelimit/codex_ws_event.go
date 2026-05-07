@@ -31,8 +31,11 @@ func ParseCodexRateLimitWebSocketEvent(payload []byte) *KeyRateLimitSnapshot {
 	if root.Type != "codex.rate_limits" {
 		return nil
 	}
-	primary := mapCodexRateLimitEventWindow(root.RateLimits.Primary)
-	secondary := mapCodexRateLimitEventWindow(root.RateLimits.Secondary)
+	var primary, secondary *RateLimitWindow
+	if root.RateLimits != nil {
+		primary = mapCodexRateLimitEventWindow(root.RateLimits.Primary)
+		secondary = mapCodexRateLimitEventWindow(root.RateLimits.Secondary)
+	}
 	var credits *CreditsSnapshot
 	if root.Credits != nil {
 		credits = &CreditsSnapshot{HasCredits: root.Credits.HasCredits, Unlimited: root.Credits.Unlimited}
