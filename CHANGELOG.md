@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - TUI: fixed `/models` pool switching while the agent is busy. Selecting a pool from the TUI selector now submits the switch immediately to the main event loop, so queued user messages pick up the new pool at the next actual request boundary instead of waiting for another draft send or full idle.
 - Worktree: improved `chord worktree finish` failure ergonomics. If the target worktree already has a rebase in progress, `finish` now exits early with an explicit recovery hint instead of attempting a nested rebase. When rebase conflicts occur, the error message now includes step-by-step recovery commands (`git status`, `git rebase --show-current-patch`, then `--skip` / `--continue` / `--abort`) plus a best-effort redundant-commit hint from `git cherry -v` to help identify likely skip-safe patches.
 - TUI: when Chord is running in the background, the terminal title now shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle; the marker is cleared on focus.
+- TUI: fixed THINKING card ordering when reasoning output is followed quickly by assistant text. Chord now closes and flushes pending thinking before emitting the first text chunk, and ignores late reasoning deltas after text has started so THINKING no longer appears below the answer body.
 
 ## 0.4.0 - 2026-05-07
 

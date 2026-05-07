@@ -260,6 +260,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		streamingPromoted     bool
 		requestProgressBytes  int64
 		requestProgressEvents int64
+		responseTextStarted   bool
 	)
 	const (
 		textFlushInterval     = 20 * time.Millisecond
@@ -288,6 +289,21 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}
 		thinkingLastEmit = time.Now()
 	}
+
+	// closeThinkingBlock flushes any pending thinking before transitioning out
+	// of the thinking phase. In particular, the first text token is a hard
+	// boundary: thinking must be visible and settled before assistant text is
+	// emitted, otherwise delayed thinking batches can be appended below text.
+	closeThinkingBlock := func() {
+		if !thinkingActive && thinkingAccum.Len() == 0 {
+			return
+		}
+		flushThinkingDelta()
+		thinkingActive = false
+		// Send the complete thinking block as commit signal for TUI.
+		a.emitToTUI(StreamThinkingEvent{AgentID: ""})
+	}
+
 	promoteStreamingActivity := func(source string) {
 		if streamingPromoted {
 			return
@@ -364,6 +380,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}
 		switch delta.Type {
 		case "text":
+			closeThinkingBlock()
+			responseTextStarted = true
 			textAccum.WriteString(delta.Text)
 			if turn != nil {
 				turn.appendPartialText(delta.Text)
@@ -375,6 +393,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				flushTextDelta()
 			}
 		case "thinking":
+			if responseTextStarted {
+				break
+			}
 			flushTextDelta() // flush any pending text before switching to thinking
 			if !thinkingActive {
 				thinkingActive = true
@@ -386,11 +407,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				flushThinkingDelta()
 			}
 		case "thinking_end":
-			// Flush any remaining thinking content.
-			flushThinkingDelta()
-			thinkingActive = false
-			// Send the complete thinking block as commit signal for TUI.
-			a.emitToTUI(StreamThinkingEvent{AgentID: ""})
+			closeThinkingBlock()
 		case "status":
 			if delta.Status != nil {
 				// When a fallback model is being tried, emit RunningModelChangedEvent
@@ -557,7 +574,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// This is the critical path for burst-delivery proxies that send all
 	// chunks within a few milliseconds — without this flush the last
 	// portion of the response would be dropped from the TUI display even
-	// though it is already persisted to the JSONL log.
+	// though it is already persisted to the JSONL log. If the stream ends
+	// while still thinking, close that block before flushing any following
+	// text so the viewport order stays stable.
+	closeThinkingBlock()
 	flushTextDelta()
 	a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: requestProgressBytes, Events: requestProgressEvents, Done: true})
 	if err != nil {

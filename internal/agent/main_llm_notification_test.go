@@ -384,6 +384,70 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 	}
 }
 
+func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	providerImpl := &blockingStreamProvider{
+		calls: []scriptedStreamCall{{
+			streams: []message.StreamDelta{
+				{Type: "thinking", Text: "analyzing"},
+				{Type: "text", Text: "answer"},
+				{Type: "thinking", Text: "late reasoning"},
+			},
+			resp: &message.Response{Content: "answer", StopReason: "stop"},
+		}},
+	}
+
+	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
+	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
+
+	if _, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}}); err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+
+	events := drainAgentEvents(a.Events())
+	var streamEvents []AgentEvent
+	for _, evt := range events {
+		switch evt.(type) {
+		case ThinkingStartedEvent, StreamThinkingDeltaEvent, StreamThinkingEvent, StreamTextEvent:
+			streamEvents = append(streamEvents, evt)
+		}
+	}
+	if len(streamEvents) != 4 {
+		t.Fatalf("stream event count = %d, want 4; events=%#v", len(streamEvents), streamEvents)
+	}
+	if _, ok := streamEvents[0].(ThinkingStartedEvent); !ok {
+		t.Fatalf("streamEvents[0] = %T, want ThinkingStartedEvent", streamEvents[0])
+	}
+	thinkDelta, ok := streamEvents[1].(StreamThinkingDeltaEvent)
+	if !ok {
+		t.Fatalf("streamEvents[1] = %T, want StreamThinkingDeltaEvent", streamEvents[1])
+	}
+	if thinkDelta.Text != "analyzing" {
+		t.Fatalf("thinking delta text = %q, want analyzing", thinkDelta.Text)
+	}
+	if _, ok := streamEvents[2].(StreamThinkingEvent); !ok {
+		t.Fatalf("streamEvents[2] = %T, want StreamThinkingEvent", streamEvents[2])
+	}
+	text, ok := streamEvents[3].(StreamTextEvent)
+	if !ok {
+		t.Fatalf("streamEvents[3] = %T, want StreamTextEvent", streamEvents[3])
+	}
+	if text.Text != "answer" {
+		t.Fatalf("text = %q, want answer", text.Text)
+	}
+}
+
 func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.newTurn()
