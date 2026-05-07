@@ -7,14 +7,6 @@ import (
 	"github.com/keakon/chord/internal/convformat"
 )
 
-func renderImportedToolBlock(label string, payload any) string {
-	b, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return label
-	}
-	return convformat.BlockString(label, string(b))
-}
-
 func renderImportedToolMarker(kind string, payload json.RawMessage) string {
 	if len(payload) == 0 {
 		return fmt.Sprintf("[Imported %s]", kind)

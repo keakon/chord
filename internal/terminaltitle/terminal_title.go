@@ -13,13 +13,13 @@ import (
 	"unicode"
 )
 
-// Practical upper bound on title length, measured in runes.
+// MaxTitleRunes is the practical upper bound on title length, measured in runes.
 // Most terminals silently truncate titles beyond a few hundred characters.
 // 30 leaves headroom for the spinner and framing while keeping titles
 // readable in tab bars.
 const MaxTitleRunes = 30
 
-// Braille-pattern dot-spinner frames for the terminal title animation.
+// SpinnerFrames contains Braille-pattern dot-spinner frames for the terminal title animation.
 // These render smoothly in most modern terminals.
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 

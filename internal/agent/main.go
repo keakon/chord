@@ -821,13 +821,6 @@ func (a *MainAgent) applyRoleModelRef(providerModel string) error {
 	return nil
 }
 
-// CurrentRateLimitSnapshot returns the latest rate-limit snapshot for the
-// active provider when that provider uses preset: codex. Otherwise it returns nil.
-// Display precedence is:
-//  1. current provider-scoped inline snapshot cache (cleared on key switch)
-//  2. client-selected key inline snapshot
-//  3. provider/account-scoped polled usage snapshot
-//
 // ProxyInUseForRef reports whether the given provider/model ref uses a proxy.
 // ref is "providerName/modelID"; if empty, the main agent's ProviderModelRef is used.
 // Used by the TUI status bar to show a proxy indicator for the current (or focused) agent.

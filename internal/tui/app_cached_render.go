@@ -160,7 +160,7 @@ func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rect
 	// one (e.g. collapsing sections in the info panel).
 	for row := 0; row < area.Dy(); row++ {
 		dst := lines.Line(area.Min.Y + row)
-		if dst == nil || area.Min.X >= len(dst) {
+		if area.Min.X >= len(dst) {
 			continue
 		}
 		rowEnd := min(area.Max.X, len(dst))
@@ -168,7 +168,7 @@ func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rect
 			dst[i] = uv.EmptyCell
 		}
 
-		if cache == nil || row >= len(cache.lines) {
+		if row >= len(cache.lines) {
 			continue
 		}
 		src := cache.lines[row]

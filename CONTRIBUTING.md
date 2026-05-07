@@ -11,6 +11,7 @@ This repository is intended for open-source contributors. Development can be don
 
 ```bash
 go install golang.org/x/tools/cmd/goimports@latest
+go install golang.org/x/tools/gopls@latest
 go install honnef.co/go/tools/cmd/staticcheck@latest
 ```
 
@@ -44,7 +45,8 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 # CI requires total coverage >= 65.0%.
 go vet ./...
-staticcheck -checks 'all,-ST*' ./...
+staticcheck -checks 'all,-ST1000' ./...
+git ls-files '*.go' | xargs gopls check
 ```
 
 If your changes touch TUI performance-critical paths, also run:

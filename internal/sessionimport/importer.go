@@ -16,6 +16,8 @@ import (
 type ImportOptions struct {
 	Source        string
 	InputPath     string
+	SourceID      string
+	SourceRoot    string
 	ProjectRoot   string
 	SessionID     string
 	ToolMode      string
@@ -33,19 +35,21 @@ type ImportResult struct {
 	Report      ImportReport
 }
 
-// Import converts an external session file into a durable Chord session
-// directory (main.jsonl + session-meta.json + import-report.json) that can be
-// resumed with chord --resume / chord resume.
-//
-// Phase 1 supports OpenCode export JSON with text-mode tool import.
+// Import converts a supported external conversation export into a Chord session.
+// Phase 1+2 support OpenCode export JSON, Codex rollout JSONL, and Claude Code
+// transcript JSONL. Tool import defaults remain conservative by source.
 func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	_ = ctx
 
-	source := strings.TrimSpace(opts.Source)
+	source := strings.ToLower(strings.TrimSpace(opts.Source))
 	if source == "" {
 		return nil, fmt.Errorf("import: source is empty")
 	}
-	input := strings.TrimSpace(opts.InputPath)
+	lookup, err := resolveImportInputPath(source, opts.InputPath, opts.SourceID, opts.SourceRoot)
+	if err != nil {
+		return nil, err
+	}
+	input := strings.TrimSpace(lookup.Path)
 	if input == "" {
 		return nil, fmt.Errorf("import: input path is empty")
 	}
@@ -88,6 +92,11 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 
 	var msgs []message.Message
 	switch source {
+	case "claude":
+		msgs, err = convertClaudeTranscript(data, toolMode, reasoningMode, &report)
+		if err != nil {
+			return nil, err
+		}
 	case "opencode":
 		if toolMode == ToolModeStructured {
 			return nil, fmt.Errorf("opencode import: --tool-mode structured is not supported in Phase 1; use --tool-mode text")
@@ -96,8 +105,16 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		if err != nil {
 			return nil, err
 		}
+	case "codex":
+		if toolMode == ToolModeStructured {
+			return nil, fmt.Errorf("codex import: --tool-mode structured is not supported in Phase 1; use --tool-mode text")
+		}
+		msgs, err = convertCodexRollout(data, reasoningMode, &report)
+		if err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("import: unsupported source %q (supported in this build: opencode)", source)
+		return nil, fmt.Errorf("import: unsupported source %q (supported in this build: claude, opencode, codex)", source)
 	}
 
 	report.ImportedMessages = len(msgs)
@@ -111,9 +128,14 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		return res, nil
 	}
 
+	resolvedInput := input
+	if opts.SourceID != "" {
+		resolvedInput = lookup.Path
+	}
+
 	sid, sessionDir, err := writeChordSession(pl.ProjectSessionsDir, opts.SessionID, opts.Force, msgs, report, recovery.SessionMeta{ImportedFrom: &recovery.ImportMeta{
 		Source:          source,
-		SourcePath:      input,
+		SourcePath:      resolvedInput,
 		SourceSessionID: report.SourceSessionID,
 		ImportedAt:      report.ImportedAt,
 		ToolMode:        toolMode,

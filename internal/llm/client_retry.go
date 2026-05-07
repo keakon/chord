@@ -307,6 +307,14 @@ func (c *Client) completeStreamWithRetry(
 				keyCount = 1
 			}
 			targetMessages := messages
+			targetMessages, _ = normalizeMessagesForPoolTarget(targetMessages, FallbackModel{
+				ProviderConfig: t.provider,
+				ProviderImpl:   t.impl,
+				ModelID:        t.modelID,
+				MaxTokens:      t.maxTokens,
+				ContextLimit:   t.contextLimit,
+				Variant:        t.variant,
+			}, t.tuning)
 			effectiveMaxTokens := t.maxTokens
 			if m, ok := t.provider.GetModel(t.modelID); ok {
 				effectiveMaxTokens = clampEffectiveMaxTokens(
@@ -698,10 +706,7 @@ func clampEffectiveMaxTokens(
 		}
 	}
 	if model.Limit.Context > 0 {
-		inputEstimate := estimateRequestInputTokens(systemPrompt, messages, tools)
-		if lastInputTokens > inputEstimate {
-			inputEstimate = lastInputTokens
-		}
+		inputEstimate := max(estimateRequestInputTokens(systemPrompt, messages, tools), lastInputTokens)
 		buffer := max(model.Limit.Context/100, 256)
 		contextCap := max(model.Limit.Context-inputEstimate-buffer, 1)
 		if contextCap < effectiveMaxTokens {

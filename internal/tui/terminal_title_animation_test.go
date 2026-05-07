@@ -336,3 +336,160 @@ func TestTerminalTitleTickerSurvivesActivityRoundTrip(t *testing.T) {
 			m.terminalTitleTickGeneration, genAfterStreaming)
 	}
 }
+
+func TestBackgroundBusyToIdleShowsOneShotCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "background complete"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.terminalTitleTickRunning = true
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID == "" {
+		t.Fatal("background busy→idle should set one-shot completion marker")
+	}
+	if got := m.currentTitleMode(); got != terminalTitleModeCompletion {
+		t.Fatalf("title mode = %v, want completion", got)
+	}
+	if m.terminalTitleTickRunning {
+		t.Fatal("completion title should stop the spinner ticker")
+	}
+}
+
+func TestForegroundBusyToIdleDoesNotShowCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateForeground
+	m.terminalTitleBase = "foreground complete"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("foreground busy→idle should not set completion marker")
+	}
+	if got := m.currentTitleMode(); got == terminalTitleModeCompletion {
+		t.Fatalf("title mode = %v, should not be completion", got)
+	}
+}
+
+func TestIdleToIdleDoesNotShowCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "already idle"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("idle→idle should not set completion marker")
+	}
+}
+
+func TestFocusClearsCompletionTitleAndBlurDoesNotReadd(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "focus clears"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+	m.terminalTitleBackgroundCompletedAgentID = "main"
+	m.setTerminalTitle(terminalTitleModeCompletion)
+
+	_ = m.handleFocusMsg()
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("focus should clear completion marker")
+	}
+	if got := m.currentTitleMode(); got == terminalTitleModeCompletion {
+		t.Fatalf("title mode = %v, completion should be cleared", got)
+	}
+
+	_ = m.handleBlurMsg()
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("blur/focus switching should not re-add completion marker without a new busy→idle transition")
+	}
+}
+
+func TestRequestTitleTakesPriorityOverCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "needs input"
+	m.terminalTitleBackgroundCompletedAgentID = "main"
+	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}
+
+	if got := m.currentTitleMode(); got != terminalTitleModeRequest {
+		t.Fatalf("title mode = %v, want request", got)
+	}
+}
+
+func TestBackgroundAgentDoneShowsCompletionForFocusedSubagent(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.focusedAgentID = "agent-1"
+	m.terminalTitleBase = "subagent complete"
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "agent-1"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", Summary: "done"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID == "" {
+		t.Fatal("focused background subagent completion should set completion marker")
+	}
+	if got := m.currentTitleMode(); got != terminalTitleModeCompletion {
+		t.Fatalf("title mode = %v, want completion", got)
+	}
+}
+
+func TestBackgroundAgentDoneDoesNotShowCompletionForUnfocusedSubagent(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.focusedAgentID = "agent-2"
+	m.terminalTitleBase = "other subagent complete"
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "agent-1"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", Summary: "done"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("unfocused subagent completion should not set completion marker")
+	}
+}
+
+func TestNewBusyActivityClearsPreviousCompletionMarkerOnlyForSameAgent(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.focusedAgentID = "main"
+	m.terminalTitleBase = "new work"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+	m.terminalTitleBackgroundCompletedAgentID = "main"
+
+	// Other agent starts work: should not clear main completion marker.
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "agent-1"}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "agent-1"}})
+	if m.terminalTitleBackgroundCompletedAgentID != "main" {
+		t.Fatalf("other agent activity should not clear completion marker; got %q", m.terminalTitleBackgroundCompletedAgentID)
+	}
+
+	// Same agent starts work: should clear.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}})
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatal("new busy activity should clear stale completion marker for same agent")
+	}
+	if got := m.currentTitleMode(); got != terminalTitleModeSpinner {
+		t.Fatalf("title mode = %v, want spinner for new busy work", got)
+	}
+}
+
+func TestMainLoopKeepsBusyDoesNotShowCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "loop idle event"
+	m.agent = loopBusyAgentStub{}
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatalf("completion marker should not set while loop keeps main busy; got %q", m.terminalTitleBackgroundCompletedAgentID)
+	}
+	if got := m.currentTitleMode(); got == terminalTitleModeCompletion {
+		t.Fatalf("title mode should not be completion while loop busy; got %v", got)
+	}
+}

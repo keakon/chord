@@ -19,6 +19,8 @@ Tool-call cards try to keep file paths concise: for file tools such as `Read`, `
 
 Tool arguments and results are displayed as terminal-safe plain text. Chord escapes embedded ANSI/control sequences from external output instead of executing them as terminal styling, and generic tool results that look like Markdown remain literal output rather than being reformatted as assistant Markdown.
 
+When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
+
 Common keys:
 
 - `Esc`: switch to Normal mode; pressing `Esc` again in the running main view cancels the current turn

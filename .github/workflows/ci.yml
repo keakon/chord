@@ -77,7 +77,28 @@ jobs:
 
       - name: Staticcheck
         run: |
-          staticcheck -checks 'all,-ST*' ./...
+          staticcheck -checks 'all,-ST1000' ./...
+
+  gopls:
+    name: Gopls diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gopls
+        run: |
+          go install golang.org/x/tools/gopls@latest
+
+      - name: Gopls check
+        run: |
+          git ls-files '*.go' | xargs gopls check
 
   gofmt:
     name: Check Go formatting

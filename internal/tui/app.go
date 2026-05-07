@@ -305,7 +305,12 @@ type Model struct {
 
 	// Terminal title state
 	terminalTitleBase string // derived from first user message (no spinner)
-	agentHadEvent     bool
+	// terminalTitleBackgroundCompletedAgentID is set once when the focused agent
+	// becomes idle while the terminal is blurred. It is cleared on focus and when
+	// that same agent starts new work, so ordinary focus/tab/window switches do
+	// not re-add the completion marker.
+	terminalTitleBackgroundCompletedAgentID string
+	agentHadEvent                           bool
 
 	// keyPoolTickGen invalidates in-flight key-pool refresh ticks when agent events arrive.
 	keyPoolTickGen int

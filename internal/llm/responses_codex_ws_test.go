@@ -115,36 +115,40 @@ func TestCodexWSCanUseIncrementalLockedAllowEmptyDelta(t *testing.T) {
 }
 
 func TestCodexWSState_KeyOrModelChangeRequiresFull(t *testing.T) {
-	r := &ResponsesProvider{}
-	r.codexWSLastKey = "k1"
-	r.codexWSLastModel = "m1"
-	r.codexWSLastRespID = "resp-1"
-	r.codexWSLastInpLen = 1
-	fullInput := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}, {Type: "message", Role: "user", Content: "next"}}
-	r.codexWSLastInpSig = responsesInputPrefixSignature(fullInput, 1)
-
-	// key changed -> chain must be treated as reset/full
-	if r.codexWSLastKey == "k2" {
-		t.Fatal("test setup invalid")
+	fullInput := []responsesInputItem{
+		{Type: "message", Role: "user", Content: "hello"},
+		{Type: "message", Role: "user", Content: "next"},
 	}
-	keyChangedCanIncremental := r.codexWSLastRespID != "" && r.codexWSLastKey == "k2" && r.codexWSLastModel == "m1"
-	if keyChangedCanIncremental {
-		t.Fatal("key change should prevent incremental reuse")
+	newProvider := func() *ResponsesProvider {
+		r := &ResponsesProvider{
+			codexWSConn:       &websocket.Conn{},
+			codexWSLastKey:    "k1",
+			codexWSLastModel:  "m1",
+			codexWSLastRespID: "resp-1",
+			codexWSLastInpLen: 1,
+			codexWSLastReqSig: "sig-a",
+		}
+		r.codexWSLastInpSig = responsesInputPrefixSignature(fullInput, r.codexWSLastInpLen)
+		return r
 	}
 
-	// model changed -> chain must be treated as reset/full
-	modelChangedCanIncremental := r.codexWSLastRespID != "" && r.codexWSLastKey == "k1" && r.codexWSLastModel == "m2"
-	if modelChangedCanIncremental {
-		t.Fatal("model change should prevent incremental reuse")
+	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k2", "m1", "", fullInput, false); ok || reason != "key_or_model_changed" {
+		t.Fatalf("key change should prevent incremental reuse, got ok=%v reason=%q", ok, reason)
+	}
+	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k1", "m2", "", fullInput, false); ok || reason != "key_or_model_changed" {
+		t.Fatalf("model change should prevent incremental reuse, got ok=%v reason=%q", ok, reason)
 	}
 }
 
 func TestCodexWSState_PrefixMismatchRequiresFull(t *testing.T) {
-	r := &ResponsesProvider{}
-	r.codexWSLastKey = "k1"
-	r.codexWSLastModel = "m1"
-	r.codexWSLastRespID = "resp-1"
-	r.codexWSLastInpLen = 1
+	r := &ResponsesProvider{
+		codexWSConn:       &websocket.Conn{},
+		codexWSLastKey:    "k1",
+		codexWSLastModel:  "m1",
+		codexWSLastRespID: "resp-1",
+		codexWSLastInpLen: 1,
+		codexWSLastReqSig: "sig-a",
+	}
 	orig := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
 	r.codexWSLastInpSig = responsesInputSignature(orig)
 
@@ -152,9 +156,8 @@ func TestCodexWSState_PrefixMismatchRequiresFull(t *testing.T) {
 		{Type: "message", Role: "user", Content: "different"},
 		{Type: "message", Role: "user", Content: "next"},
 	}
-	canIncremental := len(fullInput) > r.codexWSLastInpLen && responsesInputPrefixSignature(fullInput, r.codexWSLastInpLen) == r.codexWSLastInpSig
-	if canIncremental {
-		t.Fatal("prefix mismatch should force full request")
+	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-a", fullInput, false); ok || reason != "input_prefix_mismatch" {
+		t.Fatalf("prefix mismatch should force full request, got ok=%v reason=%q", ok, reason)
 	}
 }
 

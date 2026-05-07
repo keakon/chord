@@ -168,6 +168,7 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 	m.streamRenderForceView = true
 	m.streamRenderDeferred = false
 	m.streamRenderDeferNext = false
+	m.terminalTitleBackgroundCompletedAgentID = ""
 
 	var cmds []tea.Cmd
 

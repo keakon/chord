@@ -6,12 +6,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/terminaltitle"
 )
 
 const (
-	terminalTitleRequestIcon   = "❓"
-	terminalTitleRequestSpacer = " "
+	terminalTitleRequestIcon    = "❓"
+	terminalTitleRequestSpacer  = " "
+	terminalTitleCompletionIcon = "✅"
 )
 
 type terminalTitleMode int
@@ -19,12 +21,16 @@ type terminalTitleMode int
 const (
 	terminalTitleModeStatic terminalTitleMode = iota
 	terminalTitleModeSpinner
-	// terminalTitleModeRequest shows a question-mark icon (?" in the title bar.
+	// terminalTitleModeRequest shows a question-mark icon (?) in the title bar.
 	// The icon blinks (toggles between ? and a space) only when the terminal is
 	// in the background state. This is by design: the blink acts as an attention
 	// signal to draw the user back when they have switched away. When the terminal
 	// is in the foreground the icon stays static to avoid unnecessary distraction.
 	terminalTitleModeRequest
+	// terminalTitleModeCompletion shows a one-shot completion icon when a focused
+	// background agent transitions from busy to idle. It is cleared on focus so
+	// normal tab/window switches do not repeatedly retrigger it.
+	terminalTitleModeCompletion
 )
 
 // terminalTitleTickMsg is sent when the terminal title ticker fires.
@@ -81,6 +87,8 @@ func (m *Model) setTerminalTitle(mode terminalTitleMode) {
 			prefix = terminalTitleRequestSpacer
 		}
 		m.terminalTitleView = terminaltitle.ComposeTitle(title, prefix)
+	case terminalTitleModeCompletion:
+		m.terminalTitleView = terminaltitle.ComposeTitle(title, terminalTitleCompletionIcon)
 	default:
 		m.terminalTitleView = terminaltitle.ComposeTitle(title, "")
 	}
@@ -103,12 +111,33 @@ func (m *Model) terminalTitleNeedsUserResponse() bool {
 	return m.confirm.request != nil || m.question.request != nil
 }
 
+func (m *Model) maybeShowBackgroundCompletionTitle(agentID string, prev agent.ActivityType, next agent.ActivityType) {
+	if m == nil || m.displayState != stateBackground || next != agent.ActivityIdle || prev == "" || prev == agent.ActivityIdle {
+		return
+	}
+	if normalizeTitleAgentID(agentID) != m.focusedAgentIDOrMain() {
+		return
+	}
+	m.terminalTitleBackgroundCompletedAgentID = normalizeTitleAgentID(agentID)
+	_ = m.syncTerminalTitleState()
+}
+
+func normalizeTitleAgentID(agentID string) string {
+	if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+		return "main"
+	}
+	return agentID
+}
+
 func (m *Model) currentTitleMode() terminalTitleMode {
 	if m == nil {
 		return terminalTitleModeStatic
 	}
 	if m.terminalTitleNeedsUserResponse() {
 		return terminalTitleModeRequest
+	}
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		return terminalTitleModeCompletion
 	}
 	if m.hasActiveAnimation() {
 		return terminalTitleModeSpinner
@@ -133,6 +162,10 @@ func (m *Model) syncTerminalTitleState() tea.Cmd {
 			return m.startTerminalTitleTicker()
 		}
 		m.setTerminalTitle(terminalTitleModeRequest)
+		return nil
+	case terminalTitleModeCompletion:
+		m.stopTerminalTitleTicker()
+		m.setTerminalTitle(terminalTitleModeCompletion)
 		return nil
 	default:
 		m.stopTerminalTitleTicker()
@@ -162,7 +195,7 @@ func (m *Model) syncTerminalTitleTickerWithCadence() tea.Cmd {
 		return nil
 	}
 	delay := m.currentTitleTickerDelay()
-	if delay <= 0 || !m.hasActiveAnimation() {
+	if delay <= 0 || !m.hasActiveAnimation() || m.currentTitleMode() != terminalTitleModeSpinner {
 		m.stopTerminalTitleTicker()
 		return nil
 	}
@@ -213,11 +246,13 @@ func (m *Model) stopTerminalTitleTicker() {
 // a user message and writes it to the terminal.
 func (m *Model) setTerminalTitleFromMessage(raw string) {
 	m.terminalTitleBase = deriveTerminalTitle(raw)
+	m.terminalTitleBackgroundCompletedAgentID = ""
 	m.setTerminalTitle(m.currentTitleMode())
 }
 
 // resetTerminalTitle resets the title to the default and writes it.
 func (m *Model) resetTerminalTitle() {
 	m.terminalTitleBase = ""
+	m.terminalTitleBackgroundCompletedAgentID = ""
 	m.setTerminalTitle(m.currentTitleMode())
 }

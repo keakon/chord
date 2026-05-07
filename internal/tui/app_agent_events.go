@@ -330,10 +330,16 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.IdleEvent:
 		m.clearSessionSwitch()
 		m.finalizeTurn()
+		prevMain := m.activities["main"].Type
 		m.markAgentIdle("main")
 		mainLoopBusy := m.agent != nil && m.agent.LoopKeepsMainBusy()
 		if mainLoopBusy {
 			m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main", Detail: "loop"}
+			if m.terminalTitleBackgroundCompletedAgentID == "main" {
+				m.terminalTitleBackgroundCompletedAgentID = ""
+			}
+		} else {
+			m.maybeShowBackgroundCompletionTitle("main", prevMain, agent.ActivityIdle)
 		}
 		skipDrain := m.pauseQueuedDraftDrainOnce
 		m.pauseQueuedDraftDrainOnce = false
@@ -401,7 +407,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.AgentDoneEvent:
+		prevType := m.activities[evt.AgentID].Type
 		m.markAgentIdle(evt.AgentID)
+		m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 		m.sidebar.UpdateStatus(evt.AgentID, "done")
 		effects.refreshSidebar = true
 		if taskBlock, ok := m.viewport.FindBlockByLinkedTask(evt.TaskID); ok {
@@ -424,9 +432,6 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)
 		}
-		if m.focusedAgentID == evt.AgentID {
-			m.setFocusedAgent("")
-		}
 		m.stopActiveAnimationIfIdle()
 		return true, effects
 	case agent.AgentStatusEvent:
@@ -436,7 +441,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		} else {
 			switch evt.Status {
 			case "idle", "done", "completed", "error", "cancelled", "waiting_primary", "waiting_descendant":
+				prevType := m.activities[evt.AgentID].Type
 				m.markAgentIdle(evt.AgentID)
+				m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 				m.stopActiveAnimationIfIdle()
 			}
 		}
@@ -490,6 +497,11 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 				m.activityStartTime[evt.AgentID] = now
 			}
 			m.activityLastChanged[evt.AgentID] = now
+			if evt.Type != agent.ActivityIdle {
+				if m.terminalTitleBackgroundCompletedAgentID == normalizedAgentID {
+					m.terminalTitleBackgroundCompletedAgentID = ""
+				}
+			}
 			if evt.Type == agent.ActivityStreaming || evt.Type == agent.ActivityWaitingToken || evt.Type == agent.ActivityConnecting || evt.Type == agent.ActivityWaitingHeaders || evt.Type == agent.ActivityCompacting {
 				m.markRequestProgressBaseline(evt.AgentID)
 			}
@@ -499,6 +511,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			// until RequestProgressEvent{Done:true} arrives.
 			if evt.Type == agent.ActivityIdle {
 				delete(m.requestProgress, normalizedAgentID)
+				m.maybeShowBackgroundCompletionTitle(normalizedAgentID, prev.Type, evt.Type)
 			}
 			if evt.Type == agent.ActivityStreaming || evt.Type == agent.ActivityWaitingToken || evt.Type == agent.ActivityConnecting || evt.Type == agent.ActivityWaitingHeaders {
 				effects.addFollowup(m.scheduleStreamFlush(0))

@@ -9,6 +9,7 @@
 - TUI：修复运行中工具/Bash 的 spinner 动画：现在每次 visual animation tick 推进一帧，而不是按 wall-clock 时间采样，避免确定性跳帧和旋转不均匀。
 - TUI：修复 agent 忙碌时通过 `/models` 选择器切换模型池的时序。现在选择器会立即把切换请求提交到主事件循环，因此已排队的用户消息会在下一次实际发起请求时使用新 pool，而不再需要等待再次发送 draft 或完全回到 idle。
 - Worktree：改进 `chord worktree finish` 的失败可操作性。若目标 worktree 已存在进行中的 rebase，`finish` 现在会提前退出并明确提示先收尾该 rebase，避免再次启动嵌套 rebase；若 rebase 发生冲突，错误信息会给出分步恢复命令（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并基于 `git cherry -v` 提供尽力而为的“可能是冗余提交”提示，帮助判断何时可安全 `--skip`。
+- TUI：当 Chord 在后台运行时，如果当前聚焦的 Agent 从 busy 变为 idle，终端标题栏会显示一次性的 `✅` 完成标记；重新聚焦终端会清除该标记。
 
 ## 0.4.0 - 2026-05-07
 

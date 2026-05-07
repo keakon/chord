@@ -95,7 +95,7 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 	return "", 0
 }
 
-// WordBoundsAtCol returns the display column range [startCol, endCol) of the word containing the given column.
+// ExtractSelectionText returns the plain text covered by sel.
 func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 	if sel.StartBlockID < 0 || sel.EndBlockID < 0 {
 		return ""

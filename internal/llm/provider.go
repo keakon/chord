@@ -481,7 +481,7 @@ func (p *ProviderConfig) selectOnFailureKeyLocked(now time.Time) (*KeyState, int
 	return selected, idx
 }
 
-// Call this after NewProviderConfig if the provider uses OAuth credentials.
+// SetOAuthRefresher configures OAuth credential refresh support.
 // oauthKeys must map the current access token string to the auth.yaml slot metadata
 // for each OAuth credential that should participate in selection.
 func (p *ProviderConfig) SetOAuthRefresher(
@@ -946,7 +946,6 @@ func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 	return saturatingDoublingDuration(time.Second, maxRetryDelay, attempt-1)
 }
 
-// Name returns the provider name.
 // KeyCount returns the number of API keys configured for this provider,
 // excluding permanently deactivated keys.
 func (p *ProviderConfig) KeyCount() int {
