@@ -501,11 +501,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					if turn.Ctx.Err() != nil {
 						return
 					}
-					err := batchCtx.Err()
-					if err == nil {
-						err = context.Canceled
-					}
-					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: err, TurnID: turnID}})
+					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turnID}})
 					return
 				}
 			}

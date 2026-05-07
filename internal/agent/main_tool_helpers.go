@@ -294,3 +294,13 @@ func composeToolResultTexts(rawResult string, err error) (displayResult, context
 func applyToolArgsAuditToContextResult(content string, _ *message.ToolArgsAudit) string {
 	return content
 }
+
+// contextCancelledError returns the error from ctx.Err(), or context.Canceled
+// if the context has no error set. This helper ensures a cancelled tool batch
+// always surfaces a non-nil error for tool result payloads.
+func contextCancelledError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return context.Canceled
+}
