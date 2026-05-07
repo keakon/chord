@@ -41,11 +41,42 @@ Common workflows:
 - `chord`: create a new session
 - `chord --continue`: resume the most recent non-empty session for this project
 - `chord --resume <session-id>`: resume a specific session
-- `chord resume <session-id>`: resume a session in any chord-managed worktree of the current repository (auto-locates the worktree)
+- `chord resume <session-id>`: resume a session by ID, auto-locating the chord-managed worktree it belongs to
+- `chord import <source> <file>`: import an external session (currently supports `opencode` export JSON) into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
+
+### Importing external sessions
+
+Chord can import an external agent session into a resumable Chord session.
+
+Currently supported sources:
+
+- `opencode`: JSON from `opencode export <sessionID>`
+
+Example:
+
+```bash
+opencode export <sessionID> > export.json
+chord import opencode export.json
+chord resume <sid>
+```
+
+Notes (Phase 1):
+
+- Tool calls/results are imported as plain text (no structured tool replay).
+- Reasoning is not imported as provider thinking payload. By default (`--reasoning strict`) non-signed reasoning is dropped; use `--reasoning visible` to include it as plain text.
+- The imported session contains an `import-report.json` with conversion warnings and stats.
+
+Common flags:
+
+- `--project <path>`: which project to write into (default: current directory)
+- `--sid <id>`: specify session id (default: auto-generated)
+- `--dry-run`: parse and report only, no writes
+- `--json`: machine-readable output
+- `--force`: overwrite an existing `--sid`
 
 ## Worktrees
 

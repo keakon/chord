@@ -42,10 +42,41 @@ Chord 会为当前项目维护持久化会话。
 - `chord --continue`：恢复当前项目最近的非空会话
 - `chord --resume <session-id>`：恢复指定会话
 - `chord resume <session-id>`：跨 worktree 恢复 — 自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
+- `chord import <source> <file>`：导入外部会话到 Chord（当前仅支持 `opencode` export JSON）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
 
 退出时，如果当前会话可恢复，Chord 会打印对应的恢复命令。
+
+### 导入外部会话
+
+Chord 支持把外部 coding agent 的历史会话导入为 Chord 可恢复的 session。
+
+当前支持的来源：
+
+- `opencode`：`opencode export <sessionID>` 导出的 JSON
+
+示例：
+
+```bash
+opencode export <sessionID> > export.json
+chord import opencode export.json
+chord resume <sid>
+```
+
+说明（Phase 1）：
+
+- tool 调用与结果会以“纯文本”形式导入（不做结构化 tool replay）。
+- reasoning 不会作为 provider thinking payload 导入。默认（`--reasoning strict`）会丢弃非签名 reasoning；使用 `--reasoning visible` 可把 reasoning 作为普通文本导入。
+- 导入后的 session 会包含 `import-report.json`，记录转换统计与 warnings。
+
+常用参数：
+
+- `--project <path>`：写入哪个 project（默认当前目录）
+- `--sid <id>`：指定 session id（默认自动生成）
+- `--dry-run`：只解析输出报告，不写入 session
+- `--json`：输出机器可读 JSON
+- `--force`：覆盖已存在的 `--sid`
 
 ## Worktree
 

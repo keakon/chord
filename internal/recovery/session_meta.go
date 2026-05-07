@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const sessionMetaFile = "session-meta.json"
@@ -23,6 +24,19 @@ type SessionMeta struct {
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`
 	IsMainWorktree bool   `json:"is_main_worktree,omitempty"`
+
+	// ImportedFrom captures external import provenance (chord import).
+	ImportedFrom *ImportMeta `json:"imported_from,omitempty"`
+}
+
+type ImportMeta struct {
+	Source          string    `json:"source"` // claude|codex|opencode
+	SourcePath      string    `json:"source_path,omitempty"`
+	SourceSessionID string    `json:"source_session_id,omitempty"`
+	ImportedAt      time.Time `json:"imported_at"`
+	ToolMode        string    `json:"tool_mode,omitempty"`
+	ReasoningMode   string    `json:"reasoning_mode,omitempty"`
+	ReportPath      string    `json:"report_path,omitempty"`
 }
 
 // IsZero reports whether m carries no useful information; used by Load to
@@ -34,6 +48,7 @@ func (m SessionMeta) IsZero() bool {
 		m.WorktreeName == "" &&
 		m.WorktreeBranch == "" &&
 		m.WorktreePath == "" &&
+		m.ImportedFrom == nil &&
 		!m.IsMainWorktree
 }
 

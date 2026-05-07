@@ -126,7 +126,7 @@ func main() {
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd())
+	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		// context.Canceled is expected on signal-driven shutdown — exit cleanly.

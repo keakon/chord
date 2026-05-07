@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSessionMeta_IsZero(t *testing.T) {
@@ -15,6 +16,9 @@ func TestSessionMeta_IsZero(t *testing.T) {
 	}
 	if (SessionMeta{WorktreeName: "feat"}).IsZero() {
 		t.Errorf("WorktreeName only reports zero")
+	}
+	if (SessionMeta{ImportedFrom: &ImportMeta{Source: "opencode", ImportedAt: time.Now()}}).IsZero() {
+		t.Errorf("ImportedFrom only reports zero")
 	}
 	if (SessionMeta{IsMainWorktree: true}).IsZero() {
 		t.Errorf("IsMainWorktree=true reports zero")
