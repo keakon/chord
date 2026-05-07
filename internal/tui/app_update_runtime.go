@@ -67,11 +67,15 @@ func (m *Model) handleAnimTick() tea.Cmd {
 
 	// Visual animation: only continue if profile allows and there's active animation.
 	if cadence.visualAnimDelay > 0 && m.hasActiveAnimation() {
+		if n := len(activeToolSpinnerSegments); n > 0 {
+			m.activitySpinnerFrameIndex = (m.activitySpinnerFrameIndex + 1) % n
+		}
 		return tea.Batch(animTickCmd(cadence.visualAnimDelay), m.scheduleStreamFlush(0))
 	}
 
 	// Visual animation disabled or no active animation.
 	m.animRunning = false
+	m.activitySpinnerFrameIndex = 0
 	// Stop or downgrade the terminal title ticker to the current title mode.
 	_ = m.syncTerminalTitleState()
 
@@ -80,7 +84,7 @@ func (m *Model) handleAnimTick() tea.Cmd {
 	// state tracking continue.
 	if m.displayState != stateForeground {
 		if entered := m.tryEnterRenderFreeze("background-idle"); entered {
-			return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+			return tea.Tick(backgroundIdleAnimTickCadence, func(time.Time) tea.Msg {
 				return animTickMsg(time.Now())
 			})
 		}
@@ -224,11 +228,7 @@ func (m *Model) handleModelSwitchResult(msg modelSwitchResultMsg) tea.Cmd {
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
-		return nil
 	}
-	// SetCurrentRolePool emits its own toast/event; keep local activity clean.
-	m.markAgentIdle("main")
-	m.stopActiveAnimationIfIdle()
 	return nil
 }
 

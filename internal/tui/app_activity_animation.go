@@ -24,6 +24,9 @@ func (m Model) hasActiveAnimation() bool {
 	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
 		return true
 	}
+	if summary := m.renderRequestProgressSummary(m.focusedAgentIDOrMain()); summary != "" {
+		return true
+	}
 	for _, act := range m.activities {
 		if activityNeedsVisualAnimation(act.Type) {
 			return true
@@ -69,6 +72,7 @@ func (m *Model) stopActiveAnimationIfIdle() {
 		return
 	}
 	m.animRunning = false
+	m.activitySpinnerFrameIndex = 0
 	_ = m.syncTerminalTitleState()
 }
 
@@ -90,7 +94,7 @@ func animTickCmd(delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = foregroundCadence.visualAnimDelay
 		if delay <= 0 {
-			delay = 200 * time.Millisecond
+			delay = visualSpinnerCadence
 		}
 	}
 	return tea.Tick(delay, func(t time.Time) tea.Msg {
@@ -109,9 +113,11 @@ func (m *Model) startAnimTick() tea.Cmd {
 	cadence := m.currentCadence()
 	if cadence.visualAnimDelay <= 0 {
 		m.animRunning = false
+		m.activitySpinnerFrameIndex = 0
 		return m.syncTerminalTitleState()
 	}
 	m.animRunning = true
+	m.activitySpinnerFrameIndex = 0
 	titleCmd := m.syncTerminalTitleState()
 	return tea.Batch(animTickCmd(cadence.visualAnimDelay), titleCmd)
 }
@@ -119,8 +125,8 @@ func (m *Model) startAnimTick() tea.Cmd {
 // activityFrame returns a non-empty string when animation is active,
 // used by the viewport as a flag to trigger tool-call block animation.
 func (m Model) activityFrame() string {
-	if m.animRunning {
-		return activeToolSpinnerSegments[(time.Now().UnixMilli()/150)%int64(len(activeToolSpinnerSegments))]
+	if m.animRunning && len(activeToolSpinnerSegments) > 0 {
+		return activeToolSpinnerSegments[m.activitySpinnerFrameIndex%len(activeToolSpinnerSegments)]
 	}
 	return ""
 }

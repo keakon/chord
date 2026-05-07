@@ -27,6 +27,30 @@ func TestAgentActivityStartsTerminalTitleTicker(t *testing.T) {
 	}
 }
 
+func TestRequestProgressStartsTerminalTitleTicker(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.terminalTitleBase = "Request progress animation"
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{
+		AgentID: "main",
+		Bytes:   128 * 1024,
+		Events:  42,
+	}})
+
+	if cmd == nil {
+		t.Fatal("request progress should schedule animation work")
+	}
+	if !m.animRunning {
+		t.Fatal("request progress should start visual animation")
+	}
+	if !m.terminalTitleTickRunning {
+		t.Fatal("request progress should start terminal title ticker")
+	}
+	if m.currentTitleMode() != terminalTitleModeSpinner {
+		t.Fatalf("title mode = %v, want spinner", m.currentTitleMode())
+	}
+}
+
 func TestHandleBlurMsgKeepsBackgroundActiveTitleTickerForBusyAgent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground

@@ -548,19 +548,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		m.cachedStatusBarActivityKey = ""
 		m.cachedStatusBarActivityText = ""
 		m.cachedStatusBarActivityWidth = 0
-		if evt.Bytes > 0 || evt.Events > 0 {
-			cadence := m.currentCadence().visualAnimDelay
-			if cadence <= 0 {
-				cadence = foregroundCadence.visualAnimDelay
-				if cadence <= 0 {
-					cadence = 200 * time.Millisecond
-				}
-			}
-			if !m.animRunning {
-				effects.addFollowup(animTickCmd(cadence))
-				m.animRunning = true
-			}
-		}
+		effects.addFollowup(m.startActiveAnimation())
 		return true, effects
 	case agent.RequestCycleStartedEvent:
 		agentID := evt.AgentID

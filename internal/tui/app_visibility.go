@@ -48,13 +48,17 @@ type cadenceProfile struct {
 
 // Cadence constants – tuned for text-first streaming and lower background cost.
 const (
-	titleSpinnerCadence = 500 * time.Millisecond // terminal title spinner tick (foreground + background)
+	foregroundContentFlushCadence       = 200 * time.Millisecond
+	backgroundActiveContentFlushCadence = 1 * time.Second
+	visualSpinnerCadence                = 200 * time.Millisecond // running tool/local-shell spinner tick (foreground + background-active)
+	titleSpinnerCadence                 = 500 * time.Millisecond // terminal title spinner tick (foreground + background)
+	backgroundIdleAnimTickCadence       = 5 * time.Second
 )
 
 var (
 	foregroundCadence = cadenceProfile{
-		contentFlushDelay:   200 * time.Millisecond,
-		visualAnimDelay:     200 * time.Millisecond,
+		contentFlushDelay:   foregroundContentFlushCadence,
+		visualAnimDelay:     visualSpinnerCadence,
 		titleTickerDelay:    titleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
 		hostRedrawAllowed:   true,
@@ -64,8 +68,8 @@ var (
 	// Background-active: user switched focus away but agent is still busy.
 	// Keep state moving, but substantially reduce terminal output.
 	backgroundActiveCadence = cadenceProfile{
-		contentFlushDelay:   1 * time.Second,
-		visualAnimDelay:     1 * time.Second,
+		contentFlushDelay:   backgroundActiveContentFlushCadence,
+		visualAnimDelay:     visualSpinnerCadence,
 		titleTickerDelay:    titleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
 		hostRedrawAllowed:   false,

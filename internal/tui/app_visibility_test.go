@@ -29,11 +29,11 @@ func TestCurrentCadenceReturnsForegroundWhenFocused(t *testing.T) {
 	m.displayState = stateForeground
 
 	c := m.currentCadence()
-	if c.contentFlushDelay != 200*time.Millisecond {
-		t.Fatalf("foreground contentFlushDelay = %v, want 200ms", c.contentFlushDelay)
+	if c.contentFlushDelay != foregroundContentFlushCadence {
+		t.Fatalf("foreground contentFlushDelay = %v, want %v", c.contentFlushDelay, foregroundContentFlushCadence)
 	}
-	if c.visualAnimDelay != 200*time.Millisecond {
-		t.Fatalf("foreground visualAnimDelay = %v, want 200ms", c.visualAnimDelay)
+	if c.visualAnimDelay != visualSpinnerCadence {
+		t.Fatalf("foreground visualAnimDelay = %v, want %v", c.visualAnimDelay, visualSpinnerCadence)
 	}
 	if c.titleTickerDelay != titleSpinnerCadence {
 		t.Fatalf("foreground titleTickerDelay = %v, want %v", c.titleTickerDelay, titleSpinnerCadence)
@@ -53,11 +53,11 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenBusy(t *testing.T) {
 	m.backgroundIdleSince = time.Now().Add(-time.Minute)
 
 	c := m.currentCadence()
-	if c.contentFlushDelay != time.Second {
-		t.Fatalf("background-active contentFlushDelay = %v, want 1s", c.contentFlushDelay)
+	if c.contentFlushDelay != backgroundActiveContentFlushCadence {
+		t.Fatalf("background-active contentFlushDelay = %v, want %v", c.contentFlushDelay, backgroundActiveContentFlushCadence)
 	}
-	if c.visualAnimDelay != time.Second {
-		t.Fatalf("background-active visualAnimDelay = %v, want 1s", c.visualAnimDelay)
+	if c.visualAnimDelay != visualSpinnerCadence {
+		t.Fatalf("background-active visualAnimDelay = %v, want %v", c.visualAnimDelay, visualSpinnerCadence)
 	}
 	if c.titleTickerDelay != titleSpinnerCadence {
 		t.Fatalf("background-active titleTickerDelay = %v, want %v", c.titleTickerDelay, titleSpinnerCadence)

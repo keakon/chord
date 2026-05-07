@@ -2389,6 +2389,16 @@ func TestFlushVisibleRequestProgressPromotesRawValues(t *testing.T) {
 	}
 }
 
+func TestRequestProgressCountsAsActiveAnimation(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}
+	m.requestProgress["main"] = requestProgressState{VisibleBytes: 1024, VisibleEvents: 2}
+
+	if !m.hasActiveAnimation() {
+		t.Fatal("request progress should count as active animation")
+	}
+}
+
 func TestStatusBarDynamicCacheKeyIncludesRequestProgress(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityCompacting}

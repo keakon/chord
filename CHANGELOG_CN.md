@@ -6,7 +6,7 @@
 
 - CLI：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会写入可 `/resume` 的 Chord session，并生成 `import-report.json`；Codex/OpenCode 默认以安全的文本模式导入 tools，Claude 默认 `auto`。
 - Runtime：新增请求前 model compatibility normalization：在切换 provider/model 时对历史中 provider-specific payload（如 Anthropic signed thinking、结构化 tools）进行安全回放或降级，避免协议错误。
-- TUI：修复运行中工具/Bash 的 spinner 动画：现在每次 visual animation tick 推进一帧，而不是按 wall-clock 时间采样，避免确定性跳帧和旋转不均匀。
+- TUI：修复运行中工具/Bash 的 spinner 动画：现在每次 visual animation tick 推进一帧，而不是按 wall-clock 时间采样，避免确定性跳帧和旋转不均匀；后台 active 会话现在保持与前台一致的视觉 spinner cadence，同时保留较慢的内容 flush。
 - TUI：修复 agent 忙碌时通过 `/models` 选择器切换模型池的时序。现在选择器会立即把切换请求提交到主事件循环，因此已排队的用户消息会在下一次实际发起请求时使用新 pool，而不再需要等待再次发送 draft 或完全回到 idle。
 - Worktree：改进 `chord worktree finish` 的失败可操作性。若目标 worktree 已存在进行中的 rebase，`finish` 现在会提前退出并明确提示先收尾该 rebase，避免再次启动嵌套 rebase；若 rebase 发生冲突，错误信息会给出分步恢复命令（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并基于 `git cherry -v` 提供尽力而为的“可能是冗余提交”提示，帮助判断何时可安全 `--skip`。
 - TUI：当 Chord 在后台运行时，如果当前聚焦的 Agent 从 busy 变为 idle，终端标题栏会显示一次性的 `✅` 完成标记；重新聚焦终端会清除该标记。
@@ -30,7 +30,7 @@
   - 所有 agent（包括 `primary`）必须定义至少一个池。池名由用户自定义且不做保留，例如 `default`、`base`、`fast`、`strong` 均为合法池名。未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
   - Agent 可通过 `model_pools` 复用全局定义的池；配置中的内联 `models` 与 `model_pools` 互斥。运行时池策略会按项目持久化当前角色池、按 agent 覆盖以及 last-picked 状态。
   - `/model` 命令替换为 `/models`，支持 `status`、`<pool>` 和 `--agent <name> <pool>` 子命令。TUI 选择器现在选择模型池，而不是单个模型。
-  - agent 忙碌时选择模型池会自动排队，等下一次用户消息发送时应用，与排队用户输入保持一致。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理，不再由后台 goroutine 直接改动视图状态。
+  - agent 忙碌时选择模型池会立即提交到主事件循环。当前已发起的请求继续使用开始时快照到的 client，而排队用户消息和其他后续请求边界会在不等待再次发送 draft 或完全回到 idle 的情况下使用新 pool。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理，不再由后台 goroutine 直接改动视图状态。
 - 在 diagnostics 与启动日志中加入构建身份信息。`chord --version`、diagnostics bundle 和 TUI dump 现在会包含或展示 commit、dirty 状态、注入的 build time、VCS time、Go 版本和可执行文件 mtime 等信息；MCP client info 继续使用精简的应用版本号。
 - 修复 SKILLS 侧边栏状态：`Skill` 工具加载失败不再被标记为已加载（绿色），未发现/不存在的 skill 不再显示，且移除旧的 "(loaded)" 后缀。
 - 修复 Codex RATE LIMIT 信息面板：倒计时到期后不再卡在 "1s"；当窗口到达 reset 时间点时会隐藏倒计时，并触发一次尽力而为的用量刷新，使新窗口尽快更新展示。
