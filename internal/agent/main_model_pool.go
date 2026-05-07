@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/keakon/golog/log"
@@ -22,6 +23,35 @@ func NewRuntimeModelPoolPolicy() *RuntimeModelPoolPolicy {
 		overrides:  make(map[string]string),
 		lastPicked: make(map[string]map[string]string),
 	}
+}
+
+func (p *RuntimeModelPoolPolicy) ReplaceSelections(currentRolePool string, overrides map[string]string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.currentRolePool = currentRolePool
+	p.overrides = make(map[string]string, len(overrides))
+	for agentName, pool := range overrides {
+		agentName = strings.TrimSpace(agentName)
+		if agentName == "" {
+			continue
+		}
+		p.overrides[agentName] = strings.TrimSpace(pool)
+	}
+}
+
+func (p *RuntimeModelPoolPolicy) ReplaceSelectionsForSessionRestore(currentRolePool string, overrides map[string]string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.currentRolePool = currentRolePool
+	p.overrides = make(map[string]string, len(overrides))
+	for agentName, pool := range overrides {
+		agentName = strings.TrimSpace(agentName)
+		if agentName == "" {
+			continue
+		}
+		p.overrides[agentName] = strings.TrimSpace(pool)
+	}
+	p.lastPicked = make(map[string]map[string]string)
 }
 
 func (p *RuntimeModelPoolPolicy) SetCurrentRole(pool string) {
@@ -251,6 +281,34 @@ func (a *MainAgent) AgentOverridePoolName(agentName string) (string, bool) {
 		return "", false
 	}
 	return a.modelPoolPolicy.AgentOverride(agentName)
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+func (a *MainAgent) snapshotModelPoolState() (string, map[string]string) {
+	if a.modelPoolPolicy == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(a.modelPoolPolicy.CurrentRole()), a.modelPoolPolicy.Overrides()
+}
+
+func (a *MainAgent) applySessionModelPoolState(loaded *loadedSessionState) {
+	if a.modelPoolPolicy == nil || loaded == nil {
+		return
+	}
+	if strings.TrimSpace(loaded.ModelPoolCurrentRole) == "" && len(loaded.ModelPoolAgentOverrides) == 0 {
+		return
+	}
+	a.modelPoolPolicy.ReplaceSelectionsForSessionRestore(strings.TrimSpace(loaded.ModelPoolCurrentRole), loaded.ModelPoolAgentOverrides)
 }
 
 func (a *MainAgent) saveModelPoolState() {

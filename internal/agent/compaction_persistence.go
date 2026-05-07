@@ -448,12 +448,15 @@ func (a *MainAgent) saveRecoverySnapshot() {
 	}
 	a.mu.RUnlock()
 
+	modelPoolCurrentRole, modelPoolAgentOverrides := a.snapshotModelPoolState()
 	usageSnap := a.usageTracker.SessionStats()
 	if err := a.recovery.SaveSnapshot(&recovery.SessionSnapshot{
 		Todos:                   todoStates,
 		ActiveAgents:            agents,
 		ModelName:               a.ModelName(),
 		ActiveRole:              a.CurrentRole(),
+		ModelPoolCurrentRole:    modelPoolCurrentRole,
+		ModelPoolAgentOverrides: modelPoolAgentOverrides,
 		CreatedAt:               time.Now(),
 		LastInputTokens:         a.ctxMgr.LastInputTokens(),
 		LastTotalContextTokens:  a.ctxMgr.LastTotalContextTokens(),

@@ -573,6 +573,162 @@ func TestRestoreSessionAtStartupRestoresActiveRoleModelFromSnapshot(t *testing.T
 	}
 }
 
+func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "role-model-pool-restore")
+
+	persistRestorableSession(t, sessionDir)
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		Todos:                []recovery.TodoState{},
+		ActiveRole:           "executor",
+		ModelPoolCurrentRole: "strong",
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	policy := NewRuntimeModelPoolPolicy()
+	policy.SetCurrentRole("fast")
+	a.SetModelPoolPolicy(policy, "")
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {
+			Name:   "builder",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
+		},
+		"executor": {
+			Name:   "executor",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong"}},
+		},
+	})
+	a.SetProviderModelRef("build/fast")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "exec/strong" {
+			t.Fatalf("providerModel = %q, want exec/strong", providerModel)
+		}
+		return newRoleSwitchClient(t, "exec", "strong", 16384, "exec-key"), "strong", 16384, nil
+	})
+
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+
+	if got := a.MainRoleCurrentPoolName(); got != "strong" {
+		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want strong", got)
+	}
+	if got := a.ProviderModelRef(); got != "exec/strong" {
+		t.Fatalf("ProviderModelRef() after restore = %q, want exec/strong", got)
+	}
+}
+
+func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastPicked(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "role-model-pool-last-picked")
+
+	persistRestorableSession(t, sessionDir)
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		Todos:                []recovery.TodoState{},
+		ActiveRole:           "executor",
+		ModelPoolCurrentRole: "strong",
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	policy := NewRuntimeModelPoolPolicy()
+	policy.SetCurrentRole("fast")
+	policy.SetLastPicked("executor", "strong", "exec/strong-b")
+	a.SetModelPoolPolicy(policy, "")
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {
+			Name:   "builder",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
+		},
+		"executor": {
+			Name:   "executor",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong-a", "exec/strong-b"}},
+		},
+	})
+	a.SetProviderModelRef("build/fast")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "exec/strong-a" {
+			t.Fatalf("providerModel = %q, want exec/strong-a", providerModel)
+		}
+		return newRoleSwitchClient(t, "exec", "strong-a", 16384, "exec-key"), "strong-a", 16384, nil
+	})
+
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+
+	if got := a.MainRoleCurrentPoolName(); got != "strong" {
+		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want strong", got)
+	}
+	if got := a.ProviderModelRef(); got != "exec/strong-a" {
+		t.Fatalf("ProviderModelRef() after restore = %q, want exec/strong-a", got)
+	}
+}
+
+func TestRestoreSessionAtStartupFallsBackToProjectModelPoolForHistoricalSnapshot(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "role-model-pool-historical")
+
+	persistRestorableSession(t, sessionDir)
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		Todos:      []recovery.TodoState{},
+		ActiveRole: "executor",
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	policy := NewRuntimeModelPoolPolicy()
+	policy.SetCurrentRole("fast")
+	a.SetModelPoolPolicy(policy, "")
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {
+			Name:   "builder",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
+		},
+		"executor": {
+			Name:   "executor",
+			Mode:   "primary",
+			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong"}},
+		},
+	})
+	a.SetProviderModelRef("build/fast")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "exec/fast" {
+			t.Fatalf("providerModel = %q, want exec/fast", providerModel)
+		}
+		return newRoleSwitchClient(t, "exec", "fast", 16384, "exec-key"), "fast", 16384, nil
+	})
+
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+
+	if got := a.MainRoleCurrentPoolName(); got != "fast" {
+		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want fast", got)
+	}
+	if got := a.ProviderModelRef(); got != "exec/fast" {
+		t.Fatalf("ProviderModelRef() after restore = %q, want exec/fast", got)
+	}
+}
+
 func TestRestoreSessionAtStartupSkipsUnknownSnapshotRole(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "unknown-role")

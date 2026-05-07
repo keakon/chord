@@ -30,6 +30,8 @@ type SessionSnapshot struct {
 	ActiveAgents            []AgentSnapshot         `json:"active_agents"`
 	ModelName               string                  `json:"model_name"`
 	ActiveRole              string                  `json:"active_role,omitempty"`
+	ModelPoolCurrentRole    string                  `json:"model_pool_current_role,omitempty"`
+	ModelPoolAgentOverrides map[string]string       `json:"model_pool_agent_overrides,omitempty"`
 	CreatedAt               time.Time               `json:"created_at"`
 	LastInputTokens         int                     `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compression)
 	LastTotalContextTokens  int                     `json:"last_total_context_tokens,omitempty"` // true input-side context burden when saved (input + cache_write); restored for CONTEXT USAGE

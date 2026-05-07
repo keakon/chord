@@ -30,19 +30,21 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath            string
-	Messages               []message.Message
-	TodoItems              []tools.TodoItem
-	TaskRecords            map[string]*DurableTaskRecord
-	ActiveRole             string
-	UsageStats             analytics.SessionStats
-	ContextUsage           message.TokenUsage
-	LastInputTokens        int
-	LastTotalContextTokens int
-	SubAgentStates         []loadedSubAgentState
-	MailboxMessages        []SubAgentMailboxMessage
-	MailboxSeqMax          uint64
-	Summary                *SessionSummary
+	SessionPath             string
+	Messages                []message.Message
+	TodoItems               []tools.TodoItem
+	TaskRecords             map[string]*DurableTaskRecord
+	ActiveRole              string
+	ModelPoolCurrentRole    string
+	ModelPoolAgentOverrides map[string]string
+	UsageStats              analytics.SessionStats
+	ContextUsage            message.TokenUsage
+	LastInputTokens         int
+	LastTotalContextTokens  int
+	SubAgentStates          []loadedSubAgentState
+	MailboxMessages         []SubAgentMailboxMessage
+	MailboxSeqMax           uint64
+	Summary                 *SessionSummary
 }
 
 type loadedSubAgentState struct {
@@ -293,6 +295,8 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	}
 	loaded.TodoItems = restoreSnapshotTodos(snap.Todos)
 	loaded.ActiveRole = strings.TrimSpace(snap.ActiveRole)
+	loaded.ModelPoolCurrentRole = strings.TrimSpace(snap.ModelPoolCurrentRole)
+	loaded.ModelPoolAgentOverrides = cloneStringMap(snap.ModelPoolAgentOverrides)
 	loaded.LastInputTokens = snap.LastInputTokens
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
 	if loaded.UsageStats.LLMCalls == 0 && (snap.UsageLLMCalls > 0 || snap.UsageInputTokens > 0) {
@@ -529,6 +533,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.adhocSeq.Store(nextAdhoc)
 	}
 	a.persistTaskRegistry()
+	a.applySessionModelPoolState(loaded)
 	if err := a.restoreMainRoleFromSession(loaded.ActiveRole); err != nil {
 		log.Warnf("restore session role failed session=%v role=%v error=%v", loaded.SessionPath, loaded.ActiveRole, err)
 	}

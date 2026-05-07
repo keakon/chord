@@ -325,9 +325,13 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 				TaskDesc:     "implement API endpoints",
 			},
 		},
-		ModelName:  "claude-opus-4.7",
-		ActiveRole: "planner",
-		CreatedAt:  now,
+		ModelName:            "claude-opus-4.7",
+		ActiveRole:           "planner",
+		ModelPoolCurrentRole: "strong",
+		ModelPoolAgentOverrides: map[string]string{
+			"reviewer": "fast",
+		},
+		CreatedAt: now,
 	}
 
 	if err := rm.SaveSnapshot(snap); err != nil {
@@ -344,6 +348,12 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 	}
 	if recovered.ActiveRole != snap.ActiveRole {
 		t.Errorf("ActiveRole = %q, want %q", recovered.ActiveRole, snap.ActiveRole)
+	}
+	if recovered.ModelPoolCurrentRole != snap.ModelPoolCurrentRole {
+		t.Errorf("ModelPoolCurrentRole = %q, want %q", recovered.ModelPoolCurrentRole, snap.ModelPoolCurrentRole)
+	}
+	if recovered.ModelPoolAgentOverrides["reviewer"] != "fast" {
+		t.Errorf("ModelPoolAgentOverrides = %+v, want reviewer=fast", recovered.ModelPoolAgentOverrides)
 	}
 	if !recovered.CreatedAt.Equal(snap.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v", recovered.CreatedAt, snap.CreatedAt)
