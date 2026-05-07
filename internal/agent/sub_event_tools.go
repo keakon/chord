@@ -154,6 +154,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		ToolDurationMs:  result.Duration.Milliseconds(),
 		LSPReviews:      append([]message.LSPReview(nil), result.LSPReviews...),
 		Audit:           result.Audit.Clone(),
+		Provenance:      toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),
 	}
 	s.ctxMgr.Append(toolMsg)
 

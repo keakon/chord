@@ -192,6 +192,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		ToolDurationMs:  payload.Duration.Milliseconds(),
 		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
 		Audit:           payload.Audit.Clone(),
+		Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
 	}
 	a.ctxMgr.Append(toolMsg)
 	if payload.Name == "Skill" && !isError {

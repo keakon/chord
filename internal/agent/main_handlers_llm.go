@@ -249,6 +249,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		ThinkingBlocks: payload.ThinkingBlocks,
 		ToolCalls:      sanitizedToolCalls,
 		StopReason:     payload.StopReason,
+		Provenance:     mainAssistantProvenance(a),
 	}
 	assistantMsg.Usage = payload.Usage
 	a.ctxMgr.Append(assistantMsg)

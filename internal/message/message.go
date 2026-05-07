@@ -43,20 +43,21 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
-	Role                string          `json:"role"` // "user", "assistant", "tool"
-	Content             string          `json:"content"`
-	Parts               []ContentPart   `json:"parts,omitempty"`                 // multi-part content (text + images); when set, supersedes Content
-	ThinkingBlocks      []ThinkingBlock `json:"thinking_blocks,omitempty"`       // assistant only; must be replayed verbatim
-	ToolCalls           []ToolCall      `json:"tool_calls,omitempty"`            // non-nil for assistant tool_use
-	ToolCallID          string          `json:"tool_call_id,omitempty"`          // non-empty for tool results
-	ToolDiff            string          `json:"tool_diff,omitempty"`             // unified diff for Write/Edit tool results
-	ToolDiffAdded       int             `json:"tool_diff_added,omitempty"`       // total added lines for Write/Edit; computed before diff truncation
-	ToolDiffRemoved     int             `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/Edit; computed before diff truncation
-	ToolDurationMs      int64           `json:"tool_duration_ms,omitempty"`      // final tool elapsed time in milliseconds for restored footer display
-	LSPReviews          []LSPReview     `json:"lsp_reviews,omitempty"`           // per-server last-review snapshot for the directly edited file only
-	Audit               *ToolArgsAudit  `json:"audit,omitempty"`                 // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary bool            `json:"is_compaction_summary,omitempty"` // first user message after compaction (summary of archived history)
-	StopReason          string          `json:"stop_reason,omitempty"`           // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Role                string             `json:"role"` // "user", "assistant", "tool"
+	Content             string             `json:"content"`
+	Parts               []ContentPart      `json:"parts,omitempty"`                 // multi-part content (text + images); when set, supersedes Content
+	ThinkingBlocks      []ThinkingBlock    `json:"thinking_blocks,omitempty"`       // assistant only; must be replayed verbatim
+	ToolCalls           []ToolCall         `json:"tool_calls,omitempty"`            // non-nil for assistant tool_use
+	ToolCallID          string             `json:"tool_call_id,omitempty"`          // non-empty for tool results
+	ToolDiff            string             `json:"tool_diff,omitempty"`             // unified diff for Write/Edit tool results
+	ToolDiffAdded       int                `json:"tool_diff_added,omitempty"`       // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved     int                `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/Edit; computed before diff truncation
+	ToolDurationMs      int64              `json:"tool_duration_ms,omitempty"`      // final tool elapsed time in milliseconds for restored footer display
+	LSPReviews          []LSPReview        `json:"lsp_reviews,omitempty"`           // per-server last-review snapshot for the directly edited file only
+	Audit               *ToolArgsAudit     `json:"audit,omitempty"`                 // tool-call audit metadata when effective args differ after confirmation
+	IsCompactionSummary bool               `json:"is_compaction_summary,omitempty"` // first user message after compaction (summary of archived history)
+	StopReason          string             `json:"stop_reason,omitempty"`           // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance          *MessageProvenance `json:"provenance,omitempty"`            // optional producer/source metadata for model-compat replay decisions
 	// Usage is the token usage for this message when it ends an LLM round (assistant only).
 	// Persisted in JSONL so session resume can sum per-message usage to restore session totals.
 	Usage        *TokenUsage `json:"usage,omitempty"`
@@ -144,6 +145,20 @@ type TokenUsage struct {
 type ThinkingBlock struct {
 	Thinking  string `json:"thinking"`
 	Signature string `json:"signature"`
+}
+
+// MessageProvenance captures the producer/source metadata of a persisted
+// message. It is optional and primarily used for request-time model-compat
+// normalization, where provider-specific payloads may need to be replayed,
+// downgraded, or dropped depending on the current target model.
+type MessageProvenance struct {
+	Source     string `json:"source,omitempty"`      // chord|import:claude|import:codex|import:opencode
+	ProviderID string `json:"provider_id,omitempty"` // anthropic-main / openai / gemini ...
+	ModelID    string `json:"model_id,omitempty"`
+	Variant    string `json:"variant,omitempty"`
+	ModelRef   string `json:"model_ref,omitempty"`   // provider/model[@variant]
+	WireFamily string `json:"wire_family,omitempty"` // anthropic|openai-chat|openai-responses|gemini|unknown
+	Imported   bool   `json:"imported,omitempty"`
 }
 
 // Response represents a complete LLM response.

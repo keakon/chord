@@ -45,6 +45,7 @@ Common workflows:
 - `chord --resume <session-id>`: resume a specific session
 - `chord resume <session-id>`: resume a session by ID, auto-locating the chord-managed worktree it belongs to
 - `chord import <source> <file>`: import an external session (currently supports `opencode` export JSON) into Chord's session store
++ - `chord import <source> [file]`: import an external session into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
 
@@ -57,25 +58,45 @@ Chord can import an external agent session into a resumable Chord session.
 Currently supported sources:
 
 - `opencode`: JSON from `opencode export <sessionID>`
+- `codex`: Codex rollout JSONL (typically under `~/.codex/sessions/**/rollout-*.jsonl`)
+- `claude`: Claude Code transcript JSONL (typically under `~/.claude/projects/**/<sessionId>.jsonl`)
 
-Example:
+Example (OpenCode):
 
 ```bash
-opencode export <sessionID> > export.json
+# OpenCode
+oopencode export <sessionID> > export.json
 chord import opencode export.json
 chord resume <sid>
+
+# Codex (direct file)
+chord import codex ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+
+# Codex (by session id)
+chord import codex --id <session-id> [--root ~/.codex/sessions]
+
+# Claude Code (direct file)
+chord import claude ~/.claude/projects/**/<sessionId>.jsonl
+
+# Claude Code (by session id)
+chord import claude --id <session-id> [--root ~/.claude/projects]
 ```
 
-Notes (Phase 1):
+Notes:
 
-- Tool calls/results are imported as plain text (no structured tool replay).
-- Reasoning is not imported as provider thinking payload. By default (`--reasoning strict`) non-signed reasoning is dropped; use `--reasoning visible` to include it as plain text.
+- **Tools**: by default, Codex/OpenCode tool calls/results are imported as plain text to avoid cross-provider tool protocol issues. Claude tool history uses `--tool-mode auto` by default: it keeps structured tool calls only when signed thinking is present; otherwise it downgrades to text.
+- **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
 - The imported session contains an `import-report.json` with conversion warnings and stats.
+- During runtime, Chord normalizes persisted history into a provider-safe wire view per request, so switching providers/models after import does not replay incompatible payloads.
 
 Common flags:
 
 - `--project <path>`: which project to write into (default: current directory)
 - `--sid <id>`: specify session id (default: auto-generated)
+- `--id <session-id>`: import by source session id instead of file path (supported for `codex` and `claude`)
+- `--root <path>`: root directory for `--id` lookup
+- `--tool-mode auto|text|structured`: tool import policy (default depends on source)
+- `--reasoning off|visible|strict`: reasoning import policy (default: `strict`)
 - `--dry-run`: parse and report only, no writes
 - `--json`: machine-readable output
 - `--force`: overwrite an existing `--sid`

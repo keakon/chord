@@ -15,6 +15,8 @@ import (
 func newImportCmd() *cobra.Command {
 	var projectRoot string
 	var sid string
+	var sourceID string
+	var sourceRoot string
 	var toolMode string
 	var reasoningMode string
 	var dryRun bool
@@ -22,16 +24,22 @@ func newImportCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:           "import <source> <file>",
+		Use:           "import <source> [file]",
 		Short:         "Import an external session into Chord's session storage",
-		Args:          cobra.ExactArgs(2),
+		Args:          cobra.RangeArgs(1, 2),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			source := strings.TrimSpace(args[0])
-			input := strings.TrimSpace(args[1])
-			if source == "" || input == "" {
-				return fmt.Errorf("source and file are required")
+			input := ""
+			if len(args) > 1 {
+				input = strings.TrimSpace(args[1])
+			}
+			if source == "" {
+				return fmt.Errorf("source is required")
+			}
+			if input == "" && strings.TrimSpace(sourceID) == "" {
+				return fmt.Errorf("file is required unless --id is provided")
 			}
 
 			res, err := sessionimport.Import(
@@ -39,6 +47,8 @@ func newImportCmd() *cobra.Command {
 				sessionimport.ImportOptions{
 					Source:        source,
 					InputPath:     input,
+					SourceID:      sourceID,
+					SourceRoot:    sourceRoot,
 					ProjectRoot:   projectRoot,
 					SessionID:     sid,
 					ToolMode:      toolMode,
@@ -82,6 +92,8 @@ func newImportCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&projectRoot, "project", ".", "write into which Chord project (default: current directory)")
 	cmd.Flags().StringVar(&sid, "sid", "", "specify the Chord session id (default: auto-generated)")
+	cmd.Flags().StringVar(&sourceID, "id", "", "import by source session id (codex/claude); requires --root or default roots")
+	cmd.Flags().StringVar(&sourceRoot, "root", "", "root directory for --id lookup (codex: ~/.codex/sessions, claude: ~/.claude/projects)")
 	cmd.Flags().StringVar(&toolMode, "tool-mode", "", "tool import mode: auto|text|structured")
 	cmd.Flags().StringVar(&reasoningMode, "reasoning", "", "reasoning import mode: off|visible|strict")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "parse and report only; do not write session")

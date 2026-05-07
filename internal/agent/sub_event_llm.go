@@ -140,6 +140,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		Content:    resp.Content,
 		ToolCalls:  sanitizedCalls,
 		StopReason: resp.StopReason,
+		Provenance: subAssistantProvenance(s),
 	})
 
 	// Emit finalized assistant message event for control-plane consumers.
@@ -155,6 +156,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		Content:    resp.Content,
 		ToolCalls:  sanitizedCalls,
 		StopReason: resp.StopReason,
+		Provenance: subAssistantProvenance(s),
 	}
 	persistMsg.Usage = resp.Usage
 	go func() {

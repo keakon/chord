@@ -44,7 +44,7 @@ Chord 会为当前项目维护持久化会话。
 - `chord --continue`：恢复当前项目最近的非空会话
 - `chord --resume <session-id>`：恢复指定会话
 - `chord resume <session-id>`：跨 worktree 恢复 — 自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
-- `chord import <source> <file>`：导入外部会话到 Chord（当前仅支持 `opencode` export JSON）
+- `chord import <source> [file]`：导入外部会话到 Chord（支持 `opencode`/`codex`/`claude`）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
 
@@ -57,25 +57,45 @@ Chord 支持把外部 coding agent 的历史会话导入为 Chord 可恢复的 s
 当前支持的来源：
 
 - `opencode`：`opencode export <sessionID>` 导出的 JSON
+- `codex`：Codex rollout JSONL（通常位于 `~/.codex/sessions/**/rollout-*.jsonl`）
+- `claude`：Claude Code transcript JSONL（通常位于 `~/.claude/projects/**/<sessionId>.jsonl`）
 
 示例：
 
 ```bash
-opencode export <sessionID> > export.json
+# OpenCode
+oopencode export <sessionID> > export.json
 chord import opencode export.json
 chord resume <sid>
+
+# Codex（直接文件）
+chord import codex ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+
+# Codex（按 session id 查找）
+chord import codex --id <session-id> [--root ~/.codex/sessions]
+
+# Claude Code（直接文件）
+chord import claude ~/.claude/projects/**/<sessionId>.jsonl
+
+# Claude Code（按 session id 查找）
+chord import claude --id <session-id> [--root ~/.claude/projects]
 ```
 
-说明（Phase 1）：
+说明：
 
-- tool 调用与结果会以“纯文本”形式导入（不做结构化 tool replay）。
-- reasoning 不会作为 provider thinking payload 导入。默认（`--reasoning strict`）会丢弃非签名 reasoning；使用 `--reasoning visible` 可把 reasoning 作为普通文本导入。
+- **Tools**：默认情况下，Codex/OpenCode 的 tool 调用与结果会以“纯文本”形式导入，以避免跨 provider 的 tool 协议差异；Claude 默认 `--tool-mode auto`，仅在具备 signed thinking 时才保留结构化 tool 调用，否则自动降级为纯文本。
+- **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
 - 导入后的 session 会包含 `import-report.json`，记录转换统计与 warnings。
+- 运行时会在每次请求前对历史消息做一次 provider-safe 的 normalization，因此导入后切换模型/provider 不会 replay 不兼容 payload。
 
 常用参数：
 
 - `--project <path>`：写入哪个 project（默认当前目录）
 - `--sid <id>`：指定 session id（默认自动生成）
+- `--id <session-id>`：按来源 session id 查找输入文件（支持 `codex` / `claude`）
+- `--root <path>`：`--id` 查找的根目录
+- `--tool-mode auto|text|structured`：工具导入策略（默认值取决于来源）
+- `--reasoning off|visible|strict`：reasoning 导入策略（默认 `strict`）
 - `--dry-run`：只解析输出报告，不写入 session
 - `--json`：输出机器可读 JSON
 - `--force`：覆盖已存在的 `--sid`

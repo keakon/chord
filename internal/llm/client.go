@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // DefaultOutputTokenMax is the global cap on requested output tokens.
@@ -330,6 +331,7 @@ func (c *Client) CompleteStream(
 			startLimit = m.Limit.Context
 		}
 	}
+	wireMessages := messages
 	c.mu.Unlock()
 
 	status := CallStatus{
@@ -344,7 +346,7 @@ func (c *Client) CompleteStream(
 	resp, err := c.completeStreamWithRetry(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
-		messages, tools, cb, true, orderedFallbacks, 0, &status,
+		wireMessages, tools, cb, true, orderedFallbacks, 0, &status,
 	)
 
 	c.mu.Lock()
@@ -484,6 +486,85 @@ func rotatePoolAfterStart(pool []FallbackModel, start int) []FallbackModel {
 		out = append(out, pool[(start+i)%len(pool)])
 	}
 	return out
+}
+
+func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel, tuning RequestTuning) ([]message.Message, modelcompat.NormalizeReport) {
+	if target.ProviderConfig == nil {
+		return msgs, modelcompat.NormalizeReport{}
+	}
+	modelRef := providerModelRef(target.ProviderConfig, target.ModelID)
+	if strings.TrimSpace(target.Variant) != "" {
+		modelRef = modelRef + "@" + strings.TrimSpace(target.Variant)
+	}
+	tm := modelcompat.TargetModel{
+		ProviderID:              target.ProviderConfig.Name(),
+		ModelID:                 target.ModelID,
+		Variant:                 target.Variant,
+		ModelRef:                modelRef,
+		WireFamily:              providerWireFamily(target.ProviderConfig),
+		ThinkingReplayEnabled:   thinkingReplayEnabled(target.ProviderConfig, target.ModelID, tuning),
+		ToolResultEncoding:      toolResultEncoding(target.ProviderConfig),
+		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
+	}
+	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true})
+}
+
+func providerWireFamily(provider *ProviderConfig) string {
+	if provider == nil {
+		return modelcompat.WireFamilyUnknown
+	}
+	switch provider.Type() {
+	case config.ProviderTypeMessages:
+		return modelcompat.WireFamilyAnthropic
+	case config.ProviderTypeChatCompletions:
+		return modelcompat.WireFamilyOpenAIChat
+	case config.ProviderTypeResponses:
+		return modelcompat.WireFamilyOpenAIResponses
+	case config.ProviderTypeGenerateContent:
+		return modelcompat.WireFamilyGemini
+	default:
+		return modelcompat.WireFamilyUnknown
+	}
+}
+
+func toolResultEncoding(provider *ProviderConfig) string {
+	switch providerWireFamily(provider) {
+	case modelcompat.WireFamilyAnthropic:
+		return modelcompat.ToolResultEncodingAnthropicUserBlock
+	case modelcompat.WireFamilyOpenAIChat, modelcompat.WireFamilyOpenAIResponses:
+		return modelcompat.ToolResultEncodingOpenAIToolRole
+	case modelcompat.WireFamilyGemini:
+		return modelcompat.ToolResultEncodingGeminiUserParts
+	default:
+		return modelcompat.ToolResultEncodingNone
+	}
+}
+
+func supportsStructuredTools(provider *ProviderConfig) bool {
+	switch providerWireFamily(provider) {
+	case modelcompat.WireFamilyAnthropic, modelcompat.WireFamilyOpenAIChat, modelcompat.WireFamilyOpenAIResponses, modelcompat.WireFamilyGemini:
+		return true
+	default:
+		return false
+	}
+}
+
+func thinkingReplayEnabled(provider *ProviderConfig, modelID string, tuning RequestTuning) bool {
+	if providerWireFamily(provider) != modelcompat.WireFamilyAnthropic {
+		return false
+	}
+	if tuning.Anthropic.ThinkingType == "enabled" || tuning.Anthropic.ThinkingType == "adaptive" {
+		return true
+	}
+	if provider == nil {
+		return false
+	}
+	m, ok := provider.GetModel(modelID)
+	if !ok {
+		return false
+	}
+	typeName := m.EffectiveThinkingType()
+	return typeName == "enabled" || typeName == "adaptive"
 }
 
 func tuningForPoolTarget(t FallbackModel) RequestTuning {
