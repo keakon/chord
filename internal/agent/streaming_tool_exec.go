@@ -64,13 +64,15 @@ type StreamingToolExecutor struct {
 
 	mu       sync.Mutex
 	limit    int
-	running  int
+	sem      chan struct{}
 	entries  map[string]*streamingToolEntry
 	deferred []*streamingToolEntry
 }
 
 func NewStreamingToolExecutor(turnID uint64, ctx context.Context, emit func(AgentEvent), execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)) *StreamingToolExecutor {
-	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: streamingToolSpeculativeLimit, entries: make(map[string]*streamingToolEntry)}
+	limit := streamingToolSpeculativeLimit
+	sem := make(chan struct{}, limit)
+	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: limit, sem: sem, entries: make(map[string]*streamingToolEntry)}
 }
 
 func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName string, at time.Time), onFirstVisible func(callID, toolName string, at time.Time), onDiscard func(info StreamingToolDiscardInfo)) {
@@ -93,26 +95,53 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 		return false
 	}
 	e.entries[call.ID] = entry
-	if e.running >= e.limit {
+	// Speculative execution shares a per-turn concurrency quota with finalized tool execution.
+	select {
+	case e.sem <- struct{}{}:
+		e.mu.Unlock()
+		go e.runEntry(entry)
+		return true
+	default:
 		e.deferred = append(e.deferred, entry)
 		e.mu.Unlock()
 		return true
 	}
-	e.running++
-	e.mu.Unlock()
-	e.run(entry)
-	return true
 }
 
-func (e *StreamingToolExecutor) run(entry *streamingToolEntry) {
-	go e.runEntry(entry)
+// AcquireExecutionSlot blocks until a shared tool execution slot is available or ctx is canceled.
+// The returned release function must be called exactly once.
+func (e *StreamingToolExecutor) AcquireExecutionSlot(ctx context.Context) func() {
+	if e == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = e.ctx
+	}
+	select {
+	case e.sem <- struct{}{}:
+		return func() { e.releaseExecutionSlot() }
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+func (e *StreamingToolExecutor) releaseExecutionSlot() {
+	// Release a slot and wake deferred speculative calls.
+	select {
+	case <-e.sem:
+	default:
+		return
+	}
+	e.mu.Lock()
+	e.startDeferredLocked()
+	e.mu.Unlock()
 }
 
 func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
+	defer e.releaseExecutionSlot()
+
 	e.mu.Lock()
 	if entry.discarded || e.ctx.Err() != nil {
-		e.running--
-		e.startDeferredLocked()
 		e.mu.Unlock()
 		close(entry.done)
 		return
@@ -137,14 +166,12 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	entry.result = result
 	entry.err = err
 	entry.completedAt = completedAt
-	if entry.discarded || e.ctx.Err() != nil {
+	discarded := entry.discarded || e.ctx.Err() != nil
+	if discarded {
 		entry.state = streamingToolDiscarded
 	} else {
 		entry.state = streamingToolCompleted
 	}
-	e.running--
-	e.startDeferredLocked()
-	discarded := entry.discarded || e.ctx.Err() != nil
 	e.mu.Unlock()
 	close(entry.done)
 
@@ -159,15 +186,25 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 }
 
 func (e *StreamingToolExecutor) startDeferredLocked() {
-	for e.running < e.limit && len(e.deferred) > 0 {
+	for len(e.deferred) > 0 {
 		entry := e.deferred[0]
-		e.deferred = e.deferred[1:]
-		if entry.discarded {
-			close(entry.done)
-			continue
+		// Try to acquire a shared slot for this deferred speculative call.
+		select {
+		case e.sem <- struct{}{}:
+			e.deferred = e.deferred[1:]
+			if entry.discarded {
+				// Slot acquired but entry already discarded; immediately release and continue.
+				select {
+				case <-e.sem:
+				default:
+				}
+				close(entry.done)
+				continue
+			}
+			go e.runEntry(entry)
+		default:
+			return
 		}
-		e.running++
-		go e.runEntry(entry)
 	}
 }
 
@@ -182,10 +219,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		return nil, false, false
 	}
 	if entry.argsHash != canonicalArgsHash(call.Args) {
-		entry.discarded = true
-		entry.discardWhy = "args_drift"
-		entry.state = streamingToolDiscarded
-		delete(e.entries, call.ID)
+		e.discardEntryLocked(call.ID, entry, "args_drift")
 		e.mu.Unlock()
 		return nil, false, true
 	}
@@ -218,16 +252,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...)}, true, false
 }
 
-func (e *StreamingToolExecutor) DiscardCall(callID, reason string) (StreamingToolDiscardInfo, bool) {
-	if e == nil || strings.TrimSpace(callID) == "" {
-		return StreamingToolDiscardInfo{}, false
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	entry := e.entries[callID]
-	if entry == nil {
-		return StreamingToolDiscardInfo{}, false
-	}
+func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
 	started := !entry.startedAt.IsZero()
 	completed := entry.state == streamingToolCompleted || entry.state == streamingToolYielded
 	entry.discarded = true
@@ -247,6 +272,20 @@ func (e *StreamingToolExecutor) DiscardCall(callID, reason string) (StreamingToo
 	if e.onSpeculativeDiscarded != nil {
 		e.onSpeculativeDiscarded(info)
 	}
+	return info
+}
+
+func (e *StreamingToolExecutor) DiscardCall(callID, reason string) (StreamingToolDiscardInfo, bool) {
+	if e == nil || strings.TrimSpace(callID) == "" {
+		return StreamingToolDiscardInfo{}, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	entry := e.entries[callID]
+	if entry == nil {
+		return StreamingToolDiscardInfo{}, false
+	}
+	info := e.discardEntryLocked(callID, entry, reason)
 	return info, true
 }
 func (e *StreamingToolExecutor) DiscardExcept(valid map[string]struct{}, reason string) []PendingToolCall {
@@ -272,26 +311,8 @@ func (e *StreamingToolExecutor) DiscardExceptInfo(valid map[string]struct{}, rea
 		if _, ok := valid[id]; ok {
 			continue
 		}
-		started := !entry.startedAt.IsZero()
-		completed := entry.state == streamingToolCompleted || entry.state == streamingToolYielded
-		entry.discarded = true
-		entry.discardWhy = reason
-		entry.state = streamingToolDiscarded
-		delete(e.entries, id)
-		info := StreamingToolDiscardInfo{
-			CallID:      entry.call.ID,
-			Name:        entry.call.Name,
-			ArgsJSON:    string(entry.call.Args),
-			Reason:      reason,
-			Started:     started,
-			Completed:   completed,
-			StartedAt:   entry.startedAt,
-			CompletedAt: entry.completedAt,
-		}
+		info := e.discardEntryLocked(id, entry, reason)
 		discarded = append(discarded, info)
-		if e.onSpeculativeDiscarded != nil {
-			e.onSpeculativeDiscarded(info)
-		}
 	}
 	return discarded
 }

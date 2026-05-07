@@ -517,7 +517,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			// and ask TUI to remove in-flight assistant/thinking blocks.
 			if turn != nil {
 				turn.drainPartialText() // discard rolled-back text
-				a.discardSpeculativeStreamToolsAndClearToolTrace(turn)
+				a.discardSpeculativeStreamToolsAndClearToolTrace(turn, "rollback")
 			}
 			reason := ""
 			if delta.Rollback != nil {

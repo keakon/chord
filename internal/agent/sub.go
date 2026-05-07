@@ -575,7 +575,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", delta.Text, s.instanceID)
 			case "rollback":
 				if s.turn != nil {
-					s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+					s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "rollback")
 				}
 				reason := ""
 				if delta.Rollback != nil {

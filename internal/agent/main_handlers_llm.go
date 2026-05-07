@@ -152,7 +152,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			if a.turn.MalformedCount >= maxMalformedToolCalls {
 				if isTruncated && a.scheduleCompactionForLengthRecovery() {
 					a.emitToTUI(ToastEvent{Message: "Response still hit the output limit; compacting context before retry", Level: "warn"})
-					a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+					a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 					return
 				}
 				log.Warnf("aborting turn: too many consecutive malformed tool call rounds count=%v threshold=%v", a.turn.MalformedCount, maxMalformedToolCalls)
@@ -174,13 +174,13 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 					),
 				})
 				a.emitToTUI(ToastEvent{Message: strings.TrimSpace(compactHint), Level: "warn"})
-				a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+				a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "args_invalid")
 				a.setIdleAndDrainPending()
 				return
 			}
 
 		}
-		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "args_invalid")
 		a.prepareSubAgentMailboxBatchForTurnContinuation()
 		// Retry LLM call without storing the malformed response.
 		turnID := a.turn.ID
@@ -208,7 +208,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			// Replace validCalls with parsed pseudo calls so they proceed
 			// through the normal execution path below.
 			validCalls = parsed
-			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "provider_drift")
 
 			// Emit ToolCallStartEvent for each parsed tool call to update the TUI.
 			// Standard tool calls emit this during streaming; pseudo calls must
@@ -234,7 +234,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.emitToTUI(InfoEvent{
 				Message: "Detected provider thinking pseudo tool-call templates but could not parse them. Please retry or switch model.",
 			})
-			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "provider_drift")
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -269,7 +269,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 
 	// No valid tool calls → agent is idle, waiting for the next user message.
 	if len(validCalls) == 0 {
-		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "no_valid_calls")
 		if payload.StopReason == "tool_calls" {
 			log.Warnf("LLM response stop_reason=tool_calls but no tool calls parsed; going idle total_tool_calls=%v malformed_count=%v", len(payload.ToolCalls), len(malformedCalls))
 		} else {
@@ -437,6 +437,16 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					a.logToolTraceExecutionRunning(batchPendingCall, now)
 					emitToolExecutionState(a.emitToTUI, []PendingToolCall{batchPendingCall}, ToolCallExecutionStateRunning)
 					go func(tc message.ToolCall) {
+						release := func() {}
+						if turn.streamingToolExec != nil {
+							if r := turn.streamingToolExec.AcquireExecutionSlot(turn.Ctx); r != nil {
+								release = r
+							} else {
+								return
+							}
+						}
+						defer release()
+
 						startedAt := time.Now()
 						execResult, err := a.executeToolCallWithHook(turn.Ctx, tc, false)
 						if turn.Ctx.Err() != nil {
@@ -479,6 +489,16 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 	emitToolExecutionState(a.emitToTUI, batchPending, ToolCallExecutionStateRunning)
 	for _, tc := range batch.Calls {
 		go func(tc message.ToolCall) {
+			release := func() {}
+			if turn.streamingToolExec != nil {
+				if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
+					release = r
+				} else {
+					return
+				}
+			}
+			defer release()
+
 			startedAt := time.Now()
 			execResult, err := a.executeToolCall(batchCtx, tc)
 			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {

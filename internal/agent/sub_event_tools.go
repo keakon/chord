@@ -126,6 +126,16 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			log.Debugf("SubAgent: speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
 			if hookModified {
 				go func(tc message.ToolCall) {
+					release := func() {}
+					if turn.streamingToolExec != nil {
+						if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
+							release = r
+						} else {
+							return
+						}
+					}
+					defer release()
+
 					startedAt := time.Now()
 					execResult, err := s.executeToolCallWithHook(batchCtx, tc, false)
 					if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
@@ -171,6 +181,16 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 	emitToolExecutionState(s.parent.emitToTUI, batchPending, ToolCallExecutionStateRunning)
 	for _, tc := range batch.Calls {
 		go func(tc message.ToolCall) {
+			release := func() {}
+			if turn.streamingToolExec != nil {
+				if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
+					release = r
+				} else {
+					return
+				}
+			}
+			defer release()
+
 			startedAt := time.Now()
 			execResult, err := s.executeToolCall(batchCtx, tc)
 			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {

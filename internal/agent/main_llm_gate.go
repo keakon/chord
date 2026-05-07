@@ -596,7 +596,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 				Message: "Try /compact to compress context, or start a new session.",
 				Level:   "warn",
 			})
-			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 			a.setIdleAndDrainPending()
 			return true
 		}

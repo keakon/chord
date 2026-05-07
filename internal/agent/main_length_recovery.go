@@ -38,7 +38,7 @@ func (a *MainAgent) beginLengthRecoveryRetry(toolName string, turnID uint64, tur
 	// recovery prompt does not survive compaction. See
 
 	a.pendingRecoveryPrompt = recoveryPrompt
-	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn)
+	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }

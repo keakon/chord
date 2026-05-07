@@ -60,7 +60,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		// Abort if too many consecutive retries.
 		if s.turn.MalformedCount >= maxMalformedToolCalls {
 			log.Warnf("SubAgent: aborting turn due to repeated malformed tool call args agent=%v count=%v threshold=%v", s.instanceID, s.turn.MalformedCount, maxMalformedToolCalls)
-			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "args_invalid")
 			s.sendEvent(Event{
 				Type: EventAgentError,
 				Payload: fmt.Errorf(
@@ -72,7 +72,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			return
 		}
 
-		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "args_invalid")
 		// Retry without storing the malformed response.
 		messages := s.ctxMgr.Snapshot()
 		s.asyncCallLLM(s.turn, messages)
@@ -91,7 +91,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if len(parsed) > 0 {
 			log.Warnf("SubAgent: thinking-toolcall format drift detected; parsed pseudo tool calls from reasoning agent=%v compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v parsed_tool_calls=%v", s.instanceID, compatEnabled, resp.ThinkingToolcallMarkerHit, len(parsed))
 			validCalls = parsed
-			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "provider_drift")
 
 			// Emit ToolCallStartEvent for each parsed tool call to update the TUI.
 			// Standard tool calls emit this during streaming; pseudo calls must
@@ -119,7 +119,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				Type:    EventAgentLog,
 				Payload: "SubAgent detected provider thinking pseudo tool-call drift but could not parse them; entered idle wait.",
 			})
-			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "provider_drift")
 			s.resetIdleTimer()
 			s.idleTimer = time.NewTimer(s.idleTimeout)
 			return
@@ -289,7 +289,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Pure text reply (no valid tool calls at all): LLM may be asking questions,
 	// analysing, or expressing confusion. Start idle timer.
 	if len(validCalls) == 0 {
-		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "no_valid_calls")
 		// Stop any previous idle timer to prevent leaking timers when
 		// consecutive pure-text responses arrive (e.g. multi-turn Q&A).
 		s.resetIdleTimer()
@@ -299,7 +299,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Complete only, no other tools → trigger done immediately.
 	if len(regularToolCalls) == 0 {
-		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn)
+		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "complete_only")
 		if wakeMainCallID != "" {
 			s.sendEvent(Event{
 				Type:     EventEscalate,
