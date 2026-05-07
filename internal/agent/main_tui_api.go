@@ -11,14 +11,37 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func (a *MainAgent) handleTUILocalOnlySlashCommand(content string, parts []message.ContentPart) bool {
+// isTUILocalOnlySlashCommand reports whether content is a local-only slash
+// command (/export, /models) that must run on the main agent's event loop and
+// must never be routed to a focused SubAgent. Predicate only — execution lives
+// in executeLocalOnlySlashCommand, which the event-loop goroutine calls.
+func isTUILocalOnlySlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
 	case c == "/export" || strings.HasPrefix(c, "/export "):
-		a.handleExportCommand(c)
 		return true
 	case c == "/models" || strings.HasPrefix(c, "/models "):
-		a.handleModelsCommand(c)
+		return true
+	default:
+		return false
+	}
+}
+
+// executeLocalOnlySlashCommand runs /export or /models on the event-loop
+// goroutine. busy reports whether an active turn is in flight (a.turn != nil)
+// so handlers can skip setIdleAndDrainPending — clearing a.turn mid-retry
+// corrupts turn state and breaks esc-cancel.
+//
+// parts is accepted for API symmetry with the user-message dispatch path; the
+// current /export and /models handlers operate on the text form only.
+func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.ContentPart, busy bool) bool {
+	c := strings.TrimSpace(content)
+	switch {
+	case c == "/export" || strings.HasPrefix(c, "/export "):
+		a.handleExportCommand(c, busy)
+		return true
+	case c == "/models" || strings.HasPrefix(c, "/models "):
+		a.handleModelsCommand(c, busy)
 		return true
 	default:
 		return false
@@ -29,9 +52,12 @@ func (a *MainAgent) handleTUILocalOnlySlashCommand(content string, parts []messa
 // from any goroutine (typically the TUI input handler).
 //
 // If a SubAgent is currently focused (via Tab), the message is routed directly
-// to that SubAgent instead of the MainAgent's event loop.
+// to that SubAgent instead of the MainAgent's event loop. Local-only slash
+// commands (/export, /models) bypass SubAgent routing because they belong to
+// the main agent — they're sent to the main event loop unchanged.
 func (a *MainAgent) SendUserMessage(content string) {
-	if a.handleTUILocalOnlySlashCommand(content, nil) {
+	if isTUILocalOnlySlashCommand(content) {
+		a.sendEvent(Event{Type: EventUserMessage, Payload: content})
 		return
 	}
 	// Route to focused SubAgent if one is active.
@@ -76,7 +102,8 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 			content += part.Text
 		}
 	}
-	if a.handleTUILocalOnlySlashCommand(content, parts) {
+	if isTUILocalOnlySlashCommand(content) {
+		a.sendEvent(Event{Type: EventUserMessage, Payload: parts})
 		return
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil {

@@ -136,7 +136,7 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 
 func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage) (message.Message, bool) {
 	content := pendingUserMessageText(p)
-	if a.handleLocalOnlySlashCommands(content, p.Parts) {
+	if a.handleLocalOnlySlashCommands(content, p.Parts, a.turn != nil) {
 		return message.Message{}, false
 	}
 	outC, outP := a.expandSlashCommandForModel(content, p.Parts)
@@ -468,7 +468,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 	var consumed []consumedPendingDraft
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
-		if a.handleLocalOnlySlashCommands(content, p.Parts) {
+		if a.handleLocalOnlySlashCommands(content, p.Parts, false) {
 			continue
 		}
 		if a.tryHandleSlashCommand(content) {

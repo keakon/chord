@@ -157,6 +157,10 @@ func TestSendUserMessageWithPartsLocalOnlyModelsWhileFocusedSubAgent(t *testing.
 		{Type: "image", MimeType: "image/png", Data: []byte{1, 2, 3}, FileName: "shot.png"},
 	}
 	a.SendUserMessageWithParts(parts)
+	// Local-only commands now dispatch via the event loop (fix:
+	// cheerful-swinging-seal). Pull the queued event and run dispatch
+	// synchronously to mimic what Run() would do.
+	dispatchPendingEvents(t, a)
 
 	select {
 	case got := <-sub.inputCh:
@@ -205,6 +209,9 @@ func TestModelsAgentCommandSetsNamedAgentPool(t *testing.T) {
 	a.SetAgentConfigs(agents)
 	a.SetModelPoolPolicy(NewRuntimeModelPoolPolicy(), "")
 	a.SendUserMessage("/models --agent reviewer fast")
+	// Local-only commands now dispatch via the event loop (fix:
+	// cheerful-swinging-seal).
+	dispatchPendingEvents(t, a)
 
 	if got, ok := a.ModelPoolPolicy().AgentOverride("reviewer"); !ok || got != "fast" {
 		t.Fatalf("AgentOverride(reviewer) = (%q, %v), want (\"fast\", true)", got, ok)

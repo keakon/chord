@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 const pendingQuitWindow = 2 * time.Second
@@ -38,6 +40,18 @@ func (m *Model) cancelBusyAgent() tea.Cmd {
 		m.pauseQueuedDraftDrainOnce = true
 		delete(m.turnBusyStartedAt, turnBusyKey(m.focusedAgentID))
 		return m.enqueueToast("Cancelled current operation", "info")
+	}
+	// Defensive fallback: agent reports no active turn but the UI still shows
+	// busy. This indicates a state-sync bug (e.g. a local-only slash command
+	// cleared a.turn while LLM retry was still running). Reset visible activity
+	// so the user is not stuck with a "busy" UI that no key can recover.
+	aid := m.focusedAgentIDOrMain()
+	if a, ok := m.activities[aid]; ok && a.Type != agent.ActivityIdle {
+		m.markAgentIdle(aid)
+		m.inflightDraft = nil
+		m.pauseQueuedDraftDrainOnce = true
+		m.stopActiveAnimationIfIdle()
+		return m.enqueueToast("No active turn to cancel; reset busy indicator", "warn")
 	}
 	return nil
 }

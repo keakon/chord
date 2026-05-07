@@ -1206,11 +1206,13 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 }
 
 // handleLocalOnlySlashCommands runs /export and /models. These must never
-// be appended to the conversation or sent to the model. Returns true if handled.
-// Runs even when the agent is busy (not queued), including when the submitted
-// message carries image parts.
-func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message.ContentPart) bool {
-	return a.handleTUILocalOnlySlashCommand(content, parts)
+// be appended to the conversation or sent to the model. Returns true if
+// handled. busy reports whether an active turn is in flight (a.turn != nil)
+// so handlers can avoid clearing turn state mid-retry. Runs even when the
+// agent is busy (not queued), including when the submitted message carries
+// image parts.
+func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message.ContentPart, busy bool) bool {
+	return a.executeLocalOnlySlashCommand(content, parts, busy)
 }
 
 // processPendingUserMessagesBeforeLLMInTurn appends queued user messages to the
@@ -1291,7 +1293,9 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	log.Debugf("handling user message content_len=%v", len(content))
 
 	// /export and /models: never queue or send to the model.
-	if a.handleLocalOnlySlashCommands(content, parts) {
+	// Pass busy = (a.turn != nil) so handlers skip setIdleAndDrainPending and
+	// don't clobber the active turn while it's mid-retry.
+	if a.handleLocalOnlySlashCommands(content, parts, a.turn != nil) {
 		return
 	}
 
@@ -1356,7 +1360,7 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	}
 
 	content := pendingUserMessageText(pending)
-	if a.handleLocalOnlySlashCommands(content, pending.Parts) {
+	if a.handleLocalOnlySlashCommands(content, pending.Parts, false) {
 		return
 	}
 	if a.tryHandleSlashCommand(content) {

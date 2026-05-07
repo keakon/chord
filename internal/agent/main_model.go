@@ -208,25 +208,37 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 //   - "/models status": shows current pool status as text.
 //   - "/models <pool>": sets the current view's pool (main role or focused SubAgent).
 //   - "/models --agent <name> <pool>": sets the named agent's pool.
-func (a *MainAgent) handleModelsCommand(content string) {
+//
+// busy reports whether an active turn is in flight. When true, handlers skip
+// setIdleAndDrainPending — clearing a.turn mid-retry corrupts turn state and
+// breaks esc-cancel.
+func (a *MainAgent) handleModelsCommand(content string, busy bool) {
 	arg := strings.TrimSpace(strings.TrimPrefix(content, "/models"))
 	if arg == "" {
 		a.emitToTUI(ModelSelectEvent{Target: ModelPoolSelectorTarget{Kind: ModelPoolSelectorTargetCurrentView}})
-		a.setIdleAndDrainPending()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 	if arg == "status" {
 		a.handleModelsStatus()
-		a.setIdleAndDrainPending()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 	if strings.HasPrefix(arg, "--agent ") {
 		a.handleModelsSetAgent(strings.TrimSpace(strings.TrimPrefix(arg, "--agent ")))
-		a.setIdleAndDrainPending()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 	a.handleModelsSetCurrentView(arg)
-	a.setIdleAndDrainPending()
+	if !busy {
+		a.setIdleAndDrainPending()
+	}
 }
 
 func (a *MainAgent) ModelsStatusText() string {

@@ -18,7 +18,10 @@ func (a *MainAgent) exportPersistentSessionID() string {
 	return sid
 }
 
-func (a *MainAgent) handleExportCommand(content string) {
+// handleExportCommand processes the /export slash command. busy reports
+// whether an active turn is in flight; when true, setIdleAndDrainPending is
+// skipped to avoid clearing a.turn mid-retry.
+func (a *MainAgent) handleExportCommand(content string, busy bool) {
 	args := strings.TrimSpace(strings.TrimPrefix(content, "/export"))
 
 	useJSON := strings.Contains(args, "--json")
@@ -43,7 +46,9 @@ func (a *MainAgent) handleExportCommand(content string) {
 
 	if err := os.MkdirAll(filepath.Dir(pathArg), 0o755); err != nil {
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("create export directory: %w", err)})
-		a.setIdleAndDrainPending()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 
@@ -73,7 +78,9 @@ func (a *MainAgent) handleExportCommand(content string) {
 	exported, err := session.Export(messages, stats, metadata)
 	if err != nil {
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("export failed: %w", err)})
-		a.setIdleAndDrainPending()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 
@@ -92,5 +99,7 @@ func (a *MainAgent) handleExportCommand(content string) {
 		}
 		a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Session exported (%s) to %s", format, pathArg)})
 	}
-	a.setIdleAndDrainPending()
+	if !busy {
+		a.setIdleAndDrainPending()
+	}
 }
