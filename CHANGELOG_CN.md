@@ -12,6 +12,7 @@
 - Worktree：改进 `chord worktree finish` 的失败可操作性。若目标 worktree 已存在进行中的 rebase，`finish` 现在会提前退出并明确提示先收尾该 rebase，避免再次启动嵌套 rebase；若 rebase 发生冲突，错误信息会给出分步恢复命令（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并基于 `git cherry -v` 提供尽力而为的“可能是冗余提交”提示，帮助判断何时可安全 `--skip`。
 - TUI：当 Chord 在后台运行时，如果当前聚焦的 Agent 从 busy 变为 idle，终端标题栏会显示一次性的 `✅` 完成标记；重新聚焦终端会清除该标记。
 - TUI：修复 reasoning 输出很快切换到 assistant 正文时 THINKING 卡片的顺序问题。现在 Chord 会在发出首段正文前先关闭并 flush 已缓冲的 thinking；正文开始后到达的 late reasoning 不再重新打开 THINKING，因此 THINKING 不会显示在答案正文下方。
+- TUI：修复 input separator 上方偶发出现的“双横线”。当 viewport 锚定到对话底部、最后一个 block 是带 `MarginBottom(1)` 的卡片（assistant / user / thinking / tool / compaction summary）时，卡片透明的 marginBottom 行与上方带 dim 背景的 padBottom 行形成颜色台阶，在 input separator 上方看起来像第二条横线。现在卡片纵向 margin 区间继承卡片背景色，横向 marginLeft / marginRight 仍透明，卡片左缩进的视觉效果不变。
 
 ## 0.4.0 - 2026-05-07
 

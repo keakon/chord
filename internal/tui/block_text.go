@@ -394,7 +394,14 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 	innerSuffix := strings.Repeat(" ", padRight)
 	lineWidth := padLeft + innerWidth + padRight
 	blankWrapped := wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq)
-	blankMargin := strings.Repeat(" ", marginLeft+lineWidth+marginRight)
+	// Vertical margin rows inherit the card bg across the lineWidth band even
+	// though lipgloss treats Margin as transparent. Why: when a sticky-to-bottom
+	// viewport pins the conversation against the input separator, a transparent
+	// marginBottom shows a colour step against the dim card-bg padding row above
+	// it that reads as a duplicate horizontal rule on top of the separator. The
+	// horizontal marginPrefix / marginSuffix stay transparent so card-left
+	// indentation still reads as a true gap.
+	blankMargin := wrapLineWithBackground(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix)
 
 	out := make([]string, 0, marginTop+padTop+len(lines)+padBottom+marginBottom)
 	for range marginTop {
