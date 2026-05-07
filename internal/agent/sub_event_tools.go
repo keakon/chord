@@ -131,6 +131,15 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
 							release = r
 						} else {
+							// Batch cancelled before execution slot was acquired.
+							err := batchCtx.Err()
+							if err == nil {
+								err = context.Canceled
+							}
+							select {
+							case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: err, TurnID: turn.ID}:
+							case <-s.parentCtx.Done():
+							}
 							return
 						}
 					}
@@ -186,6 +195,15 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				if r := turn.streamingToolExec.AcquireExecutionSlot(batchCtx); r != nil {
 					release = r
 				} else {
+					// Batch cancelled before execution slot was acquired.
+					err := batchCtx.Err()
+					if err == nil {
+						err = context.Canceled
+					}
+					select {
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: err, TurnID: turn.ID}:
+					case <-s.parentCtx.Done():
+					}
 					return
 				}
 			}
