@@ -518,13 +518,12 @@ func testColorsEqual(a, b interface{ RGBA() (r, g, b, a uint32) }) bool {
 	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
-// TestRenderPrewrappedCardMarginBottomInheritsCardBg guards the fix for the
-// "duplicate horizontal rule on top of input separator" regression: a card
-// whose last padded row has the dim card bg followed by a transparent
-// marginBottom row creates a colour step at the viewport floor that reads as
-// a second separator. The marginBottom row must inherit bgSeq across the
-// padded width while keeping marginLeft / marginRight transparent.
-func TestRenderPrewrappedCardMarginBottomInheritsCardBg(t *testing.T) {
+// TestRenderPrewrappedCardMarginBottomStaysTransparentBetweenCards guards the
+// chat-card spacing regression: renderPrewrappedCard is used for every card,
+// so painting marginBottom with the card bg makes adjacent cards visually merge.
+// Margin rows should stay transparent; the full viewport/input seam case is
+// handled by clearing/drawing layers rather than changing every card's margin.
+func TestRenderPrewrappedCardMarginBottomStaysTransparentBetweenCards(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	bg := currentTheme.AssistantCardBg
 	style := lipgloss.NewStyle().
@@ -542,31 +541,18 @@ func TestRenderPrewrappedCardMarginBottomInheritsCardBg(t *testing.T) {
 	if strings.TrimSpace(stripANSI(last)) != "" {
 		t.Fatalf("marginBottom row should be visually blank: plain=%q", stripANSI(last))
 	}
-
-	bgSeq := colorToANSIBgSeq(bg)
-	if !strings.Contains(last, bgSeq) {
-		t.Fatalf("marginBottom row missing bg seq %q so the colour step against the padBottom row is back: %q", bgSeq, last)
+	if strings.ContainsRune(last, '\x1b') {
+		t.Fatalf("marginBottom row should stay transparent and unstyled between cards, got: %q", last)
 	}
-
-	// marginPrefix (1 col) must stay transparent so the card's left indent is
-	// not painted into the rail-less margin column.
-	marginLeft := 1
-	if !strings.HasPrefix(last, strings.Repeat(" ", marginLeft)) {
-		t.Fatalf("marginBottom row should start with %d transparent space(s) before bgSeq, got: %q", marginLeft, last)
-	}
-
-	// The bg run must end before the line ends so the next painted layer (e.g.
-	// the input separator on the next viewport row) still sees the card colour
-	// reset, not a leaked attribute.
-	if !strings.Contains(last, ansi.ResetStyle) {
-		t.Fatalf("marginBottom row missing ANSI reset, bg may leak into following rows: %q", last)
+	wantWidth := style.GetMarginLeft() + style.GetPaddingLeft() + innerWidth + style.GetPaddingRight() + style.GetMarginRight()
+	if got := ansi.StringWidth(last); got != wantWidth {
+		t.Fatalf("marginBottom row width=%d want %d; row=%q", got, wantWidth, last)
 	}
 }
 
-// TestRenderPrewrappedCardMarginBottomNoBgWithoutCard ensures the colour-step
-// fix does not introduce phantom backgrounds when the caller passes an empty
-// bg colour (e.g. plain text blocks): the marginBottom row must remain
-// transparent space.
+// TestRenderPrewrappedCardMarginBottomNoBgWithoutCard ensures transparent
+// margins also remain unstyled when the caller passes an empty bg colour (e.g.
+// plain text blocks): the marginBottom row must remain transparent space.
 func TestRenderPrewrappedCardMarginBottomNoBgWithoutCard(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	style := lipgloss.NewStyle().
