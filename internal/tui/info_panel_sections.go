@@ -13,7 +13,10 @@ import (
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
-const infoPanelCollapsibleContentInset = 2
+const (
+	infoPanelCollapsibleContentInset = 2
+	infoPanelEditedFilesLimit        = 20
+)
 
 func joinInfoPanelBlockLines(lines []string) string {
 	switch len(lines) {
@@ -438,7 +441,11 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	if !expanded {
 		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 	}
-	for _, fe := range editedFiles {
+	visibleFiles := editedFiles
+	if len(visibleFiles) > infoPanelEditedFilesLimit {
+		visibleFiles = visibleFiles[:infoPanelEditedFilesLimit]
+	}
+	for _, fe := range visibleFiles {
 		baseName := filepath.Base(fe.Path)
 		var parts string
 		if fe.Added > 0 {
@@ -472,6 +479,11 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 			fileLine = renderInfoPanelCollapsibleContentLine(lineW, namePart)
 		}
 		filesLines = append(filesLines, fileLine)
+	}
+	if hidden := len(editedFiles) - len(visibleFiles); hidden > 0 {
+		filesLines = append(filesLines, renderInfoPanelCollapsibleContentLine(lineW,
+			InfoPanelDim.Render(fmt.Sprintf("… and %d more", hidden)),
+		))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -698,6 +699,33 @@ func TestRenderInfoPanelEditedFilesStatsPreserveInfoPanelBackground(t *testing.T
 	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ EDITED FILES")
 	if len(section) == 0 || !strings.HasPrefix(section[0], "foo.go +2 -1") {
 		t.Fatalf("EDITED FILES rows should remain visible in plain section extraction; got %#v", section)
+	}
+}
+
+func TestRenderInfoPanelEditedFilesLimitsVisibleRows(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	for i := 1; i <= infoPanelEditedFilesLimit+3; i++ {
+		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%02d.go", i), i, 0)
+	}
+
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 40)), "▼ EDITED FILES")
+	if got, want := len(section), infoPanelEditedFilesLimit+1; got != want {
+		t.Fatalf("EDITED FILES rows = %d, want %d; section=%#v", got, want, section)
+	}
+	if !strings.HasPrefix(section[0], "file-01.go +1") {
+		t.Fatalf("first visible edited file = %q, want file-01.go", section[0])
+	}
+	lastFile := fmt.Sprintf("file-%02d.go +%d", infoPanelEditedFilesLimit, infoPanelEditedFilesLimit)
+	if !strings.HasPrefix(section[infoPanelEditedFilesLimit-1], lastFile) {
+		t.Fatalf("last visible edited file = %q, want prefix %q", section[infoPanelEditedFilesLimit-1], lastFile)
+	}
+	if got, want := section[infoPanelEditedFilesLimit], "… and 3 more"; got != want {
+		t.Fatalf("overflow row = %q, want %q", got, want)
+	}
+	if strings.Contains(strings.Join(section, "\n"), "file-21.go") {
+		t.Fatalf("EDITED FILES should hide files beyond limit; section=%#v", section)
 	}
 }
 
