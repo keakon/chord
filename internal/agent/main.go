@@ -107,6 +107,8 @@ type toolCallStageTrace struct {
 	Agent  string
 
 	ToolUseEndAt           time.Time
+	SpeculativeStartAt     time.Time
+	FirstVisibleResultAt   time.Time
 	CallLLMReturnedAt      time.Time
 	OnAfterLLMCallDoneAt   time.Time
 	LLMResponseEventSentAt time.Time

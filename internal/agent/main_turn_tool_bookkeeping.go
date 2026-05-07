@@ -341,6 +341,107 @@ func (a *MainAgent) recordToolTraceLLMResponseHandled(payload *LLMResponsePayloa
 	}
 }
 
+func (a *MainAgent) recordToolTraceSpeculativeStart(callID, name string, at time.Time) {
+	if a == nil || strings.TrimSpace(callID) == "" {
+		return
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	a.toolTraceMu.Lock()
+	defer a.toolTraceMu.Unlock()
+	if a.toolTrace == nil {
+		a.toolTrace = make(map[string]toolCallStageTrace)
+	}
+	trace := a.toolTrace[callID]
+	trace.CallID = callID
+	if strings.TrimSpace(name) != "" {
+		trace.Name = strings.TrimSpace(name)
+	}
+	if trace.SpeculativeStartAt.IsZero() {
+		trace.SpeculativeStartAt = at
+	}
+	// If we already have tool_use_end, log speculative start latency.
+	if !trace.ToolUseEndAt.IsZero() {
+		toolUseToStart := at.Sub(trace.ToolUseEndAt)
+		if toolUseToStart < 0 {
+			toolUseToStart = 0
+		}
+		log.Debugf("streaming tool speculative start tool=%s call_id=%s agent_id=%s tool_use_end_to_speculative_start_ms=%d", trace.Name, trace.CallID, trace.Agent, toolUseToStart.Milliseconds())
+	}
+	a.toolTrace[callID] = trace
+}
+
+func (a *MainAgent) recordToolTraceFirstVisibleResult(callID, name string, at time.Time) {
+	if a == nil || strings.TrimSpace(callID) == "" {
+		return
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	a.toolTraceMu.Lock()
+	if a.toolTrace == nil {
+		a.toolTrace = make(map[string]toolCallStageTrace)
+	}
+	trace := a.toolTrace[callID]
+	trace.CallID = callID
+	if strings.TrimSpace(name) != "" {
+		trace.Name = strings.TrimSpace(name)
+	}
+	if trace.FirstVisibleResultAt.IsZero() {
+		trace.FirstVisibleResultAt = at
+	}
+	// Compute metrics if we have a tool_use_end marker.
+	if !trace.ToolUseEndAt.IsZero() {
+		firstVisible := at.Sub(trace.ToolUseEndAt)
+		if firstVisible < 0 {
+			firstVisible = 0
+		}
+		specStart := time.Duration(0)
+		if !trace.SpeculativeStartAt.IsZero() {
+			specStart = trace.SpeculativeStartAt.Sub(trace.ToolUseEndAt)
+			if specStart < 0 {
+				specStart = 0
+			}
+		}
+		attrs := []any{
+			"tool", trace.Name,
+			"call_id", trace.CallID,
+			"agent_id", trace.Agent,
+			"tool_use_end_to_first_visible_result_ms", firstVisible.Milliseconds(),
+		}
+		if specStart > 0 {
+			attrs = append(attrs, "tool_use_end_to_speculative_start_ms", specStart.Milliseconds())
+		}
+		log.Infof("streaming tool first visible result attrs=%v", attrs)
+	}
+	// Avoid unbounded growth for promoted speculative calls: if we got a first-visible
+	// marker before any finalized execution running marker, drop the trace now.
+	if trace.ExecutionRunningAt.IsZero() {
+		delete(a.toolTrace, callID)
+		if len(a.toolTrace) == 0 {
+			a.toolTrace = nil
+		}
+		a.toolTraceMu.Unlock()
+		return
+	}
+	a.toolTrace[callID] = trace
+	a.toolTraceMu.Unlock()
+}
+
+func (a *MainAgent) recordToolTraceSpeculativeDiscard(info StreamingToolDiscardInfo) {
+	if a == nil || strings.TrimSpace(info.CallID) == "" {
+		return
+	}
+	wasted := time.Duration(0)
+	if info.Started && !info.CompletedAt.IsZero() && !info.StartedAt.IsZero() {
+		wasted = info.CompletedAt.Sub(info.StartedAt)
+		if wasted < 0 {
+			wasted = 0
+		}
+	}
+	log.Debugf("streaming tool speculative discarded tool=%s call_id=%s reason=%s started=%v completed=%v wasted_ms=%d", info.Name, info.CallID, info.Reason, info.Started, info.Completed, wasted.Milliseconds())
+}
 func (a *MainAgent) recordToolTracePersistBlock(callID string, d time.Duration) {
 	if a == nil || strings.TrimSpace(callID) == "" {
 		return

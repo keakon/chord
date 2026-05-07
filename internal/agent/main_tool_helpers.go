@@ -123,12 +123,13 @@ func emitCancelledToolResults(emit func(AgentEvent), calls []PendingToolCall) {
 	}
 }
 
-func finalizeStreamingToolCards(emit func(AgentEvent), validCallIDs map[string]struct{}, t *Turn) {
+func finalizeStreamingToolCards(emit func(AgentEvent), validCallIDs map[string]struct{}, discardInfo map[string]StreamingToolDiscardInfo, t *Turn) {
 	if t == nil {
 		return
 	}
 	spec := t.drainStreamingToolCalls()
-	const orphanMsg = "This tool call was not executed: arguments were invalid or incomplete when the model response finalized. Fix the arguments and retry if you still need this tool."
+	const notExecutedMsg = "This tool call was not executed: arguments were invalid or incomplete when the model response finalized. Fix the arguments and retry if you still need this tool."
+	const discardedMsg = "Speculative tool execution was discarded during finalize (not part of conversation context)."
 	for _, c := range spec {
 		if c.CallID == "" {
 			continue
@@ -136,7 +137,22 @@ func finalizeStreamingToolCards(emit func(AgentEvent), validCallIDs map[string]s
 		if _, ok := validCallIDs[c.CallID]; ok {
 			continue
 		}
-		emit(ToolResultEvent{CallID: c.CallID, Name: c.Name, ArgsJSON: c.ArgsJSON, Audit: c.Audit.Clone(), Result: orphanMsg, Status: ToolResultStatusError, AgentID: c.AgentID})
+		msg := notExecutedMsg
+		if discardInfo != nil {
+			if info, ok := discardInfo[c.CallID]; ok {
+				// If speculative execution had started, we must not claim "not executed".
+				if info.Started {
+					msg = discardedMsg
+					if info.Reason != "" {
+						msg += " reason=" + info.Reason
+					}
+				} else if info.Reason != "" {
+					// Speculative was registered but never started (deferred/cancelled/etc.).
+					msg = notExecutedMsg + " reason=" + info.Reason
+				}
+			}
+		}
+		emit(ToolResultEvent{CallID: c.CallID, Name: c.Name, ArgsJSON: c.ArgsJSON, Audit: c.Audit.Clone(), Result: msg, Status: ToolResultStatusError, AgentID: c.AgentID})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,11 +41,26 @@ type streamingToolEntry struct {
 	discardWhy  string
 }
 
+type StreamingToolDiscardInfo struct {
+	CallID      string
+	Name        string
+	ArgsJSON    string
+	Reason      string
+	Started     bool
+	Completed   bool
+	StartedAt   time.Time
+	CompletedAt time.Time
+}
+
 type StreamingToolExecutor struct {
 	turnID  uint64
 	ctx     context.Context
 	execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)
 	emit    func(AgentEvent)
+
+	onSpeculativeStart     func(callID, toolName string, at time.Time)
+	onFirstVisibleResult   func(callID, toolName string, at time.Time)
+	onSpeculativeDiscarded func(info StreamingToolDiscardInfo)
 
 	mu       sync.Mutex
 	limit    int
@@ -55,6 +71,15 @@ type StreamingToolExecutor struct {
 
 func NewStreamingToolExecutor(turnID uint64, ctx context.Context, emit func(AgentEvent), execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)) *StreamingToolExecutor {
 	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: streamingToolSpeculativeLimit, entries: make(map[string]*streamingToolEntry)}
+}
+
+func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName string, at time.Time), onFirstVisible func(callID, toolName string, at time.Time), onDiscard func(info StreamingToolDiscardInfo)) {
+	if e == nil {
+		return
+	}
+	e.onSpeculativeStart = onStart
+	e.onFirstVisibleResult = onFirstVisible
+	e.onSpeculativeDiscarded = onDiscard
 }
 
 func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
@@ -95,7 +120,12 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	entry.state = streamingToolExecuting
 	entry.startedAt = time.Now()
 	call := entry.call
+	startedAt := entry.startedAt
 	e.mu.Unlock()
+
+	if e.onSpeculativeStart != nil {
+		e.onSpeculativeStart(call.ID, call.Name, startedAt)
+	}
 
 	if e.emit != nil {
 		e.emit(ToolCallExecutionEvent{ID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), State: ToolCallExecutionStateRunning})
@@ -120,6 +150,9 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 
 	if discarded || e.emit == nil {
 		return
+	}
+	if e.onFirstVisibleResult != nil {
+		e.onFirstVisibleResult(call.ID, call.Name, time.Now())
 	}
 	status := toolResultStatusFromError(err != nil)
 	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Status: status})
@@ -185,22 +218,80 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...)}, true, false
 }
 
+func (e *StreamingToolExecutor) DiscardCall(callID, reason string) (StreamingToolDiscardInfo, bool) {
+	if e == nil || strings.TrimSpace(callID) == "" {
+		return StreamingToolDiscardInfo{}, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	entry := e.entries[callID]
+	if entry == nil {
+		return StreamingToolDiscardInfo{}, false
+	}
+	started := !entry.startedAt.IsZero()
+	completed := entry.state == streamingToolCompleted || entry.state == streamingToolYielded
+	entry.discarded = true
+	entry.discardWhy = reason
+	entry.state = streamingToolDiscarded
+	delete(e.entries, callID)
+	info := StreamingToolDiscardInfo{
+		CallID:      entry.call.ID,
+		Name:        entry.call.Name,
+		ArgsJSON:    string(entry.call.Args),
+		Reason:      reason,
+		Started:     started,
+		Completed:   completed,
+		StartedAt:   entry.startedAt,
+		CompletedAt: entry.completedAt,
+	}
+	if e.onSpeculativeDiscarded != nil {
+		e.onSpeculativeDiscarded(info)
+	}
+	return info, true
+}
 func (e *StreamingToolExecutor) DiscardExcept(valid map[string]struct{}, reason string) []PendingToolCall {
+	info := e.DiscardExceptInfo(valid, reason)
+	if len(info) == 0 {
+		return nil
+	}
+	out := make([]PendingToolCall, 0, len(info))
+	for _, it := range info {
+		out = append(out, PendingToolCall{CallID: it.CallID, Name: it.Name, ArgsJSON: it.ArgsJSON})
+	}
+	return out
+}
+
+func (e *StreamingToolExecutor) DiscardExceptInfo(valid map[string]struct{}, reason string) []StreamingToolDiscardInfo {
 	if e == nil {
 		return nil
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	var discarded []PendingToolCall
+	var discarded []StreamingToolDiscardInfo
 	for id, entry := range e.entries {
 		if _, ok := valid[id]; ok {
 			continue
 		}
+		started := !entry.startedAt.IsZero()
+		completed := entry.state == streamingToolCompleted || entry.state == streamingToolYielded
 		entry.discarded = true
 		entry.discardWhy = reason
 		entry.state = streamingToolDiscarded
 		delete(e.entries, id)
-		discarded = append(discarded, PendingToolCall{CallID: entry.call.ID, Name: entry.call.Name, ArgsJSON: string(entry.call.Args)})
+		info := StreamingToolDiscardInfo{
+			CallID:      entry.call.ID,
+			Name:        entry.call.Name,
+			ArgsJSON:    string(entry.call.Args),
+			Reason:      reason,
+			Started:     started,
+			Completed:   completed,
+			StartedAt:   entry.startedAt,
+			CompletedAt: entry.completedAt,
+		}
+		discarded = append(discarded, info)
+		if e.onSpeculativeDiscarded != nil {
+			e.onSpeculativeDiscarded(info)
+		}
 	}
 	return discarded
 }
@@ -226,4 +317,17 @@ func logStreamingToolDiscard(reason string, calls []PendingToolCall) {
 		return
 	}
 	log.Debugf("discarded speculative streaming tools reason=%s count=%d", reason, len(calls))
+}
+
+func logStreamingToolDiscardInfo(reason string, calls []StreamingToolDiscardInfo) {
+	if len(calls) == 0 {
+		return
+	}
+	started := 0
+	for _, c := range calls {
+		if c.Started {
+			started++
+		}
+	}
+	log.Debugf("discarded speculative streaming tools reason=%s count=%d started=%d", reason, len(calls), started)
 }

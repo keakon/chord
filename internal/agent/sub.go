@@ -549,6 +549,11 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 						}
 						argsJSON = call.ArgsJSON
 					}
+					decision := evaluateSpeculativeExecutionPolicy(s.tools, s.ruleset, callName, json.RawMessage(argsJSON))
+					logSpeculativeExecutionDecision(callID, callName, decision)
+					if decision.Allowed && s.turn.streamingToolExec != nil {
+						s.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
+					}
 					s.parent.recordToolTraceToolUseEnd(callID, callName, s.instanceID, time.Now())
 					s.parent.emitToTUI(ToolCallUpdateEvent{
 						ID:                callID,
@@ -927,6 +932,8 @@ func (s *SubAgent) newTurn() *Turn {
 		nextToolBatch:         0,
 		activeToolBatchCancel: nil,
 	}
+	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
+	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
 	return s.turn
 }

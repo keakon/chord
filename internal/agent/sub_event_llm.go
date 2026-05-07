@@ -358,15 +358,23 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 		emitToolExecutionState(s.parent.emitToTUI, queued, ToolCallExecutionStateQueued)
 	}
-	if len(batches) > 0 {
-		s.startNextToolBatch(turn)
-	}
 	streamingSnapshot := turn.snapshotStreamingToolCalls()
 	validCallIDs := make(map[string]struct{}, len(regularToolCalls))
 	for _, tc := range regularToolCalls {
 		validCallIDs[tc.ID] = struct{}{}
 	}
-	finalizeStreamingToolCards(s.parent.emitToTUI, validCallIDs, s.turn)
+	var discardInfo map[string]StreamingToolDiscardInfo
+	if len(streamingSnapshot) > 0 && turn.streamingToolExec != nil {
+		discarded := turn.streamingToolExec.DiscardExceptInfo(validCallIDs, "filtered")
+		logStreamingToolDiscardInfo("filtered", discarded)
+		if len(discarded) > 0 {
+			discardInfo = make(map[string]StreamingToolDiscardInfo, len(discarded))
+			for _, it := range discarded {
+				discardInfo[it.CallID] = it
+			}
+		}
+	}
+	finalizeStreamingToolCards(s.parent.emitToTUI, validCallIDs, discardInfo, s.turn)
 	if len(streamingSnapshot) > 0 {
 		orphans := make([]PendingToolCall, 0, len(streamingSnapshot))
 		for _, c := range streamingSnapshot {
@@ -376,5 +384,8 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			orphans = append(orphans, c)
 		}
 		s.parent.clearToolTraceForCalls(orphans)
+	}
+	if len(batches) > 0 {
+		s.startNextToolBatch(turn)
 	}
 }

@@ -324,6 +324,7 @@ func (a *MainAgent) newTurn() {
 		activeToolBatchCancel: nil,
 	}
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
+	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()
 	log.Debugf("new turn created turn_id=%v", a.turn.ID)

@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -29,13 +30,136 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 	}
 	batch := turn.toolExecutionBatches[turn.nextToolBatch]
 	turn.nextToolBatch++
-	turn.PendingToolCalls.Store(int32(len(batch.Calls)))
+
 	batchCtx := turn.Ctx
 	var batchCancel context.CancelFunc
 	if batch.AbortSiblingsOnError {
 		batchCtx, batchCancel = context.WithCancel(turn.Ctx)
 		turn.activeToolBatchCancel = batchCancel
 	}
+
+	pendingCalls := make([]message.ToolCall, 0, len(batch.Calls))
+	for _, tc := range batch.Calls {
+		if turn.streamingToolExec == nil {
+			pendingCalls = append(pendingCalls, tc)
+			continue
+		}
+
+		// Only attempt to reuse speculative results when permission is non-interactive.
+		if len(s.ruleset) > 0 && !isSubAgentInternalTool(tc.Name) {
+			decision := evaluateToolPermission(s.ruleset, tc.Name, tc.Args)
+			if decision.Action != permission.ActionAllow {
+				pendingCalls = append(pendingCalls, tc)
+				continue
+			}
+		}
+
+		effective := tc
+		execResult := ToolExecutionResult{EffectiveArgsJSON: string(effective.Args)}
+
+		// Finalize hook: on_tool_call (must not fire speculatively).
+		hookModified := false
+		if hookResult, hookErr := s.fireHook(batchCtx, hook.OnToolCall, turn.ID, buildToolHookData(effective)); hookErr == nil && hookResult != nil {
+			switch hookResult.Action {
+			case hook.ActionBlock:
+				msg := "blocked by hook"
+				if hookResult.Message != "" {
+					msg = hookResult.Message
+				}
+				_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
+				select {
+				case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turn.ID}:
+				case <-s.parentCtx.Done():
+				}
+				continue
+			case hook.ActionModify:
+				if modified, ok := hookResult.Data.(map[string]any); ok {
+					if newArgs, ok := modified["args"]; ok {
+						if raw, err := json.Marshal(newArgs); err == nil {
+							effective.Args = raw
+							execResult.EffectiveArgsJSON = string(raw)
+							hookModified = true
+							turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON})
+							s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
+						}
+					}
+				}
+			}
+		}
+
+		// Repetition guard for promoted results.
+		s.repMu.Lock()
+		allowed := s.repetition.Check(effective.Name, effective.Args)
+		s.repMu.Unlock()
+		if !allowed {
+			_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "repetition")
+			select {
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q called too many times with the same arguments (loop detected)", tc.Name), TurnID: turn.ID}:
+			case <-s.parentCtx.Done():
+			}
+			continue
+		}
+
+		if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
+			tr := &toolResult{
+				CallID:      payload.CallID,
+				Name:        payload.Name,
+				ArgsJSON:    execResult.EffectiveArgsJSON,
+				Audit:       payload.Audit,
+				Result:      payload.Result,
+				Error:       payload.Error,
+				TurnID:      turn.ID,
+				Duration:    payload.Duration,
+				Diff:        payload.Diff,
+				DiffAdded:   payload.DiffAdded,
+				DiffRemoved: payload.DiffRemoved,
+				FileCreated: payload.FileCreated,
+				LSPReviews:  append([]message.LSPReview(nil), payload.LSPReviews...),
+			}
+			s.commitPromotedToolSideEffects(effective, tr)
+			select {
+			case s.toolCh <- tr:
+			case <-s.parentCtx.Done():
+			}
+			continue
+		} else if drift {
+			log.Debugf("SubAgent: speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
+			if hookModified {
+				go func(tc message.ToolCall) {
+					startedAt := time.Now()
+					execResult, err := s.executeToolCallWithHook(batchCtx, tc, false)
+					if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
+						return
+					}
+					var diff agentdiff.Summary
+					if err == nil {
+						effectiveCall := tc
+						effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
+						diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+					}
+					if err != nil && batch.AbortSiblingsOnError {
+						if batchCancel != nil {
+							batchCancel()
+						}
+					}
+					select {
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), Duration: time.Since(startedAt)}:
+					case <-s.parentCtx.Done():
+					}
+				}(effective)
+				continue
+			}
+		}
+
+		pendingCalls = append(pendingCalls, tc)
+	}
+
+	turn.PendingToolCalls.Store(int32(len(batch.Calls)))
+	if len(pendingCalls) == 0 {
+		return
+	}
+	batch.Calls = pendingCalls
+
 	batchPending := make([]PendingToolCall, 0, len(batch.Calls))
 	for _, tc := range batch.Calls {
 		batchPending = append(batchPending, PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), AgentID: s.instanceID})
@@ -64,21 +188,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{
-				CallID:      tc.ID,
-				Name:        tc.Name,
-				ArgsJSON:    execResult.EffectiveArgsJSON,
-				Audit:       execResult.Audit,
-				Result:      execResult.Result,
-				Error:       err,
-				TurnID:      turn.ID,
-				Diff:        diff.Text,
-				DiffAdded:   diff.Added,
-				DiffRemoved: diff.Removed,
-				FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted,
-				LSPReviews:  append([]message.LSPReview(nil), execResult.LSPReviews...),
-				Duration:    time.Since(startedAt),
-			}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), Duration: time.Since(startedAt)}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)

@@ -10,8 +10,10 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
+	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -306,15 +308,23 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		}
 		emitToolExecutionState(a.emitToTUI, queued, ToolCallExecutionStateQueued)
 	}
-	if len(batches) > 0 {
-		a.startNextToolBatch(a.turn)
-	}
 	streamingSnapshot := a.turn.snapshotStreamingToolCalls()
 	validCallIDs := make(map[string]struct{}, len(validCalls))
 	for _, tc := range validCalls {
 		validCallIDs[tc.ID] = struct{}{}
 	}
-	finalizeStreamingToolCards(a.emitToTUI, validCallIDs, a.turn)
+	var discardInfo map[string]StreamingToolDiscardInfo
+	if len(streamingSnapshot) > 0 && a.turn.streamingToolExec != nil {
+		discarded := a.turn.streamingToolExec.DiscardExceptInfo(validCallIDs, "filtered")
+		logStreamingToolDiscardInfo("filtered", discarded)
+		if len(discarded) > 0 {
+			discardInfo = make(map[string]StreamingToolDiscardInfo, len(discarded))
+			for _, it := range discarded {
+				discardInfo[it.CallID] = it
+			}
+		}
+	}
+	finalizeStreamingToolCards(a.emitToTUI, validCallIDs, discardInfo, a.turn)
 	if len(streamingSnapshot) > 0 {
 		// Drop traces for speculative tool calls that didn't survive validation.
 		orphans := make([]PendingToolCall, 0, len(streamingSnapshot))
@@ -324,11 +334,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			}
 			orphans = append(orphans, c)
 		}
-		if a.turn.streamingToolExec != nil {
-			discarded := a.turn.streamingToolExec.DiscardExcept(validCallIDs, "filtered")
-			logStreamingToolDiscard("filtered", discarded)
-		}
 		a.clearToolTraceForCalls(orphans)
+	}
+	if len(batches) > 0 {
+		a.startNextToolBatch(a.turn)
 	}
 }
 
@@ -356,15 +365,94 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 	promoted := false
 	for _, tc := range batch.Calls {
 		if turn.streamingToolExec != nil {
-			if payload, ok, drift := turn.streamingToolExec.Promote(tc); ok {
+			// Only attempt to reuse speculative results when permission is non-interactive.
+			if len(a.ruleset) > 0 && !isInternalControlTool(tc.Name) {
+				decision := evaluateToolPermission(a.effectiveRuleset(), tc.Name, tc.Args)
+				if decision.Action != permission.ActionAllow {
+					pendingCalls = append(pendingCalls, tc)
+					continue
+				}
+			}
+
+			effective := tc
+			execResult := ToolExecutionResult{EffectiveArgsJSON: string(effective.Args)}
+
+			// Finalize hook: on_tool_call. This must not be fired speculatively, but must
+			// be applied before deciding whether speculative args drifted.
+			hookModified := false
+			if hookResult, hookErr := a.fireHook(turn.Ctx, hook.OnToolCall, turnID, buildToolHookData(effective)); hookErr == nil && hookResult != nil {
+				switch hookResult.Action {
+				case hook.ActionBlock:
+					msg := "blocked by hook"
+					if hookResult.Message != "" {
+						msg = hookResult.Message
+					}
+					// Consume and suppress speculative result, then surface the hook error.
+					_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
+					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turnID}})
+					promoted = true
+					continue
+				case hook.ActionModify:
+					if modified, ok := hookResult.Data.(map[string]any); ok {
+						if newArgs, ok := modified["args"]; ok {
+							if raw, err := json.Marshal(newArgs); err == nil {
+								effective.Args = raw
+								execResult.EffectiveArgsJSON = string(raw)
+								hookModified = true
+								turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+								a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true})
+							}
+						}
+					}
+				}
+			}
+
+			// Repetition guard for promoted results.
+			a.repMu.Lock()
+			allowed := a.repetition.Check(effective.Name, effective.Args)
+			a.repMu.Unlock()
+			if !allowed {
+				_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "repetition")
+				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q called too many times with the same arguments (loop detected)", tc.Name), TurnID: turnID}})
 				promoted = true
-				turn.PendingToolCalls.Add(1)
-				turn.recordPendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
+				continue
+			}
+
+			if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
+				promoted = true
+				turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON})
 				payload.TurnID = turnID
+				payload.ArgsJSON = execResult.EffectiveArgsJSON
+				// Commit missing post-exec side effects for reused speculative results before persisting.
+				a.commitPromotedToolSideEffects(effective, payload)
 				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
 				continue
 			} else if drift {
 				log.Debugf("speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
+				if hookModified {
+					// Hook already ran and mutated args; execute without firing on_tool_call again.
+					turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+					batchPendingCall := PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON}
+					now := time.Now()
+					a.logToolTraceExecutionRunning(batchPendingCall, now)
+					emitToolExecutionState(a.emitToTUI, []PendingToolCall{batchPendingCall}, ToolCallExecutionStateRunning)
+					go func(tc message.ToolCall) {
+						startedAt := time.Now()
+						execResult, err := a.executeToolCallWithHook(turn.Ctx, tc, false)
+						if turn.Ctx.Err() != nil {
+							return
+						}
+						var diff agentdiff.Summary
+						if err == nil {
+							effectiveCall := tc
+							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
+							diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+						}
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...)}})
+					}(effective)
+					promoted = true
+					continue
+				}
 			}
 		}
 		pendingCalls = append(pendingCalls, tc)
