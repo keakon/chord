@@ -67,6 +67,10 @@ func newPoolSwitchModel() (*Model, *poolSwitchBackend) {
 	}
 	m := NewModel(backend)
 	m.mode = ModeNormal
+	// Make tests deterministic across environments.
+	// sendDraft may return nil when the focus-resize-freeze workaround is disabled
+	// (it batches only image-protocol and host-redraw commands, both optional).
+	m.SetFocusResizeFreezeEnabled(true)
 	return &m, backend
 }
 
