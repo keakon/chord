@@ -4,6 +4,12 @@
 
 ## 未发布
 
+- CLI：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会写入可 `/resume` 的 Chord session，并生成 `import-report.json`；Codex/OpenCode 默认以安全的文本模式导入 tools，Claude 默认 `auto`。
+- Runtime：新增请求前 model compatibility normalization：在切换 provider/model 时对历史中 provider-specific payload（如 Anthropic signed thinking、结构化 tools）进行安全回放或降级，避免协议错误。
+- TUI：修复运行中工具/Bash 的 spinner 动画：现在每次 visual animation tick 推进一帧，而不是按 wall-clock 时间采样，避免确定性跳帧和旋转不均匀。
+- TUI：修复 agent 忙碌时通过 `/models` 选择器切换模型池的时序。现在选择器会立即把切换请求提交到主事件循环，因此已排队的用户消息会在下一次实际发起请求时使用新 pool，而不再需要等待再次发送 draft 或完全回到 idle。
+- Worktree：改进 `chord worktree finish` 的失败可操作性。若目标 worktree 已存在进行中的 rebase，`finish` 现在会提前退出并明确提示先收尾该 rebase，避免再次启动嵌套 rebase；若 rebase 发生冲突，错误信息会给出分步恢复命令（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并基于 `git cherry -v` 提供尽力而为的“可能是冗余提交”提示，帮助判断何时可安全 `--skip`。
+
 ## 0.4.0 - 2026-05-07
 
 - 在默认 TUI 命令和 `chord headless` 中新增 `--worktree [name]`：在启动前创建或进入一个 chord 管理的 git worktree。worktree 路径为 `<state-dir>/worktrees/<repo-id>/<slug>`，分支名 `chord/<slug>`（若配置了 `worktree.branch_prefix`，则为 `<branch_prefix><slug>`）；每个 worktree 拥有独立的 ProjectKey，session、runtime cache 与 exports 自动隔离。`--worktree` 可与 `--continue` / `--resume` 组合，作用域为该 worktree 自身的会话。值为空时按 `task-YYYYMMDD-HHMMSS` 自动命名；分支已挂在某个 worktree 时会直接复用（fast resume）。`chord headless` 启动时若使用 `--worktree`，`ready` 事件 payload 新增 `worktree: { name, branch, path, repo_root }` 字段。

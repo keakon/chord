@@ -4,6 +4,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- CLI: added `chord import` support for importing external sessions from Claude Code (`claude`), Codex (`codex`), and OpenCode (`opencode`). Import writes a resumable Chord session plus `import-report.json`; tools default to safe text-mode for Codex/OpenCode and `auto` for Claude.
+- Runtime: added request-time model compatibility normalization to safely replay or downgrade provider-specific history payloads (Anthropic signed thinking and structured tools) when switching providers/models.
+- TUI: fixed running tool/Bash spinner animation to advance one frame per visual animation tick instead of sampling wall-clock time, eliminating deterministic skipped frames and uneven rotation.
+- TUI: fixed `/models` pool switching while the agent is busy. Selecting a pool from the TUI selector now submits the switch immediately to the main event loop, so queued user messages pick up the new pool at the next actual request boundary instead of waiting for another draft send or full idle.
+- Worktree: improved `chord worktree finish` failure ergonomics. If the target worktree already has a rebase in progress, `finish` now exits early with an explicit recovery hint instead of attempting a nested rebase. When rebase conflicts occur, the error message now includes step-by-step recovery commands (`git status`, `git rebase --show-current-patch`, then `--skip` / `--continue` / `--abort`) plus a best-effort redundant-commit hint from `git cherry -v` to help identify likely skip-safe patches.
+
 ## 0.4.0 - 2026-05-07
 
 - Added `--worktree [name]` to both the default TUI command and `chord headless` for creating or entering a chord-managed git worktree at startup. Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` with branch `chord/<slug>` (or `<branch_prefix><slug>` when `worktree.branch_prefix` is configured); each worktree gets its own ProjectKey so sessions, runtime cache, and exports are isolated automatically. `--worktree` may be combined with `--continue` / `--resume` to act on the worktree's own session history. Auto-named when the value is empty (`task-YYYYMMDD-HHMMSS`); a branch already attached to a worktree is reused (fast resume). Headless `ready` event payload now carries `worktree: { name, branch, path, repo_root }` when launched with `--worktree`.

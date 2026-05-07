@@ -344,6 +344,99 @@ func TestRemove_RefusesCwdSelf(t *testing.T) {
 	}
 }
 
+func TestFinish_Basic_RebaseMergeAndReclaim(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Create a commit on the worktree branch.
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{}, pl); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if _, err := os.Stat(info.Path); err == nil {
+		t.Errorf("worktree dir still exists after Finish")
+	}
+	// Worktree branch should be deleted after successful finish.
+	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
+	if strings.Contains(string(branches), "chord/feat") {
+		t.Errorf("branch chord/feat still present after Finish: %s", branches)
+	}
+	// Main branch must contain the committed file.
+	if _, err := os.Stat(filepath.Join(repo, "extra.txt")); err != nil {
+		t.Errorf("expected extra.txt in main repo after Finish: %v", err)
+	}
+}
+
+func TestFinish_RefusesDirtyWorktreeWithoutForce(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("expected dirty refusal, got %v", err)
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Errorf("worktree dir missing after refused Finish: %v", err)
+	}
+}
+
+func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an add/add conflict: the worktree will add a file that the main
+	// branch also adds independently.
+	if err := os.WriteFile(filepath.Join(repo, "clash.txt"), []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "clash.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main adds clash")
+
+	if err := os.WriteFile(filepath.Join(info.Path, "clash.txt"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "clash.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree adds clash")
+
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil {
+		t.Fatalf("expected rebase conflict error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"git rebase --show-current-patch",
+		"git rebase --skip",
+		"git rebase --continue",
+		"git rebase --abort",
+		"chord worktree finish feat",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q:\n%s", want, msg)
+		}
+	}
+}
+
 func TestIsInsideLinkedWorktree_MainRepoSubdirIsFalse(t *testing.T) {
 	repo := setupTestRepo(t)
 	sub := filepath.Join(repo, "sub")

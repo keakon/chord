@@ -56,8 +56,9 @@ Chord 会为当前项目维护持久化会话。
 - `chord headless -d <repo> --worktree feat-auth`：headless 同款行为；`ready` 事件 payload 包含 worktree 的 `name`、`branch`、`path`、`repo_root`
 - `chord worktree list`：列出当前仓库的 chord 管理 worktree
 - `chord worktree remove <name>`：删除 worktree 及其 sessions/cache/exports；默认保留分支。`--delete-branch` 仅在已合并时删除分支；`--force` 强制删除脏 worktree 和分支。
+- `chord worktree finish <name>`：把 worktree 分支 rebase 回主线并回收（默认主线：main worktree 当前检出的分支），然后 fast-forward 更新主线、删除 worktree 并删除分支。可用 `--onto <branch>` 指定主线分支，用 `--force` 放宽 clean 检查；若 rebase 出现冲突，命令会输出分步指引（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并保留 worktree/分支供你处理后重跑。若该 worktree 已有进行中的 rebase，`finish` 会先明确提示“先收尾当前 rebase”，不会再尝试启动新的 rebase。
 
-创建/进入 worktree 属于启动级动作（会改变 chord 运行所在的 project），所以它放在 `chord` 的 flag 上、不归属 `chord worktree` 子命令；后者只承担纯管理操作（`list`、`remove`）。
+创建/进入 worktree 属于启动级动作（会改变 chord 运行所在的 project），所以它放在 `chord` 的 flag 上、不归属 `chord worktree` 子命令；后者只承担纯管理操作（`list`、`remove`、`finish`）。
 
 Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之外），每个 worktree 拥有独立的 project key，session 与 cache 自动隔离。worktree 仅包含被 git 追踪的文件；主仓库未提交的改动不会自动带过去。
 

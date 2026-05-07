@@ -35,7 +35,7 @@ func newWorktreeCmd() *cobra.Command {
 		Use:   "worktree",
 		Short: "Manage chord-owned git worktrees (create/enter via `chord --worktree`)",
 	}
-	cmd.AddCommand(newWorktreeListCmd(), newWorktreeRemoveCmd())
+	cmd.AddCommand(newWorktreeListCmd(), newWorktreeRemoveCmd(), newWorktreeFinishCmd())
 	return cmd
 }
 
@@ -161,5 +161,60 @@ func newWorktreeRemoveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even when the worktree is dirty; force-delete the branch")
 	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the worktree's branch (only if merged; pass --force to override)")
+	return cmd
+}
+
+// newWorktreeFinishCmd rebases a worktree branch onto the main line,
+// fast-forwards the main line to include it, then reclaims the worktree
+// and deletes its branch.
+func newWorktreeFinishCmd() *cobra.Command {
+	var onto string
+	var force bool
+	cmd := &cobra.Command{
+		Use:           "finish <name>",
+		Short:         "Rebase a worktree back onto the main line, then remove the worktree and its branch",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(_ *cobra.Command, args []string) error {
+			ctx := context.Background()
+			name := args[0]
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+			pl, err := startupPathLocator()
+			if err != nil {
+				return err
+			}
+			branchPrefix, err := startupBranchPrefix()
+			if err != nil {
+				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
+			}
+			var ontoUsed string
+			if onto != "" {
+				ontoUsed = onto
+			} else {
+				// Best-effort: discover the default onto branch so the success
+				// message shows where the worktree was finished into.
+				if mainRoot, rerr := worktree.GitMainRoot(ctx, cwd); rerr == nil {
+					if br, berr := worktree.CurrentBranch(ctx, mainRoot); berr == nil {
+						ontoUsed = br
+					}
+				}
+			}
+			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Force: force, BranchPrefix: branchPrefix}, pl); err != nil {
+				return err
+			}
+			if ontoUsed != "" {
+				fmt.Fprintf(os.Stdout, "Finished worktree %s into %s\n", name, ontoUsed)
+			} else {
+				fmt.Fprintf(os.Stdout, "Finished worktree %s\n", name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&onto, "onto", "", "target main branch to rebase onto and fast-forward (default: main worktree's current branch)")
+	cmd.Flags().BoolVar(&force, "force", false, "relax clean-tree checks; use git rebase --autostash; force-delete branch when reclaiming")
 	return cmd
 }
