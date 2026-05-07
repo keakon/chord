@@ -28,11 +28,15 @@ func mainAssistantProvenance(a *MainAgent) *message.MessageProvenance {
 }
 
 func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
-	if s == nil || s.llmClient == nil {
+	if s == nil {
 		return nil
 	}
-	selectedRef := strings.TrimSpace(s.llmClient.PrimaryModelRef())
-	runningRef := strings.TrimSpace(s.llmClient.RunningModelRef())
+	client, _ := s.llmSnapshot()
+	if client == nil {
+		return nil
+	}
+	selectedRef := strings.TrimSpace(client.PrimaryModelRef())
+	runningRef := strings.TrimSpace(client.RunningModelRef())
 	if runningRef == "" {
 		runningRef = selectedRef
 	}

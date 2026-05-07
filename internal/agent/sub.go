@@ -93,6 +93,7 @@ type SubAgent struct {
 	joinToOwner     bool
 	delegation      config.DelegationConfig
 	color           string // optional ANSI color code from agent config for TUI display
+	llmMu           sync.RWMutex
 	llmClient       *llm.Client
 	ctxMgr          *ctxmgr.Manager // own context (no auto_compact)
 	tools           *tools.Registry // shared base + SubAgent-specific tools
@@ -360,8 +361,10 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	}
 	prompt := s.buildSystemPrompt()
 	client.SetSystemPrompt(prompt)
+	s.llmMu.Lock()
 	s.llmClient = client
 	s.modelName = modelName
+	s.llmMu.Unlock()
 	s.ctxMgr.SetMaxTokens(contextLimit)
 	s.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: prompt})
 	providerRef := client.PrimaryModelRef()
@@ -370,6 +373,25 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 		runningRef = providerRef
 	}
 	s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: providerRef, RunningModelRef: runningRef})
+}
+
+func (s *SubAgent) llmSnapshot() (*llm.Client, string) {
+	if s == nil {
+		return nil, ""
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	modelName := s.modelName
+	s.llmMu.RUnlock()
+	return client, modelName
+}
+
+func (s *SubAgent) thinkingToolcallCompat() *config.ThinkingToolcallCompatConfig {
+	client, _ := s.llmSnapshot()
+	if client == nil {
+		return nil
+	}
+	return client.ThinkingToolcallCompat()
 }
 
 // ---------------------------------------------------------------------------
@@ -394,13 +416,21 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			s.sessionReminderInjected = true
 		}
 	}
-	compatCfg := s.llmClient.ThinkingToolcallCompat()
+	llmClient, modelName := s.llmSnapshot()
+	if llmClient == nil {
+		select {
+		case s.llmCh <- &llmResult{err: fmt.Errorf("SubAgent %s has no LLM client", s.instanceID), turnID: turn.ID}:
+		case <-s.parentCtx.Done():
+		}
+		return
+	}
+	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
 	go func() {
 		// Hook: on_before_llm_call (mirrors MainAgent.callLLM).
 		hookResult, hookErr := s.fireHook(turn.Ctx, hook.OnBeforeLLMCall, turn.ID, map[string]any{
-			"model":         s.modelName,
+			"model":         modelName,
 			"message_count": len(messages),
 		})
 		if hookErr != nil {
@@ -551,7 +581,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 		}
 
 		s.parent.emitActivity(s.instanceID, ActivityConnecting, "")
-		resp, err := s.llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
+		resp, err := llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
 		flushSubTextDelta() // final flush: emit any remaining accumulated text
 		if turn.Ctx.Err() != nil {
 			return // turn cancelled
@@ -559,17 +589,13 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 
 		// Track usage for cost analytics (mirrors MainAgent.callLLM).
 		if err == nil && resp != nil {
-			selectedRef := ""
-			runningRef := ""
-			if s.llmClient != nil {
-				selectedRef = s.llmClient.PrimaryModelRef()
-				runningRef = s.llmClient.RunningModelRef()
-				// Set context limit so the info panel gauge shows correct capacity
-				// when TUI focus is on this SubAgent (mirrors MainAgent.callLLM).
-				if runningRef != "" {
-					if lim := s.llmClient.ContextLimitForModelRef(runningRef); lim > 0 {
-						s.ctxMgr.SetMaxTokens(lim)
-					}
+			selectedRef := llmClient.PrimaryModelRef()
+			runningRef := llmClient.RunningModelRef()
+			// Set context limit so the info panel gauge shows correct capacity
+			// when TUI focus is on this SubAgent (mirrors MainAgent.callLLM).
+			if runningRef != "" {
+				if lim := llmClient.ContextLimitForModelRef(runningRef); lim > 0 {
+					s.ctxMgr.SetMaxTokens(lim)
 				}
 			}
 			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage)
@@ -581,7 +607,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				subOutputTok = resp.Usage.OutputTokens
 			}
 			afterResult, afterErr := s.fireHook(turn.Ctx, hook.OnAfterLLMCall, turn.ID, map[string]any{
-				"model":         s.modelName,
+				"model":         modelName,
 				"input_tokens":  subInputTok,
 				"output_tokens": subOutputTok,
 				"tool_calls":    len(resp.ToolCalls),

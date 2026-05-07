@@ -89,6 +89,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleExecutePlanEvent(evt)
 	case EventSessionControl:
 		a.handleSessionControlEvent(evt)
+	case EventModelPoolSwitch:
+		a.handleModelPoolSwitchEvent(evt)
 	case EventAgentDone:
 		a.handleAgentDone(evt)
 	case EventAgentIdle:

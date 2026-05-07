@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -269,11 +270,35 @@ func (a *MainAgent) PoolNames() []string {
 }
 
 func (a *MainAgent) SetCurrentRolePool(pool string) error {
-	return a.setCurrentRolePool(pool, true)
+	a.sendEvent(Event{Type: EventModelPoolSwitch, Payload: modelPoolSwitchRequest{Pool: pool}})
+	return nil
 }
 
 func (a *MainAgent) SetAgentModelPool(agentName, pool string) error {
-	return a.setAgentModelPool(agentName, pool, true)
+	a.sendEvent(Event{Type: EventModelPoolSwitch, Payload: modelPoolSwitchRequest{AgentName: agentName, Pool: pool}})
+	return nil
+}
+
+type modelPoolSwitchRequest struct {
+	AgentName string
+	Pool      string
+}
+
+func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
+	req, ok := evt.Payload.(modelPoolSwitchRequest)
+	if !ok {
+		log.Errorf("handleModelPoolSwitchEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
+		return
+	}
+	if strings.TrimSpace(req.AgentName) != "" {
+		if err := a.setAgentModelPool(req.AgentName, req.Pool, true); err != nil {
+			a.emitToTUI(ErrorEvent{Err: err})
+		}
+		return
+	}
+	if err := a.setCurrentRolePool(req.Pool, true); err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+	}
 }
 
 func (a *MainAgent) AgentOverridePoolName(agentName string) (string, bool) {

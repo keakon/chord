@@ -83,7 +83,8 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 	if len(parts) == 0 {
 		return content, parts
 	}
-	if s.llmClient == nil {
+	llmClient, _ := s.llmSnapshot()
+	if llmClient == nil {
 		return content, parts
 	}
 
@@ -92,12 +93,12 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 	for _, p := range parts {
 		switch p.Type {
 		case "image":
-			if !s.llmClient.SupportsInput("image") {
+			if !llmClient.SupportsInput("image") {
 				dropped = append(dropped, "image")
 				continue
 			}
 		case "pdf":
-			if !s.llmClient.SupportsInput("pdf") {
+			if !llmClient.SupportsInput("pdf") {
 				dropped = append(dropped, "pdf")
 				continue
 			}

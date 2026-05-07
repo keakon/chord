@@ -11,11 +11,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
-type pendingModelSwitchState struct {
-	target agent.ModelPoolSelectorTarget
-	pool   string
-}
-
 type modelSwitchResultMsg struct {
 	err error
 }
@@ -59,31 +54,6 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 		return func() tea.Msg {
 			return modelSwitchResultMsg{err: ag.SetCurrentRolePool(pool)}
 		}
-	}
-}
-
-// applyPendingPoolSwitch synchronously applies a deferred pool switch and
-// clears the pending state. It is called before sending the next user draft
-// so the upcoming turn runs under the requested pool. Errors are returned as
-// modelSwitchResultMsg cmd so state updates stay on the Bubble Tea Update path.
-func (m *Model) applyPendingPoolSwitch() tea.Cmd {
-	if m.pendingModelSwitch == nil {
-		return nil
-	}
-	ps := m.pendingModelSwitch
-	m.pendingModelSwitch = nil
-	if m.agent == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var err error
-		switch ps.target.Kind {
-		case agent.ModelPoolSelectorTargetAgentOverride:
-			err = m.agent.SetAgentModelPool(ps.target.AgentName, ps.pool)
-		default:
-			err = m.agent.SetCurrentRolePool(ps.pool)
-		}
-		return modelSwitchResultMsg{err: err}
 	}
 }
 
@@ -217,13 +187,7 @@ func (m *Model) selectPoolAtCursor() tea.Cmd {
 	var switchCmd tea.Cmd
 	if ag != nil {
 		target := m.modelSelect.target
-		if m.isAgentBusy() {
-			// Defer switching pools until the current turn finishes.
-			m.pendingModelSwitch = &pendingModelSwitchState{target: target, pool: pool}
-			switchCmd = m.enqueueToast(fmt.Sprintf("Model pool switch to %q queued", pool), "info")
-		} else {
-			switchCmd = m.switchModelPoolNow(target, pool)
-		}
+		switchCmd = m.switchModelPoolNow(target, pool)
 	}
 	prevMode := m.modelSelect.prevMode
 	cmd := m.restoreModeWithIME(prevMode)

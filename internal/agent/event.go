@@ -22,6 +22,7 @@ const (
 	EventAgentError         = "agent_error"
 	EventExecutePlan        = "execute_plan" // Internal: execute a plan file after user selects target agent (payload: *executePlanPayload)
 	EventSessionControl     = "session_control"
+	EventModelPoolSwitch    = "model_pool_switch"
 	EventPendingDraftUpsert = "pending_draft_upsert"
 	EventPendingDraftRemove = "pending_draft_remove"
 

@@ -79,7 +79,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		return
 	}
 
-	compatCfg := s.llmClient.ThinkingToolcallCompat()
+	compatCfg := s.thinkingToolcallCompat()
 	compatEnabled := compatCfg != nil && compatCfg.EnabledValue()
 	driftDetected := compatEnabled &&
 		resp.ThinkingToolcallMarkerHit &&

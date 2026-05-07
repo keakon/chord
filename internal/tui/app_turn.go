@@ -97,9 +97,6 @@ func (m *Model) finalizeTurn() {
 }
 
 func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
-	// Apply pending pool switch synchronously BEFORE sending the user message
-	// so the next turn runs under the selected pool.
-	pendingSwitchCmd := m.applyPendingPoolSwitch()
 	_, imageCount := queuedDraftTextAndImageCount(draft)
 	msgIndex := -1
 	if m.focusedAgentID == "" && m.agent != nil {
@@ -148,7 +145,6 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 	}
 	m.syncVisibleMainUserBlockMsgIndexes()
 	return tea.Batch(
-		pendingSwitchCmd,
 		m.imageProtocolCmd(),
 		m.hostRedrawForContentBoundaryCmd("live-append"),
 	)

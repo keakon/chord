@@ -394,6 +394,7 @@ func (a *MainAgent) appendHookFeedback(content string) {
 }
 
 func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, data map[string]any) (*hook.Result, error) {
+	_, modelName := s.llmSnapshot()
 	return s.parent.hookEngine.Fire(ctx, newHookEnvelope(
 		point,
 		s.sessionDir,
@@ -401,13 +402,14 @@ func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, da
 		s.instanceID,
 		"sub",
 		s.parent.projectRoot,
-		s.modelName,
-		s.modelName,
+		modelName,
+		modelName,
 		data,
 	))
 }
 
 func (s *SubAgent) fireHookBackground(ctx context.Context, point string, turnID uint64, data map[string]any) {
+	_, modelName := s.llmSnapshot()
 	s.parent.hookEngine.FireBackground(ctx, newHookEnvelope(
 		point,
 		s.sessionDir,
@@ -415,8 +417,8 @@ func (s *SubAgent) fireHookBackground(ctx context.Context, point string, turnID 
 		s.instanceID,
 		"sub",
 		s.parent.projectRoot,
-		s.modelName,
-		s.modelName,
+		modelName,
+		modelName,
 		data,
 	))
 }
@@ -425,6 +427,7 @@ func (s *SubAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.Au
 	if turn == nil {
 		return nil, nil
 	}
+	_, modelName := s.llmSnapshot()
 	data := map[string]any{
 		"tool_calls":    append([]any(nil), turn.CompletedToolCalls...),
 		"changed_files": append([]any(nil), turn.ChangedFiles...),
@@ -436,8 +439,8 @@ func (s *SubAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.Au
 		s.instanceID,
 		"sub",
 		s.parent.projectRoot,
-		s.modelName,
-		s.modelName,
+		modelName,
+		modelName,
 		data,
 	))
 }

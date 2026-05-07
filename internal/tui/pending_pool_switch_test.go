@@ -70,35 +70,37 @@ func newPoolSwitchModel() (*Model, *poolSwitchBackend) {
 	return &m, backend
 }
 
-func TestBusyPoolSwitchQueuesSwitch(t *testing.T) {
+func TestBusyPoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainRolePoolNames = []string{"slow", "fast"}
 	backend.mainRoleCurrentPool = "slow"
 
-	// Mark agent busy (streaming).
+	// Mark agent busy (streaming). Selecting a pool should submit the switch to
+	// the agent immediately. Local MainAgent serializes that request on its event
+	// loop, so it reaches the next request boundary before later queued work.
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	// Open pool selector and select "fast".
 	m.modelSelect = modelSelectState{
 		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
 		poolNames:  []string{"slow", "fast"},
 		poolCursor: 1,
 		prevMode:   ModeNormal,
 	}
-	m.selectPoolAtCursor()
+	cmd := m.selectPoolAtCursor()
+	if cmd == nil {
+		t.Fatal("expected command for immediate busy switch submission")
+	}
 
-	if m.pendingModelSwitch == nil {
-		t.Fatal("expected pendingModelSwitch to be set when agent is busy")
+	msgs := runCmdTree(cmd)
+	if _, ok := findModelSwitchResult(msgs); !ok {
+		t.Fatalf("cmd tree did not include modelSwitchResultMsg: %#v", msgs)
 	}
-	if m.pendingModelSwitch.pool != "fast" {
-		t.Fatalf("pending pool = %q, want %q", m.pendingModelSwitch.pool, "fast")
-	}
-	if len(backend.setCurrentRolePoolCalls) != 0 {
-		t.Fatalf("SetCurrentRolePool called immediately: %v", backend.setCurrentRolePoolCalls)
+	if len(backend.setCurrentRolePoolCalls) != 1 || backend.setCurrentRolePoolCalls[0] != "fast" {
+		t.Fatalf("SetCurrentRolePool calls = %v, want [fast]", backend.setCurrentRolePoolCalls)
 	}
 }
 
-func TestIdlePoolSwitchExecutesImmediately(t *testing.T) {
+func TestIdlePoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainRolePoolNames = []string{"slow", "fast"}
 	backend.mainRoleCurrentPool = "slow"
@@ -111,59 +113,7 @@ func TestIdlePoolSwitchExecutesImmediately(t *testing.T) {
 	}
 	cmd := m.selectPoolAtCursor()
 	if cmd == nil {
-		t.Fatal("expected non-nil command for immediate switch")
-	}
-	if m.pendingModelSwitch != nil {
-		t.Fatal("pendingModelSwitch should not be set when agent is idle")
-	}
-}
-
-func TestApplyPendingPoolSwitchReturnsResultCmd(t *testing.T) {
-	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
-
-	m.pendingModelSwitch = &pendingModelSwitchState{
-		target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
-		pool:   "fast",
-	}
-	cmd := m.applyPendingPoolSwitch()
-
-	if m.pendingModelSwitch != nil {
-		t.Fatal("pendingModelSwitch should be nil after applyPendingPoolSwitch")
-	}
-	if cmd == nil {
-		t.Fatal("applyPendingPoolSwitch should return result cmd")
-	}
-	msgs := runCmdTree(cmd)
-	if _, ok := findModelSwitchResult(msgs); !ok {
-		t.Fatalf("cmd tree did not include modelSwitchResultMsg: %#v", msgs)
-	}
-	if len(backend.setCurrentRolePoolCalls) != 1 || backend.setCurrentRolePoolCalls[0] != "fast" {
-		t.Fatalf("SetCurrentRolePool calls = %v, want [fast]", backend.setCurrentRolePoolCalls)
-	}
-}
-
-func TestSendDraftAppliesPendingPoolSwitch(t *testing.T) {
-	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
-
-	m.pendingModelSwitch = &pendingModelSwitchState{
-		target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
-		pool:   "fast",
-	}
-	d := queuedDraft{Content: "hello", QueuedAt: time.Now()}
-	cmd := m.sendDraft(d)
-
-	if m.pendingModelSwitch != nil {
-		t.Fatal("pendingModelSwitch should be nil after sendDraft")
-	}
-	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "hello" {
-		t.Fatalf("sent messages = %v, want [hello]", backend.sentMessages)
-	}
-	if cmd == nil {
-		t.Fatal("sendDraft should return command batch including pending switch result")
+		t.Fatal("expected non-nil command for immediate switch submission")
 	}
 }
 
@@ -178,104 +128,114 @@ func TestDuplicatePoolSwitchIsNoop(t *testing.T) {
 		poolCursor: 1,
 		prevMode:   ModeNormal,
 	}
-	m.selectPoolAtCursor()
+	cmd := m.selectPoolAtCursor()
 
-	// Current pool is already "fast", so no switch should happen.
-	if m.pendingModelSwitch != nil {
-		t.Fatal("pendingModelSwitch should not be set for same pool")
+	if cmd != nil {
+		msgs := runCmdTree(cmd)
+		if _, ok := findModelSwitchResult(msgs); ok {
+			t.Fatalf("same-pool selection should not switch, got msgs %#v", msgs)
+		}
+	}
+	if len(backend.setCurrentRolePoolCalls) != 0 {
+		t.Fatalf("SetCurrentRolePool calls = %v, want none", backend.setCurrentRolePoolCalls)
 	}
 }
 
-func TestBusyPoolSwitchOverwritesPrevious(t *testing.T) {
-	m, _ := newPoolSwitchModel()
+func TestRepeatedBusyPoolSwitchesAllSubmitToAgent(t *testing.T) {
+	m, backend := newPoolSwitchModel()
+	backend.mainRolePoolNames = []string{"pool-a", "pool-b", "pool-c"}
+	backend.mainRoleCurrentPool = "pool-a"
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
-	// First busy select sets pending to "pool-a".
 	m.modelSelect = modelSelectState{
 		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
 		poolNames:  []string{"pool-a", "pool-b", "pool-c"},
-		poolCursor: 0,
+		poolCursor: 1,
 		prevMode:   ModeNormal,
 	}
-	m.selectPoolAtCursor()
+	runCmdTree(m.selectPoolAtCursor())
 
-	// Second busy select (still busy) should overwrite to "pool-c".
-	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
+	backend.mainRoleCurrentPool = "pool-b"
 	m.modelSelect.poolCursor = 2
-	m.selectPoolAtCursor()
+	runCmdTree(m.selectPoolAtCursor())
 
-	if m.pendingModelSwitch == nil || m.pendingModelSwitch.pool != "pool-c" {
-		t.Fatalf("pending pool = %v, want pool-c", m.pendingModelSwitch)
+	want := []string{"pool-b", "pool-c"}
+	if len(backend.setCurrentRolePoolCalls) != len(want) {
+		t.Fatalf("SetCurrentRolePool calls = %v, want %v", backend.setCurrentRolePoolCalls, want)
+	}
+	for i := range want {
+		if backend.setCurrentRolePoolCalls[i] != want[i] {
+			t.Fatalf("SetCurrentRolePool calls = %v, want %v", backend.setCurrentRolePoolCalls, want)
+		}
 	}
 }
 
-func TestDrainQueuedDraftsAppliesPendingPoolSwitch(t *testing.T) {
+func TestDrainQueuedDraftsDoesNotPerformPoolSwitch(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainRolePoolNames = []string{"slow", "fast"}
 	backend.mainRoleCurrentPool = "slow"
-
-	m.pendingModelSwitch = &pendingModelSwitchState{
-		target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
-		pool:   "fast",
-	}
 	m.queuedDrafts = []queuedDraft{{
 		Content:  "queued msg",
 		QueuedAt: time.Now(),
 	}}
 
 	cmd := m.drainQueuedDrafts()
-
-	if m.pendingModelSwitch != nil {
-		t.Fatal("pendingModelSwitch should be nil after drainQueuedDrafts")
-	}
 	if cmd == nil {
 		t.Fatal("drainQueuedDrafts should return command batch")
 	}
 	msgs := runCmdTree(cmd)
-	if _, ok := findModelSwitchResult(msgs); !ok {
-		t.Fatalf("cmd tree did not include modelSwitchResultMsg: %#v", msgs)
+	if _, ok := findModelSwitchResult(msgs); ok {
+		t.Fatalf("draining queued drafts should not perform a model switch: %#v", msgs)
 	}
-	if len(backend.setCurrentRolePoolCalls) != 1 || backend.setCurrentRolePoolCalls[0] != "fast" {
-		t.Fatalf("SetCurrentRolePool calls = %v, want [fast]", backend.setCurrentRolePoolCalls)
+	if len(backend.setCurrentRolePoolCalls) != 0 {
+		t.Fatalf("SetCurrentRolePool calls = %v, want none", backend.setCurrentRolePoolCalls)
 	}
 }
 
-func TestPendingPoolSwitchErrorDoesNotBlockDraft(t *testing.T) {
+func TestPoolSwitchErrorReportsResultWithoutBlockingDraft(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainRolePoolNames = []string{"slow", "fast"}
 	backend.mainRoleCurrentPool = "slow"
 	backend.switchErr = errors.New("simulated failure")
 
-	m.pendingModelSwitch = &pendingModelSwitchState{
-		target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
-		pool:   "fast",
+	m.modelSelect = modelSelectState{
+		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
+		poolNames:  []string{"slow", "fast"},
+		poolCursor: 1,
+		prevMode:   ModeNormal,
 	}
-	d := queuedDraft{Content: "test", QueuedAt: time.Now()}
-	cmd := m.sendDraft(d)
-
-	if len(backend.sentMessages) != 1 {
-		t.Fatalf("message should still be sent despite pool switch error, got %d messages", len(backend.sentMessages))
-	}
+	cmd := m.selectPoolAtCursor()
 	if cmd == nil {
-		t.Fatal("sendDraft should return command batch including pending switch result")
+		t.Fatal("expected switch command")
 	}
-
-	backend2 := &poolSwitchBackend{switchErr: backend.switchErr}
-	m2 := NewModel(backend2)
-	m2.pendingModelSwitch = &pendingModelSwitchState{
-		target: agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
-		pool:   "fast",
-	}
-	cmd2 := m2.applyPendingPoolSwitch()
-	if cmd2 == nil {
-		t.Fatal("applyPendingPoolSwitch should return result cmd for error case")
-	}
-	msgs := runCmdTree(cmd2)
+	msgs := runCmdTree(cmd)
 	result, ok := findModelSwitchResult(msgs)
 	if !ok {
 		t.Fatalf("cmd tree did not include modelSwitchResultMsg: %#v", msgs)
 	}
 	if !errors.Is(result.err, backend.switchErr) {
 		t.Fatalf("modelSwitchResultMsg.err = %v, want %v", result.err, backend.switchErr)
+	}
+
+	d := queuedDraft{Content: "test", QueuedAt: time.Now()}
+	draftCmd := m.sendDraft(d)
+	if len(backend.sentMessages) != 1 {
+		t.Fatalf("message should still be sent despite pool switch error, got %d messages", len(backend.sentMessages))
+	}
+	if draftCmd == nil {
+		t.Fatal("sendDraft should still return command batch")
+	}
+}
+
+func TestModelSwitchResultDoesNotMarkBusyAgentIdle(t *testing.T) {
+	m, _ := newPoolSwitchModel()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	cmd := m.handleModelSwitchResult(modelSwitchResultMsg{})
+	if cmd != nil {
+		t.Fatalf("handleModelSwitchResult returned unexpected cmd %#v", cmd)
+	}
+	if got := m.activities["main"].Type; got != agent.ActivityStreaming {
+		t.Fatalf("main activity = %q, want streaming", got)
 	}
 }

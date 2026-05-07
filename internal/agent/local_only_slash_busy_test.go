@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
 )
 
 // dispatchPendingEvents drains any events sitting on the agent's internal
@@ -58,6 +61,17 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	policy := NewRuntimeModelPoolPolicy()
 	policy.SetCurrentRole("base")
 	a.SetModelPoolPolicy(policy, "")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+				"model-b": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"test-key"})
+		modelID := strings.TrimPrefix(providerModel, "provider/")
+		return llm.NewClient(providerCfg, stubProvider{}, modelID, 1024, ""), modelID, 8192, nil
+	})
 	cfg := &config.AgentConfig{
 		Name: "test",
 		Mode: "primary",
@@ -68,6 +82,35 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	}
 	a.agentConfigs = map[string]*config.AgentConfig{"test": cfg}
 	a.activeConfig = cfg
+}
+
+func TestTUISetCurrentRolePoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	a.ApplyInitialModel("provider/model-a")
+	drainAgentEvents(a.Events())
+
+	a.newTurn()
+	turn := a.turn
+	a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
+	a.SetCurrentRolePool("fast")
+	if got := a.ModelPoolPolicy().CurrentRole(); got != "base" {
+		t.Fatalf("CurrentRole changed before event-loop dispatch = %q, want base", got)
+	}
+
+	dispatchPendingEvents(t, a)
+	if got := a.ModelPoolPolicy().CurrentRole(); got != "fast" {
+		t.Fatalf("CurrentRole after dispatch = %q, want fast", got)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after switch = %q, want provider/model-b", got)
+	}
+	if a.turn != turn {
+		t.Fatal("model pool switch dispatch should not clear the active turn")
+	}
+	if got := a.PendingUserMessageCount(); got != 1 {
+		t.Fatalf("PendingUserMessageCount = %d, want queued draft preserved until request boundary", got)
+	}
 }
 
 // TestHandleModelsCommandBusyDoesNotClearTurn proves the central fix: when an
