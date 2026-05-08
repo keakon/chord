@@ -214,12 +214,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// concurrent SwapLLMClient cannot produce an inconsistent pair (e.g.
 	// old client with new model name). All subsequent reads in this
 	// function use the snapshot variables.
-	a.llmMu.RLock()
-	llmClient := a.llmClient
-	modelName := a.modelName
-	selectedRef := a.providerModelRef
-	prevRunningRef := a.runningModelRef
-	a.llmMu.RUnlock()
+	llmClient, modelName, selectedRef, prevRunningRef := a.llmSnapshot()
 	compatCfg := llmClient.ThinkingToolcallCompat() // use snapshot for consistency with llmClient
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
@@ -709,11 +704,20 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 }
 
 func (a *MainAgent) thinkingToolcallCompat() *config.ThinkingToolcallCompatConfig {
-	a.llmMu.RLock()
-	client := a.llmClient
-	a.llmMu.RUnlock()
+	client, _, _, _ := a.llmSnapshot()
 	if client == nil {
 		return nil
 	}
 	return client.ThinkingToolcallCompat()
+}
+
+// llmSnapshot returns a consistent point-in-time view of the LLM fields under
+// llmMu so concurrent SwapLLMClient / SwitchModel cannot tear apart a reader.
+func (a *MainAgent) llmSnapshot() (client *llm.Client, modelName, providerRef, runningRef string) {
+	if a == nil {
+		return nil, "", "", ""
+	}
+	a.llmMu.RLock()
+	defer a.llmMu.RUnlock()
+	return a.llmClient, a.modelName, a.providerModelRef, a.runningModelRef
 }
