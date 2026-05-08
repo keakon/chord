@@ -26,11 +26,16 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 	cancelled := false
 	if t != nil {
 		pending := t.PendingToolCalls.Load()
+		// Cancel the whole turn before cancelling any narrower tool-batch
+		// context. Tool goroutines use turn.Ctx.Err() to distinguish a user
+		// turn cancellation from an ordinary batch cancellation; doing this in
+		// the opposite order can let a racing goroutine emit EventToolResult
+		// before EventTurnCancelled.
+		t.Cancel()
 		if t.activeToolBatchCancel != nil {
 			t.activeToolBatchCancel()
 			t.activeToolBatchCancel = nil
 		}
-		t.Cancel()
 		cancelledExec := t.cancelPendingToolCalls()
 		cancelledStream := t.drainStreamingToolCalls()
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
