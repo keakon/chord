@@ -455,12 +455,26 @@ func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string 
 }
 
 func renderFullFrameLine(b *strings.Builder, line uv.Line, width int, pen *uv.Style, link *uv.Link) {
+nextCell:
 	for x := 0; x < width; {
 		var cell uv.Cell
 		if x < len(line) {
 			cell = line[x]
 		}
 		if cell.IsZero() {
+			if x < len(line) {
+				for start := x - 1; start >= 0; start-- {
+					prev := line[start]
+					if prev.IsZero() {
+						continue
+					}
+					if prev.Width > 1 && x < start+prev.Width {
+						x++
+						continue nextCell
+					}
+					break
+				}
+			}
 			cell = uv.EmptyCell
 		}
 

@@ -259,6 +259,33 @@ func TestApplyInitialMCPPromptStateAsyncConfiguredDefersPromptInjection(t *testi
 	}
 }
 
+func TestRuntimeMCPControlAggregatesValidationErrors(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.MCPConfigs = []mcp.ServerConfig{
+		{Name: "manual-empty", Manual: true},
+		{Name: "auto-empty"},
+	}
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+
+	_, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{
+		Action:  agent.MCPControlEnable,
+		Servers: []string{"missing", "auto-empty", "manual-empty"},
+	})
+	if err == nil {
+		t.Fatal("expected aggregated MCP control error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		`unknown MCP server "missing"`,
+		`MCP server "auto-empty" is not manual`,
+		`enable MCP "manual-empty": must specify either command or url`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("aggregated error %q missing %q", msg, want)
+		}
+	}
+}
+
 func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 	projectRoot := t.TempDir()
 	chordHome := t.TempDir()

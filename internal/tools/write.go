@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
 )
@@ -52,6 +51,19 @@ func (t WriteTool) Parameters() map[string]any {
 
 func (t WriteTool) IsReadOnly() bool { return false }
 
+func writtenLineCount(content string) int {
+	if content == "" {
+		return 0
+	}
+	lineCount := 1
+	for i := 0; i < len(content); i++ {
+		if content[i] == '\n' && i < len(content)-1 {
+			lineCount++
+		}
+	}
+	return lineCount
+}
+
 func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a writeArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -72,10 +84,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 
 	data := []byte(content)
-	lineCount := 0
-	if content != "" {
-		lineCount = 1 + strings.Count(content, "\n")
-	}
+	lineCount := writtenLineCount(content)
 	lineLabel := "lines"
 	if lineCount == 1 {
 		lineLabel = "line"

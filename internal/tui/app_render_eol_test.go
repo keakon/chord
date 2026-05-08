@@ -106,6 +106,26 @@ func TestRenderScreenBufferFullFrameRoundTripsTrailingSpaces(t *testing.T) {
 	}
 }
 
+func TestRenderScreenBufferFullFrameRoundTripsWideCells(t *testing.T) {
+	src := newScreenBuffer(6, 1)
+	uv.NewStyledString("a世b  ").Draw(src, src.Bounds())
+
+	out := renderScreenBufferFullFrame(src, 6, 1)
+	if w := ansi.StringWidth(out); w != 6 {
+		t.Fatalf("serialized width = %d, want 6; raw=%q", w, out)
+	}
+
+	roundTrip := newScreenBuffer(6, 1)
+	uv.NewStyledString(out).Draw(roundTrip, roundTrip.Bounds())
+	for x := 0; x < 6; x++ {
+		got := roundTrip.Line(0)[x]
+		want := src.Line(0)[x]
+		if !got.Equal(&want) {
+			t.Fatalf("cell %d mismatch: got=%+v want=%+v raw=%q", x, got, want, out)
+		}
+	}
+}
+
 func TestModelViewDoesNotInjectUnsupportedControlSequencesWhenFocusResizeFreezeEnabled(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	m := NewModelWithSize(nil, 60, 12)

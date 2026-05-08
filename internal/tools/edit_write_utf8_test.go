@@ -98,6 +98,26 @@ func TestWriteToolEmptyContentReportsZeroLines(t *testing.T) {
 	}
 }
 
+func TestWriteToolLineCountDoesNotCountTrailingNewlineAsExtraLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "with-trailing-newline.txt")
+	args, err := json.Marshal(map[string]any{
+		"path":    path,
+		"content": "first\nsecond\n",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := (WriteTool{}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("WriteTool.Execute: %v", err)
+	}
+	want := "Successfully wrote 2 lines, 13 bytes"
+	if got != want {
+		t.Fatalf("result = %q, want %q", got, want)
+	}
+}
+
 func TestEditToolResultOmitsUTF8Encoding(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "utf8.txt")
