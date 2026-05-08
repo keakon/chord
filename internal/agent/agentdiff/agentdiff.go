@@ -15,12 +15,13 @@ type Summary struct {
 	Removed int
 }
 
-// CapturePreWriteState reads the current file content before a Write or Edit
-// tool call so a before/after diff can be generated after execution.
+// CapturePreWriteState reads the current file content before a tool call
+// so a before/after diff can be generated after execution.
+// Currently only used for Edit; Write does not generate a diff.
 // Returns the file path, existing content (empty string if file does not exist),
 // and whether the file existed before execution.
 func CapturePreWriteState(tc message.ToolCall) (filePath, content string, existed bool) {
-	if tc.Name != "Write" && tc.Name != "Edit" {
+	if tc.Name != "Edit" {
 		return
 	}
 	var args struct {
@@ -37,25 +38,11 @@ func CapturePreWriteState(tc message.ToolCall) (filePath, content string, existe
 	return filePath, decoded.Text, true
 }
 
-// GenerateToolDiff builds a unified diff string for a completed Write or Edit
-// tool call. preContent/preFilePath must have been captured before execution
-// via CapturePreWriteState. Returns zero values for other tools or on any parse error.
+// GenerateToolDiff builds a unified diff string for a completed Edit tool call.
+// preContent/preFilePath must have been captured before execution via
+// CapturePreWriteState. Returns zero values for other tools or on any parse error.
 func GenerateToolDiff(tc message.ToolCall, preContent, preFilePath string) Summary {
 	switch tc.Name {
-	case "Write":
-		var args struct {
-			Content string `json:"content"`
-		}
-		if json.Unmarshal(tc.Args, &args) != nil {
-			return Summary{}
-		}
-		decoded, err := tools.DecodeToolStringArgForAgent(args.Content)
-		if err != nil {
-			return Summary{}
-		}
-		s := tools.GenerateUnifiedDiffSummary(preContent, decoded, preFilePath)
-		return Summary{Text: s.Text, Added: s.Added, Removed: s.Removed}
-
 	case "Edit":
 		var args struct {
 			FilePath string `json:"path"`

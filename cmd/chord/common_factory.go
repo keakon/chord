@@ -17,6 +17,54 @@ func parseRoleModelRef(ref, defaultVariant string) (baseRef, variant string) {
 	return baseRef, variant
 }
 
+func buildModelPool(
+	modelRefs []string,
+	defaultVariant string,
+	selectedRef string,
+	allProviders map[string]config.ProviderConfig,
+	auth config.AuthConfig,
+	globalProxy string,
+	getProvider getProviderFunc,
+	getProviderImpl getProviderImplFunc,
+	logLabel string,
+) ([]llm.FallbackModel, int) {
+	if len(modelRefs) == 0 {
+		return nil, -1
+	}
+
+	selectedBaseRef := config.NormalizeModelRef(selectedRef)
+	pool := make([]llm.FallbackModel, 0, len(modelRefs))
+	selectedIdx := -1
+	for _, ref := range modelRefs {
+		fbBaseRef, fbVariant := parseRoleModelRef(ref, defaultVariant)
+		fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
+			fbBaseRef, allProviders, auth, globalProxy, getProvider, getProviderImpl,
+		)
+		if fbErr != nil {
+			log.Warnf("failed to resolve %s model, skipping model_ref=%v error=%v", logLabel, ref, fbErr)
+			continue
+		}
+		if config.NormalizeModelRef(ref) == selectedBaseRef && selectedIdx < 0 {
+			selectedIdx = len(pool)
+		}
+		pool = append(pool, llm.FallbackModel{
+			ProviderConfig: fbProvCfg,
+			ProviderImpl:   fbImpl,
+			ModelID:        fbModelID,
+			MaxTokens:      fbMaxTokens,
+			ContextLimit:   fbCtxLimit,
+			Variant:        fbVariant,
+		})
+	}
+	if len(pool) == 0 {
+		return nil, -1
+	}
+	if selectedIdx < 0 {
+		selectedIdx = 0
+	}
+	return pool, selectedIdx
+}
+
 // buildSubAgentLLMFactory returns the LLM factory used by MainAgent when
 // spawning SubAgents. Captures AppContext for provider/impl caching and
 // config/auth for per-ref resolution.
@@ -125,35 +173,19 @@ func buildMainClientFactory(
 		if roleCfg := ac.MainAgent.CurrentRoleConfig(); roleCfg != nil {
 			roleDefaultVariant = strings.TrimSpace(roleCfg.Variant)
 		}
-		selectedBaseRef := config.NormalizeModelRef(providerModel)
 
-		pool := make([]llm.FallbackModel, 0, len(roleModels))
-		selectedIdx := -1
-		for _, ref := range roleModels {
-			fbBaseRef, fbVariant := parseRoleModelRef(ref, roleDefaultVariant)
-			fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
-				fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
-			)
-			if fbErr != nil {
-				log.Warnf("failed to resolve main-agent model, skipping model_ref=%v error=%v", ref, fbErr)
-				continue
-			}
-			if config.NormalizeModelRef(ref) == selectedBaseRef && selectedIdx < 0 {
-				selectedIdx = len(pool)
-			}
-			pool = append(pool, llm.FallbackModel{
-				ProviderConfig: fbProvCfg,
-				ProviderImpl:   fbImpl,
-				ModelID:        fbModelID,
-				MaxTokens:      fbMaxTokens,
-				ContextLimit:   fbCtxLimit,
-				Variant:        fbVariant,
-			})
-		}
+		pool, selectedIdx := buildModelPool(
+			roleModels,
+			roleDefaultVariant,
+			providerModel,
+			cfg.Providers,
+			auth,
+			cfg.Proxy,
+			ac.GetOrCreateProvider,
+			ac.GetOrCreateProviderImpl,
+			"main-agent",
+		)
 		if len(pool) > 0 {
-			if selectedIdx < 0 {
-				selectedIdx = 0
-			}
 			client.SetModelPool(pool, selectedIdx)
 		}
 

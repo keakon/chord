@@ -6,6 +6,13 @@
 
 - 暂无。
 
+## 0.5.1 - 2026-05-08
+
+- Runtime：修复了初始 LLM client 未按 builder agent 的 model pool 配置的问题。此前即使配置了多个模型，冷启动后的首个请求在失败时也只会在第一个模型的多个 API key 之间重试，不会切换到池中的其他模型。现在初始 client 会正确携带 builder agent 的完整模型池，因此首轮失败也能触发跨模型的 fallback。
+- TUI：Write 工具卡片不再展示 diff 预览。结果现在显示清晰的行数+字节数摘要（`Successfully wrote N lines, N bytes`），而非从 unified diff 中提取新增行来展示，避免「只写了 3 行」的误导显示。
+- TUI：移除了 Write 工具的预读 + diff 生成流程。Write 工具结果不再携带 `Diff`、`DiffAdded`、`DiffRemoved` 元数据。Edit 工具结果继续正常展示 diff。
+- Write 工具 `Execute` 的成功消息现在同时报告写入行数和字节数。
+
 ## 0.5.0 - 2026-05-08
 
 - Config：agent 配置现用 `mode: main` 表示 MainAgent 角色，`mode: subagent` 表示 SubAgent。`sub_agent` 和 `sub` 也可作为 SubAgent 别名；空值或其他值按 `main` 处理。Hook `agent_kind` 过滤器使用 `main` / `subagent`。

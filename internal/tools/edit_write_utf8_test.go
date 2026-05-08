@@ -70,12 +70,31 @@ func TestWriteToolResultOmitsUTF8Encoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteTool.Execute: %v", err)
 	}
-	want := "Successfully wrote 2 bytes"
+	want := "Successfully wrote 1 line, 2 bytes"
 	if got != want {
 		t.Fatalf("result = %q, want %q", got, want)
 	}
 	if strings.Contains(strings.ToLower(got), "encoding") {
 		t.Fatalf("result should not mention encoding for UTF-8: %q", got)
+	}
+}
+
+func TestWriteToolEmptyContentReportsZeroLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.txt")
+	args, err := json.Marshal(map[string]any{
+		"path":    path,
+		"content": "",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := (WriteTool{}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("WriteTool.Execute: %v", err)
+	}
+	if got != "Successfully wrote 0 lines, 0 bytes" {
+		t.Fatalf("result = %q, want %q", got, "Successfully wrote 0 lines, 0 bytes")
 	}
 }
 

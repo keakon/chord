@@ -1,0 +1,507 @@
+package main
+
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
+)
+
+// stubProviderImpl is a minimal Provider implementation for testing.
+type stubProviderImpl struct{}
+
+type stubScriptedCall struct {
+	resp *message.Response
+	err  error
+}
+
+type stubScriptedProvider struct {
+	calls []stubScriptedCall
+}
+
+func (p *stubScriptedProvider) CompleteStream(
+	_ context.Context,
+	_ string, _ string, _ string,
+	_ []message.Message, _ []message.ToolDefinition,
+	_ int, _ llm.RequestTuning,
+	_ llm.StreamCallback,
+) (*message.Response, error) {
+	if len(p.calls) == 0 {
+		return &message.Response{Content: "ok", StopReason: "stop"}, nil
+	}
+	call := p.calls[0]
+	p.calls = p.calls[1:]
+	if call.err != nil {
+		return nil, call.err
+	}
+	if call.resp != nil {
+		return call.resp, nil
+	}
+	return &message.Response{Content: "ok", StopReason: "stop"}, nil
+}
+
+func resolveProviderConfigForTest(provName string, cfg config.ProviderConfig, auth config.AuthConfig) *llm.ProviderConfig {
+	return llm.NewProviderConfig(provName, cfg, config.ExtractAPIKeys(auth[provName]))
+}
+
+func (p *stubProviderImpl) CompleteStream(
+	_ context.Context,
+	_ string, _ string, _ string,
+	_ []message.Message, _ []message.ToolDefinition,
+	_ int, _ llm.RequestTuning,
+	_ llm.StreamCallback,
+) (*message.Response, error) {
+	return &message.Response{Content: "ok", StopReason: "stop"}, nil
+}
+
+// TestBuildMainClientFactoryWithModelPool verifies that buildMainClientFactory
+// creates clients with properly configured model pools.
+func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
+	t.Parallel()
+
+	// Create test config with multiple models in builder agent
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	// Simulate agent configs with multiple models
+	agentConfigs := map[string]*config.AgentConfig{
+		"builder": {
+			Name:    "builder",
+			Variant: "balanced",
+			Models: map[string][]string{
+				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+			},
+		},
+	}
+
+	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	factory := buildMainClientFactory(ac, cfg, auth)
+
+	// Request client for first model - should include all models in pool
+	client, modelID, ctxLimit, err := factory("openai/gpt-4o@balanced")
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	// Verify client is created with correct parameters
+	if modelID != "gpt-4o" {
+		t.Fatalf("modelID = %q, want gpt-4o", modelID)
+	}
+	if ctxLimit != 128000 {
+		t.Fatalf("ctxLimit = %d, want 128000", ctxLimit)
+	}
+
+	// Verify model pool is configured - should start with gpt-4o, then others
+	primary := client.PrimaryModelRef()
+	if primary != "openai/gpt-4o" {
+		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4o", primary)
+	}
+
+	// Verify the pool includes all models (variant is tracked internally, not in ref)
+	status := client.LastCallStatus()
+	if status.SelectedModelRef != "openai/gpt-4o" {
+		t.Fatalf("SelectedModelRef = %q, want openai/gpt-4o", status.SelectedModelRef)
+	}
+
+	t.Logf("Model pool configured correctly: primary=%s", primary)
+}
+
+// TestBuildMainClientFactorySelectsCorrectPoolEntry verifies that when requesting
+// a non-first model from the pool, the factory correctly identifies it as the
+// selected index and includes all other models as fallbacks.
+func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	agentConfigs := map[string]*config.AgentConfig{
+		"builder": {
+			Name:    "builder",
+			Variant: "balanced",
+			Models: map[string][]string{
+				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+			},
+		},
+	}
+
+	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	factory := buildMainClientFactory(ac, cfg, auth)
+
+	// Request client for second model - pool should start from here
+	client, modelID, _, err := factory("openai/gpt-4.1")
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	if modelID != "gpt-4.1" {
+		t.Fatalf("modelID = %q, want gpt-4.1", modelID)
+	}
+
+	primary := client.PrimaryModelRef()
+	if primary != "openai/gpt-4.1" {
+		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4.1", primary)
+	}
+
+	t.Logf("Pool correctly starts from selected model: %s", primary)
+}
+
+func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+				},
+			},
+		},
+	}
+	pool, selectedIdx := buildModelPool(
+		[]string{"openai/missing", "openai/gpt-4o", "openai/gpt-4.1"},
+		"",
+		"openai/gpt-4.1",
+		cfg.Providers,
+		nil,
+		"",
+		nil,
+		nil,
+		"test",
+	)
+	if len(pool) != 2 {
+		t.Fatalf("pool len = %d, want 2", len(pool))
+	}
+	if selectedIdx != 1 {
+		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
+	}
+	if got := pool[selectedIdx].ProviderConfig.Name() + "/" + pool[selectedIdx].ModelID; got != "openai/gpt-4.1" {
+		t.Fatalf("selected pool entry = %q, want openai/gpt-4.1", got)
+	}
+	if got := pool[0].ProviderConfig.Name() + "/" + pool[0].ModelID; got != "openai/gpt-4o" {
+		t.Fatalf("first pool entry = %q, want openai/gpt-4o", got)
+	}
+}
+
+func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+				},
+			},
+		},
+	}
+	pool, selectedIdx := buildModelPool(
+		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
+		"",
+		"openai/missing",
+		cfg.Providers,
+		nil,
+		"",
+		nil,
+		nil,
+		"test",
+	)
+	if len(pool) != 2 {
+		t.Fatalf("pool len = %d, want 2", len(pool))
+	}
+	if selectedIdx != 0 {
+		t.Fatalf("selectedIdx = %d, want 0", selectedIdx)
+	}
+}
+
+// TestBuildMainClientFactorySingleModelPool verifies behavior when only one model
+// is configured (should not set pool).
+func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+				},
+			},
+		},
+	}
+
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	agentConfigs := map[string]*config.AgentConfig{
+		"builder": {
+			Name:    "builder",
+			Variant: "balanced",
+			Models: map[string][]string{
+				"standard": {"openai/gpt-4o"}, // single model
+			},
+		},
+	}
+
+	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	factory := buildMainClientFactory(ac, cfg, auth)
+
+	client, _, _, err := factory("openai/gpt-4o")
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	// Single model pool - pool should have just one entry
+	primary := client.PrimaryModelRef()
+	if primary != "openai/gpt-4o" {
+		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4o", primary)
+	}
+
+	t.Logf("Single model pool handled correctly: %s", primary)
+}
+
+// TestBuildMainClientFactoryWrapAround verifies that the model pool wraps around
+// correctly when the selected model is not the first in the pool.
+func TestBuildMainClientFactoryWrapAround(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	agentConfigs := map[string]*config.AgentConfig{
+		"builder": {
+			Name:    "builder",
+			Variant: "balanced",
+			Models: map[string][]string{
+				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+			},
+		},
+	}
+
+	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	factory := buildMainClientFactory(ac, cfg, auth)
+
+	// Request client for third model - pool should wrap around
+	client, modelID, _, err := factory("openai/o3-pro")
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	if modelID != "o3-pro" {
+		t.Fatalf("modelID = %q, want o3-pro", modelID)
+	}
+
+	primary := client.PrimaryModelRef()
+	if primary != "openai/o3-pro" {
+		t.Fatalf("PrimaryModelRef = %q, want openai/o3-pro", primary)
+	}
+
+	t.Logf("Pool wrap-around handled correctly: %s", primary)
+}
+
+func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+				},
+			},
+		},
+	}
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	providerCfg := resolveProviderConfigForTest("openai", cfg.Providers["openai"], auth)
+	primaryImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "primary failed"}}}}
+	fallbackImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}}}
+
+	pool, selectedIdx := buildModelPool(
+		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
+		"",
+		"openai/gpt-4o",
+		cfg.Providers,
+		auth,
+		"",
+		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
+			switch provName {
+			case "openai":
+				return providerCfg, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+		func(_ string, _ config.ProviderConfig, _ *llm.ProviderConfig, modelID string) (llm.Provider, error) {
+			switch modelID {
+			case "gpt-4o":
+				return primaryImpl, nil
+			case "gpt-4.1":
+				return fallbackImpl, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+		"builder startup",
+	)
+	if len(pool) != 2 {
+		t.Fatalf("pool len = %d, want 2", len(pool))
+	}
+	if selectedIdx != 0 {
+		t.Fatalf("selectedIdx = %d, want 0", selectedIdx)
+	}
+
+	client := llm.NewClient(providerCfg, primaryImpl, "gpt-4o", 4096, "")
+	client.SetOutputTokenMax(cfg.MaxOutputTokens)
+	client.SetModelPool(pool, selectedIdx)
+
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream() error = %v", err)
+	}
+	if resp == nil || resp.Content != "fallback success" {
+		t.Fatalf("response = %#v, want fallback success", resp)
+	}
+	st := client.LastCallStatus()
+	if !st.FallbackTriggered {
+		t.Fatal("expected first request to trigger fallback across builder model pool")
+	}
+	if st.RunningModelRef != "openai/gpt-4.1" {
+		t.Fatalf("RunningModelRef = %q, want openai/gpt-4.1", st.RunningModelRef)
+	}
+}
+
+// newTestAppContextWithBuilder creates an AppContext with a MainAgent configured
+// with builder agent configs for testing model pool factory.
+func newTestAppContextWithBuilder(
+	t *testing.T,
+	cfg *config.Config,
+	auth config.AuthConfig,
+	agentConfigs map[string]*config.AgentConfig,
+) *AppContext {
+	t.Helper()
+
+	projectRoot := t.TempDir()
+	sessionDir := projectRoot + "/.chord/sessions/test"
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", sessionDir, err)
+	}
+
+	providerCfg := llm.NewProviderConfig("openai", cfg.Providers["openai"], []string{"test-key"})
+	llmClient := llm.NewClient(providerCfg, &stubProviderImpl{}, "gpt-4o", 4096, "")
+	ctxMgr := ctxmgr.NewManager(128000, false, 0)
+
+	// Create pool policy
+	poolPolicy := agent.NewRuntimeModelPoolPolicy()
+
+	// Create MainAgent with pool policy
+	mainAgent := agent.NewMainAgent(
+		context.Background(),
+		llmClient,
+		ctxMgr,
+		tools.NewRegistry(),
+		&hook.NoopEngine{},
+		sessionDir,
+		"gpt-4o",
+		projectRoot,
+		cfg,
+		nil,
+		mcp.ClientInfo{Name: "chord-test", Version: "test"},
+	)
+	mainAgent.SetModelPoolPolicy(poolPolicy, "")
+
+	// Configure builder agent with its model pool
+	if builderCfg, ok := agentConfigs["builder"]; ok {
+		mainAgent.SetAgentConfigs(map[string]*config.AgentConfig{"builder": builderCfg})
+	}
+
+	ac := &AppContext{
+		Ctx:         context.Background(),
+		ProjectRoot: projectRoot,
+		SessionDir:  sessionDir,
+		CtxMgr:      ctxMgr,
+		MainAgent:   mainAgent,
+		ProviderCache: &providerCache{
+			m:     map[string]*llm.ProviderConfig{"openai": providerCfg},
+			impls: map[string]llm.Provider{"openai": &stubProviderImpl{}},
+			auth:  auth,
+			cfg:   cfg,
+		},
+	}
+
+	// Wire up pool policy with agent configs for test
+	for name, agentCfg := range agentConfigs {
+		if len(agentCfg.Models) > 0 {
+			for poolName := range agentCfg.Models {
+				poolPolicy.SetAgentOverride(name, poolName)
+				break // use first pool
+			}
+		}
+	}
+
+	return ac
+}

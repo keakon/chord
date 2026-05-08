@@ -22,13 +22,8 @@ func TestCapturePreWriteState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotPath, content, existed := CapturePreWriteState(toolCall("Write", map[string]string{"path": path}))
-	if gotPath != path || content != "before\n" || !existed {
-		t.Fatalf("CapturePreWriteState existing = (%q, %q, %v)", gotPath, content, existed)
-	}
-
 	missing := filepath.Join(dir, "missing.txt")
-	gotPath, content, existed = CapturePreWriteState(toolCall("Edit", map[string]string{"path": missing}))
+	gotPath, content, existed := CapturePreWriteState(toolCall("Edit", map[string]string{"path": missing}))
 	if gotPath != missing || content != "" || existed {
 		t.Fatalf("CapturePreWriteState missing = (%q, %q, %v)", gotPath, content, existed)
 	}
@@ -40,24 +35,7 @@ func TestCapturePreWriteState(t *testing.T) {
 
 	gotPath, content, existed = CapturePreWriteState(message.ToolCall{Name: "Write", Args: json.RawMessage(`{`)})
 	if gotPath != "" || content != "" || existed {
-		t.Fatalf("CapturePreWriteState invalid json = (%q, %q, %v)", gotPath, content, existed)
-	}
-}
-
-func TestGenerateToolDiffForWrite(t *testing.T) {
-	summary := GenerateToolDiff(toolCall("Write", map[string]string{
-		"path":    "file.txt",
-		"content": "before\nafter\n",
-	}), "before\n", "file.txt")
-	if summary.Added != 1 || summary.Removed != 0 || !strings.Contains(summary.Text, "+after") {
-		t.Fatalf("unexpected write diff: %+v", summary)
-	}
-
-	if got := GenerateToolDiff(message.ToolCall{Name: "Write", Args: json.RawMessage(`{`)}, "before", "file.txt"); got != (Summary{}) {
-		t.Fatalf("invalid write diff = %+v", got)
-	}
-	if got := GenerateToolDiff(toolCall("Read", map[string]string{"path": "file.txt"}), "before", "file.txt"); got != (Summary{}) {
-		t.Fatalf("read diff = %+v", got)
+		t.Fatalf("CapturePreWriteState write = (%q, %q, %v)", gotPath, content, existed)
 	}
 }
 

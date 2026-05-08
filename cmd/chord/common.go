@@ -353,6 +353,41 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	if initialVariant != "" {
 		llmClient.SetVariant(initialVariant)
 	}
+
+	// Configure model pool fallbacks for the initial client using the builder
+	// agent's effective model pool. The initial MainAgent client is used for the
+	// first builder turn before any role/model switch occurs, so without this the
+	// very first request can only retry keys on the initial model.
+	if agentConfigs != nil {
+		if builderCfg, ok := agentConfigs["builder"]; ok && len(builderCfg.Models) > 0 {
+			var poolModels []string
+			if poolPolicy != nil {
+				poolModels = poolPolicy.EffectiveModels("builder", builderCfg)
+			}
+			if len(poolModels) == 0 {
+				if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
+					poolModels = builderCfg.PoolModels(poolNames[0])
+				}
+			}
+
+			pool, selectedIdx := buildModelPool(
+				poolModels,
+				builderCfg.Variant,
+				defaultProviderModel,
+				cfg.Providers,
+				auth,
+				cfg.Proxy,
+				ac.GetOrCreateProvider,
+				ac.GetOrCreateProviderImpl,
+				"builder startup",
+			)
+			if len(pool) > 1 {
+				llmClient.SetModelPool(pool, selectedIdx)
+				log.Debugf("initial LLM client configured with builder model pool size=%v selected_idx=%v", len(pool), selectedIdx)
+			}
+		}
+	}
+
 	ac.LLMClient = llmClient
 	ac.ProviderCfg = providerCfg
 	ac.LLMProvider = llmProvider

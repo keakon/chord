@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
 )
@@ -71,13 +72,25 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 
 	data := []byte(content)
+	lineCount := 0
+	if content != "" {
+		lineCount = 1 + strings.Count(content, "\n")
+	}
+	lineLabel := "lines"
+	if lineCount == 1 {
+		lineLabel = "line"
+	}
+	byteLabel := "bytes"
+	if len(data) == 1 {
+		byteLabel = "byte"
+	}
 	invalidatePathCache(a.Path)
 	if err := os.WriteFile(a.Path, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
 	warmDecodedFileCacheAsync(a.Path, data, decodedText{Text: content, Encoding: utf8Encoding})
 
-	out := fmt.Sprintf("Successfully wrote %d bytes", len(data))
+	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if t.LSP != nil {
 		absPath, _ := filepath.Abs(a.Path)
 		t.LSP.MarkTouched(absPath)

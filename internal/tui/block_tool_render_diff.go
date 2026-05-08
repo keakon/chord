@@ -11,6 +11,9 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// maxTUIDiffLines is the maximum number of diff lines rendered in the TUI.
+const maxTUIDiffLines = 200
+
 const (
 	diffSnippetMergeGapCols       = 6
 	diffSnippetContextCols        = 12

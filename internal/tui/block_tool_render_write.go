@@ -2,16 +2,10 @@ package tui
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
-// maxTUIDiffLines is the maximum number of diff lines rendered in the TUI.
-const maxTUIDiffLines = 200
-
-// renderWriteCall renders a Write tool call as code with line numbers and syntax highlighting.
+// renderWriteCall renders a Write tool call result.
+// Shows the success result (line/byte count) without diff content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	blockStyle := ToolBlockStyle
 	toolCardBg := currentTheme.ToolCallBg
@@ -22,15 +16,6 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
 	if cardWidth < 10 {
 		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	const lineNumWidth = 6
-	codeWidth := contentWidth - lineNumWidth - 2
-	if codeWidth < 10 {
-		codeWidth = 10
 	}
 
 	var filePath string
@@ -54,25 +39,8 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		return renderPrewrappedToolCard(blockStyle, cardWidth, ToolLabelStyle.Render("TOOL CALL"), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
-	contentLines := writeDiffToContentLines(b.Diff)
-	if !b.toolResultIsCancelled() {
-		highlightedLines := highlightCodeLines(ensureCodeHighlighter(&b.diffHL, filePath, strings.Join(contentLines, "\n")), contentLines, "")
-		cap := maxTUIDiffLines
-		shown := 0
-		for i := range contentLines {
-			if shown >= cap {
-				result = append(result, DimStyle.Render(fmt.Sprintf("  ... (%d lines hidden)", len(contentLines)-cap)))
-				break
-			}
-			highlighted := highlightedLines[i]
-			highlighted = ansi.Truncate(highlighted, codeWidth, "…")
-			lineNum := fmt.Sprintf("%*d", lineNumWidth, shown+1)
-			result = append(result, "  "+DimStyle.Render(lineNum)+"  "+highlighted)
-			shown++
-		}
-		if len(contentLines) == 0 {
-			result = append(result, "  "+DimStyle.Render("(empty file)"))
-		}
+	if !b.toolResultIsCancelled() && b.ResultContent != "" {
+		result = append(result, "  "+DimStyle.Render(b.ResultContent))
 	}
 
 	if writeEditToolResultExtraVisible(b) {
