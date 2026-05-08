@@ -10,12 +10,12 @@
 
 ## Why Chord
 
-- **Long sessions do not crash.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
+- **Stable for the long haul.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
 - **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
-- **Runs for days on a small VPS.** Low memory and CPU footprint. Power-aware on macOS: prevents idle sleep while work is active, lets the system sleep again when idle.
-- **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from any chat surface.
+- **Extremely lightweight.** Low memory and CPU footprint. Power-aware on macOS: prevents idle sleep while work is active, lets the system sleep again when idle.
+- **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from any chat surface — even from your phone when you are away from the desk.
 
 A few extras you may appreciate later:
 
@@ -24,12 +24,6 @@ A few extras you may appreciate later:
 - **LSP-backed code awareness** — live diagnostics and definition / references / implementation lookups via your local language servers.
 - **Multimodal input** — paste images from the clipboard, attach files, preview in supported terminals.
 - **Codex quota visibility** — real-time remaining-quota and reset-time display for OpenAI Codex subscriptions.
-
-## When Chord shines
-
-- **Always-on assistant on a small VPS.** Low resource budget plus reliable long sessions means you can leave it running and check in throughout the day.
-- **Mixed-model setups.** Use a strong model for thinking, a fast one for navigation, a cheap one for compaction — switch with one keystroke when the wind changes.
-- **Operating from your phone.** Expose `chord headless` through chord-gateway and drive a real coding agent from a chat app while you are away from the desk.
 
 ## Three-step setup
 

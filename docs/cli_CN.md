@@ -1,8 +1,8 @@
 # CLI 参考
 
-本页列出 Chord 的所有命令、子命令和 flag。
+Chord 的所有命令、子命令和 flag。
 
-如果是首次使用，建议先看 [快速开始](./quickstart_CN.md)。
+首次使用建议先看 [快速开始](./quickstart_CN.md)。
 
 ## 用法摘要
 
@@ -24,30 +24,30 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
 | `chord worktree remove <name>`    | 移除 chord 管理的 worktree                                        |
-| `chord worktree finish <name>`    | 把 worktree 分支 rebase 回主线、fast-forward、然后删除 worktree   |
+| `chord worktree finish <name>`    | 把 worktree 分支 rebase 回主线、fast-forward，然后删除 worktree   |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord                                       |
 
 ## 全局 flag
 
-下列 flag 所有命令都接受，与环境变量、`config.yaml` 协同生效（CLI flag 优先，其次是环境变量，最后是配置文件）。
+下列 flag 所有命令都接受，与环境变量、`config.yaml` 协同生效（优先级：CLI flag > 环境变量 > 配置文件）。
 
 | Flag             | 说明                                                                                                | 环境变量              | 默认值                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| `--api-base`     | 当 provider 配置没有自带 `api_url` 时，作为统一基础 URL 传给 provider                               | `CHORD_API_BASE`      | 空                                                                           |
-| `--config-home`  | 配置主目录，包含 `config.yaml`、`auth.yaml`、`agents/`、`skills/`、`commands/`                      | `CHORD_CONFIG_HOME`   | 已设置 `$XDG_CONFIG_HOME` 时取 `$XDG_CONFIG_HOME/chord`，否则 `~/.config/chord` |
-| `--state-dir`    | 持久运行时状态（sessions、exports、logs、project registry、worktree metadata）                      | `CHORD_STATE_DIR`     | 已设置 `$XDG_STATE_HOME` 时取 `$XDG_STATE_HOME/chord`，否则 `~/.local/state/chord` |
-| `--cache-dir`    | 可重建缓存（runtime caches、临时产物）                                                              | `CHORD_CACHE_DIR`     | 已设置 `$XDG_CACHE_HOME` 时取 `$XDG_CACHE_HOME/chord`，否则 `~/.cache/chord`  |
+| `--api-base`     | provider 未配 `api_url` 时，作为统一基础 URL                                                       | `CHORD_API_BASE`      | 空                                                                           |
+| `--config-home`  | 配置主目录，包含 `config.yaml`、`auth.yaml`、`agents/`、`skills/`、`commands/`                      | `CHORD_CONFIG_HOME`   | 已设 `$XDG_CONFIG_HOME` 时取 `$XDG_CONFIG_HOME/chord`，否则 `~/.config/chord` |
+| `--state-dir`    | 持久运行时状态（sessions、exports、logs、project registry、worktree metadata）                      | `CHORD_STATE_DIR`     | 已设 `$XDG_STATE_HOME` 时取 `$XDG_STATE_HOME/chord`，否则 `~/.local/state/chord` |
+| `--cache-dir`    | 可重建缓存（runtime caches、临时产物）                                                              | `CHORD_CACHE_DIR`     | 已设 `$XDG_CACHE_HOME` 时取 `$XDG_CACHE_HOME/chord`，否则 `~/.cache/chord`  |
 | `--sessions-dir` | 仅覆盖 sessions 根目录                                                                              | `CHORD_SESSIONS_DIR`  | `<state-dir>/sessions`                                                       |
 | `--logs-dir`     | 仅覆盖 logs 目录                                                                                    | `CHORD_LOGS_DIR`      | `<state-dir>/logs`                                                           |
 
-`--config` 是 `--config-home` 的隐藏别名，仅作向后兼容；新脚本请用 `--config-home`。
+`--config` 是 `--config-home` 的隐藏别名，仅为向后兼容保留；新脚本请用 `--config-home`。
 
 完整目录布局见 [目录与路径](./paths_CN.md)。完整环境变量列表见 [环境变量](./environment_CN.md)。
 
 ## `chord`（默认 — TUI）
 
-在当前目录启动本地 TUI。首次启动时会按需创建项目根的 `.chord/` 目录，并在 `<state-dir>/projects/<project-key>.json` 注册该项目。
+在当前目录启动本地 TUI。首次启动时按需创建项目根 `.chord/` 目录，并在 `<state-dir>/projects/<project-key>.json` 注册该项目。
 
 ### Flag
 
@@ -80,13 +80,13 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-用 `preset: codex` provider 登录 OAuth，凭据存到 `~/.config/chord/auth.yaml`。不带 provider 名时，Chord 自动选择唯一一个 codex provider；多个时会让你选。
+用 `preset: codex` provider 登录 OAuth，凭据存入 `~/.config/chord/auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。
 
 ### Flag
 
 | Flag             | 说明                                                                                                                                                                 |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--device-code`  | 改用 device-code 流程（在 provider 网页粘贴一次性 code），而不是本地浏览器回调。在 SSH / 无桌面 / WSL 等不能本地打开浏览器的环境下使用                              |
+| `--device-code`  | 改用 device-code 流程（在 provider 网页粘贴一次性 code），而非本地浏览器回调。适用于 SSH / 无桌面 / WSL 等无法本地打开浏览器的环境                              |
 
 ### 示例
 
@@ -126,13 +126,13 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 ## `chord test-providers`
 
-向每个已配置的 provider 发一个最小请求并报告成功/失败，常用于做凭据 + 网络的烟雾测试。
+向每个已配置的 provider 发一个最小请求并报告成功/失败。常用于凭据和网络烟雾测试。
 
 ### Flag
 
 | Flag                  | 说明                                  |
 | --------------------- | ------------------------------------- |
-| `--provider <name>`   | 只测指定的一个 provider                |
+| `--provider <name>`   | 仅测试指定的 provider                 |
 
 ### 示例
 
@@ -164,19 +164,19 @@ sessions:  42 across 7 projects
 
 ### `chord cleanup sessions | cache | logs | project`
 
-清理指定类别的数据。**默认是 dry-run** —— 加 `--yes` 才真的删。
+清理指定类别的数据。**默认是 dry-run**——加 `--yes` 才真正删除。
 
 | Flag                          | 说明                                                                                  |
 | ----------------------------- | ------------------------------------------------------------------------------------- |
-| `--older-than <duration>`     | 仅清理早于该时长的条目（Go duration 语法，例如 `720h` 表示 30 天）                    |
-| `--yes`                       | 真的删除；不加这个 flag 时只预览将被删除的内容                                        |
+| `--older-than <duration>`     | 仅清理早于该时长的条目（Go duration 语法，如 `720h` 表示 30 天）                    |
+| `--yes`                       | 真正删除；不加此 flag 时仅预览将被删除的内容                                        |
 
-| 类别        | 清理什么                                                                                |
+| 类别        | 清理内容                                                                                |
 | ----------- | --------------------------------------------------------------------------------------- |
 | `sessions`  | `<state-dir>/sessions/<project-key>/` 下的旧会话目录                                   |
 | `cache`     | `<cache-dir>/runtime/` 下的可重建缓存                                                  |
 | `logs`      | `<state-dir>/logs/` 下的轮转日志                                                       |
-| `project`   | 孤立的项目元数据（项目目录已经不存在的注册项）                                          |
+| `project`   | 孤立的项目元数据（项目目录已不存在的注册项）                                          |
 
 ### 示例
 
@@ -193,9 +193,9 @@ chord cleanup cache --yes
 
 ## `chord worktree`
 
-管理 chord 管理的 git worktree。注意：**创建/进入** worktree 是启动时的动作，走 `chord --worktree`，不在本子命令下；`chord worktree` 只负责纯管理操作。
+管理 chord 管理的 git worktree。注意：**创建/进入** worktree 是启动时动作，走 `chord --worktree`，不归属本子命令；`chord worktree` 只负责纯管理操作。
 
-Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），每个 worktree 拥有自己的 project key，sessions 与 cache 自动隔离。
+Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），每个 worktree 拥有独立 project key，sessions 与 cache 自动隔离。
 
 ### `chord worktree list`
 
@@ -208,20 +208,20 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 | Flag                | 说明                                                                                            |
 | ------------------- | ----------------------------------------------------------------------------------------------- |
 | `--force`           | worktree 有未提交修改也强删；强删分支                                                           |
-| `--delete-branch`   | 同时删除 worktree 的分支。不加 `--force` 时只在分支已合并的前提下才会删除                       |
+| `--delete-branch`   | 同时删除 worktree 分支。不加 `--force` 时仅在分支已合并的前提下删除                       |
 
 ### `chord worktree finish <name>`
 
-把 worktree 分支 rebase 到主线、fast-forward 主分支，然后删掉 worktree 与其分支。
+将 worktree 分支 rebase 到主线、fast-forward 主分支，然后删除 worktree 与分支。
 
 | Flag             | 说明                                                                                                                  |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `--onto <分支>`  | 要 rebase 到并 fast-forward 的目标主分支（默认主 worktree 的当前分支）                                                |
+| `--onto <分支>`  | 目标主分支（默认主 worktree 当前分支）                                                                                |
 | `--force`        | 放宽 clean-tree 检查；用 `git rebase --autostash`；回收时强删分支                                                     |
 
-rebase 出现冲突时，`finish` 会打印恢复指引（`git status`、`git rebase --show-current-patch`，再选 `--skip` / `--continue` / `--abort`），同时保留 worktree 与分支，让你解决冲突后重跑。
+rebase 出现冲突时，`finish` 会打印恢复指引（`git status`、`git rebase --show-current-patch`，再根据情况选择 `--skip` / `--continue` / `--abort`），同时保留 worktree 与分支，让你解决冲突后重跑。
 
-如果该 worktree 内已经有 rebase 在进行中，`finish` 会直接退出，提示先完成已有 rebase。
+worktree 内已有进行中的 rebase 时，`finish` 直接退出，提示先完成已有 rebase。
 
 ### 示例
 
@@ -233,7 +233,7 @@ chord worktree finish feat-auth --onto main
 
 ## `chord resume <session-id>`
 
-按 session id 恢复会话。与 `chord --resume` 不同，本命令能自动定位到该 session 所属的 chord-managed worktree 并切过去——即使你当前 cwd 不在那个 worktree 里也行。
+按 session id 恢复会话。与 `chord --resume` 不同，此命令能自动定位该 session 所属的 chord 管理 worktree 并切换过去——即便当前 cwd 不在那个 worktree 内也可以。
 
 ```bash
 chord resume 20260428064910975
@@ -241,7 +241,7 @@ chord resume 20260428064910975
 
 ## `chord import <source> [file]`
 
-把外部 agent 会话导入到 Chord 可恢复的会话。目前支持的 source：`opencode`、`codex`、`claude`。
+将外部 agent 会话导入为 Chord 可恢复的会话。当前支持的 source：`opencode`、`codex`、`claude`。
 
 ### Flag
 
@@ -249,9 +249,9 @@ chord resume 20260428064910975
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `--project <path>`        | 写入哪个项目（默认当前目录）                                                                                        |
 | `--sid <id>`              | 指定 Chord session id（默认自动生成）                                                                               |
-| `--id <session-id>`       | 按 source 端的 session id 查找（仅支持 `codex` 与 `claude`）                                                        |
+| `--id <session-id>`       | 按 source 端 session id 查找（仅支持 `codex` 与 `claude`）                                                        |
 | `--root <path>`           | 配合 `--id` 使用的根目录（codex 默认 `~/.codex/sessions`，claude 默认 `~/.claude/projects`）                        |
-| `--tool-mode <mode>`      | 工具导入策略：`auto`、`text`、`structured`（默认值与 source 有关）                                                  |
+| `--tool-mode <mode>`      | 工具导入策略：`auto`、`text`、`structured`（默认值因 source 而异）                                                  |
 | `--reasoning <mode>`      | 推理导入策略：`off`、`visible`、`strict`（默认 `strict`）                                                           |
 | `--dry-run`               | 仅解析与报告，不写入会话                                                                                            |
 | `--json`                  | 输出机器可读 JSON 摘要                                                                                              |

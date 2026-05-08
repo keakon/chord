@@ -3,7 +3,7 @@ title: Chord
 description: Calm AI coding in your terminal — a lightweight, local-first coding agent with reliable long sessions, hot-swappable model setups, and remote operation.
 template: splash
 hero:
-  tagline: Calm AI coding in your terminal — long sessions that do not crash, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
+  tagline: Calm AI coding in your terminal — stable long sessions, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
   actions:
     - text: Quickstart
       link: /chord/quickstart/
@@ -20,7 +20,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 ## Why Chord
 
 <CardGrid>
-  <Card title="Long sessions don't crash" icon="document">
+  <Card title="Stable for the long haul" icon="document">
     Auto-compaction summarises earlier turns into a context summary, so a
     long session keeps working past the model's context window — without
     losing the information needed to continue.
@@ -38,14 +38,14 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     them at runtime via `/models` or `Ctrl+P`. The runtime falls back through
     the ordered list automatically.
   </Card>
-  <Card title="Runs for days on a small VPS" icon="seti:powershell">
+  <Card title="Extremely lightweight" icon="seti:powershell">
     Low memory and CPU footprint. macOS power-aware: prevents idle sleep
     while work is active, lets the system sleep again when idle.
   </Card>
   <Card title="Drive it remotely" icon="external">
     `chord headless` exposes a stdio JSON control plane; pair with
     [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord
-    from any chat surface.
+    from any chat surface — even from your phone when you are away.
   </Card>
 </CardGrid>
 

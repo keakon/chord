@@ -1,34 +1,34 @@
 # 配置与认证
 
-Chord 把“行为配置”和“凭据配置”分开管理。
+Chord 将行为配置与凭据配置分开管理。
 
-- `~/.config/chord/config.yaml`：provider、model、权限、扩展能力等行为配置
-- `~/.config/chord/auth.yaml`：API keys 或 OAuth 凭据
+- `~/.config/chord/config.yaml`：provider、模型、权限、扩展能力等行为配置
+- `~/.config/chord/auth.yaml`：API key 或 OAuth 凭据
 - `.chord/config.yaml`：项目级覆盖配置
 - `~/.config/chord/agents/` / `.chord/agents/`：角色配置
 
 ## 配置层级
 
-常见优先级可以理解为：
+优先级从低到高：
 
 1. 内置默认
 2. 全局配置
 3. 项目配置
 4. Agent 级配置
 
-这样可以同时满足用户习惯、项目差异和不同 Agent 的能力特化。
+兼顾用户习惯、项目差异和不同 Agent 的能力特化。
 
-## 流式工具早执行（Streaming tool execution / early execution）
+## 流式工具早执行
 
-Chord 会在模型响应仍在流式输出时（工具参数刚刚完整时），对少量**安全的只读工具子集**进行 *speculative* 执行，而不是等待 provider 完全 finalize（`CompleteStream()` 返回）后才开始执行。这样可以显著降低“finalize gap”的体感等待。
+模型仍在流式输出响应、工具参数刚完整时，Chord 会提前执行一小批安全的只读工具，而不必等服务商完成最终确认（`CompleteStream()` 返回）后才开始。这能显著缩短最终确认阶段的体感等待时间。
 
-- 始终启用；没有 `early_tool_execution` 开关。
-- 允许 early-exec 的工具：`Read`、`Grep`、`Glob`，支持回滚的文件变更工具（`Write`、`Edit`、`Delete`），以及 `Bash` 的保守只读子集（只允许单命令；不允许管道/重定向/`&&`/`;` 等组合）：
+- 始终启用，无 `early_tool_execution` 开关。
+- 允许早执行的工具：`Read`、`Grep`、`Glob`，支持回滚的文件编辑工具（`Write`、`Edit`、`Delete`），以及 `Bash` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
   - `pwd`、`ls`、`cat`、`which`
   - `git status|log|diff|show|branch|rev-parse`
-- 不允许 early-exec：非只读 `Bash`、交互/控制类工具，或任何权限判断为 `ask` 的调用。
-- speculative 文件变更会真实落盘，但 runtime 会先捕获 pre-state；如果 finalize 丢弃该调用，会自动回滚。同一 turn 内若多个 speculative 文件变更命中同一路径，后续冲突调用会跳过早执行，留给 finalize 后的正式路径处理。同一 turn 内只要存在**任意**尚未 promote 的 speculative 文件变更（不限路径），后续读类 speculative 调用都会跳过早执行；这避免读取未提交状态，代价是读 speculative 会被进行中的写 speculative 短暂阻塞。
-- speculative 结果可能会提前显示在 UI 中，但只有在 finalize 校验通过后才会追加进对话上下文；未通过 finalize 的结果会被丢弃并在 UI 中收敛为“speculative discarded（不属于上下文）”。
+- 不允许早执行：非只读 `Bash`、交互/控制类工具，以及权限为 `ask` 的工具调用。
+- 提前执行的文件变更会真实落盘，但运行时会先捕获变更前状态；若最终确认阶段丢弃了该调用，则自动回滚。同一回合内若多个提前执行的文件变更命中同一路径，后续冲突调用会跳过，留给正式路径处理。同一回合内只要有任意尚未提交的提前执行文件变更（不限路径），后续的读类早执行都会跳过——这避免了读取未提交状态，代价是读早执行会被进行中的写早执行短暂阻塞。
+- 提前执行的结果可能提前显示在界面上，但只有在最终确认通过后才会追加进对话上下文；未通过的结果会被丢弃，界面显示为「推测执行，已丢弃（不属于上下文）」。
 
 ## 最小 provider 配置
 
@@ -103,9 +103,9 @@ providers:
           output: 65536
 ```
 
-Gemini 需要把 `api_url` 设置为 `/models` 基础路径。Chord 会根据 `/models` 后缀自动识别为 `type: generate-content`，所以可以省略 `type`。不要在 `api_url` 中包含模型名或 `:streamGenerateContent?alt=sse`；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（例如 `gemini-2.5-flash`）就是发送给 Gemini 的模型 ID。
+Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-2.5-flash`）即为发送给 Gemini 的模型 ID。
 
-如果省略 `type`，Chord 会根据 provider 配置自动识别：
+省略 `type` 时，Chord 按以下规则自动推断：
 
 - `preset: codex` → `responses`
 - `api_url` 以 `/responses` 结尾 → `responses`
@@ -113,11 +113,11 @@ Gemini 需要把 `api_url` 设置为 `/models` 基础路径。Chord 会根据 `/
 - `api_url` 以 `/messages` 结尾 → `messages`
 - `api_url` 以 `/models` 结尾 → `generate-content`
 
-如果不匹配这些规则，需要显式设置 `type`。
+不匹配以上规则时，需显式设置 `type`。
 
 ## auth.yaml
 
-`auth.yaml` 的 key 名需要与 `config.yaml` 中的 provider 名称对应：
+`auth.yaml` 的 key 名需与 `config.yaml` 中的 provider 名称对应：
 
 ```yaml
 anthropic:
@@ -127,7 +127,7 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
-也可以配置多个 key 作为轮换或备用来源。
+可配置多个 key 作为轮换或备用。
 
 ## auth.yaml 中的环境变量
 
@@ -141,20 +141,20 @@ openai:
   - "${OPENAI_API_KEY}"
 ```
 
-当标量字符串以 `$` 开头时会进行展开。未设置的环境变量会展开为空字符串并被过滤掉，除非 YAML 值本身就是字面量空字符串。这个展开能力适用于 `auth.yaml` 凭据，不代表 `config.yaml` 的所有字段都会自动展开环境变量。
+标量字符串以 `$` 开头时触发展开。未设置的环境变量会展开为空字符串并被过滤，除非 YAML 值本身就是字面空字符串。该展开仅适用于 `auth.yaml` 凭据，`config.yaml` 的字段不会自动展开。
 
-如果你确实需要空 API key，请显式写字面量空字符串：
+确实需要空 API key 时，请显式写字面空字符串：
 
 ```yaml
 local-provider:
   - ""
 ```
 
-不要依赖未设置的环境变量来表达空 key。未设置的 `$ENV_VAR` 会被视为缺失凭据并被过滤掉。
+不要依赖未设置的环境变量来表示空 key——未设置的 `$ENV_VAR` 会被视为缺失凭据而过滤掉。
 
 ## OAuth 登录
 
-当前只有配置了 `preset: codex` 的 provider 才会被视为 OAuth provider。
+当前仅配置了 `preset: codex` 的 provider 支持 OAuth。
 
 ```bash
 # 自动选择已配置的 codex provider
@@ -167,11 +167,11 @@ chord auth codex
 chord auth codex --device-code
 ```
 
-## 模型池（指定 provider 与 model）
+## 模型池
 
-Chord 通过**命名模型池**来选择当前使用的模型。
+Chord 通过命名模型池选择当前使用的模型。
 
-模型池的定义放在 `config.yaml`（全局或项目级）里；agent 配置只能引用池名，不允许在 agent 里内联定义池。
+模型池在 `config.yaml`（全局或项目级）中定义；agent 配置只能引用池名，不允许在 agent 中内联定义池。
 
 ### 在 config.yaml 中定义 model_pools
 
@@ -203,13 +203,13 @@ mode: subagent
 model_pools: [thinking]
 ```
 
-未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
+未显式选择池时，Chord 回退到该 agent `model_pools: [...]` 列表中的第一个池。
 
-运行时可通过 `/models` 切换**当前视图对象**的池（按 project 持久化，重启后仍生效）：在 main 视图中，它作用于当前主角色；在 SubAgent 视图中，它作用于该 agent。也可以通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。对 SubAgent 而言，默认行为就是使用 `model_pools: [...]` 里列出的**第一个**池；如果之后想恢复默认，直接切回第一个池即可。
+运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用 `model_pools` 列表中的第一个池；想恢复默认时切回第一个池即可。
 
-## 使用 YAML anchor 复用模型模板
+## 用 YAML anchor 复用模型模板
 
-Chord 没有专门的 `model_templates` 配置字段，但可以使用 YAML anchor 和 merge key 来避免重复写模型限制与 variants。下面顶层的 `model_templates` 只是一个会被忽略的锚点容器。
+Chord 没有 `model_templates` 配置字段，但可用 YAML anchor 和 merge key 避免重复书写模型限制与 variants。下面顶层的 `model_templates` 仅作为锚点容器，Chord 会忽略其内容。
 
 ```yaml
 model_templates:
@@ -289,34 +289,31 @@ providers:
       claude-opus-4.7: *claude-1m
 ```
 
-示例中用到的模型字段含义：
+用到的模型字段含义：
 
 - `limit.context`：模型上下文窗口大小。
-- `limit.output`：模型自身最大输出 token 能力。运行时请求还会受到 `max_output_tokens` 限制。
-- `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制 reasoning summary 输出；variant 通常覆盖 `reasoning.effort`。
-- `text.verbosity`：OpenAI text verbosity hint，取决于 provider/model 是否支持。
-- `thinking`：Anthropic extended thinking 选项。`type: adaptive` 表示由 Chord 根据 `effort` 推导合适的 thinking budget；variant 可以覆盖 `thinking.effort`。
-- `variants`：命名模型参数预设。可以通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 这样的 model ref 选择。
-- `modalities.input`：模型支持的输入模态。支持值包括 `text`、`image`、`pdf`。如果省略，Chord 为了向后兼容默认认为支持 `text` 和 `image`。
+- `limit.output`：模型自身最大输出 token。实际请求还会受 `max_output_tokens` 限制。
+- `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
+- `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
+- `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
+- `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
+- `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
 
-只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不会被运行时解释，因此示例中刻意省略。
+只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不被运行时解释，示例中刻意省略。
 
 ## 项目级配置
 
-如果某个项目需要特定默认值，可以在项目根目录创建：
+项目需要特定默认值时，在项目根目录创建：
 
 ```text
 .chord/config.yaml
 ```
 
-常见用途：
-
-- 调整项目特有的权限规则
-- 配置该项目的 LSP / MCP / Hooks / Skills
+常见用途：调整项目特有权限规则、配置该项目的 LSP / MCP / Hooks / Skills。
 
 ## Provider 请求压缩
 
-Provider 级别的 `compress` 控制上游 HTTP 请求体的 gzip 压缩。它和上下文压缩不同：只影响 HTTP 请求传输编码，不会总结或移除对话历史。
+Provider 级别的 `compress` 控制上游 HTTP 请求体的 gzip 压缩。它和上下文压缩是两回事——只影响请求传输编码，不会总结或移除对话历史。
 
 ```yaml
 providers:
@@ -324,11 +321,11 @@ providers:
     compress: true
 ```
 
-启用后，Chord 只会在 gzip 后体积更小时发送压缩请求；否则仍发送未压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则可以不配置。
+启用后，Chord 仅在 gzip 能减小体积时才发送压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则无需配置。
 
 ## 输出 token 上限
 
-使用 `max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍会被每个模型的 `limit.output` 和可用上下文限制。
+`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用上下文限制。
 
 ```yaml
 max_output_tokens: 32000
@@ -336,7 +333,7 @@ max_output_tokens: 32000
 
 ## 本地 TUI 选项
 
-这些选项影响本地 TUI。它们可以写在全局配置里，也可以在合适时由项目级 `.chord/config.yaml` 覆盖。
+以下选项影响本地 TUI，可写在全局配置中，也可由项目级 `.chord/config.yaml` 覆盖。
 
 ```yaml
 desktop_notification: true
@@ -344,22 +341,22 @@ ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
-- `desktop_notification`：在本地 TUI 中启用 OSC 9 终端通知，主要用于终端失焦场景。Chord 会在权限确认、等待用户回答、agent 回到 idle 等场景发送通知。
-- `ime_switch_target`：通过 `im-select`（Windows 为 `im-select.exe`）在进入 Normal 模式时切换到指定输入法，并在回到 Insert 模式时恢复之前的输入法。常用于让快捷键使用英文键盘布局。
-- `prevent_sleep`：在任意 agent 活跃时阻止 macOS 进入空闲睡眠。只在本地 TUI 模式生效。
+- `desktop_notification`：启用 OSC 9 终端通知（主要用于终端失焦场景），在权限确认、等待回答、agent 回到 idle 时发送通知。
+- `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
+- `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。
 
 ## WebFetch
 
-`WebFetch` 默认使用内置的 browser-like `User-Agent`。如果某些站点需要不同请求头，可以在配置中覆盖：
+`WebFetch` 默认使用类似浏览器的 `User-Agent`。某些站点需要不同请求头时，可在配置中覆盖：
 
 ```yaml
 web_fetch:
   user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36
 ```
 
-这个配置同时支持全局配置和项目级 `.chord/config.yaml`，且项目级配置优先。
+该配置同时支持全局和项目级，项目级优先。
 
-你也可以为 WebFetch 请求配置代理：
+也可为 WebFetch 请求单独配置代理：
 
 ```yaml
 web_fetch:
@@ -367,14 +364,14 @@ web_fetch:
 ```
 
 - `proxy: nil`（默认）—— 继承全局 `proxy` 配置
-- `proxy: ""`（空字符串）—— 明确禁用代理（"direct" 模式）
+- `proxy: ""`（空字符串）—— 显式直连（不走代理）
 - `proxy: "http://..."`、`"https://..."`、`"socks5://..."` —— 使用指定代理
 
-`WebFetch` 会保持轻量的静态 HTTP 读取定位，不运行本地浏览器。对于 JS-heavy 页面，如果返回的 HTML 像应用空壳而不是可读正文，结果会标记为 `Content-Quality: suspect-shell`。
+`WebFetch` 保持轻量级静态 HTTP 读取，不运行本地浏览器。对 JS-heavy 页面，若返回的 HTML 只有应用空壳而非可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
 ## MCP
 
-MCP server 可能暴露很多工具。可以用 `allowed_tools` 只允许部分远端工具进入 Chord，从而避免把不用的 tool schema 发送给模型：
+MCP server 可能暴露大量工具。通过 `allowed_tools` 只允许部分远端工具进入 Chord，避免把不必要的 tool schema 发送给模型：
 
 ```yaml
 mcp:
@@ -385,18 +382,18 @@ mcp:
       - web_fetch_exa
 ```
 
-被过滤的工具不会注册，也不会进入 LLM tool surface。上例中的 `search` 是用户自定义 MCP server 名；Chord 只会注册 `mcp_search_web_search_exa` 和 `mcp_search_web_fetch_exa`。
+被过滤的工具不会注册，也不会进入 LLM 工具列表。上例中 `search` 是用户自定义的 MCP server 名；Chord 只会注册 `mcp_search_web_search_exa` 和 `mcp_search_web_fetch_exa`。
 
 ## Agent 配置
 
-内置角色包括 `builder`、`planner`。你也可以新增自定义 agent 或覆盖内置 agent。Agent 文件可以放在：
+内置角色包括 `builder`、`planner`。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`
 
 支持的文件格式：
 
-- `.md`：YAML frontmatter 加 Markdown 正文，正文会作为 system prompt。
+- `.md`：YAML frontmatter 加 Markdown 正文，正文作为 system prompt。
 - `.yaml` / `.yml`：普通 YAML 文档，通过 `prompt` 或 `system_prompt` 配置 system prompt。
 
 Markdown agent 示例：
@@ -429,22 +426,21 @@ prompt: |
   你是一个专注于后端开发的 Agent。
 ```
 
-常用字段包括：
+常用字段：
 
 - `name`：agent 名称。省略时使用不带扩展名的文件名。
-- `description`：简短描述，会在 delegation 可用时展示给 main agent。
+- `description`：简短描述，在可委派给该 agent 时展示给 main agent。
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
-- `model_pools`：该 agent 可使用的模型池名列表（有序）。池定义位于 `config.yaml` 顶层的 `model_pools`。
-  `openai/gpt-5.5@high` 这类 inline variant 写在池定义里。
-- `variant`：当 model ref 没有写 `@variant` 时使用的默认 variant。
-- `permission`：该 agent 的 per-tool 权限策略。
+- `model_pools`：该 agent 的可用池名列表（有序）。池定义位于 `config.yaml` 顶层 `model_pools`。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
+- `variant`：model ref 未写 `@variant` 时的默认 variant。
+- `permission`：该 agent 的逐工具权限策略。
 - `mcp`：作用域限定在该 agent 的 MCP 配置。
-- `delegation`：例如 `max_children`、`max_depth`、`child_join` 等 delegation 限制。
-- `prompt` / `system_prompt`：plain YAML agent 文件中的 system prompt。
+- `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。
+- `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。
 
 ## 上下文压缩
 
-当主会话接近模型上下文上限时，Chord 可以自动执行 durable compaction。常见相关配置：
+主会话接近模型上下文上限时，Chord 可自动执行持久化压缩。常见配置：
 
 ```yaml
 context:
@@ -453,7 +449,7 @@ context:
   compact_model: openai/gpt-5.4-mini
 ```
 
-如果你的模型上下文较小，建议保持自动压缩开启。
+模型上下文较小时，建议保持自动压缩开启。
 
 ## Provider 连通性自检
 
@@ -465,32 +461,32 @@ chord test-providers
 chord test-providers --provider openai
 ```
 
-这个命令适合做认证与基础连通性 smoke test。
+适合做认证与基础连通性的冒烟测试。
 
 ## 配置字段速查表
 
-下面是 `config.yaml` 的全部顶层 key（同时适用于全局 `~/.config/chord/config.yaml` 和项目级 `.chord/config.yaml`）。除非特别注明，所有 key 都是可选的。
+下面是 `config.yaml` 的全部顶层 key（同时适用于全局 `~/.config/chord/config.yaml` 和项目级 `.chord/config.yaml`）。除特别注明外，所有 key 均可选。
 
 | Key                     | 类型                  | 默认值                          | 适用层级                 | 简述                                                                                                                  |
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `providers`             | `map[name]Provider`   | —                               | global / project         | 每个 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
-| `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为 `provider/model`（或 `model@variant`）。见 [模型池](#模型池指定-provider-与-model)。           |
+| `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
+| `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为 `provider/model`（或 `model@variant`）。见 [模型池](#模型池)。           |
 | `context`               | object                | 见下文                          | global / project         | `auto_compact`、`compact_threshold`、`compact_model`。见 [上下文压缩](#上下文压缩)。                                  |
-| `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录之外追加 skill 目录。                                                                     |
+| `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
-| `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 的宽度。                                                    |
-| `desktop_notification`  | bool                  | `false`                         | global / project         | 在终端非聚焦时启用 OSC 9 idle 通知（仅本地 TUI）。                                                                    |
-| `prevent_sleep`         | bool                  | `false`                         | global / project         | 任意 agent 活动时阻止 macOS idle sleep。仅 macOS 生效；其他平台 no-op。                                              |
+| `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
+| `desktop_notification`  | bool                  | `false`                         | global / project         | 终端非聚焦时启用 OSC 9 idle 通知（仅本地 TUI）。                                                                    |
+| `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
 | `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。 |
-| `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。Linux/macOS/Windows 各有自己的格式。                  |
-| `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 比较啰嗦。                                                              |
+| `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |
+| `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 输出较多。                                                              |
 | `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
 | `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`size_check_interval_hours`、`warn_state_bytes`、`warn_cache_bytes`。                       |
-| `lsp`                   | `map[name]Server`     | 空                              | global / project         | 每个 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
-| `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 每个 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
+| `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
+| `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
-| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会被各模型的 `limit.output` 限制。                                                    |
+| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制。                                                    |
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
 | `worktree`              | object                | 空                              | global / project         | `chord --worktree` 与 `chord worktree …` 子命令的默认值。                                                            |
@@ -500,9 +496,9 @@ chord test-providers --provider openai
 | 字段          | 类型   | 说明                                                                                                                                                |
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
-| `api_url`     | string | Endpoint URL。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。                                                |
+| `api_url`     | string | 接口地址。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。                                                |
 | `preset`      | string | 当前可选 `codex`（OpenAI Codex / ChatGPT OAuth）。                                                                                                  |
-| `compress`    | bool   | 当 gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
+| `compress`    | bool   | gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
 
 ### 模型字段参考
@@ -510,9 +506,9 @@ chord test-providers --provider openai
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
 | `limit.context`   | int    | 上下文 token 上限。                                                                                               |
-| `limit.output`    | int    | 输出 token 上限；运行时还会被 `max_output_tokens` 限制。                                                          |
+| `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |
-| `text.verbosity`  | string | OpenAI text verbosity 提示，支持的模型生效。                                                                      |
+| `text.verbosity`  | string | OpenAI 文本详细程度提示，支持的模型生效。                                                                      |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认 `[text, image]`。                                                           |

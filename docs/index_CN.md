@@ -1,8 +1,8 @@
 # Chord 文档
 
-本文档面向终端用户：安装、配置、日常使用、定制扩展、排障。
+面向终端用户：安装、配置、日常使用、定制扩展、排障。
 
-- English: see [index.md](./index.md)
+- English: 见 [index.md](./index.md)
 
 ## 入门
 

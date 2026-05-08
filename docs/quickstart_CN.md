@@ -1,6 +1,6 @@
 # 快速开始
 
-本文档面向第一次使用 Chord 的用户，目标是在几分钟内跑通一次最小可用流程。
+几分钟跑通一个最小可用流程。
 
 ## 1. 安装
 
@@ -14,7 +14,7 @@ go install github.com/keakon/chord/cmd/chord@latest
 go build -o chord ./cmd/chord/
 ```
 
-你也可以从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。macOS 下载版首次运行时可能会因为文件来自互联网且未公证而被系统阻止。遇到这种情况时执行：
+也可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。macOS 下载版首次运行时，系统可能因文件来自互联网且未公证而阻止运行，执行以下命令即可：
 
 ```bash
 xattr -dr com.apple.quarantine /path/to/chord
@@ -22,15 +22,15 @@ chmod +x /path/to/chord
 /path/to/chord --version
 ```
 
-如果仍然被 macOS 阻止，可以添加本地 ad-hoc 签名：
+若仍被 macOS 阻止，添加本地 ad-hoc 签名：
 
 ```bash
 codesign --force --sign - /path/to/chord
 ```
 
-请把 `/path/to/chord` 替换为实际安装路径，例如 `/usr/local/bin/chord`。
+把 `/path/to/chord` 换成实际安装路径，如 `/usr/local/bin/chord`。
 
-> 运行源码入口时请使用 `go run ./cmd/chord/`，不要使用 `go run cmd/chord/main.go`。
+> 运行源码入口时用 `go run ./cmd/chord/`，不要用 `go run cmd/chord/main.go`。
 
 ## 2. 配置 API Key
 
@@ -41,16 +41,16 @@ mkdir -p ~/.config/chord
 chmod 700 ~/.config/chord
 ```
 
-然后编辑 `~/.config/chord/auth.yaml`。如果使用下方默认的 ModelScope 示例：
+然后编辑 `~/.config/chord/auth.yaml`。以默认的 ModelScope 示例为例：
 
 ```yaml
 modelscope:
   - "$MODELSCOPE_API_KEY"
 ```
 
-其他 provider 也使用同样的 provider 名作为 key，例如 `anthropic`、`openai`，或任意自定义 OpenAI 兼容 provider 名。
+其他 provider 同理——用 provider 名作为 key，如 `anthropic`、`openai`，或任意自定义的 OpenAI 兼容 provider 名。
 
-OpenAI ChatGPT / Codex OAuth 需要先在 `~/.config/chord/config.yaml` 中添加 provider：
+OpenAI ChatGPT / Codex OAuth 需先在 `~/.config/chord/config.yaml` 中添加 provider：
 
 ```yaml
 providers:
@@ -87,13 +87,13 @@ model_pools:
     - modelscope/Qwen/Qwen3.5-397B-A17B
 ```
 
-`providers` 定义可用的 API endpoint 与模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置，否则只配置 provider 时启动会报找不到默认模型池。`builder` 不会自动使用所有全局 `model_pools`；内置配置只引用 `default`，如果你用自定义 `builder` agent 覆盖内置配置，也必须显式配置 `model_pools` 或 `models`。
+`providers` 定义可用的 API 端点和模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置——只配 provider 不配模型池的话，启动会报找不到默认模型池。内置 `builder` 只引用 `default` 池，不会自动使用全局 `model_pools`；用自定义 `builder` agent 覆盖内置配置时，也必须显式配置 `model_pools` 或 `models`。
 
-如果你使用其他 ModelScope 模型或其他 OpenAI 兼容接口，可以把 `api_url`、provider 名和模型名改成对应值，并同步更新 `model_pools.default` 中的 `provider/model` 引用。
+换用其他 ModelScope 模型或其他 OpenAI 兼容接口时，把 `api_url`、provider 名和模型名改成对应值，同步更新 `model_pools.default` 中的 `provider/model` 引用即可。
 
 ## 4. 运行
 
-在你的项目目录中执行：
+在项目目录中执行：
 
 ```bash
 cd my-project
@@ -104,7 +104,7 @@ go run ./cmd/chord/
 
 首次运行时，Chord 会按需创建项目级 `.chord/` 目录。
 
-如果需要无界面的控制面模式：
+无界面控制面模式：
 
 ```bash
 chord headless
@@ -118,12 +118,12 @@ headless 模式说明见 [Headless 集成](./headless_CN.md)。
 
 启动后：
 
-1. 直接输入你的问题
+1. 直接输入问题
 2. 按 `Enter` 发送
 3. 按 `Esc` 进入 Normal 模式
-4. 按 `q` 退出，或在 2 秒内连续按两次 `Ctrl+C`
+4. 按 `q` 退出，或 2 秒内连按两次 `Ctrl+C`
 
-你可以先试一条简单消息，例如：
+试试一条简单消息：
 
 ```text
 请先阅读当前项目结构，然后总结它的主要模块。
@@ -134,7 +134,7 @@ headless 模式说明见 [Headless 集成](./headless_CN.md)。
 ```bash
 # 正常启动；当前模型取自该 agent 的 model_pools 列表中的第一个池。
 # 启动后用 /models 查看池状态，或 /models <pool> / Ctrl+P 切换池。
-# 完整配置说明：./configuration_CN.md#模型池指定-provider-与-model
+# 完整配置说明：./configuration_CN.md#模型池
 chord
 
 # 恢复最近会话

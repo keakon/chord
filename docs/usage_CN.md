@@ -1,6 +1,6 @@
 # 使用指南
 
-本文档介绍 Chord 的主要运行模式、核心交互方式，以及你在日常使用中最常用到的功能。
+主要运行模式、核心交互方式以及日常高频功能。
 
 ## 运行模式
 
@@ -9,22 +9,22 @@ Chord 有两条主要使用路径：
 - **本地 TUI**：默认模式，直接在当前进程内运行 MainAgent
 - **Headless 控制面**：通过 `chord headless` 使用 stdio JSONL 与外部 gateway / bot 集成
 
-大多数个人开发场景推荐直接使用本地 TUI。
+大多数个人开发场景推荐直接用本地 TUI。
 
 ## TUI 基本交互
 
-启动后输入框默认聚焦，可以直接输入消息并按 `Enter` 发送。
+启动后输入框默认聚焦，直接输入消息按 `Enter` 发送。
 
-工具调用卡片会尽量保持路径简洁：对于 `Read`、`Write`、`Edit` 这类文件工具，如果路径位于当前工作目录内，TUI 会优先显示相对路径；如果路径位于当前目录之外，则继续显示绝对路径。
+工具调用卡片会尽量保持路径简洁：`Read`、`Write`、`Edit` 等文件工具在路径位于当前工作目录内时优先显示相对路径；位于当前目录之外则显示绝对路径。
 
-工具参数和工具结果会按终端安全的纯文本展示。Chord 会把外部输出中的 ANSI/control sequence 转义成字面内容，而不是当作终端样式执行；看起来像 Markdown 的普通工具结果也会保持原始文本，不会被重新排版成 assistant Markdown。
+工具参数和工具结果按终端安全的纯文本展示。外部输出中的 ANSI/control sequence 会被转义成字面内容，不会当作终端样式执行；看起来像 Markdown 的普通工具结果也会保持原始文本，不会被重新排版成 assistant Markdown。
 
-当 Chord 在后台运行时，如果当前聚焦的 Agent 从 busy 变为 idle，终端标题栏会显示一次性的 `✅` 完成标记。重新聚焦终端会清除该标记；普通的标签页/窗口焦点切换不会重复添加，除非之后又有新的后台工作完成。
+Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终端标题栏会显示一次性的 `✅` 完成标记。重新聚焦终端会清除该标记；普通的标签页/窗口焦点切换不会重复添加，除非之后又有新的后台工作完成。
 
 常用操作：
 
-- `Esc`：切换到 Normal 模式；在 main 视图运行中再次按 `Esc` 可取消当前 turn
-- `i`：回到输入模式
+- `Esc`：切换到 Normal 模式；main 视图运行中再按 `Esc` 可取消当前 turn
+- `i`：回到 Insert 模式
 - `j` / `k`：在消息卡片之间移动
 - `gg` / `G`：跳到开头 / 结尾
 - `/`：搜索消息
@@ -36,23 +36,23 @@ Chord 有两条主要使用路径：
 
 ## 会话
 
-Chord 会为当前项目维护持久化会话。
+Chord 为当前项目维护持久化会话。
 
 常见方式：
 
 - `chord`：新建会话
 - `chord --continue`：恢复当前项目最近的非空会话
 - `chord --resume <session-id>`：恢复指定会话
-- `chord resume <session-id>`：跨 worktree 恢复 — 自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
+- `chord resume <session-id>`：跨 worktree 恢复——自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
 - `chord import <source> [file]`：导入外部会话到 Chord（支持 `opencode`/`codex`/`claude`）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
 
-退出时，如果当前会话可恢复，Chord 会打印对应的恢复命令。
+退出时若当前会话可恢复，Chord 会打印对应的恢复命令。
 
 ### 导入外部会话
 
-Chord 支持把外部 coding agent 的历史会话导入为 Chord 可恢复的 session。
+Chord 支持把外部 coding agent 的历史会话导入为可恢复的 session。
 
 当前支持的来源：
 
@@ -64,7 +64,7 @@ Chord 支持把外部 coding agent 的历史会话导入为 Chord 可恢复的 s
 
 ```bash
 # OpenCode
-oopencode export <sessionID> > export.json
+opencode export <sessionID> > export.json
 chord import opencode export.json
 chord resume <sid>
 
@@ -83,10 +83,10 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 说明：
 
-- **Tools**：默认情况下，Codex/OpenCode 的 tool 调用与结果会以“纯文本”形式导入，以避免跨 provider 的 tool 协议差异；Claude 默认 `--tool-mode auto`，仅在具备 signed thinking 时才保留结构化 tool 调用，否则自动降级为纯文本。
+- **Tools**：默认情况下，Codex/OpenCode 的工具调用与结果以"纯文本"形式导入，避免跨 provider 的工具协议差异；Claude 默认 `--tool-mode auto`，仅在具备 signed thinking 时保留结构化工具调用，否则自动降级为纯文本。
 - **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
-- 导入后的 session 会包含 `import-report.json`，记录转换统计与 warnings。
-- 运行时会在每次请求前对历史消息做一次 provider-safe 的 normalization，因此导入后切换模型/provider 不会 replay 不兼容 payload。
+- 导入后的 session 包含 `import-report.json`，记录转换统计与 warnings。
+- 运行时会在每次请求前对历史消息做 provider 兼容标准化，导入后切换模型/provider 不会重播不兼容 payload。
 
 常用参数：
 
@@ -104,16 +104,16 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 需要在同一项目里并行做多个任务且互不干扰时，Chord 可以为任务创建独立的 git worktree：
 
-- `chord --worktree`：创建或进入一个 chord 管理的 worktree（不指定名字时自动按时间戳生成）
+- `chord --worktree`：创建或进入 chord 管理的 worktree（不指定名字时自动按时间戳生成）
 - `chord --worktree feat-auth`：创建或进入名为 `feat-auth` 的 worktree（分支 `chord/feat-auth`）；可与 `--continue` / `--resume` 组合，作用于该 worktree 自身的会话历史
 - `chord headless -d <repo> --worktree feat-auth`：headless 同款行为；`ready` 事件 payload 包含 worktree 的 `name`、`branch`、`path`、`repo_root`
 - `chord worktree list`：列出当前仓库的 chord 管理 worktree
 - `chord worktree remove <name>`：删除 worktree 及其 sessions/cache/exports；默认保留分支。`--delete-branch` 仅在已合并时删除分支；`--force` 强制删除脏 worktree 和分支。
-- `chord worktree finish <name>`：把 worktree 分支 rebase 回主线并回收（默认主线：main worktree 当前检出的分支），然后 fast-forward 更新主线、删除 worktree 并删除分支。可用 `--onto <branch>` 指定主线分支，用 `--force` 放宽 clean 检查；若 rebase 出现冲突，命令会输出分步指引（`git status`、`git rebase --show-current-patch`，再按情况选择 `--skip` / `--continue` / `--abort`），并保留 worktree/分支供你处理后重跑。若该 worktree 已有进行中的 rebase，`finish` 会先明确提示“先收尾当前 rebase”，不会再尝试启动新的 rebase。
+- `chord worktree finish <name>`：把 worktree 分支 rebase 回主线并回收（默认主线：main worktree 当前检出的分支），然后 fast-forward 更新主线、删除 worktree 并删除分支。可用 `--onto <branch>` 指定主线分支，`--force` 放宽 clean 检查。rebase 出现冲突时，命令会输出分步指引（`git status`、`git rebase --show-current-patch`，再按情况选 `--skip` / `--continue` / `--abort`），并保留 worktree/分支供你处理后重跑。worktree 已有进行中的 rebase 时，`finish` 会先提示"先收尾当前 rebase"，不会再尝试启动新的 rebase。
 
-创建/进入 worktree 属于启动级动作（会改变 chord 运行所在的 project），所以它放在 `chord` 的 flag 上、不归属 `chord worktree` 子命令；后者只承担纯管理操作（`list`、`remove`、`finish`）。
+创建/进入 worktree 属于启动级动作（会改变 chord 运行所在的 project），所以放在 `chord` 的 flag 上，不归属 `chord worktree` 子命令；后者只承担纯管理操作（`list`、`remove`、`finish`）。
 
-Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之外），每个 worktree 拥有独立的 project key，session 与 cache 自动隔离。worktree 仅包含被 git 追踪的文件；主仓库未提交的改动不会自动带过去。
+Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之外），每个 worktree 拥有独立的 project key，session 与 cache 自动隔离。worktree 只包含被 git 追踪的文件；主仓库未提交的改动不会自动带过去。
 
 ## 常用本地控制命令
 
@@ -123,13 +123,76 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/resume`：恢复会话
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
-- `/export`：导出当前会话
 - `/compact`：手动触发上下文压缩
-- `/stats`：查看用量统计
-- `/diagnostics`：导出用于排障的诊断包
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
-- `/rules`：打开权限规则管理器（查看、编辑、保存规则）
-- `/loop`：显示当前的持续执行模式状态；`/loop on` 给当前聚焦 agent 开启；`/loop on <target>` 指定 agent 名开启；`/loop off` 关闭
+- `/diagnostics`：导出用于排障的诊断包
+
+下面几个命令有更多交互细节，单独展开说明。
+
+### `/export` — 导出当前会话
+
+将当前会话导出为 Markdown（默认）或 JSON。
+
+```text
+/export                  # 默认：导出为 Markdown，保存到 session artifacts 目录
+/export ~/out.md         # 指定输出路径
+/export --json           # 导出为 JSON 格式
+/export ~/out.json       # 文件名以 .json 结尾时自动识别为 JSON
+```
+
+导出内容包括全部对话消息以及当前会话的用量统计。导出成功后 TUI 会显示保存路径。
+
+### `/stats` — 用量统计浮层
+
+打开一个浮层，分两个维度浏览用量数据：
+
+- **范围（Scope）**：`Session`（当前会话）或 `Project`（当前项目的聚合统计）。按 `s` 键切换。
+- **视图（View）**：`Overview`（总览）、`Models`（按模型细分）、`Agents`（按 agent 细分）。Project 额外支持 `Dates`（按日期细分）。按 `Tab` / `Shift+Tab` 切换视图。
+
+Session Overview 展示：LLM 调用次数、输入/输出 token、缓存读写 token、reasoning token、估算成本。Models 和 Agents 视图以表格展示各维度详细拆解。
+
+Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`30d`、`90d`、`all` 五种时间范围。切换到 Project 时可能短暂显示"加载中"，稍后会展示统计数据。
+
+浮层打开期间，所有活动搜索自动取消。按 `Esc` 关闭。也可在 Normal 模式用 `$` 键直接打开。
+
+### `/rules` — 会话规则管理器
+
+打开一个浮层，查看当前会话中通过权限确认弹窗"允许并记住规则"添加的规则。
+
+- `↑` / `↓` 或 `j` / `k`：移动光标
+- `d`：删除当前规则
+- `o`：在系统编辑器中打开规则对应的配置文件
+- `Esc` / `q`：关闭
+
+规则旁会显示作用域（`session` / `project` / `global`）和落盘文件路径。这些规则是**动态添加的临时规则**，与 `config.yaml` 中预写的权限规则互补，不修改原有配置文件。
+
+### `/loop` — 持续执行模式
+
+持续执行模式让 agent 在完成当前任务后自动继续，无需反复催促。适合那种"帮我搞定这个功能"的一次性指令——你只需发一条消息，agent 会自己迭代、验证、直到完成或确实卡住。
+
+启用方式：
+
+```text
+/loop on                           # 开启，agent 会尝试完成当前会话中的所有剩余任务
+/loop on 实现用户认证模块            # 开启并指定目标任务
+/loop off                          # 关闭，回到普通模式
+/loop                              # 查看当前状态
+```
+
+`/loop on` 后面的文字会作为任务目标发给 agent。省缺时默认为"继续完成当前会话中所有剩余任务"。每次开启默认限制最多 10 轮迭代，超出自动停止。
+
+**工作流程：** `/loop on` 后发送一条任务指令（如"实现用户认证模块"）。agent 会按以下循环推进：
+
+1. **executing**：执行任务，调用工具做实际工作
+2. **assessing**：评估当前进度，决定下一步
+3. **verifying**：运行校验（跑测试、lint 等）
+4. **继续或停止**：根据评估结果选择 `continue`、`verify`、`completed`（完成）、或 `blocked`（阻塞）
+
+agent 通过 `<done>` 标记主动汇报完成、`<blocked>` 标记说明阻塞原因。你也随时可以用 `Esc` 取消当前轮。
+
+**状态栏提示：** 开启后 TUI 状态栏会显示 `[↻]` 标记，告诉你当前处于持续执行模式。
+
+**适用场景：** 多步骤任务（生成代码 → 写测试 → 调试 → 优化）、需要反复迭代的开发工作。不适合：一次性查询、单纯的问答。
 
 也可以**自定义** slash 命令（按项目或全局），见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。
 
@@ -140,7 +203,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - `Tab`：切换 main agent 角色
 - `Shift+Tab`：在 main agent 与各 sub agent 之间切换焦点
 
-在 SubAgent 视图中，你可以查看该 agent 的上下文与输出；已结束的 SubAgent 视图是只读的。
+在 SubAgent 视图中可查看该 agent 的上下文与输出；已结束的 SubAgent 视图只读。
 
 ## 图片输入与查看
 
@@ -154,35 +217,35 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 - `Ctrl+V` / `Cmd+V`：优先读取剪贴板图片，否则粘贴文本
 - `Ctrl+F`：把输入框中的图片路径加入当前消息附件
-- `Enter` / `o` / `Space`：在 Normal 模式下打开当前消息中的图片
+- `Enter` / `o` / `Space`：Normal 模式下打开当前消息中的图片
 
 ## 复制文本
 
 - 可在转录区内用鼠标拖选 TUI 里的文本
 - `Cmd+C`：在会把这个按键转发给 Chord 的 macOS 终端中，复制当前转录区选中的文本
-- `Ctrl+C`：仍用于取消 / 退出，不用于复制转录区文本
+- `Ctrl+C`：仍用于取消/退出，不用于复制转录区文本
 
 ## Headless 模式
 
-`chord headless` 适合以下场景：
+`chord headless` 适合：
 
 - bot / gateway 集成
 - 自动化脚本驱动
 - 无需本地 TUI 的外部控制面接入
 
-它使用：
+协议格式：
 
-- stdin：一行一个 JSON 命令
-- stdout：一行一个 JSON 事件
+- stdin：一行一条 JSON 命令
+- stdout：一行一条 JSON 事件
 
-更详细的说明见 [Headless 集成](./headless_CN.md)。
+详细说明见 [Headless 集成](./headless_CN.md)。
 
 ## 日常使用建议
 
 - 首次接入时，先用最小 provider 配置确认请求能跑通
-- 需要更强代码感知时，再配置 LSP
-- 需要外部工具接入时，再添加 MCP 或 Hooks
-- 对高风险工具保持 `ask`，不要直接全局 `allow`
+- 需要更强代码感知时再配置 LSP
+- 需要外部工具接入时再添加 MCP 或 Hooks
+- 高风险工具保持 `ask`，不要直接全局 `allow`
 
 ## 相关文档
 

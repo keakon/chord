@@ -123,13 +123,76 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/resume`: resume a session
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
-- `/export`: export the current session
 - `/compact`: manually trigger context compaction
-- `/stats`: view usage statistics
-- `/diagnostics`: export a diagnostics bundle for troubleshooting
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
-- `/rules`: open the permission-rule manager (view, edit, save rules)
-- `/loop`: show current continuous-execution status; `/loop on` enables it for the focused agent; `/loop on <target>` enables it for a specific agent name; `/loop off` disables it
+- `/diagnostics`: export a diagnostics bundle for troubleshooting
+
+The following commands have more interactive detail, expanded below.
+
+### `/export` — export the current session
+
+Export the current session as Markdown (default) or JSON.
+
+```text
+/export                  # default: export as Markdown into the session artifacts directory
+/export ~/out.md         # specify an output path
+/export --json           # export as JSON
+/export ~/out.json       # a .json path auto-selects JSON
+```
+
+The export includes every conversation message plus the current session usage statistics. On success, the TUI displays the saved path.
+
+### `/stats` — usage statistics overlay
+
+Opens an overlay to browse usage data along two axes:
+
+- **Scope**: `Session` (current session) or `Project` (aggregate project stats). Press `s` to toggle.
+- **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown). Project scope additionally supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
+
+Session Overview shows: LLM calls, input/output tokens, cache read/write tokens, reasoning tokens, and estimated cost. Models and Agents views display detailed per-dimension tables.
+
+Project statistics are auto-aggregated from local sessions directories, with five time ranges: `today`, `7d`, `30d`, `90d`, `all`. Switching to Project may briefly show "loading" before data appears.
+
+Any active search is automatically cleared when the overlay opens. Press `Esc` to close. You can also open it directly via the `$` key in Normal mode.
+
+### `/rules` — session rule manager
+
+Opens an overlay listing rules added during the current session via the confirmation popup's "allow and remember" path.
+
+- `↑` / `↓` or `j` / `k`: move cursor
+- `d`: delete the current rule
+- `o`: open the rule's backing config file in the OS editor
+- `Esc` / `q`: close
+
+Each rule shows its scope (`session` / `project` / `global`) and on-disk file path. These are **dynamically added temporary rules** that complement the pre-written permission rules in `config.yaml` — they never modify the original config files.
+
+### `/loop` — continuous execution mode
+
+Continuous execution mode keeps the agent working after each task completes without you having to nudge it. Suitable for one-shot instructions like "implement feature X" — you send one message and the agent iterates, verifies, and pushes through until the work is done or genuinely blocked.
+
+Enabling:
+
+```text
+/loop on                           # enable; agent will try to finish all remaining tasks in the session
+/loop on implement user auth       # enable with a specific task target
+/loop off                          # return to normal mode
+/loop                              # show current state
+```
+
+The text after `/loop on` is the task target sent to the agent. When omitted, it defaults to "Continue and finish all remaining tasks in the current session." Each enable defaults to 10 max iterations; exceeding that stops automatically.
+
+**How it works:** after `/loop on`, send a task instruction (e.g. "implement user auth"). The agent follows this cycle:
+
+1. **executing**: carrying out the task, calling tools to do real work
+2. **assessing**: evaluating current progress, deciding the next step
+3. **verifying**: running checks (tests, lint, etc.)
+4. **continue or stop**: based on the assessment, choose `continue`, `verify`, `completed`, or `blocked`
+
+The agent reports completion via `<done>` tags and blocking reasons via `<blocked>` tags. You can always press `Esc` to cancel the current iteration.
+
+**Status bar:** when enabled, the TUI status bar shows a `[↻]` marker.
+
+**When to use:** multi-step tasks (generate code → write tests → debug → refine), iterative development. Not suitable for: one-shot queries or pure Q&A.
 
 You can also define **custom** slash commands (per project or globally). See [Customization — Custom slash commands](./customization.md#custom-slash-commands).
 
