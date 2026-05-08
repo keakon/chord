@@ -35,11 +35,11 @@ const (
 	OnToolBatchComplete      = "on_tool_batch_complete"
 )
 
-const DefaultTimeout = 30
-
 const (
-	defaultMaxResultLines = 50
-	defaultMaxResultBytes = 4096
+	DefaultTimeout = 30
+
+	DefaultMaxResultLines = 50
+	DefaultMaxResultBytes = 4096
 )
 
 const (
@@ -440,10 +440,10 @@ func normalizeHookDefaults(h HookDef) HookDef {
 		h.ResultFormat = ResultFormatSummary
 	}
 	if h.MaxResultLines <= 0 {
-		h.MaxResultLines = defaultMaxResultLines
+		h.MaxResultLines = DefaultMaxResultLines
 	}
 	if h.MaxResultBytes <= 0 {
-		h.MaxResultBytes = defaultMaxResultBytes
+		h.MaxResultBytes = DefaultMaxResultBytes
 	}
 	return h
 }

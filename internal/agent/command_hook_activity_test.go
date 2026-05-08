@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -114,6 +115,28 @@ func TestAutomationFeedbackFormattingAndPolicies(t *testing.T) {
 	}
 	if got := trimAutomationBody("abcdef", 50, 3); got != "abc\n... (truncated)" {
 		t.Fatalf("trim bytes = %q", got)
+	}
+
+	defaultTailLines := make([]string, hook.DefaultMaxResultLines+2)
+	for i := range defaultTailLines {
+		defaultTailLines[i] = fmt.Sprintf("line-%d", i)
+	}
+	defaultTail := selectAutomationBody(hook.HookDef{ResultFormat: hook.ResultFormatTail}, hook.AutomationResult{
+		Body: strings.Join(defaultTailLines, "\n"),
+	})
+	gotLines := strings.Split(defaultTail, "\n")
+	if len(gotLines) != hook.DefaultMaxResultLines {
+		t.Fatalf("default tail lines = %d, want %d", len(gotLines), hook.DefaultMaxResultLines)
+	}
+	if gotLines[0] != defaultTailLines[2] || gotLines[len(gotLines)-1] != defaultTailLines[len(defaultTailLines)-1] {
+		t.Fatalf("default tail = %q, want last %d lines", defaultTail, hook.DefaultMaxResultLines)
+	}
+	defaultTrim := trimAutomationBody(strings.Repeat("x", hook.DefaultMaxResultBytes+1), 0, 0)
+	if !strings.HasSuffix(defaultTrim, "... (truncated)") {
+		t.Fatalf("default trim = %q, want truncation suffix", defaultTrim)
+	}
+	if firstLine := strings.SplitN(defaultTrim, "\n", 2)[0]; len(firstLine) != hook.DefaultMaxResultBytes {
+		t.Fatalf("default trim first line bytes = %d, want %d", len(firstLine), hook.DefaultMaxResultBytes)
 	}
 
 	if !shouldAppendAutomationResult(hook.HookDef{}, hook.AutomationResult{AppendContext: true}) {

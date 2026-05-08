@@ -242,7 +242,7 @@ func selectAutomationBody(h hook.HookDef, result hook.AutomationResult) string {
 		lines := strings.Split(strings.TrimRight(result.Body, "\n"), "\n")
 		maxLines := h.MaxResultLines
 		if maxLines <= 0 {
-			maxLines = 50
+			maxLines = hook.DefaultMaxResultLines
 		}
 		if len(lines) > maxLines {
 			lines = lines[len(lines)-maxLines:]
@@ -258,10 +258,10 @@ func selectAutomationBody(h hook.HookDef, result hook.AutomationResult) string {
 
 func trimAutomationBody(body string, maxLines int, maxBytes int) string {
 	if maxLines <= 0 {
-		maxLines = 50
+		maxLines = hook.DefaultMaxResultLines
 	}
 	if maxBytes <= 0 {
-		maxBytes = 4096
+		maxBytes = hook.DefaultMaxResultBytes
 	}
 
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")

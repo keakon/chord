@@ -100,6 +100,40 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 	}()
 }
 
+func summarizeMCPControlError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var parts []string
+	collectMCPControlErrorParts(err, &parts)
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts, "; ")
+}
+
+func collectMCPControlErrorParts(err error, parts *[]string) {
+	if err == nil {
+		return
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			collectMCPControlErrorParts(child, parts)
+		}
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	msg := strings.Join(strings.Fields(strings.TrimSpace(err.Error())), " ")
+	if msg != "" {
+		*parts = append(*parts, msg)
+	}
+}
+
 func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 	payload, ok := evt.Payload.(mcpControlDonePayload)
 	if !ok {
@@ -126,11 +160,8 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 	a.NotifyEnvStatusUpdated()
 
 	if payload.err != nil {
-		msg := strings.TrimSpace(payload.err.Error())
-		if msg == "" {
-			msg = "MCP update failed"
-		}
-		if !errors.Is(payload.err, context.Canceled) {
+		msg := summarizeMCPControlError(payload.err)
+		if msg != "" {
 			a.emitToTUI(ToastEvent{Message: msg, Level: "error"})
 		}
 	}
