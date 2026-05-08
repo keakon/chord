@@ -16,8 +16,22 @@ Requires Go 1.26+.
 # 1. Install
 go install github.com/keakon/chord/cmd/chord@latest
 
-# 2. Configure credentials
+# 2. Configure provider, model pool, and credentials
 mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/config.yaml <<'YAML'
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-opus-4.7:
+        limit:
+          context: 1000000
+          output: 128000
+model_pools:
+  default:
+    - anthropic/claude-opus-4.7
+YAML
 cat > ~/.config/chord/auth.yaml <<'YAML'
 anthropic:
   - "$ANTHROPIC_API_KEY"
@@ -27,7 +41,7 @@ YAML
 cd my-project && chord
 ```
 
-For OpenAI / Codex OAuth / Gemini / OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
+If you cannot directly reach Anthropic, configure a proxy. For OpenAI / Codex OAuth / Gemini / OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
 
 ### macOS release downloads
 

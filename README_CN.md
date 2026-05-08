@@ -16,8 +16,22 @@
 # 1. 安装
 go install github.com/keakon/chord/cmd/chord@latest
 
-# 2. 配置凭据
+# 2. 配置 provider、模型池与凭据
 mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/config.yaml <<'YAML'
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-opus-4.7:
+        limit:
+          context: 1000000
+          output: 128000
+model_pools:
+  default:
+    - anthropic/claude-opus-4.7
+YAML
 cat > ~/.config/chord/auth.yaml <<'YAML'
 anthropic:
   - "$ANTHROPIC_API_KEY"
@@ -27,7 +41,7 @@ YAML
 cd my-project && chord
 ```
 
-OpenAI / Codex OAuth / Gemini / OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+如果无法直连 Anthropic，请配置代理；OpenAI / Codex OAuth / Gemini / OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
 ### macOS Release 下载说明
 

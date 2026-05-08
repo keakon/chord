@@ -58,13 +58,29 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     ```
     Requires Go 1.26+.
   </Card>
-  <Card title="2. Configure credentials" icon="seti:lock">
+  <Card title="2. Configure model and credentials" icon="seti:lock">
     ```bash
     mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-    echo 'anthropic:\n  - "$ANTHROPIC_API_KEY"' \
-      > ~/.config/chord/auth.yaml
+    cat > ~/.config/chord/config.yaml <<'YAML'
+    providers:
+      anthropic:
+        type: messages
+        api_url: https://api.anthropic.com/v1/messages
+        models:
+          claude-opus-4.7:
+            limit:
+              context: 1000000
+              output: 128000
+    model_pools:
+      default:
+        - anthropic/claude-opus-4.7
+    YAML
+    cat > ~/.config/chord/auth.yaml <<'YAML'
+    anthropic:
+      - "$ANTHROPIC_API_KEY"
+    YAML
     ```
-    Other providers: see [Quickstart](/chord/quickstart/).
+    Other providers and proxy setup: see [Quickstart](/chord/quickstart/).
   </Card>
   <Card title="3. Run from your project" icon="rocket">
     ```bash

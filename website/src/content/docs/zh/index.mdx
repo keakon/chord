@@ -49,13 +49,29 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     ```
     需要 Go 1.26+。
   </Card>
-  <Card title="2. 配置凭据" icon="seti:lock">
+  <Card title="2. 配置模型与凭据" icon="seti:lock">
     ```bash
     mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-    echo 'anthropic:\n  - "$ANTHROPIC_API_KEY"' \
-      > ~/.config/chord/auth.yaml
+    cat > ~/.config/chord/config.yaml <<'YAML'
+    providers:
+      anthropic:
+        type: messages
+        api_url: https://api.anthropic.com/v1/messages
+        models:
+          claude-opus-4.7:
+            limit:
+              context: 1000000
+              output: 128000
+    model_pools:
+      default:
+        - anthropic/claude-opus-4.7
+    YAML
+    cat > ~/.config/chord/auth.yaml <<'YAML'
+    anthropic:
+      - "$ANTHROPIC_API_KEY"
+    YAML
     ```
-    其他 provider 见 [快速开始](/chord/zh/quickstart/)。
+    其他 provider 与代理配置见 [快速开始](/chord/zh/quickstart/)。
   </Card>
   <Card title="3. 在项目里启动" icon="rocket">
     ```bash
