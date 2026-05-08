@@ -38,6 +38,11 @@ const (
 const DefaultTimeout = 30
 
 const (
+	defaultMaxResultLines = 50
+	defaultMaxResultBytes = 4096
+)
+
+const (
 	ActionContinue = "continue"
 	ActionBlock    = "block"
 	ActionModify   = "modify"
@@ -435,10 +440,10 @@ func normalizeHookDefaults(h HookDef) HookDef {
 		h.ResultFormat = ResultFormatSummary
 	}
 	if h.MaxResultLines <= 0 {
-		h.MaxResultLines = 50
+		h.MaxResultLines = defaultMaxResultLines
 	}
 	if h.MaxResultBytes <= 0 {
-		h.MaxResultBytes = 4096
+		h.MaxResultBytes = defaultMaxResultBytes
 	}
 	return h
 }

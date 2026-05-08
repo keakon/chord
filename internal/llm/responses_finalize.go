@@ -103,7 +103,7 @@ func finalizeOneResponsesToolCall(
 	args = unwrapJSONString(args)
 	if !json.Valid(args) {
 		log.Warnf("tool call has invalid JSON args in responses API tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
-		args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+		args = json.RawMessage(MalformedArgsSentinel)
 	}
 	log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 	resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{

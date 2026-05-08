@@ -36,7 +36,7 @@ func shellHook(name, point, command string) HookDef {
 
 func TestHookPureHelpers(t *testing.T) {
 	h := normalizeHookDefaults(HookDef{Point: OnToolCall})
-	if h.Name != OnToolCall || h.Join != JoinBackground || h.ResultFormat != ResultFormatSummary || h.MaxResultLines != 50 || h.MaxResultBytes != 4096 {
+	if h.Name != OnToolCall || h.Join != JoinBackground || h.ResultFormat != ResultFormatSummary || h.MaxResultLines != defaultMaxResultLines || h.MaxResultBytes != defaultMaxResultBytes {
 		t.Fatalf("normalizeHookDefaults = %+v", h)
 	}
 	if normalizeJoin(JoinBeforeNextLLM) != JoinBeforeNextLLM || normalizeJoin("unknown") != JoinBackground {

@@ -577,7 +577,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				// response would cause the API to reject the request.
 				if len(args) == 0 || !json.Valid(args) {
 					log.Warnf("sanitizing invalid tool call args in Anthropic conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+					args = json.RawMessage(MalformedArgsSentinel)
 				}
 				content = append(content, anthropicContent{
 					Type:  "tool_use",

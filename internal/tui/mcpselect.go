@@ -206,16 +206,16 @@ func (m *Model) handleMCPSelectKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "enter", "t":
-		return m.mcpSelectDispatch("toggle")
+		return m.mcpSelectDispatch(agent.MCPControlToggle)
 	case "e":
-		return m.mcpSelectDispatch("enable")
+		return m.mcpSelectDispatch(agent.MCPControlEnable)
 	case "d":
-		return m.mcpSelectDispatch("disable")
+		return m.mcpSelectDispatch(agent.MCPControlDisable)
 	}
 	return nil
 }
 
-func (m *Model) mcpSelectDispatch(action string) tea.Cmd {
+func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
@@ -236,6 +236,6 @@ func (m *Model) mcpSelectDispatch(action string) tea.Cmd {
 	if name == "" {
 		return nil
 	}
-	m.agent.SendUserMessage(fmt.Sprintf("/mcp %s %s", action, name))
+	m.agent.SendUserMessage(fmt.Sprintf("/mcp %s %s", string(action), name))
 	return nil
 }

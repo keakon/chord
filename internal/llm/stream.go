@@ -275,7 +275,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					// could produce malformed JSON (rare but possible).
 					if !json.Valid(tc.Args) {
 						log.Warnf("Anthropic tool call has invalid JSON args at content_block_stop tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(tc.Args))
-						tc.Args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+						tc.Args = json.RawMessage(MalformedArgsSentinel)
 					}
 					resp.ToolCalls = append(resp.ToolCalls, tc)
 					if cb != nil {
@@ -371,7 +371,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				// Validate JSON — stream may have been interrupted mid-argument.
 				if !json.Valid(args) {
 					log.Warnf("Anthropic tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(args))
-					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+					args = json.RawMessage(MalformedArgsSentinel)
 				}
 				resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
 					ID:   block.toolID,

@@ -23,7 +23,7 @@ func (a *MainAgent) handleMCPCommand(content string) {
 		a.emitToTUI(InfoEvent{Message: a.mcpStatusText()})
 		a.setIdleAndDrainPending()
 		return
-	case "enable", "disable", "toggle":
+	case string(MCPControlEnable), string(MCPControlDisable), string(MCPControlToggle):
 		if len(fields) < 2 {
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp %s: usage: /mcp %s <server|all|server...>", fields[0], fields[0])})
 			a.setIdleAndDrainPending()

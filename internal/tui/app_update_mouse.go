@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
@@ -98,7 +100,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 				if m.mcpSelect.list != nil {
 					m.mcpSelect.list.SetCursor(idx)
 				}
-				return m.mcpSelectDispatch("toggle")
+				return m.mcpSelectDispatch(agent.MCPControlToggle)
 			}
 		}
 		return nil

@@ -57,7 +57,7 @@ func TestMCPSelectDispatchRejectsAutoServerWithoutSendingCommand(t *testing.T) {
 	// OverlayList normally keeps the cursor on selectable items; force the
 	// cursor onto an auto/read-only item to verify dispatch itself rejects it.
 	m.mcpSelect.list.cursor = 0
-	cmd := m.mcpSelectDispatch("toggle")
+	cmd := m.mcpSelectDispatch(agent.MCPControlToggle)
 	if cmd == nil {
 		t.Fatal("expected read-only MCP selection to return toast command")
 	}

@@ -433,7 +433,7 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 				args := tc.Args
 				if len(args) == 0 || !json.Valid(args) {
 					log.Warnf("sanitizing invalid tool call args in conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-					args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+					args = json.RawMessage(MalformedArgsSentinel)
 				}
 				// The OpenAI Chat Completions API requires function.arguments
 				// to be a JSON *string* (e.g. "{\"path\":\"README.md\"}"),
@@ -875,7 +875,7 @@ func finalizeToolCalls(
 		// the conversation history with malformed JSON.
 		if !json.Valid(args) {
 			log.Warnf("tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
-			args = json.RawMessage(`{"error":"malformed tool call arguments from model"}`)
+			args = json.RawMessage(MalformedArgsSentinel)
 		}
 		// Discard tool calls with empty id or name — some models (e.g. GLM) omit
 		// these fields, producing history entries that cause 400 errors on
