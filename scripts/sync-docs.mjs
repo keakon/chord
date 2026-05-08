@@ -199,8 +199,13 @@ async function syncExamples() {
 
 async function clean() {
   for (const dir of [enDir, zhDir]) {
-    if (existsSync(dir)) await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
+    const entries = await readdir(dir, { withFileTypes: true });
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+        .map((entry) => rm(path.join(dir, entry.name), { force: true })),
+    );
   }
 }
 

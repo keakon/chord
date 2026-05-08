@@ -73,7 +73,6 @@ jobs:
             README.md
             README_CN.md
             CONTRIBUTING.md
-            AGENTS.md
             SECURITY.md
             CODE_OF_CONDUCT.md
           fail: true

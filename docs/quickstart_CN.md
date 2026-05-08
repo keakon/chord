@@ -14,6 +14,22 @@ go install github.com/keakon/chord/cmd/chord@latest
 go build -o chord ./cmd/chord/
 ```
 
+你也可以从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。macOS 下载版首次运行时可能会因为文件来自互联网且未公证而被系统阻止。遇到这种情况时执行：
+
+```bash
+xattr -dr com.apple.quarantine /path/to/chord
+chmod +x /path/to/chord
+/path/to/chord --version
+```
+
+如果仍然被 macOS 阻止，可以添加本地 ad-hoc 签名：
+
+```bash
+codesign --force --sign - /path/to/chord
+```
+
+请把 `/path/to/chord` 替换为实际安装路径，例如 `/usr/local/bin/chord`。
+
 > 运行源码入口时请使用 `go run ./cmd/chord/`，不要使用 `go run cmd/chord/main.go`。
 
 ## 2. 配置 API Key

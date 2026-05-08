@@ -29,6 +29,24 @@ cd my-project && chord
 
 For OpenAI / Codex OAuth / Gemini / OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
 
+### macOS release downloads
+
+If you download a macOS binary from [GitHub Releases](https://github.com/keakon/chord/releases), macOS may block the first run because the file came from the internet and is not notarized. Remove the quarantine attribute and make the binary executable:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/chord
+chmod +x /path/to/chord
+/path/to/chord --version
+```
+
+If macOS still blocks it, add a local ad-hoc signature:
+
+```bash
+codesign --force --sign - /path/to/chord
+```
+
+For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to/chord` with `/usr/local/bin/chord`.
+
 ## Why Chord
 
 - **Long sessions do not crash.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
@@ -67,7 +85,7 @@ A few extras you may appreciate later:
 - Companion: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
 - [Contributing](./CONTRIBUTING.md)
 - [Changelog](./CHANGELOG.md)
-- [Discussions](https://github.com/keakon/chord/discussions)
+- [Issues](https://github.com/keakon/chord/issues)
 
 ## Platform support
 

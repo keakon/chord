@@ -14,6 +14,22 @@ go install github.com/keakon/chord/cmd/chord@latest
 go build -o chord ./cmd/chord/
 ```
 
+You can also download prebuilt binaries from [GitHub Releases](https://github.com/keakon/chord/releases). On macOS, a downloaded binary may be blocked on first run because it came from the internet and is not notarized. If that happens, run:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/chord
+chmod +x /path/to/chord
+/path/to/chord --version
+```
+
+If macOS still blocks it, add a local ad-hoc signature:
+
+```bash
+codesign --force --sign - /path/to/chord
+```
+
+Replace `/path/to/chord` with the actual installed path, such as `/usr/local/bin/chord`.
+
 > When running from source, use `go run ./cmd/chord/` (not `go run cmd/chord/main.go`).
 
 ## 2. Configure API keys

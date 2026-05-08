@@ -12,8 +12,7 @@ export default defineConfig({
     starlight({
       title: 'Chord',
       description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
-      logo: { src: undefined },
-      social: [{ icon: 'github', label: 'GitHub', href: repo }],
+      social: { github: repo },
       defaultLocale: 'en',
       locales: {
         en: { label: 'English', lang: 'en' },
