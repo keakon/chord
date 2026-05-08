@@ -139,6 +139,43 @@ func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	}
 }
 
+func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	abs := filepath.Join(wd, "demo.go")
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "Write",
+		Content:    fmt.Sprintf(`{"path":%q,"content":"package demo\n"}`, abs),
+		Collapsed:  false,
+		ResultDone: true,
+		ResultContent: strings.Join([]string{
+			"Successfully wrote 66 lines, 1976 bytes",
+			"",
+			"LSP diagnostics in other files:",
+			"<project-root>/internal/tools/bash_test.go",
+			"[H] 259:23 Ranging over SplitSeq is more efficient",
+		}, "\n"),
+		displayWorkingDir: wd,
+	}
+
+	raw := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(raw)
+	if !strings.Contains(plain, "LSP diagnostics in other files:") {
+		t.Fatalf("expected diagnostics text to render; got:\n%s", plain)
+	}
+	for i, line := range strings.Split(plain, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "│") {
+			t.Fatalf("line %d bypassed card wrapper (missing rail): %q\nfull:\n%s", i, trimmed, plain)
+		}
+	}
+}
+
 func TestReadHeaderKeepsAbsolutePathOutsideWorkingDir(t *testing.T) {
 	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
 	abs := filepath.Join(string(os.PathSeparator), "tmp", "other", "demo.txt")

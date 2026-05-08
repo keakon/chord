@@ -418,6 +418,25 @@ func TestRenderPrewrappedCardAppliesRailToPaddingRows(t *testing.T) {
 	}
 }
 
+func TestRenderPrewrappedCardSplitsEmbeddedNewlinesBeforeWrapping(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	style := lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color(currentTheme.ToolCallBg))
+	out := renderPrewrappedCard(style, 16, []string{"first\nsecond", "third"}, currentTheme.ToolCallBg, railANSISeq("tool", false))
+	plain := stripANSI(strings.Join(out, "\n"))
+	if !strings.Contains(plain, "first") || !strings.Contains(plain, "second") || !strings.Contains(plain, "third") {
+		t.Fatalf("expected all embedded newline segments to render; got:\n%s", plain)
+	}
+	for i, line := range strings.Split(plain, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "│") {
+			t.Fatalf("line %d bypassed card wrapper (missing rail): %q\nfull:\n%s", i, trimmed, plain)
+		}
+	}
+}
+
 func TestFocusedAssistantCardKeepsBaseBackground(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	msg := "focused rail only should keep card background unchanged"

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // renderWriteCall renders a Write tool call result.
@@ -40,7 +41,15 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 
 	if !b.toolResultIsCancelled() && b.ResultContent != "" {
-		result = append(result, "  "+DimStyle.Render(b.ResultContent))
+		// Keep the compact header summary to a single line; detailed multi-line
+		// diagnostics are rendered below via renderLSPDiagnosticsLines.
+		summary := strings.TrimSpace(b.ResultContent)
+		if i := strings.IndexByte(summary, '\n'); i >= 0 {
+			summary = strings.TrimSpace(summary[:i])
+		}
+		if summary != "" {
+			result = append(result, "  "+DimStyle.Render(summary))
+		}
 	}
 
 	if writeEditToolResultExtraVisible(b) {

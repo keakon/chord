@@ -385,6 +385,7 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 	if innerWidth < 0 {
 		innerWidth = 0
 	}
+	lines = splitEmbeddedNewlines(lines)
 	padTop, padRight, padBottom, padLeft := style.GetPadding()
 	marginTop, marginRight, marginBottom, marginLeft := style.GetMargin()
 	bgSeq := colorToANSIBgSeq(bgColorNum)
@@ -435,6 +436,19 @@ func renderPrewrappedToolCard(style lipgloss.Style, cardWidth int, title string,
 	final = append(final, body...)
 	final = preserveCardBg(final, bgColorNum)
 	return renderPrewrappedCard(style, cardWidth, final, bgColorNum, railSeq)
+}
+
+func splitEmbeddedNewlines(lines []string) []string {
+	for _, line := range lines {
+		if strings.ContainsRune(line, '\n') {
+			out := make([]string, 0, len(lines)+1)
+			for _, line := range lines {
+				out = append(out, strings.Split(line, "\n")...)
+			}
+			return out
+		}
+	}
+	return lines
 }
 
 // railANSISeq returns the ANSI foreground sequence for the conversation rail
