@@ -256,6 +256,169 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 	}
 }
 
+func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o": {
+						Limit:    config.ModelLimit{Context: 128000, Output: 4096},
+						Variants: map[string]config.ModelVariant{"balanced": {}},
+					},
+					"gpt-4.1": {
+						Limit:    config.ModelLimit{Context: 200000, Output: 4096},
+						Variants: map[string]config.ModelVariant{"high": {}},
+					},
+					"o3-pro": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+
+	pool, selectedIdx := buildModelPool(
+		[]string{"openai/gpt-4o@balanced", "openai/gpt-4.1", "openai/o3-pro@high"},
+		"high",
+		"openai/gpt-4.1",
+		cfg.Providers,
+		nil,
+		"",
+		nil,
+		nil,
+		"test",
+	)
+	if len(pool) != 3 {
+		t.Fatalf("pool len = %d, want 3", len(pool))
+	}
+	if selectedIdx != 1 {
+		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
+	}
+
+	gotRefs := []string{
+		pool[0].ProviderConfig.Name() + "/" + pool[0].ModelID + "@" + pool[0].Variant,
+		pool[1].ProviderConfig.Name() + "/" + pool[1].ModelID + "@" + pool[1].Variant,
+		pool[2].ProviderConfig.Name() + "/" + pool[2].ModelID + "@" + pool[2].Variant,
+	}
+	wantRefs := []string{
+		"openai/gpt-4o@balanced",
+		"openai/gpt-4.1@high",
+		"openai/o3-pro@high",
+	}
+	for i := range wantRefs {
+		if gotRefs[i] != wantRefs[i] {
+			t.Fatalf("pool[%d] = %q, want %q", i, gotRefs[i], wantRefs[i])
+		}
+	}
+}
+
+func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+	auth := config.AuthConfig{
+		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+
+	providerCfg := resolveProviderConfigForTest("openai", cfg.Providers["openai"], auth)
+	selectedImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "selected failed"}}}}
+	fallbackOneImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "fallback one failed"}}}}
+	fallbackTwoImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}, {resp: &message.Response{Content: "next call starts here"}}}}
+
+	pool, selectedIdx := buildModelPool(
+		[]string{"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+		"",
+		"openai/gpt-4.1",
+		cfg.Providers,
+		auth,
+		"",
+		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
+			switch provName {
+			case "openai":
+				return providerCfg, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+		func(_ string, _ config.ProviderConfig, _ *llm.ProviderConfig, modelID string) (llm.Provider, error) {
+			switch modelID {
+			case "gpt-4o":
+				return fallbackTwoImpl, nil
+			case "gpt-4.1":
+				return selectedImpl, nil
+			case "o3-pro":
+				return fallbackOneImpl, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+		"test",
+	)
+	if len(pool) != 3 {
+		t.Fatalf("pool len = %d, want 3", len(pool))
+	}
+	if selectedIdx != 1 {
+		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
+	}
+
+	client := llm.NewClient(providerCfg, selectedImpl, "gpt-4.1", 4096, "")
+	client.SetOutputTokenMax(cfg.MaxOutputTokens)
+	client.SetModelPool(pool, selectedIdx)
+
+	if got := client.PrimaryModelRef(); got != "openai/gpt-4.1" {
+		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4.1", got)
+	}
+
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream() error = %v", err)
+	}
+	if resp == nil || resp.Content != "fallback success" {
+		t.Fatalf("response = %#v, want fallback success", resp)
+	}
+	st := client.LastCallStatus()
+	if !st.FallbackTriggered {
+		t.Fatal("expected fallback across rotated model pool")
+	}
+	if st.SelectedModelRef != "openai/gpt-4.1" {
+		t.Fatalf("SelectedModelRef = %q, want openai/gpt-4.1", st.SelectedModelRef)
+	}
+	if st.RunningModelRef != "openai/gpt-4o" {
+		t.Fatalf("RunningModelRef = %q, want openai/gpt-4o", st.RunningModelRef)
+	}
+
+	// After success on gpt-4o, the next request should start from that rotated
+	// pool entry even though the client object still stores the original selected
+	// head as its primary config surface.
+	resp, err = client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "again"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("second CompleteStream() error = %v", err)
+	}
+	if resp == nil || resp.Content != "next call starts here" {
+		t.Fatalf("second response = %#v, want next call starts here", resp)
+	}
+	st = client.LastCallStatus()
+	if st.SelectedModelRef != "openai/gpt-4o" {
+		t.Fatalf("second SelectedModelRef = %q, want openai/gpt-4o", st.SelectedModelRef)
+	}
+	if st.RunningModelRef != "openai/gpt-4o" {
+		t.Fatalf("second RunningModelRef = %q, want openai/gpt-4o", st.RunningModelRef)
+	}
+}
+
 // TestBuildMainClientFactorySingleModelPool verifies behavior when only one model
 // is configured (should not set pool).
 func TestBuildMainClientFactorySingleModelPool(t *testing.T) {

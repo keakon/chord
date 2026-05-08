@@ -222,8 +222,18 @@ func (m *Model) mcpSelectDispatch(action string) tea.Cmd {
 	if m.isAgentBusy() {
 		return m.enqueueToast("Wait until the agent is idle before changing MCP", "warn")
 	}
-	name, ok := m.mcpSelectCurrent()
+	if m.mcpSelect.list == nil {
+		return nil
+	}
+	item, ok := m.mcpSelect.list.SelectedItem()
 	if !ok {
+		return nil
+	}
+	if item.Disabled {
+		return m.enqueueToast("Auto-start MCP servers are read-only", "info")
+	}
+	name := strings.TrimSpace(item.ID)
+	if name == "" {
 		return nil
 	}
 	m.agent.SendUserMessage(fmt.Sprintf("/mcp %s %s", action, name))
