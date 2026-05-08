@@ -26,7 +26,7 @@ func rejectSpeculativeExecution(reason string) speculativeExecutionDecision {
 }
 
 // evaluateSpeculativeExecutionPolicy is the streaming-execution safety gate.
-// Phase 4 keeps side-effecting and interactive tools out of speculative execution
+// Side-effecting and interactive tools stay out of speculative execution
 // until each tool has an audited rollback / interrupt protocol.
 func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage) speculativeExecutionDecision {
 	toolName = strings.TrimSpace(toolName)

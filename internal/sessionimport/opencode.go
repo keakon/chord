@@ -17,7 +17,7 @@ type openCodeExportFile struct {
 // convertOpenCodeExport converts an OpenCode `opencode export <sessionID>` JSON
 // file into a Chord main transcript.
 //
-// Phase 1 scope: tool history is always imported as text (no structured tools).
+// Tool history is always imported as text (no structured tools).
 func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -93,7 +93,7 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		}
 	}
 
-	// Ignore model-switched/compaction markers for now (Phase 1 keeps report-only).
+	// Ignore model-switched/compaction markers; the importer is report-only for these.
 	switch kind {
 	case "model-switched", "model_switched", "model_switched_event", "compaction", "session-event", "event":
 		return msg, true, false, false, []string{"skipped non-conversation event type=" + kind}, nil

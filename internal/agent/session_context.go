@@ -94,8 +94,8 @@ func injectMetaUserReminder(messages []message.Message, content string) []messag
 // injectSessionContextReminder prepends the cached reminder (if any) before the
 // first user message in messages.
 //
-// The reminder is meta: it is not stored in ctxMgr or persisted. For the chosen
-// session policy (Phase A), it is injected once per session-head only.
+// The reminder is meta: it is not stored in ctxMgr or persisted. It is injected
+// once per session-head only.
 func (a *MainAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
 	if a.sessionReminderInjected.Load() {
 		return messages

@@ -8,9 +8,8 @@ import (
 // ImportReport captures a detailed report of a session import conversion.
 // It is written to <sessionDir>/import-report.json.
 //
-// Phase 1 intentionally focuses on text-mode imports (no structured tools),
-// so the schema is oriented around warnings and downgrade statistics.
-// It is safe to extend this struct in later phases.
+// The schema is oriented around warnings and downgrade statistics, since
+// imports are text-mode only (no structured tools).
 type ImportReport struct {
 	Source          string    `json:"source"`
 	SourcePath      string    `json:"source_path,omitempty"`

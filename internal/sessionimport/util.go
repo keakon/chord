@@ -24,7 +24,7 @@ const (
 func normalizeToolMode(source, raw string) (string, error) {
 	mode := strings.TrimSpace(raw)
 	if mode == "" {
-		// Phase 1 defaults.
+		// Per-source defaults.
 		switch source {
 		case "opencode", "codex":
 			return ToolModeText, nil

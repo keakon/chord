@@ -21,7 +21,7 @@ func TestIdleAfterCancelKeepsQueuedDraftsPaused(t *testing.T) {
 		QueuedAt: time.Now(),
 	}}
 
-	// Phase A: ESC is the cancel key (not Ctrl+C)
+	// ESC is the cancel key (not Ctrl+C).
 	// Simulate ESC in normal mode with busy agent
 	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})); cmd == nil {
 		t.Fatal("handleNormalKey(ESC) = nil, want cancel command")

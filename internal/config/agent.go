@@ -88,9 +88,10 @@ func (c *AgentConfig) IsSubAgent() bool {
 
 // PoolNames returns the ordered list of model pool names defined in this agent config.
 //
-// When the agent config uses model_pools: [...], the list order in YAML is preserved
-// (and used as the fallback "first pool"). For inline models: { ... } definitions,
-// YAML map order is not preserved after unmarshal, so we fall back to a sorted order.
+// When the agent config went through ResolveAgentModelPools, the user-declared
+// model_pools order in YAML is preserved. For configs constructed directly
+// (e.g. in tests), where poolOrder is unset, names are returned in sorted order
+// since YAML map iteration does not preserve insertion order.
 func (c *AgentConfig) PoolNames() []string {
 	if len(c.Models) == 0 {
 		return nil
@@ -100,7 +101,6 @@ func (c *AgentConfig) PoolNames() []string {
 		copy(out, c.poolOrder)
 		return out
 	}
-	// Best effort: keep stable order for inline maps.
 	names := make([]string, 0, len(c.Models))
 	for name := range c.Models {
 		names = append(names, name)

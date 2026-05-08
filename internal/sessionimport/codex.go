@@ -13,7 +13,7 @@ import (
 // convertCodexRollout converts a Codex rollout JSONL file (typically under
 // ~/.codex/sessions/**/rollout-*.jsonl) into a Chord main transcript.
 //
-// Phase 1 scope: tool history is always imported as text (no structured tools).
+// Tool history is always imported as text (no structured tools).
 func convertCodexRollout(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {

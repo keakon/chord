@@ -36,7 +36,7 @@ type ImportResult struct {
 }
 
 // Import converts a supported external conversation export into a Chord session.
-// Phase 1+2 support OpenCode export JSON, Codex rollout JSONL, and Claude Code
+// Supported sources: OpenCode export JSON, Codex rollout JSONL, and Claude Code
 // transcript JSONL. Tool import defaults remain conservative by source.
 func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	_ = ctx
@@ -99,7 +99,7 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		}
 	case "opencode":
 		if toolMode == ToolModeStructured {
-			return nil, fmt.Errorf("opencode import: --tool-mode structured is not supported in Phase 1; use --tool-mode text")
+			return nil, fmt.Errorf("opencode import: --tool-mode structured is not supported for opencode; use --tool-mode text")
 		}
 		msgs, err = convertOpenCodeExport(data, reasoningMode, &report)
 		if err != nil {
@@ -107,7 +107,7 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		}
 	case "codex":
 		if toolMode == ToolModeStructured {
-			return nil, fmt.Errorf("codex import: --tool-mode structured is not supported in Phase 1; use --tool-mode text")
+			return nil, fmt.Errorf("codex import: --tool-mode structured is not supported for codex; use --tool-mode text")
 		}
 		msgs, err = convertCodexRollout(data, reasoningMode, &report)
 		if err != nil {

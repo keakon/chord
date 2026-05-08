@@ -158,7 +158,7 @@ func runTestProviderRequest(provider llm.Provider, testKey, modelID string) erro
 		ctx,
 		testKey,
 		modelID,
-		"You are a helpful assistant.", // Non-empty system prompt for API compatibility
+		"You are a helpful assistant.", // some providers reject empty system prompts
 		messages,
 		nil, // tools
 		128, // maxTokens

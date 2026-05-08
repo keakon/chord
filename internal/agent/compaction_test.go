@@ -1225,7 +1225,7 @@ func TestSpawnFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
 	payload := &tools.SpawnFinishedPayload{BackgroundID: "job-1", AgentID: a.instanceID, Kind: "job", Status: "finished (exit 0)", Message: "background finished"}
 	a.dispatch(Event{Type: EventSpawnFinished, SourceID: "main", Payload: payload})
 
-	// Phase B: events are no longer queued behind compaction.
+	// Events are no longer queued behind compaction.
 	// With no active turn, spawn-finished starts a new turn immediately.
 	if a.turn == nil {
 		t.Fatal("expected spawn-finished to start a turn immediately during compaction")

@@ -124,8 +124,8 @@ func (m *Model) handleCtrlC() tea.Cmd {
 		m.clearPendingQuit()
 		return nil
 	}
-	// Phase A: Ctrl+C no longer cancels busy agent or compaction.
-	// ESC is now the dedicated cancel key. Ctrl+C only initiates quit.
+	// Ctrl+C no longer cancels busy agent or compaction.
+	// ESC is the dedicated cancel key. Ctrl+C only initiates quit.
 	m.pendingQuitAt = now
 	m.pendingQuitBy = "ctrl+c"
 	m.pendingQuitGen++
