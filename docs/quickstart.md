@@ -88,9 +88,15 @@ providers:
         limit:
           context: 1000000
           output: 128000
+
+model_pools:
+  default:
+    - anthropic/claude-opus-4.7
 ```
 
-If you use an OpenAI-compatible API, change `type` and `api_url` accordingly.
+`providers` defines the API endpoint and available models; `model_pools.default` defines the model pool used by the built-in `builder` / `planner` agents. Both are required. If you only configure a provider, startup will fail because the default model pool cannot be resolved. `builder` does not automatically use every global `model_pools` entry; the built-in config only references `default`. If you override the built-in `builder` agent with a custom agent config, that config must explicitly define `model_pools` or `models`.
+
+If you use an OpenAI-compatible API, change `type`, `api_url`, the provider name, and the model name, then update the `provider/model` reference in `model_pools.default` to match.
 
 ## 4. Run
 

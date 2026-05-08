@@ -59,6 +59,8 @@ my-gateway:
 
 ## 网络代理
 
+如果你所在网络无法直连 Anthropic、OpenAI、Google 等官方 API，需要为 Chord 配置代理；否则 provider 请求会超时或连接失败。可以使用标准环境变量，也可以在 `config.yaml` 中配置全局或 provider 级 `proxy`。
+
 Chord 用 Go 标准的 `http.ProxyFromEnvironment` 解析出站 HTTP 代理。所以标准变量直接生效：
 
 | 变量                | 用途                                                                            |

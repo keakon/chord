@@ -88,9 +88,15 @@ providers:
         limit:
           context: 1000000
           output: 128000
+
+model_pools:
+  default:
+    - anthropic/claude-opus-4.7
 ```
 
-如果你使用 OpenAI 兼容接口，可以把 `type` 和 `api_url` 改成对应值。
+`providers` 定义可用的 API endpoint 与模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置，否则只配置 provider 时启动会报找不到默认模型池。`builder` 不会自动使用所有全局 `model_pools`；内置配置只引用 `default`，如果你用自定义 `builder` agent 覆盖内置配置，也必须显式配置 `model_pools` 或 `models`。
+
+如果你使用 OpenAI 兼容接口，可以把 `type`、`api_url`、provider 名和模型名改成对应值，并同步更新 `model_pools.default` 中的 `provider/model` 引用。
 
 ## 4. 运行
 

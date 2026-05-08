@@ -17,19 +17,30 @@ Typical permission states:
 - `ask`: require confirmation before execution
 - `deny`: reject directly
 
-Permissions can be defined in Agent config, for example:
+Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
 
 ```yaml
 permission:
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Write: ask
-  Edit: ask
+  "*": allow
+  Handoff: deny
+  Delegate: deny
+  Delete: ask
   Bash:
-    "go test ./...": allow
-    "rm *": deny
+    "sudo *": ask
+    "rm *": ask
+    "rmdir *": ask
+    "mv *": ask
+    "git add *": ask
+    "git checkout *": ask
+    "git clean *": ask
+    "git commit *": ask
+    "git push *": ask
+    "git reset *": ask
+    "git restore *": ask
+    "git tag *": ask
 ```
+
+This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `Bash` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
 
 > Permissions are Agent-level configuration, not a simple global switch.
 

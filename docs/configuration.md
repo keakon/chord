@@ -43,8 +43,6 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 - Speculative results may be shown early in the UI, but they are only appended to
   the conversation context after finalize validation.
 
-Troubleshooting notes live in `.internal-docs/troubleshooting/streaming-tool-execution.md`.
-
 ## Minimal provider config
 
 ### Anthropic

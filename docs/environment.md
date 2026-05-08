@@ -59,6 +59,8 @@ Notes:
 
 ## Network proxy
 
+If your network cannot directly reach official Anthropic, OpenAI, Google, or similar APIs, configure a proxy for Chord; otherwise provider requests may time out or fail to connect. You can use standard environment variables, or configure a global/provider-level `proxy` in `config.yaml`.
+
 Chord uses Go's standard proxy resolution (`http.ProxyFromEnvironment`) for outbound HTTP. The standard proxy variables apply directly:
 
 | Variable           | Purpose                                                                                                            |

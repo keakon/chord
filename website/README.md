@@ -36,7 +36,7 @@ website/
 │   └── styles/
 │       └── custom.css      # Theme tweaks
 └── public/
-    └── screenshots/        # M2: drop screenshots here (see .internal-docs/guides/screenshots-checklist.md)
+    └── screenshots/        # M2: drop screenshots here
 ```
 
 ## Authoring
