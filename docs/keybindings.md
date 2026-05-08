@@ -88,7 +88,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 - **Normal mode** — opens the model-pool selector (the `SwitchModel` action).
 - **Insert mode** — acts as history-up (the `InsertHistoryUp` action). To switch the pool from Insert mode, type `/models` and press Enter, or press `Esc` to leave Insert mode first.
 
-If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+u`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
+If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+t`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
 
 ## Customizing key bindings
 
@@ -101,7 +101,7 @@ keymap:
   scroll_down: ["down"]        # arrow keys for line scrolling only
   scroll_up: ["up"]
   quit: ["Q"]                  # require shift for quit
-  switch_model: ["ctrl+u"]     # avoid the Ctrl+P insert-mode collision
+  switch_model: ["ctrl+t"]     # avoid the Ctrl+P insert-mode collision
 ```
 
 Action names are lower snake_case mirrors of the [`KeyMap` fields](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) in `internal/tui/keymap.go`. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.

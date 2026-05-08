@@ -110,7 +110,7 @@ Response:
   "type": "models_response",
   "payload": {
     "ok": true,
-    "status": "current role: thinking\n..."
+    "status": "Model pool: thinking\n..."
   }
 }
 ```

@@ -88,7 +88,7 @@ TUI 有两种模式：
 - **Normal 模式**：打开模型池选择器（`SwitchModel`）
 - **Insert 模式**：触发历史上翻（`InsertHistoryUp`）。要在 Insert 模式切池，可输入 `/models` 回车，或先按 `Esc` 切到 Normal 模式
 
-若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+u`），见下文 [自定义键位](#自定义键位)。
+若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+t`），见下文 [自定义键位](#自定义键位)。
 
 ## 自定义键位
 
@@ -101,7 +101,7 @@ keymap:
   scroll_down: ["down"]        # 仅用方向键做行滚动
   scroll_up: ["up"]
   quit: ["Q"]                  # 退出要求大写 Q（防误触）
-  switch_model: ["ctrl+u"]     # 避开 Ctrl+P 在 Insert 模式的冲突
+  switch_model: ["ctrl+t"]     # 避开 Ctrl+P 在 Insert 模式的冲突
 ```
 
 action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go)的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
