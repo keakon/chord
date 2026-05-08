@@ -8,61 +8,6 @@
 
 - 配套网关：[keakon/chord-gateway](https://github.com/keakon/chord-gateway) —— 把 Chord 接到微信、飞书等聊天平台
 
-## 三步上手
-
-需要 Go 1.26+。
-
-```bash
-# 1. 安装
-go install github.com/keakon/chord/cmd/chord@latest
-
-# 2. 配置 provider、模型池与凭据
-mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-cat > ~/.config/chord/config.yaml <<'YAML'
-providers:
-  modelscope:
-    type: chat-completions
-    api_url: https://api-inference.modelscope.cn/v1/chat/completions
-    models:
-      Qwen/Qwen3.5-397B-A17B:
-        limit:
-          context: 262144
-          output: 65536
-        modalities:
-          input: [text, image]
-model_pools:
-  default:
-    - modelscope/Qwen/Qwen3.5-397B-A17B
-YAML
-cat > ~/.config/chord/auth.yaml <<'YAML'
-modelscope:
-  - "$MODELSCOPE_API_KEY"
-YAML
-
-# 3. 在项目里启动
-cd my-project && chord
-```
-
-其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
-
-### macOS Release 下载说明
-
-如果你从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载 macOS 可执行文件，首次运行时 macOS 可能会因为文件来自互联网且未公证而阻止打开。可以移除 quarantine 属性并确保文件可执行：
-
-```bash
-xattr -dr com.apple.quarantine /path/to/chord
-chmod +x /path/to/chord
-/path/to/chord --version
-```
-
-如果仍然被 macOS 阻止，可以添加本地 ad-hoc 签名：
-
-```bash
-codesign --force --sign - /path/to/chord
-```
-
-例如安装到 `/usr/local/bin/chord` 时，把 `/path/to/chord` 替换为 `/usr/local/bin/chord`。
-
 ## 为什么选 Chord
 
 - **长会话不崩。** 自动 compaction 把长对话压缩成上下文摘要，让会话在超过 context window 之后还能继续——保留继续工作所需的关键信息，不会出现"它忘了？"的尴尬。
@@ -85,6 +30,74 @@ codesign --force --sign - /path/to/chord
 - **小 VPS 上的常驻助手。** 低资源占用 + 长会话稳，可以挂着随时回来用。
 - **混搭多模型。** 思考用强模型、导航用快模型、压缩用便宜模型——一键切换。
 - **从手机上操控。** 把 `chord headless` 通过 chord-gateway 暴露出来，离开桌面也能在聊天里调用真正的编码 agent。
+
+## 三步上手
+
+### 1. 安装
+
+如果你已经安装 Go 1.26+：
+
+```bash
+go install github.com/keakon/chord/cmd/chord@latest
+```
+
+如果你没有安装 Go 1.26+，可以从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。选择与你的 OS/架构匹配的压缩包，解压后把 `chord` 放到 `PATH` 中，然后执行：
+
+```bash
+chord --version
+```
+
+### 2. 配置 provider、模型池与凭据
+
+```bash
+mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/config.yaml <<'YAML'
+providers:
+  modelscope:
+    type: chat-completions
+    api_url: https://api-inference.modelscope.cn/v1/chat/completions
+    models:
+      Qwen/Qwen3.5-397B-A17B:
+        limit:
+          context: 262144
+          output: 65536
+        modalities:
+          input: [text, image]
+model_pools:
+  default:
+    - modelscope/Qwen/Qwen3.5-397B-A17B
+YAML
+cat > ~/.config/chord/auth.yaml <<'YAML'
+modelscope:
+  - "$MODELSCOPE_API_KEY"
+YAML
+```
+
+### 3. 在项目里启动
+
+```bash
+cd my-project && chord
+```
+
+其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+
+### Release 下载说明
+
+GitHub Releases 提供多个受支持平台的预构建二进制。macOS 下载版首次运行时可能会因为文件来自互联网且未公证而被系统阻止。遇到这种情况时，可以移除 quarantine 属性并确保文件可执行：
+
+```bash
+xattr -dr com.apple.quarantine /path/to/chord
+chmod +x /path/to/chord
+/path/to/chord --version
+```
+
+如果仍然被 macOS 阻止，可以添加本地 ad-hoc 签名：
+
+```bash
+codesign --force --sign - /path/to/chord
+```
+
+例如安装到 `/usr/local/bin/chord` 时，把 `/path/to/chord` 替换为 `/usr/local/bin/chord`。
 
 ## 文档
 

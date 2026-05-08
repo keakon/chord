@@ -8,61 +8,6 @@
 
 - Companion gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway) — drive Chord from WeChat, Feishu, and other chat surfaces
 
-## Three-step setup
-
-Requires Go 1.26+.
-
-```bash
-# 1. Install
-go install github.com/keakon/chord/cmd/chord@latest
-
-# 2. Configure provider, model pool, and credentials
-mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-cat > ~/.config/chord/config.yaml <<'YAML'
-providers:
-  openrouter:
-    type: chat-completions
-    api_url: https://openrouter.ai/api/v1/chat/completions
-    models:
-      openai/gpt-5.5:
-        limit:
-          context: 1000000
-          output: 128000
-        modalities:
-          input: [text, image]
-model_pools:
-  default:
-    - openrouter/openai/gpt-5.5
-YAML
-cat > ~/.config/chord/auth.yaml <<'YAML'
-openrouter:
-  - "$OPENROUTER_API_KEY"
-YAML
-
-# 3. Run from your project
-cd my-project && chord
-```
-
-For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
-
-### macOS release downloads
-
-If you download a macOS binary from [GitHub Releases](https://github.com/keakon/chord/releases), macOS may block the first run because the file came from the internet and is not notarized. Remove the quarantine attribute and make the binary executable:
-
-```bash
-xattr -dr com.apple.quarantine /path/to/chord
-chmod +x /path/to/chord
-/path/to/chord --version
-```
-
-If macOS still blocks it, add a local ad-hoc signature:
-
-```bash
-codesign --force --sign - /path/to/chord
-```
-
-For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to/chord` with `/usr/local/bin/chord`.
-
 ## Why Chord
 
 - **Long sessions do not crash.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
@@ -85,6 +30,74 @@ A few extras you may appreciate later:
 - **Always-on assistant on a small VPS.** Low resource budget plus reliable long sessions means you can leave it running and check in throughout the day.
 - **Mixed-model setups.** Use a strong model for thinking, a fast one for navigation, a cheap one for compaction — switch with one keystroke when the wind changes.
 - **Operating from your phone.** Expose `chord headless` through chord-gateway and drive a real coding agent from a chat app while you are away from the desk.
+
+## Three-step setup
+
+### 1. Install
+
+If you already have Go 1.26+ installed:
+
+```bash
+go install github.com/keakon/chord/cmd/chord@latest
+```
+
+If you do not have Go 1.26+, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases). Pick the archive for your OS/architecture, extract it, put `chord` on your `PATH`, and run:
+
+```bash
+chord --version
+```
+
+### 2. Configure provider, model pool, and credentials
+
+```bash
+mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/config.yaml <<'YAML'
+providers:
+  openrouter:
+    type: chat-completions
+    api_url: https://openrouter.ai/api/v1/chat/completions
+    models:
+      openai/gpt-5.5:
+        limit:
+          context: 1000000
+          output: 128000
+        modalities:
+          input: [text, image]
+model_pools:
+  default:
+    - openrouter/openai/gpt-5.5
+YAML
+cat > ~/.config/chord/auth.yaml <<'YAML'
+openrouter:
+  - "$OPENROUTER_API_KEY"
+YAML
+```
+
+### 3. Run from your project
+
+```bash
+cd my-project && chord
+```
+
+For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
+
+### Release download notes
+
+GitHub Releases provide prebuilt binaries for supported platforms. On macOS, the downloaded binary may be blocked on first run because the file came from the internet and is not notarized. If that happens, remove the quarantine attribute and make the binary executable:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/chord
+chmod +x /path/to/chord
+/path/to/chord --version
+```
+
+If macOS still blocks it, add a local ad-hoc signature:
+
+```bash
+codesign --force --sign - /path/to/chord
+```
+
+For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to/chord` with `/usr/local/bin/chord`.
 
 ## Documentation
 

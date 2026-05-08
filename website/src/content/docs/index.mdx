@@ -53,10 +53,13 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="1. Install" icon="seti:go">
+    If you already have Go 1.26+ installed:
+
     ```bash
     go install github.com/keakon/chord/cmd/chord@latest
     ```
-    Requires Go 1.26+.
+
+    If not, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
   </Card>
   <Card title="2. Configure model and credentials" icon="seti:lock">
     ```bash
