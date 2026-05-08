@@ -205,7 +205,7 @@ model_pools: [thinking]
 
 未显式选择池时，Chord 回退到该 agent `model_pools: [...]` 列表中的第一个池。
 
-运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用 `model_pools` 列表中的第一个池；想恢复默认时切回第一个池即可。
+运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。切换池会更新后续 LLM 调用的整条 fallback 链；即使当前选中的 `provider/model` 同时存在于两个池中，也会按新池的顺序重新构建（已发起的 in-flight 请求仍使用其开始时快照到的 client）。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用 `model_pools` 列表中的第一个池；想恢复默认时切回第一个池即可。
 
 ## 用 YAML anchor 复用模型模板
 

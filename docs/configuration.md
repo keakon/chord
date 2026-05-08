@@ -223,7 +223,10 @@ in the `model_pools: [...]` list.
 
 At runtime, use `/models` to switch the pool for the **current view** (per project,
 persisted across restarts). In the main view this means the current main role; in a
-SubAgent view it means that SubAgent's agent pool selection. You can also set a named
+SubAgent view it means that SubAgent's agent pool selection. Switching pools updates
+the full fallback chain for subsequent LLM calls, even if the currently selected
+`provider/model` exists in both pools (in-flight requests keep using their starting
+snapshot). You can also set a named
 agent directly with `/models --agent <name> <pool>`. For SubAgents, the default behavior
 is simply to use the first pool listed in `model_pools: [...]`; switching back to that
 first pool restores the default behavior.

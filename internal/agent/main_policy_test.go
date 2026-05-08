@@ -710,6 +710,121 @@ func TestSwitchRoleAppliesMainRoleModelImmediately(t *testing.T) {
 	}
 }
 
+func TestSetCurrentRolePoolRebuildsClientWhenSelectedModelExistsInNewPool(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	cfg := &config.AgentConfig{
+		Name: "builder",
+		Mode: config.AgentModeMain,
+		Models: map[string][]string{
+			"single": {"provider-x/model-x"},
+			"multi":  {"provider-x/model-x", "provider-y/model-y", "provider-z/model-z"},
+		},
+	}
+	a.SetAgentConfigs(map[string]*config.AgentConfig{"builder": cfg})
+	policy := NewRuntimeModelPoolPolicy()
+	policy.SetCurrentRole("single")
+	a.SetModelPoolPolicy(policy, "")
+
+	providers := map[string]*llm.ProviderConfig{
+		"provider-x": llm.NewProviderConfig("provider-x", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-x": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"key-x"}),
+		"provider-y": llm.NewProviderConfig("provider-y", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-y": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"key-y"}),
+		"provider-z": llm.NewProviderConfig("provider-z", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-z": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"key-z"}),
+	}
+	providers["provider-x"].MarkCooldown("key-x", time.Minute)
+	impls := map[string]llm.Provider{
+		"provider-x": stubProvider{err: &llm.APIError{StatusCode: 429, Message: "rate limited"}},
+		"provider-y": stubProvider{response: &message.Response{Content: "from fallback", StopReason: "stop"}},
+		"provider-z": stubProvider{response: &message.Response{Content: "unused", StopReason: "stop"}},
+	}
+
+	var factoryCalls []string
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		factoryCalls = append(factoryCalls, providerModel)
+		roleModels := a.CurrentRoleModelRefs()
+		pool := make([]llm.FallbackModel, 0, len(roleModels))
+		selectedIdx := -1
+		for _, ref := range roleModels {
+			baseRef, variant := config.ParseModelRef(ref)
+			providerName, modelID, ok := strings.Cut(baseRef, "/")
+			if !ok {
+				t.Fatalf("invalid test model ref %q", ref)
+			}
+			prov := providers[providerName]
+			if prov == nil {
+				t.Fatalf("missing test provider %q", providerName)
+			}
+			entry := llm.FallbackModel{
+				ProviderConfig: prov,
+				ProviderImpl:   impls[providerName],
+				ModelID:        modelID,
+				MaxTokens:      1024,
+				ContextLimit:   8192,
+				Variant:        variant,
+			}
+			if config.NormalizeModelRef(ref) == config.NormalizeModelRef(providerModel) && selectedIdx < 0 {
+				selectedIdx = len(pool)
+			}
+			pool = append(pool, entry)
+		}
+		if selectedIdx < 0 {
+			selectedIdx = 0
+		}
+		selected := pool[selectedIdx]
+		client := llm.NewClient(selected.ProviderConfig, selected.ProviderImpl, selected.ModelID, selected.MaxTokens, "")
+		client.SetModelPool(pool, selectedIdx)
+		return client, selected.ModelID, selected.ContextLimit, nil
+	})
+
+	if err := a.ApplyInitialModel("provider-x/model-x"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	if got := len(factoryCalls); got != 1 {
+		t.Fatalf("factory calls after initial model = %d, want 1", got)
+	}
+
+	if err := a.setCurrentRolePool("multi", false); err != nil {
+		t.Fatalf("setCurrentRolePool: %v", err)
+	}
+	if got := len(factoryCalls); got != 2 {
+		t.Fatalf("factory calls after pool switch = %d, want 2", got)
+	}
+	if got := factoryCalls[1]; got != "provider-x/model-x" {
+		t.Fatalf("pool switch rebuilt selected model %q, want provider-x/model-x", got)
+	}
+	if got := a.llmClient.ContextLimitForModelRef("provider-y/model-y"); got != 8192 {
+		t.Fatalf("rebuilt client missing fallback model context limit = %d, want 8192", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := a.llmClient.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hello"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream after pool switch: %v", err)
+	}
+	if resp == nil || resp.Content != "from fallback" {
+		t.Fatalf("CompleteStream response = %#v, want fallback response", resp)
+	}
+	if st := a.llmClient.LastCallStatus(); st.RunningModelRef != "provider-y/model-y" {
+		t.Fatalf("RunningModelRef = %q, want provider-y/model-y", st.RunningModelRef)
+	}
+}
+
 func TestAvailableRolesSortsCustomMainRolesDeterministically(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

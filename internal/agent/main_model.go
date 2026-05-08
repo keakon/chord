@@ -366,8 +366,12 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 		return nil
 	}
 	if modelRefInPool(current, refs) {
-		a.modelPoolPolicy.SetLastPicked(cfg.Name, pool, current)
-		return nil
+		if a.modelSwitchFactory == nil {
+			a.modelPoolPolicy.SetLastPicked(cfg.Name, pool, current)
+			a.mainModelPolicyDirty.Store(true)
+			return nil
+		}
+		return a.switchModel(current, false)
 	}
 	ref := a.modelPoolPolicy.ResolveInitialModelRef(cfg.Name, cfg)
 	if ref == "" {
