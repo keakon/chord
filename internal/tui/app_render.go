@@ -390,16 +390,15 @@ func (m *Model) View() tea.View {
 	canvas := m.screenBuf
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	rendered := canvas.Render()
 	if m.useFocusResizeFreeze {
-		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims trailing
-		// spaces from a row. Avoid injecting terminal control sequences into the
-		// View content (UV StyledString only understands SGR + hyperlinks); instead
-		// pad every line to the full frame width with real spaces so Bubble Tea's
-		// UV renderer overwrites all cells deterministically.
-		v.Content = padRenderToFullFrame(rendered, m.width, m.height)
+		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims
+		// trailing spaces from a row during string rendering. Avoid injecting
+		// terminal control sequences into View content; instead, serialize the
+		// already-drawn screen buffer as a full frame so Bubble Tea/UV recreate
+		// the exact cells, including trailing spaces, on every row.
+		v.Content = renderScreenBufferFullFrame(canvas, m.width, m.height)
 	} else {
-		v.Content = rendered
+		v.Content = canvas.Render()
 	}
 	v.WindowTitle = m.terminalTitleView
 	if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
@@ -425,38 +424,78 @@ func (m *Model) View() tea.View {
 
 const ansiNoopSGR = "\x1b[m"
 
-func padRenderToFullFrame(rendered string, width, height int) string {
+func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string {
 	if width <= 0 || height <= 0 {
-		return rendered
-	}
-	// Be robust to platform-specific newlines in case a renderer upstream changes.
-	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
-
-	lines := strings.Split(rendered, "\n")
-	if len(lines) < height {
-		lines = append(lines, make([]string, height-len(lines))...)
-	} else if len(lines) > height {
-		lines = lines[:height]
+		return ""
 	}
 
 	var b strings.Builder
-	b.Grow(len(rendered) + height) // +height for newlines/spaces growth lower bound
-	for i := 0; i < height; i++ {
-		line := lines[i]
-		b.WriteString(line)
-		w := ansi.StringWidth(line)
-		if w < width {
-			// Ensure padding spaces don't inherit any active style.
-			b.WriteString(ansiNoopSGR)
-			for j := 0; j < width-w; j++ {
-				b.WriteByte(' ')
-			}
-		}
-		if i < height-1 {
+	// Lower-bound estimate: one byte per cell plus newlines. Styled cells may
+	// emit more bytes, but this avoids many tiny reallocations.
+	b.Grow(width*height + max(0, height-1))
+
+	var pen uv.Style
+	var link uv.Link
+	for y := 0; y < height; y++ {
+		line := scr.Line(y)
+		renderFullFrameLine(&b, line, width, &pen, &link)
+		if y < height-1 {
 			b.WriteByte('\n')
 		}
 	}
+
+	if !link.IsZero() {
+		b.WriteString(ansi.ResetHyperlink())
+	}
+	if !pen.IsZero() {
+		b.WriteString(ansi.ResetStyle)
+	}
+
 	return b.String()
+}
+
+func renderFullFrameLine(b *strings.Builder, line uv.Line, width int, pen *uv.Style, link *uv.Link) {
+	for x := 0; x < width; {
+		var cell uv.Cell
+		if x < len(line) {
+			cell = line[x]
+		}
+		if cell.IsZero() {
+			cell = uv.EmptyCell
+		}
+
+		if cell.Style.IsZero() {
+			if !pen.IsZero() {
+				b.WriteString(ansi.ResetStyle)
+				*pen = uv.Style{}
+			}
+		} else if !cell.Style.Equal(pen) {
+			b.WriteString(cell.Style.Diff(pen))
+			*pen = cell.Style
+		}
+
+		if !cell.Link.Equal(link) {
+			if !link.IsZero() {
+				b.WriteString(ansi.ResetHyperlink())
+			}
+			if !cell.Link.IsZero() {
+				b.WriteString(ansi.SetHyperlink(cell.Link.URL, cell.Link.Params))
+			}
+			*link = cell.Link
+		}
+
+		content := cell.Content
+		if content == "" {
+			content = " "
+		}
+		b.WriteString(content)
+
+		w := cell.Width
+		if w <= 0 {
+			w = 1
+		}
+		x += w
+	}
 }
 
 // ensureScreenBuffer reuses the existing UV screen buffer across View() calls.

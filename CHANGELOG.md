@@ -6,10 +6,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Nothing yet.
 
-## 0.5.1 - 2026-05-08
+## 0.5.1 - 2026-05-09
 
 - Runtime/TUI: added manual MCP server control for `manual: true` servers. Chord now exposes `/mcp` (`status`, `enable`, `disable`, `toggle`) plus an MCP selector in the TUI (`Ctrl+O`) so on-demand servers can be connected or disconnected at runtime. Auto-start servers remain read-only, and the selector stays open while MCP state updates stream in.
 - Runtime: fixed initial LLM client not being configured with the builder agent's model pool. Previously, when multiple models were configured, retries would only rotate through API keys on the first model without falling back to other models. The initial client now properly includes all models from the builder agent's pool, so failures correctly trigger model-level fallback.
+- TUI: fixed Ghostty/cmux stale-cell artifacts after focus/resize recovery. The focus-resize freeze path now serializes the drawn screen buffer as a full frame that preserves trailing spaces, instead of relying on string-level end-of-line clearing or post-render padding.
+- TUI: upgraded the Bubble Tea rendering stack to newer compatible releases (`bubbletea/v2` 2.0.6, `bubbles/v2` 2.1.0, `lipgloss/v2` 2.0.3, plus newer `ultraviolet` and `x/ansi`) to pick up renderer and terminal-behavior fixes.
 - TUI: Write tool card no longer shows a diff preview. The result now displays a clear line and byte count summary (`Successfully wrote N lines, N bytes`) instead of extracting added lines from a unified diff, eliminating the misleading "only a few lines shown" display for full-file writes.
 - TUI: removed the pre-read + diff generation pipeline from the Write tool. Write tool results no longer carry `Diff`, `DiffAdded`, or `DiffRemoved` metadata. Edit tool results continue to show diffs as before.
 - Write tool `Execute` now reports the line count in addition to byte count in its success message.
