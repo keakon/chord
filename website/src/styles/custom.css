@@ -1,0 +1,15 @@
+/* Chord docs site — light theme tweaks. Starlight already provides a solid
+   dark/light pair; the variables below adjust the accent to match Chord's
+   identity without overriding readability. */
+
+:root {
+  --sl-color-accent-low: #1d2c3f;
+  --sl-color-accent: #4f8cff;
+  --sl-color-accent-high: #cce0ff;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e0ecff;
+  --sl-color-accent: #2a6cff;
+  --sl-color-accent-high: #1a3a86;
+}

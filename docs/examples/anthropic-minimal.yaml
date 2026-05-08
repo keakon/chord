@@ -1,0 +1,36 @@
+# Anthropic minimal — single provider, single key, single pool
+#
+# Drop this into ~/.config/chord/config.yaml as a starting point. Pair with
+# auth.yaml below.
+#
+#   ~/.config/chord/auth.yaml
+#   ----------------------------
+#   anthropic:
+#     - "$ANTHROPIC_API_KEY"
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-opus-4.7:
+        limit:
+          context: 1000000
+          output: 128000
+        thinking:
+          type: adaptive
+          effort: medium
+        modalities:
+          input: [text, image]
+
+model_pools:
+  default:
+    - anthropic/claude-opus-4.7
+
+# Sensible defaults for daily use
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+
+desktop_notification: true
+log_level: info

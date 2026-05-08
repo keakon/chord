@@ -1,0 +1,62 @@
+name: Documentation issue
+description: Report a problem or suggest an improvement to the user docs
+title: "docs: "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the Chord docs!
+
+        Use this template for content issues — wrong information, missing
+        sections, broken links, confusing wording, or suggestions for new
+        pages. For TUI / runtime bugs, use the **Bug report** template instead.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did you see this?
+      options:
+        - On the docs site
+        - In docs/ markdown on GitHub
+        - In README.md / README_CN.md
+        - In .internal-docs/ (maintainer-facing)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: page
+    attributes:
+      label: Page or section
+      description: URL or relative path (e.g. /chord/cli/, docs/configuration.md#mcp).
+      placeholder: "/chord/cli/"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - English
+        - 中文
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong or missing?
+      description: Describe the problem. If reporting an inaccuracy, include the wrong claim and the right one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix or addition
+      description: Optional. Plain wording is fine — we'll polish during review.
+    validations:
+      required: false

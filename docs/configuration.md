@@ -514,9 +514,66 @@ chord test-providers --provider openai
 
 This command is useful as an auth and basic connectivity smoke test.
 
+## Configuration cheatsheet
+
+The full top-level keys of `config.yaml` (both global `~/.config/chord/config.yaml` and project-level `.chord/config.yaml`). All keys are optional unless noted.
+
+| Key                     | Type                  | Default                          | Scope                    | Summary                                                                                                                  |
+| ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
+| `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of `provider/model` (and `model@variant`) refs. See [Model pools](#model-pools-selecting-providermodel). |
+| `context`               | object                | see below                        | global / project         | `auto_compact`, `compact_threshold`, `compact_model`. See [Context compaction](#context-compaction).                     |
+| `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
+| `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
+| `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
+| `desktop_notification`  | bool                  | `false`                          | global / project         | Enable OSC 9 idle notifications in local TUI when terminal is unfocused.                                                 |
+| `prevent_sleep`         | bool                  | `false`                          | global / project         | Prevent macOS idle sleep while any agent is active. macOS-only; no-op elsewhere.                                         |
+| `keymap`                | `map[action][]key`    | see [Keybindings](./keybindings.md#action-name-reference) | global / project | Override key bindings. Action names use lower snake_case.                                                                |
+| `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization — Custom slash commands](./customization.md#custom-slash-commands). |
+| `ime_switch_target`     | string                | empty                            | global / project         | IM identifier passed to `im-select` / `im-select.exe` when entering Normal mode. Linux/macOS/Windows.                    |
+| `log_level`             | string                | `info`                           | global / project         | `debug` / `info` / `warn` / `error`. `debug` is verbose.                                                                |
+| `paths`                 | object                | XDG defaults                     | global only              | `state_dir`, `cache_dir`, `sessions_dir`, `logs_dir`. CLI flags and `CHORD_*` env vars override.                         |
+| `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `size_check_interval_hours`, `warn_state_bytes`, `warn_cache_bytes`.                            |
+| `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization — LSP](./customization.md#lsp).                                          |
+| `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
+| `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
+| `max_output_tokens`     | int                   | model-default                    | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`.                  |
+| `proxy`                 | string                | empty (use env / direct)         | global / project         | Global proxy URL. Per-tool override via `web_fetch.proxy`.                                                              |
+| `web_fetch`             | object                | empty                            | global / project         | `user_agent`, `proxy` (inherits global if nil; empty string = direct). See [WebFetch](#webfetch).                       |
+| `worktree`              | object                | empty                            | global / project         | Defaults for `chord --worktree` and `chord worktree …` subcommands.                                                     |
+
+### Provider field reference
+
+| Field          | Type   | Description                                                                                                                                              |
+| -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
+| `api_url`      | string | Endpoint URL. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`.                                              |
+| `preset`       | string | Currently `codex` (OpenAI Codex / ChatGPT OAuth).                                                                                                        |
+| `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
+| `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
+
+### Model field reference
+
+| Field             | Type   | Description                                                                                                            |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `limit.context`   | int    | Context window size in tokens.                                                                                         |
+| `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                 |
+| `reasoning`       | object | OpenAI reasoning options (`summary`, `effort`). Variants commonly override `reasoning.effort`.                         |
+| `text.verbosity`  | string | OpenAI text verbosity hint where supported.                                                                            |
+| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |
+| `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
+| `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text, image]`.                                                       |
+
+For more on agents, see [Customization — Agents](./customization.md#agents); for the full agent schema, see [Agent config](#agent-config).
+
 ## Related
 
 - [Quickstart](./quickstart.md)
+- [CLI](./cli.md)
+- [Keybindings](./keybindings.md)
+- [Paths](./paths.md)
+- [Environment variables](./environment.md)
 - [Permissions & Safety](./permissions-and-safety.md)
 - [Customization](./customization.md)
+- [Hooks](./hooks.md)
 - [Troubleshooting](./troubleshooting.md)

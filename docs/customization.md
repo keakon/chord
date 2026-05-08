@@ -53,22 +53,9 @@ Follow Effective Go and Go Code Review Comments.
 
 ## Hooks
 
-Hooks are useful for:
+Hooks let you run external commands at well-defined runtime points (before a tool call, after an LLM call, on idle, on tool-batch complete, etc.) for notifications, auditing, automation checks, or tool-result cleanup.
 
-- notifications
-- auditing
-- automation checks
-- tool-result cleanup or interception
-
-Common trigger points include:
-
-- `on_tool_call`
-- `on_before_tool_result_append`
-- `on_after_llm_call`
-- `on_idle`
-- `on_tool_batch_complete`
-
-Example:
+Quick example — desktop notification when an agent goes idle:
 
 ```yaml
 hooks:
@@ -76,6 +63,8 @@ hooks:
     - name: notify-idle
       command: ["osascript", "-e", "display notification \"Chord is idle\" with title \"Chord\""]
 ```
+
+For the full list of trigger points (14 in total), the JSON envelope contract, sync vs automation vs observer categories, and richer examples, see the dedicated [Hooks](./hooks.md) page.
 
 ## LSP
 

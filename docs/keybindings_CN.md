@@ -1,0 +1,153 @@
+# 快捷键速查
+
+本页是 Chord TUI 全部快捷键的完整参考。下面列出的所有键位都可以通过 `config.yaml` 的 `keymap:` 重新映射。
+
+## 模式
+
+TUI 有两种模式：
+
+- **Insert（输入模式）**：输入框聚焦，正在打字
+- **Normal（普通模式）**：消息区聚焦，用于浏览、搜索、折叠、滚动等
+
+按 `Esc` 从 Insert 切到 Normal；按 `i`（或任意未绑定的可见字符）从 Normal 切回 Insert。当 agent 正在执行时，Normal 模式下再按一次 `Esc` 会取消当前轮次。
+
+## 速查表
+
+### Insert 模式
+
+| 按键               | 动作                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `Esc`              | 离开 Insert 模式，进入 Normal 模式                                                                  |
+| `Enter`            | 发送消息                                                                                            |
+| `Shift+Enter`      | 输入换行                                                                                            |
+| `Ctrl+J`           | 输入换行（终端不传 `Shift+Enter` 时的备选）                                                         |
+| `Up` / `Ctrl+P`    | 输入框为空时载入上一条用户消息；非空时按历史上翻                                                    |
+| `Down` / `Ctrl+N`  | 历史下翻                                                                                            |
+| `Ctrl+V` / `Cmd+V` | 智能粘贴：剪贴板有图先粘图，否则粘文本                                                              |
+| `Ctrl+F`           | 把输入框中写好的图片路径附加到当前消息                                                              |
+| `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
+
+### Normal 模式 — 退出与元操作
+
+| 按键               | 动作                                              |
+| ------------------ | ------------------------------------------------- |
+| `i`                | 回到 Insert 模式                                  |
+| `q`                | 2 秒内连按两次退出                                |
+| `Ctrl+C`           | 2 秒内连按两次退出                                |
+| `?`                | 切换内置帮助/键位速查浮层                         |
+| `Esc`              | （agent 运行中）取消当前轮次                      |
+
+### Normal 模式 — 滚动
+
+| 按键               | 动作                                |
+| ------------------ | ----------------------------------- |
+| `↓` / `↑`          | 行滚动                              |
+| `Ctrl+F`           | 整页向下                            |
+| `Ctrl+B`           | 整页向上                            |
+| `G`                | 跳到最底                            |
+| `gg`               | 跳到最顶（双键序列）                |
+
+### Normal 模式 — 消息卡片
+
+| 按键                          | 动作                                                                                |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| `j` / `}`                     | 跳到下一条消息卡片                                                                  |
+| `k` / `{`                     | 跳到上一条消息卡片                                                                  |
+| `o` / `Enter` / `Space`       | 折叠/展开当前卡片；图片卡片下用此键打开图片                                          |
+| `e`                           | 编辑/分叉当前用户消息为新一轮对话                                                   |
+
+### Normal 模式 — 浮层
+
+| 按键      | 动作                                                |
+| --------- | --------------------------------------------------- |
+| `Ctrl+J`  | 打开消息目录（跳转到指定卡片）                      |
+| `$`       | 打开 Usage 统计浮层                                 |
+
+### Normal 模式 — 搜索
+
+| 按键     | 动作                                  |
+| -------- | ------------------------------------- |
+| `/`      | 开始搜索                              |
+| `n`      | 跳到下一个匹配                        |
+| `N`      | 跳到上一个匹配                        |
+
+### 两种模式都有效 — Agent 与模型
+
+| 按键          | 动作                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Tab`         | 切换主 agent role（仅在 main-agent 视图下生效）                                                                 |
+| `Shift+Tab`   | 在主 agent 与所有活跃 SubAgent 视图之间循环切换 focus                                                           |
+| `Ctrl+P`      | 打开模型池选择器（Normal 模式）。Insert 模式下 `Ctrl+P` 优先充当历史上翻                                        |
+| `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
+
+### 关于 `Ctrl+P` 的特别说明
+
+`Ctrl+P` 同时绑了两个动作，由当前模式决定哪一个生效：
+
+- **Normal 模式**：打开模型池选择器（`SwitchModel`）
+- **Insert 模式**：触发历史上翻（`InsertHistoryUp`）。要在 Insert 模式切池，可输入 `/models` 回车，或先按 `Esc` 切到 Normal 模式
+
+如果你希望在两种模式都用同一个键切池，请把 `switch_model` 改绑到其他键（如 `ctrl+m`），见下文 [自定义键位](#自定义键位)。
+
+## 自定义键位
+
+可以在 `config.yaml` 中覆盖任意键位：
+
+```yaml
+keymap:
+  next_block: ["j"]            # 不要 } 作为下一条卡片的备用键
+  prev_block: ["k"]            # 不要 { 作为上一条卡片的备用键
+  scroll_down: ["down"]        # 仅用方向键做行滚动
+  scroll_up: ["up"]
+  quit: ["Q"]                  # 退出要求大写 Q（防止误触）
+  switch_model: ["ctrl+m"]     # 避开 Ctrl+P 在 Insert 模式的冲突
+```
+
+action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) 的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
+
+### Action 名速查
+
+| Action                     | 默认值                            |
+| -------------------------- | --------------------------------- |
+| `insert_escape`            | `["esc"]`                         |
+| `insert_submit`            | `["enter"]`                       |
+| `insert_newline`           | `["shift+enter", "ctrl+j"]`       |
+| `insert_history_up`        | `["up", "ctrl+p"]`                |
+| `insert_history_down`      | `["down", "ctrl+n"]`              |
+| `insert_attach_clipboard`  | `["ctrl+v"]`                      |
+| `insert_attach_file`       | `["ctrl+f"]`                      |
+| `insert_clear_input`       | `["ctrl+u"]`                      |
+| `enter_insert`             | `["i"]`                           |
+| `quit`                     | `["q"]`                           |
+| `help_toggle`              | `["?"]`                           |
+| `scroll_down`              | `["down"]`                        |
+| `scroll_up`                | `["up"]`                          |
+| `full_page_down`           | `["ctrl+f"]`                      |
+| `full_page_up`             | `["ctrl+b"]`                      |
+| `scroll_to_bottom`         | `["G"]`                           |
+| `scroll_to_top_seq`        | `["g"]`（`gg` 序列的首键）        |
+| `next_block`               | `["j", "}"]`                      |
+| `prev_block`               | `["k", "{"]`                      |
+| `toggle_collapse`          | `["o", "enter", " ", "space"]`    |
+| `fork_session`             | `["e"]`                           |
+| `directory`                | `["ctrl+j"]`                      |
+| `usage_stats`              | `["$"]`                           |
+| `search_start`             | `["/"]`                           |
+| `search_next`              | `["n"]`                           |
+| `search_prev`              | `["N"]`                           |
+| `switch_agent`             | `["shift+tab"]`                   |
+| `switch_role`              | `["tab"]`                         |
+| `switch_model`             | `["ctrl+p"]`                      |
+| `diagnostics`              | `["ctrl+g"]`                      |
+
+仅你列出的 action 会被覆盖；其余仍按上表默认值生效。
+
+## 运行时查看当前键位
+
+在 Normal 模式按 `?` 唤出内置 cheatsheet 浮层，里面显示的是**当前实际生效**的键位——在你修改了 `keymap` 之后特别有用。
+
+## 相关
+
+- [使用指南](./usage_CN.md)：键位对应的工作流上下文
+- [配置与认证](./configuration_CN.md)：完整 `config.yaml` schema
+- [扩展与定制](./customization_CN.md)：agents、hooks、skills、MCP、LSP

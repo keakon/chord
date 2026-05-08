@@ -6,19 +6,33 @@ This documentation is for end users: installation, configuration, daily usage, c
 
 ## Getting started
 
-- [Quickstart](./quickstart.md) – get running in minutes
-- [Usage](./usage.md) – TUI basics, sessions, common commands, headless mode
-- [Configuration & Auth](./configuration.md) – `config.yaml`, `auth.yaml`, providers/models, OAuth
-
-## Safety & customization
-
-- [Permissions & Safety](./permissions-and-safety.md) – permission model and security boundaries
-- [Customization](./customization.md) – agents, skills, hooks, LSP, MCP, slash commands
-
-## Troubleshooting
-
-- [Troubleshooting](./troubleshooting.md)
+- [Quickstart](./quickstart.md) — get running in minutes
+- [Usage](./usage.md) — TUI basics, sessions, common commands, headless mode
+- [Glossary](./glossary.md) — vocabulary used across these docs
 
 ## Reference
 
-- [Headless](./headless.md) – what `chord headless` is and how to integrate
+- [CLI](./cli.md) — every command, subcommand, and flag
+- [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
+- [Keybindings](./keybindings.md) — complete key map and how to customize it
+- [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
+- [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads
+- [Platform support](./platforms.md) — what works on macOS / Linux / Windows / WSL
+
+## Going further
+
+- [Customization](./customization.md) — agents, skills, MCP, LSP, custom slash commands
+- [Hooks](./hooks.md) — 14 trigger points, payload contract, examples
+- [Examples](./examples/index.md) — copy-paste-ready `config.yaml` setups for common situations
+
+## Integration
+
+- [Headless](./headless.md) — `chord headless` JSON control plane and `chord-gateway`
+
+## Safety
+
+- [Permissions & Safety](./permissions-and-safety.md) — the permission model and security boundaries
+
+## Troubleshooting
+
+- [Troubleshooting](./troubleshooting.md) — symptoms, common causes, and how to collect logs

@@ -44,8 +44,7 @@ Common workflows:
 - `chord --continue`: resume the most recent non-empty session for this project
 - `chord --resume <session-id>`: resume a specific session
 - `chord resume <session-id>`: resume a session by ID, auto-locating the chord-managed worktree it belongs to
-- `chord import <source> <file>`: import an external session (currently supports `opencode` export JSON) into Chord's session store
-+ - `chord import <source> [file]`: import an external session into Chord's session store
+- `chord import <source> [file]`: import an external session into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
 
@@ -128,7 +127,11 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/compact`: manually trigger context compaction
 - `/stats`: view usage statistics
 - `/diagnostics`: export a diagnostics bundle for troubleshooting
-- `/loop on [target]` / `/loop off`: enable or disable continuous execution mode
+- `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
+- `/rules`: open the permission-rule manager (view, edit, save rules)
+- `/loop`: show current continuous-execution status; `/loop on` enables it for the focused agent; `/loop on <target>` enables it for a specific agent name; `/loop off` disables it
+
+You can also define **custom** slash commands (per project or globally). See [Customization — Custom slash commands](./customization.md#custom-slash-commands).
 
 ## Multi-agent focus switching
 

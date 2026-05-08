@@ -1,0 +1,88 @@
+---
+title: Chord
+description: 让 AI 编码体验从容下来——一个轻量、本地优先的终端 Coding Agent，会话再长也不崩、模型组合可热切、脱离电脑时还能远程操控。
+template: splash
+hero:
+  tagline: 让 AI 编码体验从容下来——长会话不崩、模型组合可热切、脱离电脑时还能远程操控。
+  actions:
+    - text: 快速开始
+      link: /chord/zh/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/keakon/chord
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## 为什么选 Chord
+
+<CardGrid>
+  <Card title="长会话不崩" icon="document">
+    自动 compaction 把早期对话压成上下文摘要，会话超出 context window 仍然能继续——保留了继续工作所需的信息。
+  </Card>
+  <Card title="网络状态全程可见" icon="rocket">
+    模型调用过程中精确显示请求状态与已等待时间，再也不用猜"是不是卡住了"。
+  </Card>
+  <Card title="键盘优先、Vim 风格" icon="seti:vim">
+    Insert / Normal 模式、消息搜索、完整 Vim 风格导航、模式切换自动切输入法。退出需连按两次。
+  </Card>
+  <Card title="模型组合热切换" icon="random">
+    把模型分到可复用的池（`fast`、`thinking`、`cheap`），运行时用 `/models` 或 `Ctrl+P` 切换。运行时按池内顺序自动 fallback。
+  </Card>
+  <Card title="小 VPS 上能跑很久" icon="seti:powershell">
+    低内存、低 CPU。macOS 上电源感知：工作时阻止系统休眠，空闲后自动放行。
+  </Card>
+  <Card title="可远程操控" icon="external">
+    `chord headless` 提供 stdio JSON 控制面，配合 [chord-gateway](https://github.com/keakon/chord-gateway) 可从任意聊天平台操控。
+  </Card>
+</CardGrid>
+
+## 三步上手
+
+<CardGrid>
+  <Card title="1. 安装" icon="seti:go">
+    ```bash
+    go install github.com/keakon/chord/cmd/chord@latest
+    ```
+    需要 Go 1.26+。
+  </Card>
+  <Card title="2. 配置凭据" icon="seti:lock">
+    ```bash
+    mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+    echo 'anthropic:\n  - "$ANTHROPIC_API_KEY"' \
+      > ~/.config/chord/auth.yaml
+    ```
+    其他 provider 见 [快速开始](/chord/zh/quickstart/)。
+  </Card>
+  <Card title="3. 在项目里启动" icon="rocket">
+    ```bash
+    cd my-project
+    chord
+    ```
+    首次启动会按需创建项目级 `.chord/`。
+  </Card>
+</CardGrid>
+
+## 接下来
+
+<CardGrid>
+  <Card title="CLI 参考" icon="setting">
+    所有命令、子命令、flag——包括 `chord cleanup`、worktree、headless。
+    [前往 →](/chord/zh/cli/)
+  </Card>
+  <Card title="配置与认证" icon="document">
+    Provider、模型池、LSP、MCP、hooks——一张速查表覆盖完整 schema。
+    [前往 →](/chord/zh/configuration/)
+  </Card>
+  <Card title="示例配置库" icon="seti:yml">
+    最常见的 4 套场景，可直接复制粘贴的 `config.yaml`。
+    [前往 →](/chord/zh/examples/)
+  </Card>
+  <Card title="Headless 集成" icon="external">
+    在 Chord 之上构建 bot、网关、自动化脚本。
+    [前往 →](/chord/zh/headless/)
+  </Card>
+</CardGrid>

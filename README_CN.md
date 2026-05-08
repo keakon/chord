@@ -2,66 +2,77 @@
 
 [![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
 
-一款轻量、本地优先的终端 Coding Agent。低资源占用、可靠长会话、灵活模型编排、Vim-like 操作、多 Agent 协作，以及可通过网关远程操控的 headless 模式——让 AI 编码体验更稳定、可预期。
+📖 **文档站：** <https://keakon.github.io/chord/zh/> · **English：** [README.md](./README.md)
 
-- English: [README.md](./README.md)
-- 用户文档：[docs/index_CN.md](./docs/index_CN.md)（建议从 [快速开始](./docs/quickstart_CN.md) 开始）
-- Gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+**让 AI 编码体验从容下来。** 一个轻量、本地优先的终端 Coding Agent——会话再长也不崩、模型组合可热切、脱离电脑时还能远程操控。
 
-## 为什么值得一试？
+- 配套网关：[keakon/chord-gateway](https://github.com/keakon/chord-gateway) —— 把 Chord 接到微信、飞书等聊天平台
 
-- **轻量，适合长期在线**：低内存、低 CPU 占用，适合部署在小内存 VPS 上，也适合作为随时可用的个人 Coding Agent。
-- **不用再猜“是不是卡住了”**：调用模型时会展示精确的网络/请求状态和已等待时间。
-- **键盘优先的终端 UI**：Vim-like normal/input 模式、消息历史搜索、快速切换模型，模式切换时自动切换输入法。
-- **图片输入**：粘贴或附加图片，在支持的终端中预览，并发送给多模态模型。
-- **LSP 加持的编码上下文**：连接本地 language server，获取静态诊断和 definition、references、implementation 等语义导航能力。
-- **长会话更可靠**：compaction 算法将长会话压缩为上下文摘要，尽量保留后续工作所需的信息。
-- **命名模型池**：把模型分组到可复用的 pool（如 `base`、`fast`、`strong`），运行时通过 `/models` 或 `Ctrl+P` 即时切换当前池。每个 agent 各选其池，运行时会按池内顺序自动 fallback。详见 [模型池](./docs/configuration_CN.md#模型池指定-provider-与-model)。
-- **Provider / model / key 调度**：多 provider、model 和 API key 配置，支持自动重试、故障切换和负载均衡。
-- **Codex 额度实时可见**：实时显示 Codex 订阅的剩余额度和重置时间。
-- **多 Agent 协作**：主 Agent 与多个 SubAgent 协作，可查看各自上下文并切换视图。
-- **基于 git worktree 的并行任务**：`chord --worktree [name]` 一键创建/进入 chord 管理的独立 worktree（独享 session 与缓存），同一项目可同时跑多个任务互不干扰。详见 [Worktree 用法](./docs/usage_CN.md#worktree)。
-- **远程操控**：`chord headless` 提供 stdio JSONL 控制面，配合 `chord-gateway` 可通过微信、飞书等聊天入口操控。
-- **电源状态友好**：工作进行中自动阻止系统休眠，空闲后允许系统恢复正常休眠。
-
-## 平台支持说明
-
-Chord 目前主要在 macOS 下开发和测试。其他平台虽然可能可以编译或运行，但可能存在功能降级或未发现的 bug，尤其是 Windows。`prevent_sleep` 电源管理功能目前仅在 macOS 上生效；在其他平台上是 no-op。
-
-## 快速开始
+## 三步上手
 
 需要 Go 1.26+。
 
 ```bash
+# 1. 安装
 go install github.com/keakon/chord/cmd/chord@latest
-chord
+
+# 2. 配置凭据
+mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/auth.yaml <<'YAML'
+anthropic:
+  - "$ANTHROPIC_API_KEY"
+YAML
+
+# 3. 在项目里启动
+cd my-project && chord
 ```
 
-用于远程 gateway、bot 或自动化脚本：
+OpenAI / Codex OAuth / Gemini / OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
-```bash
-chord headless
-```
+## 为什么选 Chord
 
-凭据配置、provider 设置和首次运行说明见 [快速开始](./docs/quickstart_CN.md)。
+- **长会话不崩。** 自动 compaction 把长对话压缩成上下文摘要，让会话在超过 context window 之后还能继续——保留继续工作所需的关键信息，不会出现"它忘了？"的尴尬。
+- **网络状态全程可见。** 等模型响应时，Chord 实时显示请求状态和已等待时间。再也不用猜"是不是卡住了"。
+- **键盘优先、Vim 风格。** Insert / Normal 模式、消息搜索、Vim 风格导航、模式切换时自动切输入法。退出需要连按两次，避免误触 Ctrl+C 丢工作。
+- **模型组合热切换。** 把模型分组到可复用的池（`fast`、`thinking`、`cheap` 等），运行时用 `/models` 或 `Ctrl+P` 切。每个 agent 独立选池；运行时自动按池内顺序 fallback。
+- **小 VPS 上能跑很久。** 低内存、低 CPU 占用。macOS 上电源感知：工作时阻止系统休眠，空闲后自动放行。
+- **能远程操控。** `chord headless` 提供 stdio JSONL 控制面；配合 [chord-gateway](https://github.com/keakon/chord-gateway) 可从任意聊天平台驱动 Chord。
+
+后期会用得上的额外能力：
+
+- **多 Agent 协作** —— 主 agent 派出 SubAgent，每个有独立 context；`Shift+Tab` 切换视图。
+- **基于 git worktree 的并行任务** —— `chord --worktree feat-auth` 启一个独立 worktree，多任务在同仓库下互不干扰。
+- **LSP 加持的代码上下文** —— 接本地 language server，提供实时 diagnostics 和 definition/references/implementation 查询。
+- **多模态输入** —— 粘贴剪贴板图片、附加文件、在支持的终端里预览。
+- **Codex 额度可见** —— 实时显示 OpenAI Codex 订阅的剩余额度和重置时间。
+
+## 适合你的场景
+
+- **小 VPS 上的常驻助手。** 低资源占用 + 长会话稳，可以挂着随时回来用。
+- **混搭多模型。** 思考用强模型、导航用快模型、压缩用便宜模型——一键切换。
+- **从手机上操控。** 把 `chord headless` 通过 chord-gateway 暴露出来，离开桌面也能在聊天里调用真正的编码 agent。
 
 ## 文档
 
 - [文档首页](./docs/index_CN.md)
-- [快速开始](./docs/quickstart_CN.md)
-- [使用指南](./docs/usage_CN.md)
-- [配置与认证](./docs/configuration_CN.md)
-- [权限与安全](./docs/permissions-and-safety_CN.md)
-- [扩展与定制](./docs/customization_CN.md)
-- [常见问题排查](./docs/troubleshooting_CN.md)
-- [Headless 集成](./docs/headless_CN.md)
+- 入门：[快速开始](./docs/quickstart_CN.md) · [使用指南](./docs/usage_CN.md) · [术语表](./docs/glossary_CN.md)
+- 参考：[CLI](./docs/cli_CN.md) · [配置与认证](./docs/configuration_CN.md) · [快捷键](./docs/keybindings_CN.md) · [目录与路径](./docs/paths_CN.md) · [环境变量](./docs/environment_CN.md) · [平台支持](./docs/platforms_CN.md)
+- 进阶：[扩展与定制](./docs/customization_CN.md) · [Hooks](./docs/hooks_CN.md) · [示例配置库](./docs/examples/index_CN.md)
+- 集成：[Headless](./docs/headless_CN.md)
+- 安全：[权限与安全](./docs/permissions-and-safety_CN.md)
+- 排障：[常见问题排查](./docs/troubleshooting_CN.md)
 
 ## 项目链接
 
-- 贡献指南：[CONTRIBUTING.md](./CONTRIBUTING.md)
-- 版本变更记录：[CHANGELOG_CN.md](./CHANGELOG_CN.md)
-- Gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+- 配套：[keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+- [贡献指南](./CONTRIBUTING.md)
+- [Changelog（中文）](./CHANGELOG_CN.md)
+- [讨论区](https://github.com/keakon/chord/discussions)
+
+## 平台支持
+
+Chord 主要在 macOS 上开发和测试。Linux 表现良好；Windows 大体可用但可能有未发现的 bug。`prevent_sleep` 等少数能力仅 macOS 生效，其他平台静默 no-op。具体能力矩阵见 [平台支持](./docs/platforms_CN.md)。
 
 ## License
 
-MIT License.
+MIT License，详见 [LICENSE](./LICENSE)。

@@ -1,0 +1,58 @@
+# OpenAI-compatible: multi-key load balancing + multi-endpoint failover
+#
+# Useful if you have several keys against an OpenAI-compatible gateway and
+# want chord to round-robin them, with a backup endpoint as failover.
+#
+# Pair with ~/.config/chord/auth.yaml:
+#
+#   ~/.config/chord/auth.yaml
+#   ----------------------------
+#   primary:
+#     - "$PRIMARY_KEY_A"
+#     - "$PRIMARY_KEY_B"
+#     - "$PRIMARY_KEY_C"
+#   backup:
+#     - "$BACKUP_KEY"
+#
+# Chord will rotate through the keys per provider for load balancing, and
+# move on to the next provider in the model pool when the current one fails
+# repeatedly.
+
+providers:
+  primary:
+    type: chat-completions
+    api_url: https://gateway.example.com/v1/chat/completions
+    models:
+      llama3-70b: &big
+        limit:
+          context: 128000
+          output: 32768
+      llama3-8b: &small
+        limit:
+          context: 32000
+          output: 8000
+
+  backup:
+    type: chat-completions
+    api_url: https://backup.example.org/v1/chat/completions
+    models:
+      llama3-70b: *big
+      llama3-8b: *small
+
+model_pools:
+  big:
+    - primary/llama3-70b           # tries primary first
+    - backup/llama3-70b            # falls back if primary keys all fail
+  small:
+    - primary/llama3-8b
+    - backup/llama3-8b
+
+context:
+  auto_compact: true
+  compact_threshold: 0.85
+  compact_model: primary/llama3-8b
+
+# Optional global HTTP proxy if your gateway lives behind one
+# proxy: socks5://127.0.0.1:1080
+
+log_level: info

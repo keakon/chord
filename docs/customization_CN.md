@@ -53,22 +53,9 @@ description: Go language development expert
 
 ## Hooks
 
-Hooks 适合做这些事情：
+Hooks 让你在运行时的明确节点（工具调用前、LLM 调用后、idle 时、工具批量完成后等）运行外部命令，用途包括通知、审计、自动化检查、工具结果清洗。
 
-- 通知
-- 审计
-- 自动化检查
-- 工具结果清洗或拦截
-
-常见触发点包括：
-
-- `on_tool_call`
-- `on_before_tool_result_append`
-- `on_after_llm_call`
-- `on_idle`
-- `on_tool_batch_complete`
-
-示例：
+简单示例——agent idle 时弹桌面通知：
 
 ```yaml
 hooks:
@@ -76,6 +63,8 @@ hooks:
     - name: notify-idle
       command: ["osascript", "-e", "display notification \"Chord 已空闲\" with title \"Chord\""]
 ```
+
+完整 14 个触发点的列表、JSON envelope 协议、sync / automation / observer 三种类别的差异，以及更丰富的示例，见专门的 [Hooks](./hooks_CN.md) 页面。
 
 ## LSP
 

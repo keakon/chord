@@ -1,0 +1,97 @@
+---
+title: Chord
+description: Calm AI coding in your terminal — a lightweight, local-first coding agent with reliable long sessions, hot-swappable model setups, and remote operation.
+template: splash
+hero:
+  tagline: Calm AI coding in your terminal — long sessions that do not crash, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
+  actions:
+    - text: Quickstart
+      link: /chord/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/keakon/chord
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why Chord
+
+<CardGrid>
+  <Card title="Long sessions don't crash" icon="document">
+    Auto-compaction summarises earlier turns into a context summary, so a
+    long session keeps working past the model's context window — without
+    losing the information needed to continue.
+  </Card>
+  <Card title="You see the network state" icon="rocket">
+    Precise request status and elapsed wait time during model calls. Never
+    wonder if it's stuck again.
+  </Card>
+  <Card title="Keyboard-first, Vim-style" icon="seti:vim">
+    Insert / Normal modes, message search, full Vim-flavoured navigation,
+    automatic input-method switching. Quitting takes two taps.
+  </Card>
+  <Card title="Hot-swap model setups" icon="random">
+    Group models into reusable pools (`fast`, `thinking`, `cheap`) and switch
+    them at runtime via `/models` or `Ctrl+P`. The runtime falls back through
+    the ordered list automatically.
+  </Card>
+  <Card title="Runs for days on a small VPS" icon="seti:powershell">
+    Low memory and CPU footprint. macOS power-aware: prevents idle sleep
+    while work is active, lets the system sleep again when idle.
+  </Card>
+  <Card title="Drive it remotely" icon="external">
+    `chord headless` exposes a stdio JSON control plane; pair with
+    [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord
+    from any chat surface.
+  </Card>
+</CardGrid>
+
+## Three-step setup
+
+<CardGrid>
+  <Card title="1. Install" icon="seti:go">
+    ```bash
+    go install github.com/keakon/chord/cmd/chord@latest
+    ```
+    Requires Go 1.26+.
+  </Card>
+  <Card title="2. Configure credentials" icon="seti:lock">
+    ```bash
+    mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+    echo 'anthropic:\n  - "$ANTHROPIC_API_KEY"' \
+      > ~/.config/chord/auth.yaml
+    ```
+    Other providers: see [Quickstart](/chord/quickstart/).
+  </Card>
+  <Card title="3. Run from your project" icon="rocket">
+    ```bash
+    cd my-project
+    chord
+    ```
+    On first run, Chord creates `.chord/` for project-level config.
+  </Card>
+</CardGrid>
+
+## Where to next
+
+<CardGrid>
+  <Card title="CLI reference" icon="setting">
+    Every command, subcommand, and flag — including `chord cleanup`, worktrees, and headless.
+    [Open →](/chord/cli/)
+  </Card>
+  <Card title="Configuration & Auth" icon="document">
+    Provider, model pool, LSP, MCP, hooks — full schema in one cheatsheet.
+    [Open →](/chord/configuration/)
+  </Card>
+  <Card title="Examples" icon="seti:yml">
+    Copy-paste-ready `config.yaml` for the four most common setups.
+    [Open →](/chord/examples/)
+  </Card>
+  <Card title="Headless integration" icon="external">
+    Build bots, gateways, or scripts on top of Chord.
+    [Open →](/chord/headless/)
+  </Card>
+</CardGrid>

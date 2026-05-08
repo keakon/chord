@@ -2,66 +2,77 @@
 
 [![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
 
-A lightweight, local-first terminal coding agent. Low resource usage, reliable long sessions, flexible model orchestration, Vim-like navigation, multi-agent collaboration, and a headless mode for remote control — designed to make AI coding feel calm and predictable.
+📖 **Docs site:** <https://keakon.github.io/chord/> · **中文版：** [README_CN.md](./README_CN.md)
 
-- 中文版：see [README_CN.md](./README_CN.md)
-- User docs: [docs/index.md](./docs/index.md) (start with [docs/quickstart.md](./docs/quickstart.md))
-- Gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+**Calm AI coding in your terminal.** A lightweight, local-first coding agent built for long sessions that do not fall over, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
 
-## Why try Chord?
+- Companion gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway) — drive Chord from WeChat, Feishu, and other chat surfaces
 
-- **Lightweight and always available** — low memory and low CPU overhead make Chord comfortable on small VPS machines and personal always-on environments.
-- **No more “is it stuck?”** — while waiting for a model response, Chord shows precise network/request status and elapsed wait time.
-- **Keyboard-first terminal UI** — Vim-like normal/input modes, searchable message history, quick model switching, and automatic input-method switching across modes.
-- **Image input** — paste or attach images, preview them in supported terminals, and send to multimodal models.
-- **LSP-backed coding context** — connect local language servers for static diagnostics and semantic navigation such as definition/references/implementation.
-- **Reliable long sessions** — compaction algorithm compresses long sessions into context summaries while preserving the information needed to continue work.
-- **Named model pools** — group models into reusable pools (`base`, `fast`, `strong`, …) and switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool, and the runtime falls back through the ordered list automatically. See [Model pools](./docs/configuration.md#model-pools-selecting-providermodel).
-- **Provider/model/key routing** — multiple provider, model, and API key configuration with automatic retry, failover, and load balancing.
-- **Codex quota visibility** — display remaining Codex subscription quota and reset time in real time.
-- **Multi-agent collaboration** — main agent with focused subagents, inspect their contexts and switch between views.
-- **Parallel tasks via git worktrees** — `chord --worktree [name]` spins up an isolated chord-managed worktree (with its own sessions/cache) so multiple tasks on the same repository run side by side without crosstalk. See [Worktrees](./docs/usage.md#worktrees).
-- **Remote control** — `chord headless` exposes a stdio JSONL control plane; with `chord-gateway`, control Chord from WeChat, Feishu, and other chat surfaces.
-- **Power-aware runtime** — prevents system sleep while work is active and allows sleep again when Chord becomes idle.
-
-## Platform support
-
-Chord is currently developed and tested primarily on macOS. Other platforms may compile or run, but functionality may be degraded or have undiscovered bugs, especially on Windows. The `prevent_sleep` power-management feature is currently only effective on macOS; on other platforms it is a no-op.
-
-## Quickstart
+## Three-step setup
 
 Requires Go 1.26+.
 
 ```bash
+# 1. Install
 go install github.com/keakon/chord/cmd/chord@latest
-chord
+
+# 2. Configure credentials
+mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
+cat > ~/.config/chord/auth.yaml <<'YAML'
+anthropic:
+  - "$ANTHROPIC_API_KEY"
+YAML
+
+# 3. Run from your project
+cd my-project && chord
 ```
 
-For remote gateways, bots, or automation:
+For OpenAI / Codex OAuth / Gemini / OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
 
-```bash
-chord headless
-```
+## Why Chord
 
-For credentials, provider setup, and first-run details, follow the [Quickstart](./docs/quickstart.md).
+- **Long sessions do not crash.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
+- **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
+- **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
+- **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
+- **Runs for days on a small VPS.** Low memory and CPU footprint. Power-aware on macOS: prevents idle sleep while work is active, lets the system sleep again when idle.
+- **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from any chat surface.
+
+A few extras you may appreciate later:
+
+- **Multi-agent collaboration** — a main agent with focused SubAgents, each with its own context, switchable via `Shift+Tab`.
+- **Parallel work via git worktrees** — `chord --worktree feat-auth` spins up an isolated working copy so several tasks on the same repo do not stomp on each other.
+- **LSP-backed code awareness** — live diagnostics and definition / references / implementation lookups via your local language servers.
+- **Multimodal input** — paste images from the clipboard, attach files, preview in supported terminals.
+- **Codex quota visibility** — real-time remaining-quota and reset-time display for OpenAI Codex subscriptions.
+
+## When Chord shines
+
+- **Always-on assistant on a small VPS.** Low resource budget plus reliable long sessions means you can leave it running and check in throughout the day.
+- **Mixed-model setups.** Use a strong model for thinking, a fast one for navigation, a cheap one for compaction — switch with one keystroke when the wind changes.
+- **Operating from your phone.** Expose `chord headless` through chord-gateway and drive a real coding agent from a chat app while you are away from the desk.
 
 ## Documentation
 
 - [Docs home](./docs/index.md)
-- [Quickstart](./docs/quickstart.md)
-- [Usage](./docs/usage.md)
-- [Configuration & Auth](./docs/configuration.md)
-- [Permissions & Safety](./docs/permissions-and-safety.md)
-- [Customization](./docs/customization.md)
-- [Troubleshooting](./docs/troubleshooting.md)
-- [Headless](./docs/headless.md)
+- Getting started: [Quickstart](./docs/quickstart.md) · [Usage](./docs/usage.md) · [Glossary](./docs/glossary.md)
+- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md)
+- Going further: [Customization](./docs/customization.md) · [Hooks](./docs/hooks.md) · [Examples](./docs/examples/index.md)
+- Integration: [Headless](./docs/headless.md)
+- Safety: [Permissions & Safety](./docs/permissions-and-safety.md)
+- Troubleshooting: [Troubleshooting](./docs/troubleshooting.md)
 
 ## Project links
 
-- Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md)
-- Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+- Companion: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+- [Contributing](./CONTRIBUTING.md)
+- [Changelog](./CHANGELOG.md)
+- [Discussions](https://github.com/keakon/chord/discussions)
+
+## Platform support
+
+Chord is developed and tested primarily on macOS. Linux works well; Windows mostly works but may have undiscovered bugs. Some features (`prevent_sleep`) are macOS-only and silently no-op elsewhere. See [Platform support](./docs/platforms.md) for the per-feature matrix.
 
 ## License
 
-MIT License.
+MIT License. See [LICENSE](./LICENSE).

@@ -467,9 +467,66 @@ chord test-providers --provider openai
 
 这个命令适合做认证与基础连通性 smoke test。
 
+## 配置字段速查表
+
+下面是 `config.yaml` 的全部顶层 key（同时适用于全局 `~/.config/chord/config.yaml` 和项目级 `.chord/config.yaml`）。除非特别注明，所有 key 都是可选的。
+
+| Key                     | 类型                  | 默认值                          | 适用层级                 | 简述                                                                                                                  |
+| ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `providers`             | `map[name]Provider`   | —                               | global / project         | 每个 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
+| `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为 `provider/model`（或 `model@variant`）。见 [模型池](#模型池指定-provider-与-model)。           |
+| `context`               | object                | 见下文                          | global / project         | `auto_compact`、`compact_threshold`、`compact_model`。见 [上下文压缩](#上下文压缩)。                                  |
+| `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录之外追加 skill 目录。                                                                     |
+| `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
+| `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 的宽度。                                                    |
+| `desktop_notification`  | bool                  | `false`                         | global / project         | 在终端非聚焦时启用 OSC 9 idle 通知（仅本地 TUI）。                                                                    |
+| `prevent_sleep`         | bool                  | `false`                         | global / project         | 任意 agent 活动时阻止 macOS idle sleep。仅 macOS 生效；其他平台 no-op。                                              |
+| `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
+| `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。 |
+| `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。Linux/macOS/Windows 各有自己的格式。                  |
+| `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 比较啰嗦。                                                              |
+| `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
+| `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`size_check_interval_hours`、`warn_state_bytes`、`warn_cache_bytes`。                       |
+| `lsp`                   | `map[name]Server`     | 空                              | global / project         | 每个 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
+| `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 每个 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
+| `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
+| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会被各模型的 `limit.output` 限制。                                                    |
+| `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
+| `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
+| `worktree`              | object                | 空                              | global / project         | `chord --worktree` 与 `chord worktree …` 子命令的默认值。                                                            |
+
+### Provider 字段参考
+
+| 字段          | 类型   | 说明                                                                                                                                                |
+| ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
+| `api_url`     | string | Endpoint URL。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。                                                |
+| `preset`      | string | 当前可选 `codex`（OpenAI Codex / ChatGPT OAuth）。                                                                                                  |
+| `compress`    | bool   | 当 gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
+| `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
+
+### 模型字段参考
+
+| 字段              | 类型   | 说明                                                                                                              |
+| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
+| `limit.context`   | int    | 上下文 token 上限。                                                                                               |
+| `limit.output`    | int    | 输出 token 上限；运行时还会被 `max_output_tokens` 限制。                                                          |
+| `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |
+| `text.verbosity`  | string | OpenAI text verbosity 提示，支持的模型生效。                                                                      |
+| `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |
+| `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
+| `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认 `[text, image]`。                                                           |
+
+Agent 用法见 [扩展与定制 — Agent](./customization_CN.md#agent)；agent 完整 schema 见 [Agent 配置](#agent-配置)。
+
 ## 相关文档
 
 - [快速开始](./quickstart_CN.md)
+- [CLI](./cli_CN.md)
+- [快捷键](./keybindings_CN.md)
+- [目录与路径](./paths_CN.md)
+- [环境变量](./environment_CN.md)
 - [权限与安全](./permissions-and-safety_CN.md)
 - [扩展与定制](./customization_CN.md)
+- [Hooks](./hooks_CN.md)
 - [常见问题排查](./troubleshooting_CN.md)

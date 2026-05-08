@@ -1,0 +1,91 @@
+# Codex OAuth + LSP + custom agent
+#
+# A practical setup if you have an OpenAI ChatGPT / Codex subscription, want
+# real LSP-backed code awareness for Go and Python, and want a dedicated
+# "reviewer" SubAgent.
+#
+# Pair with ~/.config/chord/auth.yaml that has Codex OAuth tokens stored via
+# `chord auth codex`.
+
+providers:
+  codex:
+    preset: codex
+    type: responses
+    models:
+      gpt-5.5:
+        limit:
+          context: 1000000
+          output: 128000
+        reasoning:
+          summary: auto
+        text:
+          verbosity: medium
+        variants:
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+        modalities:
+          input: [text, image]
+
+  # A fallback OpenAI-compatible provider (e.g. for cheap / fast tasks).
+  fast:
+    type: chat-completions
+    api_url: https://api.openai.com/v1/chat/completions
+    models:
+      gpt-5.4-mini:
+        limit:
+          context: 200000
+          output: 16384
+
+model_pools:
+  thinking:
+    - codex/gpt-5.5@high
+    - codex/gpt-5.5
+  fast:
+    - fast/gpt-5.4-mini
+
+# LSP — install gopls + pyright separately
+lsp:
+  gopls:
+    command: gopls
+    file_types: [".go"]
+    root_markers: ["go.work", "go.mod", ".git"]
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python.analysis:
+        typeCheckingMode: standard
+
+# Compaction friendly to long sessions
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+  compact_model: fast/gpt-5.4-mini
+
+desktop_notification: true
+prevent_sleep: true                 # macOS only
+ime_switch_target: com.apple.keylayout.ABC
+log_level: info
+
+# An additional reviewer SubAgent ships in ~/.config/chord/agents/reviewer.md:
+#
+#   ---
+#   name: reviewer
+#   description: Critical code reviewer
+#   mode: subagent
+#   model_pools: [thinking]
+#   permission:
+#     Read: allow
+#     Grep: allow
+#     Glob: allow
+#     Edit: deny
+#     Write: deny
+#     Bash: ask
+#   ---
+#   You review code changes for correctness, safety, and style.
+#   Speak plainly and call out the most impactful issues first.

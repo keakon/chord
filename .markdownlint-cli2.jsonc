@@ -1,0 +1,42 @@
+// markdownlint-cli2 configuration for the Chord repository.
+//
+// Run locally:
+//   npx -y markdownlint-cli2
+//
+// CI runs the same command via .github/workflows/docs.yml.
+{
+  "config": {
+    "default": true,
+
+    // Practical relaxations:
+    "MD013": false,        // line-length — irrelevant for this project
+    "MD033": false,        // allow inline HTML (admonition shorthand, <sup>, etc.)
+    "MD034": false,        // allow bare-URL <https://...> autolinks
+    "MD041": false,        // synced site files don't start with H1; let frontmatter lead
+    "MD036": false,        // allow `**Note:**` inline emphasis
+    "MD026": false,        // allow trailing punctuation in headings ("常见问题：" etc.)
+    "MD024": { "siblings_only": true },   // dup headings only across siblings, not the whole doc
+    "MD060": false,        // table-pipe column alignment — fights CJK + emoji width
+
+    // Extras worth keeping strict:
+    // MD009 trailing spaces, MD012 multiple blanks, MD025 single H1,
+    // MD031 blanks around fences, MD032 blanks around lists,
+    // MD040 fenced code language, MD047 file end newline — all default-on.
+  },
+  "globs": [
+    "docs/**/*.md",
+    "README.md",
+    "README_CN.md",
+    "CONTRIBUTING.md",
+    "AGENTS.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "ignores": [
+    ".internal-docs/**",
+    "website/**",
+    "node_modules/**",
+    "CHANGELOG.md",
+    "CHANGELOG_CN.md"
+  ]
+}

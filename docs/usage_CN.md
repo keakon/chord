@@ -127,7 +127,11 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/compact`：手动触发上下文压缩
 - `/stats`：查看用量统计
 - `/diagnostics`：导出用于排障的诊断包
-- `/loop on [target]` / `/loop off`：开启或关闭持续执行模式
+- `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
+- `/rules`：打开权限规则管理器（查看、编辑、保存规则）
+- `/loop`：显示当前的持续执行模式状态；`/loop on` 给当前聚焦 agent 开启；`/loop on <target>` 指定 agent 名开启；`/loop off` 关闭
+
+也可以**自定义** slash 命令（按项目或全局），见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。
 
 ## 多 Agent 与焦点切换
 

@@ -1,0 +1,119 @@
+# Team-ready: strict permissions, hooks-based auditing, project-level overrides
+#
+# This is the kind of config you would commit as ~/.config/chord/config.yaml
+# **plus** a project-level .chord/config.yaml in your team repository.
+#
+# Pair with ~/.config/chord/auth.yaml that has the relevant API keys, and a
+# scripts/chord-hooks/ directory in your repo that contains the hook scripts.
+
+# ---------------------------------------------------------------------------
+# Global ~/.config/chord/config.yaml
+# ---------------------------------------------------------------------------
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-opus-4.7:
+        limit:
+          context: 1000000
+          output: 128000
+        thinking:
+          type: adaptive
+          effort: medium
+
+model_pools:
+  thinking:
+    - anthropic/claude-opus-4.7
+
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+
+desktop_notification: true
+log_level: info
+
+# ---------------------------------------------------------------------------
+# Project-level <repo>/.chord/config.yaml (commit this)
+# ---------------------------------------------------------------------------
+# Copy the block below into <repo>/.chord/config.yaml — chord merges it on top
+# of the user-level config.
+
+# context:
+#   compact_model: anthropic/claude-opus-4.7   # use the same model for compaction
+#
+# # Hooks: audit Bash, lint Go on edit batches, redact secrets from output
+# hooks:
+#   on_tool_call:
+#     - name: audit-bash
+#       tools: ["Bash"]
+#       command: ["./scripts/chord-hooks/audit-bash.sh"]
+#       timeout: 5
+#
+#   on_tool_batch_complete:
+#     - name: golangci-lint
+#       tools: ["Edit", "Write", "Delete"]
+#       paths: ["**/*.go"]
+#       min_changed_files: 1
+#       command: ["./scripts/chord-hooks/run-golangci-lint.sh"]
+#       result: append_on_failure
+#       result_format: tail
+#       max_result_lines: 80
+#       join: before_next_llm
+#
+#   on_before_tool_result_append:
+#     - name: redact-keys
+#       tools: ["Bash", "WebFetch", "Read"]
+#       command: ["./scripts/chord-hooks/redact-keys.sh"]
+#       timeout: 3
+#
+# # MCP exposes a curated subset of remote tools
+# mcp:
+#   search:
+#     url: https://mcp.exa.ai/mcp
+#     allowed_tools:
+#       - web_search_exa
+#       - web_fetch_exa
+#
+# # LSP for the project's languages
+# lsp:
+#   gopls:
+#     command: gopls
+#     file_types: [".go"]
+#     root_markers: ["go.work", "go.mod"]
+#
+# # Project-scoped slash commands the team shares
+# commands:
+#   /review: |
+#     Please review the staged diff for correctness, security, and style.
+#     Highlight the most impactful issues first.
+#   /commit: |
+#     Generate a Conventional Commit message based on the staged diff.
+
+# ---------------------------------------------------------------------------
+# Per-agent strictness — committed under <repo>/.chord/agents/
+# ---------------------------------------------------------------------------
+# Example: <repo>/.chord/agents/builder.md
+#
+#   ---
+#   name: builder
+#   mode: primary
+#   model_pools: [thinking]
+#   permission:
+#     Read: allow
+#     Grep: allow
+#     Glob: allow
+#     Write: ask
+#     Edit: ask
+#     Delete: ask
+#     Bash:
+#       "go test ./...": allow
+#       "go build ./...": allow
+#       "git status": allow
+#       "git diff": allow
+#       "rm *": deny
+#       "sudo *": deny
+#   ---
+#   You are the team's primary coder. Default to small, focused commits.
+#   Always run `go test ./...` before considering a task complete.

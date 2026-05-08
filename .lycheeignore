@@ -1,0 +1,13 @@
+# lychee link-checker ignore list.
+# One regex per line; matched against URLs found in scanned files.
+# Run locally:  lychee --no-progress --cache docs/ README.md README_CN.md ...
+
+# The published docs site URL.
+# Until GitHub Pages is enabled and docs.yml has run once, these URLs return
+# 404 on the public web. Once the first deploy succeeds, you can delete this
+# block — link-check will then verify the live site too.
+^https://keakon\.github\.io/chord(/|$)
+
+# GitHub anchor-only links inside the same repo are sometimes flagged by
+# strict mode even though they resolve. Uncomment if false positives appear.
+# ^https://github\.com/keakon/chord/(blob|tree)/.*#L\d+

@@ -7,8 +7,16 @@
 !.githooks
 !.github
 !.gitignore
+!.markdownlint-cli2.jsonc
+!.lycheeignore
 
 # Go build/test artifacts
 *.test
 *.out
 coverage.*
+
+# Starlight docs site (website/)
+website/node_modules/
+website/dist/
+website/src/content/docs/en/*.md
+website/src/content/docs/zh/*.md
