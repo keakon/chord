@@ -41,25 +41,16 @@ mkdir -p ~/.config/chord
 chmod 700 ~/.config/chord
 ```
 
-Then edit `~/.config/chord/auth.yaml` and choose one credential setup.
-
-### Option A: Anthropic
+Then edit `~/.config/chord/auth.yaml`. For the default OpenRouter setup below:
 
 ```yaml
-anthropic:
-  - "$ANTHROPIC_API_KEY"
+openrouter:
+  - "$OPENROUTER_API_KEY"
 ```
 
-### Option B: OpenAI-compatible API
+Other providers use the same provider-name key convention, for example `anthropic`, `openai`, or any custom OpenAI-compatible provider name.
 
-```yaml
-openai-compatible:
-  - "$OPENAI_API_KEY"
-```
-
-### Option C: OpenAI ChatGPT / Codex OAuth
-
-Add a provider in `~/.config/chord/config.yaml` first:
+For OpenAI ChatGPT / Codex OAuth, add a provider in `~/.config/chord/config.yaml` first:
 
 ```yaml
 providers:
@@ -80,23 +71,25 @@ Edit `~/.config/chord/config.yaml`:
 
 ```yaml
 providers:
-  anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+  openrouter:
+    type: chat-completions
+    api_url: https://openrouter.ai/api/v1/chat/completions
     models:
-      claude-opus-4.7:
+      openai/gpt-5.5:
         limit:
           context: 1000000
           output: 128000
+        modalities:
+          input: [text, image]
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.7
+    - openrouter/openai/gpt-5.5
 ```
 
 `providers` defines the API endpoint and available models; `model_pools.default` defines the model pool used by the built-in `builder` / `planner` agents. Both are required. If you only configure a provider, startup will fail because the default model pool cannot be resolved. `builder` does not automatically use every global `model_pools` entry; the built-in config only references `default`. If you override the built-in `builder` agent with a custom agent config, that config must explicitly define `model_pools` or `models`.
 
-If you use an OpenAI-compatible API, change `type`, `api_url`, the provider name, and the model name, then update the `provider/model` reference in `model_pools.default` to match.
+If you use another OpenRouter model or any other OpenAI-compatible API, change `api_url`, the provider name, and the model name, then update the `provider/model` reference in `model_pools.default` to match.
 
 ## 4. Run
 

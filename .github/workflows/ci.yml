@@ -6,11 +6,17 @@ on:
       - "**"
     paths-ignore:
       - "**/*.md"
+      - "**/*.mdx"
       - "docs/**"
+      - "website/**"
+      - "scripts/sync-docs.mjs"
   pull_request:
     paths-ignore:
       - "**/*.md"
+      - "**/*.mdx"
       - "docs/**"
+      - "website/**"
+      - "scripts/sync-docs.mjs"
 
 permissions:
   contents: read

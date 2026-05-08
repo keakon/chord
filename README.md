@@ -20,28 +20,30 @@ go install github.com/keakon/chord/cmd/chord@latest
 mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
 cat > ~/.config/chord/config.yaml <<'YAML'
 providers:
-  anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+  openrouter:
+    type: chat-completions
+    api_url: https://openrouter.ai/api/v1/chat/completions
     models:
-      claude-opus-4.7:
+      openai/gpt-5.5:
         limit:
           context: 1000000
           output: 128000
+        modalities:
+          input: [text, image]
 model_pools:
   default:
-    - anthropic/claude-opus-4.7
+    - openrouter/openai/gpt-5.5
 YAML
 cat > ~/.config/chord/auth.yaml <<'YAML'
-anthropic:
-  - "$ANTHROPIC_API_KEY"
+openrouter:
+  - "$OPENROUTER_API_KEY"
 YAML
 
 # 3. Run from your project
 cd my-project && chord
 ```
 
-If you cannot directly reach Anthropic, configure a proxy. For OpenAI / Codex OAuth / Gemini / OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
+For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
 
 ### macOS release downloads
 

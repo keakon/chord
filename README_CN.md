@@ -20,28 +20,30 @@ go install github.com/keakon/chord/cmd/chord@latest
 mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
 cat > ~/.config/chord/config.yaml <<'YAML'
 providers:
-  anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+  modelscope:
+    type: chat-completions
+    api_url: https://api-inference.modelscope.cn/v1/chat/completions
     models:
-      claude-opus-4.7:
+      Qwen/Qwen3.5-397B-A17B:
         limit:
-          context: 1000000
-          output: 128000
+          context: 262144
+          output: 65536
+        modalities:
+          input: [text, image]
 model_pools:
   default:
-    - anthropic/claude-opus-4.7
+    - modelscope/Qwen/Qwen3.5-397B-A17B
 YAML
 cat > ~/.config/chord/auth.yaml <<'YAML'
-anthropic:
-  - "$ANTHROPIC_API_KEY"
+modelscope:
+  - "$MODELSCOPE_API_KEY"
 YAML
 
 # 3. 在项目里启动
 cd my-project && chord
 ```
 
-如果无法直连 Anthropic，请配置代理；OpenAI / Codex OAuth / Gemini / OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
 ### macOS Release 下载说明
 

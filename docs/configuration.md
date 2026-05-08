@@ -45,18 +45,20 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 
 ## Minimal provider config
 
-### Anthropic
+### OpenRouter
 
 ```yaml
 providers:
-  anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+  openrouter:
+    type: chat-completions
+    api_url: https://openrouter.ai/api/v1/chat/completions
     models:
-      claude-opus-4.7:
+      openai/gpt-5.5:
         limit:
           context: 1000000
           output: 128000
+        modalities:
+          input: [text, image]
 ```
 
 ### OpenAI Chat Completions

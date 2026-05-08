@@ -41,25 +41,16 @@ mkdir -p ~/.config/chord
 chmod 700 ~/.config/chord
 ```
 
-然后编辑 `~/.config/chord/auth.yaml`，选择一种方式配置凭据。
-
-### 方案 A：Anthropic
+然后编辑 `~/.config/chord/auth.yaml`。如果使用下方默认的 ModelScope 示例：
 
 ```yaml
-anthropic:
-  - "$ANTHROPIC_API_KEY"
+modelscope:
+  - "$MODELSCOPE_API_KEY"
 ```
 
-### 方案 B：OpenAI 兼容接口
+其他 provider 也使用同样的 provider 名作为 key，例如 `anthropic`、`openai`，或任意自定义 OpenAI 兼容 provider 名。
 
-```yaml
-openai-compatible:
-  - "$OPENAI_API_KEY"
-```
-
-### 方案 C：OpenAI ChatGPT / Codex OAuth
-
-先在 `~/.config/chord/config.yaml` 中添加 provider：
+OpenAI ChatGPT / Codex OAuth 需要先在 `~/.config/chord/config.yaml` 中添加 provider：
 
 ```yaml
 providers:
@@ -80,23 +71,25 @@ chord auth openai
 
 ```yaml
 providers:
-  anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+  modelscope:
+    type: chat-completions
+    api_url: https://api-inference.modelscope.cn/v1/chat/completions
     models:
-      claude-opus-4.7:
+      Qwen/Qwen3.5-397B-A17B:
         limit:
-          context: 1000000
-          output: 128000
+          context: 262144
+          output: 65536
+        modalities:
+          input: [text, image]
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.7
+    - modelscope/Qwen/Qwen3.5-397B-A17B
 ```
 
 `providers` 定义可用的 API endpoint 与模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置，否则只配置 provider 时启动会报找不到默认模型池。`builder` 不会自动使用所有全局 `model_pools`；内置配置只引用 `default`，如果你用自定义 `builder` agent 覆盖内置配置，也必须显式配置 `model_pools` 或 `models`。
 
-如果你使用 OpenAI 兼容接口，可以把 `type`、`api_url`、provider 名和模型名改成对应值，并同步更新 `model_pools.default` 中的 `provider/model` 引用。
+如果你使用其他 ModelScope 模型或其他 OpenAI 兼容接口，可以把 `api_url`、provider 名和模型名改成对应值，并同步更新 `model_pools.default` 中的 `provider/model` 引用。
 
 ## 4. 运行
 
