@@ -4,6 +4,11 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.5.0 - 2026-05-08
+
+- Config: agent configs now use `mode: main` for MainAgent roles and `mode: subagent` for SubAgents. `sub_agent` and `sub` are also accepted as SubAgent aliases; empty or other values behave as `main`. Hook `agent_kind` filters use `main`/`subagent`.
 - CLI: added `chord import` support for importing external sessions from Claude Code (`claude`), Codex (`codex`), and OpenCode (`opencode`). Import writes a resumable Chord session plus `import-report.json`; tools default to safe text-mode for Codex/OpenCode and `auto` for Claude.
 - Runtime: added request-time model compatibility normalization to safely replay or downgrade provider-specific history payloads (Anthropic signed thinking and structured tools) when switching providers/models.
 - Runtime: fixed a potential hang when a tool batch/turn is cancelled while waiting for the shared streaming tool execution quota. Chord now emits a cancelled tool result so pending tool calls resolve and the UI cannot get stuck.
@@ -30,7 +35,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Added runtime model pools:
   - **Breaking:** agent model configuration must now reference one or more top-level `model_pools` from `config.yaml`; the previous flat per-agent `models` list is no longer accepted. Internally, `AgentConfig.Models` is now a `map[string][]string` (pool name → ordered model refs).
-  - Every agent, including `primary`, must define at least one pool. Pool names are user-defined and not reserved (for example, `default`, `base`, `fast`, and `strong` are all valid). When no pool is explicitly selected, Chord falls back to the **first** pool in the agent's `model_pools: [...]` list.
+  - Every agent must define at least one pool. Pool names are user-defined and not reserved (for example, `default`, `base`, `fast`, and `strong` are all valid). When no pool is explicitly selected, Chord falls back to the **first** pool in the agent's `model_pools: [...]` list.
   - Agents can reuse globally-defined pools via `model_pools`; inline `models` and `model_pools` are mutually exclusive in agent config. Runtime pool policy now tracks the current role pool, per-agent overrides, and last-picked state with per-project persistence.
   - The `/model` command is replaced by `/models` with `status`, `<pool>`, and `--agent <name> <pool>` subcommands. The TUI selector now chooses pools instead of individual models.
   - Model pool selections made while the agent is busy are submitted to the main event loop immediately. The current in-flight request keeps its existing client snapshot, while queued user messages and other later request boundaries pick up the new pool without waiting for another draft send or full idle. Pending-switch failures now flow through the TUI update loop instead of mutating view state from a background goroutine.

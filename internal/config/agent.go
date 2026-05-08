@@ -57,7 +57,21 @@ type DelegationConfig struct {
 const (
 	DefaultDelegationMaxChildren = 10
 	DefaultDelegationMaxDepth    = 1
+
+	AgentModeMain          = "main"
+	AgentModeSubAgent      = "subagent"
+	AgentModeSubAgentSnake = "sub_agent"
+	AgentModeSubAgentShort = "sub"
 )
+
+func isAgentModeSubAgent(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case AgentModeSubAgent, AgentModeSubAgentSnake, AgentModeSubAgentShort:
+		return true
+	default:
+		return false
+	}
+}
 
 func (c DelegationConfig) EffectiveMaxChildren() int {
 	if c.MaxChildren > 0 {
@@ -81,9 +95,9 @@ func (c DelegationConfig) ChildJoinEnabled() bool {
 }
 
 // IsSubAgent reports whether this agent is intended for use as a SubAgent.
-// Agents default to subagent mode when Mode is empty.
+// Only subagent modes enable SubAgent behavior; empty and unknown modes are treated as main mode for compatibility.
 func (c *AgentConfig) IsSubAgent() bool {
-	return c.Mode == "" || c.Mode == "subagent"
+	return isAgentModeSubAgent(c.Mode)
 }
 
 // PoolNames returns the ordered list of model pool names defined in this agent config.
@@ -336,14 +350,14 @@ Question: allow
 	return &AgentConfig{
 		Name:        "planner",
 		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
-		Mode:        "primary",
+		Mode:        AgentModeMain,
 		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}
 }
 
 // DefaultBuilderAgent returns the built-in builder agent configuration.
-// The builder agent is the MainAgent's default role — the primary agent the user
+// The builder agent is the MainAgent's default role — the main agent the user
 // interacts with for coding tasks. Its permissions are from the MainAgent's
 // perspective (Delegate, TodoWrite) not SubAgent's (Complete, Escalate, Notify).
 //
@@ -376,7 +390,7 @@ Handoff: deny
 	return &AgentConfig{
 		Name:        "builder",
 		Description: "General-purpose coding agent — the default MainAgent role for implementing features, fixing bugs, writing tests, and refactoring code.",
-		Mode:        "primary",
+		Mode:        AgentModeMain,
 		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}

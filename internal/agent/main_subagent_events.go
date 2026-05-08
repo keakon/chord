@@ -27,8 +27,8 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 	case SubAgentStateCompleted:
 		a.loopState.markProgress()
 		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "done", Message: payload.Summary})
-	case SubAgentStateWaitingPrimary:
-		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "waiting_primary", Message: payload.Summary})
+	case SubAgentStateWaitingMain:
+		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "waiting_main", Message: payload.Summary})
 	case SubAgentStateWaitingDescendant:
 		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: string(SubAgentStateWaitingDescendant), Message: payload.Summary})
 	case SubAgentStateRunning:

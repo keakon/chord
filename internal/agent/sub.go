@@ -1131,7 +1131,7 @@ func (e *subAgentEventSender) SendAgentEvent(eventType, sourceID string, payload
 	switch eventType {
 	case EventEscalate:
 		reason, _ := payload.(string)
-		s.setState(SubAgentStateWaitingPrimary, reason)
+		s.setState(SubAgentStateWaitingMain, reason)
 	case EventAgentNotify:
 		msg, _ := payload.(string)
 		if strings.TrimSpace(msg) != "" {

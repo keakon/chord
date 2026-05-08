@@ -135,8 +135,8 @@ func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
 	if sub.pendingEscalate != "need help" {
 		t.Fatalf("pendingEscalate = %q, want %q", sub.pendingEscalate, "need help")
 	}
-	if sub.State() == SubAgentStateWaitingPrimary {
-		t.Fatal("worker entered waiting_primary before regular tool batch completed")
+	if sub.State() == SubAgentStateWaitingMain {
+		t.Fatal("worker entered waiting_main before regular tool batch completed")
 	}
 	sub.handleToolResult(&toolResult{
 		CallID:   "call-2",

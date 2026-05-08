@@ -254,7 +254,7 @@ func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string
 	statusMessage := "message delivered to running worker"
 	payload := normalizeSubAgentMessage(kind, message)
 	replyKind := normalizeReplyKind(kind)
-	needsResume := state == SubAgentStateWaitingPrimary || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted || state == SubAgentStateIdle
+	needsResume := state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted || state == SubAgentStateIdle
 
 	if needsResume {
 		if err := a.acquireSubAgentSlot(sub); err != nil {

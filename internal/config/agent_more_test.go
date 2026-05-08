@@ -15,10 +15,13 @@ func TestAgentConfigIsSubAgentAndModelRefHelpers(t *testing.T) {
 		mode string
 		want bool
 	}{
-		{name: "empty defaults subagent", mode: "", want: true},
-		{name: "explicit subagent", mode: "subagent", want: true},
-		{name: "primary", mode: "primary", want: false},
-		{name: "case sensitive", mode: "SubAgent", want: false},
+		{name: "empty defaults main", mode: "", want: false},
+		{name: "explicit subagent", mode: AgentModeSubAgent, want: true},
+		{name: "snake subagent alias", mode: AgentModeSubAgentSnake, want: true},
+		{name: "short subagent alias", mode: AgentModeSubAgentShort, want: true},
+		{name: "case-insensitive subagent", mode: "SubAgent", want: true},
+		{name: "main", mode: AgentModeMain, want: false},
+		{name: "unknown mode is main", mode: "custom", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,7 +125,7 @@ func TestBuiltinAndResolvedAgentConfigs(t *testing.T) {
 	if builtins["planner"] == nil || builtins["builder"] == nil {
 		t.Fatalf("BuiltinAgentConfigs() = %#v, want planner and builder", builtins)
 	}
-	if builtins["planner"].Mode != "primary" || builtins["builder"].Mode != "primary" {
+	if builtins["planner"].Mode != AgentModeMain || builtins["builder"].Mode != AgentModeMain {
 		t.Fatalf("builtin modes = planner:%q builder:%q", builtins["planner"].Mode, builtins["builder"].Mode)
 	}
 	if builtins["planner"].Permission.Kind != yaml.MappingNode || builtins["builder"].Permission.Kind != yaml.MappingNode {

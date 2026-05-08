@@ -59,7 +59,7 @@ Every hook receives this JSON document on stdin:
   "session_id": "20260508120000000",
   "turn_id": 7,
   "agent_id": "main",
-  "agent_kind": "primary",
+  "agent_kind": "main",
   "project_root": "/path/to/project",
   "selected_model": "anthropic/claude-opus-4.7",
   "running_model": "anthropic/claude-opus-4.7",
@@ -139,7 +139,7 @@ hooks:
       tools: ["Bash"]                         # glob match on tool name
       paths: ["src/**/*.go"]                  # glob match on relevant paths
       agents: ["main", "reviewer"]            # glob match on agent name
-      agent_kinds: ["primary", "subagent"]    # exact match
+      agent_kinds: ["main", "subagent"]       # exact match
       models: ["anthropic/*"]                 # glob match on selected/running model
       min_changed_files: 0                    # only run if at least N files changed
       only_on_error: false                    # only run when there is an error in payload

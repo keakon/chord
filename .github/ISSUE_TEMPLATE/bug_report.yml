@@ -17,7 +17,7 @@ body:
     attributes:
       label: Chord version
       description: Output of `chord --version` (or commit SHA if built from source)
-      placeholder: "v0.1.0 / dev-abc1234"
+      placeholder: "v0.5.0 / dev-abc1234"
     validations:
       required: true
 

@@ -74,7 +74,7 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	})
 	cfg := &config.AgentConfig{
 		Name: "test",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base": {"provider/model-a"},
 			"fast": {"provider/model-b"},

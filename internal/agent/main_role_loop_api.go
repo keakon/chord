@@ -22,7 +22,7 @@ func (a *MainAgent) SwitchRole(role string) {
 }
 
 // AvailableRoles returns the ordered list of roles the user can cycle through.
-// Only primary-mode agents (mode: "primary") are included; subagent-only configs
+// Only main-mode agents are included; subagent-only configs
 // are excluded. builder is always first; planner second (if present); custom
 // roles after that are sorted alphabetically for deterministic Tab cycling.
 func (a *MainAgent) AvailableRoles() []string {
@@ -48,7 +48,7 @@ func (a *MainAgent) AvailableRoles() []string {
 }
 
 // AvailableAgents returns the names of agent roles available for Handoff selection.
-// Only primary-mode agents (mode != "subagent") are eligible, and the current
+// Only main-mode agents are eligible, and the current
 // active role is excluded so planner cannot hand off to itself. builder remains
 // the default when available so the selector always offers an execution agent.
 // Non-builder roles are sorted alphabetically for deterministic selection order.

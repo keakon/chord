@@ -98,7 +98,7 @@ log_level: info
 #
 #   ---
 #   name: builder
-#   mode: primary
+#   mode: main
 #   model_pools: [thinking]
 #   permission:
 #     Read: allow
@@ -115,5 +115,5 @@ log_level: info
 #       "rm *": deny
 #       "sudo *": deny
 #   ---
-#   You are the team's primary coder. Default to small, focused commits.
+#   You are the team's main coder. Default to small, focused commits.
 #   Always run `go test ./...` before considering a task complete.

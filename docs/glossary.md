@@ -4,7 +4,7 @@ Quick reference for the terms that appear across Chord's docs.
 
 ## MainAgent
 
-The single primary agent for a session. It owns the user-facing conversation and is the only agent that can spawn SubAgents. The active main role is shown in the TUI status bar and can be cycled with `Tab` (in the main view).
+The single main agent for a session. It owns the user-facing conversation and is the only agent that can spawn SubAgents. The active main role is shown in the TUI status bar and can be cycled with `Tab` (in the main view).
 
 ## SubAgent
 
@@ -44,7 +44,7 @@ Chord without the TUI. `chord headless` exposes a stdio JSONL control plane suit
 
 ## Speculative execution (early tool execution)
 
-Chord may execute a small safe subset of tool calls *while the model response is still streaming* (as soon as tool arguments are complete) to reduce the "finalize gap". Speculative file mutations are real on-disk writes that get rolled back if the finalize discards the call. Always enabled; not user-configurable. See [Configuration — Streaming tool execution](./configuration.md#streaming-tool-execution-early-execution).
+Chord may execute a small safe subset of tool calls *while the model response is still streaming* (as soon as tool arguments are complete) to reduce the "finalize gap". Speculative file mutations are real on-disk writes that get rolled back if the finalize discards the call. Always enabled; not user-configurable.
 
 ## Project key
 

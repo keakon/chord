@@ -107,13 +107,15 @@ function rewriteLinks(body, lang) {
       `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,
     )
     // Sibling .md links: ./xxx_CN.md → /chord/zh/xxx/ ; ./xxx.md → /chord/xxx/
-    .replace(/\(\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) =>
-      `(${sitePath(cn ? 'zh' : lang, slug, anchor || '')})`,
-    )
+    .replace(/\(\.\/([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
+      const anchor = (rest || '').startsWith('#') ? rest : '';
+      return `(${sitePath(cn ? 'zh' : lang, slug, anchor)})`;
+    })
     // ../<page>.md from a subdir
-    .replace(/\(\.\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) =>
-      `(${sitePath(cn ? 'zh' : lang, slug, anchor || '')})`,
-    );
+    .replace(/\(\.\.\/([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
+      const anchor = (rest || '').startsWith('#') ? rest : '';
+      return `(${sitePath(cn ? 'zh' : lang, slug, anchor)})`;
+    });
 }
 
 // Promote the simple "> **Note:**" / "> **Important:** / **Warning:**" patterns

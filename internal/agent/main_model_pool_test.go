@@ -9,7 +9,7 @@ import (
 func TestRuntimeModelPoolPolicyEffectivePool(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base":   {"provider/model-a"},
 			"fast":   {"provider/model-b"},
@@ -42,7 +42,7 @@ func TestRuntimeModelPoolPolicyEffectivePool(t *testing.T) {
 func TestRuntimeModelPoolPolicyFallbackToFirstPool(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base": {"provider/model-a"},
 		},
@@ -59,7 +59,7 @@ func TestRuntimeModelPoolPolicyFallbackToFirstPool(t *testing.T) {
 func TestRuntimeModelPoolPolicyEmptyConfig(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name:   "builder",
-		Mode:   "primary",
+		Mode:   config.AgentModeMain,
 		Models: map[string][]string{},
 	}
 
@@ -99,7 +99,7 @@ func TestRuntimeModelPoolPolicyGlobalDoesNotAffectSubAgent(t *testing.T) {
 func TestRuntimeModelPoolPolicyEffectiveModels(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base": {"provider/model-a", "provider/model-b"},
 			"fast": {"provider/model-c"},
@@ -128,7 +128,7 @@ func TestRuntimeModelPoolPolicyEffectiveModels(t *testing.T) {
 func TestRuntimeModelPoolPolicyLastPicked(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base": {"provider/model-a", "provider/model-b"},
 		},
@@ -151,7 +151,7 @@ func TestRuntimeModelPoolPolicyLastPicked(t *testing.T) {
 func TestRuntimeModelPoolPolicyOverridePrecedence(t *testing.T) {
 	builderCfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"base": {"provider/model-a"},
 			"fast": {"provider/model-b"},
@@ -186,7 +186,7 @@ func TestRuntimeModelPoolPolicyFallbackRespectsModelPoolsOrder(t *testing.T) {
 	agents := map[string]*config.AgentConfig{
 		"builder": {
 			Name:       "builder",
-			Mode:       "primary",
+			Mode:       config.AgentModeMain,
 			ModelPools: []string{"thinking", "non-thinking"},
 		},
 	}
@@ -240,7 +240,7 @@ func TestRuntimeModelPoolPolicyClearAgentOverride(t *testing.T) {
 func TestRuntimeModelPoolPolicyDefaultPoolNameAllowed(t *testing.T) {
 	cfg := &config.AgentConfig{
 		Name: "builder",
-		Mode: "primary",
+		Mode: config.AgentModeMain,
 		Models: map[string][]string{
 			"default": {"provider/model-a"},
 			"fast":    {"provider/model-b"},

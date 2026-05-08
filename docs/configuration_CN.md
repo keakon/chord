@@ -192,7 +192,7 @@ model_pools:
 ```yaml
 # ~/.config/chord/agents/builder.yaml 或 .chord/agents/builder.yaml
 name: builder
-mode: primary
+mode: main
 model_pools: [thinking, non-thinking]
 ```
 
@@ -433,7 +433,7 @@ prompt: |
 
 - `name`：agent 名称。省略时使用不带扩展名的文件名。
 - `description`：简短描述，会在 delegation 可用时展示给 main agent。
-- `mode`：`subagent` 或其他角色模式；为空时默认按 subagent 行为处理。
+- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
 - `model_pools`：该 agent 可使用的模型池名列表（有序）。池定义位于 `config.yaml` 顶层的 `model_pools`。
   `openai/gpt-5.5@high` 这类 inline variant 写在池定义里。
 - `variant`：当 model ref 没有写 `@variant` 时使用的默认 variant。

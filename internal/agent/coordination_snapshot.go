@@ -206,7 +206,7 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 		if sub := a.subAgents[rec.LatestInstanceID]; sub != nil {
 			state := sub.State()
 			switch state {
-			case SubAgentStateWaitingPrimary:
+			case SubAgentStateWaitingMain:
 				reason = ""
 			case SubAgentStateWaitingDescendant:
 				if len(a.outstandingJoinChildTaskIDsLocked(sub.taskID)) == 0 && now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {

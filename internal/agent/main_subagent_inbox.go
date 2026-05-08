@@ -308,13 +308,13 @@ func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {
 	case SubAgentMailboxKindCompleted:
 		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "done", Message: msg.Summary})
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
-		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_primary", Message: msg.Summary})
+		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_main", Message: msg.Summary})
 		a.emitToTUI(ToastEvent{Message: msg.Summary, Level: "warn", AgentID: msg.AgentID})
 	case SubAgentMailboxKindRiskAlert:
-		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_primary", Message: msg.Summary})
+		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_main", Message: msg.Summary})
 		a.emitToTUI(ToastEvent{Message: msg.Summary, Level: "error", AgentID: msg.AgentID})
 	case SubAgentMailboxKindDirectionChange:
-		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_primary", Message: msg.Summary})
+		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_main", Message: msg.Summary})
 		a.emitToTUI(ToastEvent{Message: msg.Summary, Level: "warn", AgentID: msg.AgentID})
 	}
 }

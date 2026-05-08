@@ -50,7 +50,7 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 		rec.State = string(SubAgentStateCompleted)
 		rec.ResumePolicy = taskResumePolicyCompletedFollowUpOnly
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
-		rec.State = string(SubAgentStateWaitingPrimary)
+		rec.State = string(SubAgentStateWaitingMain)
 		rec.ResumePolicy = taskResumePolicyLiveOnly
 	case SubAgentMailboxKindProgress:
 		if rec.State == "" {

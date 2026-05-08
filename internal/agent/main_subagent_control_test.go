@@ -270,10 +270,10 @@ func TestTakeOutstandingMailboxForSubPreservesSiblingCompletedMailboxes(t *testi
 	}
 }
 
-func TestSendMessageToWaitingPrimaryWorkerResumesExecution(t *testing.T) {
+func TestSendMessageToWaitingMainWorkerResumesExecution(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-1")
-	sub.setState(SubAgentStateWaitingPrimary, "need approval")
+	sub.setState(SubAgentStateWaitingMain, "need approval")
 	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
 		MessageID:   "worker-1-1",
 		AgentID:     sub.instanceID,
@@ -330,7 +330,7 @@ func TestSendMessageToWaitingPrimaryWorkerResumesExecution(t *testing.T) {
 func TestNotifySubAgentDoesNotAckMailboxWhenSlotUnavailable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-slot")
-	sub.setState(SubAgentStateWaitingPrimary, "need approval")
+	sub.setState(SubAgentStateWaitingMain, "need approval")
 	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
 		MessageID:   "worker-1-2",
 		AgentID:     sub.instanceID,
@@ -436,8 +436,8 @@ func TestCreateSubAgentIgnoresNonActiveDirectChildrenForLimit(t *testing.T) {
 	if child == nil {
 		t.Fatal("expected first child SubAgent to exist")
 	}
-	child.setState(SubAgentStateWaitingPrimary, "need decision")
-	a.noteSubAgentStateTransition(child, SubAgentStateWaitingPrimary)
+	child.setState(SubAgentStateWaitingMain, "need decision")
+	a.noteSubAgentStateTransition(child, SubAgentStateWaitingMain)
 	a.syncTaskRecordFromSub(child, "")
 
 	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child two", "worker", "", "", tools.WriteScope{})
@@ -966,7 +966,7 @@ func TestNotifySubAgentUsesEventLoopWhenStarted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	startMainAgentLoopForTest(t, a)
 	sub := newControllableTestSubAgent(t, a, "adhoc-loop")
-	sub.setState(SubAgentStateWaitingPrimary, "need approval")
+	sub.setState(SubAgentStateWaitingMain, "need approval")
 	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
 		MessageID:   "worker-1-3",
 		AgentID:     sub.instanceID,
@@ -1190,18 +1190,18 @@ func TestSendMessageToCompletedTaskRehydratesClosedWorker(t *testing.T) {
 	}
 }
 
-func TestWaitingPrimaryLifecycleExpiresAfterUserTurns(t *testing.T) {
+func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-6")
-	sub.setState(SubAgentStateWaitingPrimary, "need answer")
-	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingPrimary)
+	sub.setState(SubAgentStateWaitingMain, "need answer")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
 
-	for i := uint64(0); i < waitingPrimaryExpiryUserTurns; i++ {
+	for i := uint64(0); i < waitingMainExpiryUserTurns; i++ {
 		a.explicitUserTurnCount++
 	}
 	a.sweepSubAgentLifecycle()
 
 	if got := a.subAgentByID(sub.instanceID); got != nil {
-		t.Fatal("expected waiting_primary worker to expire and close")
+		t.Fatal("expected waiting_main worker to expire and close")
 	}
 }

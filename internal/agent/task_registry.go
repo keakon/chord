@@ -76,7 +76,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.ExpectedWriteScope = out.ExpectedWriteScope.Normalized()
 	out.OwnerAgentID = strings.TrimSpace(out.OwnerAgentID)
 	out.OwnerTaskID = strings.TrimSpace(out.OwnerTaskID)
-	out.State = strings.TrimSpace(out.State)
+	out.State = string(normalizeSubAgentState(SubAgentState(strings.TrimSpace(out.State))))
 	out.ResumePolicy = strings.TrimSpace(out.ResumePolicy)
 	out.LatestInstanceID = strings.TrimSpace(out.LatestInstanceID)
 	out.LastSummary = strings.TrimSpace(out.LastSummary)
@@ -205,7 +205,7 @@ func durableTaskResumePolicy(state SubAgentState) string {
 
 func shouldRestoreLiveSubAgentState(state SubAgentState) bool {
 	switch state {
-	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingPrimary, SubAgentStateWaitingDescendant:
+	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
 		return true
 	default:
 		return false
@@ -430,7 +430,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.UpdatedAt = now
 	if strings.TrimSpace(closedReason) != "" {
 		rec.ClosedReason = strings.TrimSpace(closedReason)
-	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingPrimary || state == SubAgentStateIdle {
+	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingMain || state == SubAgentStateIdle {
 		rec.ClosedReason = ""
 	}
 	a.taskRecords[taskID] = rec

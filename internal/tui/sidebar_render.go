@@ -292,7 +292,7 @@ func statusIndicator(status string, focused bool) string {
 		return "○"
 	case "connecting", "waiting_headers", "waiting_token", "retrying", "retrying_key", "cooling":
 		return "↺"
-	case "waiting_primary", "waiting_descendant":
+	case "waiting_main", "waiting_descendant":
 		return "?"
 	case "done", "completed":
 		return "✓"

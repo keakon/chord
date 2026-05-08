@@ -11,13 +11,22 @@ type SubAgentState string
 
 const (
 	SubAgentStateRunning           SubAgentState = "running"
-	SubAgentStateWaitingPrimary    SubAgentState = "waiting_primary"
+	SubAgentStateWaitingMain       SubAgentState = "waiting_main"
 	SubAgentStateWaitingDescendant SubAgentState = "waiting_descendant"
 	SubAgentStateCompleted         SubAgentState = "completed"
 	SubAgentStateFailed            SubAgentState = "failed"
 	SubAgentStateCancelled         SubAgentState = "cancelled"
 	SubAgentStateIdle              SubAgentState = "idle"
+
+	legacySubAgentStateWaitingMainValue = "waiting_primary"
 )
+
+func normalizeSubAgentState(state SubAgentState) SubAgentState {
+	if state == SubAgentState(legacySubAgentStateWaitingMainValue) {
+		return SubAgentStateWaitingMain
+	}
+	return state
+}
 
 type subAgentRuntimeState struct {
 	mu                   sync.RWMutex

@@ -89,7 +89,7 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	if b.state.TaskDesc == "" {
 		b.state.TaskDesc = strings.TrimSpace(snap.TaskDesc)
 	}
-	b.state.State = SubAgentState(strings.TrimSpace(snap.State))
+	b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(snap.State)))
 	b.state.LastSummary = strings.TrimSpace(snap.LastSummary)
 	b.state.OwnerAgentID = strings.TrimSpace(snap.OwnerAgentID)
 	b.state.OwnerTaskID = strings.TrimSpace(snap.OwnerTaskID)
@@ -118,7 +118,7 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 		b.state.TaskID = strings.TrimSpace(meta.TaskID)
 	}
 	if b.state.State == "" {
-		b.state.State = SubAgentState(strings.TrimSpace(meta.State))
+		b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(meta.State)))
 	}
 	if b.state.LastSummary == "" {
 		b.state.LastSummary = strings.TrimSpace(meta.LastSummary)
@@ -655,7 +655,7 @@ func latestMailboxByAgentFromMessages(msgs []SubAgentMailboxMessage) map[string]
 		case SubAgentMailboxKindCompleted:
 			state = SubAgentStateCompleted
 		case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
-			state = SubAgentStateWaitingPrimary
+			state = SubAgentStateWaitingMain
 		}
 		out[msg.AgentID] = restoredMailboxAgentState{
 			State:       state,

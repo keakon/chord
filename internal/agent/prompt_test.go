@@ -1065,7 +1065,7 @@ TodoWrite: allow
 
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "General coding"}}}))
 	a.agentConfigs = map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Description: "Builder role", Mode: "primary"},
+		"builder": {Name: "builder", Description: "Builder role", Mode: config.AgentModeMain},
 		"coder":   {Name: "coder", Description: "General coding", Mode: "subagent"},
 	}
 	a.rebuildCachedSubAgents()
@@ -1088,7 +1088,7 @@ func TestExecutionPacingInstructionStaysGenericAcrossDelegateAccess(t *testing.T
 
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "General coding"}}}))
 	a.agentConfigs = map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Description: "Builder role", Mode: "primary"},
+		"builder": {Name: "builder", Description: "Builder role", Mode: config.AgentModeMain},
 		"coder":   {Name: "coder", Description: "General coding", Mode: "subagent"},
 	}
 	a.rebuildCachedSubAgents()

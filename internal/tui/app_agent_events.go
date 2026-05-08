@@ -440,7 +440,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.sidebar.ResolvePendingTask()
 		} else {
 			switch evt.Status {
-			case "idle", "done", "completed", "error", "cancelled", "waiting_primary", "waiting_descendant":
+			case "idle", "done", "completed", "error", "cancelled", "waiting_main", "waiting_descendant":
 				prevType := m.activities[evt.AgentID].Type
 				m.markAgentIdle(evt.AgentID)
 				m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)

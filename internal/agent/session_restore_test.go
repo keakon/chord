@@ -541,12 +541,12 @@ func TestRestoreSessionAtStartupRestoresActiveRoleModelFromSnapshot(t *testing.T
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:   "builder",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"default": {"build/one"}},
 		},
 		"executor": {
 			Name:   "executor",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"default": {"exec/one"}},
 		},
 	})
@@ -596,12 +596,12 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:   "builder",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
 		},
 		"executor": {
 			Name:   "executor",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong"}},
 		},
 	})
@@ -649,12 +649,12 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastP
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:   "builder",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
 		},
 		"executor": {
 			Name:   "executor",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong-a", "exec/strong-b"}},
 		},
 	})
@@ -700,12 +700,12 @@ func TestRestoreSessionAtStartupFallsBackToProjectModelPoolForHistoricalSnapshot
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:   "builder",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"build/fast"}, "strong": {"build/strong"}},
 		},
 		"executor": {
 			Name:   "executor",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"fast": {"exec/fast"}, "strong": {"exec/strong"}},
 		},
 	})
@@ -788,8 +788,8 @@ func TestRestoreSessionAtStartupRestoresSubAgentMailboxState(t *testing.T) {
 	if len(subagents) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want 1", len(subagents))
 	}
-	if subagents[0].State != string(SubAgentStateWaitingPrimary) {
-		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateWaitingPrimary)
+	if subagents[0].State != string(SubAgentStateWaitingMain) {
+		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateWaitingMain)
 	}
 	if subagents[0].LastSummary != "need approval to continue" {
 		t.Fatalf("subagents[0].LastSummary = %q, want %q", subagents[0].LastSummary, "need approval to continue")

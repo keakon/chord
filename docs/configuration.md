@@ -207,7 +207,7 @@ Project-level `.chord/config.yaml` `model_pools` are merged into the global conf
 ```yaml
 # ~/.config/chord/agents/builder.yaml or .chord/agents/builder.yaml
 name: builder
-mode: primary
+mode: main
 model_pools: [thinking, non-thinking]
 ```
 
@@ -478,7 +478,7 @@ Common fields include:
 
 - `name`: agent name. If omitted, Chord uses the filename without extension.
 - `description`: short description shown to the main agent when delegation is available.
-- `mode`: `subagent` or another role mode; empty defaults to subagent behavior.
+- `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases.
 - `model_pools`: list of pool names this agent can use (ordered). Pool definitions live in `config.yaml` top-level `model_pools`.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.

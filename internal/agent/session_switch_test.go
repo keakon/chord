@@ -118,7 +118,7 @@ func TestSendUserMessageWithPartsLocalOnlyModelsWhileFocusedSubAgent(t *testing.
 	agents := map[string]*config.AgentConfig{
 		"builder": {
 			Name:       "builder",
-			Mode:       "primary",
+			Mode:       config.AgentModeMain,
 			ModelPools: []string{"base", "fast"},
 		},
 		"reviewer": {
@@ -199,7 +199,7 @@ func TestModelsAgentCommandSetsNamedAgentPool(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	agents := map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", ModelPools: []string{"base"}},
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, ModelPools: []string{"base"}},
 		"reviewer": {Name: "reviewer", Mode: "subagent", ModelPools: []string{"base", "fast"}},
 	}
 	globalPools := map[string][]string{"base": {"provider/model-a"}, "fast": {"provider/model-b"}}

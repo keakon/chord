@@ -1,6 +1,6 @@
 package agent
 
-// Prompt building blocks shared across primary agents and subagents.
+// Prompt building blocks shared across main agents and subagents.
 const mainAgentIdentityPrompt = `You are an expert coding assistant. You help users with software development tasks.`
 
 const subAgentIdentityPrompt = `You are an expert coding assistant executing a specific task. You help with software development using the tools and permissions available in this role.`

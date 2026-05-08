@@ -782,7 +782,7 @@ func formatTodosAsBullets(todos []tools.TodoItem) string {
 
 func subAgentStateNeedsPromptContext(state string) bool {
 	switch strings.TrimSpace(state) {
-	case string(SubAgentStateRunning), string(SubAgentStateIdle), string(SubAgentStateWaitingPrimary), string(SubAgentStateWaitingDescendant):
+	case string(SubAgentStateRunning), string(SubAgentStateIdle), string(SubAgentStateWaitingMain), string(SubAgentStateWaitingDescendant):
 		return true
 	default:
 		return false

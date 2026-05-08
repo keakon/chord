@@ -149,7 +149,7 @@ func sidebarStatusPriority(status string) int {
 		return 1
 	case "retrying", "retrying_key", "cooling":
 		return 2
-	case "waiting_primary", "waiting_descendant":
+	case "waiting_main", "waiting_descendant":
 		return 3
 	case "idle":
 		return 4
@@ -170,7 +170,7 @@ func (s *Sidebar) UpdateStatus(agentID, status string) {
 		if s.agents[i].ID == agentID {
 			s.agents[i].Status = status
 			switch status {
-			case "done", "completed", "cancelled", "error", "waiting_primary", "waiting_descendant", "idle":
+			case "done", "completed", "cancelled", "error", "waiting_main", "waiting_descendant", "idle":
 				s.agents[i].Activity = ""
 			}
 			return

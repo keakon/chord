@@ -290,7 +290,7 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "resume worker conversation"})
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.agentDefName = "restorer"
-	sub.setState(SubAgentStateWaitingPrimary, "need decision")
+	sub.setState(SubAgentStateWaitingMain, "need decision")
 	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
 	}

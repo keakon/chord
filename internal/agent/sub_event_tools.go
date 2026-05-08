@@ -456,7 +456,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		})
 		return
 	}
-	if s.State() == SubAgentStateWaitingPrimary {
+	if s.State() == SubAgentStateWaitingMain {
 		return
 	}
 

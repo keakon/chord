@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	waitingPrimaryExpiryUserTurns   = uint64(5)
+	waitingMainExpiryUserTurns      = uint64(5)
 	failedCancelledGCGraceUserTurns = uint64(1)
 )
 
@@ -24,7 +24,7 @@ func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentSta
 	switch state {
 	case SubAgentStateRunning:
 		delete(a.subAgentStateEnteredTurn, sub.instanceID)
-	case SubAgentStateWaitingPrimary, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
+	case SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
 		a.subAgentStateEnteredTurn[sub.instanceID] = a.explicitUserTurnCount
 	}
 }
@@ -138,14 +138,14 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		state := sub.State()
 		enteredTurn := a.subAgentStateEnteredTurn[sub.instanceID]
 		switch state {
-		case SubAgentStateWaitingPrimary:
-			if a.explicitUserTurnCount >= enteredTurn+waitingPrimaryExpiryUserTurns {
+		case SubAgentStateWaitingMain:
+			if a.explicitUserTurnCount >= enteredTurn+waitingMainExpiryUserTurns {
 				a.handleSubAgentCloseRequestedEvent(Event{
 					Type:     EventSubAgentCloseRequested,
 					SourceID: sub.instanceID,
 					Payload: &SubAgentCloseRequestedPayload{
-						Reason:       "expired waiting for primary reply",
-						ClosedReason: "expired waiting for primary reply",
+						Reason:       "expired waiting for main reply",
+						ClosedReason: "expired waiting for main reply",
 						FinalState:   SubAgentStateCancelled,
 					},
 				})

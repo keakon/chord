@@ -325,7 +325,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 	a.handleSubAgentStateChangedEvent(Event{
 		Type:     EventSubAgentStateChanged,
 		SourceID: evt.SourceID,
-		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingPrimary, Summary: reason},
+		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: reason},
 	})
 	replyMessageID := firstReplyMessageID(sub)
 	a.releaseSubAgentSlot(sub)

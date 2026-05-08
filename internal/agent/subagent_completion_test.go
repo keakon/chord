@@ -251,7 +251,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 	}
 }
 
-func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingPrimary(t *testing.T) {
+func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	running := newControllableTestSubAgent(t, a, "task-running")
 	running.semHeld = true
@@ -263,7 +263,7 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingPrimary(t *test
 		TaskID:           "task-waiting",
 		AgentDefName:     "worker",
 		LatestInstanceID: "worker-waiting",
-		State:            string(SubAgentStateWaitingPrimary),
+		State:            string(SubAgentStateWaitingMain),
 		LastSummary:      "needs decision",
 		LastUpdatedTurn:  a.explicitUserTurnCount,
 	}
@@ -279,7 +279,7 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingPrimary(t *test
 	}
 	waitingSection := block[idx:]
 	if strings.Contains(waitingSection, "suspected_stall:") && !strings.Contains(waitingSection, "task_id: task-running") {
-		t.Fatalf("waiting_primary should not be marked stalled:\n%s", block)
+		t.Fatalf("waiting_main should not be marked stalled:\n%s", block)
 	}
 }
 

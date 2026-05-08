@@ -4,6 +4,11 @@
 
 ## 未发布
 
+- 暂无。
+
+## 0.5.0 - 2026-05-08
+
+- Config：agent 配置现在使用 `mode: main` 表示 MainAgent 角色，使用 `mode: subagent` 表示 SubAgent。`sub_agent` 和 `sub` 也可作为 SubAgent 别名；空值或其他值按 `main` 处理。Hook `agent_kind` 过滤器使用 `main` / `subagent`。
 - CLI：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会写入可 `/resume` 的 Chord session，并生成 `import-report.json`；Codex/OpenCode 默认以安全的文本模式导入 tools，Claude 默认 `auto`。
 - Runtime：新增请求前 model compatibility normalization：在切换 provider/model 时对历史中 provider-specific payload（如 Anthropic signed thinking、结构化 tools）进行安全回放或降级，避免协议错误。
 - Runtime：修复一种潜在卡死：当工具 batch/turn 在等待共享的流式工具执行配额（slot）期间被取消时，现在会产生一条 cancelled 的 tool result，从而保证 PendingToolCalls 能归零、UI 不会卡在 busy。
@@ -30,7 +35,7 @@
 
 - 新增运行时模型池（model pool）：
   - **不兼容变更：** agent 模型配置现在必须通过 `model_pools` 引用 `config.yaml` 顶层定义的一个或多个池；旧的 per-agent 扁平 `models` 列表不再接受。内部 `AgentConfig.Models` 现在表示为 `map[string][]string`（池名 → 有序模型引用列表）。
-  - 所有 agent（包括 `primary`）必须定义至少一个池。池名由用户自定义且不做保留，例如 `default`、`base`、`fast`、`strong` 均为合法池名。未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
+  - 所有 agent 必须定义至少一个池。池名由用户自定义且不做保留，例如 `default`、`base`、`fast`、`strong` 均为合法池名。未显式选择池时，Chord 会回退到该 agent 的 `model_pools: [...]` 列表中的**第一个**池。
   - Agent 可通过 `model_pools` 复用全局定义的池；配置中的内联 `models` 与 `model_pools` 互斥。运行时池策略会按项目持久化当前角色池、按 agent 覆盖以及 last-picked 状态。
   - `/model` 命令替换为 `/models`，支持 `status`、`<pool>` 和 `--agent <name> <pool>` 子命令。TUI 选择器现在选择模型池，而不是单个模型。
   - agent 忙碌时选择模型池会立即提交到主事件循环。当前已发起的请求继续使用开始时快照到的 client，而排队用户消息和其他后续请求边界会在不等待再次发送 draft 或完全回到 idle 的情况下使用新 pool。pending switch 失败现在通过 TUI 的 Update 消息路径回流处理，不再由后台 goroutine 直接改动视图状态。

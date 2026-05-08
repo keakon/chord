@@ -66,7 +66,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 		case SubAgentStateRunning:
 			focused.InjectUserMessage(content)
 			return
-		case SubAgentStateWaitingPrimary:
+		case SubAgentStateWaitingMain:
 			taskID := strings.TrimSpace(focused.taskID)
 			if taskID == "" {
 				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})

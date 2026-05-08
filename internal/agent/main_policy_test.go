@@ -81,7 +81,7 @@ func TestStartPlanExecutionKeepsExecutionPromptAcrossRefresh(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
 	})
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -121,7 +121,7 @@ func TestStartPlanExecutionPropagatesNewSessionIDToProvider(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
 	})
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -153,7 +153,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWithDelegateAvailab
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "Coder role"}}}))
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
 		"coder":   {Name: "coder", Mode: "subagent", Description: "Coder role"},
 	})
 	a.markAgentsMDReady()
@@ -206,7 +206,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:        "builder",
-			Mode:        "primary",
+			Mode:        config.AgentModeMain,
 			Description: "Builder role",
 			Permission:  parsePermissionNode(t, "\"*\": deny\nTodoWrite: allow\n"),
 		},
@@ -266,10 +266,10 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 func TestSetAgentConfigsPreservesExistingActiveRole(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.activeConfig = &config.AgentConfig{Name: "planner", Mode: "primary"}
+	a.activeConfig = &config.AgentConfig{Name: "planner", Mode: config.AgentModeMain}
 
-	builderCfg := &config.AgentConfig{Name: "builder", Mode: "primary"}
-	plannerCfg := &config.AgentConfig{Name: "planner", Mode: "primary"}
+	builderCfg := &config.AgentConfig{Name: "builder", Mode: config.AgentModeMain}
+	plannerCfg := &config.AgentConfig{Name: "planner", Mode: config.AgentModeMain}
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": builderCfg,
 		"planner": plannerCfg,
@@ -633,18 +633,18 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	}
 }
 
-func TestSwitchRoleAppliesPrimaryRoleModelImmediately(t *testing.T) {
+func TestSwitchRoleAppliesMainRoleModelImmediately(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:   "builder",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"default": {"build/one", "build/two"}},
 		},
 		"executor": {
 			Name:   "executor",
-			Mode:   "primary",
+			Mode:   config.AgentModeMain,
 			Models: map[string][]string{"default": {"exec/one", "exec/two"}},
 		},
 	})
@@ -710,15 +710,15 @@ func TestSwitchRoleAppliesPrimaryRoleModelImmediately(t *testing.T) {
 	}
 }
 
-func TestAvailableRolesSortsCustomPrimaryRolesDeterministically(t *testing.T) {
+func TestAvailableRolesSortsCustomMainRolesDeterministically(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary"},
-		"planner":  {Name: "planner", Mode: "primary"},
-		"zeta":     {Name: "zeta", Mode: "primary"},
-		"alpha":    {Name: "alpha", Mode: "primary"},
-		"reviewer": {Name: "reviewer", Mode: "primary"},
+		"builder":  {Name: "builder", Mode: config.AgentModeMain},
+		"planner":  {Name: "planner", Mode: config.AgentModeMain},
+		"zeta":     {Name: "zeta", Mode: config.AgentModeMain},
+		"alpha":    {Name: "alpha", Mode: config.AgentModeMain},
+		"reviewer": {Name: "reviewer", Mode: config.AgentModeMain},
 		"worker":   {Name: "worker", Mode: "subagent", Models: map[string][]string{"default": {"worker/one"}}},
 	})
 
@@ -733,10 +733,10 @@ func TestAvailableAgentsSortsNonBuilderRolesDeterministically(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary"},
-		"planner": {Name: "planner", Mode: "primary"},
-		"zeta":    {Name: "zeta", Mode: "primary"},
-		"alpha":   {Name: "alpha", Mode: "primary"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain},
+		"planner": {Name: "planner", Mode: config.AgentModeMain},
+		"zeta":    {Name: "zeta", Mode: config.AgentModeMain},
+		"alpha":   {Name: "alpha", Mode: config.AgentModeMain},
 		"worker":  {Name: "worker", Mode: "subagent", Models: map[string][]string{"default": {"worker/one"}}},
 	})
 	if err := a.switchRole("planner", false); err != nil {
@@ -754,8 +754,8 @@ func TestSwitchRoleAppliesRoleModelWithoutToast(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
-		"executor": {Name: "executor", Mode: "primary", Models: map[string][]string{"default": {"exec/one"}}},
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"exec/one"}}},
 	})
 	a.SetProviderModelRef("build/one")
 
@@ -797,8 +797,8 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
-		"executor": {Name: "executor", Mode: "primary", Models: map[string][]string{"default": {"exec/one"}}},
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"exec/one"}}},
 	})
 	a.SetProviderModelRef("build/one")
 
@@ -834,14 +834,14 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	}
 }
 
-func TestSwitchRoleUsesAgentVariantForPrimaryRoleModel(t *testing.T) {
+func TestSwitchRoleUsesAgentVariantForMainRoleModel(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
 		"executor": {
 			Name:    "executor",
-			Mode:    "primary",
+			Mode:    config.AgentModeMain,
 			Models:  map[string][]string{"default": {"exec/one"}},
 			Variant: "high",
 		},
@@ -871,8 +871,8 @@ func TestSwitchRoleWithNoModelsLeavesSelectedModelUntouchedAndDefersPolicy(t *te
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder":  {Name: "builder", Mode: "primary", Models: map[string][]string{"default": {"build/one"}}},
-		"reviewer": {Name: "reviewer", Mode: "primary"},
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
+		"reviewer": {Name: "reviewer", Mode: config.AgentModeMain},
 	})
 	a.SetProviderModelRef("build/one")
 	a.llmMu.Lock()
@@ -999,7 +999,7 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithDelegate(t *testi
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "Coder role"}}}))
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
 		"coder":   {Name: "coder", Mode: "subagent", Description: "Coder role"},
 	})
 	a.markAgentsMDReady()
@@ -1045,7 +1045,7 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithoutTodoWrite(t *t
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
 			Name:        "builder",
-			Mode:        "primary",
+			Mode:        config.AgentModeMain,
 			Description: "Builder role",
 			Permission:  parsePermissionNode(t, "\"*\": deny\nDelegate: allow\n"),
 		},
@@ -1092,7 +1092,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "Coder role"}}}))
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"builder": {Name: "builder", Mode: "primary", Description: "Builder role"},
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
 		"coder":   {Name: "coder", Mode: "subagent", Description: "Coder role"},
 	})
 	a.markAgentsMDReady()
