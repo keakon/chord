@@ -28,7 +28,7 @@ func (GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (GlobTool) Description() string {
-	return "Find files matching a glob pattern. Supports ** for recursive directory matching." +
+	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
 		" Best for discovering candidate files by path or extension before using Read, Grep, or Lsp."
 }
 
@@ -38,7 +38,7 @@ func (GlobTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Glob pattern to match files against (e.g. \"**/*.go\", \"src/**/*.ts\").",
+				"description": "Path glob relative to path (e.g. \"**/*.go\", \"src/**/*.ts\"). Supports ** for recursive directory matching.",
 			},
 			"path": map[string]any{
 				"type":        "string",

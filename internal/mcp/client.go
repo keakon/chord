@@ -280,6 +280,7 @@ type ServerConfig struct {
 	Env          []string // optional environment variables (for stdio transport)
 	URL          string   // HTTP URL (for HTTP transport)
 	AllowedTools []string // optional allowlist of remote MCP tool names
+	Manual       bool     // when true, do not auto-connect on startup
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +292,8 @@ type ServerEndpointStatus struct {
 	Name        string
 	OK          bool
 	Pending     bool
+	Disabled    bool
+	Manual      bool
 	Retrying    bool
 	Attempt     int
 	MaxAttempts int
@@ -347,6 +350,8 @@ func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *M
 				Name:        name,
 				OK:          false,
 				Pending:     false,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     0,
 				MaxAttempts: defaultConnectAttempts,
@@ -354,10 +359,26 @@ func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *M
 			}
 			continue
 		}
+		if cfg.Manual {
+			byName[name] = ServerEndpointStatus{
+				Name:        name,
+				OK:          false,
+				Pending:     false,
+				Manual:      cfg.Manual,
+				Disabled:    true,
+				Retrying:    false,
+				Attempt:     0,
+				MaxAttempts: defaultConnectAttempts,
+				Error:       "",
+			}
+			continue
+		}
 		byName[name] = ServerEndpointStatus{
 			Name:        name,
 			OK:          false,
 			Pending:     true,
+			Disabled:    false,
+			Manual:      cfg.Manual,
 			Retrying:    false,
 			Attempt:     0,
 			MaxAttempts: defaultConnectAttempts,
@@ -400,6 +421,26 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 	for _, cfg := range configs {
 		name := serverConfigName(cfg)
 
+		if cfg.Manual {
+			m.mu.RLock()
+			hasClient := m.clients[name] != nil
+			m.mu.RUnlock()
+			if !hasClient {
+				m.setEndpointStatus(ServerEndpointStatus{
+					Name:        name,
+					OK:          false,
+					Pending:     false,
+					Disabled:    true,
+					Manual:      true,
+					Retrying:    false,
+					Attempt:     0,
+					MaxAttempts: defaultConnectAttempts,
+					Error:       "",
+				})
+			}
+			continue
+		}
+
 		m.mu.Lock()
 		if old := m.clients[name]; old != nil {
 			_ = old.Close()
@@ -413,6 +454,8 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 				Name:        name,
 				OK:          false,
 				Pending:     false,
+				Disabled:    false,
+				Manual:      cfg.Manual,
 				Retrying:    false,
 				Attempt:     0,
 				MaxAttempts: defaultConnectAttempts,
@@ -440,6 +483,91 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 	}
 }
 
+// ConnectOne initializes a single MCP server config without affecting other
+// connected servers. It updates endpoint status for the server name in-place.
+func (m *Manager) ConnectOne(ctx context.Context, cfg ServerConfig) error {
+	if m == nil {
+		return nil
+	}
+	name := serverConfigName(cfg)
+
+	m.mu.Lock()
+	if m.allowedTools == nil {
+		m.allowedTools = make(map[string]map[string]struct{})
+	}
+	allowed := makeAllowedToolsSet(cfg.AllowedTools)
+	if len(allowed) > 0 {
+		m.allowedTools[name] = allowed
+	} else {
+		delete(m.allowedTools, name)
+	}
+	if old := m.clients[name]; old != nil {
+		_ = old.Close()
+		delete(m.clients, name)
+	}
+	delete(m.toolDefs, name)
+	m.mu.Unlock()
+
+	if cfg.Command == "" && cfg.URL == "" {
+		status := ServerEndpointStatus{
+			Name:        name,
+			OK:          false,
+			Pending:     false,
+			Disabled:    false,
+			Manual:      cfg.Manual,
+			Retrying:    false,
+			Attempt:     0,
+			MaxAttempts: defaultConnectAttempts,
+			Error:       "must specify either command or url",
+		}
+		m.setEndpointStatus(status)
+		return fmt.Errorf("%s", status.Error)
+	}
+
+	client, status, err := m.connectServer(ctx, cfg)
+	status.Disabled = false
+	status.Manual = cfg.Manual
+	m.setEndpointStatus(status)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.clients[name] = client
+	m.mu.Unlock()
+	return nil
+}
+
+// Disconnect drops a server connection (if any) and marks it disabled.
+func (m *Manager) Disconnect(name string) {
+	if m == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	m.mu.Lock()
+	if c := m.clients[name]; c != nil {
+		_ = c.Close()
+		delete(m.clients, name)
+	}
+	delete(m.toolDefs, name)
+	m.mu.Unlock()
+
+	m.setEndpointStatus(ServerEndpointStatus{
+		Name:        name,
+		OK:          false,
+		Pending:     false,
+		Disabled:    true,
+		Manual:      true,
+		Retrying:    false,
+		Attempt:     0,
+		MaxAttempts: defaultConnectAttempts,
+		Error:       "",
+	})
+}
+
 func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client, ServerEndpointStatus, error) {
 	name := serverConfigName(cfg)
 	maxAttempts := defaultConnectAttempts
@@ -447,6 +575,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 		Name:        name,
 		OK:          false,
 		Pending:     true,
+		Disabled:    false,
+		Manual:      cfg.Manual,
 		Retrying:    false,
 		Attempt:     0,
 		MaxAttempts: maxAttempts,
@@ -462,11 +592,7 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 		status.Error = ""
 		m.setEndpointStatus(status)
 
-		attemptCtx := ctx
-		cancel := func() {}
-		if cfg.URL != "" {
-			attemptCtx, cancel = context.WithTimeout(ctx, connectAttemptTimeout)
-		}
+		attemptCtx, cancel := context.WithTimeout(ctx, connectAttemptTimeout)
 
 		client, err := m.newClientFactory(attemptCtx, cfg)
 		if err != nil {
@@ -477,6 +603,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 					Name:        name,
 					OK:          false,
 					Pending:     true,
+					Disabled:    false,
+					Manual:      cfg.Manual,
 					Retrying:    false,
 					Attempt:     attempt,
 					MaxAttempts: maxAttempts,
@@ -487,6 +615,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 				Name:        name,
 				OK:          false,
 				Pending:     false,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     attempt,
 				MaxAttempts: maxAttempts,
@@ -501,6 +631,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 				Name:        name,
 				OK:          true,
 				Pending:     false,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     attempt,
 				MaxAttempts: maxAttempts,
@@ -515,6 +647,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 				Name:        name,
 				OK:          false,
 				Pending:     true,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     attempt,
 				MaxAttempts: maxAttempts,
@@ -526,6 +660,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 				Name:        name,
 				OK:          false,
 				Pending:     false,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     attempt,
 				MaxAttempts: maxAttempts,
@@ -537,6 +673,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 				Name:        name,
 				OK:          false,
 				Pending:     true,
+				Manual:      cfg.Manual,
+				Disabled:    false,
 				Retrying:    false,
 				Attempt:     attempt,
 				MaxAttempts: maxAttempts,

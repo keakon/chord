@@ -431,6 +431,29 @@ mcp:
 
 The server name (`search` above) is user-defined. With this example, Chord registers only `mcp_search_web_search_exa` and `mcp_search_web_fetch_exa`. Filtered tools are not registered and do not enter the LLM tool surface.
 
+### Manual (on-demand) MCP servers
+
+By default, configured MCP servers auto-start. To keep a server disabled at startup and enable it on demand:
+
+```yaml
+mcp:
+  exa:
+    url: https://mcp.exa.ai/mcp
+    manual: true
+```
+
+- When `manual: true`, the server starts in a disabled (gray) state and does not connect until you enable it.
+- Only servers configured with `manual: true` can be changed at runtime with `/mcp`. Auto-start servers are read-only in the MCP selector and are not affected by `/mcp enable|disable|toggle`.
+- Enable/disable at runtime with `/mcp` (menu in TUI) or with explicit commands:
+  - `/mcp enable <server>`
+  - `/mcp disable <server>`
+  - `/mcp toggle <server>`
+  - `/mcp status`
+
+### Startup consistency
+
+Auto-start MCP servers still connect asynchronously after the TUI starts, but **the first LLM request waits** until each auto-start server has either connected successfully or reached a terminal failure state. This avoids tool-surface inconsistency between the agent and the model.
+
 ## Agent config
 
 Built-in roles include `builder` and `planner`. You can also add custom agents

@@ -233,6 +233,8 @@ type MCPServerDisplay struct {
 	Name        string
 	OK          bool
 	Pending     bool // not connected yet (async startup)
+	Disabled    bool // explicitly disabled (manual /mcp disable)
+	Manual      bool // configured as manual/on-demand; only manual servers can be changed with /mcp
 	Retrying    bool // transient failure, retry still in progress
 	Attempt     int
 	MaxAttempts int

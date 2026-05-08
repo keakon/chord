@@ -78,7 +78,11 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 
 	a.waitGitStatus(ctx)
 
-	for _, ch := range []chan struct{}{a.agentsMDReady, a.skillsReady, a.mcpReady} {
+	a.mcpReadyMu.Lock()
+	mcpReady := a.mcpReady
+	a.mcpReadyMu.Unlock()
+
+	for _, ch := range []chan struct{}{a.agentsMDReady, a.skillsReady, mcpReady} {
 		if ch == nil {
 			continue
 		}

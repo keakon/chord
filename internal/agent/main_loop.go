@@ -91,6 +91,10 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
 		a.handleModelPoolSwitchEvent(evt)
+	case EventMCPControl:
+		a.handleMCPControlEvent(evt)
+	case EventMCPControlDone:
+		a.handleMCPControlDoneEvent(evt)
 	case EventAgentDone:
 		a.handleAgentDone(evt)
 	case EventAgentIdle:

@@ -133,7 +133,11 @@ mcp:
 
 可通过 `allowed_tools` 只暴露部分工具，减少 token 开销。详见 [配置与认证](./configuration_CN.md#mcp)。
 
-本地模式下 MCP 会在 TUI 启动后异步连接；刚启动时短暂 unavailable 不一定代表配置错误。
+本地模式下 MCP 会在 TUI 启动后异步连接。自动启动的 server 仍在后台连接，但第一次 LLM 请求会等待：每个自动启动的 server 要么连接成功，要么明确失败后才会继续。
+
+若希望启动时保持禁用、需要时再启用，可设置 `manual: true`，然后用 `/mcp`（菜单）或 `/mcp enable <server>` 手动启用。
+
+只有 `manual: true` 的 server 才能在运行时切换。自动启动的 server 保持只读，不受 `/mcp enable|disable|toggle` 影响。
 
 ## 自定义 slash commands
 

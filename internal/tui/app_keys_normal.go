@@ -326,6 +326,13 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			m.handleSwitchRole()
 		}
 
+	// -- MCP selector --------------------------------------------------------
+	case keyMatches(key, m.keyMap.MCP):
+		if m.agent != nil {
+			m.agent.SendUserMessage("/mcp")
+		}
+		return nil
+
 	// -- model pool selector ---------------------------------------------------
 	case keyMatches(key, m.keyMap.SwitchModel):
 		m.openModelSelect()

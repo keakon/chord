@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/keakon/chord/internal/message"
@@ -148,6 +149,31 @@ func (r *Registry) Register(tool Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[tool.Name()] = tool
+}
+
+// Unregister removes a tool from the registry by name.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
+// UnregisterPrefix removes every tool whose name has the given prefix.
+// It returns the number of removed tools.
+func (r *Registry) UnregisterPrefix(prefix string) int {
+	if prefix == "" {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	removed := 0
+	for name := range r.tools {
+		if strings.HasPrefix(name, prefix) {
+			delete(r.tools, name)
+			removed++
+		}
+	}
+	return removed
 }
 
 // Get looks up a tool by name.

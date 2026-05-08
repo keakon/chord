@@ -79,6 +79,31 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
+	if m.mode == ModeMCPSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.mcpSelect.list != nil {
+				m.mcpSelect.list.HandleWheel(-3)
+			}
+			return nil
+		case tea.MouseWheelDown:
+			if m.mcpSelect.list != nil {
+				m.mcpSelect.list.HandleWheel(3)
+			}
+			return nil
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.mcpSelectOptionIndexAt(mouse.X, mouse.Y); ok {
+				if m.mcpSelect.list != nil {
+					m.mcpSelect.list.SetCursor(idx)
+				}
+				return m.mcpSelectDispatch("toggle")
+			}
+		}
+		return nil
+	}
+
 	if m.mode == ModeHandoffSelect {
 		m.clearChordState()
 		switch mouse.Button {

@@ -137,7 +137,11 @@ mcp:
 
 Use `allowed_tools` to expose only selected tools and reduce token overhead. See [Configuration & Auth](./configuration.md#mcp) for details.
 
-In local mode, MCP connects asynchronously after the TUI starts. A brief unavailable state right after startup does not necessarily mean the config is wrong.
+In local mode, MCP connects asynchronously after the TUI starts. Auto-start servers still start in the background, but the first LLM request waits until they either connect successfully or reach a terminal failure state.
+
+To keep a server disabled at startup and enable it on demand, set `manual: true` and use `/mcp` (menu) or `/mcp enable <server>`.
+
+Only `manual: true` servers can be toggled at runtime. Auto-start servers remain read-only and are not affected by `/mcp enable|disable|toggle`.
 
 ## Custom slash commands
 

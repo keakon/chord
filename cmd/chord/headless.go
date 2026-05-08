@@ -277,6 +277,9 @@ func isUnsupportedHeadlessCommand(content string) bool {
 		return true
 	case "/resume":
 		return len(fields) == 1
+	case "/mcp":
+		// Supported in headless mode when passed explicitly with an action.
+		return len(fields) == 1
 	default:
 		return false
 	}

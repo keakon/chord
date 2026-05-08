@@ -143,6 +143,9 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 	case c == "/compact":
 		a.handleCompactCommand()
 		return true
+	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
+		a.handleMCPCommand(c)
+		return true
 	default:
 		return false
 	}

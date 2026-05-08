@@ -202,9 +202,34 @@ func findHeadlessEnvelopeValue(envs []headlessEnvelope, typ string) *headlessEnv
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Tests for headlessState tracking via filterHeadlessEvent
-// ---------------------------------------------------------------------------
+func TestHeadlessSendCommandRejectsBareMCP(t *testing.T) {
+	to := newTestOut()
+	backend := &mockBackend{}
+	state := &headlessState{}
+
+	hcmd := headlessCommand{Type: "send", Content: "/mcp"}
+	handleHeadlessCommand(hcmd, backend, state, to.writer(), "sess")
+
+	envs := to.drain()
+	env := findHeadlessEnvelopeValue(envs, "error")
+	if env == nil {
+		t.Fatalf("expected error envelope, got %v", envs)
+	}
+	payload, _ := env.Payload.(map[string]any)
+	if payload == nil {
+		t.Fatalf("unexpected error payload: %#v", env.Payload)
+	}
+	msg, _ := payload["message"].(string)
+	if msg == "" {
+		t.Fatalf("unexpected error payload: %#v", env.Payload)
+	}
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.sentMessages) != 0 {
+		t.Fatalf("SendUserMessage should not be called, got %v", backend.sentMessages)
+	}
+}
 
 func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 	state := &headlessState{

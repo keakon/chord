@@ -269,6 +269,10 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		dialog := m.renderHandoffSelectDialog()
 		dialogRect := centeredRect(area, dialog)
 		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+	case ModeMCPSelect:
+		dialog := m.renderMCPSelectDialog()
+		dialogRect := centeredRect(area, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
 	case ModeSessionSelect:
 		dialog := m.renderSessionSelectDialog()
 		dialogRect := centeredRect(area, dialog)
@@ -388,15 +392,12 @@ func (m *Model) View() tea.View {
 
 	rendered := canvas.Render()
 	if m.useFocusResizeFreeze {
-		// UV's Render() may emit empty lines without trailing spaces. In Ghostty/cmux
-		// this can leave stale cells behind (notably “phantom” duplicate separators)
-		// when layout rows move.
-		//
-		// Clearing to end-of-line on every row ensures blank rows actively overwrite
-		// any previous content without requiring an extra ClearScreen. This adds an
-		// extra O(n) pass over the rendered frame and slightly increases output size,
-		// so keep it scoped to terminals where the workaround is needed.
-		v.Content = eraseToEOLPerLine(rendered)
+		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims trailing
+		// spaces from a row. Avoid injecting terminal control sequences into the
+		// View content (UV StyledString only understands SGR + hyperlinks); instead
+		// pad every line to the full frame width with real spaces so Bubble Tea's
+		// UV renderer overwrites all cells deterministically.
+		v.Content = padRenderToFullFrame(rendered, m.width, m.height)
 	} else {
 		v.Content = rendered
 	}
@@ -422,32 +423,38 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-const ansiEraseToEOL = "\x1b[0K"
 const ansiNoopSGR = "\x1b[m"
 
-func eraseToEOLPerLine(s string) string {
-	if s == "" {
-		return ansiEraseToEOL
+func padRenderToFullFrame(rendered string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return rendered
 	}
-	if !strings.Contains(s, "\n") {
-		return s + ansiEraseToEOL
+	// Be robust to platform-specific newlines in case a renderer upstream changes.
+	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
+
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < height {
+		lines = append(lines, make([]string, height-len(lines))...)
+	} else if len(lines) > height {
+		lines = lines[:height]
 	}
-	// Add "erase to end of line" before every newline, and at the end of the
-	// final line, so that rows that render as empty still actively clear any
-	// stale terminal cells.
-	newlines := strings.Count(s, "\n")
+
 	var b strings.Builder
-	b.Grow(len(s) + (newlines+1)*len(ansiEraseToEOL))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			b.WriteString(ansiEraseToEOL)
-			b.WriteByte('\n')
-			continue
+	b.Grow(len(rendered) + height) // +height for newlines/spaces growth lower bound
+	for i := 0; i < height; i++ {
+		line := lines[i]
+		b.WriteString(line)
+		w := ansi.StringWidth(line)
+		if w < width {
+			// Ensure padding spaces don't inherit any active style.
+			b.WriteString(ansiNoopSGR)
+			for j := 0; j < width-w; j++ {
+				b.WriteByte(' ')
+			}
 		}
-		b.WriteByte(s[i])
-	}
-	if len(s) == 0 || s[len(s)-1] != '\n' {
-		b.WriteString(ansiEraseToEOL)
+		if i < height-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }

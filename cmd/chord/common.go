@@ -482,6 +482,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 				log.Warnf("MCP initialization failed error=%v", err)
 			} else {
 				ac.MCPMgr = mgr
+				ac.MCPConfigs = mcpConfigs
 				if len(mgr.Clients()) > 0 {
 					mcpTools, err := mcp.DiscoverAllTools(ac.Ctx, mgr)
 					if err != nil {

@@ -384,6 +384,29 @@ mcp:
 
 被过滤的工具不会注册，也不会进入 LLM 工具列表。上例中 `search` 是用户自定义的 MCP server 名；Chord 只会注册 `mcp_search_web_search_exa` 和 `mcp_search_web_fetch_exa`。
 
+### 手动（按需）启用 MCP
+
+默认情况下，已配置的 MCP server 会自动启动。若希望启动时保持禁用、需要时再手动启用：
+
+```yaml
+mcp:
+  exa:
+    url: https://mcp.exa.ai/mcp
+    manual: true
+```
+
+- `manual: true` 时，启动后该 server 处于禁用（灰色）状态，不会主动连接。
+- 只有配置了 `manual: true` 的 server 才能在运行时通过 `/mcp` 修改状态。自动启动的 server 在 MCP 选择器中是只读的，也不会受 `/mcp enable|disable|toggle` 影响。
+- 运行时可用 `/mcp`（TUI 菜单）或带参数命令启用/禁用：
+  - `/mcp enable <server>`
+  - `/mcp disable <server>`
+  - `/mcp toggle <server>`
+  - `/mcp status`
+
+### 启动一致性
+
+自动启动的 MCP server 仍会在 TUI 启动后异步连接，但 **第一次 LLM 请求会等待**：每个自动启动的 server 要么连接成功，要么明确失败后才会继续发起请求，以避免工具描述不一致。
+
 ## Agent 配置
 
 内置角色包括 `builder`、`planner`。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：

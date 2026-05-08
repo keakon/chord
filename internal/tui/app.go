@@ -33,6 +33,7 @@ const (
 	ModeQuestion                         // Question tool multi-choice dialog
 	ModeSearch                           // search input active
 	ModeModelSelect                      // model pool selector overlay
+	ModeMCPSelect                        // MCP server selector overlay (/mcp)
 	ModeSessionSelect                    // session picker overlay (/resume)
 	ModeSessionDeleteConfirm             // delete-session confirmation overlay from session picker
 	ModeHandoffSelect                    // Handoff agent selector overlay
@@ -253,6 +254,9 @@ type Model struct {
 
 	// Model selector state
 	modelSelect modelSelectState
+
+	// MCP server selector state (/mcp)
+	mcpSelect mcpSelectState
 
 	// Session picker state (/resume)
 	sessionSelect sessionSelectState

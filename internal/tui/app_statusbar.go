@@ -254,6 +254,8 @@ func (m *Model) statusBarModeText() string {
 		return "SEARCH"
 	case ModeModelSelect:
 		return "MODEL"
+	case ModeMCPSelect:
+		return "MCP"
 	case ModeSessionSelect:
 		return "SESSION"
 	case ModeSessionDeleteConfirm:
@@ -383,6 +385,9 @@ func (m *Model) renderStatusBar() string {
 	case ModeModelSelect:
 		modeText = m.statusBarModeText()
 		modeStyle = ModeModelSelectStyle
+	case ModeMCPSelect:
+		modeText = m.statusBarModeText()
+		modeStyle = ModeNormalStyle
 	case ModeSessionSelect:
 		modeText = m.statusBarModeText()
 		modeStyle = ModeNormalStyle

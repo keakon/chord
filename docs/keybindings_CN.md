@@ -71,13 +71,14 @@ TUI 有两种模式：
 | `n`      | 跳到下一个匹配                        |
 | `N`      | 跳到上一个匹配                        |
 
-### 两种模式都有效 — Agent 与模型
+### 两种模式都有效 — Agent / 模型 / 集成
 
 | 按键          | 动作                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Tab`         | 切换主 agent role（仅在 main-agent 视图下生效）                                                                 |
 | `Shift+Tab`   | 在主 agent 与所有活跃 SubAgent 视图之间循环切换焦点                                                           |
 | `Ctrl+P`      | 打开模型池选择器（Normal 模式）。Insert 模式下 `Ctrl+P` 优先充当历史上翻                                        |
+| `Ctrl+O`      | 打开 MCP server 选择器（`/mcp`）                                                                                |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 
 ### 关于 `Ctrl+P` 的特别说明
@@ -87,7 +88,7 @@ TUI 有两种模式：
 - **Normal 模式**：打开模型池选择器（`SwitchModel`）
 - **Insert 模式**：触发历史上翻（`InsertHistoryUp`）。要在 Insert 模式切池，可输入 `/models` 回车，或先按 `Esc` 切到 Normal 模式
 
-若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+m`），见下文 [自定义键位](#自定义键位)。
+若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+u`），见下文 [自定义键位](#自定义键位)。
 
 ## 自定义键位
 
@@ -100,7 +101,7 @@ keymap:
   scroll_down: ["down"]        # 仅用方向键做行滚动
   scroll_up: ["up"]
   quit: ["Q"]                  # 退出要求大写 Q（防误触）
-  switch_model: ["ctrl+m"]     # 避开 Ctrl+P 在 Insert 模式的冲突
+  switch_model: ["ctrl+u"]     # 避开 Ctrl+P 在 Insert 模式的冲突
 ```
 
 action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go)的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
@@ -138,6 +139,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `switch_agent`             | `["shift+tab"]`                   |
 | `switch_role`              | `["tab"]`                         |
 | `switch_model`             | `["ctrl+p"]`                      |
+| `mcp`                      | `["ctrl+o"]`                      |
 | `diagnostics`              | `["ctrl+g"]`                      |
 
 只有你列出的 action 会被覆盖，其余仍按上表默认值生效。

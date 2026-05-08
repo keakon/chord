@@ -120,6 +120,7 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 			b.WriteString(r.Name)
 			appendBool(r.OK)
 			appendBool(r.Pending)
+			appendBool(r.Disabled)
 			appendBool(r.Retrying)
 			appendInt(r.Attempt)
 			appendInt(r.MaxAttempts)

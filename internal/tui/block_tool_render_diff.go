@@ -60,16 +60,6 @@ type diffOneSidedSpan struct {
 	LineWidth int
 }
 
-func writeDiffToContentLines(diff string) []string {
-	var out []string
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			out = append(out, line[1:])
-		}
-	}
-	return out
-}
-
 // appendEditToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
 func appendEditToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }

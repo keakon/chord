@@ -183,6 +183,24 @@ func TestHandleModelsCommandIdleClearsTurn(t *testing.T) {
 	}
 }
 
+func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.mcpTransitionActive.Store(true)
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp toggle exa"})
+
+	if got := a.PendingUserMessageCount(); got != 0 {
+		t.Fatalf("PendingUserMessageCount = %d, want 0", got)
+	}
+	counts := drainEventsByType(t, a.Events())
+	if counts["ToastEvent"] == 0 {
+		t.Fatalf("ToastEvent missing, got %v", counts)
+	}
+	if counts["IdleEvent"] != 0 {
+		t.Fatalf("IdleEvent should not be emitted while MCP transition is active, got %v", counts)
+	}
+}
+
 // TestHandleExportCommandBusyDoesNotClearTurn mirrors the /models test for
 // /export — same setIdleAndDrainPending pitfall, same fix.
 func TestHandleExportCommandBusyDoesNotClearTurn(t *testing.T) {
@@ -269,6 +287,8 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		{"/export", true},
 		{"/export ~/out.md", true},
 		{"/export --json", true},
+		{"/mcp", true},
+		{"/mcp enable exa", true},
 		{"/compact", false},
 		{"/new", false},
 		{"/loop", false},

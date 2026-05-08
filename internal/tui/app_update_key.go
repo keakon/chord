@@ -49,6 +49,8 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return m.handleSearchKey(msg)
 	case ModeModelSelect:
 		return m.handleModelSelectKey(msg)
+	case ModeMCPSelect:
+		return m.handleMCPSelectKey(msg)
 	case ModeSessionSelect:
 		return m.handleSessionSelectKey(msg)
 	case ModeSessionDeleteConfirm:

@@ -34,10 +34,29 @@ func (m *Model) maybeExportDiagnosticsShortcut(key string) tea.Cmd {
 	return m.exportDiagnosticsBundleNow("shortcut:" + trigger)
 }
 
+func (m *Model) maybeMCPShortcut(key string) bool {
+	if !keyMatches(key, m.keyMap.MCP) {
+		return false
+	}
+	if m.agent == nil {
+		return true
+	}
+	trigger := key
+	if strings.TrimSpace(trigger) == "" {
+		trigger = "mcp"
+	}
+	m.recordTUIDiagnostic("local-command", "shortcut:%s", trigger)
+	m.agent.SendUserMessage("/mcp")
+	return true
+}
+
 func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
+	}
+	if m.maybeMCPShortcut(key) {
+		return nil
 	}
 	m.clearPendingQuit()
 	if key != "" {

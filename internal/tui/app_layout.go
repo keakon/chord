@@ -233,3 +233,22 @@ func (m *Model) handoffSelectOptionIndexAt(x, y int) (int, bool) {
 	}
 	return idx, true
 }
+
+func (m *Model) mcpSelectOptionIndexAt(x, y int) (int, bool) {
+	if m.mcpSelect.list == nil || m.mcpSelect.list.Len() == 0 {
+		return 0, false
+	}
+	dialogRect := m.overlayRect(m.renderMCPSelectDialog())
+	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
+		return 0, false
+	}
+	start, end := m.mcpSelect.list.WindowRange()
+	idx, ok := overlayItemIndexAt(dialogRect, y, 3, start, end-start)
+	if !ok {
+		return 0, false
+	}
+	if idx < 0 || idx >= m.mcpSelect.list.Len() {
+		return 0, false
+	}
+	return idx, true
+}

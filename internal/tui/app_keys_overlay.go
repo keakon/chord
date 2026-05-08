@@ -103,6 +103,9 @@ func (m *Model) handleCtrlC() tea.Cmd {
 		}
 		return cmd
 	}
+	if m.mode == ModeMCPSelect {
+		return m.closeMCPSelect()
+	}
 	if m.mode == ModeSessionSelect {
 		prevMode := m.sessionSelect.prevMode
 		cmd := m.restoreModeWithIME(prevMode)

@@ -142,6 +142,101 @@ func configureRuntimeStateProviders(ac *AppContext) {
 	ac.MainAgent.SetMCPStatusFunc(func() []agent.MCPServerDisplay {
 		return mcpServerDisplayList(ac.MCPMgr)
 	})
+	ac.MainAgent.SetMCPControlFunc(func(ctx context.Context, req agent.MCPControlRequest) (agent.MCPControlResult, error) {
+		// Ensure MCP startup wiring has run before manual control operations.
+		startRuntimeMCP(ac)
+		if ac.MCPMgr == nil {
+			return agent.MCPControlResult{}, fmt.Errorf("MCP is not configured")
+		}
+		if ctx == nil {
+			ctx = ac.Ctx
+		}
+
+		configsByName := make(map[string]mcp.ServerConfig, len(ac.MCPConfigs))
+		for _, cfg := range ac.MCPConfigs {
+			configsByName[cfg.Name] = cfg
+		}
+		var targets []string
+		if len(req.Servers) == 0 {
+			for _, cfg := range ac.MCPConfigs {
+				if cfg.Manual {
+					targets = append(targets, cfg.Name)
+				}
+			}
+		} else {
+			targets = append([]string(nil), req.Servers...)
+		}
+
+		var firstErr error
+		// Only manual MCP servers can be controlled via /mcp.
+		for _, name := range targets {
+			cfg, ok := configsByName[name]
+			if !ok {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("unknown MCP server %q", name)
+				}
+				continue
+			}
+			if !cfg.Manual {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("MCP server %q is not manual; only manual MCP servers can be enabled/disabled", name)
+				}
+			}
+		}
+
+		switch req.Action {
+		case agent.MCPControlEnable:
+			for _, name := range targets {
+				cfg, ok := configsByName[name]
+				if !ok {
+					// already captured above
+					continue
+				}
+				if !cfg.Manual {
+					// already captured above
+					continue
+				}
+				if err := ac.MCPMgr.ConnectOne(ctx, cfg); err != nil && firstErr == nil {
+					firstErr = fmt.Errorf("enable MCP %q: %w", name, err)
+				}
+			}
+		case agent.MCPControlDisable:
+			for _, name := range targets {
+				cfg, ok := configsByName[name]
+				if !ok || !cfg.Manual {
+					continue
+				}
+				ac.MCPMgr.Disconnect(name)
+			}
+		case agent.MCPControlToggle:
+			status := ac.MCPMgr.ServerEndpoints()
+			enabled := make(map[string]bool, len(status))
+			for _, st := range status {
+				enabled[st.Name] = st.OK || st.Pending
+			}
+			for _, name := range targets {
+				cfg, ok := configsByName[name]
+				if !ok || !cfg.Manual {
+					continue
+				}
+				if enabled[name] {
+					ac.MCPMgr.Disconnect(name)
+					continue
+				}
+				if err := ac.MCPMgr.ConnectOne(ctx, cfg); err != nil && firstErr == nil {
+					firstErr = fmt.Errorf("enable MCP %q: %w", name, err)
+				}
+			}
+		default:
+			if firstErr == nil {
+				firstErr = fmt.Errorf("unknown MCP action %q", req.Action)
+			}
+		}
+
+		mcpTools, _ := mcp.DiscoverAllTools(ctx, ac.MCPMgr)
+		block := mcp.ConnectedServersPromptBlock(ctx, ac.MCPMgr)
+		return agent.MCPControlResult{Tools: mcpTools, PromptBlock: block}, firstErr
+	})
 }
 
 func startRuntimeMCP(ac *AppContext) {
@@ -149,6 +244,10 @@ func startRuntimeMCP(ac *AppContext) {
 		return
 	}
 	ac.mcpStartOnce.Do(func() {
+		// Block initial requests until MCP has either connected or failed.
+		ac.MainAgent.ResetMCPReady()
+		ac.MainAgent.NotifyEnvStatusUpdated()
+
 		go func() {
 			ac.MCPMgr.ConnectAll(ac.Ctx, ac.MCPConfigs)
 
@@ -173,7 +272,6 @@ func startRuntimeMCP(ac *AppContext) {
 			ac.MainAgent.RegisterMainMCPServers(mainServerNames)
 
 			ac.MainAgent.SetPendingMCPDiscovery(mcpTools, block)
-
 			ac.MainAgent.NotifyEnvStatusUpdated()
 		}()
 	})

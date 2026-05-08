@@ -51,6 +51,7 @@ type KeyMap struct {
 	// Both Insert and Normal modes
 	SwitchModel []string // open model pool selector
 	Diagnostics []string // export diagnostics bundle
+	MCP         []string // open MCP server selector
 }
 
 // DefaultKeyMap returns the built-in Vim-style key bindings.
@@ -101,6 +102,7 @@ func DefaultKeyMap() KeyMap {
 		// Both Insert and Normal modes
 		SwitchModel: []string{"ctrl+p"},
 		Diagnostics: []string{"ctrl+g"},
+		MCP:         []string{"ctrl+o"},
 	}
 }
 

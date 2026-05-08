@@ -612,6 +612,10 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.inflightDraft = nil
 		m.openModelSelectFor(evt.Target)
 		return true, effects
+	case agent.MCPSelectEvent:
+		m.inflightDraft = nil
+		m.openMCPSelect()
+		return true, effects
 	case agent.SessionSelectEvent:
 		effects.addFollowup(m.openSessionSelect(evt.Sessions))
 		return true, effects
@@ -1025,6 +1029,9 @@ func (m *Model) handleHygieneAgentEvent(event agent.AgentEvent) (bool, agentEven
 	switch event.(type) {
 	case agent.EnvStatusUpdateEvent:
 		effects.refreshSidebar = true
+		if m.mode == ModeMCPSelect {
+			m.refreshMCPSelectItems()
+		}
 		return true, effects
 	case agent.RateLimitUpdatedEvent, agent.KeyPoolChangedEvent, agent.TodosUpdatedEvent:
 		effects.invalidateUsage = true

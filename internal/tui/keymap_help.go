@@ -67,6 +67,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.SwitchAgent, "switch focused agent"),
 		helpBinding(km.SwitchRole, "switch main agent role"),
 		helpBinding(km.SwitchModel, "open model pool selector"),
+		helpBinding(km.MCP, "open MCP selector"),
 		helpBinding(km.Diagnostics, "export diagnostics bundle"),
 		helpBinding(km.Quit, "quit"),
 	}

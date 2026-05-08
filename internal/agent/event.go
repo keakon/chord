@@ -23,6 +23,8 @@ const (
 	EventExecutePlan        = "execute_plan" // Internal: execute a plan file after user selects target agent (payload: *executePlanPayload)
 	EventSessionControl     = "session_control"
 	EventModelPoolSwitch    = "model_pool_switch"
+	EventMCPControl         = "mcp_control"
+	EventMCPControlDone     = "mcp_control_done"
 	EventPendingDraftUpsert = "pending_draft_upsert"
 	EventPendingDraftRemove = "pending_draft_remove"
 
@@ -453,6 +455,12 @@ type ModelSelectEvent struct {
 }
 
 func (ModelSelectEvent) agentEvent() {}
+
+// MCPSelectEvent signals the TUI to open the MCP server selector overlay.
+// Emitted in response to /mcp with no arguments.
+type MCPSelectEvent struct{}
+
+func (MCPSelectEvent) agentEvent() {}
 
 // RunningModelChangedEvent signals that the active running model has changed.
 // Emitted after a manual model switch or fallback switch so the TUI can

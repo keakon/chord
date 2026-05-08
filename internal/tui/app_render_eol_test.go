@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestViewPropagatesWindowTitle(t *testing.T) {
@@ -49,19 +50,41 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	}
 }
 
-func TestModelViewAddsEraseToEOLWhenFocusResizeFreezeEnabled(t *testing.T) {
+func TestPadRenderToFullFramePadsToWidthAndHeight(t *testing.T) {
+	in := "abc\n\n"
+	out := padRenderToFullFrame(in, 5, 3)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3", len(lines))
+	}
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w != 5 {
+			t.Fatalf("line %d width = %d, want 5; raw=%q", i, w, line)
+		}
+	}
+}
+
+func TestPadRenderToFullFramePadsEmptyRenderToFullFrame(t *testing.T) {
+	out := padRenderToFullFrame("", 4, 2)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w != 4 {
+			t.Fatalf("line %d width = %d, want 4; raw=%q", i, w, line)
+		}
+	}
+}
+
+func TestModelViewDoesNotInjectUnsupportedControlSequencesWhenFocusResizeFreezeEnabled(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	m := NewModelWithSize(nil, 60, 12)
 	m.useFocusResizeFreeze = true
 	v := m.View()
-	if !strings.Contains(v.Content, ansiEraseToEOL) {
-		t.Fatalf("expected View() output to contain %q when focus-resize freeze is enabled", ansiEraseToEOL)
-	}
-
-	m2 := NewModelWithSize(nil, 60, 12)
-	m2.useFocusResizeFreeze = false
-	v2 := m2.View()
-	if strings.Contains(v2.Content, ansiEraseToEOL) {
-		t.Fatalf("expected View() output to not contain %q when focus-resize freeze is disabled", ansiEraseToEOL)
+	// padRenderToFullFrame should rely on printable padding rather than terminal
+	// control sequences like CSI K, which UV StyledString doesn't interpret.
+	if strings.Contains(v.Content, "\x1b[0K") {
+		t.Fatalf("unexpected CSI 0K in View() output")
 	}
 }

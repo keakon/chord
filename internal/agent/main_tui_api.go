@@ -22,6 +22,9 @@ func isTUILocalOnlySlashCommand(content string) bool {
 		return true
 	case c == "/models" || strings.HasPrefix(c, "/models "):
 		return true
+	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
+		// MCP control affects the tool surface and must always be routed to the main agent.
+		return true
 	default:
 		return false
 	}

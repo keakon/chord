@@ -253,11 +253,17 @@ func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
 		case row.OK:
 			dot = GaugeFull
 			labelStyle = InfoPanelDim
-		case row.Pending && row.Retrying:
+		case row.Disabled:
+			// Disabled/manual: dim gray.
 			dot = pendingDotStyle
+			labelStyle = InfoPanelDim
+		case row.Pending && row.Retrying:
+			// Retrying: warning/orange.
+			dot = InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
 			labelStyle = mcpRetryLabelStyle
 		case row.Pending:
-			dot = pendingDotStyle
+			// Connecting: keep dim label (tests pin this); use a warning-colored dot.
+			dot = InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
 			labelStyle = InfoPanelDim
 		default:
 			dot = mcpErrStyle

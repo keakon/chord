@@ -12,6 +12,7 @@ func TestServerConfigsFromConfigCopiesAllowedTools(t *testing.T) {
 		"search": {
 			URL:          "https://mcp.test/mcp",
 			AllowedTools: []string{"alpha_tool", "beta_tool"},
+			Manual:       true,
 		},
 	})
 	if len(configs) != 1 {

@@ -424,8 +424,10 @@ type MainAgent struct {
 	agentsMDReadyOnce     sync.Once
 	skillsReady           chan struct{}
 	skillsReadyOnce       sync.Once
+	mcpReadyMu            sync.Mutex
 	mcpReady              chan struct{}
-	mcpReadyOnce          sync.Once
+	mcpTransitionActive   atomic.Bool
+	mcpControlFn          func(context.Context, MCPControlRequest) (MCPControlResult, error)
 	sessionBuilt          atomic.Bool
 	bugTriagePromptActive atomic.Bool
 
@@ -606,6 +608,7 @@ func NewMainAgent(
 		gitStatusReady:           gitStatusReady,
 		agentsMDReady:            make(chan struct{}),
 		skillsReady:              make(chan struct{}),
+		mcpReadyMu:               sync.Mutex{},
 		mcpReady:                 make(chan struct{}),
 	}
 	a.refreshSessionSummary()
@@ -711,7 +714,18 @@ func (a *MainAgent) MarkSkillsReady() {
 }
 
 func (a *MainAgent) markMCPReady() {
-	a.mcpReadyOnce.Do(func() { close(a.mcpReady) })
+	a.mcpReadyMu.Lock()
+	ch := a.mcpReady
+	a.mcpReadyMu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case <-ch:
+		// already closed
+	default:
+		close(ch)
+	}
 }
 
 func (a *MainAgent) currentActiveConfig() *config.AgentConfig {
@@ -1217,7 +1231,7 @@ func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message
 
 // processPendingUserMessagesBeforeLLMInTurn appends queued user messages to the
 // conversation so the next LLM call sees tool results and user input together.
-// Slash commands that require idle (/loop*, /resume*, /new, /compact) are left on the
+// Slash commands that require idle (/loop*, /resume*, /new, /compact, /mcp*) are left on the
 // queue for the next idle drain.
 func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	if len(a.pendingUserMessages) == 0 {
@@ -1235,7 +1249,7 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
 		c := strings.TrimSpace(content)
-		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/compact" || isLoopSlashCommand(c) {
+		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/compact" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || isLoopSlashCommand(c) {
 			deferred = append(deferred, p)
 			continue
 		}
@@ -1302,9 +1316,19 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	a.explicitUserTurnCount++
 	a.sweepSubAgentLifecycle()
 
-	// When busy, queue the message; it will be drained and sent in one batch when idle.
-	if a.turn != nil {
-		if a.tryHandleBusySlashCommand(content) {
+	trimmedContent := strings.TrimSpace(content)
+	isMCPCommand := trimmedContent == "/mcp" || strings.HasPrefix(trimmedContent, "/mcp ")
+
+	// When busy (turn != nil) or an MCP transition is in flight, queue the message;
+	// it will be drained and sent in one batch when idle.
+	if a.turn != nil || a.mcpTransitionActive.Load() {
+		if a.turn != nil {
+			if a.tryHandleBusySlashCommand(content) {
+				return
+			}
+		}
+		if a.mcpTransitionActive.Load() && isMCPCommand {
+			a.emitToTUI(ToastEvent{Message: "MCP change already in progress", Level: "warn"})
 			return
 		}
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
@@ -1351,9 +1375,11 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	pending.Parts = pendingDraftParts(pending)
 	pending.Content = pendingUserMessageText(pending)
 
-	if a.turn != nil {
-		if a.tryHandleBusySlashCommand(pending.Content) {
-			return
+	if a.turn != nil || a.mcpTransitionActive.Load() {
+		if a.turn != nil {
+			if a.tryHandleBusySlashCommand(pending.Content) {
+				return
+			}
 		}
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
 		return

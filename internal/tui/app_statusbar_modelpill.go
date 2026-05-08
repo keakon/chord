@@ -105,6 +105,7 @@ func renderMCPStatusPill(rows []agent.MCPServerDisplay) string {
 
 	okCount := 0
 	pendingCount := 0
+	disabledCount := 0
 	failCount := 0
 	for _, row := range rows {
 		switch {
@@ -112,17 +113,23 @@ func renderMCPStatusPill(rows []agent.MCPServerDisplay) string {
 			okCount++
 		case row.Pending:
 			pendingCount++
+		case row.Disabled:
+			disabledCount++
 		default:
 			failCount++
 		}
 	}
 
-	color := "82"
+	color := currentTheme.InfoPanelSuccessFg
 	switch {
 	case failCount > 0:
-		color = "196"
+		color = currentTheme.InfoPanelCriticalFg
 	case pendingCount > 0:
-		color = "240"
+		// Connecting/retrying MCP uses warning/orange for visibility.
+		color = currentTheme.InfoPanelWarningFg
+	case disabledCount > 0:
+		// Disabled manual servers: keep dim/gray.
+		color = currentTheme.InfoPanelPendingFg
 	}
 
 	label := "mcp"

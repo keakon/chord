@@ -71,13 +71,14 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `n`      | Jump to the next match                                |
 | `N`      | Jump to the previous match                            |
 
-### Both modes — agents and models
+### Both modes — agents, models, and integrations
 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
 | `Tab`        | Cycle the main agent role (only in the main-agent view)                                                   |
 | `Shift+Tab`  | Cycle focus across the main agent and any active SubAgent views                                           |
 | `Ctrl+P`     | Open the model-pool selector (Normal mode). In Insert mode `Ctrl+P` first acts as history-up.             |
+| `Ctrl+O`     | Open the MCP server selector (`/mcp`)                                                                     |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
 ### Note on `Ctrl+P`
@@ -87,7 +88,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 - **Normal mode** — opens the model-pool selector (the `SwitchModel` action).
 - **Insert mode** — acts as history-up (the `InsertHistoryUp` action). To switch the pool from Insert mode, type `/models` and press Enter, or press `Esc` to leave Insert mode first.
 
-If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+m`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
+If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+u`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
 
 ## Customizing key bindings
 
@@ -100,7 +101,7 @@ keymap:
   scroll_down: ["down"]        # arrow keys for line scrolling only
   scroll_up: ["up"]
   quit: ["Q"]                  # require shift for quit
-  switch_model: ["ctrl+m"]     # avoid the Ctrl+P insert-mode collision
+  switch_model: ["ctrl+u"]     # avoid the Ctrl+P insert-mode collision
 ```
 
 Action names are lower snake_case mirrors of the [`KeyMap` fields](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) in `internal/tui/keymap.go`. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
@@ -138,6 +139,7 @@ Action names are lower snake_case mirrors of the [`KeyMap` fields](https://githu
 | `switch_agent`             | `["shift+tab"]`                  |
 | `switch_role`              | `["tab"]`                        |
 | `switch_model`             | `["ctrl+p"]`                     |
+| `mcp`                      | `["ctrl+o"]`                     |
 | `diagnostics`              | `["ctrl+g"]`                     |
 
 Only the actions you list are overridden; all others fall back to the defaults above.

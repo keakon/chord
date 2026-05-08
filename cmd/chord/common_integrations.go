@@ -85,6 +85,8 @@ func mcpServerDisplayList(mgr *mcp.Manager) []agent.MCPServerDisplay {
 			Name:        st.Name,
 			OK:          st.OK,
 			Pending:     st.Pending,
+			Disabled:    st.Disabled,
+			Manual:      st.Manual,
 			Retrying:    st.Retrying,
 			Attempt:     st.Attempt,
 			MaxAttempts: st.MaxAttempts,
