@@ -4,6 +4,8 @@ This documentation is for end users: installation, configuration, daily usage, c
 
 - 中文版入口：见 [index_CN.md](./index_CN.md)
 
+Start with what works out of the box; move on to customization and advanced workflows when you need more.
+
 ## Getting started
 
 - [Quickstart](./quickstart.md) — get running in minutes
@@ -21,7 +23,7 @@ This documentation is for end users: installation, configuration, daily usage, c
 
 ## Going further
 
-- [Customization](./customization.md) — agents, skills, MCP, LSP, custom slash commands
+- [Customization](./customization.md) — agents, skills, MCP, optional LSP setup, custom slash commands
 - [Hooks](./hooks.md) — 14 trigger points, payload contract, examples
 - [Examples](./examples/index.md) — copy-paste-ready `config.yaml` setups for common situations
 

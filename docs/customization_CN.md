@@ -93,7 +93,7 @@ lsp:
 
 需要限制语言服务器的生效范围时，可配置 `root_markers`；省略时仅由 `file_types` 决定是否处理某文件。
 
-对 Python 来说，通常不建议默认配置 `root_markers`。在 Chord 当前的 LSP 模型中，`root_markers` 只决定 Pyright 是否为某个文件启动，而不会将工作区根目录重定向到最近的 `pyproject.toml` 或 `pyrightconfig.json`。默认推荐 Python root markers，往往只会让合法的独立脚本或轻量项目无法启用 Pyright，却不能改善 workspace root 的选择。需要更严格的项目范围控制时，再按仓库实际情况显式添加 `root_markers`。
+对 Python 来说，通常不建议默认配置 `root_markers`。在 Chord 当前的 LSP 模型中，`root_markers` 只决定 Pyright 是否为某个文件启动，而不会将工作区根目录重定向到最近的 `pyproject.toml` 或 `pyrightconfig.json`。默认配置 Python root markers 往往只会让合法的独立脚本或轻量项目无法启用 Pyright，却不能改善 workspace root 的选择。需要更严格的项目范围控制时，再按仓库实际情况显式添加 `root_markers`。
 
 通常无需手动设置 `python.pythonPath`。未显式配置解释器时，Chord 已在 LSP root 下自动发现项目本地的 `.venv`、`venv` 或 `env`。仅当需覆盖自动发现逻辑、改用自定义解释器路径时，才需设置 `python.pythonPath`。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
 

@@ -10,6 +10,8 @@
 
 ## Why Chord
 
+Start with the core experience you notice immediately:
+
 - **Stable for the long haul.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
 - **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
@@ -17,13 +19,16 @@
 - **Extremely lightweight.** Low memory and CPU footprint. Power-aware on macOS: prevents idle sleep while work is active, lets the system sleep again when idle.
 - **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from any chat surface — even from your phone when you are away from the desk.
 
-A few extras you may appreciate later:
+Out of the box, you also get these quality-of-life upgrades:
 
-- **Multi-agent collaboration** — a main agent with focused SubAgents, each with its own context, switchable via `Shift+Tab`.
-- **Parallel work via git worktrees** — `chord --worktree feat-auth` spins up an isolated working copy so several tasks on the same repo do not stomp on each other.
 - **LSP-backed code awareness** — live diagnostics and definition / references / implementation lookups via your local language servers.
 - **Multimodal input** — paste images from the clipboard, attach files, preview in supported terminals.
 - **Codex quota visibility** — real-time remaining-quota and reset-time display for OpenAI Codex subscriptions.
+
+Once you want to go further, Chord also supports these advanced workflows:
+
+- **Multi-agent collaboration** — a main agent with focused SubAgents, each with its own context, switchable via `Shift+Tab`.
+- **Parallel work via git worktrees** — `chord --worktree feat-auth` spins up an isolated working copy so several tasks on the same repo do not stomp on each other.
 
 ## Three-step setup
 

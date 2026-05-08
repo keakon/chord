@@ -4,6 +4,8 @@
 
 - English: 见 [index.md](./index.md)
 
+先从开箱即用的内容开始；需要更强能力时，再进入扩展与进阶工作流。
+
 ## 入门
 
 - [快速开始](./quickstart_CN.md) —— 几分钟跑起来
@@ -21,7 +23,7 @@
 
 ## 进阶
 
-- [扩展与定制](./customization_CN.md) —— agents、skills、MCP、LSP、自定义 slash 命令
+- [扩展与定制](./customization_CN.md) —— agents、skills、MCP、按需配置 LSP、自定义 slash 命令
 - [Hooks](./hooks_CN.md) —— 14 个触发点、payload 协议、示例
 - [示例配置库](./examples/index_CN.md) —— 4 套可直接复制粘贴的 `config.yaml`
 

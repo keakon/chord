@@ -10,6 +10,8 @@
 
 ## 为什么选 Chord
 
+先说最容易感受到的核心体验：
+
 - **稳定长期运行。** 自动压缩将长对话浓缩为上下文摘要，会话超出 context window 后照样继续——保留继续工作所需的关键信息，不会出现「它忘了？」的尴尬。
 - **网络状态全程可见。** 等模型响应时，Chord 实时显示请求状态和已等待时间。再也不用猜「是不是卡住了」。
 - **键盘优先、Vim 风格。** Insert / Normal 模式、消息搜索、Vim 风格导航、模式切换自动切输入法。退出需连按两次，避免误触 Ctrl+C 丢工作。
@@ -17,13 +19,16 @@
 - **资源占用极低。** 低内存、低 CPU 占用。macOS 上电源感知：工作时阻止系统休眠，空闲后自动放行。
 - **能远程操控。** `chord headless` 提供 stdio JSONL 控制面；配合 [chord-gateway](https://github.com/keakon/chord-gateway) 可从任意聊天平台驱动 Chord，离开桌面也能在手机上操控。
 
-等你熟悉之后，还可以用这些能力：
+开箱即用，还有这些体验增强能力：
 
-- **多 Agent 协作** —— 主 agent 派出 SubAgent，每个拥有独立 context；`Shift+Tab` 切换视图。
-- **基于 git worktree 的并行任务** —— `chord --worktree feat-auth` 启动独立 worktree，多任务在同仓库下互不干扰。
 - **LSP 加持的代码上下文** —— 接入本地 language server，提供实时诊断和 definition/references/implementation 查询。
 - **多模态输入** —— 粘贴剪贴板图片、附加文件、在支持的终端里预览。
 - **Codex 额度可见** —— 实时显示 OpenAI Codex 订阅的剩余额度和重置时间。
+
+熟悉之后，还可以进一步用这些进阶工作流：
+
+- **多 Agent 协作** —— 主 agent 派出 SubAgent，每个拥有独立 context；`Shift+Tab` 切换视图。
+- **基于 git worktree 的并行任务** —— `chord --worktree feat-auth` 启动独立 worktree，多任务在同仓库下互不干扰。
 
 ## 三步上手
 
