@@ -436,7 +436,7 @@ The server name (`search` above) is user-defined. With this example, Chord regis
 
 ### Manual (on-demand) MCP servers
 
-By default, configured MCP servers auto-start. To keep a server disabled at startup and enable it on demand:
+By default, configured MCP servers auto-start and become part of the default LLM tool context. For an MCP server you do not need in every conversation, set `manual: true`: it stays disabled at startup, Chord normally does not connect to it, and its tool descriptions are not added to the default context, reducing context overhead. Enable it manually only when you need it:
 
 ```yaml
 mcp:

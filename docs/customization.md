@@ -139,9 +139,9 @@ Use `allowed_tools` to expose only selected tools and reduce token overhead. See
 
 In local mode, MCP connects asynchronously after the TUI starts. Auto-start servers still start in the background, but the first LLM request waits until they either connect successfully or reach a terminal failure state.
 
-To keep a server disabled at startup and enable it on demand, set `manual: true` and use `/mcp` (menu) or `/mcp enable <server>`.
+Use `manual: true` for MCP servers you do not need in every conversation. The server stays disabled at startup, Chord does not connect to it, and its tool descriptions are not added to the default LLM tool context, reducing everyday context overhead. When you need it, enable it manually with `/mcp` (menu) or `/mcp enable <server>`.
 
-Only `manual: true` servers can be toggled at runtime. Auto-start servers remain read-only and are not affected by `/mcp enable|disable|toggle`.
+Only `manual: true` servers can be toggled at runtime. Auto-start servers remain part of the default tool context, stay read-only, and are not affected by `/mcp enable|disable|toggle`.
 
 ## Custom slash commands
 

@@ -135,9 +135,9 @@ mcp:
 
 本地模式下 MCP 会在 TUI 启动后异步连接。自动启动的 server 仍在后台连接，但第一次 LLM 请求会等待：每个自动启动的 server 要么连接成功，要么明确失败后才会继续。
 
-若希望启动时保持禁用、需要时再启用，可设置 `manual: true`，然后用 `/mcp`（菜单）或 `/mcp enable <server>` 手动启用。
+对于不是每轮对话都需要的 MCP，建议设置 `manual: true`：启动时保持禁用，不连接该 server，也不把它的工具描述加入默认 LLM 工具上下文，从而降低平时的上下文开销。需要使用时，再通过 `/mcp`（菜单）或 `/mcp enable <server>` 手动启用。
 
-只有 `manual: true` 的 server 才能在运行时切换。自动启动的 server 保持只读，不受 `/mcp enable|disable|toggle` 影响。
+只有 `manual: true` 的 server 才能在运行时切换。自动启动的 server 会作为默认工具上下文的一部分保持只读，不受 `/mcp enable|disable|toggle` 影响。
 
 ## 自定义 slash commands
 
