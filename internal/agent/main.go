@@ -127,6 +127,7 @@ type ToolExecutionResult struct {
 	PreFilePath       string
 	PreContent        string
 	PreExisted        bool
+	speculativeHooks  *speculativeToolHooks
 }
 
 // ---------------------------------------------------------------------------

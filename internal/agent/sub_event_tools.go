@@ -102,19 +102,20 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 
 		if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
 			tr := &toolResult{
-				CallID:      payload.CallID,
-				Name:        payload.Name,
-				ArgsJSON:    execResult.EffectiveArgsJSON,
-				Audit:       payload.Audit,
-				Result:      payload.Result,
-				Error:       payload.Error,
-				TurnID:      turn.ID,
-				Duration:    payload.Duration,
-				Diff:        payload.Diff,
-				DiffAdded:   payload.DiffAdded,
-				DiffRemoved: payload.DiffRemoved,
-				FileCreated: payload.FileCreated,
-				LSPReviews:  append([]message.LSPReview(nil), payload.LSPReviews...),
+				CallID:           payload.CallID,
+				Name:             payload.Name,
+				ArgsJSON:         execResult.EffectiveArgsJSON,
+				Audit:            payload.Audit,
+				Result:           payload.Result,
+				Error:            payload.Error,
+				TurnID:           turn.ID,
+				Duration:         payload.Duration,
+				Diff:             payload.Diff,
+				DiffAdded:        payload.DiffAdded,
+				DiffRemoved:      payload.DiffRemoved,
+				FileCreated:      payload.FileCreated,
+				LSPReviews:       append([]message.LSPReview(nil), payload.LSPReviews...),
+				speculativeHooks: payload.speculativeHooks,
 			}
 			s.commitPromotedToolSideEffects(effective, tr)
 			select {

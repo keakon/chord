@@ -21,11 +21,12 @@ import (
 // commitPromotedToolSideEffects applies the minimal post-execution side effects
 // that speculative execution intentionally skipped, but that must still happen
 // once a tool call is validated and committed to context.
-//
-// Today this is intentionally narrow: only safe read-only tools can be promoted.
 func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *ToolResultPayload) {
 	if a == nil || payload == nil || payload.Error != nil {
 		return
+	}
+	if payload.speculativeHooks != nil && payload.speculativeHooks.commit != nil {
+		payload.speculativeHooks.commit()
 	}
 	if tc.Name != tools.NameRead {
 		return

@@ -29,16 +29,17 @@ const (
 )
 
 type streamingToolEntry struct {
-	call        message.ToolCall
-	argsHash    string
-	state       streamingToolState
-	startedAt   time.Time
-	completedAt time.Time
-	result      ToolExecutionResult
-	err         error
-	done        chan struct{}
-	discarded   bool
-	discardWhy  string
+	call         message.ToolCall
+	argsHash     string
+	conflictKeys []string
+	state        streamingToolState
+	startedAt    time.Time
+	completedAt  time.Time
+	result       ToolExecutionResult
+	err          error
+	done         chan struct{}
+	discarded    bool
+	discardWhy   string
 }
 
 type StreamingToolDiscardInfo struct {
@@ -67,12 +68,13 @@ type StreamingToolExecutor struct {
 	sem      chan struct{}
 	entries  map[string]*streamingToolEntry
 	deferred []*streamingToolEntry
+	locks    map[string]string
 }
 
 func NewStreamingToolExecutor(turnID uint64, ctx context.Context, emit func(AgentEvent), execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)) *StreamingToolExecutor {
 	limit := streamingToolSpeculativeLimit
 	sem := make(chan struct{}, limit)
-	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: limit, sem: sem, entries: make(map[string]*streamingToolEntry)}
+	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: limit, sem: sem, entries: make(map[string]*streamingToolEntry), locks: make(map[string]string)}
 }
 
 func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName string, at time.Time), onFirstVisible func(callID, toolName string, at time.Time), onDiscard func(info StreamingToolDiscardInfo)) {
@@ -88,11 +90,26 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 	if e == nil || call.ID == "" || e.ctx == nil || e.execute == nil {
 		return false
 	}
-	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), state: streamingToolQueued, done: make(chan struct{})}
+	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call), state: streamingToolQueued, done: make(chan struct{})}
 	e.mu.Lock()
 	if _, exists := e.entries[call.ID]; exists {
 		e.mu.Unlock()
 		return false
+	}
+	for _, key := range entry.conflictKeys {
+		if owner := e.locks[key]; owner != "" && owner != call.ID {
+			e.mu.Unlock()
+			log.Debugf("speculative execution skipped call_id=%s tool=%s reason=speculative_conflict key=%s owner=%s", call.ID, call.Name, key, owner)
+			return false
+		}
+	}
+	if blocks := e.speculativeMutationBarrierLocked(call); blocks != "" {
+		e.mu.Unlock()
+		log.Debugf("speculative execution skipped call_id=%s tool=%s reason=speculative_mutation_barrier owner=%s", call.ID, call.Name, blocks)
+		return false
+	}
+	for _, key := range entry.conflictKeys {
+		e.locks[key] = call.ID
 	}
 	e.entries[call.ID] = entry
 	// Speculative execution shares a per-turn concurrency quota with finalized tool execution.
@@ -163,10 +180,21 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	completedAt := time.Now()
 
 	e.mu.Lock()
-	entry.result = result
 	entry.err = err
 	entry.completedAt = completedAt
 	discarded := entry.discarded || e.ctx.Err() != nil
+	e.mu.Unlock()
+
+	// captureAfter touches the filesystem; run it without holding the executor lock.
+	if !discarded && err == nil && result.speculativeHooks != nil && result.speculativeHooks.captureAfter != nil {
+		result.speculativeHooks.captureAfter()
+	}
+
+	e.mu.Lock()
+	if entry.discarded || e.ctx.Err() != nil {
+		discarded = true
+	}
+	entry.result = result
 	if discarded {
 		entry.state = streamingToolDiscarded
 	} else {
@@ -175,7 +203,11 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	e.mu.Unlock()
 	close(entry.done)
 
-	if discarded || e.emit == nil {
+	if discarded {
+		rollbackSpeculativeToolHooks(result)
+		return
+	}
+	if e.emit == nil {
 		return
 	}
 	if e.onFirstVisibleResult != nil {
@@ -198,7 +230,10 @@ func (e *StreamingToolExecutor) startDeferredLocked() {
 				case <-e.sem:
 				default:
 				}
-				close(entry.done)
+				if entry.state != streamingToolDiscarded {
+					entry.state = streamingToolDiscarded
+					close(entry.done)
+				}
 				continue
 			}
 			go e.runEntry(entry)
@@ -239,6 +274,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	}
 	entry.state = streamingToolYielded
 	delete(e.entries, call.ID)
+	e.releaseConflictKeysLocked(entry)
 	startedAt := entry.startedAt
 	if startedAt.IsZero() {
 		startedAt = entry.completedAt
@@ -249,7 +285,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...)}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -259,6 +295,7 @@ func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streami
 	entry.discardWhy = reason
 	entry.state = streamingToolDiscarded
 	delete(e.entries, callID)
+	e.releaseConflictKeysLocked(entry)
 	info := StreamingToolDiscardInfo{
 		CallID:      entry.call.ID,
 		Name:        entry.call.Name,
@@ -269,8 +306,12 @@ func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streami
 		StartedAt:   entry.startedAt,
 		CompletedAt: entry.completedAt,
 	}
+	rollback := entry.result
 	if e.onSpeculativeDiscarded != nil {
 		e.onSpeculativeDiscarded(info)
+	}
+	if completed {
+		go rollbackSpeculativeToolHooks(rollback)
 	}
 	return info
 }
@@ -319,6 +360,61 @@ func (e *StreamingToolExecutor) DiscardExceptInfo(valid map[string]struct{}, rea
 
 func (e *StreamingToolExecutor) DiscardAll(reason string) []PendingToolCall {
 	return e.DiscardExcept(map[string]struct{}{}, reason)
+}
+
+func (e *StreamingToolExecutor) releaseConflictKeysLocked(entry *streamingToolEntry) {
+	if e == nil || entry == nil || len(entry.conflictKeys) == 0 {
+		return
+	}
+	for _, key := range entry.conflictKeys {
+		if e.locks[key] == entry.call.ID {
+			delete(e.locks, key)
+		}
+	}
+}
+
+func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.ToolCall) string {
+	if e == nil || isFileMutationTool(call.Name) {
+		return ""
+	}
+	for _, entry := range e.entries {
+		if entry == nil || entry.discarded || len(entry.conflictKeys) == 0 {
+			continue
+		}
+		if isFileMutationTool(entry.call.Name) {
+			return entry.call.ID
+		}
+	}
+	return ""
+}
+
+func isFileMutationTool(name string) bool {
+	switch name {
+	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func speculativeConflictKeys(call message.ToolCall) []string {
+	switch call.Name {
+	case tools.NameWrite, tools.NameEdit:
+		if path, ok := singlePathToolPath(call.Args); ok {
+			return []string{"file:" + path}
+		}
+	case tools.NameDelete:
+		paths, err := deleteToolPaths(call.Args)
+		if err == nil && len(paths) > 0 {
+			normalized := normalizeSpeculativeMutationPaths(paths)
+			keys := make([]string, 0, len(normalized))
+			for _, path := range normalized {
+				keys = append(keys, "file:"+path)
+			}
+			return keys
+		}
+	}
+	return nil
 }
 
 func canonicalArgsHash(args json.RawMessage) string {

@@ -57,7 +57,7 @@ func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permis
 		}
 		return rejectSpeculativeExecution("bash_not_static_read_only")
 	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
-		return rejectSpeculativeExecution("file_mutation_requires_rollback")
+		return allowSpeculativeExecution()
 	case tools.NameSpawn, tools.NameSpawnStop:
 		return rejectSpeculativeExecution("process_side_effect")
 	case tools.NameQuestion:

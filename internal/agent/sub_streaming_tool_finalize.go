@@ -22,6 +22,9 @@ func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *to
 	if s == nil || result == nil || result.Error != nil {
 		return
 	}
+	if result.speculativeHooks != nil && result.speculativeHooks.commit != nil {
+		result.speculativeHooks.commit()
+	}
 	if tc.Name != tools.NameRead {
 		return
 	}
@@ -230,6 +233,12 @@ func (s *SubAgent) executeToolCallSpeculative(ctx context.Context, tc message.To
 	if err := validateToolArgsAgainstSchema(s.tools, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
+	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
+	hooks, err := prepareSpeculativeToolCall(tc, s.parent.fileTrack, s.instanceID)
+	if err != nil {
+		return execResult, err
+	}
+	execResult.speculativeHooks = hooks
 	agentCtx := buildToolExecContext(ctx, tc, s.instanceID, s.taskID, s.sessionDir, s.parent, s.parent.emitToTUI)
 	artifactKey := tc.ID
 	if strings.TrimSpace(artifactKey) == "" {
@@ -237,6 +246,7 @@ func (s *SubAgent) executeToolCallSpeculative(ctx context.Context, tc message.To
 	}
 	result, err := s.tools.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	if err != nil {
+		rollbackSpeculativeToolHooks(execResult)
 		if result != "" {
 			truncated := tools.TruncateOutputWithOptions(result, s.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 			content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, err)
@@ -246,6 +256,9 @@ func (s *SubAgent) executeToolCallSpeculative(ctx context.Context, tc message.To
 			return execResult, err
 		}
 		return execResult, err
+	}
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && execResult.PreFilePath != "" {
+		execResult.LSPReviews = speculativeWriteToolLSPReviews(s.tools, tc.Name, execResult.PreFilePath)
 	}
 	truncated := tools.TruncateOutputWithOptions(result, s.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 	content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, nil)

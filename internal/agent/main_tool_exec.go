@@ -269,14 +269,20 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	return execResult, nil
 }
 
-// executeToolCallSpeculative runs a safe read-only tool without firing hooks,
-// repetition detection, or file-tracker commits. Results are UI-only until the
+// executeToolCallSpeculative runs a tool without firing hooks, repetition detection,
+// or irreversible finalize-only side effects. Results are UI-only until the
 // finalized call promotes them through the normal handleToolResult path.
 func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if err := validateToolArgsAgainstSchema(a.tools, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
+	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
+	hooks, err := prepareSpeculativeToolCall(tc, a.fileTrack, a.instanceID)
+	if err != nil {
+		return execResult, err
+	}
+	execResult.speculativeHooks = hooks
 	agentCtx := buildToolExecContext(ctx, tc, a.instanceID, "", a.sessionDir, a, a.emitToTUI)
 	artifactKey := tc.ID
 	if strings.TrimSpace(artifactKey) == "" {
@@ -284,6 +290,7 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 	}
 	result, err := a.tools.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	if err != nil {
+		rollbackSpeculativeToolHooks(execResult)
 		if result != "" {
 			truncated := tools.TruncateOutputWithOptions(result, a.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 			content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, err)
@@ -293,6 +300,9 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 			return execResult, err
 		}
 		return execResult, err
+	}
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && execResult.PreFilePath != "" {
+		execResult.LSPReviews = speculativeWriteToolLSPReviews(a.tools, tc.Name, execResult.PreFilePath)
 	}
 	truncated := tools.TruncateOutputWithOptions(result, a.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 	content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, nil)

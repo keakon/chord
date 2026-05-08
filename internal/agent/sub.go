@@ -40,19 +40,20 @@ type llmResult struct {
 
 // toolResult carries a single tool execution result back to the event loop.
 type toolResult struct {
-	CallID      string
-	Name        string // tool name, used for empty-args detection
-	ArgsJSON    string // original args JSON string for malformed detection
-	Audit       *message.ToolArgsAudit
-	Result      string
-	Error       error
-	TurnID      uint64
-	Duration    time.Duration
-	Diff        string              // unified diff for Write/Edit tools; not sent to LLM
-	DiffAdded   int                 // full added-line count before any diff truncation
-	DiffRemoved int                 // full removed-line count before any diff truncation
-	FileCreated bool                // true when Write created a file that did not previously exist
-	LSPReviews  []message.LSPReview // last-review snapshot for the directly edited file only
+	CallID           string
+	Name             string // tool name, used for empty-args detection
+	ArgsJSON         string // original args JSON string for malformed detection
+	Audit            *message.ToolArgsAudit
+	Result           string
+	Error            error
+	TurnID           uint64
+	Duration         time.Duration
+	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
+	DiffAdded        int                 // full added-line count before any diff truncation
+	DiffRemoved      int                 // full removed-line count before any diff truncation
+	FileCreated      bool                // true when Write created a file that did not previously exist
+	LSPReviews       []message.LSPReview // last-review snapshot for the directly edited file only
+	speculativeHooks *speculativeToolHooks
 }
 
 // AgentResult is the completion payload sent via EventAgentDone when a

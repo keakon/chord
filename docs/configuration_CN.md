@@ -18,6 +18,20 @@ Chord 把“行为配置”和“凭据配置”分开管理。
 
 这样可以同时满足用户习惯、项目差异和不同 Agent 的能力特化。
 
+## 流式工具早执行（Streaming tool execution / early execution）
+
+Chord 会在模型响应仍在流式输出时（工具参数刚刚完整时），对少量**安全的只读工具子集**进行 *speculative* 执行，而不是等待 provider 完全 finalize（`CompleteStream()` 返回）后才开始执行。这样可以显著降低“finalize gap”的体感等待。
+
+- 始终启用；没有 `early_tool_execution` 开关。
+- 允许 early-exec 的工具：`Read`、`Grep`、`Glob`，支持回滚的文件变更工具（`Write`、`Edit`、`Delete`），以及 `Bash` 的保守只读子集（只允许单命令；不允许管道/重定向/`&&`/`;` 等组合）：
+  - `pwd`、`ls`、`cat`、`which`
+  - `git status|log|diff|show|branch|rev-parse`
+- 不允许 early-exec：非只读 `Bash`、交互/控制类工具，或任何权限判断为 `ask` 的调用。
+- speculative 文件变更会真实落盘，但 runtime 会先捕获 pre-state；如果 finalize 丢弃该调用，会自动回滚。同一 turn 内若多个 speculative 文件变更命中同一路径，后续冲突调用会跳过早执行，留给 finalize 后的正式路径处理。同一 turn 内只要存在**任意**尚未 promote 的 speculative 文件变更（不限路径），后续读类 speculative 调用都会跳过早执行；这避免读取未提交状态，代价是读 speculative 会被进行中的写 speculative 短暂阻塞。
+- speculative 结果可能会提前显示在 UI 中，但只有在 finalize 校验通过后才会追加进对话上下文；未通过 finalize 的结果会被丢弃并在 UI 中收敛为“speculative discarded（不属于上下文）”。
+
+排障说明见：`.internal-docs/troubleshooting/streaming-tool-execution.md`。
+
 ## 最小 provider 配置
 
 ### Anthropic

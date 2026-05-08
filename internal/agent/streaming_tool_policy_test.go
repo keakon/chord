@@ -69,14 +69,11 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 	}
 }
 
-func TestSpeculativeExecutionPolicyRejectsPhase4HighRiskTools(t *testing.T) {
+func TestSpeculativeExecutionPolicyAllowsRollbackFileMutationTools(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteTool{})
 	registry.Register(tools.EditTool{})
 	registry.Register(tools.DeleteTool{})
-	registry.Register(tools.NewBashTool("bash"))
-	registry.Register(tools.NewQuestionTool(nil))
-	registry.Register(tools.NewTodoWriteTool(nil))
 
 	cases := []struct {
 		name string
@@ -85,6 +82,25 @@ func TestSpeculativeExecutionPolicyRejectsPhase4HighRiskTools(t *testing.T) {
 		{tools.NameWrite, `{"path":"x.txt","content":"x"}`},
 		{tools.NameEdit, `{"path":"x.txt","old_string":"x","new_string":"y"}`},
 		{tools.NameDelete, `{"paths":["x.txt"],"reason":"cleanup"}`},
+	}
+	for _, tc := range cases {
+		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tc.name, json.RawMessage(tc.args))
+		if !decision.Allowed {
+			t.Fatalf("%s rejected for speculative execution: %s", tc.name, decision.Reason)
+		}
+	}
+}
+
+func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewBashTool("bash"))
+	registry.Register(tools.NewQuestionTool(nil))
+	registry.Register(tools.NewTodoWriteTool(nil))
+
+	cases := []struct {
+		name string
+		args string
+	}{
 		{tools.NameBash, `{"command":"go test ./..."}`},
 		{tools.NameQuestion, `{"questions":[{"header":"H","question":"Q?"}]}`},
 		{tools.NameTodoWrite, `{"todos":[]}`},

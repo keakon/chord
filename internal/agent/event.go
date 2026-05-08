@@ -71,19 +71,20 @@ type LLMResponsePayload struct {
 
 // ToolResultPayload wraps a tool execution result for the internal event bus.
 type ToolResultPayload struct {
-	CallID      string
-	Name        string
-	ArgsJSON    string
-	Audit       *message.ToolArgsAudit
-	Result      string
-	Error       error
-	TurnID      uint64
-	Duration    time.Duration
-	Diff        string              // unified diff for Write/Edit tools; not sent to LLM
-	DiffAdded   int                 // full added-line count before any diff truncation
-	DiffRemoved int                 // full removed-line count before any diff truncation
-	FileCreated bool                // true when Write created a file that did not previously exist
-	LSPReviews  []message.LSPReview // last-review snapshot for the directly edited file only
+	CallID           string
+	Name             string
+	ArgsJSON         string
+	Audit            *message.ToolArgsAudit
+	Result           string
+	Error            error
+	TurnID           uint64
+	Duration         time.Duration
+	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
+	DiffAdded        int                 // full added-line count before any diff truncation
+	DiffRemoved      int                 // full removed-line count before any diff truncation
+	FileCreated      bool                // true when Write created a file that did not previously exist
+	LSPReviews       []message.LSPReview // last-review snapshot for the directly edited file only
+	speculativeHooks *speculativeToolHooks
 }
 
 // TurnCancelledPayload carries the pending tool calls that must be explicitly

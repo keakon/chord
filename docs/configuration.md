@@ -26,12 +26,20 @@ is still streaming (as soon as tool arguments are complete), instead of waiting
 for the provider to fully finalize the response. This reduces the "finalize gap".
 
 - Always enabled; there is no `early_tool_execution` toggle.
-- Eligible tools: `Read`, `Grep`, `Glob`, plus a conservative read-only subset of
+- Eligible tools: `Read`, `Grep`, `Glob`, rollback-safe file mutation tools
+  (`Write`, `Edit`, `Delete`), plus a conservative read-only subset of
   `Bash` (single command only; no pipes/redirects/`&&`/`;`):
   - `pwd`, `ls`, `cat`, `which`
   - `git status|log|diff|show|branch|rev-parse`
-- Not eligible: `Write`/`Edit`/`Delete`, non-read-only `Bash`, interactive tools,
-  or any call that requires permission action `ask`.
+- Not eligible: non-read-only `Bash`, interactive/control tools, or any call that
+  requires permission action `ask`.
+- Speculative file mutations are real on-disk writes/deletes, but the runtime
+  captures pre-state first and rolls them back if finalize discards the call.
+  Within a turn, conflicting speculative file mutations for the same path are
+  skipped and left to the finalized execution path. Read-like speculative calls
+  are also skipped while *any* unpromoted speculative file mutation exists in
+  the same turn (regardless of path), so they never observe uncommitted file
+  state — at the cost of serializing read speculation behind in-flight writes.
 - Speculative results may be shown early in the UI, but they are only appended to
   the conversation context after finalize validation.
 
