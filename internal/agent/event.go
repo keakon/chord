@@ -440,7 +440,7 @@ const (
 
 // ModelPoolSelectorTarget describes the explicit target edited by the model-pool selector.
 // Current-view selection follows the active TUI focus (main role or focused SubAgent).
-// Main role selection changes the current project-scoped role pool. Agent override
+// Main role selection changes the current project-scoped model pool. Agent override
 // selection changes the named agent's explicit fixed pool and may also offer a
 // restore-default action.
 type ModelPoolSelectorTarget struct {

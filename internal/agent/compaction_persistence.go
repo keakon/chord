@@ -448,31 +448,31 @@ func (a *MainAgent) saveRecoverySnapshot() {
 	}
 	a.mu.RUnlock()
 
-	modelPoolCurrentRole, modelPoolAgentOverrides := a.snapshotModelPoolState()
+	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
 	usageSnap := a.usageTracker.SessionStats()
 	if err := a.recovery.SaveSnapshot(&recovery.SessionSnapshot{
-		Todos:                   todoStates,
-		ActiveAgents:            agents,
-		ModelName:               a.ModelName(),
-		ActiveRole:              a.CurrentRole(),
-		ModelPoolCurrentRole:    modelPoolCurrentRole,
-		ModelPoolAgentOverrides: modelPoolAgentOverrides,
-		CreatedAt:               time.Now(),
-		LastInputTokens:         a.ctxMgr.LastInputTokens(),
-		LastTotalContextTokens:  a.ctxMgr.LastTotalContextTokens(),
-		CompactionGeneration:    a.nextCompactionPlanID,
-		LastHistoryIndex:        nextHistoryIndexMinusOne(a.sessionDir),
-		SessionEpoch:            a.sessionEpoch,
-		ActiveBackgroundObjects: spawnStatesForSnapshot(),
-		UsageInputTokens:        usageSnap.InputTokens,
-		UsageOutputTokens:       usageSnap.OutputTokens,
-		UsageCacheReadTokens:    usageSnap.CacheReadTokens,
-		UsageCacheWriteTokens:   usageSnap.CacheWriteTokens,
-		UsageReasoningTokens:    usageSnap.ReasoningTokens,
-		UsageLLMCalls:           usageSnap.LLMCalls,
-		UsageEstimatedCost:      usageSnap.EstimatedCost,
-		UsageByModel:            usageSnap.ByModel,
-		UsageByAgent:            usageSnap.ByAgent,
+		Todos:                     todoStates,
+		ActiveAgents:              agents,
+		ModelName:                 a.ModelName(),
+		ActiveRole:                a.CurrentRole(),
+		ModelPoolCurrentModelPool: modelPoolCurrentModelPool,
+		ModelPoolAgentOverrides:   modelPoolAgentOverrides,
+		CreatedAt:                 time.Now(),
+		LastInputTokens:           a.ctxMgr.LastInputTokens(),
+		LastTotalContextTokens:    a.ctxMgr.LastTotalContextTokens(),
+		CompactionGeneration:      a.nextCompactionPlanID,
+		LastHistoryIndex:          nextHistoryIndexMinusOne(a.sessionDir),
+		SessionEpoch:              a.sessionEpoch,
+		ActiveBackgroundObjects:   spawnStatesForSnapshot(),
+		UsageInputTokens:          usageSnap.InputTokens,
+		UsageOutputTokens:         usageSnap.OutputTokens,
+		UsageCacheReadTokens:      usageSnap.CacheReadTokens,
+		UsageCacheWriteTokens:     usageSnap.CacheWriteTokens,
+		UsageReasoningTokens:      usageSnap.ReasoningTokens,
+		UsageLLMCalls:             usageSnap.LLMCalls,
+		UsageEstimatedCost:        usageSnap.EstimatedCost,
+		UsageByModel:              usageSnap.ByModel,
+		UsageByAgent:              usageSnap.ByAgent,
 	}); err != nil {
 		log.Warnf("failed to save recovery snapshot error=%v", err)
 	}

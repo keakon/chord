@@ -62,16 +62,16 @@ type ModelSelector interface {
 	CurrentPoolName() string
 	// PoolNames returns the pool names for the agent currently shown in the TUI.
 	PoolNames() []string
-	// MainRoleCurrentPoolName returns the effective pool name for the current main
+	// MainModelPoolName returns the effective pool name for the current main
 	// role regardless of focused SubAgent state.
-	MainRoleCurrentPoolName() string
-	// MainRolePoolNames returns the pool names for the current main role regardless
+	MainModelPoolName() string
+	// MainModelPoolNames returns the pool names for the current main role regardless
 	// of focused SubAgent state.
-	MainRolePoolNames() []string
+	MainModelPoolNames() []string
 	// AgentOverridePoolName returns the explicit override for the named agent, if any.
 	AgentOverridePoolName(agentName string) (string, bool)
-	// SetCurrentRolePool sets the current main role's pool.
-	SetCurrentRolePool(pool string) error
+	// SetCurrentModelPool sets the current main model pool.
+	SetCurrentModelPool(pool string) error
 	// SetAgentModelPool sets the named agent's pool.
 	SetAgentModelPool(agentName, pool string) error
 }

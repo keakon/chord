@@ -20,10 +20,10 @@ func TestRuntimeModelPoolPolicyEffectivePool(t *testing.T) {
 	p := NewRuntimeModelPoolPolicy()
 
 	if pool := p.EffectivePool("builder", cfg); pool != "base" {
-		t.Fatalf("no current role pool set, should use first pool alphabetically: got %q, want %q", pool, "base")
+		t.Fatalf("no current model pool set, should use first pool alphabetically: got %q, want %q", pool, "base")
 	}
 
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 	if pool := p.EffectivePool("builder", cfg); pool != "fast" {
 		t.Fatalf("current role fast pool: got %q, want %q", pool, "fast")
 	}
@@ -49,10 +49,10 @@ func TestRuntimeModelPoolPolicyFallbackToFirstPool(t *testing.T) {
 	}
 
 	p := NewRuntimeModelPoolPolicy()
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 
 	if pool := p.EffectivePool("builder", cfg); pool != "base" {
-		t.Fatalf("current role pool not supported, should fallback to first pool: got %q", pool)
+		t.Fatalf("current model pool not supported, should fallback to first pool: got %q", pool)
 	}
 }
 
@@ -83,11 +83,11 @@ func TestRuntimeModelPoolPolicyGlobalDoesNotAffectSubAgent(t *testing.T) {
 	}
 
 	p := NewRuntimeModelPoolPolicy()
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 
-	// Subagents ignore the current role pool unless explicitly overridden.
+	// Subagents ignore the current model pool unless explicitly overridden.
 	if pool := p.EffectivePool("reviewer", reviewer); pool != "base" {
-		t.Fatalf("subagent should ignore current role pool: got %q, want %q", pool, "base")
+		t.Fatalf("subagent should ignore current model pool: got %q, want %q", pool, "base")
 	}
 
 	p.SetAgentOverride("reviewer", "fast")
@@ -112,7 +112,7 @@ func TestRuntimeModelPoolPolicyEffectiveModels(t *testing.T) {
 		t.Fatalf("first pool effective models: got %v", models)
 	}
 
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 	models = p.EffectiveModels("builder", cfg)
 	if len(models) != 1 || models[0] != "provider/model-c" {
 		t.Fatalf("fast effective models: got %v", models)
@@ -167,7 +167,7 @@ func TestRuntimeModelPoolPolicyOverridePrecedence(t *testing.T) {
 	}
 
 	p := NewRuntimeModelPoolPolicy()
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 
 	if pool := p.EffectivePool("builder", builderCfg); pool != "fast" {
 		t.Fatalf("builder should use current role fast: got %q", pool)
@@ -253,7 +253,7 @@ func TestRuntimeModelPoolPolicyDefaultPoolNameAllowed(t *testing.T) {
 		t.Fatalf("first pool alphabetically is 'default': got %q, want %q", pool, "default")
 	}
 
-	p.SetCurrentRole("fast")
+	p.SetCurrentModelPool("fast")
 	if pool := p.EffectivePool("builder", cfg); pool != "fast" {
 		t.Fatalf("current role fast pool: got %q, want %q", pool, "fast")
 	}

@@ -100,7 +100,7 @@ Inspect or change model pools.
 ```
 
 ```json
-{"type": "models", "action": "set_current_role", "pool": "thinking"}
+{"type": "models", "action": "set_current_model_pool", "pool": "thinking"}
 ```
 
 Response:

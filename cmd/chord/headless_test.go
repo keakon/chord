@@ -172,10 +172,10 @@ func (m *mockBackend) ResolveQuestion(answers []string, cancelled bool, requestI
 	m.mu.Unlock()
 }
 
-func (m *mockBackend) ModelsStatusText() string { return "Current role pool: thinking\n" }
+func (m *mockBackend) ModelsStatusText() string { return "Model pool: thinking\n" }
 
-func (m *mockBackend) SetCurrentRolePool(pool string) error {
-	m.SendUserMessage("set-current-role:" + pool)
+func (m *mockBackend) SetCurrentModelPool(pool string) error {
+	m.SendUserMessage("set-current-model-pool:" + pool)
 	return nil
 }
 
@@ -649,22 +649,22 @@ func TestHeadlessModelsCommandStatus(t *testing.T) {
 	if payload["ok"] != true {
 		t.Fatalf("ok = %v, want true", payload["ok"])
 	}
-	if payload["status"] != "Current role pool: thinking\n" {
+	if payload["status"] != "Model pool: thinking\n" {
 		t.Fatalf("status = %q", payload["status"])
 	}
 }
 
-func TestHeadlessModelsCommandSetCurrentRole(t *testing.T) {
+func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	state := &headlessState{}
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_role", Pool: "fast"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast"}, backend, state, to.writer(), "test-session")
 
 	backend.mu.Lock()
 	msgs := append([]string(nil), backend.sentMessages...)
 	backend.mu.Unlock()
-	want := []string{"set-current-role:fast"}
+	want := []string{"set-current-model-pool:fast"}
 	if len(msgs) != len(want) {
 		t.Fatalf("sent messages = %v, want %v", msgs, want)
 	}
@@ -686,6 +686,22 @@ func TestHeadlessModelsCommandSetCurrentRole(t *testing.T) {
 	}
 	if responses != 1 {
 		t.Fatalf("models_response count = %d, want 1", responses)
+	}
+}
+
+func TestHeadlessModelsCommandSetCurrentModelPoolLegacyAlias(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_role", Pool: "fast"}, backend, state, to.writer(), "test-session")
+
+	backend.mu.Lock()
+	msgs := append([]string(nil), backend.sentMessages...)
+	backend.mu.Unlock()
+	want := []string{"set-current-model-pool:fast"}
+	if len(msgs) != len(want) || msgs[0] != want[0] {
+		t.Fatalf("sent messages = %v, want %v", msgs, want)
 	}
 }
 

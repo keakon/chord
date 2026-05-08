@@ -314,7 +314,7 @@ Examples:
 
 Model pool control commands:
   {"type":"models","action":"status"}
-  {"type":"models","action":"set_current_role","pool":"thinking"}`,
+  {"type":"models","action":"set_current_model_pool","pool":"thinking"}`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -496,7 +496,7 @@ type headlessBackend interface {
 
 type headlessModelsBackend interface {
 	ModelsStatusText() string
-	SetCurrentRolePool(pool string) error
+	SetCurrentModelPool(pool string) error
 }
 
 type headlessBackendWithRuleIntent interface {
@@ -518,17 +518,17 @@ func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBack
 	switch strings.TrimSpace(cmd.Action) {
 	case "", "status":
 		emitHeadlessModelsResponse(out, true, "", backend.ModelsStatusText())
-	case "set_current_role":
+	case "set_current_model_pool", "set_current_role":
 		pool := strings.TrimSpace(cmd.Pool)
 		if pool == "" {
-			emitHeadlessModelsResponse(out, false, "models set_current_role requires pool", "")
+			emitHeadlessModelsResponse(out, false, "models set_current_model_pool requires pool", "")
 			return
 		}
-		if err := backend.SetCurrentRolePool(pool); err != nil {
+		if err := backend.SetCurrentModelPool(pool); err != nil {
 			emitHeadlessModelsResponse(out, false, err.Error(), "")
 			return
 		}
-		emitHeadlessModelsResponse(out, true, "current role pool set", backend.ModelsStatusText())
+		emitHeadlessModelsResponse(out, true, "model pool set", backend.ModelsStatusText())
 	default:
 		emitHeadlessModelsResponse(out, false, "unsupported models action: "+cmd.Action, "")
 	}

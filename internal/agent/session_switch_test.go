@@ -167,8 +167,8 @@ func TestSendUserMessageWithPartsLocalOnlyModelsWhileFocusedSubAgent(t *testing.
 		t.Fatalf("focused subagent unexpectedly received local-only /models payload: %+v", got)
 	default:
 	}
-	if got := a.ModelPoolPolicy().CurrentRole(); got != "" {
-		t.Fatalf("CurrentRole() = %q, want empty when focused subagent pool changes", got)
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "" {
+		t.Fatalf("CurrentModelPool() = %q, want empty when focused subagent pool changes", got)
 	}
 	if got, ok := a.ModelPoolPolicy().AgentOverride(sub.agentDefName); !ok || got != "fast" {
 		t.Fatalf("AgentOverride(%s) = (%q, %v), want (\"fast\", true)", sub.agentDefName, got, ok)

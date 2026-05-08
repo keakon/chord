@@ -33,10 +33,10 @@ func (loopBusyAgentStub) RunningModelRef() string                               
 func (loopBusyAgentStub) RunningVariant() string                                    { return "" }
 func (loopBusyAgentStub) CurrentPoolName() string                                   { return "" }
 func (loopBusyAgentStub) PoolNames() []string                                       { return nil }
-func (loopBusyAgentStub) MainRoleCurrentPoolName() string                           { return "" }
-func (loopBusyAgentStub) MainRolePoolNames() []string                               { return nil }
+func (loopBusyAgentStub) MainModelPoolName() string                                 { return "" }
+func (loopBusyAgentStub) MainModelPoolNames() []string                              { return nil }
 func (loopBusyAgentStub) AgentOverridePoolName(string) (string, bool)               { return "", false }
-func (loopBusyAgentStub) SetCurrentRolePool(string) error                           { return nil }
+func (loopBusyAgentStub) SetCurrentModelPool(string) error                          { return nil }
 func (loopBusyAgentStub) SetAgentModelPool(string, string) error                    { return nil }
 func (loopBusyAgentStub) GetSubAgents() []agent.SubAgentInfo                        { return nil }
 func (loopBusyAgentStub) GetMessages() []message.Message                            { return nil }

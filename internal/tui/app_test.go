@@ -6714,8 +6714,8 @@ func TestOpenModelSelectForAgentOverrideUsesExplicitTarget(t *testing.T) {
 
 func TestModelSelectorSingleGJumpsToTop(t *testing.T) {
 	backend := &sessionControlAgent{
-		mainRoleCurrentPool: "gamma",
-		poolNamesByFocus:    map[string][]string{"": {"alpha", "beta", "gamma"}},
+		mainModelPool:    "gamma",
+		poolNamesByFocus: map[string][]string{"": {"alpha", "beta", "gamma"}},
 	}
 	m := NewModel(backend)
 	m.openModelSelect()

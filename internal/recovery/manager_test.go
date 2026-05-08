@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -325,9 +326,9 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 				TaskDesc:     "implement API endpoints",
 			},
 		},
-		ModelName:            "claude-opus-4.7",
-		ActiveRole:           "planner",
-		ModelPoolCurrentRole: "strong",
+		ModelName:                 "claude-opus-4.7",
+		ActiveRole:                "planner",
+		ModelPoolCurrentModelPool: "strong",
 		ModelPoolAgentOverrides: map[string]string{
 			"reviewer": "fast",
 		},
@@ -336,6 +337,13 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 
 	if err := rm.SaveSnapshot(snap); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(rm.sessionDir, "snapshot.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(snapshot.json): %v", err)
+	}
+	if !strings.Contains(string(raw), "model_pool_current_model_pool") || strings.Contains(string(raw), "model_pool_current_role") {
+		t.Fatalf("snapshot should use model_pool_current_model_pool only, got: %s", raw)
 	}
 
 	recovered, err := rm.Recover()
@@ -349,8 +357,8 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 	if recovered.ActiveRole != snap.ActiveRole {
 		t.Errorf("ActiveRole = %q, want %q", recovered.ActiveRole, snap.ActiveRole)
 	}
-	if recovered.ModelPoolCurrentRole != snap.ModelPoolCurrentRole {
-		t.Errorf("ModelPoolCurrentRole = %q, want %q", recovered.ModelPoolCurrentRole, snap.ModelPoolCurrentRole)
+	if recovered.ModelPoolCurrentModelPool != snap.ModelPoolCurrentModelPool {
+		t.Errorf("ModelPoolCurrentModelPool = %q, want %q", recovered.ModelPoolCurrentModelPool, snap.ModelPoolCurrentModelPool)
 	}
 	if recovered.ModelPoolAgentOverrides["reviewer"] != "fast" {
 		t.Errorf("ModelPoolAgentOverrides = %+v, want reviewer=fast", recovered.ModelPoolAgentOverrides)
@@ -373,6 +381,27 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 	aa := recovered.ActiveAgents[0]
 	if aa.InstanceID != "agent-2" || aa.AgentDefName != "backend-coder" {
 		t.Errorf("active agent = %+v, unexpected", aa)
+	}
+}
+
+func TestRecoverLegacyModelPoolCurrentRole(t *testing.T) {
+	rm, dir := newTestManager(t)
+	defer rm.Close()
+
+	data := []byte(`{"todos":[],"active_agents":[],"model_name":"model","model_pool_current_role":"strong","created_at":"2026-01-01T00:00:00Z"}`)
+	if err := os.WriteFile(filepath.Join(dir, "snapshot.json"), data, 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot.json): %v", err)
+	}
+
+	recovered, err := rm.Recover()
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if recovered.ModelPoolCurrentModelPool != "strong" {
+		t.Fatalf("ModelPoolCurrentModelPool = %q, want strong", recovered.ModelPoolCurrentModelPool)
+	}
+	if recovered.LegacyModelPoolCurrentRole != "" {
+		t.Fatalf("LegacyModelPoolCurrentRole should be cleared, got %q", recovered.LegacyModelPoolCurrentRole)
 	}
 }
 

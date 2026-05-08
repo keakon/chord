@@ -581,9 +581,9 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 
 	rm := recovery.NewRecoveryManager(sessionDir)
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		Todos:                []recovery.TodoState{},
-		ActiveRole:           "executor",
-		ModelPoolCurrentRole: "strong",
+		Todos:                     []recovery.TodoState{},
+		ActiveRole:                "executor",
+		ModelPoolCurrentModelPool: "strong",
 	}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
 	policy := NewRuntimeModelPoolPolicy()
-	policy.SetCurrentRole("fast")
+	policy.SetCurrentModelPool("fast")
 	a.SetModelPoolPolicy(policy, "")
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
@@ -617,8 +617,8 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
 
-	if got := a.MainRoleCurrentPoolName(); got != "strong" {
-		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want strong", got)
+	if got := a.MainModelPoolName(); got != "strong" {
+		t.Fatalf("MainModelPoolName() after restore = %q, want strong", got)
 	}
 	if got := a.ProviderModelRef(); got != "exec/strong" {
 		t.Fatalf("ProviderModelRef() after restore = %q, want exec/strong", got)
@@ -633,9 +633,9 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastP
 
 	rm := recovery.NewRecoveryManager(sessionDir)
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		Todos:                []recovery.TodoState{},
-		ActiveRole:           "executor",
-		ModelPoolCurrentRole: "strong",
+		Todos:                     []recovery.TodoState{},
+		ActiveRole:                "executor",
+		ModelPoolCurrentModelPool: "strong",
 	}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastP
 
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
 	policy := NewRuntimeModelPoolPolicy()
-	policy.SetCurrentRole("fast")
+	policy.SetCurrentModelPool("fast")
 	policy.SetLastPicked("executor", "strong", "exec/strong-b")
 	a.SetModelPoolPolicy(policy, "")
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -670,8 +670,8 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastP
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
 
-	if got := a.MainRoleCurrentPoolName(); got != "strong" {
-		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want strong", got)
+	if got := a.MainModelPoolName(); got != "strong" {
+		t.Fatalf("MainModelPoolName() after restore = %q, want strong", got)
 	}
 	if got := a.ProviderModelRef(); got != "exec/strong-a" {
 		t.Fatalf("ProviderModelRef() after restore = %q, want exec/strong-a", got)
@@ -695,7 +695,7 @@ func TestRestoreSessionAtStartupFallsBackToProjectModelPoolForHistoricalSnapshot
 
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
 	policy := NewRuntimeModelPoolPolicy()
-	policy.SetCurrentRole("fast")
+	policy.SetCurrentModelPool("fast")
 	a.SetModelPoolPolicy(policy, "")
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {
@@ -721,8 +721,8 @@ func TestRestoreSessionAtStartupFallsBackToProjectModelPoolForHistoricalSnapshot
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
 
-	if got := a.MainRoleCurrentPoolName(); got != "fast" {
-		t.Fatalf("MainRoleCurrentPoolName() after restore = %q, want fast", got)
+	if got := a.MainModelPoolName(); got != "fast" {
+		t.Fatalf("MainModelPoolName() after restore = %q, want fast", got)
 	}
 	if got := a.ProviderModelRef(); got != "exec/fast" {
 		t.Fatalf("ProviderModelRef() after restore = %q, want exec/fast", got)

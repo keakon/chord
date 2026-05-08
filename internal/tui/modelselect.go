@@ -43,11 +43,11 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 			return modelSwitchResultMsg{err: ag.SetAgentModelPool(target.AgentName, pool)}
 		}
 	default:
-		if pool == ag.MainRoleCurrentPoolName() {
+		if pool == ag.MainModelPoolName() {
 			return nil
 		}
 		return func() tea.Msg {
-			return modelSwitchResultMsg{err: ag.SetCurrentRolePool(pool)}
+			return modelSwitchResultMsg{err: ag.SetCurrentModelPool(pool)}
 		}
 	}
 }
@@ -87,8 +87,8 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 			currentPool = poolNames[0]
 		}
 	} else {
-		poolNames = m.agent.MainRolePoolNames()
-		currentPool = m.agent.MainRoleCurrentPoolName()
+		poolNames = m.agent.MainModelPoolNames()
+		currentPool = m.agent.MainModelPoolName()
 	}
 
 	poolCursor := 0
@@ -252,7 +252,7 @@ func (m *Model) renderModelSelectDialog() string {
 				currentPool = m.modelSelect.poolNames[0]
 			}
 		} else {
-			currentPool = m.agent.MainRoleCurrentPoolName()
+			currentPool = m.agent.MainModelPoolName()
 		}
 	}
 

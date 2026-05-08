@@ -94,7 +94,7 @@ func TestOpenModelSelectForAgentUsesFirstPoolWhenUnset(t *testing.T) {
 }
 
 func TestPoolSelectIndexAtUsesListBaseRow(t *testing.T) {
-	backend := &sessionControlAgent{mainRolePoolNames: []string{"alpha", "beta", "gamma"}, mainRoleCurrentPool: "alpha"}
+	backend := &sessionControlAgent{mainModelPoolNames: []string{"alpha", "beta", "gamma"}, mainModelPool: "alpha"}
 	m := NewModelWithSize(backend, 120, 24)
 	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole})
 	_ = m.renderModelSelectDialog()
@@ -116,7 +116,7 @@ func TestPoolSelectIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		pools = append(pools, fmt.Sprintf("pool-%02d", i))
 	}
-	backend := &sessionControlAgent{mainRolePoolNames: pools, mainRoleCurrentPool: pools[0]}
+	backend := &sessionControlAgent{mainModelPoolNames: pools, mainModelPool: pools[0]}
 
 	// Height chosen so modelSelectMaxVisible() clamps to 3.
 	m := NewModelWithSize(backend, 120, 16)

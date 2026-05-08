@@ -13,8 +13,8 @@ import (
 type RuntimeModelPoolPolicy struct {
 	mu sync.RWMutex
 
-	currentRolePool string
-	overrides       map[string]string
+	currentModelPool string
+	overrides        map[string]string
 
 	lastPicked map[string]map[string]string
 }
@@ -26,10 +26,10 @@ func NewRuntimeModelPoolPolicy() *RuntimeModelPoolPolicy {
 	}
 }
 
-func (p *RuntimeModelPoolPolicy) ReplaceSelections(currentRolePool string, overrides map[string]string) {
+func (p *RuntimeModelPoolPolicy) ReplaceSelections(currentModelPool string, overrides map[string]string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.currentRolePool = currentRolePool
+	p.currentModelPool = currentModelPool
 	p.overrides = make(map[string]string, len(overrides))
 	for agentName, pool := range overrides {
 		agentName = strings.TrimSpace(agentName)
@@ -40,10 +40,10 @@ func (p *RuntimeModelPoolPolicy) ReplaceSelections(currentRolePool string, overr
 	}
 }
 
-func (p *RuntimeModelPoolPolicy) ReplaceSelectionsForSessionRestore(currentRolePool string, overrides map[string]string) {
+func (p *RuntimeModelPoolPolicy) ReplaceSelectionsForSessionRestore(currentModelPool string, overrides map[string]string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.currentRolePool = currentRolePool
+	p.currentModelPool = currentModelPool
 	p.overrides = make(map[string]string, len(overrides))
 	for agentName, pool := range overrides {
 		agentName = strings.TrimSpace(agentName)
@@ -55,16 +55,16 @@ func (p *RuntimeModelPoolPolicy) ReplaceSelectionsForSessionRestore(currentRoleP
 	p.lastPicked = make(map[string]map[string]string)
 }
 
-func (p *RuntimeModelPoolPolicy) SetCurrentRole(pool string) {
+func (p *RuntimeModelPoolPolicy) SetCurrentModelPool(pool string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.currentRolePool = pool
+	p.currentModelPool = pool
 }
 
-func (p *RuntimeModelPoolPolicy) CurrentRole() string {
+func (p *RuntimeModelPoolPolicy) CurrentModelPool() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.currentRolePool
+	return p.currentModelPool
 }
 
 func (p *RuntimeModelPoolPolicy) SetAgentOverride(agentName, pool string) {
@@ -102,9 +102,9 @@ func (p *RuntimeModelPoolPolicy) effectivePoolLocked(agentName string, cfg *conf
 		}
 	}
 
-	// Current role pool is only applied to non-subagent roles.
-	if cfg != nil && !cfg.IsSubAgent() && cfg.HasPool(p.currentRolePool) {
-		return p.currentRolePool
+	// Current model pool is only applied to non-subagent roles.
+	if cfg != nil && !cfg.IsSubAgent() && cfg.HasPool(p.currentModelPool) {
+		return p.currentModelPool
 	}
 
 	if cfg != nil && len(cfg.Models) > 0 {
@@ -239,7 +239,7 @@ func (a *MainAgent) CurrentPoolName() string {
 	return a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 }
 
-func (a *MainAgent) MainRoleCurrentPoolName() string {
+func (a *MainAgent) MainModelPoolName() string {
 	if a.modelPoolPolicy == nil {
 		return ""
 	}
@@ -250,7 +250,7 @@ func (a *MainAgent) MainRoleCurrentPoolName() string {
 	return a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 }
 
-func (a *MainAgent) MainRolePoolNames() []string {
+func (a *MainAgent) MainModelPoolNames() []string {
 	cfg := a.currentActiveConfig()
 	if cfg == nil {
 		return nil
@@ -269,7 +269,7 @@ func (a *MainAgent) PoolNames() []string {
 	return cfg.PoolNames()
 }
 
-func (a *MainAgent) SetCurrentRolePool(pool string) error {
+func (a *MainAgent) SetCurrentModelPool(pool string) error {
 	a.sendEvent(Event{Type: EventModelPoolSwitch, Payload: modelPoolSwitchRequest{Pool: pool}})
 	return nil
 }
@@ -296,7 +296,7 @@ func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
 		}
 		return
 	}
-	if err := a.setCurrentRolePool(req.Pool, true); err != nil {
+	if err := a.setCurrentModelPool(req.Pool, true); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
 }
@@ -323,17 +323,17 @@ func (a *MainAgent) snapshotModelPoolState() (string, map[string]string) {
 	if a.modelPoolPolicy == nil {
 		return "", nil
 	}
-	return strings.TrimSpace(a.modelPoolPolicy.CurrentRole()), a.modelPoolPolicy.Overrides()
+	return strings.TrimSpace(a.modelPoolPolicy.CurrentModelPool()), a.modelPoolPolicy.Overrides()
 }
 
 func (a *MainAgent) applySessionModelPoolState(loaded *loadedSessionState) {
 	if a.modelPoolPolicy == nil || loaded == nil {
 		return
 	}
-	if strings.TrimSpace(loaded.ModelPoolCurrentRole) == "" && len(loaded.ModelPoolAgentOverrides) == 0 {
+	if strings.TrimSpace(loaded.ModelPoolCurrentModelPool) == "" && len(loaded.ModelPoolAgentOverrides) == 0 {
 		return
 	}
-	a.modelPoolPolicy.ReplaceSelectionsForSessionRestore(strings.TrimSpace(loaded.ModelPoolCurrentRole), loaded.ModelPoolAgentOverrides)
+	a.modelPoolPolicy.ReplaceSelectionsForSessionRestore(strings.TrimSpace(loaded.ModelPoolCurrentModelPool), loaded.ModelPoolAgentOverrides)
 }
 
 func (a *MainAgent) saveModelPoolState() {
@@ -341,8 +341,8 @@ func (a *MainAgent) saveModelPoolState() {
 		return
 	}
 	state := &config.ModelPoolState{
-		CurrentRole:    a.modelPoolPolicy.CurrentRole(),
-		AgentOverrides: a.modelPoolPolicy.Overrides(),
+		CurrentModelPool: a.modelPoolPolicy.CurrentModelPool(),
+		AgentOverrides:   a.modelPoolPolicy.Overrides(),
 	}
 	knownAgents := make(map[string]struct{})
 	a.stateMu.RLock()

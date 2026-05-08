@@ -710,7 +710,7 @@ func TestSwitchRoleAppliesMainRoleModelImmediately(t *testing.T) {
 	}
 }
 
-func TestSetCurrentRolePoolRebuildsClientWhenSelectedModelExistsInNewPool(t *testing.T) {
+func TestSetCurrentModelPoolRebuildsClientWhenSelectedModelExistsInNewPool(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	cfg := &config.AgentConfig{
@@ -723,7 +723,7 @@ func TestSetCurrentRolePoolRebuildsClientWhenSelectedModelExistsInNewPool(t *tes
 	}
 	a.SetAgentConfigs(map[string]*config.AgentConfig{"builder": cfg})
 	policy := NewRuntimeModelPoolPolicy()
-	policy.SetCurrentRole("single")
+	policy.SetCurrentModelPool("single")
 	a.SetModelPoolPolicy(policy, "")
 
 	providers := map[string]*llm.ProviderConfig{
@@ -798,8 +798,8 @@ func TestSetCurrentRolePoolRebuildsClientWhenSelectedModelExistsInNewPool(t *tes
 		t.Fatalf("factory calls after initial model = %d, want 1", got)
 	}
 
-	if err := a.setCurrentRolePool("multi", false); err != nil {
-		t.Fatalf("setCurrentRolePool: %v", err)
+	if err := a.setCurrentModelPool("multi", false); err != nil {
+		t.Fatalf("setCurrentModelPool: %v", err)
 	}
 	if got := len(factoryCalls); got != 2 {
 		t.Fatalf("factory calls after pool switch = %d, want 2", got)

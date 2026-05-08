@@ -41,13 +41,13 @@ func findModelSwitchResult(msgs []tea.Msg) (modelSwitchResultMsg, bool) {
 
 type poolSwitchBackend struct {
 	sessionControlAgent
-	setCurrentRolePoolCalls []string
-	setAgentModelPoolCalls  map[string]string
-	switchErr               error
+	setCurrentModelPoolCalls []string
+	setAgentModelPoolCalls   map[string]string
+	switchErr                error
 }
 
-func (b *poolSwitchBackend) SetCurrentRolePool(pool string) error {
-	b.setCurrentRolePoolCalls = append(b.setCurrentRolePoolCalls, pool)
+func (b *poolSwitchBackend) SetCurrentModelPool(pool string) error {
+	b.setCurrentModelPoolCalls = append(b.setCurrentModelPoolCalls, pool)
 	return b.switchErr
 }
 
@@ -76,8 +76,8 @@ func newPoolSwitchModel() (*Model, *poolSwitchBackend) {
 
 func TestBusyPoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.mainModelPool = "slow"
 
 	// Mark agent busy (streaming). Selecting a pool should submit the switch to
 	// the agent immediately. Local MainAgent serializes that request on its event
@@ -99,15 +99,15 @@ func TestBusyPoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	if _, ok := findModelSwitchResult(msgs); !ok {
 		t.Fatalf("cmd tree did not include modelSwitchResultMsg: %#v", msgs)
 	}
-	if len(backend.setCurrentRolePoolCalls) != 1 || backend.setCurrentRolePoolCalls[0] != "fast" {
-		t.Fatalf("SetCurrentRolePool calls = %v, want [fast]", backend.setCurrentRolePoolCalls)
+	if len(backend.setCurrentModelPoolCalls) != 1 || backend.setCurrentModelPoolCalls[0] != "fast" {
+		t.Fatalf("SetCurrentModelPool calls = %v, want [fast]", backend.setCurrentModelPoolCalls)
 	}
 }
 
 func TestIdlePoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.mainModelPool = "slow"
 
 	m.modelSelect = modelSelectState{
 		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
@@ -123,8 +123,8 @@ func TestIdlePoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 
 func TestDuplicatePoolSwitchIsNoop(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "fast"
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.mainModelPool = "fast"
 
 	m.modelSelect = modelSelectState{
 		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
@@ -140,15 +140,15 @@ func TestDuplicatePoolSwitchIsNoop(t *testing.T) {
 			t.Fatalf("same-pool selection should not switch, got msgs %#v", msgs)
 		}
 	}
-	if len(backend.setCurrentRolePoolCalls) != 0 {
-		t.Fatalf("SetCurrentRolePool calls = %v, want none", backend.setCurrentRolePoolCalls)
+	if len(backend.setCurrentModelPoolCalls) != 0 {
+		t.Fatalf("SetCurrentModelPool calls = %v, want none", backend.setCurrentModelPoolCalls)
 	}
 }
 
 func TestRepeatedBusyPoolSwitchesAllSubmitToAgent(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"pool-a", "pool-b", "pool-c"}
-	backend.mainRoleCurrentPool = "pool-a"
+	backend.mainModelPoolNames = []string{"pool-a", "pool-b", "pool-c"}
+	backend.mainModelPool = "pool-a"
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
 	m.modelSelect = modelSelectState{
@@ -159,25 +159,25 @@ func TestRepeatedBusyPoolSwitchesAllSubmitToAgent(t *testing.T) {
 	}
 	runCmdTree(m.selectPoolAtCursor())
 
-	backend.mainRoleCurrentPool = "pool-b"
+	backend.mainModelPool = "pool-b"
 	m.modelSelect.poolCursor = 2
 	runCmdTree(m.selectPoolAtCursor())
 
 	want := []string{"pool-b", "pool-c"}
-	if len(backend.setCurrentRolePoolCalls) != len(want) {
-		t.Fatalf("SetCurrentRolePool calls = %v, want %v", backend.setCurrentRolePoolCalls, want)
+	if len(backend.setCurrentModelPoolCalls) != len(want) {
+		t.Fatalf("SetCurrentModelPool calls = %v, want %v", backend.setCurrentModelPoolCalls, want)
 	}
 	for i := range want {
-		if backend.setCurrentRolePoolCalls[i] != want[i] {
-			t.Fatalf("SetCurrentRolePool calls = %v, want %v", backend.setCurrentRolePoolCalls, want)
+		if backend.setCurrentModelPoolCalls[i] != want[i] {
+			t.Fatalf("SetCurrentModelPool calls = %v, want %v", backend.setCurrentModelPoolCalls, want)
 		}
 	}
 }
 
 func TestDrainQueuedDraftsDoesNotPerformPoolSwitch(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.mainModelPool = "slow"
 	m.queuedDrafts = []queuedDraft{{
 		Content:  "queued msg",
 		QueuedAt: time.Now(),
@@ -191,15 +191,15 @@ func TestDrainQueuedDraftsDoesNotPerformPoolSwitch(t *testing.T) {
 	if _, ok := findModelSwitchResult(msgs); ok {
 		t.Fatalf("draining queued drafts should not perform a model switch: %#v", msgs)
 	}
-	if len(backend.setCurrentRolePoolCalls) != 0 {
-		t.Fatalf("SetCurrentRolePool calls = %v, want none", backend.setCurrentRolePoolCalls)
+	if len(backend.setCurrentModelPoolCalls) != 0 {
+		t.Fatalf("SetCurrentModelPool calls = %v, want none", backend.setCurrentModelPoolCalls)
 	}
 }
 
 func TestPoolSwitchErrorReportsResultWithoutBlockingDraft(t *testing.T) {
 	m, backend := newPoolSwitchModel()
-	backend.mainRolePoolNames = []string{"slow", "fast"}
-	backend.mainRoleCurrentPool = "slow"
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.mainModelPool = "slow"
 	backend.switchErr = errors.New("simulated failure")
 
 	m.modelSelect = modelSelectState{

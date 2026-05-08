@@ -55,11 +55,11 @@ func drainEventsByType(t *testing.T, events <-chan AgentEvent) map[string]int {
 
 // installPoolPolicyForTest wires up a minimal RuntimeModelPoolPolicy and
 // agentConfigs so /models <pool> can resolve a target. The test agent uses the
-// "test" role; we register two pools so SetCurrentRolePool has somewhere to go.
+// "test" role; we register two pools so SetCurrentModelPool has somewhere to go.
 func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	t.Helper()
 	policy := NewRuntimeModelPoolPolicy()
-	policy.SetCurrentRole("base")
+	policy.SetCurrentModelPool("base")
 	a.SetModelPoolPolicy(policy, "")
 	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
@@ -84,7 +84,7 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	a.activeConfig = cfg
 }
 
-func TestTUISetCurrentRolePoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *testing.T) {
+func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	a.ApplyInitialModel("provider/model-a")
@@ -93,14 +93,14 @@ func TestTUISetCurrentRolePoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *tes
 	a.newTurn()
 	turn := a.turn
 	a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
-	a.SetCurrentRolePool("fast")
-	if got := a.ModelPoolPolicy().CurrentRole(); got != "base" {
-		t.Fatalf("CurrentRole changed before event-loop dispatch = %q, want base", got)
+	a.SetCurrentModelPool("fast")
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "base" {
+		t.Fatalf("CurrentModelPool changed before event-loop dispatch = %q, want base", got)
 	}
 
 	dispatchPendingEvents(t, a)
-	if got := a.ModelPoolPolicy().CurrentRole(); got != "fast" {
-		t.Fatalf("CurrentRole after dispatch = %q, want fast", got)
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after dispatch = %q, want fast", got)
 	}
 	if got := a.ProviderModelRef(); got != "provider/model-b" {
 		t.Fatalf("ProviderModelRef after switch = %q, want provider/model-b", got)

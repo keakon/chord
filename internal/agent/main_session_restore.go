@@ -30,21 +30,21 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath             string
-	Messages                []message.Message
-	TodoItems               []tools.TodoItem
-	TaskRecords             map[string]*DurableTaskRecord
-	ActiveRole              string
-	ModelPoolCurrentRole    string
-	ModelPoolAgentOverrides map[string]string
-	UsageStats              analytics.SessionStats
-	ContextUsage            message.TokenUsage
-	LastInputTokens         int
-	LastTotalContextTokens  int
-	SubAgentStates          []loadedSubAgentState
-	MailboxMessages         []SubAgentMailboxMessage
-	MailboxSeqMax           uint64
-	Summary                 *SessionSummary
+	SessionPath               string
+	Messages                  []message.Message
+	TodoItems                 []tools.TodoItem
+	TaskRecords               map[string]*DurableTaskRecord
+	ActiveRole                string
+	ModelPoolCurrentModelPool string
+	ModelPoolAgentOverrides   map[string]string
+	UsageStats                analytics.SessionStats
+	ContextUsage              message.TokenUsage
+	LastInputTokens           int
+	LastTotalContextTokens    int
+	SubAgentStates            []loadedSubAgentState
+	MailboxMessages           []SubAgentMailboxMessage
+	MailboxSeqMax             uint64
+	Summary                   *SessionSummary
 }
 
 type loadedSubAgentState struct {
@@ -295,7 +295,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	}
 	loaded.TodoItems = restoreSnapshotTodos(snap.Todos)
 	loaded.ActiveRole = strings.TrimSpace(snap.ActiveRole)
-	loaded.ModelPoolCurrentRole = strings.TrimSpace(snap.ModelPoolCurrentRole)
+	loaded.ModelPoolCurrentModelPool = strings.TrimSpace(snap.ModelPoolCurrentModelPool)
 	loaded.ModelPoolAgentOverrides = cloneStringMap(snap.ModelPoolAgentOverrides)
 	loaded.LastInputTokens = snap.LastInputTokens
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens

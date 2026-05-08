@@ -26,19 +26,20 @@ const maxSessionDirRetries = 1000
 // SessionSnapshot captures the recoverable state of a session at a point in
 // time. It is atomically written to snapshot.json for crash recovery.
 type SessionSnapshot struct {
-	Todos                   []TodoState             `json:"todos"`
-	ActiveAgents            []AgentSnapshot         `json:"active_agents"`
-	ModelName               string                  `json:"model_name"`
-	ActiveRole              string                  `json:"active_role,omitempty"`
-	ModelPoolCurrentRole    string                  `json:"model_pool_current_role,omitempty"`
-	ModelPoolAgentOverrides map[string]string       `json:"model_pool_agent_overrides,omitempty"`
-	CreatedAt               time.Time               `json:"created_at"`
-	LastInputTokens         int                     `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compression)
-	LastTotalContextTokens  int                     `json:"last_total_context_tokens,omitempty"` // true input-side context burden when saved (input + cache_write); restored for CONTEXT USAGE
-	CompactionGeneration    uint64                  `json:"compaction_generation,omitempty"`
-	LastHistoryIndex        int                     `json:"last_history_index,omitempty"`
-	SessionEpoch            uint64                  `json:"session_epoch,omitempty"`
-	ActiveBackgroundObjects []BackgroundObjectState `json:"active_background_objects,omitempty"`
+	Todos                      []TodoState             `json:"todos"`
+	ActiveAgents               []AgentSnapshot         `json:"active_agents"`
+	ModelName                  string                  `json:"model_name"`
+	ActiveRole                 string                  `json:"active_role,omitempty"`
+	ModelPoolCurrentModelPool  string                  `json:"model_pool_current_model_pool,omitempty"`
+	LegacyModelPoolCurrentRole string                  `json:"model_pool_current_role,omitempty"`
+	ModelPoolAgentOverrides    map[string]string       `json:"model_pool_agent_overrides,omitempty"`
+	CreatedAt                  time.Time               `json:"created_at"`
+	LastInputTokens            int                     `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compression)
+	LastTotalContextTokens     int                     `json:"last_total_context_tokens,omitempty"` // true input-side context burden when saved (input + cache_write); restored for CONTEXT USAGE
+	CompactionGeneration       uint64                  `json:"compaction_generation,omitempty"`
+	LastHistoryIndex           int                     `json:"last_history_index,omitempty"`
+	SessionEpoch               uint64                  `json:"session_epoch,omitempty"`
+	ActiveBackgroundObjects    []BackgroundObjectState `json:"active_background_objects,omitempty"`
 	// Usage statistics — restored when a session is resumed via /resume.
 	UsageInputTokens      int64                            `json:"usage_input_tokens,omitempty"`
 	UsageOutputTokens     int64                            `json:"usage_output_tokens,omitempty"`
@@ -337,6 +338,10 @@ func (r *RecoveryManager) Recover() (*SessionSnapshot, error) {
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, err
 	}
+	if snap.ModelPoolCurrentModelPool == "" {
+		snap.ModelPoolCurrentModelPool = snap.LegacyModelPoolCurrentRole
+	}
+	snap.LegacyModelPoolCurrentRole = ""
 	return &snap, nil
 }
 

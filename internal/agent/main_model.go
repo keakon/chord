@@ -246,22 +246,22 @@ func (a *MainAgent) ModelsStatusText() string {
 		return "Model pool policy not configured"
 	}
 	var sb strings.Builder
-	currentRolePool := a.modelPoolPolicy.CurrentRole()
-	currentRoleStatus := ""
-	if currentRolePool != "" {
-		// Current role pool is only applied to non-subagent roles.
-		currentRoleDefined := false
+	currentModelPool := a.modelPoolPolicy.CurrentModelPool()
+	currentModelPoolStatus := ""
+	if currentModelPool != "" {
+		// Model pool is only applied to non-subagent roles.
+		currentModelPoolDefined := false
 		for _, cfg := range a.agentConfigs {
-			if cfg != nil && !cfg.IsSubAgent() && cfg.HasPool(currentRolePool) {
-				currentRoleDefined = true
+			if cfg != nil && !cfg.IsSubAgent() && cfg.HasPool(currentModelPool) {
+				currentModelPoolDefined = true
 				break
 			}
 		}
-		if !currentRoleDefined {
-			currentRoleStatus = " (missing)"
+		if !currentModelPoolDefined {
+			currentModelPoolStatus = " (missing)"
 		}
 	}
-	sb.WriteString(fmt.Sprintf("Current role pool: %s%s\n", currentRolePool, currentRoleStatus))
+	sb.WriteString(fmt.Sprintf("Model pool: %s%s\n", currentModelPool, currentModelPoolStatus))
 	overrides := a.modelPoolPolicy.Overrides()
 	if len(overrides) > 0 {
 		sb.WriteString("Fixed agent pools:\n")
@@ -310,7 +310,7 @@ func (a *MainAgent) handleModelsSetCurrentView(pool string) {
 		}
 		return
 	}
-	if err := a.setCurrentRolePool(pool, true); err != nil {
+	if err := a.setCurrentModelPool(pool, true); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
 }
@@ -383,7 +383,7 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 	return nil
 }
 
-func (a *MainAgent) setCurrentRolePool(pool string, emitToast bool) error {
+func (a *MainAgent) setCurrentModelPool(pool string, emitToast bool) error {
 	if a.modelPoolPolicy == nil {
 		return fmt.Errorf("/models: model pool policy not configured")
 	}
@@ -400,21 +400,21 @@ func (a *MainAgent) setCurrentRolePool(pool string, emitToast bool) error {
 		return fmt.Errorf("/models: agent %q does not define pool %q", activeCfg.Name, pool)
 	}
 
-	oldPool := a.modelPoolPolicy.CurrentRole()
-	a.modelPoolPolicy.SetCurrentRole(pool)
+	oldPool := a.modelPoolPolicy.CurrentModelPool()
+	a.modelPoolPolicy.SetCurrentModelPool(pool)
 
 	cfg := a.currentActiveConfig()
 	if cfg != nil {
 		effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 		if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, oldPool); err != nil {
-			a.modelPoolPolicy.SetCurrentRole(oldPool)
+			a.modelPoolPolicy.SetCurrentModelPool(oldPool)
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 	}
 	a.saveModelPoolState()
 
 	if emitToast {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Current role pool set to %q", pool), Level: "info"})
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Model pool set to %q", pool), Level: "info"})
 	}
 	return nil
 }

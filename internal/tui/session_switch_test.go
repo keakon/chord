@@ -2692,9 +2692,9 @@ type sessionControlAgent struct {
 	messagesByFocus         map[string][]message.Message
 	subAgents               []agent.SubAgentInfo
 	poolNamesByFocus        map[string][]string
-	mainRolePoolNames       []string
+	mainModelPoolNames      []string
 	currentPoolByFocus      map[string]string
-	mainRoleCurrentPool     string
+	mainModelPool           string
 	availableAgents         []string
 	availableRoles          []string
 	currentRole             string
@@ -2828,9 +2828,9 @@ func (s *sessionControlAgent) PoolNames() []string {
 	}
 	return nil
 }
-func (s *sessionControlAgent) MainRoleCurrentPoolName() string {
-	if s.mainRoleCurrentPool != "" {
-		return s.mainRoleCurrentPool
+func (s *sessionControlAgent) MainModelPoolName() string {
+	if s.mainModelPool != "" {
+		return s.mainModelPool
 	}
 	if s.currentPoolByFocus != nil {
 		if pool, ok := s.currentPoolByFocus[""]; ok {
@@ -2839,9 +2839,9 @@ func (s *sessionControlAgent) MainRoleCurrentPoolName() string {
 	}
 	return ""
 }
-func (s *sessionControlAgent) MainRolePoolNames() []string {
-	if len(s.mainRolePoolNames) > 0 {
-		return append([]string(nil), s.mainRolePoolNames...)
+func (s *sessionControlAgent) MainModelPoolNames() []string {
+	if len(s.mainModelPoolNames) > 0 {
+		return append([]string(nil), s.mainModelPoolNames...)
 	}
 	if s.poolNamesByFocus != nil {
 		if names, ok := s.poolNamesByFocus[""]; ok {
@@ -2858,7 +2858,7 @@ func (s *sessionControlAgent) AgentOverridePoolName(agentName string) (string, b
 	}
 	return "", false
 }
-func (s *sessionControlAgent) SetCurrentRolePool(string) error        { return nil }
+func (s *sessionControlAgent) SetCurrentModelPool(string) error       { return nil }
 func (s *sessionControlAgent) SetAgentModelPool(string, string) error { return nil }
 func (s *sessionControlAgent) GetSubAgents() []agent.SubAgentInfo {
 	return append([]agent.SubAgentInfo(nil), s.subAgents...)

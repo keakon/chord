@@ -232,8 +232,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		poolState = &config.ModelPoolState{}
 	}
 	poolPolicy := agent.NewRuntimeModelPoolPolicy()
-	if poolState.CurrentRole != "" {
-		poolPolicy.SetCurrentRole(poolState.CurrentRole)
+	if poolState.CurrentModelPool != "" {
+		poolPolicy.SetCurrentModelPool(poolState.CurrentModelPool)
 	}
 	for agentName, poolName := range poolState.AgentOverrides {
 		poolPolicy.SetAgentOverride(agentName, poolName)
@@ -583,17 +583,17 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// it on MainAgent now for runtime pool switching.
 	ac.MainAgent.SetModelPoolPolicy(poolPolicy, poolStatePath)
 
-	// Warn if the persisted current role pool is not defined by any agent.
-	if poolState.CurrentRole != "" {
+	// Warn if the persisted current model pool is not defined by any agent.
+	if poolState.CurrentModelPool != "" {
 		poolDefined := false
 		for _, cfg := range agentConfigs {
-			if cfg.HasPool(poolState.CurrentRole) {
+			if cfg.HasPool(poolState.CurrentModelPool) {
 				poolDefined = true
 				break
 			}
 		}
 		if !poolDefined {
-			log.Warnf("model pool state current role pool %q not defined by any agent, falling back to first pool", poolState.CurrentRole)
+			log.Warnf("model pool state current model pool %q not defined by any agent, falling back to first pool", poolState.CurrentModelPool)
 		}
 	}
 
