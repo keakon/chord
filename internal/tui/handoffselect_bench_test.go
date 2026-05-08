@@ -13,12 +13,12 @@ func benchmarkModelForHandoffDialog() Model {
 	}
 	m.handoffSelect = handoffSelectState{
 		options:  options,
-		list:     NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible()),
 		planPath: "docs/plans/example.md",
 		prevMode: ModeInsert,
 	}
-	if m.handoffSelect.list != nil {
-		m.handoffSelect.list.SetCursor(0)
+	m.handoffSelect.selector.list = NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible())
+	if m.handoffSelect.selector.list != nil {
+		m.handoffSelect.selector.list.SetCursor(0)
 	}
 	return m
 }

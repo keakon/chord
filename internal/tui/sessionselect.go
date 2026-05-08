@@ -20,7 +20,7 @@ import (
 // sessionSelectState holds the transient state for the session picker overlay.
 type sessionSelectState struct {
 	options  []agent.SessionSummary // from ListSessionSummaries()
-	list     *OverlayList
+	selector overlayListSelectorState
 	prevMode Mode
 	loading  bool
 	loadErr  string
@@ -29,13 +29,6 @@ type sessionSelectState struct {
 	filterFocused bool
 	filteredIdx   []int
 	searchCorpus  []string
-
-	renderCacheWidth      int
-	renderCacheHeight     int
-	renderCacheMaxVisible int
-	renderCacheTheme      string
-	renderCacheListVer    uint64
-	renderCacheText       string
 }
 
 // sessionSummariesLoadedMsg delivers the result of asynchronously loading
@@ -54,8 +47,9 @@ type sessionSwitchState struct {
 const sessionSwitchOverlayDelay = 200 * time.Millisecond
 
 const (
+	// NOTE: list base row is computed by overlayListSelectorState, so hit-tests
+	// should not depend on this constant.
 	sessionSelectOverlayChromeRows = 7 // title/blank + filter/blank + hint/blank
-	sessionSelectListBaseRow       = 4 // title + blank + filter + blank
 )
 
 func (s sessionSwitchState) active() bool {
@@ -219,10 +213,10 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{}
 	m.sessionSelect = sessionSelectState{
 		options:  list,
-		list:     NewOverlayList(nil, m.sessionSelectMaxVisible()),
 		prevMode: m.mode,
 		loading:  loading,
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, m.sessionSelectMaxVisible())
 	if !loading {
 		m.rebuildSessionSelectFilteredView(false)
 	}
@@ -264,13 +258,13 @@ func (m *Model) handleSessionSelectKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch key {
 	case "j", "down":
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorDown()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorDown()
 		}
 		return nil
 	case "k", "up":
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorUp()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorUp()
 		}
 		return nil
 	case "enter":
@@ -279,13 +273,13 @@ func (m *Model) handleSessionSelectKey(msg tea.KeyMsg) tea.Cmd {
 		return m.openSessionDeleteConfirm()
 	case "g":
 		// "gg" to top
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorToTop()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorToTop()
 		}
 		return nil
 	case "G":
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorToBottom()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorToBottom()
 		}
 		return nil
 	case "/":
@@ -321,13 +315,13 @@ func (m *Model) handleSessionSelectFilterKey(msg tea.KeyMsg) tea.Cmd {
 		m.setSessionSelectFilterFocused(false)
 		return nil
 	case tea.KeyUp:
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorUp()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorUp()
 		}
 		return nil
 	case tea.KeyDown:
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.CursorDown()
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.CursorDown()
 		}
 		return nil
 	case tea.KeyBackspace:
@@ -452,7 +446,7 @@ func filterSessionOptions(corpus []string, query string) []int {
 }
 
 func (m *Model) invalidateSessionSelectDialogCache() {
-	m.sessionSelect.renderCacheText = ""
+	m.sessionSelect.selector.renderCacheText = ""
 }
 
 func (m *Model) setSessionSelectFilterFocused(v bool) {
@@ -473,22 +467,22 @@ func (m *Model) rebuildSessionSelectFilteredView(resetCursor bool) {
 	for _, idx := range m.sessionSelect.filteredIdx {
 		items = append(items, sessionSelectItemFor(opts[idx]))
 	}
-	if m.sessionSelect.list == nil {
-		m.sessionSelect.list = NewOverlayList(items, m.sessionSelectMaxVisible())
+	if m.sessionSelect.selector.list == nil {
+		m.sessionSelect.selector.list = NewOverlayList(items, m.sessionSelectMaxVisible())
 	} else {
-		m.sessionSelect.list.SetItems(items)
+		m.sessionSelect.selector.list.SetItems(items)
 	}
-	if resetCursor && m.sessionSelect.list != nil && len(m.sessionSelect.filteredIdx) > 0 {
-		m.sessionSelect.list.SetCursor(0)
+	if resetCursor && m.sessionSelect.selector.list != nil && len(m.sessionSelect.filteredIdx) > 0 {
+		m.sessionSelect.selector.list.SetCursor(0)
 	}
 	m.invalidateSessionSelectDialogCache()
 }
 
 func (m *Model) sessionSelectCurrentOptionIndex() int {
-	if len(m.sessionSelect.options) == 0 || m.sessionSelect.list == nil {
+	if len(m.sessionSelect.options) == 0 || m.sessionSelect.selector.list == nil {
 		return -1
 	}
-	cursor := m.sessionSelect.list.CursorAt()
+	cursor := m.sessionSelect.selector.list.CursorAt()
 	if cursor < 0 {
 		return -1
 	}
@@ -497,7 +491,7 @@ func (m *Model) sessionSelectCurrentOptionIndex() int {
 		// without rebuildSessionSelectFilteredView.
 		if strings.TrimSpace(m.sessionSelect.filter) == "" &&
 			len(m.sessionSelect.filteredIdx) == 0 &&
-			m.sessionSelect.list.Len() == len(m.sessionSelect.options) &&
+			m.sessionSelect.selector.list.Len() == len(m.sessionSelect.options) &&
 			cursor < len(m.sessionSelect.options) {
 			return cursor
 		}
@@ -524,7 +518,7 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 	}
 	total := len(m.sessionSelect.options)
 	filtered := len(m.sessionSelect.filteredIdx)
-	if filtered == 0 && strings.TrimSpace(m.sessionSelect.filter) == "" && m.sessionSelect.list != nil && m.sessionSelect.list.Len() == total {
+	if filtered == 0 && strings.TrimSpace(m.sessionSelect.filter) == "" && m.sessionSelect.selector.list != nil && m.sessionSelect.selector.list.Len() == total {
 		filtered = total
 	}
 	count := fmt.Sprintf("%d/%d", filtered, total)
@@ -574,39 +568,34 @@ func (m *Model) renderSessionSelectDialog() string {
 		MinWidth: 40,
 		MaxWidth: 90,
 	}
+	area := image.Rect(0, 0, m.width, m.height)
+	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	innerWidth := overlayCfg.MaxWidth - 4
 
 	if m.sessionSelect.loading {
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render("Loading sessions..."), 1, image.Rect(0, 0, m.width, m.height))
+		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render("Loading sessions..."), 1, area)
 		return dialog
 	}
 	if m.sessionSelect.loadErr != "" {
 		errMsg := fmt.Sprintf("Failed to load sessions: %s", m.sessionSelect.loadErr)
-		dialog, _ := RenderOverlay(overlayCfg, ErrorStyle.Render(errMsg), 1, image.Rect(0, 0, m.width, m.height))
+		dialog, _ := RenderOverlay(overlayCfg, ErrorStyle.Render(errMsg), 1, area)
 		return dialog
 	}
 
 	if len(opts) == 0 {
 		emptyMsg := "No previous sessions to choose from. Start a conversation to create one."
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render(emptyMsg), 1, image.Rect(0, 0, m.width, m.height))
+		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render(emptyMsg), 1, area)
 		return dialog
 	}
-	if m.sessionSelect.list == nil {
+	if m.sessionSelect.selector.list == nil {
 		return ""
 	}
+
 	maxVisible := m.sessionSelectMaxVisible()
-	m.sessionSelect.list.SetMaxVisible(maxVisible)
-	listVersion := m.sessionSelect.list.RenderVersion()
-	if m.sessionSelect.renderCacheText != "" &&
-		m.sessionSelect.renderCacheWidth == m.width &&
-		m.sessionSelect.renderCacheHeight == m.height &&
-		m.sessionSelect.renderCacheMaxVisible == maxVisible &&
-		m.sessionSelect.renderCacheTheme == m.theme.Name &&
-		m.sessionSelect.renderCacheListVer == listVersion {
-		return m.sessionSelect.renderCacheText
-	}
 	filterLine := m.renderSessionSelectFilterLine(innerWidth)
-	listBody := m.sessionSelect.list.Render(innerWidth)
+
+	// Special-case: when the filter yields no matches, we show an inline message
+	// instead of the list.
 	if len(m.sessionSelect.filteredIdx) == 0 && strings.TrimSpace(m.sessionSelect.filter) != "" {
 		query := m.sessionSelect.filter
 		maxQueryWidth := innerWidth - runewidth.StringWidth(`No sessions match ""`)
@@ -616,15 +605,21 @@ func (m *Model) renderSessionSelectDialog() string {
 		if runewidth.StringWidth(query) > maxQueryWidth {
 			query = runewidth.Truncate(query, maxQueryWidth, "…")
 		}
-		listBody = DimStyle.Render(fmt.Sprintf(`No sessions match %q`, query))
+		listBody := DimStyle.Render(fmt.Sprintf(`No sessions match %q`, query))
+		content := filterLine + "\n\n" + listBody
+		dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), area)
+		return dialog
 	}
-	content := filterLine + "\n\n" + listBody
-	dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), image.Rect(0, 0, m.width, m.height))
-	m.sessionSelect.renderCacheWidth = m.width
-	m.sessionSelect.renderCacheHeight = m.height
-	m.sessionSelect.renderCacheMaxVisible = maxVisible
-	m.sessionSelect.renderCacheTheme = m.theme.Name
-	m.sessionSelect.renderCacheListVer = listVersion
-	m.sessionSelect.renderCacheText = dialog
-	return dialog
+
+	extraKey := "filter=" + filterLine
+	return m.sessionSelect.selector.Render(
+		m,
+		overlayCfg,
+		filterLine,
+		1,
+		maxVisible,
+		extraKey,
+		nil,
+		area,
+	)
 }

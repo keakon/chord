@@ -1663,8 +1663,8 @@ func TestMouseWheelScrollTriggersInlineImageRefresh(t *testing.T) {
 	if model.viewport.offset != 1 {
 		t.Fatalf("mouse wheel event should defer offset change until flush, got %d", model.viewport.offset)
 	}
-	if model.pendingScrollDelta != -3 {
-		t.Fatalf("pendingScrollDelta = %d, want -3", model.pendingScrollDelta)
+	if model.pendingScrollDelta != -mouseWheelScrollStep {
+		t.Fatalf("pendingScrollDelta = %d, want %d", model.pendingScrollDelta, -mouseWheelScrollStep)
 	}
 	cmd = model.consumeScrollFlush(scrollFlushTickMsg{generation: model.scrollFlushGeneration})
 	if cmd == nil {
@@ -1697,8 +1697,8 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("mouse wheel during compacting should still schedule a scroll flush command")
 	}
-	if model.pendingScrollDelta != -3 {
-		t.Fatalf("pendingScrollDelta = %d, want -3", model.pendingScrollDelta)
+	if model.pendingScrollDelta != -mouseWheelScrollStep {
+		t.Fatalf("pendingScrollDelta = %d, want %d", model.pendingScrollDelta, -mouseWheelScrollStep)
 	}
 	model.consumeScrollFlush(scrollFlushTickMsg{generation: model.scrollFlushGeneration})
 	if model.viewport.offset >= startOffset {

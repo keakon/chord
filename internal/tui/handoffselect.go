@@ -5,7 +5,6 @@ import (
 	"image"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -23,17 +22,10 @@ type handoffOption struct {
 // handoffSelectState holds the transient state for the Handoff agent selector.
 type handoffSelectState struct {
 	options  []handoffOption
-	list     *OverlayList
 	planPath string
 	prevMode Mode
 
-	renderCacheWidth      int
-	renderCacheHeight     int
-	renderCacheMaxVisible int
-	renderCacheTheme      string
-	renderCacheListVer    uint64
-	renderCachePlanPath   string
-	renderCacheText       string
+	selector overlayListSelectorState
 }
 
 // ---------------------------------------------------------------------------
@@ -72,12 +64,12 @@ func (m *Model) openHandoffSelect(planPath string) {
 	m.clearActiveSearch()
 	m.handoffSelect = handoffSelectState{
 		options:  options,
-		list:     NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible()),
 		planPath: planPath,
 		prevMode: m.mode,
 	}
-	if m.handoffSelect.list != nil {
-		m.handoffSelect.list.SetCursor(cursorIdx)
+	m.handoffSelect.selector.list = NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible())
+	if m.handoffSelect.selector.list != nil {
+		m.handoffSelect.selector.list.SetCursor(cursorIdx)
 	}
 	if m.mode == ModeInsert {
 		m.input.Blur()
@@ -106,23 +98,23 @@ func (m *Model) handleHandoffSelectKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case "j", "down":
-		if m.handoffSelect.list != nil {
-			m.handoffSelect.list.CursorDown()
+		if m.handoffSelect.selector.list != nil {
+			m.handoffSelect.selector.list.CursorDown()
 		}
 
 	case "k", "up":
-		if m.handoffSelect.list != nil {
-			m.handoffSelect.list.CursorUp()
+		if m.handoffSelect.selector.list != nil {
+			m.handoffSelect.selector.list.CursorUp()
 		}
 
 	case "g":
-		if m.handoffSelect.list != nil {
-			m.handoffSelect.list.CursorToTop()
+		if m.handoffSelect.selector.list != nil {
+			m.handoffSelect.selector.list.CursorToTop()
 		}
 
 	case "G":
-		if m.handoffSelect.list != nil {
-			m.handoffSelect.list.CursorToBottom()
+		if m.handoffSelect.selector.list != nil {
+			m.handoffSelect.selector.list.CursorToBottom()
 		}
 
 	case "enter":
@@ -137,8 +129,8 @@ func (m *Model) confirmHandoff() tea.Cmd {
 		return nil
 	}
 	cursor := 0
-	if m.handoffSelect.list != nil {
-		cursor = m.handoffSelect.list.CursorAt()
+	if m.handoffSelect.selector.list != nil {
+		cursor = m.handoffSelect.selector.list.CursorAt()
 	}
 	if cursor < 0 || cursor >= len(m.handoffSelect.options) {
 		return nil
@@ -183,39 +175,31 @@ func handoffItems(options []handoffOption) []OverlayListItem {
 }
 
 func (m *Model) renderHandoffSelectDialog() string {
-	if m.handoffSelect.list == nil {
+	if m.handoffSelect.selector.list == nil {
 		return ""
 	}
-	maxVisible := m.handoffSelectMaxVisible()
-	m.handoffSelect.list.SetMaxVisible(maxVisible)
-	listVersion := m.handoffSelect.list.RenderVersion()
-	if m.handoffSelect.renderCacheText != "" &&
-		m.handoffSelect.renderCacheWidth == m.width &&
-		m.handoffSelect.renderCacheHeight == m.height &&
-		m.handoffSelect.renderCacheMaxVisible == maxVisible &&
-		m.handoffSelect.renderCacheTheme == m.theme.Name &&
-		m.handoffSelect.renderCacheListVer == listVersion &&
-		m.handoffSelect.renderCachePlanPath == m.handoffSelect.planPath {
-		return m.handoffSelect.renderCacheText
-	}
+
 	overlayCfg := OverlayConfig{
 		Title:    "Handoff To Agent",
 		Hint:     "j/k move  g/G jump  enter confirm  esc cancel",
 		MinWidth: 30,
 		MaxWidth: 70,
 	}
+	area := image.Rect(0, 0, m.width, m.height)
+	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := overlayCfg.MaxWidth - 4
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		DimStyle.Render(ansi.Truncate(fmt.Sprintf("Plan: %s", m.handoffSelect.planPath), contentWidth, "…")),
-		m.handoffSelect.list.Render(contentWidth),
+	planLine := DimStyle.Render(ansi.Truncate(fmt.Sprintf("Plan: %s", m.handoffSelect.planPath), contentWidth, "…"))
+
+	extraKey := "plan=" + m.handoffSelect.planPath
+	maxVisible := m.handoffSelectMaxVisible()
+	return m.handoffSelect.selector.Render(
+		m,
+		overlayCfg,
+		planLine,
+		0,
+		maxVisible,
+		extraKey,
+		nil,
+		area,
 	)
-	dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), image.Rect(0, 0, m.width, m.height))
-	m.handoffSelect.renderCacheWidth = m.width
-	m.handoffSelect.renderCacheHeight = m.height
-	m.handoffSelect.renderCacheMaxVisible = maxVisible
-	m.handoffSelect.renderCacheTheme = m.theme.Name
-	m.handoffSelect.renderCacheListVer = listVersion
-	m.handoffSelect.renderCachePlanPath = m.handoffSelect.planPath
-	m.handoffSelect.renderCacheText = dialog
-	return dialog
 }

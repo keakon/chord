@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -89,5 +90,60 @@ func TestOpenModelSelectForAgentUsesFirstPoolWhenUnset(t *testing.T) {
 	}
 	if strings.Contains(plain, "Restore default") {
 		t.Fatalf("dialog should not include restore default:\n%s", plain)
+	}
+}
+
+func TestPoolSelectIndexAtUsesListBaseRow(t *testing.T) {
+	backend := &sessionControlAgent{mainRolePoolNames: []string{"alpha", "beta", "gamma"}, mainRoleCurrentPool: "alpha"}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole})
+	_ = m.renderModelSelectDialog()
+
+	dialogRect := m.overlayRect(m.renderModelSelectDialog())
+	x := dialogRect.Min.X + 2
+	y := dialogRect.Min.Y + 1 + 2 // title + blank
+	idx, ok := m.poolSelectIndexAt(x, y)
+	if !ok {
+		t.Fatal("expected hit test to resolve first list row")
+	}
+	if idx != 0 {
+		t.Fatalf("hit-test index = %d, want 0", idx)
+	}
+}
+
+func TestPoolSelectIndexAtAccountsForScrollWindowStart(t *testing.T) {
+	pools := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		pools = append(pools, fmt.Sprintf("pool-%02d", i))
+	}
+	backend := &sessionControlAgent{mainRolePoolNames: pools, mainRoleCurrentPool: pools[0]}
+
+	// Height chosen so modelSelectMaxVisible() clamps to 3.
+	m := NewModelWithSize(backend, 120, 16)
+	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole})
+	if m.modelSelect.selector.list == nil {
+		t.Fatal("expected modelSelect.list to be initialized")
+	}
+	m.modelSelect.selector.list.SetCursor(11)
+	m.modelSelect.poolCursor = 11
+	_ = m.renderModelSelectDialog()
+
+	start, end := m.modelSelect.selector.list.WindowRange()
+	if end-start != 3 {
+		t.Fatalf("visible window = %d, want 3", end-start)
+	}
+	if start == 0 {
+		t.Fatal("expected list to be scrolled")
+	}
+
+	dialogRect := m.overlayRect(m.renderModelSelectDialog())
+	x := dialogRect.Min.X + 2
+	y := dialogRect.Min.Y + 1 + 2 // first visible row
+	idx, ok := m.poolSelectIndexAt(x, y)
+	if !ok {
+		t.Fatal("expected hit test to resolve first visible list row")
+	}
+	if idx != start {
+		t.Fatalf("hit-test index = %d, want %d (window start)", idx, start)
 	}
 }

@@ -46,7 +46,7 @@ func newSessionSelectTestModel(options []agent.SessionSummary) Model {
 	m.mode = ModeSessionSelect
 	m.sessionSelect = sessionSelectState{
 		options:      append([]agent.SessionSummary(nil), options...),
-		list:         NewOverlayList(nil, m.sessionSelectMaxVisible()),
+		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeNormal,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
@@ -107,14 +107,14 @@ func TestBuildSessionSearchCorpusAndFilterSessionOptions(t *testing.T) {
 func TestRebuildSessionSelectFilteredViewResetsCursorAndHandlesNoMatch(t *testing.T) {
 	m := newSessionSelectTestModel(testSessionSummaries())
 
-	if got, want := len(m.sessionSelect.filteredIdx), m.sessionSelect.list.Len(); got != want {
+	if got, want := len(m.sessionSelect.filteredIdx), m.sessionSelect.selector.list.Len(); got != want {
 		t.Fatalf("filteredIdx/list mismatch: %d vs %d", got, want)
 	}
 
-	m.sessionSelect.list.SetCursor(2)
+	m.sessionSelect.selector.list.SetCursor(2)
 	m.sessionSelect.filter = "ime"
 	m.rebuildSessionSelectFilteredView(true)
-	if got := m.sessionSelect.list.CursorAt(); got != 0 {
+	if got := m.sessionSelect.selector.list.CursorAt(); got != 0 {
 		t.Fatalf("cursor after reset rebuild = %d, want 0", got)
 	}
 	if got := len(m.sessionSelect.filteredIdx); got != 1 {
@@ -126,7 +126,7 @@ func TestRebuildSessionSelectFilteredViewResetsCursorAndHandlesNoMatch(t *testin
 	if got := len(m.sessionSelect.filteredIdx); got != 0 {
 		t.Fatalf("len(filteredIdx) no-match = %d, want 0", got)
 	}
-	if got := m.sessionSelect.list.Len(); got != 0 {
+	if got := m.sessionSelect.selector.list.Len(); got != 0 {
 		t.Fatalf("list len no-match = %d, want 0", got)
 	}
 }
@@ -179,7 +179,7 @@ func TestSessionSelectFilterFocusEscBehavior(t *testing.T) {
 
 func TestSessionSelectFilterFocusTreatsJKAsInput(t *testing.T) {
 	m := newSessionSelectTestModel(testSessionSummaries())
-	m.sessionSelect.list.SetCursor(1)
+	m.sessionSelect.selector.list.SetCursor(1)
 
 	_ = m.handleSessionSelectKey(sessionSelectRuneKey("/"))
 	_ = m.handleSessionSelectKey(sessionSelectRuneKey("j"))
@@ -187,7 +187,7 @@ func TestSessionSelectFilterFocusTreatsJKAsInput(t *testing.T) {
 	if m.sessionSelect.filter != "j" {
 		t.Fatalf("filter after j in focus = %q, want j", m.sessionSelect.filter)
 	}
-	if got := m.sessionSelect.list.CursorAt(); got != 0 {
+	if got := m.sessionSelect.selector.list.CursorAt(); got != 0 {
 		t.Fatalf("cursor after j input = %d, want reset to 0", got)
 	}
 }
@@ -199,7 +199,7 @@ func TestSelectSessionAtCursorUsesFilteredMapping(t *testing.T) {
 	options := testSessionSummaries()
 	m.sessionSelect = sessionSelectState{
 		options:      options,
-		list:         NewOverlayList(nil, m.sessionSelectMaxVisible()),
+		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeNormal,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
@@ -234,12 +234,12 @@ func TestConfirmSessionDeletionRemovesBySessionID(t *testing.T) {
 	m.mode = ModeSessionDeleteConfirm
 	m.sessionSelect = sessionSelectState{
 		options:      append([]agent.SessionSummary(nil), options...),
-		list:         NewOverlayList(nil, m.sessionSelectMaxVisible()),
+		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeSessionSelect,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
 	m.rebuildSessionSelectFilteredView(false)
-	m.sessionSelect.list.SetCursor(0) // points to sess-100
+	m.sessionSelect.selector.list.SetCursor(0) // points to sess-100
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{
 		session:  &agent.SessionSummary{ID: "sess-300"},
 		prevMode: ModeSessionSelect,
@@ -281,17 +281,17 @@ func TestRenderSessionSelectDialogShowsFilterHintAndNoMatch(t *testing.T) {
 func TestSetSessionSelectFilterFocusedInvalidatesDialogCache(t *testing.T) {
 	m := newSessionSelectTestModel(testSessionSummaries())
 	_ = m.renderSessionSelectDialog()
-	if m.sessionSelect.renderCacheText == "" {
+	if m.sessionSelect.selector.renderCacheText == "" {
 		t.Fatal("expected non-empty render cache after first render")
 	}
 
 	m.setSessionSelectFilterFocused(true)
-	if m.sessionSelect.renderCacheText != "" {
+	if m.sessionSelect.selector.renderCacheText != "" {
 		t.Fatal("filter focus change should invalidate dialog cache")
 	}
 	_ = m.renderSessionSelectDialog()
 	m.setSessionSelectFilterFocused(false)
-	if m.sessionSelect.renderCacheText != "" {
+	if m.sessionSelect.selector.renderCacheText != "" {
 		t.Fatal("focus exit should invalidate dialog cache")
 	}
 }
@@ -302,7 +302,7 @@ func TestSessionSelectOptionIndexAtUsesListContentBaseRow(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderSessionSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + sessionSelectListBaseRow
+	y := dialogRect.Min.Y + 1 + 4
 	idx, ok := m.sessionSelectOptionIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first list row")

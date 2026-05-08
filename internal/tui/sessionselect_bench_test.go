@@ -23,12 +23,12 @@ func benchmarkModelForSessionSelectDialog() Model {
 	m.sessionSelect = sessionSelectState{
 		options:      options,
 		searchCorpus: buildSessionSearchCorpus(options),
-		list:         NewOverlayList(nil, m.sessionSelectMaxVisible()),
 		prevMode:     ModeInsert,
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, m.sessionSelectMaxVisible())
 	m.rebuildSessionSelectFilteredView(false)
-	if m.sessionSelect.list != nil {
-		m.sessionSelect.list.SetCursor(0)
+	if m.sessionSelect.selector.list != nil {
+		m.sessionSelect.selector.list.SetCursor(0)
 	}
 	return m
 }

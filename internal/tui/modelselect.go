@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
 )
@@ -21,11 +20,7 @@ type modelSelectState struct {
 	poolCursor int
 	prevMode   Mode
 
-	renderCacheWidth      int
-	renderCacheHeight     int
-	renderCacheText       string
-	renderCachePoolCursor int
-	renderCachePoolNames  string
+	selector overlayListSelectorState
 }
 
 func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool string) tea.Cmd {
@@ -110,12 +105,20 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 	}
 	m.clearActiveSearch()
 	m.clearChordState()
+
+	var list *OverlayList
+	if len(poolNames) > 0 {
+		list = NewOverlayList(buildModelSelectItems(poolNames, currentPool), m.modelSelectMaxVisible())
+		list.SetCursor(poolCursor)
+	}
+
 	m.modelSelect = modelSelectState{
 		target:     target,
 		poolNames:  poolNames,
 		poolCursor: poolCursor,
 		prevMode:   prevMode,
 	}
+	m.modelSelect.selector.list = list
 	if m.mode == ModeInsert {
 		m.input.Blur()
 	}
@@ -148,24 +151,49 @@ func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 	itemCount := len(m.modelSelect.poolNames)
 	switch key {
 	case "j", "down":
-		if itemCount > 0 && m.modelSelect.poolCursor < itemCount-1 {
-			m.modelSelect.poolCursor++
+		if itemCount > 0 {
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.CursorDown()
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if m.modelSelect.poolCursor < itemCount-1 {
+				m.modelSelect.poolCursor++
+			}
 		}
 
 	case "k", "up":
-		if m.modelSelect.poolCursor > 0 {
-			m.modelSelect.poolCursor--
+		if itemCount > 0 {
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.CursorUp()
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if m.modelSelect.poolCursor > 0 {
+				m.modelSelect.poolCursor--
+			}
 		}
 
 	case "g":
-		m.modelSelect.poolCursor = 0
+		if itemCount > 0 {
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.CursorToTop()
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else {
+				m.modelSelect.poolCursor = 0
+			}
+		}
 
 	case "G":
 		if itemCount > 0 {
-			m.modelSelect.poolCursor = itemCount - 1
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.CursorToBottom()
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else {
+				m.modelSelect.poolCursor = itemCount - 1
+			}
 		}
 
 	case "enter":
+		if m.modelSelect.selector.list != nil {
+			m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+		}
 		return m.selectPoolAtCursor()
 	}
 
@@ -215,14 +243,6 @@ func (m *Model) renderModelSelectDialog() string {
 		return dialog
 	}
 
-	if m.modelSelect.renderCacheText != "" &&
-		m.modelSelect.renderCacheWidth == m.width &&
-		m.modelSelect.renderCacheHeight == m.height &&
-		m.modelSelect.renderCachePoolCursor == m.modelSelect.poolCursor &&
-		m.modelSelect.renderCachePoolNames == strings.Join(m.modelSelect.poolNames, ",") {
-		return m.modelSelect.renderCacheText
-	}
-
 	currentPool := ""
 	if m.agent != nil {
 		if m.modelSelect.target.Kind == agent.ModelPoolSelectorTargetAgentOverride {
@@ -236,44 +256,45 @@ func (m *Model) renderModelSelectDialog() string {
 		}
 	}
 
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00"))
-	dimStyle := DimStyle
-
-	var lines []string
-	for i, name := range m.modelSelect.poolNames {
-		if name == currentPool {
-			label := "✓ " + name
-			if i == m.modelSelect.poolCursor {
-				lines = append(lines, cursorStyle.Render("▸ ")+activeStyle.Render(label))
-			} else {
-				lines = append(lines, "  "+activeStyle.Render(label))
-			}
-		} else {
-			label := "  " + name
-			if i == m.modelSelect.poolCursor {
-				lines = append(lines, cursorStyle.Render("▸ ")+dimStyle.Render(label))
-			} else {
-				lines = append(lines, "  "+dimStyle.Render(label))
-			}
-		}
-	}
-	content := strings.Join(lines, "\n")
-
 	overlayCfg := OverlayConfig{
 		Title:    modelSelectTitle(m.modelSelect.target),
 		Hint:     modelSelectHint(m.modelSelect.target),
 		MinWidth: 30,
 		MaxWidth: 60,
 	}
-	dialog, _ := RenderOverlay(overlayCfg, content, len(lines), image.Rect(0, 0, m.width, m.height))
 
-	m.modelSelect.renderCacheWidth = m.width
-	m.modelSelect.renderCacheHeight = m.height
-	m.modelSelect.renderCachePoolCursor = m.modelSelect.poolCursor
-	m.modelSelect.renderCachePoolNames = strings.Join(m.modelSelect.poolNames, ",")
-	m.modelSelect.renderCacheText = dialog
-	return dialog
+	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName)
+	maxVisible := m.modelSelectMaxVisible()
+
+	return m.modelSelect.selector.Render(
+		m,
+		overlayCfg,
+		"",
+		0,
+		maxVisible,
+		extraKey,
+		func(list *OverlayList) {
+			list.SetItems(buildModelSelectItems(m.modelSelect.poolNames, currentPool))
+			list.SetCursor(m.modelSelect.poolCursor)
+		},
+		image.Rect(0, 0, m.width, m.height),
+	)
+}
+
+func (m *Model) modelSelectMaxVisible() int {
+	maxVisible := m.height/2 - 5
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	return maxVisible
+}
+
+func buildModelSelectItems(poolNames []string, currentPool string) []OverlayListItem {
+	items := make([]OverlayListItem, 0, len(poolNames))
+	for _, name := range poolNames {
+		items = append(items, OverlayListItem{ID: name, Label: name, Selected: name == currentPool})
+	}
+	return items
 }
 
 func modelSelectTitle(target agent.ModelPoolSelectorTarget) string {
@@ -287,5 +308,6 @@ func modelSelectTitle(target agent.ModelPoolSelectorTarget) string {
 }
 
 func modelSelectHint(target agent.ModelPoolSelectorTarget) string {
-	return "j/k move  enter select  esc cancel"
+	_ = target
+	return "j/k move  g/G jump  enter select  esc cancel"
 }

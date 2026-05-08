@@ -9,6 +9,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+const mouseWheelScrollStep = 3
+
 func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 	if m.interactionSuppressed() {
 		return nil
@@ -32,20 +34,20 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.sessionSelect.list != nil {
-				m.sessionSelect.list.HandleWheel(-3)
+			if m.sessionSelect.selector.list != nil {
+				m.sessionSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
 			}
 			return nil
 		case tea.MouseWheelDown:
-			if m.sessionSelect.list != nil {
-				m.sessionSelect.list.HandleWheel(3)
+			if m.sessionSelect.selector.list != nil {
+				m.sessionSelect.selector.list.HandleWheel(mouseWheelScrollStep)
 			}
 			return nil
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			if idx, ok := m.sessionSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.sessionSelect.list != nil {
-					m.sessionSelect.list.SetCursor(idx)
+				if m.sessionSelect.selector.list != nil {
+					m.sessionSelect.selector.list.SetCursor(idx)
 				}
 				return m.selectSessionAtCursor()
 			}
@@ -62,19 +64,30 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.modelSelect.poolCursor > 0 {
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if m.modelSelect.poolCursor > 0 {
 				m.modelSelect.poolCursor--
 			}
 			return nil
 		case tea.MouseWheelDown:
-			if len(m.modelSelect.poolNames) > 0 && m.modelSelect.poolCursor < len(m.modelSelect.poolNames)-1 {
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if len(m.modelSelect.poolNames) > 0 && m.modelSelect.poolCursor < len(m.modelSelect.poolNames)-1 {
 				m.modelSelect.poolCursor++
 			}
 			return nil
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			if idx, ok := m.poolSelectIndexAt(mouse.X, mouse.Y); ok {
-				m.modelSelect.poolCursor = idx
+				if m.modelSelect.selector.list != nil {
+					m.modelSelect.selector.list.SetCursor(idx)
+					m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+				} else {
+					m.modelSelect.poolCursor = idx
+				}
 				return m.selectPoolAtCursor()
 			}
 		}
@@ -85,20 +98,20 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.mcpSelect.list != nil {
-				m.mcpSelect.list.HandleWheel(-3)
+			if m.mcpSelect.selector.list != nil {
+				m.mcpSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
 			}
 			return nil
 		case tea.MouseWheelDown:
-			if m.mcpSelect.list != nil {
-				m.mcpSelect.list.HandleWheel(3)
+			if m.mcpSelect.selector.list != nil {
+				m.mcpSelect.selector.list.HandleWheel(mouseWheelScrollStep)
 			}
 			return nil
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			if idx, ok := m.mcpSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.mcpSelect.list != nil {
-					m.mcpSelect.list.SetCursor(idx)
+				if m.mcpSelect.selector.list != nil {
+					m.mcpSelect.selector.list.SetCursor(idx)
 				}
 				return m.mcpSelectDispatch(agent.MCPControlToggle)
 			}
@@ -110,20 +123,20 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.handoffSelect.list != nil {
-				m.handoffSelect.list.HandleWheel(-3)
+			if m.handoffSelect.selector.list != nil {
+				m.handoffSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
 			}
 			return nil
 		case tea.MouseWheelDown:
-			if m.handoffSelect.list != nil {
-				m.handoffSelect.list.HandleWheel(3)
+			if m.handoffSelect.selector.list != nil {
+				m.handoffSelect.selector.list.HandleWheel(mouseWheelScrollStep)
 			}
 			return nil
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			if idx, ok := m.handoffSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.handoffSelect.list != nil {
-					m.handoffSelect.list.SetCursor(idx)
+				if m.handoffSelect.selector.list != nil {
+					m.handoffSelect.selector.list.SetCursor(idx)
 				}
 				return m.confirmHandoff()
 			}
@@ -470,10 +483,10 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 	if _, isWheel := msg.(tea.MouseWheelMsg); isWheel {
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			m.pendingScrollDelta -= 3
+			m.pendingScrollDelta -= mouseWheelScrollStep
 			return m.scheduleScrollFlush(16 * time.Millisecond)
 		case tea.MouseWheelDown:
-			m.pendingScrollDelta += 3
+			m.pendingScrollDelta += mouseWheelScrollStep
 			return m.scheduleScrollFlush(16 * time.Millisecond)
 		}
 	}

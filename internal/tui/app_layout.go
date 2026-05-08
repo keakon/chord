@@ -178,53 +178,25 @@ func overlayItemIndexAt(dialogRect image.Rectangle, y, contentBaseRow, windowSta
 }
 
 func (m *Model) sessionSelectOptionIndexAt(x, y int) (int, bool) {
-	if m.sessionSelect.list == nil || m.sessionSelect.list.Len() == 0 {
-		return 0, false
-	}
-	dialogRect := m.overlayRect(m.renderSessionSelectDialog())
-	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
-		return 0, false
-	}
-	start, end := m.sessionSelect.list.WindowRange()
-	idx, ok := overlayItemIndexAt(dialogRect, y, sessionSelectListBaseRow, start, end-start)
-	if !ok {
-		return 0, false
-	}
-	if idx < 0 || idx >= m.sessionSelect.list.Len() {
-		return 0, false
-	}
-	return idx, true
+	dialog := m.renderSessionSelectDialog()
+	return m.sessionSelect.selector.IndexAt(m, dialog, x, y)
 }
 
 func (m *Model) poolSelectIndexAt(x, y int) (int, bool) {
-	itemCount := len(m.modelSelect.poolNames)
-	if itemCount == 0 {
-		return 0, false
-	}
-	dialogRect := m.overlayRect(m.renderModelSelectDialog())
-	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
-		return 0, false
-	}
-	idx, ok := overlayItemIndexAt(dialogRect, y, 5, 0, itemCount)
+	dialog := m.renderModelSelectDialog()
+	idx, ok := m.modelSelect.selector.IndexAt(m, dialog, x, y)
 	if !ok {
 		return 0, false
 	}
-	if idx < 0 || idx >= itemCount {
+	if idx < 0 || idx >= len(m.modelSelect.poolNames) {
 		return 0, false
 	}
 	return idx, true
 }
 
 func (m *Model) handoffSelectOptionIndexAt(x, y int) (int, bool) {
-	if len(m.handoffSelect.options) == 0 || m.handoffSelect.list == nil {
-		return 0, false
-	}
-	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
-	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
-		return 0, false
-	}
-	start, end := m.handoffSelect.list.WindowRange()
-	idx, ok := overlayItemIndexAt(dialogRect, y, 3, start, end-start)
+	dialog := m.renderHandoffSelectDialog()
+	idx, ok := m.handoffSelect.selector.IndexAt(m, dialog, x, y)
 	if !ok {
 		return 0, false
 	}
@@ -235,20 +207,6 @@ func (m *Model) handoffSelectOptionIndexAt(x, y int) (int, bool) {
 }
 
 func (m *Model) mcpSelectOptionIndexAt(x, y int) (int, bool) {
-	if m.mcpSelect.list == nil || m.mcpSelect.list.Len() == 0 {
-		return 0, false
-	}
-	dialogRect := m.overlayRect(m.renderMCPSelectDialog())
-	if x < dialogRect.Min.X || x >= dialogRect.Max.X || y < dialogRect.Min.Y || y >= dialogRect.Max.Y {
-		return 0, false
-	}
-	start, end := m.mcpSelect.list.WindowRange()
-	idx, ok := overlayItemIndexAt(dialogRect, y, 3, start, end-start)
-	if !ok {
-		return 0, false
-	}
-	if idx < 0 || idx >= m.mcpSelect.list.Len() {
-		return 0, false
-	}
-	return idx, true
+	dialog := m.renderMCPSelectDialog()
+	return m.mcpSelect.selector.IndexAt(m, dialog, x, y)
 }

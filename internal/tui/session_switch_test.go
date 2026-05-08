@@ -1460,10 +1460,10 @@ func TestSelectSessionAtCursorStartsStatusIndicator(t *testing.T) {
 	m.mode = ModeSessionSelect
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
-		list:    NewOverlayList(nil, 5),
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
-	m.sessionSelect.list.SetCursor(1)
+	m.sessionSelect.selector.list.SetCursor(1)
 
 	_ = m.selectSessionAtCursor()
 
@@ -1501,10 +1501,10 @@ func TestHandleSessionSelectKeyDeleteOpensConfirmOverlay(t *testing.T) {
 	m.mode = ModeSessionSelect
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456", ForkedFrom: "100"}},
-		list:    NewOverlayList(nil, 5),
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
-	m.sessionSelect.list.SetCursor(1)
+	m.sessionSelect.selector.list.SetCursor(1)
 
 	_ = m.handleSessionSelectKey(tea.KeyPressMsg(tea.Key{Code: 'd'}))
 
@@ -1522,10 +1522,10 @@ func TestHandleSessionDeleteConfirmKeyDeletesSelectedSessionAndUpdatesList(t *te
 	m.mode = ModeSessionDeleteConfirm
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
-		list:    NewOverlayList(nil, 5),
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
-	m.sessionSelect.list.SetCursor(1)
+	m.sessionSelect.selector.list.SetCursor(1)
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{
 		session:  &agent.SessionSummary{ID: "456"},
 		prevMode: ModeSessionSelect,
@@ -1556,10 +1556,10 @@ func TestHandleSessionDeleteConfirmKeyShowsErrorAndKeepsListOnFailure(t *testing
 	m.mode = ModeSessionDeleteConfirm
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
-		list:    NewOverlayList(nil, 5),
 	}
+	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
-	m.sessionSelect.list.SetCursor(1)
+	m.sessionSelect.selector.list.SetCursor(1)
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{
 		session:  &agent.SessionSummary{ID: "456"},
 		prevMode: ModeSessionSelect,

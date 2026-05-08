@@ -186,8 +186,8 @@ func (m *Model) handleSessionSummariesLoaded(msg sessionSummariesLoadedMsg) tea.
 		m.sessionSelect.options = nil
 		m.sessionSelect.filteredIdx = nil
 		m.sessionSelect.searchCorpus = nil
-		if m.sessionSelect.list != nil {
-			m.sessionSelect.list.SetItems(nil)
+		if m.sessionSelect.selector.list != nil {
+			m.sessionSelect.selector.list.SetItems(nil)
 		}
 		m.invalidateSessionSelectDialogCache()
 		m.sessionSelect.loadErr = msg.err.Error()

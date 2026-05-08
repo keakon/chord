@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
@@ -18,15 +17,8 @@ import (
 // ---------------------------------------------------------------------------
 
 type mcpSelectState struct {
-	list     *OverlayList
+	selector overlayListSelectorState
 	prevMode Mode
-
-	renderCacheWidth      int
-	renderCacheHeight     int
-	renderCacheMaxVisible int
-	renderCacheTheme      string
-	renderCacheListVer    uint64
-	renderCacheText       string
 }
 
 func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
@@ -57,7 +49,7 @@ func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
 }
 
 func (m *Model) refreshMCPSelectItems() {
-	if m.mcpSelect.list == nil || m.agent == nil {
+	if m.mcpSelect.selector.list == nil || m.agent == nil {
 		return
 	}
 	mp, ok := m.agent.(agent.MCPStateProvider)
@@ -67,17 +59,17 @@ func (m *Model) refreshMCPSelectItems() {
 	rows := mp.MCPServerList()
 	items := buildMCPSelectItems(rows)
 	if len(items) == 0 {
-		m.mcpSelect.list.SetItems(nil)
+		m.mcpSelect.selector.list.SetItems(nil)
 		return
 	}
 	selectedID, hasSelection := m.mcpSelectCurrent()
-	m.mcpSelect.list.SetItems(items)
+	m.mcpSelect.selector.list.SetItems(items)
 	if !hasSelection {
 		return
 	}
 	for i, item := range items {
 		if item.ID == selectedID {
-			m.mcpSelect.list.SetCursor(i)
+			m.mcpSelect.selector.list.SetCursor(i)
 			return
 		}
 	}
@@ -99,10 +91,8 @@ func (m *Model) openMCPSelect() {
 	}
 
 	m.clearChordState()
-	m.mcpSelect = mcpSelectState{
-		list:     NewOverlayList(buildMCPSelectItems(rows), m.mcpSelectMaxVisible()),
-		prevMode: m.mode,
-	}
+	m.mcpSelect = mcpSelectState{prevMode: m.mode}
+	m.mcpSelect.selector.list = NewOverlayList(buildMCPSelectItems(rows), m.mcpSelectMaxVisible())
 	m.mode = ModeMCPSelect
 	m.recalcViewportSize()
 }
@@ -116,19 +106,8 @@ func (m *Model) mcpSelectMaxVisible() int {
 }
 
 func (m *Model) renderMCPSelectDialog() string {
-	if m.mcpSelect.list == nil {
+	if m.mcpSelect.selector.list == nil {
 		return ""
-	}
-	maxVisible := m.mcpSelectMaxVisible()
-	m.mcpSelect.list.SetMaxVisible(maxVisible)
-	listVersion := m.mcpSelect.list.RenderVersion()
-	if m.mcpSelect.renderCacheText != "" &&
-		m.mcpSelect.renderCacheWidth == m.width &&
-		m.mcpSelect.renderCacheHeight == m.height &&
-		m.mcpSelect.renderCacheMaxVisible == maxVisible &&
-		m.mcpSelect.renderCacheTheme == m.theme.Name &&
-		m.mcpSelect.renderCacheListVer == listVersion {
-		return m.mcpSelect.renderCacheText
 	}
 
 	overlayCfg := OverlayConfig{
@@ -137,19 +116,22 @@ func (m *Model) renderMCPSelectDialog() string {
 		MinWidth: 30,
 		MaxWidth: 70,
 	}
+	area := image.Rect(0, 0, m.width, m.height)
+	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := overlayCfg.MaxWidth - 4
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		DimStyle.Render(ansi.Truncate("Changes apply immediately while idle", contentWidth, "…")),
-		m.mcpSelect.list.Render(contentWidth),
+	prefix := DimStyle.Render(ansi.Truncate("Changes apply immediately while idle", contentWidth, "…"))
+
+	maxVisible := m.mcpSelectMaxVisible()
+	return m.mcpSelect.selector.Render(
+		m,
+		overlayCfg,
+		prefix,
+		0,
+		maxVisible,
+		prefix,
+		nil,
+		area,
 	)
-	dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), image.Rect(0, 0, m.width, m.height))
-	m.mcpSelect.renderCacheWidth = m.width
-	m.mcpSelect.renderCacheHeight = m.height
-	m.mcpSelect.renderCacheMaxVisible = maxVisible
-	m.mcpSelect.renderCacheTheme = m.theme.Name
-	m.mcpSelect.renderCacheListVer = listVersion
-	m.mcpSelect.renderCacheText = dialog
-	return dialog
 }
 
 func (m *Model) closeMCPSelect() tea.Cmd {
@@ -164,10 +146,10 @@ func (m *Model) closeMCPSelect() tea.Cmd {
 }
 
 func (m *Model) mcpSelectCurrent() (string, bool) {
-	if m.mcpSelect.list == nil {
+	if m.mcpSelect.selector.list == nil {
 		return "", false
 	}
-	item, ok := m.mcpSelect.list.SelectedItem()
+	item, ok := m.mcpSelect.selector.list.SelectedItem()
 	if !ok {
 		return "", false
 	}
@@ -186,23 +168,23 @@ func (m *Model) handleMCPSelectKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch key {
 	case "j", "down":
-		if m.mcpSelect.list != nil {
-			m.mcpSelect.list.CursorDown()
+		if m.mcpSelect.selector.list != nil {
+			m.mcpSelect.selector.list.CursorDown()
 		}
 		return nil
 	case "k", "up":
-		if m.mcpSelect.list != nil {
-			m.mcpSelect.list.CursorUp()
+		if m.mcpSelect.selector.list != nil {
+			m.mcpSelect.selector.list.CursorUp()
 		}
 		return nil
 	case "g":
-		if m.mcpSelect.list != nil {
-			m.mcpSelect.list.CursorToTop()
+		if m.mcpSelect.selector.list != nil {
+			m.mcpSelect.selector.list.CursorToTop()
 		}
 		return nil
 	case "G":
-		if m.mcpSelect.list != nil {
-			m.mcpSelect.list.CursorToBottom()
+		if m.mcpSelect.selector.list != nil {
+			m.mcpSelect.selector.list.CursorToBottom()
 		}
 		return nil
 	case "enter", "t":
@@ -222,10 +204,10 @@ func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	if m.isAgentBusy() {
 		return m.enqueueToast("Wait until the agent is idle before changing MCP", "warn")
 	}
-	if m.mcpSelect.list == nil {
+	if m.mcpSelect.selector.list == nil {
 		return nil
 	}
-	item, ok := m.mcpSelect.list.SelectedItem()
+	item, ok := m.mcpSelect.selector.list.SelectedItem()
 	if !ok {
 		return nil
 	}
