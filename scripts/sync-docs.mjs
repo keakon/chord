@@ -1,18 +1,17 @@
 #!/usr/bin/env node
-// Sync docs/*.md → website/src/content/docs/{en,zh}/*.md for Starlight.
+// Sync docs/*.md → website/src/content/docs/*.md (English root) and website/src/content/docs/zh/*.md.
 //
 // What it does for each source file:
 //   1. Picks the target language from the *_CN.md suffix.
 //   2. Strips the leading H1 (Starlight uses frontmatter title instead).
 //   3. Adds Starlight frontmatter: title (from H1), description (first paragraph).
-//   4. Rewrites relative ./xxx.md links to absolute /xxx/ slugs (and zh/ for CN).
+//   4. Rewrites relative ./xxx.md links to root /xxx/ slugs for English and /zh/xxx/ for Chinese.
 //   5. Promotes "> **Note:** ...", "> **Important:** ..." block-quotes into
 //      Starlight :::note / :::caution / :::danger admonitions.
 //   6. For docs/examples/index*.md, inlines the four yaml example files as
 //      fenced code blocks so the rendered page is self-contained.
 //
-// Source of truth stays in docs/. The sync target (website/src/content/docs/{en,zh}/)
-// is gitignored — never edit it by hand.
+// Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -26,13 +25,13 @@ const repoRoot = path.resolve(__dirname, '..');
 const docsDir = path.join(repoRoot, 'docs');
 const examplesDir = path.join(docsDir, 'examples');
 const websiteContentDir = path.join(repoRoot, 'website', 'src', 'content', 'docs');
-const enDir = path.join(websiteContentDir, 'en');
+const enDir = websiteContentDir;
 const zhDir = path.join(websiteContentDir, 'zh');
 
 // Pages we manage as hand-written Starlight (skip from sync to avoid clobbering).
 const SKIP_FILES = new Set(['index.md', 'index_CN.md']);
 
-// docs/<basename>.md lives at /<slug>/ on the site (en) or /zh/<slug>/ (zh).
+// docs/<basename>.md lives at /<slug>/ on the site (en root) or /zh/<slug>/ (zh).
 function deriveSlug(basename) {
   return basename.replace(/_CN$/, '');
 }
@@ -84,14 +83,20 @@ function deriveDescription(body) {
   return '';
 }
 
-function rewriteLinks(body, lang) {
+const SITE_BASE = '/chord';
+
+function sitePath(lang, slug, anchor = '') {
   const langPrefix = lang === 'zh' ? '/zh' : '';
+  return `${SITE_BASE}${langPrefix}/${slug}/${anchor}`;
+}
+
+function rewriteLinks(body, lang) {
   return body
-    // ./examples/index.md  → /examples/   (special-case the directory index)
-    // ./examples/index_CN.md → /zh/examples/
-    .replace(/\(\.\/examples\/index(_CN)?\.md([^)]*)\)/g, (_m, _cn, rest) => {
+    // ./examples/index.md  → /chord/examples/   (special-case the directory index)
+    // ./examples/index_CN.md → /chord/zh/examples/
+    .replace(/\(\.\/examples\/index(_CN)?\.md([^)]*)\)/g, (_m, cn, rest) => {
       const anchor = (rest || '').startsWith('#') ? rest : '';
-      return `(${langPrefix}/examples/${anchor})`;
+      return `(${sitePath(cn ? 'zh' : lang, 'examples', anchor)})`;
     })
     // ./examples/<file>.yaml  → repo blob link (yaml not a content collection)
     .replace(/\(\.\/examples\/([\w.-]+)\.yaml\)/g, (_m, name) =>
@@ -101,16 +106,14 @@ function rewriteLinks(body, lang) {
     .replace(/\(\.\.\/examples\/([\w.-]+)\.yaml\)/g, (_m, name) =>
       `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,
     )
-    // Sibling .md links: ./xxx_CN.md → /zh/xxx/   ;  ./xxx.md → /<lang>/xxx/
-    .replace(/\(\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) => {
-      const targetLang = cn ? '/zh' : langPrefix;
-      return `(${targetLang}/${slug}/${anchor || ''})`;
-    })
+    // Sibling .md links: ./xxx_CN.md → /chord/zh/xxx/ ; ./xxx.md → /chord/xxx/
+    .replace(/\(\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) =>
+      `(${sitePath(cn ? 'zh' : lang, slug, anchor || '')})`,
+    )
     // ../<page>.md from a subdir
-    .replace(/\(\.\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) => {
-      const targetLang = cn ? '/zh' : langPrefix;
-      return `(${targetLang}/${slug}/${anchor || ''})`;
-    });
+    .replace(/\(\.\.\/([\w-]+)(_CN)?\.md(#[\w-]+)?\)/g, (_m, slug, cn, anchor) =>
+      `(${sitePath(cn ? 'zh' : lang, slug, anchor || '')})`,
+    );
 }
 
 // Promote the simple "> **Note:**" / "> **Important:** / **Warning:**" patterns
@@ -226,7 +229,7 @@ async function main() {
 
   await syncExamples();
 
-  console.log('Synced docs/ → website/src/content/docs/{en,zh}/.');
+  console.log('Synced docs/ → website/src/content/docs/*.md and website/src/content/docs/zh/*.md.');
 }
 
 main().catch((err) => {

@@ -13,9 +13,9 @@ export default defineConfig({
       title: 'Chord',
       description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
       social: { github: repo },
-      defaultLocale: 'en',
+      defaultLocale: 'root',
       locales: {
-        en: { label: 'English', lang: 'en' },
+        root: { label: 'English', lang: 'en' },
         zh: { label: '中文', lang: 'zh-CN' },
       },
       editLink: {

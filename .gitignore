@@ -18,5 +18,6 @@ coverage.*
 # Starlight docs site (website/)
 website/node_modules/
 website/dist/
+website/src/content/docs/*.md
 website/src/content/docs/en/*.md
 website/src/content/docs/zh/*.md
