@@ -813,7 +813,7 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 			var parsed struct {
 				Path string `json:"path"`
 			}
-			if json.Unmarshal(tc.Args, &parsed) == nil {
+			if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
 				trackedFilePath = parsed.Path
 			}
 		}

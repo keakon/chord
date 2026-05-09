@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -18,7 +19,7 @@ func validateToolArgsAgainstSchema(registry *tools.Registry, toolName string, ar
 	if !ok {
 		return nil
 	}
-	return tools.ValidateToolArgs(tool, args)
+	return tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(args))
 }
 
 func applyConfirmedArgsEdits(registry *tools.Registry, ruleset permission.Ruleset, toolName string, original json.RawMessage, modifiedArgs string) (json.RawMessage, error) {

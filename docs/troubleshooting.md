@@ -139,15 +139,17 @@ Recent builds fix two transcript-height accounting bugs:
 - Late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
 - Background idle-sweep cache dropping could miscompute offscreen line offsets when turn-spacing lines were present, causing scroll/selection drift that grew over time.
 
-## Edit reports `oldString not found` after a streamed tool card already changed the file
+## Edit reports `changed on disk since the last read` even when the previous Edit succeeded
 
-When diagnosing development builds with streaming tool execution enabled, an `Edit` failure can appear even though the target file already contains the intended new content. This usually means a speculative `Write` / `Edit` / `Delete` ran before LLM finalize, was later discarded because of args drift/filtering, and the finalized path tried to rerun before the speculative file change had been rolled back.
+This error comes from Chord's in-process optimistic file locking. It means Chord believes the file no longer matches the last content hash it recorded for this agent.
 
-Recent builds make completed speculative file mutations roll back synchronously before the finalized execution path is allowed to rerun. If you still see this symptom:
+Common causes:
 
-- check the logs for speculative discard reasons such as `args_drift`, `filtered`, `rollback`, or `length_recovery`
-- verify the finalized `Edit` is not reusing stale `old_string` from an earlier file snapshot
-- capture the session JSONL and current file diff so the speculative discard/rollback order can be inspected
+- the file was modified by another process (editor/formatter) between `Read` and `Edit`;
+- a speculative tool run was discarded/rolled back and the finalized call raced it;
+- the provider sent tool arguments as a JSON string (wrapped arguments). Recent builds unwrap tool arguments consistently, but if you are on an older build, a wrapped `path` may not be tracked correctly and can trigger false staleness errors.
+
+If this persists on the latest build, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
 
 ## Performance issues
 

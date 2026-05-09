@@ -131,6 +131,18 @@ curl -I https://api.openai.com/v1
 - 长会话里较早的状态卡在后续更新时，旧版本可能让 viewport 记录的总高度小于真实转录内容，导致最后几行甚至最后几张卡片无法滚动到。
 - 后台 idle-sweep 丢弃缓存时若存在 turn-spacing 空行，旧版本可能会把这些空行漏算进偏移，从而造成滚动/鼠标选区命中逐步漂移，随着消息增加偏差越来越大。
 
+## Edit 报 `changed on disk since the last read`（即使上一次 Edit 已成功）
+
+这个错误来自 Chord 进程内的乐观文件锁（FileTracker）：Chord 认为当前磁盘内容已经不再匹配本 agent 上一次 `Read` 时记录的内容哈希。
+
+常见原因：
+
+- 你在 `Read` 与 `Edit` 之间用编辑器/格式化器等外部进程改动了文件；
+- speculative 工具调用被丢弃/回滚，finalize 阶段的工具调用与其发生竞态；
+- provider 将 tool arguments 以 JSON 字符串形式包了一层（wrapped arguments）。新版会一致地对 tool arguments 做 unwrap；如果你在旧版上，`path` 可能没有被正确跟踪，从而触发“假 stale”。
+
+如果在最新版仍能复现，请同时提供 session JSONL 和当前文件 diff，便于检查 tool-call 的顺序与被跟踪的路径。
+
 ## 流式工具卡片已改文件后，`Edit` 又报 `oldString not found`
 
 在排查启用了 streaming tool execution 的开发构建时，可能会看到 `Edit` 报错，但目标文件里已经包含预期的新内容。这通常表示某个 speculative `Write` / `Edit` / `Delete` 在 LLM finalize 前提前执行，随后因为 args drift、过滤或回滚被丢弃，而 finalized 路径在 speculative 文件变更完成回滚前又尝试正式重跑。
