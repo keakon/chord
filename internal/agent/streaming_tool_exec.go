@@ -311,7 +311,7 @@ func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streami
 		e.onSpeculativeDiscarded(info)
 	}
 	if completed {
-		go rollbackSpeculativeToolHooks(rollback)
+		rollbackSpeculativeToolHooks(rollback)
 	}
 	return info
 }

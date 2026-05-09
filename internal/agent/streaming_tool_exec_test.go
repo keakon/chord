@@ -55,6 +55,65 @@ func TestStreamingToolExecutorArgsDriftInvalidates(t *testing.T) {
 	}
 }
 
+func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	completed := make(chan struct{})
+	rollbackStarted := make(chan struct{})
+	releaseRollback := make(chan struct{})
+	exec := NewStreamingToolExecutor(7, ctx, func(AgentEvent) {}, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
+		return ToolExecutionResult{
+			EffectiveArgsJSON: `{"path":"a"}`,
+			Result:            "a",
+			speculativeHooks: &speculativeToolHooks{rollback: func() error {
+				close(rollbackStarted)
+				<-releaseRollback
+				return nil
+			}},
+		}, nil
+	})
+	exec.SetTraceCallbacks(nil, func(_, _ string, _ time.Time) { close(completed) }, nil)
+	if !exec.Start(message.ToolCall{ID: "call-1", Name: "Edit", Args: json.RawMessage(`{"path":"a","old_string":"before","new_string":"after"}`)}) {
+		t.Fatal("Start returned false")
+	}
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("speculative execution did not complete")
+	}
+
+	promoteReturned := make(chan struct{})
+	var payload *ToolResultPayload
+	var ok, drift bool
+	go func() {
+		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: "Edit", Args: json.RawMessage(`{"path":"a","old_string":"before","new_string":"final"}`)})
+		close(promoteReturned)
+	}()
+
+	select {
+	case <-rollbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("rollback did not start")
+	}
+	select {
+	case <-promoteReturned:
+		t.Fatal("Promote returned before completed speculative rollback finished")
+	default:
+	}
+	close(releaseRollback)
+	select {
+	case <-promoteReturned:
+	case <-time.After(time.Second):
+		t.Fatal("Promote did not return after rollback finished")
+	}
+	if !drift {
+		t.Fatal("Promote did not report drift")
+	}
+	if ok || payload != nil {
+		t.Fatalf("payload=%#v ok=%v, want no cached result", payload, ok)
+	}
+}
+
 func TestStreamingToolExecutorDiscardSuppressesVisibleResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

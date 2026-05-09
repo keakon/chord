@@ -131,6 +131,16 @@ curl -I https://api.openai.com/v1
 - 长会话里较早的状态卡在后续更新时，旧版本可能让 viewport 记录的总高度小于真实转录内容，导致最后几行甚至最后几张卡片无法滚动到。
 - 后台 idle-sweep 丢弃缓存时若存在 turn-spacing 空行，旧版本可能会把这些空行漏算进偏移，从而造成滚动/鼠标选区命中逐步漂移，随着消息增加偏差越来越大。
 
+## 流式工具卡片已改文件后，`Edit` 又报 `oldString not found`
+
+在排查启用了 streaming tool execution 的开发构建时，可能会看到 `Edit` 报错，但目标文件里已经包含预期的新内容。这通常表示某个 speculative `Write` / `Edit` / `Delete` 在 LLM finalize 前提前执行，随后因为 args drift、过滤或回滚被丢弃，而 finalized 路径在 speculative 文件变更完成回滚前又尝试正式重跑。
+
+较新的构建会在允许 finalized 执行路径重跑前，同步回滚已完成的 speculative 文件变更。如果仍然看到这类现象：
+
+- 在日志中查找 `args_drift`、`filtered`、`rollback`、`length_recovery` 等 speculative discard 原因
+- 确认 finalized `Edit` 没有复用来自更早文件快照的 stale `old_string`
+- 保留 session JSONL 和当前文件 diff，便于检查 speculative discard / rollback 的先后顺序
+
 ## 性能问题
 
 感觉滚屏、流式输出或大消息渲染明显变慢：

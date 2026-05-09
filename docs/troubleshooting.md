@@ -139,6 +139,16 @@ Recent builds fix two transcript-height accounting bugs:
 - Late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
 - Background idle-sweep cache dropping could miscompute offscreen line offsets when turn-spacing lines were present, causing scroll/selection drift that grew over time.
 
+## Edit reports `oldString not found` after a streamed tool card already changed the file
+
+When diagnosing development builds with streaming tool execution enabled, an `Edit` failure can appear even though the target file already contains the intended new content. This usually means a speculative `Write` / `Edit` / `Delete` ran before LLM finalize, was later discarded because of args drift/filtering, and the finalized path tried to rerun before the speculative file change had been rolled back.
+
+Recent builds make completed speculative file mutations roll back synchronously before the finalized execution path is allowed to rerun. If you still see this symptom:
+
+- check the logs for speculative discard reasons such as `args_drift`, `filtered`, `rollback`, or `length_recovery`
+- verify the finalized `Edit` is not reusing stale `old_string` from an earlier file snapshot
+- capture the session JSONL and current file diff so the speculative discard/rollback order can be inspected
+
 ## Performance issues
 
 If scrolling, streaming output, or large message rendering feels noticeably slow:
