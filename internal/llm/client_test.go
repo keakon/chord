@@ -1207,6 +1207,123 @@ func TestClientCompleteStreamDeactivatedOnlyOAuthKeyReturnsNoUsableKeys(t *testi
 	}
 }
 
+func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
+	seen := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("ChatGPT-Account-ID"); got != "" {
+			select {
+			case seen <- got:
+			default:
+			}
+		}
+		if got := r.URL.Path; got != "/backend-api/wham/usage" {
+			t.Errorf("request path = %q, want /backend-api/wham/usage", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":20,"reset_after_seconds":3600},"secondary_window":{"used_percent":40,"reset_after_seconds":7200}},"credits":{"has_credits":true,"unlimited":false}}`)
+	}))
+	defer server.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	creds := []config.ProviderCredential{
+		{OAuth: &config.OAuthCredential{Access: "oauth-a", Refresh: "refresh-a", Expires: expires, AccountID: "acc-a"}},
+		{OAuth: &config.OAuthCredential{Access: "oauth-b", Refresh: "refresh-b", Expires: expires, AccountID: "acc-b"}},
+	}
+	auth := config.AuthConfig{"openai": creds}
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/backend-api/codex/responses",
+		Preset: config.ProviderPresetCodex,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {Limit: config.ModelLimit{Context: 128000, Output: 1024}},
+		},
+	}, config.ExtractAPIKeys(creds))
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
+		"oauth-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
+	}, "")
+	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		return nil, nil
+	})
+
+	_ = NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+
+	got := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case accountID := <-seen:
+			got[accountID] = true
+		case <-deadline:
+			t.Fatalf("warmup probes = %#v, want both accounts", got)
+		}
+	}
+	for _, want := range []string{"acc-a", "acc-b"} {
+		if !got[want] {
+			t.Fatalf("warmup probes = %#v, want account %s", got, want)
+		}
+	}
+}
+
+func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
+	started := make(chan string, 1)
+	canceled := make(chan struct{})
+	var canceledOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("ChatGPT-Account-ID"); got != "" {
+			select {
+			case started <- got:
+			default:
+			}
+		}
+		<-r.Context().Done()
+		canceledOnce.Do(func() {
+			close(canceled)
+		})
+	}))
+	defer server.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	creds := []config.ProviderCredential{
+		{OAuth: &config.OAuthCredential{Access: "oauth-a", Refresh: "refresh-a", Expires: expires, AccountID: "acc-a"}},
+		{OAuth: &config.OAuthCredential{Access: "oauth-b", Refresh: "refresh-b", Expires: expires, AccountID: "acc-b"}},
+	}
+	auth := config.AuthConfig{"openai": creds}
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/backend-api/codex/responses",
+		Preset: config.ProviderPresetCodex,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {Limit: config.ModelLimit{Context: 128000, Output: 1024}},
+		},
+	}, config.ExtractAPIKeys(creds))
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
+		"oauth-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
+	}, "")
+	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		return nil, nil
+	})
+
+	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup request did not start")
+	}
+
+	c.InvalidateRouting("model_client_swapped")
+
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup request was not cancelled after InvalidateRouting")
+	}
+}
+
 func TestClientCompleteStream401OAuthRefreshThenFallback(t *testing.T) {
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

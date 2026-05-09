@@ -199,6 +199,8 @@ For Codex providers, `key_order` supports an additional value:
 - preferring higher remaining headroom when rate-limit snapshots are available;
 - falling back to soft-cooled accounts when no better candidate exists.
 
+When a Codex client becomes active, Chord may also background-probe additional OAuth slots to refresh cached headroom snapshots. That warm-up is best-effort, low-concurrency, and cancels when the active client is replaced.
+
 ```bash
 # auto-select a configured codex provider
 chord auth

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1428,6 +1429,105 @@ func (p *ProviderConfig) StopCodexRateLimitPolling() {
 	defer p.mu.Unlock()
 	p.codexPollFetchFn = nil
 	p.polledRateLimitInFlight = make(map[int]bool)
+}
+
+func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
+	if p == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	p.mu.Lock()
+	if p.oauthProfile != config.OAuthProfileOpenAICodex || p.codexPollFetchFn == nil {
+		p.mu.Unlock()
+		return false
+	}
+	now := time.Now()
+	candidates := make([]int, 0, len(p.keyStates))
+	for i, ks := range p.keyStates {
+		if ks == nil || ks.Invalid || ks.OAuthInfo == nil || ks.OAuthInfo.AccountID == "" {
+			continue
+		}
+		if !p.keyStateSelectableLocked(now, ks) {
+			continue
+		}
+		candidates = append(candidates, i)
+	}
+	if len(candidates) < 2 {
+		p.mu.Unlock()
+		return false
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return p.codexSmartLessLocked(now, p.keyStates[candidates[i]], p.keyStates[candidates[j]])
+	})
+	if p.polledRateLimitInFlight == nil {
+		p.polledRateLimitInFlight = make(map[int]bool)
+	}
+	if p.polledRateLimitAttemptedAt == nil {
+		p.polledRateLimitAttemptedAt = make(map[int]time.Time)
+	}
+	if p.polledRateLimitSucceededAt == nil {
+		p.polledRateLimitSucceededAt = make(map[int]time.Time)
+	}
+	p.mu.Unlock()
+
+	go func(providerName string, candidateIdxs []int, ctx context.Context) {
+		const successTTL = time.Minute
+		const failureBackoff = 30 * time.Second
+		for _, credIdx := range candidateIdxs {
+			if ctx.Err() != nil {
+				return
+			}
+			p.mu.Lock()
+			ks := p.keyStateBySlotLocked(credIdx)
+			if ks == nil || ks.Invalid || ks.OAuthInfo == nil || ks.OAuthInfo.AccountID == "" {
+				p.mu.Unlock()
+				continue
+			}
+			now := time.Now()
+			if p.polledRateLimitInFlight[credIdx] {
+				p.mu.Unlock()
+				continue
+			}
+			if lastOK := p.polledRateLimitSucceededAt[credIdx]; !lastOK.IsZero() && now.Sub(lastOK) < successTTL {
+				p.mu.Unlock()
+				continue
+			}
+			if lastAttempt := p.polledRateLimitAttemptedAt[credIdx]; !lastAttempt.IsZero() && now.Sub(lastAttempt) < failureBackoff {
+				p.mu.Unlock()
+				continue
+			}
+			key := ks.Key
+			accountID := ks.OAuthInfo.AccountID
+			p.polledRateLimitInFlight[credIdx] = true
+			p.polledRateLimitAttemptedAt[credIdx] = now
+			p.mu.Unlock()
+
+			snaps, err := FetchCodexUsageSnapshot(ctx, p, key, accountID)
+			p.mu.Lock()
+			if p.polledRateLimitInFlight != nil {
+				delete(p.polledRateLimitInFlight, credIdx)
+			}
+			p.mu.Unlock()
+			if err != nil {
+				log.Debugf("codex warmup usage probe failed provider=%v account_id=%v error=%v", providerName, accountID, err)
+				continue
+			}
+			for _, snap := range snaps {
+				if snap == nil {
+					continue
+				}
+				if snap.LimitID == "" || snap.LimitID == "codex" {
+					p.UpdatePolledRateLimitSnapshotForCredentialIndex(credIdx, snap)
+					break
+				}
+			}
+		}
+	}(p.name, candidates, ctx)
+
+	return true
 }
 
 func (p *ProviderConfig) WakeCodexRateLimitPolling() {

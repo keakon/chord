@@ -55,6 +55,9 @@ type Client struct {
 
 	routingGeneration atomic.Uint64
 	routingChangedCh  chan struct{}
+
+	codexWarmupStarted bool
+	codexWarmupCancel  context.CancelFunc
 }
 
 // CallStatus describes the effective model-routing outcome of the most recent
@@ -81,7 +84,7 @@ func NewClient(
 		tuning = tuningFromModel(m)
 	}
 
-	return &Client{
+	c := &Client{
 		provider:         providerCfg,
 		providerImpl:     providerImpl,
 		modelID:          modelID,
@@ -94,6 +97,8 @@ func NewClient(
 			RunningModelRef:  providerModelRef(providerCfg, modelID),
 		},
 	}
+	c.startCodexWarmup()
+	return c
 }
 
 // RoutingInvalidatedError indicates the current retry/fallback plan became stale
@@ -120,19 +125,62 @@ func (c *Client) InvalidateRouting(reason string) {
 	if c == nil {
 		return
 	}
+	var warmupCancel context.CancelFunc
 	c.mu.Lock()
 	providers := c.providersLocked()
 	prevCh := c.routingChangedCh
+	if c.codexWarmupCancel != nil {
+		warmupCancel = c.codexWarmupCancel
+		c.codexWarmupCancel = nil
+	}
 	c.routingGeneration.Add(1)
 	c.routingChangedCh = make(chan struct{})
 	c.mu.Unlock()
 	if prevCh != nil {
 		close(prevCh)
 	}
+	if warmupCancel != nil {
+		warmupCancel()
+	}
 	for _, p := range providers {
 		if invalidator, ok := p.(routingInvalidator); ok {
 			invalidator.InvalidateRouting(reason)
 		}
+	}
+}
+
+func (c *Client) startCodexWarmup() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.codexWarmupStarted {
+		c.mu.Unlock()
+		return
+	}
+	provider := c.provider
+	c.mu.Unlock()
+	if provider == nil {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.mu.Lock()
+	if c.codexWarmupStarted || c.provider == nil {
+		c.mu.Unlock()
+		cancel()
+		return
+	}
+	c.codexWarmupStarted = true
+	c.codexWarmupCancel = cancel
+	c.mu.Unlock()
+
+	if !provider.StartCodexWarmup(ctx) {
+		cancel()
+		c.mu.Lock()
+		c.codexWarmupCancel = nil
+		c.codexWarmupStarted = false
+		c.mu.Unlock()
 	}
 }
 
