@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // maxReadDefaultLines is the number of lines shown by default for Read tool results.
@@ -24,15 +22,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	if cardWidth < 10 {
 		cardWidth = 10
 	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	const lineNumWidth = 6
-	codeWidth := contentWidth - lineNumWidth - 2
-	if codeWidth < 10 {
-		codeWidth = 10
-	}
+	contentWidth, codeWidth := numberedToolPreviewWidths(cardWidth)
 
 	var filePath string
 	var readArgs struct {
@@ -71,42 +61,16 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
 	} else if b.ResultContent != "" {
 		rows, sourceSample := parseReadDisplayLines(b.ResultContent)
-		codeLines := make([]string, 0, len(rows))
-		for _, row := range rows {
-			if row.IsCode {
-				codeLines = append(codeLines, row.Content)
-			}
-		}
-		var highlightedCodeLines []string
-		codeIndex := 0
-		if len(codeLines) > 0 {
-			highlightedCodeLines = highlightCodeLines(ensureCodeHighlighter(&b.diffHL, filePath, sourceSample), codeLines, "")
-		}
-		cap := maxTUIDiffLines
-		if !b.ReadContentExpanded && len(rows) > maxReadDefaultLines {
-			cap = maxReadDefaultLines
-		}
-		shown := 0
-		for _, row := range rows {
-			if shown >= cap {
-				hidden := len(rows) - cap
-				result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-				break
-			}
-			if row.IsCode {
-				highlighted := row.Content
-				if codeIndex < len(highlightedCodeLines) {
-					highlighted = highlightedCodeLines[codeIndex]
-				}
-				codeIndex++
-				highlighted = ansi.Truncate(highlighted, codeWidth, "…")
-				result = append(result, "  "+DimStyle.Render(row.LineNo)+"  "+highlighted)
-			} else {
-				wrapped := ansi.Truncate(row.Content, contentWidth, "…")
-				result = append(result, "  "+DimStyle.Render(wrapped))
-			}
-			shown++
-		}
+		result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
+			filePath:            filePath,
+			rows:                rows,
+			sourceSample:        sourceSample,
+			contentWidth:        contentWidth,
+			codeWidth:           codeWidth,
+			defaultVisibleLines: maxReadDefaultLines,
+			expanded:            b.ReadContentExpanded,
+			highlighter:         &b.diffHL,
+		})...)
 	}
 	result = appendToolElapsedFooter(result, b)
 

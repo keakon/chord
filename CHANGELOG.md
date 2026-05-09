@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- TUI: `Write` tool cards now show the written file content as a numbered, syntax-highlighted preview, sharing the same first-10-lines default and space-to-expand behavior as `Read` cards.
 - Runtime/Codex rate limits: provider usage polling now inherits the application context, so shutdown/cancel paths stop pending Codex usage refreshes instead of letting them wait on a detached background context.
 - Auth/Codex: browser and device-code login HTTP requests now inherit the CLI command context, so Ctrl+C or parent shutdown can cancel in-flight device-code and token-exchange requests promptly.
 

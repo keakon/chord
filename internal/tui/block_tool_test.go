@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -173,6 +174,92 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 		if !strings.HasPrefix(line, "│") {
 			t.Fatalf("line %d bypassed card wrapper (missing rail): %q\nfull:\n%s", i, trimmed, plain)
 		}
+	}
+}
+
+func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := strings.Join([]string{
+		"package main",
+		"",
+		"func main() {",
+		`\tfmt.Println("1")`,
+		`\tfmt.Println("2")`,
+		`\tfmt.Println("3")`,
+		`\tfmt.Println("4")`,
+		`\tfmt.Println("5")`,
+		`\tfmt.Println("6")`,
+		`\tfmt.Println("7")`,
+		`\tfmt.Println("8")`,
+		"}",
+	}, "\n")
+	args, err := json.Marshal(map[string]string{
+		"path":    "cmd/demo/main.go",
+		"content": content,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Write",
+		Content:       string(args),
+		Collapsed:     false,
+		ResultDone:    true,
+		ResultContent: "Successfully wrote 12 lines, 157 bytes",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"Write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] expand"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "11  \\tfmt.Println") || strings.Contains(plain, "12  }") {
+		t.Fatalf("expected collapsed Write preview to hide lines after 10; got:\n%s", plain)
+	}
+
+	block.ToggleAtWidth(120)
+	if !block.ReadContentExpanded {
+		t.Fatal("expected space toggle to expand Write preview")
+	}
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"11  \\tfmt.Println", "12  }"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded Write preview to contain %q; got:\n%s", want, expanded)
+		}
+	}
+	if strings.Contains(expanded, "[space] expand") {
+		t.Fatalf("expanded Write preview should not show expand hint; got:\n%s", expanded)
+	}
+}
+
+func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args, err := json.Marshal(map[string]string{
+		"path":    "demo.txt",
+		"content": "safe\x1b[31m literal\rnext",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Write",
+		Content:       string(args),
+		Collapsed:     false,
+		ResultDone:    true,
+		ResultContent: "Successfully wrote 1 line, 22 bytes",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.ContainsRune(plain, '\x1b') {
+		t.Fatalf("expected rendered Write preview to not contain raw ESC: %q", plain)
+	}
+	if !strings.Contains(plain, `safe\x1b[31m literal`) || !strings.Contains(plain, "next") {
+		t.Fatalf("expected sanitized Write preview content, got:\n%s", plain)
 	}
 }
 

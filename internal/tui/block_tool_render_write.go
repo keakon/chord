@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// renderWriteCall renders a Write tool call result.
-// Shows the success result (line/byte count) without diff content.
+// renderWriteCall renders a Write tool call result with a syntax-highlighted
+// preview of the written file content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	blockStyle := ToolBlockStyle
 	toolCardBg := currentTheme.ToolCallBg
@@ -18,10 +18,12 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	if cardWidth < 10 {
 		cardWidth = 10
 	}
+	contentWidth, codeWidth := numberedToolPreviewWidths(cardWidth)
 
 	var filePath string
 	var parsed struct {
-		Path string `json:"path"`
+		Path    string `json:"path"`
+		Content string `json:"content"`
 	}
 	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
 		filePath = b.displayToolPath(parsed.Path)
@@ -49,6 +51,22 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		}
 		if summary != "" {
 			result = append(result, "  "+DimStyle.Render(summary))
+		}
+	}
+
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		rows, sourceSample := parsePlainContentPreviewLines(parsed.Content)
+		if len(rows) > 0 {
+			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
+				filePath:            filePath,
+				rows:                rows,
+				sourceSample:        sourceSample,
+				contentWidth:        contentWidth,
+				codeWidth:           codeWidth,
+				defaultVisibleLines: maxReadDefaultLines,
+				expanded:            b.ReadContentExpanded,
+				highlighter:         &b.diffHL,
+			})...)
 		}
 	}
 
