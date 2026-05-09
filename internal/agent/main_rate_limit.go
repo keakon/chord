@@ -155,14 +155,22 @@ func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 		// reset timestamp has been reached, fall back to provider/client selection
 		// so a fresh /wham/usage snapshot can be displayed.
 		if snap.Source != ratelimit.SnapshotSourceInlineKey || !ratelimit.SnapshotExpiredAt(snap, now) {
-			return snap
+			// If the inline snapshot is old enough, prefer client selection so a newer
+			// polled /wham/usage snapshot can surface even when the window hasn't reset.
+			const staleAfter = time.Minute
+			if snap.Source != ratelimit.SnapshotSourceInlineKey || snap.CapturedAt.IsZero() || now.Sub(snap.CapturedAt) < staleAfter {
+				return snap
+			}
 		}
 	}
 	client, ref := a.tuiFocusedLLMAndRef()
 	if client == nil {
-		return nil
+		return snap
 	}
-	return client.CurrentRateLimitSnapshotForRef(ref)
+	if out := client.CurrentRateLimitSnapshotForRef(ref); out != nil {
+		return out
+	}
+	return snap
 }
 
 // WakeCodexRateLimitPolling triggers an on-demand /wham/usage poll for the

@@ -1169,7 +1169,7 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		p.polledRateLimitAttemptedAt = make(map[int]time.Time)
 	}
 	now := time.Now()
-	const successTTL = 2 * time.Minute
+	const successTTL = time.Minute
 	const failureBackoff = 30 * time.Second
 	if p.polledRateLimitInFlight[credIdx] {
 		p.mu.Unlock()

@@ -57,10 +57,23 @@ func (c *Client) CurrentRateLimitSnapshotForRef(ref string) *ratelimit.KeyRateLi
 
 	now := time.Now()
 	inline := prov.CurrentInlineRateLimitSnapshot()
+	polled := prov.CurrentPolledRateLimitSnapshot()
+
+	// Inline snapshots are preferred when fresh because they are request/key scoped.
+	// However, when a Codex WebSocket stream stops emitting codex.rate_limits frames,
+	// the inline snapshot may stay non-expired for the whole window (e.g. 15m) while
+	// usage continues to change. In that case, prefer a newer /wham/usage (polled)
+	// snapshot once the inline data is stale.
 	if inline != nil && !ratelimit.SnapshotExpiredAt(inline, now) {
+		if polled != nil && prov.IsCodexOAuthTransport() {
+			const staleAfter = time.Minute
+			if !inline.CapturedAt.IsZero() && now.Sub(inline.CapturedAt) >= staleAfter && polled.CapturedAt.After(inline.CapturedAt) {
+				return polled
+			}
+		}
 		return inline
 	}
-	if polled := prov.CurrentPolledRateLimitSnapshot(); polled != nil {
+	if polled != nil {
 		return polled
 	}
 	if inline != nil {

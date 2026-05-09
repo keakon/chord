@@ -129,6 +129,49 @@ func TestCurrentRateLimitSnapshotForRefPrefersInlineOverPolled(t *testing.T) {
 	}
 }
 
+func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T) {
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	// Mark the single key as Codex OAuth so polled snapshots can be associated with it.
+	authCfg := config.AuthConfig{
+		"openai": {
+			{OAuth: &config.OAuthCredential{Access: "oauth-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		},
+	}
+	var authMu sync.Mutex
+	prov.SetOAuthRefresher(
+		config.OpenAIOAuthTokenURL,
+		config.OpenAIOAuthClientID,
+		"",
+		&authCfg,
+		&authMu,
+		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		"",
+	)
+	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+
+	inline := &ratelimit.KeyRateLimitSnapshot{
+		Provider:   "openai",
+		CapturedAt: time.Now().Add(-2 * time.Minute),
+		Primary:    &ratelimit.RateLimitWindow{UsedPct: 88},
+		Source:     ratelimit.SnapshotSourceInlineKey,
+	}
+	polled := &ratelimit.KeyRateLimitSnapshot{
+		Provider:   "openai",
+		CapturedAt: time.Now(),
+		Primary:    &ratelimit.RateLimitWindow{UsedPct: 42},
+		Source:     ratelimit.SnapshotSourcePolledUsage,
+	}
+	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, polled)
+	prov.UpdateKeySnapshot("oauth-token", inline)
+
+	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	if got := c.CurrentRateLimitSnapshotForRef("openai/gpt-5.5"); got != polled {
+		t.Fatalf("CurrentRateLimitSnapshotForRef() = %#v, want polled %#v when inline is stale", got, polled)
+	}
+}
+
 func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T) {
 	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
 	authCfg := config.AuthConfig{

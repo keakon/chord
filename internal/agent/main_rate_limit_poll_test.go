@@ -64,6 +64,60 @@ func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testin
 	}
 }
 
+func TestCurrentRateLimitSnapshotPrefersPolledWhenInlineStale(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
+		"openai": {Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex},
+	}}
+	a.SetProviderModelRef("openai/gpt-5.5")
+
+	prov := llm.NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	authCfg := config.AuthConfig{
+		"openai": {
+			{OAuth: &config.OAuthCredential{Access: "oauth-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		},
+	}
+	var authMu sync.Mutex
+	prov.SetOAuthRefresher(
+		config.OpenAIOAuthTokenURL,
+		config.OpenAIOAuthClientID,
+		"",
+		&authCfg,
+		&authMu,
+		map[string]llm.OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		"",
+	)
+	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+
+	polled := &ratelimit.KeyRateLimitSnapshot{
+		Provider:   "openai",
+		CapturedAt: time.Now(),
+		Primary:    &ratelimit.RateLimitWindow{UsedPct: 33},
+		Source:     ratelimit.SnapshotSourcePolledUsage,
+	}
+	inline := &ratelimit.KeyRateLimitSnapshot{
+		Provider:   "openai",
+		CapturedAt: time.Now().Add(-2 * time.Minute),
+		Primary:    &ratelimit.RateLimitWindow{UsedPct: 77},
+		Source:     ratelimit.SnapshotSourceInlineKey,
+	}
+	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, polled)
+	prov.UpdateKeySnapshot("oauth-token", inline)
+
+	client := llm.NewClient(prov, stubProvider{}, "gpt-5.5", 1024, "")
+	a.SwapLLMClient(client, "gpt-5.5", 128000)
+
+	// Agent cached inline snapshot should be treated as stale and fall back to the
+	// newer polled /wham/usage snapshot.
+	a.updateRateLimitSnapshot(inline)
+	if got := a.CurrentRateLimitSnapshot(); got != polled {
+		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want polled %#v when inline is stale", got, polled)
+	}
+}
+
 func TestPolledRateLimitUpdateEmitsEventViaCallback(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

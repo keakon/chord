@@ -418,6 +418,27 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		outputItems    []responsesInputItem
 		gotData        bool
 	)
+
+	// Codex WS streams do not reliably emit codex.rate_limits frames for long periods.
+	// When we see continued activity but no usage events for a while, trigger a
+	// best-effort /wham/usage poll so the UI can refresh.
+	lastUsageEventAt := time.Now()
+	var lastUsageProbeAt time.Time
+	maybeWakeUsagePoll := func(now time.Time) {
+		if r.provider == nil {
+			return
+		}
+		const staleAfter = time.Minute
+		if now.Sub(lastUsageEventAt) < staleAfter {
+			return
+		}
+		if !lastUsageProbeAt.IsZero() && now.Sub(lastUsageProbeAt) < staleAfter {
+			return
+		}
+		lastUsageProbeAt = now
+		r.provider.WakeCodexRateLimitPolling()
+	}
+
 	flushContent := func() {
 		if content.Len() == 0 {
 			resp.Content = ""
@@ -454,12 +475,14 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		if err := json.Unmarshal(msg, &hdr); err != nil {
 			return nil, nil, fmt.Errorf("%w: %v", errCodexWSInvalidEventJSON, err)
 		}
+		now := time.Now()
 		if hdr.Type == "error" {
 			if apiErr, errHdr := parseCodexWebSocketErrorJSON(msg); apiErr != nil {
 				if len(errHdr) > 0 {
 					if snap := ratelimit.ParseCodexHeaders(errHdr); snap != nil && r.provider != nil {
 						snap.Provider = r.provider.Name()
 						r.provider.UpdateKeySnapshot(apiKey, snap)
+						lastUsageEventAt = now
 						if cb != nil {
 							cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
 						}
@@ -482,6 +505,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 				continue
 			}
 			snap.Provider = providerName
+			lastUsageEventAt = now
 			if r.provider != nil {
 				r.provider.UpdateKeySnapshot(apiKey, snap)
 			}
@@ -527,6 +551,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		if done {
 			return outResp, outItems, nil
 		}
+		maybeWakeUsagePoll(now)
 	}
 }
 
