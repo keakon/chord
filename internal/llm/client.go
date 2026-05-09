@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
@@ -50,6 +52,9 @@ type Client struct {
 	fallbackModels  []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
 	poolCursor      int             // sticky cursor over the effective model pool; success pins, failure advances
 	lastCallStatus  CallStatus
+
+	routingGeneration atomic.Uint64
+	routingChangedCh  chan struct{}
 }
 
 // CallStatus describes the effective model-routing outcome of the most recent
@@ -77,17 +82,90 @@ func NewClient(
 	}
 
 	return &Client{
-		provider:     providerCfg,
-		providerImpl: providerImpl,
-		modelID:      modelID,
-		maxTokens:    maxTokens,
-		tuning:       tuning,
-		systemPrompt: systemPrompt,
+		provider:         providerCfg,
+		providerImpl:     providerImpl,
+		modelID:          modelID,
+		maxTokens:        maxTokens,
+		tuning:           tuning,
+		systemPrompt:     systemPrompt,
+		routingChangedCh: make(chan struct{}),
 		lastCallStatus: CallStatus{
 			SelectedModelRef: providerModelRef(providerCfg, modelID),
 			RunningModelRef:  providerModelRef(providerCfg, modelID),
 		},
 	}
+}
+
+// RoutingInvalidatedError indicates the current retry/fallback plan became stale
+// because model routing changed while a request was in progress.
+type RoutingInvalidatedError struct {
+	StartedGeneration uint64
+	CurrentGeneration uint64
+}
+
+func (e *RoutingInvalidatedError) Error() string {
+	return fmt.Sprintf("llm routing invalidated: started_generation=%d current_generation=%d", e.StartedGeneration, e.CurrentGeneration)
+}
+
+// IsRoutingInvalidated reports whether err means the request should abandon the
+// current retry/fallback plan and start a fresh request using the latest routing.
+func IsRoutingInvalidated(err error) bool {
+	var target *RoutingInvalidatedError
+	return errors.As(err, &target)
+}
+
+// InvalidateRouting marks the current retry/fallback plan stale for all future
+// retry boundaries and resets provider-specific incremental transport chains.
+func (c *Client) InvalidateRouting(reason string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	providers := c.providersLocked()
+	prevCh := c.routingChangedCh
+	c.routingGeneration.Add(1)
+	c.routingChangedCh = make(chan struct{})
+	c.mu.Unlock()
+	if prevCh != nil {
+		close(prevCh)
+	}
+	for _, p := range providers {
+		if invalidator, ok := p.(routingInvalidator); ok {
+			invalidator.InvalidateRouting(reason)
+		}
+	}
+}
+
+func (c *Client) routingSnapshot() (generation uint64, changed <-chan struct{}) {
+	if c == nil {
+		return 0, nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	changed = c.routingChangedCh
+	generation = c.routingGeneration.Load()
+	return
+}
+
+func (c *Client) routingInvalidated(startGeneration uint64) (uint64, bool) {
+	if c == nil {
+		return 0, false
+	}
+	current := c.routingGeneration.Load()
+	return current, current != startGeneration
+}
+
+func (c *Client) providersLocked() []Provider {
+	providers := make([]Provider, 0, 1+len(c.fallbackModels))
+	if c.providerImpl != nil {
+		providers = append(providers, c.providerImpl)
+	}
+	for _, fb := range c.fallbackModels {
+		if fb.ProviderImpl != nil {
+			providers = append(providers, fb.ProviderImpl)
+		}
+	}
+	return providers
 }
 
 // SetSystemPrompt updates the system prompt used for subsequent completions.
@@ -332,6 +410,8 @@ func (c *Client) CompleteStream(
 		}
 	}
 	wireMessages := messages
+	routingGeneration := c.routingGeneration.Load()
+	routingChangedCh := c.routingChangedCh
 	c.mu.Unlock()
 
 	status := CallStatus{
@@ -347,6 +427,7 @@ func (c *Client) CompleteStream(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
 		wireMessages, tools, cb, true, orderedFallbacks, 0, &status,
+		routingGeneration, routingChangedCh,
 	)
 
 	c.mu.Lock()

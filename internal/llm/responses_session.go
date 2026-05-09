@@ -9,6 +9,19 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// InvalidateRouting drops any incremental WebSocket chain so future requests
+// cannot reuse transport state from a stale routing plan.
+func (r *ResponsesProvider) InvalidateRouting(reason string) {
+	if r == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "routing_changed"
+	}
+	r.resetCodexWebSocketChain(reason)
+}
+
 // SetSessionID sets the persistent session identifier used as prompt_cache_key
 // for OpenAI's prompt caching. When the session changes, any existing Codex
 // WebSocket chain is dropped so incremental reuse cannot cross session bounds.

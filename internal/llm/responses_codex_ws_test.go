@@ -70,6 +70,23 @@ func TestResetCodexWebSocketChainLogsChainResetWithoutConnectionClosed(t *testin
 	}
 }
 
+func TestInvalidateRoutingResetsCodexWebSocketChain(t *testing.T) {
+	r := &ResponsesProvider{}
+	r.codexWSLastKey = "k1"
+	r.codexWSLastModel = "m1"
+	r.codexWSLastRespID = "resp-1"
+	r.codexWSLastInpLen = 3
+	r.codexWSLastInpSig = "sig"
+	r.codexWSLastReqSig = "reqsig"
+	r.codexWSPromptCacheKey = "prompt"
+
+	r.InvalidateRouting("model_pool_changed")
+
+	if r.codexWSLastKey != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
+		t.Fatalf("routing invalidation did not fully clear websocket chain: %+v", r)
+	}
+}
+
 func TestCodexWSCanUseIncrementalLockedRequiresMatchingRequestSignature(t *testing.T) {
 	r := &ResponsesProvider{
 		codexWSConn:       &websocket.Conn{},

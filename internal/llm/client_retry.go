@@ -147,12 +147,17 @@ func (c *Client) completeStreamWithRetry(
 	fallbackModels []FallbackModel,
 	maxAttempts int,
 	status *CallStatus,
+	startRoutingGeneration uint64,
+	routingChangedCh <-chan struct{},
 ) (*message.Response, error) {
 	var lastErr error
 	var pendingRoundWait time.Duration
 	abortIfCancelled := func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("LLM request aborted: %w", err)
+		}
+		if currentGeneration, invalidated := c.routingInvalidated(startRoutingGeneration); invalidated {
+			return &RoutingInvalidatedError{StartedGeneration: startRoutingGeneration, CurrentGeneration: currentGeneration}
 		}
 		return nil
 	}
@@ -198,6 +203,10 @@ func (c *Client) completeStreamWithRetry(
 			if delay > 0 {
 				select {
 				case <-time.After(delay):
+				case <-routingChangedCh:
+					if err := abortIfCancelled(); err != nil {
+						return nil, err
+					}
 				case <-ctx.Done():
 					return nil, fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
 				}
@@ -463,9 +472,10 @@ func (c *Client) completeStreamWithRetry(
 					break // success: exit key loop
 				}
 
-				// Turn cancelled (e.g. Ctrl+C): do not rotate keys, advance models, or backoff.
-				if ctx.Err() != nil {
-					return nil, fmt.Errorf("LLM request aborted: %w", ctx.Err())
+				// Turn cancelled (e.g. Ctrl+C) or routing changed after a failed
+				// attempt: do not rotate keys, advance models, or backoff.
+				if err := abortIfCancelled(); err != nil {
+					return nil, err
 				}
 
 				lastErr = err

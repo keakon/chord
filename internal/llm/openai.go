@@ -73,6 +73,13 @@ func (o *OpenAIProvider) SetDumpWriter(w *DumpWriter) {
 	}
 }
 
+// InvalidateRouting drops any provider-side incremental routing state.
+func (o *OpenAIProvider) InvalidateRouting(reason string) {
+	if o.responsesProvider != nil {
+		o.responsesProvider.InvalidateRouting(reason)
+	}
+}
+
 // SetSessionID sets the persistent session identifier for prompt caching.
 func (o *OpenAIProvider) SetSessionID(sid string) {
 	if o.responsesProvider != nil {

@@ -138,6 +138,44 @@ func (p *recordingTuningProvider) CompleteStream(
 	return &message.Response{Content: "ok"}, nil
 }
 
+func callCompleteStreamWithRetryForTest(
+	c *Client,
+	ctx context.Context,
+	startProvider *ProviderConfig,
+	startImpl Provider,
+	startModelID string,
+	startMaxTokens int,
+	startTuning RequestTuning,
+	startVariant string,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	cb StreamCallback,
+	fallbackEnabled bool,
+	fallbackModels []FallbackModel,
+	maxAttempts int,
+	status *CallStatus,
+) (*message.Response, error) {
+	generation, changedCh := c.routingSnapshot()
+	return c.completeStreamWithRetry(
+		ctx,
+		startProvider,
+		startImpl,
+		startModelID,
+		startMaxTokens,
+		startTuning,
+		startVariant,
+		messages,
+		tools,
+		cb,
+		fallbackEnabled,
+		fallbackModels,
+		maxAttempts,
+		status,
+		generation,
+		changedCh,
+	)
+}
+
 func TestVisibleStreamTrackerMarksToolUseAsStreaming(t *testing.T) {
 	var got []message.StreamDelta
 	tracker := &visibleStreamTracker{
@@ -694,7 +732,8 @@ func TestCompleteStreamWithRetryDoesNotResetRetryCountAfterVisibleOutputOnly(t *
 	}
 	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
 
-	resp, err := c.completeStreamWithRetry(
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
 		context.Background(),
 		primaryCfg,
 		impl,
@@ -730,7 +769,8 @@ func TestCompleteStreamWithRetryHonorsExplicitMaxAttempts(t *testing.T) {
 	}
 	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
 
-	_, err := c.completeStreamWithRetry(
+	_, err := callCompleteStreamWithRetryForTest(
+		c,
 		context.Background(),
 		cfg,
 		impl,
@@ -832,7 +872,8 @@ func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 	}
 	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
 
-	resp, err := c.completeStreamWithRetry(
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
 		context.Background(),
 		primaryCfg,
 		impl,
@@ -877,7 +918,8 @@ func TestCompleteStreamWithRetryPrefersShortestRoundWaitAcrossModels(t *testing.
 	}})
 
 	start := time.Now()
-	resp, err := c.completeStreamWithRetry(
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
 		context.Background(),
 		primaryCfg,
 		implPrimary,
@@ -2492,7 +2534,8 @@ func TestCompleteStreamFallbackRunningModelRefIncludesFallbackVariant(t *testing
 	}})
 
 	st := &CallStatus{}
-	resp, err := c.completeStreamWithRetry(
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
 		context.Background(),
 		primaryCfg,
 		implPrimary,
@@ -2516,6 +2559,56 @@ func TestCompleteStreamFallbackRunningModelRefIncludesFallbackVariant(t *testing
 	}
 	if st.RunningModelRef != "fallback-prov/fallback-model@high" {
 		t.Fatalf("RunningModelRef = %q, want fallback-prov/fallback-model@high", st.RunningModelRef)
+	}
+}
+
+func TestCompleteStreamWithRetryStopsOnRoutingInvalidationDuringBackoff(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{{err: &APIError{StatusCode: 500, Message: "retry later"}}}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+		resultCh <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	c.InvalidateRouting("model_pool_changed")
+
+	select {
+	case err := <-resultCh:
+		if !IsRoutingInvalidated(err) {
+			t.Fatalf("CompleteStream err = %v, want routing invalidated", err)
+		}
+		if got := impl.CallCount(); got != 1 {
+			t.Fatalf("provider calls = %d, want 1 after invalidation aborts retry chain", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CompleteStream to stop after routing invalidation")
+	}
+}
+
+func TestCompleteStreamReturnsSuccessWhenRoutingChangesDuringSuccessfulAttempt(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{{
+		streams: []message.StreamDelta{{Type: "text", Text: "visible"}},
+		resp:    &message.Response{Content: "ok"},
+	}}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == "text" {
+			c.InvalidateRouting("model_pool_changed")
+		}
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("unexpected response: %#v", resp)
 	}
 }
 

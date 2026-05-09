@@ -363,9 +363,13 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	prompt := s.buildSystemPrompt()
 	client.SetSystemPrompt(prompt)
 	s.llmMu.Lock()
+	oldClient := s.llmClient
 	s.llmClient = client
 	s.modelName = modelName
 	s.llmMu.Unlock()
+	if oldClient != nil && oldClient != client {
+		oldClient.InvalidateRouting("model_client_swapped")
+	}
 	s.ctxMgr.SetMaxTokens(contextLimit)
 	s.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: prompt})
 	providerRef := client.PrimaryModelRef()

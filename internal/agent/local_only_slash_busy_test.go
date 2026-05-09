@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -110,6 +112,76 @@ func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *te
 	}
 	if got := a.PendingUserMessageCount(); got != 1 {
 		t.Fatalf("PendingUserMessageCount = %d, want queued draft preserved until request boundary", got)
+	}
+}
+
+func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+
+	oldCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	oldProvider := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 500, Message: "old pool failed"}}}}
+	oldClient := llm.NewClient(oldCfg, oldProvider, "model-a", 1024, "")
+	a.swapLLMClientWithRef(oldClient, "model-a", 8192, "provider/model-a")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := oldClient.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+		errCh <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if err := a.switchModel("provider/model-b", false); err != nil {
+		t.Fatalf("switchModel returned error: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if !llm.IsRoutingInvalidated(err) {
+			t.Fatalf("old CompleteStream err = %v, want routing invalidated", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for old client retry plan to be invalidated")
+	}
+}
+
+func TestResumeTurnAfterRoutingInvalidationConsumesQueuedUserDraft(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	a.ApplyInitialModel("provider/model-a")
+	drainAgentEvents(a.Events())
+
+	a.newTurn()
+	turn := a.turn
+	if turn == nil {
+		t.Fatal("expected active turn")
+	}
+	a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	if a.PendingUserMessageCount() != 1 {
+		t.Fatalf("PendingUserMessageCount before resume = %d, want 1", a.PendingUserMessageCount())
+	}
+	if ok := a.resumeTurnAfterRoutingInvalidation(turn.ID); !ok {
+		t.Fatal("resumeTurnAfterRoutingInvalidation returned false, want true")
+	}
+	if a.turn != turn {
+		t.Fatal("resumeTurnAfterRoutingInvalidation should keep the active turn")
+	}
+	if got := a.PendingUserMessageCount(); got != 0 {
+		t.Fatalf("PendingUserMessageCount after resume = %d, want 0", got)
+	}
+	msgs := a.ctxMgr.Snapshot()
+	if len(msgs) == 0 || msgs[len(msgs)-1].Role != "user" || msgs[len(msgs)-1].Content != "queued message" {
+		t.Fatalf("last ctx message = %#v, want queued user message appended", msgs)
 	}
 }
 

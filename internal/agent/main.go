@@ -1496,6 +1496,17 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	a.setIdleAndDrainPending()
 }
 
+func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
+	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
+		return false
+	}
+	a.processPendingUserMessagesBeforeLLMInTurn()
+	a.syncBugTriagePromptFromSnapshot()
+	turnCtx := a.turn.Ctx
+	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
+	return true
+}
+
 // handleAgentError emits the error to the TUI and logs it. An IdleEvent is
 // also sent so the TUI knows the agent is ready for new input.
 //
@@ -1517,6 +1528,13 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		if a.turn != nil && evt.TurnID != 0 && evt.TurnID != a.turn.ID {
 			log.Debugf("discarding stale error event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 			return
+		}
+
+		if llm.IsRoutingInvalidated(err) {
+			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
+			if a.resumeTurnAfterRoutingInvalidation(evt.TurnID) {
+				return
+			}
 		}
 
 		log.Errorf("agent error error=%v turn_id=%v instance=%v", err, evt.TurnID, a.instanceID)

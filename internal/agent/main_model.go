@@ -105,6 +105,7 @@ func (a *MainAgent) SwapLLMClient(newClient *llm.Client, modelName string, conte
 // also atomically updates providerModelRef when non-empty.
 func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string, contextLimit int, providerModelRef string) {
 	a.llmMu.Lock()
+	oldClient := a.llmClient
 	a.llmClient = newClient
 	a.modelName = modelName
 	if providerModelRef != "" {
@@ -115,6 +116,9 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	}
 	a.installedSysPrompt = ""
 	a.llmMu.Unlock()
+	if oldClient != nil && oldClient != newClient {
+		oldClient.InvalidateRouting("model_client_swapped")
+	}
 	a.ctxMgr.SetMaxTokens(contextLimit)
 
 	// Wire the polled-rate-limit callback so that background /wham/usage poll
@@ -299,6 +303,34 @@ func (a *MainAgent) ModelsStatusText() string {
 	return sb.String()
 }
 
+func (a *MainAgent) notifyMainRoutingChanged(reason string) {
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	if client != nil {
+		client.InvalidateRouting(reason)
+	}
+}
+
+func (a *MainAgent) notifySubAgentRoutingChanged(agentName, reason string) {
+	a.mu.RLock()
+	var targets []*SubAgent
+	for _, sub := range a.subAgents {
+		if sub != nil && sub.agentDefName == agentName {
+			targets = append(targets, sub)
+		}
+	}
+	a.mu.RUnlock()
+	for _, sub := range targets {
+		sub.llmMu.RLock()
+		client := sub.llmClient
+		sub.llmMu.RUnlock()
+		if client != nil {
+			client.InvalidateRouting(reason)
+		}
+	}
+}
+
 func (a *MainAgent) handleModelsStatus() {
 	a.emitToTUI(InfoEvent{Message: a.ModelsStatusText()})
 }
@@ -411,6 +443,7 @@ func (a *MainAgent) setCurrentModelPool(pool string, emitToast bool) error {
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 	}
+	a.notifyMainRoutingChanged("model_pool_changed")
 	a.saveModelPoolState()
 
 	if emitToast {
@@ -490,6 +523,7 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 			}
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
+		a.notifyMainRoutingChanged("agent_model_pool_changed")
 	} else if err := a.switchActiveSubAgentsForPoolIfNeeded(agentName, cfg, pool); err != nil {
 		if hadOverride {
 			a.modelPoolPolicy.SetAgentOverride(agentName, prev)
@@ -497,6 +531,8 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 			a.modelPoolPolicy.ClearAgentOverride(agentName)
 		}
 		return fmt.Errorf("/models: switch model: %w", err)
+	} else {
+		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
 	}
 	a.saveModelPoolState()
 

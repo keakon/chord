@@ -6,6 +6,12 @@ type sessionIDSetter interface {
 	SetSessionID(sid string)
 }
 
+// routingInvalidator is implemented by provider types that need to drop
+// transport-level incremental state when routing changes mid-request.
+type routingInvalidator interface {
+	InvalidateRouting(reason string)
+}
+
 // SetSessionID propagates the persistent session identifier to providers that
 // support it (e.g. ResponsesProvider for OpenAI prompt caching).
 func (c *Client) SetSessionID(sid string) {
