@@ -51,6 +51,9 @@ permission:
 常见改写方式：
 
 - 用 `git commit -m "message"` 或 `git commit -F file` 代替会打开编辑器的 `git commit`
+- amend 时如果要保留现有提交信息，使用明确不会打开编辑器的形式，如 `git commit --amend --no-edit` 或 `git commit --amend -C HEAD`
+- 避免在 `Bash` / `Spawn` 中运行交互式 Git patch 流程（`git add -p`、`git commit -p`、`git stash -p`）；改为显式指定 pathspec，或在真实终端中手动执行
+- 容器命令不要分配 TTY（如 `docker exec -it`、`docker run -t`、`podman run -t`、`kubectl exec -it`），除非你是在真实终端中手动运行
 - 用 `npm init -y` / `--yes`，或显式提供所有必要选项
 - 需要 sudo 非交互失败时用 `sudo -n`，避免等待密码提示
 - 命令确实支持非交互 stdin 时，用 pipe 或 here-doc 显式提供输入

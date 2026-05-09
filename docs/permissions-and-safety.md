@@ -51,6 +51,9 @@ This means: allow most tools by default; disable `Handoff` and `Delegate`; requi
 Common rewrites:
 
 - Use `git commit -m "message"` or `git commit -F file` instead of editor-driven `git commit`
+- For amend flows that should preserve the existing message, use explicit non-editor forms such as `git commit --amend --no-edit` or `git commit --amend -C HEAD`
+- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `Bash` / `Spawn`; stage explicit pathspecs or run them manually
+- Remove TTY allocation flags from container commands (`docker exec -it`, `docker run -t`, `podman run -t`, `kubectl exec -it`) unless you are running them manually in a real terminal
 - Use `npm init -y` / `--yes` or provide all required options explicitly
 - Use `sudo -n` when you want sudo to fail non-interactively instead of prompting
 - Pipe input or use a here-doc when a command truly accepts non-interactive stdin

@@ -73,6 +73,10 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Run this manually in a terminal or use a non-interactive authentication method.")
 	case "git":
 		return detectInteractiveGit(tokens)
+	case "docker", "podman":
+		return detectInteractiveContainerCommand(name, tokens)
+	case "kubectl":
+		return detectInteractiveKubectl(tokens)
 	case "gh":
 		if len(tokens) >= 3 && tokens[1] == "auth" && tokens[2] == "login" {
 			return interactiveFinding("gh auth login", "`gh auth login` starts an authentication wizard", "Run it manually in a terminal, or provide authentication non-interactively via environment/token configuration.")
@@ -108,31 +112,160 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 }
 
 func detectInteractiveGit(tokens []string) *InteractiveCommandFinding {
-	if len(tokens) < 2 {
+	sub, args, ok := gitSubcommand(tokens)
+	if !ok {
 		return nil
 	}
-	sub := tokens[1]
 	switch sub {
 	case "commit":
-		if !gitCommitHasMessage(tokens[2:]) {
-			return interactiveFinding("git commit", "`git commit` without -m/-F opens an editor", "Use `git commit -m <message>` or `git commit -F <file>`.")
+		if hasOption(args, "-p", "--patch") || hasOption(args, "", "--interactive") {
+			return interactiveFinding("git commit --patch", "`git commit --patch` is an interactive patch workflow", "Run it manually in a terminal or commit explicit pathspecs/options non-interactively.")
+		}
+		if !gitCommitAvoidsEditor(args) {
+			return interactiveFinding("git commit", "`git commit` without an explicit message or no-edit/reuse-message option opens an editor", "Use `git commit -m <message>`, `git commit -F <file>`, `git commit --amend --no-edit`, or `git commit -C <commit>`.")
 		}
 	case "rebase":
-		if hasOption(tokens[2:], "-i", "--interactive") {
+		if hasOption(args, "-i", "--interactive") || hasOption(args, "", "--edit-todo") {
 			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Run it manually in a terminal, or use non-interactive git commands.")
 		}
-	case "add", "checkout", "restore", "reset":
-		if hasOption(tokens[2:], "-p", "--patch") {
+	case "add", "checkout", "restore", "reset", "stash":
+		if hasOption(args, "-p", "--patch") {
 			return interactiveFinding("git "+sub+" -p", fmt.Sprintf("`git %s -p` is an interactive patch workflow", sub), "Run it manually in a terminal or use non-interactive pathspecs/options.")
 		}
+		if sub == "add" && hasOption(args, "-i", "--interactive") {
+			return interactiveFinding("git add -i", "`git add -i` is interactive", "Run it manually in a terminal or use non-interactive pathspecs/options.")
+		}
 	case "clean":
-		if hasOption(tokens[2:], "-i", "--interactive") {
+		if hasOption(args, "-i", "--interactive") {
 			return interactiveFinding("git clean -i", "`git clean -i` is interactive", "Run it manually in a terminal or use explicit non-interactive clean options.")
 		}
 	case "difftool", "mergetool":
 		return interactiveFinding("git "+sub, fmt.Sprintf("`git %s` launches an interactive tool", sub), "Run it manually in a terminal or use plain git diff/merge commands.")
 	}
 	return nil
+}
+
+func detectInteractiveContainerCommand(name string, tokens []string) *InteractiveCommandFinding {
+	sub, args, ok := commandSubcommand(tokens, containerGlobalOptionsWithValue)
+	if !ok {
+		return nil
+	}
+	switch sub {
+	case "exec", "run", "start":
+		if hasTTYOptionBeforeContainerCommand(args) {
+			return interactiveFinding(name+" "+sub+" -t", fmt.Sprintf("`%s %s -t` allocates a TTY", name, sub), "Remove -t/--tty for non-interactive execution, or run the command manually in a terminal.")
+		}
+	case "login":
+		return interactiveFinding(name+" login", fmt.Sprintf("`%s login` may prompt for credentials", name), "Use non-interactive credential input such as --password-stdin where supported, or run it manually in a terminal.")
+	}
+	return nil
+}
+
+func detectInteractiveKubectl(tokens []string) *InteractiveCommandFinding {
+	sub, args, ok := commandSubcommand(tokens, kubectlGlobalOptionsWithValue)
+	if !ok {
+		return nil
+	}
+	if (sub == "exec" || sub == "run" || sub == "attach") && hasTTYOption(args) {
+		return interactiveFinding("kubectl "+sub+" -t", fmt.Sprintf("`kubectl %s -t` allocates a TTY", sub), "Remove -t/--tty for non-interactive execution, or run the command manually in a terminal.")
+	}
+	return nil
+}
+func gitSubcommand(tokens []string) (string, []string, bool) {
+	return commandSubcommand(tokens, gitGlobalOptionsWithValue)
+}
+
+func commandSubcommand(tokens []string, optionsWithValue map[string]bool) (string, []string, bool) {
+	for i := 1; i < len(tokens); i++ {
+		arg := tokens[i]
+		if arg == "--" {
+			if i+1 < len(tokens) {
+				return tokens[i+1], tokens[i+2:], true
+			}
+			return "", nil, false
+		}
+		if optionsWithValue[arg] {
+			i++
+			continue
+		}
+		if optionHasInlineValue(arg, optionsWithValue) {
+			continue
+		}
+		if strings.HasPrefix(arg, "--") {
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return arg, tokens[i+1:], true
+	}
+	return "", nil, false
+}
+
+var gitGlobalOptionsWithValue = map[string]bool{
+	"-C":          true,
+	"-c":          true,
+	"--exec-path": true,
+	"--git-dir":   true,
+	"--work-tree": true,
+	"--namespace": true,
+}
+
+var containerGlobalOptionsWithValue = map[string]bool{
+	"-c":           true,
+	"--config":     true,
+	"--context":    true,
+	"-H":           true,
+	"--host":       true,
+	"--log-level":  true,
+	"--tlscacert":  true,
+	"--tlscert":    true,
+	"--tlskey":     true,
+	"--connection": true,
+	"--url":        true,
+	"--identity":   true,
+}
+
+var kubectlGlobalOptionsWithValue = map[string]bool{
+	"--as":                    true,
+	"--as-group":              true,
+	"--as-uid":                true,
+	"--cache-dir":             true,
+	"--certificate-authority": true,
+	"--client-certificate":    true,
+	"--client-key":            true,
+	"--cluster":               true,
+	"--context":               true,
+	"--kubeconfig":            true,
+	"--log-flush-frequency":   true,
+	"--match-server-version":  true,
+	"-n":                      true,
+	"--namespace":             true,
+	"--password":              true,
+	"--profile":               true,
+	"--profile-output":        true,
+	"--request-timeout":       true,
+	"-s":                      true,
+	"--server":                true,
+	"--tls-server-name":       true,
+	"--token":                 true,
+	"--user":                  true,
+	"--username":              true,
+}
+
+func optionHasInlineValue(arg string, optionsWithValue map[string]bool) bool {
+	for opt := range optionsWithValue {
+		if strings.HasPrefix(opt, "--") {
+			if strings.HasPrefix(arg, opt+"=") {
+				return true
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, opt) && len(arg) > len(opt) {
+			return true
+		}
+	}
+	return false
 }
 
 func interactiveFinding(command, reason, hint string) *InteractiveCommandFinding {
@@ -168,13 +301,13 @@ func containsToken(tokens []string, want string) bool {
 	return false
 }
 
-func gitCommitHasMessage(args []string) bool {
+func gitCommitAvoidsEditor(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
 			break
 		}
-		if arg == "-m" || arg == "-F" || arg == "--message" || arg == "--file" {
+		if arg == "-m" || arg == "-F" || arg == "--message" || arg == "--file" || arg == "-C" || arg == "--reuse-message" || arg == "--no-edit" {
 			return true
 		}
 		if strings.HasPrefix(arg, "-m") && len(arg) > 2 {
@@ -183,11 +316,82 @@ func gitCommitHasMessage(args []string) bool {
 		if strings.HasPrefix(arg, "-F") && len(arg) > 2 {
 			return true
 		}
-		if strings.HasPrefix(arg, "--message=") || strings.HasPrefix(arg, "--file=") {
+		if strings.HasPrefix(arg, "-C") && len(arg) > 2 {
+			return true
+		}
+		if strings.HasPrefix(arg, "--message=") || strings.HasPrefix(arg, "--file=") || strings.HasPrefix(arg, "--reuse-message=") {
 			return true
 		}
 	}
 	return false
+}
+
+func hasTTYOptionBeforeContainerCommand(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return false
+		}
+		if isTTYOption(arg) {
+			return true
+		}
+		if strings.HasPrefix(arg, "-") {
+			if containerOptionConsumesValue(arg) && !strings.Contains(arg, "=") {
+				i++
+			}
+			continue
+		}
+		return false
+	}
+	return false
+}
+
+func hasTTYOption(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if isTTYOption(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTTYOption(arg string) bool {
+	if arg == "--tty" || strings.HasPrefix(arg, "--tty=") {
+		return true
+	}
+	if arg == "--interactive" || strings.HasPrefix(arg, "--interactive=") {
+		return false
+	}
+	if strings.HasPrefix(arg, "--") {
+		return false
+	}
+	return strings.HasPrefix(arg, "-") && strings.Contains(arg[1:], "t")
+}
+
+func containerOptionConsumesValue(arg string) bool {
+	return arg == "--add-host" || arg == "--annotation" || arg == "--attach" || arg == "-a" ||
+		arg == "--blkio-weight" || arg == "--blkio-weight-device" || arg == "--cap-add" || arg == "--cap-drop" ||
+		arg == "--cgroup-parent" || arg == "--cidfile" || arg == "--cpu-period" || arg == "--cpu-quota" ||
+		arg == "--cpuset-cpus" || arg == "--cpuset-mems" || arg == "--cpu-shares" || arg == "--detach-keys" ||
+		arg == "--device" || arg == "--device-cgroup-rule" || arg == "--device-read-bps" || arg == "--device-read-iops" ||
+		arg == "--device-write-bps" || arg == "--device-write-iops" || arg == "--dns" || arg == "--dns-option" ||
+		arg == "--dns-search" || arg == "--entrypoint" || arg == "--env" || arg == "-e" || arg == "--env-file" ||
+		arg == "--expose" || arg == "--gpus" || arg == "--group-add" || arg == "--health-cmd" || arg == "--health-interval" ||
+		arg == "--health-retries" || arg == "--health-start-interval" || arg == "--health-start-period" || arg == "--health-timeout" ||
+		arg == "--hostname" || arg == "-h" || arg == "--init-path" || arg == "--io-maxbandwidth" || arg == "--io-maxiops" ||
+		arg == "--ip" || arg == "--ip6" || arg == "--ipc" || arg == "--isolation" || arg == "--kernel-memory" ||
+		arg == "--label" || arg == "-l" || arg == "--label-file" || arg == "--link" || arg == "--link-local-ip" ||
+		arg == "--log-driver" || arg == "--log-opt" || arg == "--mac-address" || arg == "--memory" || arg == "-m" ||
+		arg == "--memory-reservation" || arg == "--memory-swap" || arg == "--memory-swappiness" || arg == "--mount" ||
+		arg == "--name" || arg == "--network" || arg == "--network-alias" || arg == "--oom-score-adj" ||
+		arg == "--pid" || arg == "--platform" || arg == "--publish" || arg == "-p" || arg == "--pull" || arg == "--restart" ||
+		arg == "--runtime" || arg == "--security-opt" || arg == "--shm-size" || arg == "--stop-signal" ||
+		arg == "--stop-timeout" || arg == "--storage-opt" || arg == "--sysctl" || arg == "--tmpfs" || arg == "--ulimit" ||
+		arg == "--user" || arg == "-u" || arg == "--userns" || arg == "--uts" || arg == "--volume" || arg == "-v" ||
+		arg == "--volumes-from" || arg == "--workdir" || arg == "-w"
 }
 
 func hasYesFlag(args []string) bool {
@@ -214,7 +418,12 @@ func hasOption(args []string, short, long string) bool {
 func splitShellCommandTokens(tokens []string) [][]string {
 	var commands [][]string
 	var current []string
+	skipNext := false
 	for _, tok := range tokens {
+		if skipNext {
+			skipNext = false
+			continue
+		}
 		switch tok {
 		case "|", "&&", "||", ";", "&", "(", ")":
 			if len(current) > 0 {
@@ -224,14 +433,15 @@ func splitShellCommandTokens(tokens []string) [][]string {
 		case "<", ">", ">>", "2>", "2>>", "&>", "&>>", "<<<", "<<":
 			if len(current) > 0 {
 				commands = append(commands, current)
-				current = nil
 			}
+			current = nil
+			skipNext = true
 		default:
 			if isRedirectionToken(tok) {
 				if len(current) > 0 {
 					commands = append(commands, current)
-					current = nil
 				}
+				current = nil
 				continue
 			}
 			current = append(current, tok)
