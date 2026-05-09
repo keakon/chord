@@ -439,22 +439,32 @@ func codexWindowResetMillis(w *ratelimit.RateLimitWindow, now time.Time) int64 {
 	return w.ResetsAt.UnixMilli()
 }
 
-func codexSoftCooldownUntilFromSnapshot(snap *ratelimit.KeyRateLimitSnapshot, now time.Time) time.Time {
-	if snap == nil {
+func (p *ProviderConfig) codexSoftCooldownUntilLocked(now time.Time, ks *KeyState) time.Time {
+	if ks == nil {
 		return time.Time{}
 	}
-	var until time.Time
-	consider := func(w *ratelimit.RateLimitWindow) {
-		if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) {
-			return
-		}
-		if until.IsZero() || w.ResetsAt.After(until) {
-			until = w.ResetsAt
+	if ks.SoftCooldownUntil.After(now) {
+		return ks.SoftCooldownUntil
+	}
+	if ks.OAuthInfo != nil {
+		until := codexSoftCooldownUntilFromMillis(ks.OAuthInfo.CodexPrimaryResetAt, ks.OAuthInfo.CodexSecondaryResetAt, now)
+		ks.SoftCooldownUntil = until
+		return until
+	}
+	ks.SoftCooldownUntil = time.Time{}
+	return time.Time{}
+}
+
+func (p *ProviderConfig) codexSnapshotForKeyStateLocked(ks *KeyState) *ratelimit.KeyRateLimitSnapshot {
+	if ks == nil {
+		return nil
+	}
+	if ks.OAuthInfo != nil && p.polledRateLimitByCredIdx != nil {
+		if snap := p.polledRateLimitByCredIdx[ks.OAuthInfo.CredentialIndex]; snap != nil {
+			return snap
 		}
 	}
-	consider(snap.Primary)
-	consider(snap.Secondary)
-	return until
+	return ks.RateLimit
 }
 
 func codexWindowRemainingPct(w *ratelimit.RateLimitWindow) (float64, bool) {
@@ -501,38 +511,6 @@ func codexCreditsPenalty(snap *ratelimit.KeyRateLimitSnapshot) bool {
 		return false
 	}
 	return !snap.Credits.Unlimited && !snap.Credits.HasCredits
-}
-
-func (p *ProviderConfig) codexSnapshotForKeyStateLocked(ks *KeyState) *ratelimit.KeyRateLimitSnapshot {
-	if ks == nil {
-		return nil
-	}
-	if ks.OAuthInfo != nil && p.polledRateLimitByCredIdx != nil {
-		if snap := p.polledRateLimitByCredIdx[ks.OAuthInfo.CredentialIndex]; snap != nil {
-			return snap
-		}
-	}
-	return ks.RateLimit
-}
-
-func (p *ProviderConfig) codexSoftCooldownUntilLocked(now time.Time, ks *KeyState) time.Time {
-	if ks == nil {
-		return time.Time{}
-	}
-	if snapUntil := codexSoftCooldownUntilFromSnapshot(p.codexSnapshotForKeyStateLocked(ks), now); !snapUntil.IsZero() {
-		ks.SoftCooldownUntil = snapUntil
-		return snapUntil
-	}
-	if ks.SoftCooldownUntil.After(now) {
-		return ks.SoftCooldownUntil
-	}
-	if ks.OAuthInfo != nil {
-		until := codexSoftCooldownUntilFromMillis(ks.OAuthInfo.CodexPrimaryResetAt, ks.OAuthInfo.CodexSecondaryResetAt, now)
-		ks.SoftCooldownUntil = until
-		return until
-	}
-	ks.SoftCooldownUntil = time.Time{}
-	return time.Time{}
 }
 
 func (p *ProviderConfig) codexSoftCooledLocked(now time.Time, ks *KeyState) bool {

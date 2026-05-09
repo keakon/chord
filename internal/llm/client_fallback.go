@@ -87,7 +87,6 @@ type markKeyCooldownResult struct {
 	refreshedKey         string
 	deactivatedAccountID string // non-empty when a codex OAuth key was put into cooldown due to 401/403
 	deactivatedEmail     string // email from the deactivated key's JWT, if available
-	softHintUpdated      bool
 }
 
 // isAccountDeactivated reports whether the API error indicates a permanently
@@ -118,8 +117,8 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		if primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
 			log.Warnf("API key quota exhausted, marking unavailable until reset key_suffix=%v until=%v", keySuffix(key), until)
 			provider.MarkQuotaExhaustedUntil(key, until)
-			updated := provider.persistCodexResetHintsForKey(key, primaryResetAt, secondaryResetAt)
-			return markKeyCooldownResult{cooldownApplied: true, softHintUpdated: updated}
+			_ = provider.persistCodexResetHintsForKey(key, primaryResetAt, secondaryResetAt)
+			return markKeyCooldownResult{cooldownApplied: true}
 		}
 		cooldown := apiErr.RetryAfter
 		if cooldown <= 0 {

@@ -200,6 +200,22 @@ func TestNewProviderConfig_CodexDefaultsToSmartKeyOrder(t *testing.T) {
 	}
 }
 
+func TestSelectKey_CodexSmartTreatsSnapshotAsHeadroomNotSoftCooldown(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	reset := time.Now().Add(time.Hour)
+	p.UpdateKeySnapshot("key-a", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 20, ResetsAt: reset},
+	})
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-a" {
+		t.Fatalf("expected snapshot-backed key-a, got %s", key)
+	}
+}
+
 func TestSelectKey_CodexSmartPrefersNonSoftCooledKey(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	p.mu.Lock()
@@ -213,21 +229,6 @@ func TestSelectKey_CodexSmartPrefersNonSoftCooledKey(t *testing.T) {
 	}
 	if key != "key-b" {
 		t.Fatalf("expected non-soft-cooled key-b, got %s", key)
-	}
-}
-
-func TestSelectKey_CodexSmartFallsBackToSoftCooledKey(t *testing.T) {
-	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	p.mu.Lock()
-	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-a", CodexPrimaryResetAt: time.Now().Add(2 * time.Hour).UnixMilli()}
-	p.keyStates[0].SoftCooldownUntil = time.Now().Add(2 * time.Hour)
-	p.mu.Unlock()
-	key, _, err := p.SelectKeyWithContext(context.Background())
-	if err != nil {
-		t.Fatalf("SelectKeyWithContext: %v", err)
-	}
-	if key != "key-a" {
-		t.Fatalf("expected soft-cooled fallback key-a, got %s", key)
 	}
 }
 
