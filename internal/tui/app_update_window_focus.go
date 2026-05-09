@@ -70,6 +70,10 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 	backgroundDirtyRedrawCmd := m.consumeBackgroundDirtyFocusRedrawWithOptions("focus-settle", time.Now(), false)
 	postRedrawCmd := postFocusSettleRedrawCmd(gen)
 	postFallbackCmd := postFocusSettleFallbackCmd(gen)
+	// Force a near-immediate full-frame replay after the focus-settle clear.
+	// Ghostty/cmux can still show stale cells until a subsequent substantial redraw;
+	// this makes the repair proactive without adding another ClearScreen cycle.
+	flushCmd := m.scheduleStreamFlush(1 * time.Millisecond)
 	m.markNextViewReplay()
 	m.recordTUIDiagnostic("post-focus-settle-fallback-arm", "generation=%d delay=%s mode=%s", gen, postFocusSettleFallbackDelay, debugModeString(m.mode))
 	if m.mode == ModeImageViewer {
@@ -79,6 +83,7 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 				tea.RequestWindowSize,
 				imageProtocolReplayCmd(gen, "focus-settle:image-viewer", 50*time.Millisecond),
 			),
+			flushCmd,
 			backgroundDirtyRedrawCmd,
 			postRedrawCmd,
 			postFallbackCmd,
@@ -90,6 +95,7 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 			tea.RequestWindowSize,
 			imageProtocolReplayCmd(gen, "focus-settle:inline-replay", 50*time.Millisecond),
 		),
+		flushCmd,
 		backgroundDirtyRedrawCmd,
 		postRedrawCmd,
 		postFallbackCmd,

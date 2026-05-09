@@ -129,6 +129,9 @@ func TestFocusResizeSettleArmsPostFocusFallback(t *testing.T) {
 	if m.focusResizeFrozen {
 		t.Fatal("focus-settle should unfreeze resize handling")
 	}
+	if !m.streamFlushScheduled {
+		t.Fatal("focus-settle should schedule a near-immediate stream flush for proactive full-frame replay")
+	}
 
 	events := m.snapshotTUIDiagnosticEvents()
 	found := false
