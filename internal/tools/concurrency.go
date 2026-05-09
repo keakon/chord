@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+func unwrapToolArgs(raw json.RawMessage) json.RawMessage {
+	for len(raw) > 0 && raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			break
+		}
+		raw = json.RawMessage(s)
+	}
+	return raw
+}
+
 type ConcurrencyMode string
 
 const (
@@ -35,7 +46,7 @@ func PolicyForTool(registry *Registry, toolName string, args json.RawMessage) Co
 	if registry != nil {
 		if tool, ok := registry.Get(toolName); ok {
 			if aware, ok := tool.(ConcurrencyAwareTool); ok {
-				return normalizeConcurrencyPolicy(toolName, aware.ConcurrencyPolicy(args))
+				return normalizeConcurrencyPolicy(toolName, aware.ConcurrencyPolicy(unwrapToolArgs(args)))
 			}
 		}
 	}
@@ -72,7 +83,7 @@ func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyP
 		Path string `json:"path"`
 	}
 	policy := ConcurrencyPolicy{}
-	if err := json.Unmarshal(args, &parsed); err != nil {
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
 		return policy
 	}
 	if strings.TrimSpace(parsed.Path) == "" {
@@ -103,7 +114,7 @@ func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPo
 		return ConcurrencyPolicy{}
 	}
 	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal(args, &parsed); err != nil {
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
 		return ConcurrencyPolicy{}
 	}
 	raw, ok := parsed[field]
@@ -129,7 +140,7 @@ func urlToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	var parsed struct {
 		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(args, &parsed); err != nil {
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
 		return ConcurrencyPolicy{}
 	}
 	url := strings.TrimSpace(parsed.URL)

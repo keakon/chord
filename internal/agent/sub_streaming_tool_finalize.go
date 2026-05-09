@@ -181,7 +181,7 @@ func (s *SubAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolC
 			var parsed struct {
 				Path string `json:"path"`
 			}
-			if json.Unmarshal(tc.Args, &parsed) == nil {
+			if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
 				trackedFilePath = parsed.Path
 			}
 		}
