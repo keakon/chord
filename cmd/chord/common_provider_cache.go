@@ -24,14 +24,16 @@ import (
 // the impl keeps model-policy rebuilds, fallback clients, and subagents on the
 // same per-provider runtime channel semantics.
 type providerCache struct {
-	mu         sync.Mutex
-	m          map[string]*llm.ProviderConfig
-	impls      map[string]llm.Provider
-	auth       config.AuthConfig
-	authPath   string
-	authMu     sync.Mutex
-	cfg        *config.Config
-	dumpWriter *llm.DumpWriter
+	mu              sync.Mutex
+	m               map[string]*llm.ProviderConfig
+	impls           map[string]llm.Provider
+	ctx             context.Context
+	auth            config.AuthConfig
+	authPath        string
+	authMu          sync.Mutex
+	cfg             *config.Config
+	dumpWriter      *llm.DumpWriter
+	fetchCodexUsage func(context.Context, *llm.ProviderConfig, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 }
 
 func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []config.ProviderCredential) (config.ProviderConfig, error) {
@@ -119,9 +121,17 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 			}
 		}
 		p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
-			pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pollParentCtx := c.ctx
+			if pollParentCtx == nil {
+				pollParentCtx = context.Background()
+			}
+			pollCtx, cancel := context.WithTimeout(pollParentCtx, 30*time.Second)
 			defer cancel()
-			return llm.FetchCodexUsageSnapshot(pollCtx, p, key, accountID)
+			fetchFn := c.fetchCodexUsage
+			if fetchFn == nil {
+				fetchFn = llm.FetchCodexUsageSnapshot
+			}
+			return fetchFn(pollCtx, p, key, accountID)
 		})
 	}
 

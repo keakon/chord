@@ -380,6 +380,7 @@ type getProviderImplFunc func(provName string, cfg config.ProviderConfig, provid
 //   - contextLimit: the model's context window limit
 //   - err:          non-nil if the reference could not be resolved
 func resolveModelRef(
+	parentCtx context.Context,
 	ref string,
 	allProviders map[string]config.ProviderConfig,
 	auth config.AuthConfig,
@@ -394,6 +395,9 @@ func resolveModelRef(
 	contextLimit int,
 	err error,
 ) {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	var provName string
 	ref = config.NormalizeModelRef(ref)
 
@@ -465,7 +469,7 @@ func resolveModelRef(
 					}
 				}
 				provCfg.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 					defer cancel()
 					return llm.FetchCodexUsageSnapshot(ctx, provCfg, key, accountID)
 				})

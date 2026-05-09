@@ -164,6 +164,7 @@ func TestResolveModelRefStripsInlineVariant(t *testing.T) {
 	}
 
 	provCfg, _, modelID, maxTokens, ctxLimit, err := resolveModelRef(
+		context.Background(),
 		"test/test-model@high", providers, nil, "", nil, nil,
 	)
 	if err != nil {
@@ -197,12 +198,14 @@ func TestResolveModelRefReusesCachedProviderImpl(t *testing.T) {
 		cfg:   &config.Config{},
 	}
 	provCfg1, impl1, _, _, _, err := resolveModelRef(
+		context.Background(),
 		"test/test-model", providers, cache.auth, "", cache.getOrCreate, cache.getOrCreateImpl,
 	)
 	if err != nil {
 		t.Fatalf("resolveModelRef first: %v", err)
 	}
 	provCfg2, impl2, _, _, _, err := resolveModelRef(
+		context.Background(),
 		"test/test-model", providers, cache.auth, "", cache.getOrCreate, cache.getOrCreateImpl,
 	)
 	if err != nil {

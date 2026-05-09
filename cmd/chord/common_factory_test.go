@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
@@ -12,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -60,6 +64,51 @@ func (p *stubProviderImpl) CompleteStream(
 	_ llm.StreamCallback,
 ) (*message.Response, error) {
 	return &message.Response{Content: "ok", StopReason: "stop"}, nil
+}
+
+func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	pollCtxCh := make(chan context.Context, 1)
+	cache := &providerCache{
+		ctx:      ctx,
+		m:        make(map[string]*llm.ProviderConfig),
+		impls:    make(map[string]llm.Provider),
+		authPath: filepath.Join(t.TempDir(), "auth.yaml"),
+		cfg:      &config.Config{},
+		auth: config.AuthConfig{"codex": {
+			{OAuth: &config.OAuthCredential{Access: "access-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "account-1"}},
+		}},
+		fetchCodexUsage: func(ctx context.Context, _ *llm.ProviderConfig, _, _ string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+			pollCtxCh <- ctx
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	prov, err := cache.getOrCreate("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Models: map[string]config.ModelConfig{"gpt-5": {}},
+	}, []string{"access-token"})
+	if err != nil {
+		t.Fatalf("getOrCreate: %v", err)
+	}
+	if _, _, err := prov.SelectKeyWithContext(context.Background()); err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+
+	pollCtx := <-pollCtxCh
+	if err := pollCtx.Err(); err != nil {
+		t.Fatalf("poll context already cancelled before cache context cancellation: %v", err)
+	}
+	cancel()
+	select {
+	case <-pollCtx.Done():
+		if !errors.Is(pollCtx.Err(), context.Canceled) {
+			t.Fatalf("poll context error = %v, want context.Canceled", pollCtx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("poll context was not cancelled after cache context cancellation")
+	}
 }
 
 // TestBuildMainClientFactoryWithModelPool verifies that buildMainClientFactory
@@ -199,6 +248,7 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 		},
 	}
 	pool, selectedIdx := buildModelPool(
+		context.Background(),
 		[]string{"openai/missing", "openai/gpt-4o", "openai/gpt-4.1"},
 		"",
 		"openai/gpt-4.1",
@@ -238,6 +288,7 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 		},
 	}
 	pool, selectedIdx := buildModelPool(
+		context.Background(),
 		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
 		"",
 		"openai/missing",
@@ -279,6 +330,7 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 	}
 
 	pool, selectedIdx := buildModelPool(
+		context.Background(),
 		[]string{"openai/gpt-4o@balanced", "openai/gpt-4.1", "openai/o3-pro@high"},
 		"high",
 		"openai/gpt-4.1",
@@ -339,6 +391,7 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 	fallbackTwoImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}, {resp: &message.Response{Content: "next call starts here"}}}}
 
 	pool, selectedIdx := buildModelPool(
+		context.Background(),
 		[]string{"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
 		"",
 		"openai/gpt-4.1",
@@ -545,6 +598,7 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 	fallbackImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}}}
 
 	pool, selectedIdx := buildModelPool(
+		context.Background(),
 		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
 		"",
 		"openai/gpt-4o",

@@ -346,6 +346,52 @@ func TestRunAuthLoginDevice_OpenAICodexHeadlessSuccess(t *testing.T) {
 	}
 }
 
+type recordingRoundTripper struct {
+	t          *testing.T
+	wantCtxKey any
+	wantCtxVal any
+	statusCode int
+	body       string
+}
+
+func (rt recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.t.Helper()
+	if got := req.Context().Value(rt.wantCtxKey); got != rt.wantCtxVal {
+		rt.t.Fatalf("request context value = %v, want %v", got, rt.wantCtxVal)
+	}
+	body := rt.body
+	if body == "" {
+		body = `{}`
+	}
+	return &http.Response{
+		StatusCode: rt.statusCode,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func TestAuthHTTPRequestsUseProvidedContext(t *testing.T) {
+	type ctxKey string
+	key := ctxKey("auth-request-context")
+	ctx := context.WithValue(context.Background(), key, "ctx-value")
+	client := &http.Client{Transport: recordingRoundTripper{t: t, wantCtxKey: key, wantCtxVal: "ctx-value", statusCode: http.StatusOK, body: `{"device_auth_id":"dev-1","user_code":"USER-1","interval":"1"}`}}
+
+	if _, err := requestOpenAICodexDeviceCode(ctx, client, "https://issuer.example", "client-123"); err != nil {
+		t.Fatalf("requestOpenAICodexDeviceCode: %v", err)
+	}
+
+	client.Transport = recordingRoundTripper{t: t, wantCtxKey: key, wantCtxVal: "ctx-value", statusCode: http.StatusOK, body: `{"authorization_code":"auth-code","code_verifier":"verifier"}`}
+	if _, _, err := requestOpenAICodexDeviceAuthorizationCode(ctx, client, "https://issuer.example", "dev-1", "USER-1"); err != nil {
+		t.Fatalf("requestOpenAICodexDeviceAuthorizationCode: %v", err)
+	}
+
+	client.Transport = recordingRoundTripper{t: t, wantCtxKey: key, wantCtxVal: "ctx-value", statusCode: http.StatusOK, body: `{"access_token":"access","refresh_token":"refresh","expires_in":3600}`}
+	if _, err := exchangeOpenAICodeForTokensWithParams(ctx, client, "https://issuer.example/oauth/token", "https://issuer.example/callback", "client-123", "auth-code", "verifier"); err != nil {
+		t.Fatalf("exchangeOpenAICodeForTokensWithParams: %v", err)
+	}
+}
+
 func TestPersistOAuthCredential_RequiresAccountID(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)

@@ -164,6 +164,8 @@ func runAuthLoginBrowserWithIO(
 	}
 	authURL := buildOpenAIAuthorizeURL(pkce, state, redirectURI)
 	defer func() {
+		// Server shutdown is cleanup for the local callback listener. Keep it bounded
+		// even when the login context was cancelled by the user.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
@@ -242,7 +244,7 @@ exchange:
 	if err != nil {
 		return err
 	}
-	tokens, err := exchangeOpenAICodeForTokens(client, code, pkce.Verifier, redirectURI)
+	tokens, err := exchangeOpenAICodeForTokens(parentCtx, client, code, pkce.Verifier, redirectURI)
 	if err != nil {
 		return err
 	}
@@ -290,7 +292,10 @@ func runOpenAICodexDeviceLogin(
 		return fmt.Errorf("provider %q has unsupported token_url %q for built-in Codex device login", providerName, tokenURL)
 	}
 
-	deviceResp, err := requestOpenAICodexDeviceCode(client, issuer, clientID)
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	deviceResp, err := requestOpenAICodexDeviceCode(parentCtx, client, issuer, clientID)
 	if err != nil {
 		return err
 	}
@@ -300,9 +305,6 @@ func runOpenAICodexDeviceLogin(
 	fmt.Fprintln(os.Stderr, "Complete authorization on another device that is already signed in.")
 
 	interval := openAICodexDevicePollingInterval(deviceResp.Interval)
-	if parentCtx == nil {
-		parentCtx = context.Background()
-	}
 	ctx, cancel := context.WithTimeout(parentCtx, 15*time.Minute)
 	defer cancel()
 
@@ -319,6 +321,7 @@ func runOpenAICodexDeviceLogin(
 	}
 
 	tokens, err := exchangeOpenAICodeForTokensWithParams(
+		ctx,
 		client,
 		tokenURL,
 		issuer+"/deviceauth/callback",
@@ -659,12 +662,15 @@ func buildOpenAILoginHTTPClient(providerCfg config.ProviderConfig, globalProxy s
 	return client, nil
 }
 
-func requestOpenAICodexDeviceCode(client *http.Client, issuer, clientID string) (*openAICodexDeviceCodeResponse, error) {
+func requestOpenAICodexDeviceCode(ctx context.Context, client *http.Client, issuer, clientID string) (*openAICodexDeviceCodeResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	body, err := json.Marshal(map[string]string{"client_id": clientID})
 	if err != nil {
 		return nil, fmt.Errorf("marshal device code request: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, issuer+"/api/accounts/deviceauth/usercode", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, issuer+"/api/accounts/deviceauth/usercode", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("build device code request: %w", err)
 	}
@@ -722,7 +728,7 @@ func pollOpenAICodexDeviceAuthorizationCodeWithWait(
 		interval = 5 * time.Second
 	}
 	for {
-		codeResp, statusCode, err := requestOpenAICodexDeviceAuthorizationCode(client, issuer, deviceAuthID, userCode)
+		codeResp, statusCode, err := requestOpenAICodexDeviceAuthorizationCode(ctx, client, issuer, deviceAuthID, userCode)
 		if err != nil {
 			return nil, err
 		}
@@ -742,11 +748,15 @@ func pollOpenAICodexDeviceAuthorizationCodeWithWait(
 }
 
 func requestOpenAICodexDeviceAuthorizationCode(
+	ctx context.Context,
 	client *http.Client,
 	issuer string,
 	deviceAuthID string,
 	userCode string,
 ) (*openAICodexDeviceAuthorizationCodeResponse, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	body, err := json.Marshal(map[string]string{
 		"device_auth_id": deviceAuthID,
 		"user_code":      userCode,
@@ -754,7 +764,7 @@ func requestOpenAICodexDeviceAuthorizationCode(
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal device authorization token request: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, issuer+"/api/accounts/deviceauth/token", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, issuer+"/api/accounts/deviceauth/token", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, 0, fmt.Errorf("build device authorization token request: %w", err)
 	}
@@ -801,8 +811,9 @@ func waitForDevicePoll(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func exchangeOpenAICodeForTokens(client *http.Client, code string, verifier string, redirectURI string) (*openAITokenResponse, error) {
+func exchangeOpenAICodeForTokens(ctx context.Context, client *http.Client, code string, verifier string, redirectURI string) (*openAITokenResponse, error) {
 	return exchangeOpenAICodeForTokensWithParams(
+		ctx,
 		client,
 		config.OpenAIOAuthTokenURL,
 		redirectURI,
@@ -813,6 +824,7 @@ func exchangeOpenAICodeForTokens(client *http.Client, code string, verifier stri
 }
 
 func exchangeOpenAICodeForTokensWithParams(
+	ctx context.Context,
 	client *http.Client,
 	tokenURL string,
 	redirectURI string,
@@ -820,6 +832,9 @@ func exchangeOpenAICodeForTokensWithParams(
 	code string,
 	verifier string,
 ) (*openAITokenResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -827,7 +842,7 @@ func exchangeOpenAICodeForTokensWithParams(
 	form.Set("client_id", clientID)
 	form.Set("code_verifier", verifier)
 
-	req, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("build token exchange request: %w", err)
 	}

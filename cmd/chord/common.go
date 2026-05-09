@@ -314,6 +314,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.ProviderCache = &providerCache{
 		m:        make(map[string]*llm.ProviderConfig),
 		impls:    make(map[string]llm.Provider),
+		ctx:      ac.Ctx,
 		auth:     auth,
 		authPath: authPath,
 		cfg:      cfg,
@@ -371,6 +372,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 			}
 
 			pool, selectedIdx := buildModelPool(
+				ac.Ctx,
 				poolModels,
 				builderCfg.Variant,
 				defaultProviderModel,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -18,6 +19,7 @@ func parseRoleModelRef(ref, defaultVariant string) (baseRef, variant string) {
 }
 
 func buildModelPool(
+	parentCtx context.Context,
 	modelRefs []string,
 	defaultVariant string,
 	selectedRef string,
@@ -28,6 +30,9 @@ func buildModelPool(
 	getProviderImpl getProviderImplFunc,
 	logLabel string,
 ) ([]llm.FallbackModel, int) {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	if len(modelRefs) == 0 {
 		return nil, -1
 	}
@@ -38,6 +43,7 @@ func buildModelPool(
 	for _, ref := range modelRefs {
 		fbBaseRef, fbVariant := parseRoleModelRef(ref, defaultVariant)
 		fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
+			parentCtx,
 			fbBaseRef, allProviders, auth, globalProxy, getProvider, getProviderImpl,
 		)
 		if fbErr != nil {
@@ -91,6 +97,11 @@ func buildSubAgentLLMFactory(
 			return c
 		}
 
+		parentCtx := ac.Ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+
 		// Parse per-model variant from the first model-pool ref (e.g. "provider/model@high").
 		// Inline @variant takes precedence over the global AgentConfig.Variant.
 		firstRef, firstVariant := config.ParseModelRef(agentModels[0])
@@ -99,6 +110,7 @@ func buildSubAgentLLMFactory(
 		}
 
 		pProvCfg, pImpl, pModelID, pMaxTokens, _, pErr := resolveModelRef(
+			parentCtx,
 			firstRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
@@ -123,6 +135,7 @@ func buildSubAgentLLMFactory(
 					fbVariant = variant
 				}
 				fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
+					parentCtx,
 					fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 				)
 				if fbErr != nil {
@@ -156,8 +169,13 @@ func buildMainClientFactory(
 	auth config.AuthConfig,
 ) func(providerModel string) (*llm.Client, string, int, error) {
 	return func(providerModel string) (*llm.Client, string, int, error) {
+		parentCtx := ac.Ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
 		baseRef, selectedVariant := config.ParseModelRef(providerModel)
 		pProvCfg, pImpl, pModelID, pMaxTokens, pCtxLimit, pErr := resolveModelRef(
+			parentCtx,
 			baseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
@@ -175,6 +193,7 @@ func buildMainClientFactory(
 		}
 
 		pool, selectedIdx := buildModelPool(
+			parentCtx,
 			roleModels,
 			roleDefaultVariant,
 			providerModel,
