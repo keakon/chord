@@ -8,7 +8,7 @@
 
 ## 0.5.1 - 2026-05-09
 
-- Runtime / TUI：新增针对 `manual: true` MCP server 的手动运行时控制。Chord 现在提供 `/mcp`（`status`、`enable`、`disable`、`toggle`）以及 TUI 内的 MCP 选择器（`Ctrl+O`），可在运行时按需连接或断开这类 server。自动启动的 server 保持只读，且 MCP 状态刷新时选择器会继续保持打开。
+- Runtime / TUI：新增针对 `manual: true` MCP server 的手动运行时控制。Chord 现在提供 `/mcp`（`status`、`enable`、`disable`）以及 TUI 内的 MCP 选择器（`Ctrl+O`），可在运行时按需连接或断开这类 server。自动启动的 server 保持只读，且 MCP 状态刷新时选择器会继续保持打开。
 - Runtime：修复了初始 LLM client 未按 builder agent 的 model pool 配置的问题。此前即使配置了多个模型，冷启动后的首个请求在失败时也只会在第一个模型的多个 API key 之间重试，不会切换到池中的其他模型。现在初始 client 会正确携带 builder agent 的完整模型池，因此首轮失败也能触发跨模型的 fallback。
 - TUI：修复了 Ghostty/cmux 在焦点恢复或 resize 恢复后出现 stale cells 残影/叠帧的问题。`focus-resize freeze` 路径现在直接把已绘制的 screen buffer 按整帧序列化并保留 trailing spaces，而不是依赖字符串级别的清行或 render 后补空格。
 - TUI：将 Bubble Tea 渲染栈升级到更新的兼容版本（`bubbletea/v2` 2.0.6、`bubbles/v2` 2.1.0、`lipgloss/v2` 2.0.3，以及更新的 `ultraviolet`、`x/ansi`），吸收已有的 renderer 和终端行为修复。

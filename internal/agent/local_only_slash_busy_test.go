@@ -187,7 +187,7 @@ func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T
 	a := newTestMainAgent(t, t.TempDir())
 	a.mcpTransitionActive.Store(true)
 
-	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp toggle exa"})
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp enable exa"})
 
 	if got := a.PendingUserMessageCount(); got != 0 {
 		t.Fatalf("PendingUserMessageCount = %d, want 0", got)

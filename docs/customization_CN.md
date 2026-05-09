@@ -137,7 +137,7 @@ mcp:
 
 对于不是每轮对话都需要的 MCP，建议设置 `manual: true`：启动时保持禁用，不连接该 server，也不把它的工具描述加入默认 LLM 工具上下文，从而降低平时的上下文开销。需要使用时，再通过 `/mcp`（菜单）或 `/mcp enable <server>` 手动启用。
 
-只有 `manual: true` 的 server 才能在运行时切换。自动启动的 server 会作为默认工具上下文的一部分保持只读，不受 `/mcp enable|disable|toggle` 影响。
+只有 `manual: true` 的 server 才能在运行时修改状态。自动启动的 server 会作为默认工具上下文的一部分保持只读，不受 `/mcp enable|disable` 影响。
 
 ## 自定义 slash commands
 

@@ -446,11 +446,10 @@ mcp:
 ```
 
 - When `manual: true`, the server starts in a disabled (gray) state and does not connect until you enable it.
-- Only servers configured with `manual: true` can be changed at runtime with `/mcp`. Auto-start servers are read-only in the MCP selector and are not affected by `/mcp enable|disable|toggle`.
+- Only servers configured with `manual: true` can be changed at runtime with `/mcp`. Auto-start servers are read-only in the MCP selector and are not affected by `/mcp enable|disable`.
 - Enable/disable at runtime with `/mcp` (menu in TUI) or with explicit commands:
   - `/mcp enable <server>`
   - `/mcp disable <server>`
-  - `/mcp toggle <server>`
   - `/mcp status`
 
 ### Startup consistency

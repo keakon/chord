@@ -23,19 +23,19 @@ func TestHandleMCPSelectKeyToggleKeepsPanelOpen(t *testing.T) {
 
 	cmd := m.handleMCPSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if cmd != nil {
-		t.Fatal("toggle should not close overlay or emit follow-up command")
+		t.Fatal("enter should not close overlay or emit follow-up command")
 	}
 	if got := len(backend.sentMessages); got != 1 {
 		t.Fatalf("SendUserMessage() calls = %d, want 1", got)
 	}
-	if got := backend.sentMessages[0]; got != "/mcp toggle alpha" {
-		t.Fatalf("sent message = %q, want %q", got, "/mcp toggle alpha")
+	if got := backend.sentMessages[0]; got != "/mcp enable alpha" {
+		t.Fatalf("sent message = %q, want %q", got, "/mcp enable alpha")
 	}
 	if m.mode != ModeMCPSelect {
-		t.Fatalf("mode after toggle = %v, want ModeMCPSelect", m.mode)
+		t.Fatalf("mode after enter = %v, want ModeMCPSelect", m.mode)
 	}
 	if m.mcpSelect.selector.list == nil {
-		t.Fatal("MCP overlay list should remain present after toggle")
+		t.Fatal("MCP overlay list should remain present after enter")
 	}
 }
 
@@ -58,7 +58,7 @@ func TestMCPSelectDispatchRejectsAutoServerWithoutSendingCommand(t *testing.T) {
 	// OverlayList normally keeps the cursor on selectable items; force the
 	// cursor onto an auto/read-only item to verify dispatch itself rejects it.
 	m.mcpSelect.selector.list.cursor = 0
-	cmd := m.mcpSelectDispatch(agent.MCPControlToggle)
+	cmd := m.mcpSelectDispatch(agent.MCPControlEnable)
 	if cmd == nil {
 		t.Fatal("expected read-only MCP selection to return toast command")
 	}
@@ -74,6 +74,53 @@ func TestMCPSelectDispatchRejectsAutoServerWithoutSendingCommand(t *testing.T) {
 	}
 	if m.mode != ModeMCPSelect {
 		t.Fatalf("mode after read-only dispatch = %v, want ModeMCPSelect", m.mode)
+	}
+}
+
+func TestMouseClickMCPSelectReadOnlyItemDoesNotToggleNeighbor(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{
+		{Name: "alpha", OK: true, Manual: false},
+		{Name: "beta", Disabled: true, Manual: true},
+	}
+	m := NewModelWithSize(backend, 100, 30)
+	m.openMCPSelect()
+	if m.mode != ModeMCPSelect {
+		t.Fatalf("mode after open = %v, want ModeMCPSelect", m.mode)
+	}
+	if m.mcpSelect.selector.list == nil {
+		t.Fatal("expected MCP overlay list")
+	}
+	_ = m.renderMCPSelectDialog()
+
+	dialogRect := m.overlayRect(m.renderMCPSelectDialog())
+	clickX := dialogRect.Min.X + 2
+	clickY := dialogRect.Min.Y + 1 + 3
+	updated, cmd := m.Update(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	m = *model
+	if cmd == nil {
+		t.Fatal("expected read-only MCP click to return toast command")
+	}
+
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+	if m.activeToast == nil {
+		t.Fatal("expected read-only MCP click to show toast")
+	}
+	if got := m.activeToast.Message; got != "Auto-start MCP servers are read-only" {
+		t.Fatalf("toast message = %q, want %q", got, "Auto-start MCP servers are read-only")
+	}
+	selected, ok := m.mcpSelect.selector.list.SelectedItem()
+	if !ok {
+		t.Fatal("expected MCP selection to remain available")
+	}
+	if selected.ID != "beta" {
+		t.Fatalf("selected MCP item after read-only click = %q, want %q", selected.ID, "beta")
 	}
 }
 

@@ -5,8 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/keakon/chord/internal/agent"
 )
 
 const mouseWheelScrollStep = 3
@@ -110,10 +108,7 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			if idx, ok := m.mcpSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.mcpSelect.selector.list != nil {
-					m.mcpSelect.selector.list.SetCursor(idx)
-				}
-				return m.mcpSelectDispatch(agent.MCPControlToggle)
+				return m.mcpSelectToggleAtIndex(idx)
 			}
 		}
 		return nil

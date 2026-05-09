@@ -16,7 +16,6 @@ type MCPControlAction string
 const (
 	MCPControlEnable  MCPControlAction = "enable"
 	MCPControlDisable MCPControlAction = "disable"
-	MCPControlToggle  MCPControlAction = "toggle"
 )
 
 // MCPControlRequest describes a runtime MCP enable/disable operation.

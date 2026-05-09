@@ -396,11 +396,10 @@ mcp:
 ```
 
 - `manual: true` 时，启动后该 server 处于禁用（灰色）状态，不会主动连接。
-- 只有配置了 `manual: true` 的 server 才能在运行时通过 `/mcp` 修改状态。自动启动的 server 在 MCP 选择器中是只读的，也不会受 `/mcp enable|disable|toggle` 影响。
+- 只有配置了 `manual: true` 的 server 才能在运行时通过 `/mcp` 修改状态。自动启动的 server 在 MCP 选择器中是只读的，也不会受 `/mcp enable|disable` 影响。
 - 运行时可用 `/mcp`（TUI 菜单）或带参数命令启用/禁用：
   - `/mcp enable <server>`
   - `/mcp disable <server>`
-  - `/mcp toggle <server>`
   - `/mcp status`
 
 ### 启动一致性

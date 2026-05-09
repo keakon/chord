@@ -187,8 +187,8 @@ func (m *Model) handleMCPSelectKey(msg tea.KeyMsg) tea.Cmd {
 			m.mcpSelect.selector.list.CursorToBottom()
 		}
 		return nil
-	case "enter", "t":
-		return m.mcpSelectDispatch(agent.MCPControlToggle)
+	case "enter":
+		return m.mcpSelectToggleFocused()
 	case "e":
 		return m.mcpSelectDispatch(agent.MCPControlEnable)
 	case "d":
@@ -220,4 +220,45 @@ func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	}
 	m.agent.SendUserMessage(fmt.Sprintf("/mcp %s %s", string(action), name))
 	return nil
+}
+
+// mcpSelectToggleFocused determines the current state of the focused MCP server
+// and dispatches the appropriate enable/disable action.
+func (m *Model) mcpSelectToggleFocused() tea.Cmd {
+	if m.mcpSelect.selector.list == nil {
+		return nil
+	}
+	return m.mcpSelectToggleAtIndex(m.mcpSelect.selector.list.CursorAt())
+}
+
+// mcpSelectToggleAtIndex determines the current state of the MCP server at the
+// given list index and dispatches the appropriate enable/disable action.
+func (m *Model) mcpSelectToggleAtIndex(idx int) tea.Cmd {
+	mp, ok := m.agent.(agent.MCPStateProvider)
+	if !ok || m.mcpSelect.selector.list == nil {
+		return nil
+	}
+	if idx < 0 || idx >= m.mcpSelect.selector.list.Len() {
+		return nil
+	}
+	item := m.mcpSelect.selector.list.items[idx]
+	if item.Disabled {
+		return m.enqueueToast("Auto-start MCP servers are read-only", "info")
+	}
+	name := strings.TrimSpace(item.ID)
+	if name == "" {
+		return nil
+	}
+	m.mcpSelect.selector.list.SetCursor(idx)
+	// Look up current state: enable if not connected/pending, disable otherwise.
+	action := agent.MCPControlEnable
+	for _, r := range mp.MCPServerList() {
+		if r.Name == name {
+			if r.OK || r.Pending {
+				action = agent.MCPControlDisable
+			}
+			break
+		}
+	}
+	return m.mcpSelectDispatch(action)
 }

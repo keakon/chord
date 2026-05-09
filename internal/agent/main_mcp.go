@@ -23,7 +23,7 @@ func (a *MainAgent) handleMCPCommand(content string) {
 		a.emitToTUI(InfoEvent{Message: a.mcpStatusText()})
 		a.setIdleAndDrainPending()
 		return
-	case string(MCPControlEnable), string(MCPControlDisable), string(MCPControlToggle):
+	case string(MCPControlEnable), string(MCPControlDisable):
 		if len(fields) < 2 {
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp %s: usage: /mcp %s <server|all|server...>", fields[0], fields[0])})
 			a.setIdleAndDrainPending()
@@ -49,7 +49,7 @@ func (a *MainAgent) handleMCPCommand(content string) {
 		a.sendEvent(Event{Type: EventMCPControl, Payload: MCPControlRequest{Action: action, Servers: servers}})
 		return
 	default:
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp: unknown subcommand %q (expected: status, enable, disable, toggle)", fields[0])})
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp: unknown subcommand %q (expected: status, enable, disable)", fields[0])})
 		a.setIdleAndDrainPending()
 		return
 	}

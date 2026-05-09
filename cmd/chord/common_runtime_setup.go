@@ -210,25 +210,6 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 			}
 			ac.MCPMgr.Disconnect(name)
 		}
-	case agent.MCPControlToggle:
-		status := ac.MCPMgr.ServerEndpoints()
-		enabled := make(map[string]bool, len(status))
-		for _, st := range status {
-			enabled[st.Name] = st.OK || st.Pending
-		}
-		for _, name := range targets {
-			cfg, ok := configsByName[name]
-			if !ok || !cfg.Manual {
-				continue
-			}
-			if enabled[name] {
-				ac.MCPMgr.Disconnect(name)
-				continue
-			}
-			if err := ac.MCPMgr.ConnectOne(ctx, cfg); err != nil {
-				errs = append(errs, fmt.Errorf("enable MCP %q: %w", name, err))
-			}
-		}
 	default:
 		errs = append(errs, fmt.Errorf("unknown MCP action %q", req.Action))
 	}
