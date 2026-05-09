@@ -894,6 +894,9 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	if grace := remaining(); grace > 0 {
 		hookBudget := min(sessionEndHookGrace, grace)
+		// Run shutdown hooks under the remaining shutdown budget rather than the
+		// already-cancelled run context, so on_session_end can perform best-effort
+		// cleanup without hanging process exit.
 		hookCtx, cancel := context.WithTimeout(context.Background(), hookBudget)
 		if _, err := a.fireHook(hookCtx, hook.OnSessionEnd, 0, map[string]any{}); err != nil {
 			log.Warnf("on_session_end hook error error=%v", err)

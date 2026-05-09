@@ -34,6 +34,8 @@ func (b *DarwinBackend) Acquire() error {
 		return nil
 	}
 
+	// The caffeinate process is owned by this backend and stopped explicitly by
+	// Release/Close, so it uses its own lifecycle root instead of a caller ctx.
 	ctx, cancel := context.WithCancel(context.Background())
 	// Use -i to prevent idle sleep only. Do not use -d (display) or -s (sleep on AC).
 	cmd := exec.CommandContext(ctx, "caffeinate", "-i")
