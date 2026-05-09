@@ -363,11 +363,19 @@ func (m *Model) View() tea.View {
 	if m.shouldFreezeRender() {
 		v := m.cachedFrozenView
 		v.WindowTitle = m.terminalTitleView
+		if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
+			v.Content += ansiNoopSGR
+			m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
+		}
 		return v
 	}
 	if m.shouldDeferStreamRender() {
 		v := m.cachedFullView
 		v.WindowTitle = m.terminalTitleView
+		if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
+			v.Content += ansiNoopSGR
+			m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
+		}
 		return v
 	}
 

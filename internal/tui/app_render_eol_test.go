@@ -29,9 +29,17 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	m.renderFreezeActive = true
 	m.cachedFrozenView = tea.View{Content: "frozen"}
 	m.cachedFrozenViewValid = true
+	m.hostRedrawFrameNonce = 1
+	m.hostRedrawFrameApplied = 0
 	frozen := m.View()
+	if frozen.Content != "frozen"+ansiNoopSGR {
+		t.Fatalf("frozen View.Content = %q, want %q", frozen.Content, "frozen"+ansiNoopSGR)
+	}
 	if frozen.WindowTitle != "CachedTitle" {
 		t.Fatalf("frozen View.WindowTitle = %q, want %q", frozen.WindowTitle, "CachedTitle")
+	}
+	if m.hostRedrawFrameApplied != 1 {
+		t.Fatalf("hostRedrawFrameApplied = %d, want 1", m.hostRedrawFrameApplied)
 	}
 
 	// Deferred path.
@@ -42,12 +50,16 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	m.mode = ModeNormal
 	m.cachedFullView = tea.View{Content: "cached"}
 	m.cachedFullViewValid = true
+	m.hostRedrawFrameNonce = 2
 	deferred := m.View()
-	if deferred.Content != "cached" {
-		t.Fatalf("deferred View.Content = %q, want cached", deferred.Content)
+	if deferred.Content != "cached"+ansiNoopSGR {
+		t.Fatalf("deferred View.Content = %q, want %q", deferred.Content, "cached"+ansiNoopSGR)
 	}
 	if deferred.WindowTitle != "CachedTitle" {
 		t.Fatalf("deferred View.WindowTitle = %q, want %q", deferred.WindowTitle, "CachedTitle")
+	}
+	if m.hostRedrawFrameApplied != 2 {
+		t.Fatalf("hostRedrawFrameApplied = %d, want 2", m.hostRedrawFrameApplied)
 	}
 }
 
