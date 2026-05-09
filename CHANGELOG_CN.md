@@ -15,6 +15,9 @@
 - TUI：Write 工具卡片不再展示 diff 预览。结果现在显示清晰的行数+字节数摘要（`Successfully wrote N lines, N bytes`），而非从 unified diff 中提取新增行来展示，避免「只写了 3 行」的误导显示。
 - TUI：移除了 Write 工具的预读 + diff 生成流程。Write 工具结果不再携带 `Diff`、`DiffAdded`、`DiffRemoved` 元数据。Edit 工具结果继续正常展示 diff。
 - Write 工具 `Execute` 的成功消息现在同时报告写入行数和字节数。
+- Runtime/Codex 限流：当 Responses WS 活跃流在一段时间内没有新的 `rate_limits` 事件时，Chord 现在会主动唤醒 Codex 轮询刷新，确保 RATE LIMIT/用量面板及时更新，避免长时间显示陈旧窗口。
+- Tools/Safety：Bash 与 Spawn 现在会在执行前拒绝高置信度交互式 shell 命令，并注入明确的 non-interactive 环境默认值（例如禁用 git 凭据/编辑器提示）以降低卡死风险。
+- Tools/进程生命周期：超时/取消后的回收流程现会在宽限期后从 graceful terminate 升级为 force-kill 进程组，避免顽固子进程导致 Bash/Spawn 调用悬挂。
 
 ## 0.5.0 - 2026-05-08
 

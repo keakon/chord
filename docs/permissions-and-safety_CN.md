@@ -46,7 +46,14 @@ permission:
 
 ## Bash 与 shell 风险
 
-`Bash` 能执行系统命令，应格外谨慎。
+`Bash` 能执行系统命令，应格外谨慎。`Bash` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、shell `read` 提示等，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
+
+常见改写方式：
+
+- 用 `git commit -m "message"` 或 `git commit -F file` 代替会打开编辑器的 `git commit`
+- 用 `npm init -y` / `--yes`，或显式提供所有必要选项
+- 需要 sudo 非交互失败时用 `sudo -n`，避免等待密码提示
+- 命令确实支持非交互 stdin 时，用 pipe 或 here-doc 显式提供输入
 
 建议：
 

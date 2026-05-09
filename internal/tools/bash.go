@@ -181,6 +181,7 @@ func bashToolDescription(visible map[string]struct{}, shellType string) string {
 		}
 	}
 	parts = append(parts,
+		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"Use Bash mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"For native filesystem operations with no dedicated built-in tool, Bash is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
@@ -242,6 +243,10 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		log.Debugf("bash tool description=%v command=%v", a.Description, a.Command)
 	}
 
+	if finding := DetectInteractiveShellCommand(a.Command); finding != nil {
+		return "", finding.Error()
+	}
+
 	timeoutInfo := ResolveBashTimeout(a.Timeout)
 	timeout := time.Duration(timeoutInfo.EffectiveSec) * time.Second
 
@@ -255,6 +260,9 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	buf := &cappedWriter{maxBytes: maxOutputBytes}
 	cmd.Stdout = buf
 	cmd.Stderr = buf
+	// BashTool is intentionally non-interactive. Leaving Stdin nil makes Go
+	// connect the child process to the null device instead of the TUI stdin.
+	cmd.Env = appendNonInteractiveEnv(nil)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("starting command: %w", err)
 	}
@@ -301,8 +309,12 @@ func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason string, doneCh <-
 	select {
 	case <-doneCh:
 	case <-time.After(killGracePeriod):
-		_ = terminateCommandProcessGroup(cmd)
-		<-doneCh
+		_ = forceTerminateCommandProcessGroup(cmd)
+		select {
+		case <-doneCh:
+		case <-time.After(killGracePeriod):
+			// Avoid hanging forever if the process refuses to die.
+		}
 	}
 	output := buf.String()
 	return output, fmt.Errorf("command %s after output:\n%s", reason, truncateForError(output, 500))

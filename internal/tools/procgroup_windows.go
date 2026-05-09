@@ -22,3 +22,12 @@ func terminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
 	}
 	return cmd.Process.Kill()
 }
+
+func forceTerminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
+	// On Windows we do not have a process group primitive; Process.Kill is the
+	// only reliable option and is already forceful.
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	return cmd.Process.Kill()
+}

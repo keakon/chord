@@ -15,7 +15,7 @@ func configureCommandProcessGroupImpl(cmd *exec.Cmd) (processGroupHandle, error)
 	if cmd == nil {
 		return unixProcessGroupHandle{}, nil
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return unixProcessGroupHandle{}, nil
 }
 
@@ -25,5 +25,14 @@ func terminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
 	}
 	pid := cmd.Process.Pid
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	return nil
+}
+
+func forceTerminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	pid := cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	return nil
 }

@@ -15,3 +15,7 @@ func configureCommandProcessGroup(cmd *exec.Cmd) (processGroupHandle, error) {
 func terminateCommandProcessGroup(cmd *exec.Cmd) error {
 	return terminateCommandProcessGroupImpl(cmd)
 }
+
+func forceTerminateCommandProcessGroup(cmd *exec.Cmd) error {
+	return forceTerminateCommandProcessGroupImpl(cmd)
+}

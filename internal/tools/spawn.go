@@ -47,6 +47,7 @@ func spawnToolDescription(_ map[string]struct{}) string {
 		"Only use Spawn for processes with real background lifecycle needs — not as a way to parallelize ordinary commands.\n" +
 		"Appropriate: dev servers, file watchers, long-running benchmarks, batch pipelines the user explicitly wants in background.\n" +
 		"It uses the same detected shell environment as the foreground Bash tool.\n" +
+		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
 		"Use foreground Bash for commands whose stdout/stderr you need in this turn.\n" +
 		"You will NOT receive stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits. Services may expose a diagnostic log_file path that you can inspect with foreground Bash when needed.\n" +
 		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
@@ -90,6 +91,10 @@ func (t SpawnTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 	if strings.TrimSpace(a.Description) == "" {
 		return "", fmt.Errorf("description is required")
+	}
+
+	if finding := DetectInteractiveShellCommand(a.Command); finding != nil {
+		return "", finding.Error()
 	}
 
 	var kind spawnKind

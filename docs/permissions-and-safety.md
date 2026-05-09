@@ -46,7 +46,14 @@ This means: allow most tools by default; disable `Handoff` and `Delegate`; requi
 
 ## Bash / shell risk
 
-`Bash` can execute system commands and should be treated carefully.
+`Bash` can execute system commands and should be treated carefully. `Bash` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and shell `read` prompts should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+
+Common rewrites:
+
+- Use `git commit -m "message"` or `git commit -F file` instead of editor-driven `git commit`
+- Use `npm init -y` / `--yes` or provide all required options explicitly
+- Use `sudo -n` when you want sudo to fail non-interactively instead of prompting
+- Pipe input or use a here-doc when a command truly accepts non-interactive stdin
 
 Recommendations:
 

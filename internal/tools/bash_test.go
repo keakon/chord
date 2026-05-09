@@ -114,6 +114,7 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		t.Fatalf("unexpected helper hint without visible tools: %q", withoutHelpers)
 	}
 	for _, want := range []string{
+		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"This tool is exclusively for foreground execution — all background process management uses the Spawn tool.",
 		"Use Bash mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls.",
@@ -310,6 +311,38 @@ func TestBashExecuteUsesDetectedShell(t *testing.T) {
 				t.Fatalf("output = %q, want to contain %q", out, tc.want)
 			}
 		})
+	}
+}
+
+func TestBashRejectsInteractiveCommandBeforeExecution(t *testing.T) {
+	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "git rebase -i HEAD~2",
+	}))
+	if err == nil {
+		t.Fatal("expected interactive command rejection")
+	}
+	if out != "" {
+		t.Fatalf("output = %q, want empty", out)
+	}
+	if !strings.Contains(err.Error(), "interactive command rejected") || !strings.Contains(err.Error(), "git rebase -i") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBashReadFromStdinFailsFast(t *testing.T) {
+	start := time.Now()
+	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "read x",
+		"timeout": 5,
+	}))
+	if err == nil {
+		t.Fatal("expected read to fail or be rejected")
+	}
+	if time.Since(start) >= 2*time.Second {
+		t.Fatalf("read command took too long; output=%q err=%v", out, err)
+	}
+	if !strings.Contains(err.Error(), "interactive command rejected") {
+		t.Fatalf("expected static interactive rejection, got output=%q err=%v", out, err)
 	}
 }
 

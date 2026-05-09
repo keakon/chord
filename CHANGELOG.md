@@ -15,6 +15,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - TUI: Write tool card no longer shows a diff preview. The result now displays a clear line and byte count summary (`Successfully wrote N lines, N bytes`) instead of extracting added lines from a unified diff, eliminating the misleading "only a few lines shown" display for full-file writes.
 - TUI: removed the pre-read + diff generation pipeline from the Write tool. Write tool results no longer carry `Diff`, `DiffAdded`, or `DiffRemoved` metadata. Edit tool results continue to show diffs as before.
 - Write tool `Execute` now reports the line count in addition to byte count in its success message.
+- Runtime/Codex rate limits: when active Responses WS streams run without fresh `rate_limits` events, Chord now proactively wakes Codex polling so RATE LIMIT/usage panels stay current instead of showing stale windows.
+- Tools/Safety: Bash and Spawn now reject high-confidence interactive shell commands before execution and run with explicit non-interactive environment defaults (for example disabling git credential/editor prompts) to reduce hang risk.
+- Tools/Process lifecycle: timeout/cancel shutdown now escalates from graceful terminate to force-kill for process groups after a grace period, preventing stubborn child processes from leaving Bash/Spawn calls stuck.
 
 ## 0.5.0 - 2026-05-08
 

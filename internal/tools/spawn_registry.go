@@ -96,6 +96,9 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
+	// Spawn is intentionally non-interactive. Leaving Stdin nil makes Go connect
+	// the child process to the null device instead of the TUI stdin.
+	cmd.Env = appendNonInteractiveEnv(nil)
 	if req.LogDir != "" {
 		logPath := filepath.Join(req.LogDir, id+".log")
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
@@ -367,11 +370,16 @@ func terminateSpawnProcessGroup(cmd *exec.Cmd, reason string, doneCh <-chan erro
 		}
 		return fmt.Errorf("command %s", reason)
 	case <-time.After(killGracePeriod):
-		_ = terminateCommandProcessGroup(cmd)
-		if err := <-doneCh; err != nil {
-			return fmt.Errorf("command %s: %w", reason, err)
+		_ = forceTerminateCommandProcessGroup(cmd)
+		select {
+		case err := <-doneCh:
+			if err != nil {
+				return fmt.Errorf("command %s: %w", reason, err)
+			}
+			return fmt.Errorf("command %s", reason)
+		case <-time.After(killGracePeriod):
+			return fmt.Errorf("command %s", reason)
 		}
-		return fmt.Errorf("command %s", reason)
 	}
 }
 

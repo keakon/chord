@@ -53,10 +53,32 @@ func TestSpawnJobDoesNotExposeLogFile(t *testing.T) {
 	_, _ = (SpawnStopTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{"id": id}))
 }
 
+func TestSpawnRejectsInteractiveCommandBeforeExecution(t *testing.T) {
+	resetSpawnRegistryOnlyForTest(t)
+	out, err := NewSpawnTool("").Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command":     "gh auth login",
+		"description": "interactive auth wizard",
+	}))
+	if err == nil {
+		t.Fatal("expected interactive command rejection")
+	}
+	if out != "" {
+		t.Fatalf("output = %q, want empty", out)
+	}
+	if !strings.Contains(err.Error(), "interactive command rejected") || !strings.Contains(err.Error(), "gh auth login") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := len(SnapshotSpawnedProcesses()); got != 0 {
+		t.Fatalf("spawn registry length = %d, want 0", got)
+	}
+}
+
 func TestSpawnToolUsesDetectedShellDescription(t *testing.T) {
 	desc := NewSpawnTool("posix").Description()
-	if !strings.Contains(desc, "same detected shell environment") {
-		t.Fatalf("description %q should mention same detected shell environment", desc)
+	for _, want := range []string{"same detected shell environment", "non-interactive", "obvious interactive commands are rejected"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description %q should mention %q", desc, want)
+		}
 	}
 }
 
