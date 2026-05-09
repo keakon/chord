@@ -51,11 +51,11 @@ func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permis
 	switch toolName {
 	case tools.NameRead, tools.NameGrep, tools.NameGlob:
 		return allowSpeculativeExecution()
-	case tools.NameBash:
-		if bashReadOnlySpeculativeAllowed(args) {
+	case tools.NameShell:
+		if shellReadOnlySpeculativeAllowed(args) {
 			return allowSpeculativeExecution()
 		}
-		return rejectSpeculativeExecution("bash_not_static_read_only")
+		return rejectSpeculativeExecution("shell_not_static_read_only")
 	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
 		return allowSpeculativeExecution()
 	case tools.NameSpawn, tools.NameSpawnStop:
@@ -69,7 +69,7 @@ func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permis
 	}
 }
 
-func bashReadOnlySpeculativeAllowed(args json.RawMessage) bool {
+func shellReadOnlySpeculativeAllowed(args json.RawMessage) bool {
 	var parsed struct {
 		Command string `json:"command"`
 	}

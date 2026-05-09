@@ -32,7 +32,7 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 		return nil
 	}
 	if hasDirectTTYRedirection(tokens) {
-		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "Bash and Spawn run without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
+		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "Shell and Spawn run without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
 	}
 	if containsToken(tokens, "stty") {
 		return interactiveFinding("stty", "stty requires a terminal", "Run terminal configuration commands manually in a real terminal.")
@@ -87,7 +87,7 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 		}
 	case "az":
 		if len(tokens) >= 2 && tokens[1] == "login" {
-			return interactiveFinding("az login", "`az login` starts an authentication wizard", "Run it manually in a terminal or use a non-interactive service-principal/device-code flow outside Bash/Spawn.")
+			return interactiveFinding("az login", "`az login` starts an authentication wizard", "Run it manually in a terminal or use a non-interactive service-principal/device-code flow outside Shell/Spawn.")
 		}
 	case "aws":
 		if len(tokens) >= 2 && tokens[1] == "configure" {

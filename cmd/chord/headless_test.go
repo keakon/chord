@@ -268,7 +268,7 @@ func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &protocol.ConfirmRequestPayload{
-			ToolName:  "Bash",
+			ToolName:  "Shell",
 			RequestID: "req-1",
 		},
 	}
@@ -967,7 +967,7 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	state := &headlessState{}
 
 	ev := agent.ConfirmRequestEvent{
-		ToolName:       "Bash",
+		ToolName:       "Shell",
 		ArgsJSON:       `{"command":"rm -rf /"}`,
 		RequestID:      "req-1",
 		Timeout:        30 * time.Second,
@@ -995,8 +995,8 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 
-	if payload["tool_name"] != "Bash" {
-		t.Errorf("tool_name = %v, want Bash", payload["tool_name"])
+	if payload["tool_name"] != "Shell" {
+		t.Errorf("tool_name = %v, want Shell", payload["tool_name"])
 	}
 	if payload["request_id"] != "req-1" {
 		t.Errorf("request_id = %v, want req-1", payload["request_id"])
@@ -1012,8 +1012,8 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if pc == nil {
 		t.Fatal("pendingConfirm should be set")
 	}
-	if pc.ToolName != "Bash" {
-		t.Errorf("pendingConfirm.ToolName = %q, want Bash", pc.ToolName)
+	if pc.ToolName != "Shell" {
+		t.Errorf("pendingConfirm.ToolName = %q, want Shell", pc.ToolName)
 	}
 }
 
@@ -1161,7 +1161,7 @@ func TestHeadlessStatusCommand(t *testing.T) {
 		phaseDetail: "analyzing code",
 		lastOutcome: "completed",
 		pendingConfirm: &protocol.ConfirmRequestPayload{
-			ToolName:  "Bash",
+			ToolName:  "Shell",
 			RequestID: "req-1",
 		},
 		lastError: "",
@@ -1326,7 +1326,7 @@ func TestHeadlessToolResultEvent(t *testing.T) {
 
 	ev := agent.ToolResultEvent{
 		CallID:   "call-1",
-		Name:     "Bash",
+		Name:     "Shell",
 		ArgsJSON: `{"command":"ls -la"}`,
 		Result:   "file1.go\nfile2.go",
 		Status:   agent.ToolResultStatusSuccess,
@@ -1349,8 +1349,8 @@ func TestHeadlessToolResultEvent(t *testing.T) {
 	if payload["call_id"] != "call-1" {
 		t.Errorf("call_id = %q, want %q", payload["call_id"], "call-1")
 	}
-	if payload["name"] != "Bash" {
-		t.Errorf("name = %q, want %q", payload["name"], "Bash")
+	if payload["name"] != "Shell" {
+		t.Errorf("name = %q, want %q", payload["name"], "Shell")
 	}
 	if payload["status"] != "success" {
 		t.Errorf("status = %q, want %q", payload["status"], "success")
@@ -1483,7 +1483,7 @@ func TestHeadlessToolResultEventStatuses(t *testing.T) {
 
 			ev := agent.ToolResultEvent{
 				CallID:  "call-1",
-				Name:    "Bash",
+				Name:    "Shell",
 				Status:  tt.status,
 				AgentID: "",
 			}

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestResolveBashTimeoutForegroundDefaultsAndClamps(t *testing.T) {
+func TestResolveShellTimeoutForegroundDefaultsAndClamps(t *testing.T) {
 	cases := []struct {
 		name          string
 		requested     int
@@ -17,14 +17,14 @@ func TestResolveBashTimeoutForegroundDefaultsAndClamps(t *testing.T) {
 		wantDefault   bool
 		wantClamped   bool
 	}{
-		{name: "default", requested: 0, hasTimeout: false, wantEffective: BashDefaultTimeoutSec, wantDefault: true},
-		{name: "non-positive uses default", requested: -5, hasTimeout: true, wantEffective: BashDefaultTimeoutSec, wantDefault: true},
+		{name: "default", requested: 0, hasTimeout: false, wantEffective: ShellDefaultTimeoutSec, wantDefault: true},
+		{name: "non-positive uses default", requested: -5, hasTimeout: true, wantEffective: ShellDefaultTimeoutSec, wantDefault: true},
 		{name: "explicit accepted", requested: 45, hasTimeout: true, wantEffective: 45},
-		{name: "clamped", requested: 2400, hasTimeout: true, wantEffective: BashMaxTimeoutSec, wantClamped: true},
+		{name: "clamped", requested: 2400, hasTimeout: true, wantEffective: ShellMaxTimeoutSec, wantClamped: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveBashTimeoutValue(tc.requested, tc.hasTimeout)
+			got := ResolveShellTimeoutValue(tc.requested, tc.hasTimeout)
 			if !got.HasLimit {
 				t.Fatal("expected foreground timeout to always have a limit")
 			}
@@ -53,7 +53,7 @@ func TestResolveSpawnTimeoutOptionalAndClamped(t *testing.T) {
 		{name: "none by default", requested: 0, hasTimeout: false, wantHasLimit: false},
 		{name: "explicit accepted", requested: 300, hasTimeout: true, wantHasLimit: true, wantEffective: 300},
 		{name: "non-positive without limit", requested: 0, hasTimeout: true, wantHasLimit: false},
-		{name: "clamped", requested: 2400, hasTimeout: true, wantHasLimit: true, wantEffective: BashMaxTimeoutSec, wantClamped: true},
+		{name: "clamped", requested: 2400, hasTimeout: true, wantHasLimit: true, wantEffective: ShellMaxTimeoutSec, wantClamped: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,7 +72,7 @@ func TestResolveSpawnTimeoutOptionalAndClamped(t *testing.T) {
 }
 
 func TestBashExecuteForegroundTimeoutUsesConfiguredValue(t *testing.T) {
-	tool := BashTool{}
+	tool := ShellTool{}
 	out, err := tool.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "sleep 2",
 		"timeout": 1,
@@ -89,7 +89,7 @@ func TestBashExecuteForegroundTimeoutUsesConfiguredValue(t *testing.T) {
 }
 
 func TestBashIgnoresLegacyBackgroundFields(t *testing.T) {
-	tool := BashTool{}
+	tool := ShellTool{}
 	for name, args := range map[string]map[string]any{
 		"mode":              {"command": "printf ok", "mode": "job", "timeout": 5},
 		"run_in_background": {"command": "printf ok", "run_in_background": true},
@@ -107,7 +107,7 @@ func TestBashIgnoresLegacyBackgroundFields(t *testing.T) {
 }
 
 func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
-	tool := BashTool{}
+	tool := ShellTool{}
 
 	withoutHelpers := tool.DescriptionForTools(nil)
 	if strings.Contains(withoutHelpers, "prefer them") {
@@ -116,12 +116,12 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 	for _, want := range []string{
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"This tool is exclusively for foreground execution — all background process management uses the Spawn tool.",
-		"Use Bash mainly for tests, builds, git, and other system commands.",
+		"Use Shell mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls.",
-		"Bash is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		"If file-reading, search, or code-navigation tools are hidden or denied in this role, Bash is not a substitute for them.",
+		"Shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
+		"If file-reading, search, or code-navigation tools are hidden or denied in this role, Shell is not a substitute for them.",
 		"Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
-		"If file-editing tools are hidden or denied in this role, Bash is not a substitute for them.",
+		"If file-editing tools are hidden or denied in this role, Shell is not a substitute for them.",
 		"For explicit file deletions, prefer `Delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"If this turn needs the command's stdout/stderr, use this tool.",
@@ -151,17 +151,17 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 }
 
 func TestBashParametersEmphasizeForegroundAndBuiltinAlternatives(t *testing.T) {
-	params := BashTool{}.Parameters()
+	params := ShellTool{}.Parameters()
 	props, ok := params["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("properties has unexpected type %T", params["properties"])
 	}
 
 	if _, exists := props["mode"]; exists {
-		t.Fatal("Bash Parameters() must not expose 'mode' — background process management is handled by Spawn")
+		t.Fatal("Shell Parameters() must not expose 'mode' — background process management is handled by Spawn")
 	}
 	if _, exists := props["run_in_background"]; exists {
-		t.Fatal("Bash Parameters() must not expose 'run_in_background'")
+		t.Fatal("Shell Parameters() must not expose 'run_in_background'")
 	}
 
 	timeoutProp, ok := props["timeout"].(map[string]any)
@@ -300,7 +300,7 @@ func TestBashExecuteUsesDetectedShell(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			tool := NewBashTool(tc.shellType)
+			tool := NewShellTool(tc.shellType)
 			out, err := tool.Execute(context.Background(), mustMarshal(t, map[string]any{
 				"command": tc.command,
 			}))
@@ -315,7 +315,7 @@ func TestBashExecuteUsesDetectedShell(t *testing.T) {
 }
 
 func TestBashRejectsInteractiveCommandBeforeExecution(t *testing.T) {
-	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "git rebase -i HEAD~2",
 	}))
 	if err == nil {
@@ -331,7 +331,7 @@ func TestBashRejectsInteractiveCommandBeforeExecution(t *testing.T) {
 
 func TestBashReadFromStdinFailsFast(t *testing.T) {
 	start := time.Now()
-	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "read x",
 		"timeout": 5,
 	}))
@@ -347,7 +347,7 @@ func TestBashReadFromStdinFailsFast(t *testing.T) {
 }
 
 func TestBashParametersCommandDescription(t *testing.T) {
-	params := BashTool{}.Parameters()
+	params := ShellTool{}.Parameters()
 	props, ok := params["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("properties has unexpected type %T", params["properties"])

@@ -25,7 +25,7 @@ permission:
   Handoff: deny
   Delegate: deny
   Delete: ask
-  Bash:
+  Shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -40,19 +40,19 @@ permission:
     "git tag *": ask
 ```
 
-This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `Bash` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
+This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `Shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
-## Bash / shell risk
+## Shell / shell risk
 
-`Bash` can execute system commands and should be treated carefully. `Bash` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and shell `read` prompts should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+`Shell` can execute system commands and should be treated carefully. `Shell` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and shell `read` prompts should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
 
 Common rewrites:
 
 - Use `git commit -m "message"` or `git commit -F file` instead of editor-driven `git commit`
 - For amend flows that should preserve the existing message, use explicit non-editor forms such as `git commit --amend --no-edit` or `git commit --amend -C HEAD`
-- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `Bash` / `Spawn`; stage explicit pathspecs or run them manually
+- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `Shell` / `Spawn`; stage explicit pathspecs or run them manually
 - Remove TTY allocation flags from container commands (`docker exec -it`, `docker run -t`, `podman run -t`, `kubectl exec -it`) unless you are running them manually in a real terminal
 - Use `npm init -y` / `--yes` or provide all required options explicitly
 - Use `sudo -n` when you want sudo to fail non-interactively instead of prompting

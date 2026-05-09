@@ -49,7 +49,7 @@ func TestConfiguredCommandTTYAccessFailsFastWithoutControllingTTY(t *testing.T) 
 
 func TestBashTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 	start := time.Now()
-	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "cat </dev/tty",
 		"timeout": 5,
 	}))
@@ -67,7 +67,7 @@ func TestBashTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
 	pidFile := t.TempDir() + "/sleep.pid"
 	start := time.Now()
-	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "sh -c 'trap \"\" TERM; (trap \"\" TERM; sleep 60) & echo $! >" + strconv.Quote(pidFile) + "; wait'",
 		"timeout": 1,
 	}))
@@ -103,7 +103,7 @@ func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
 }
 func TestBashTimeoutTerminatesBackgroundChild(t *testing.T) {
 	pidFile := t.TempDir() + "/sleep.pid"
-	out, err := BashTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "sleep 60 & echo $! >" + strconv.Quote(pidFile) + "; wait",
 		"timeout": 1,
 	}))

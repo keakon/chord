@@ -10,8 +10,8 @@ import (
 func TestDefaultPlannerAgentUsesConservativeBashPermission(t *testing.T) {
 	cfg := DefaultPlannerAgent()
 	ruleset := permission.ParsePermission(&cfg.Permission)
-	if got := ruleset.Evaluate("Bash", "go test ./..."); got != permission.ActionAsk {
-		t.Fatalf("planner Bash permission = %s, want ask", got)
+	if got := ruleset.Evaluate("Shell", "go test ./..."); got != permission.ActionAsk {
+		t.Fatalf("planner Shell permission = %s, want ask", got)
 	}
 	if got := ruleset.Evaluate("Read", "internal/agent/main.go"); got != permission.ActionAllow {
 		t.Fatalf("planner Read permission = %s, want allow", got)

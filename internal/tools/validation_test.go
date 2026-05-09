@@ -93,7 +93,7 @@ func TestValidateToolArgsRejectsEnumMismatch(t *testing.T) {
 
 func TestValidateToolArgsAcceptsValidArgs(t *testing.T) {
 	tool := validationStubTool{
-		name: "Bash",
+		name: "Shell",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"command", "timeout"},

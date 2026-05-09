@@ -24,7 +24,7 @@ const darkThemeSyntaxCommentColour = "#9aa06b"
 // a small allowlist of well-known special basenames such as Dockerfile.*.
 //
 // This avoids false positives from Chroma's glob-based filename matching (for
-// example, bash_jobs.go matching Bash via the "bash_*" glob instead of Go via
+// example, bash_jobs.go matching Shell via the "bash_*" glob instead of Go via
 // ".go").
 var syntaxHighlightExtWhitelist = map[string]struct{}{
 	".astro":   {},

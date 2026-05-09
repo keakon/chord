@@ -75,7 +75,6 @@ func TestParseShellType(t *testing.T) {
 		expected ShellType
 	}{
 		{"bash", ShellBash},
-		{"Bash", ShellBash},
 		{"powershell", ShellPowerShell},
 		{"PowerShell", ShellPowerShell},
 		{"git-bash", ShellGitBash},

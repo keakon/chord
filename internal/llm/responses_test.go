@@ -150,7 +150,7 @@ func TestApplyResponsesCompletionPayload(t *testing.T) {
 		truncated := false
 		applyResponsesCompletionPayload(&resp, responsesCompletedPayload{
 			ID:     "resp-1",
-			Output: []responsesOutputEntry{{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Bash", Arguments: `{"command":"pwd"}`}},
+			Output: []responsesOutputEntry{{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Shell", Arguments: `{"command":"pwd"}`}},
 			Usage: &responsesUsagePayload{
 				InputTokens:  10,
 				OutputTokens: 20,
@@ -208,7 +208,7 @@ func TestRecoverResponsesToolCallsFromOutput(t *testing.T) {
 	var starts []string
 	recoverResponsesToolCallsFromOutput(&resp, []responsesOutputEntry{
 		{Type: "message", ID: "m1"},
-		{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Bash", Arguments: `{"command":"echo hi"}`},
+		{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Shell", Arguments: `{"command":"echo hi"}`},
 		{Type: "function_call", ID: "fc-2", Name: "Read", Arguments: `{"path":"a.go"}`},
 	}, func(delta message.StreamDelta) {
 		if delta.Type == "tool_use_start" && delta.ToolCall != nil {
@@ -218,13 +218,13 @@ func TestRecoverResponsesToolCallsFromOutput(t *testing.T) {
 	if len(resp.ToolCalls) != 2 {
 		t.Fatalf("got %d tool calls, want 2", len(resp.ToolCalls))
 	}
-	if resp.ToolCalls[0].ID != "call-1" || resp.ToolCalls[0].Name != "Bash" {
+	if resp.ToolCalls[0].ID != "call-1" || resp.ToolCalls[0].Name != "Shell" {
 		t.Fatalf("first tool call = %#v", resp.ToolCalls[0])
 	}
 	if resp.ToolCalls[1].ID != "fc-2" || resp.ToolCalls[1].Name != "Read" {
 		t.Fatalf("second tool call = %#v", resp.ToolCalls[1])
 	}
-	if len(starts) != 2 || starts[0] != "call-1:Bash" || starts[1] != "fc-2:Read" {
+	if len(starts) != 2 || starts[0] != "call-1:Shell" || starts[1] != "fc-2:Read" {
 		t.Fatalf("tool_use_start callbacks = %#v", starts)
 	}
 }
@@ -237,7 +237,7 @@ func TestConvertMessagesToResponses_ArgumentsAsString(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "c1", Name: "Bash", Args: json.RawMessage(`{"command":"ls -la"}`)},
+				{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"ls -la"}`)},
 			},
 		},
 	})
@@ -330,7 +330,7 @@ func TestConvertMessagesToResponses_EmptyToolOutput(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "c1", Name: "Bash", Args: json.RawMessage(`{"command":"git diff --staged"}`)},
+				{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"git diff --staged"}`)},
 			},
 		},
 		{Role: "tool", ToolCallID: "c1", Content: ""}, // empty tool output
@@ -410,11 +410,11 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 	t.Run("from_delta_only", func(t *testing.T) {
 		// Single function_call: args built only from delta chunks (no arguments in done).
 		stream := buildSSEStream([]string{
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Bash"}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell"}}`,
 			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}`,
 			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"echo hi"}`,
 			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"}"}`,
-			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Bash","status":"completed"}}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell","status":"completed"}}`,
 			"[DONE]",
 		})
 		resp, err := parseResponsesSSE(stream, nil, nil)
@@ -425,8 +425,8 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
 		}
 		tc := resp.ToolCalls[0]
-		if tc.ID != "call_abc" || tc.Name != "Bash" {
-			t.Errorf("tool call id=%q name=%q, want call_abc Bash", tc.ID, tc.Name)
+		if tc.ID != "call_abc" || tc.Name != "Shell" {
+			t.Errorf("tool call id=%q name=%q, want call_abc Shell", tc.ID, tc.Name)
 		}
 		var args map[string]any
 		if err := json.Unmarshal(tc.Args, &args); err != nil {
@@ -441,9 +441,9 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 		// API sends empty or partial deltas but done event has full item.arguments (e.g. qt decoding).
 		// Parser should use done's arguments as final args.
 		stream := buildSSEStream([]string{
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Bash"}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Shell"}}`,
 			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{}"}`,
-			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Bash","arguments":"{\"command\":\"ls -la\"}","status":"completed"}}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Shell","arguments":"{\"command\":\"ls -la\"}","status":"completed"}}`,
 			"[DONE]",
 		})
 		resp, err := parseResponsesSSE(stream, nil, nil)
@@ -454,8 +454,8 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
 		}
 		tc := resp.ToolCalls[0]
-		if tc.Name != "Bash" {
-			t.Errorf("tool name = %q, want Bash", tc.Name)
+		if tc.Name != "Shell" {
+			t.Errorf("tool name = %q, want Shell", tc.Name)
 		}
 		var args map[string]any
 		if err := json.Unmarshal(tc.Args, &args); err != nil {
@@ -469,9 +469,9 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 	t.Run("two_tool_calls_by_output_index", func(t *testing.T) {
 		// Two function_calls: output_index 0 and 1; verify routing by output_index.
 		stream := buildSSEStream([]string{
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Bash"}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Shell"}}`,
 			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"first\"}"}`,
-			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Bash","status":"completed"}}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Shell","status":"completed"}}`,
 			`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Read"}}`,
 			`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"path\":\"a.go\"}"}`,
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Read","status":"completed"}}`,
@@ -484,8 +484,8 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 		if len(resp.ToolCalls) != 2 {
 			t.Fatalf("got %d tool calls, want 2", len(resp.ToolCalls))
 		}
-		if resp.ToolCalls[0].Name != "Bash" || resp.ToolCalls[0].ID != "c0" {
-			t.Errorf("first tool: name=%q id=%q, want Bash c0", resp.ToolCalls[0].Name, resp.ToolCalls[0].ID)
+		if resp.ToolCalls[0].Name != "Shell" || resp.ToolCalls[0].ID != "c0" {
+			t.Errorf("first tool: name=%q id=%q, want Shell c0", resp.ToolCalls[0].Name, resp.ToolCalls[0].ID)
 		}
 		if resp.ToolCalls[1].Name != "Read" || resp.ToolCalls[1].ID != "c1" {
 			t.Errorf("second tool: name=%q id=%q, want Read c1", resp.ToolCalls[1].Name, resp.ToolCalls[1].ID)
@@ -505,9 +505,9 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 	t.Run("done_with_index_fallback", func(t *testing.T) {
 		// Backward compat: done event has index but no output_index (or output_index 0).
 		stream := buildSSEStream([]string{
-			`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Bash"}}`,
+			`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Shell"}}`,
 			`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"pwd\"}"}`,
-			`{"type":"response.output_item.done","index":1,"output_index":0,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Bash","status":"completed"}}`,
+			`{"type":"response.output_item.done","index":1,"output_index":0,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Shell","status":"completed"}}`,
 			"[DONE]",
 		})
 		resp, err := parseResponsesSSE(stream, nil, nil)
@@ -527,8 +527,8 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 	t.Run("done_arguments_as_json_string", func(t *testing.T) {
 		// API sends arguments as a JSON string (e.g. "{\"command\":\"echo 1\"}"); parser must unwrap so tool gets object.
 		stream := buildSSEStream([]string{
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Bash"}}`,
-			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Bash","arguments":"{\"command\":\"echo 1\"}","status":"completed"}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Shell"}}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Shell","arguments":"{\"command\":\"echo 1\"}","status":"completed"}}`,
 			"[DONE]",
 		})
 		resp, err := parseResponsesSSE(stream, nil, nil)
@@ -538,7 +538,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 		if len(resp.ToolCalls) != 1 {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
 		}
-		// Args must be unwrapped to object so json.Unmarshal into struct works (e.g. tools.bashArgs).
+		// Args must be unwrapped to object so json.Unmarshal into struct works (e.g. tools.shellArgs).
 		var args map[string]any
 		if err := json.Unmarshal(resp.ToolCalls[0].Args, &args); err != nil {
 			t.Fatalf("tool args must be valid object for tools: %v", err)
@@ -634,13 +634,13 @@ func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
 	// Simulate qt behavior: normal sequence, then duplicate with triple-encoded args.
 	stream := buildSSEStream([]string{
 		// First (normal) sequence
-		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"echo hi\"}"}`,
-		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Bash","arguments":"{\"command\":\"echo hi\"}","status":"completed"}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Shell","arguments":"{\"command\":\"echo hi\"}","status":"completed"}}`,
 		// Duplicate replay from proxy (same call_id, same output_index, triple-encoded args)
-		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Bash","status":"in_progress","arguments":""}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Shell","status":"in_progress","arguments":""}}`,
 		`{"type":"response.function_call_arguments.done","output_index":1,"arguments":"\"{\\\"command\\\":\\\"echo hi\\\"}\"","call_id":"call_abc","item_id":"fc_1"}`,
-		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Bash","arguments":"\"{\\\"command\\\":\\\"echo hi\\\"}\"","status":"completed"}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Shell","arguments":"\"{\\\"command\\\":\\\"echo hi\\\"}\"","status":"completed"}}`,
 		// Completion
 		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call"}],"usage":{"input_tokens":100,"output_tokens":50}}}`,
 	})
@@ -663,8 +663,8 @@ func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
 		t.Errorf("got %d tool_use_start callbacks, want 1 (duplicate should not trigger TUI block)", toolUseStarts)
 	}
 	tc := resp.ToolCalls[0]
-	if tc.ID != "call_abc" || tc.Name != "Bash" {
-		t.Errorf("tool call id=%q name=%q, want call_abc Bash", tc.ID, tc.Name)
+	if tc.ID != "call_abc" || tc.Name != "Shell" {
+		t.Errorf("tool call id=%q name=%q, want call_abc Shell", tc.ID, tc.Name)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(tc.Args, &args); err != nil {
@@ -675,16 +675,16 @@ func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
 	}
 }
 
-// TestParseResponsesSSE_ExecuteBashTool runs the full flow: parse SSE → UnwrapToolArgs → Registry.Execute(Bash).
+// TestParseResponsesSSE_ExecuteShellTool runs the full flow: parse SSE → UnwrapToolArgs → Registry.Execute(Shell).
 // It verifies that parsed tool-call args are valid for real tool execution (no "cannot unmarshal string" etc.).
-func TestParseResponsesSSE_ExecuteBashTool(t *testing.T) {
-	// Simulate API stream: one Bash tool call with command "echo chord-ok".
+func TestParseResponsesSSE_ExecuteShellTool(t *testing.T) {
+	// Simulate API stream: one Shell tool call with command "echo chord-ok".
 	stream := buildSSEStream([]string{
-		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"echo chord-ok"}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"}"}`,
-		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Bash","status":"completed"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Shell","status":"completed"}}`,
 		"[DONE]",
 	})
 	resp, err := parseResponsesSSE(stream, nil, nil)
@@ -695,31 +695,31 @@ func TestParseResponsesSSE_ExecuteBashTool(t *testing.T) {
 		t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
 	}
 	tc := resp.ToolCalls[0]
-	if tc.Name != "Bash" {
-		t.Fatalf("tool name = %q, want Bash", tc.Name)
+	if tc.Name != "Shell" {
+		t.Fatalf("tool name = %q, want Shell", tc.Name)
 	}
 
 	// Same path as agent: UnwrapToolArgs then Execute.
 	args := UnwrapToolArgs(tc.Args)
 	reg := tools.NewRegistry()
-	reg.Register(tools.NewBashTool("bash"))
+	reg.Register(tools.NewShellTool("bash"))
 	ctx := context.Background()
 	out, execErr := reg.Execute(ctx, tc.Name, args)
 	if execErr != nil {
-		t.Fatalf("Bash Execute failed (args may be wrong type for tools.bashArgs): %v", execErr)
+		t.Fatalf("Shell Execute failed (args may be wrong type for tools.shellArgs): %v", execErr)
 	}
 	if !strings.Contains(out, "chord-ok") {
-		t.Errorf("Bash output = %q, want to contain \"chord-ok\"", out)
+		t.Errorf("Shell output = %q, want to contain \"chord-ok\"", out)
 	}
 }
 
-// TestParseResponsesSSE_ExecuteBashTool_DoneArgumentsAsString runs the same flow when the API
+// TestParseResponsesSSE_ExecuteShellTool_DoneArgumentsAsString runs the same flow when the API
 // sends arguments only in done event as a JSON string (e.g. qt). Execute must still succeed.
-func TestParseResponsesSSE_ExecuteBashTool_DoneArgumentsAsString(t *testing.T) {
+func TestParseResponsesSSE_ExecuteShellTool_DoneArgumentsAsString(t *testing.T) {
 	stream := buildSSEStream([]string{
-		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{}"}`,
-		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"Bash","arguments":"{\"command\":\"echo done-args\"}","status":"completed"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"Shell","arguments":"{\"command\":\"echo done-args\"}","status":"completed"}}`,
 		"[DONE]",
 	})
 	resp, err := parseResponsesSSE(stream, nil, nil)
@@ -732,14 +732,14 @@ func TestParseResponsesSSE_ExecuteBashTool_DoneArgumentsAsString(t *testing.T) {
 	tc := resp.ToolCalls[0]
 	args := UnwrapToolArgs(tc.Args)
 	reg := tools.NewRegistry()
-	reg.Register(tools.NewBashTool("bash"))
+	reg.Register(tools.NewShellTool("bash"))
 	ctx := context.Background()
 	out, execErr := reg.Execute(ctx, tc.Name, args)
 	if execErr != nil {
-		t.Fatalf("Bash Execute failed (done.arguments as string must unwrap to object): %v", execErr)
+		t.Fatalf("Shell Execute failed (done.arguments as string must unwrap to object): %v", execErr)
 	}
 	if !strings.Contains(out, "done-args") {
-		t.Errorf("Bash output = %q, want to contain \"done-args\"", out)
+		t.Errorf("Shell output = %q, want to contain \"done-args\"", out)
 	}
 }
 
@@ -747,9 +747,9 @@ func TestParseResponsesSSE_ExecuteBashTool_DoneArgumentsAsString(t *testing.T) {
 // (output truncation, e.g. max_output_tokens), we do not append in-progress tool calls and set StopReason=length.
 // This prevents "review uncommitted code" / large git diff scenarios from being counted as malformed.
 func TestParseResponsesSSE_TruncatedStream(t *testing.T) {
-	// Simulate: model starts Bash (e.g. git diff), stream is truncated before output_item.done.
+	// Simulate: model starts Shell (e.g. git diff), stream is truncated before output_item.done.
 	stream := buildSSEStream([]string{
-		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"git diff --staged"}`,
 		// No output_item.done; stream ends with response.incomplete (truncation).
@@ -772,7 +772,7 @@ func TestParseResponsesSSE_TruncatedStream(t *testing.T) {
 // we discard that tool call and set StopReason=length so the agent does not count it as malformed.
 func TestParseResponsesSSE_DONEWithIncompleteJSON(t *testing.T) {
 	stream := buildSSEStream([]string{
-		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"git "}`,
 		// No more deltas, no output_item.done; stream ends with [DONE]. Args are invalid JSON.
 		"[DONE]",
@@ -865,7 +865,7 @@ func TestResponsesRequestSignatureIgnoresInputButTracksNonInputFields(t *testing
 	if responsesRequestSignature(reqA) != responsesRequestSignature(reqB) {
 		t.Fatal("signature should ignore input differences")
 	}
-	reqB.Tools = []responsesTool{{Type: "function", Name: "Bash"}}
+	reqB.Tools = []responsesTool{{Type: "function", Name: "Shell"}}
 	if responsesRequestSignature(reqA) == responsesRequestSignature(reqB) {
 		t.Fatal("signature should change when non-input fields change")
 	}
@@ -1287,12 +1287,12 @@ func TestResponsesProvider_AlwaysFullInputOnHTTP(t *testing.T) {
 }
 
 // TestParseResponsesSSE_ReviewUncommittedCode_E2E simulates "review uncommitted code" flow: parse a truncated
-// stream (Bash git diff started but output truncated), then ensure we do not produce malformed tool calls
+// stream (Shell git diff started but output truncated), then ensure we do not produce malformed tool calls
 // and StopReason is length so the agent can suggest new conversation / max_output_tokens.
 func TestParseResponsesSSE_ReviewUncommittedCode_E2E(t *testing.T) {
-	// Scenario: user says "review uncommitted code", model starts Bash with "git diff --staged", output is truncated.
+	// Scenario: user says "review uncommitted code", model starts Shell with "git diff --staged", output is truncated.
 	stream := buildSSEStream([]string{
-		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"bash_1","call_id":"call_bash","name":"Bash"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"shell_1","call_id":"call_shell","name":"Shell"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"git diff --staged"}`,
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"}"}`,

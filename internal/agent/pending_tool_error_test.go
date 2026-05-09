@@ -132,7 +132,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 	}()
 
 	a.newTurn()
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "Bash", ArgsJSON: `{"command":"sleep 10"}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "Shell", ArgsJSON: `{"command":"sleep 10"}`})
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 
@@ -445,11 +445,11 @@ func TestWrapToolRejectedByUserDisplaysWithoutSentinelDuplication(t *testing.T) 
 }
 
 func TestWrapToolRejectedByUserIncludesDenyReasonOnce(t *testing.T) {
-	err := wrapToolRejectedByUser("Bash", " risky command ")
+	err := wrapToolRejectedByUser("Shell", " risky command ")
 	if !errors.Is(err, errToolRejectedByUser) {
 		t.Fatalf("errors.Is(err, errToolRejectedByUser) = false for %v", err)
 	}
-	want := `tool "Bash" rejected by user: risky command`
+	want := `tool "Shell" rejected by user: risky command`
 	if got := err.Error(); got != want {
 		t.Fatalf("err.Error() = %q, want %q", got, want)
 	}
@@ -485,7 +485,7 @@ func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 	var events []AgentEvent
 	emitFailedToolResults(func(evt AgentEvent) {
 		events = append(events, evt)
-	}, []PendingToolCall{{CallID: "tool-2", Name: "Bash", ArgsJSON: `{"command":"echo hi"}`, AgentID: "main"}}, context.DeadlineExceeded)
+	}, []PendingToolCall{{CallID: "tool-2", Name: "Shell", ArgsJSON: `{"command":"echo hi"}`, AgentID: "main"}}, context.DeadlineExceeded)
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))

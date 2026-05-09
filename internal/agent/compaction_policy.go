@@ -79,8 +79,8 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= compactBashSuccessAgeTurns && len(prepared[i].Content) > compactBashSuccessBytes {
 			meta := callMeta[prepared[i].ToolCallID]
-			if strings.TrimSpace(meta.Name) == "Bash" {
-				prepared[i].Content = "[Older Bash output omitted to save context; re-run the command if needed.]"
+			if strings.TrimSpace(meta.Name) == "Shell" {
+				prepared[i].Content = "[Older Shell output omitted to save context; re-run the command if needed.]"
 				prepared[i].ToolDiff = ""
 				continue
 			}

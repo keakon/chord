@@ -609,7 +609,7 @@ func TestParseFrontmatter_AllowedTools(t *testing.T) {
 name: "tool-skill"
 description: "Skill with allowed tools"
 allowed_tools:
-  - "Bash"
+  - "Shell"
   - "Read"
   - "Write"
 ---
@@ -622,7 +622,7 @@ Body
 	if len(fm.AllowedTools) != 3 {
 		t.Fatalf("allowed_tools: got %d items, want 3", len(fm.AllowedTools))
 	}
-	if fm.AllowedTools[0] != "Bash" || fm.AllowedTools[1] != "Read" || fm.AllowedTools[2] != "Write" {
+	if fm.AllowedTools[0] != "Shell" || fm.AllowedTools[1] != "Read" || fm.AllowedTools[2] != "Write" {
 		t.Errorf("allowed_tools: got %v", fm.AllowedTools)
 	}
 }
@@ -659,7 +659,7 @@ func TestLoadMeta_ExtendedFrontmatter(t *testing.T) {
 		"context":       "fork",
 		"model":         "sonnet",
 		"effort":        "medium",
-		"allowed_tools": []string{"Bash"},
+		"allowed_tools": []string{"Shell"},
 		"paths":         []string{"**/*.go"},
 	}, "Body\n")
 
@@ -682,7 +682,7 @@ func TestLoadMeta_ExtendedFrontmatter(t *testing.T) {
 	if meta.Effort != "medium" {
 		t.Errorf("effort: got %q", meta.Effort)
 	}
-	if len(meta.AllowedTools) != 1 || meta.AllowedTools[0] != "Bash" {
+	if len(meta.AllowedTools) != 1 || meta.AllowedTools[0] != "Shell" {
 		t.Errorf("allowed_tools: got %v", meta.AllowedTools)
 	}
 	if len(meta.Paths) != 1 || meta.Paths[0] != "**/*.go" {
@@ -709,7 +709,7 @@ context: "fork"
 model: "gpt-5.5"
 effort: "high"
 allowed_tools:
-  - "Bash"
+  - "Shell"
 `
 	if err := os.WriteFile(filepath.Join(dir, "chord.yaml"), []byte(sidecar), 0644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -731,7 +731,7 @@ allowed_tools:
 	if meta.Effort != "high" {
 		t.Errorf("effort: got %q", meta.Effort)
 	}
-	if len(meta.AllowedTools) != 1 || meta.AllowedTools[0] != "Bash" {
+	if len(meta.AllowedTools) != 1 || meta.AllowedTools[0] != "Shell" {
 		t.Errorf("allowed_tools: got %v", meta.AllowedTools)
 	}
 }

@@ -133,7 +133,7 @@ func (DelegateTool) Name() string { return NameDelegate }
 func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +
 		"The SubAgent runs independently and reports back when done. " +
-		"Prefer using Read, Grep, and Bash directly when one or a few tool calls suffice; " +
+		"Prefer using Read, Grep, and Shell directly when one or a few tool calls suffice; " +
 		"use Delegate only for substantial sub-work that benefits from a dedicated agent (e.g. multi-file edits or independent plan items). " +
 		"Use Notify(existing) for the same task's follow-up, clarification, rework, added tests, added verification, or final acceptance work; use Delegate(new) for a genuinely new, independently trackable task. " +
 		"Only parallelize tasks when their write scopes are clearly independent; do not create concurrent workers that may edit the same file or tightly coupled targets. " +

@@ -148,7 +148,7 @@ type Block struct {
 	// ImageParts holds metadata for each image attachment when available.
 	ImageParts []BlockImagePart
 
-	// UserLocalShell: merged USER + Bash-style !shell card (Type must be BlockUser).
+	// UserLocalShell: merged USER + Shell-style !shell card (Type must be BlockUser).
 	UserLocalShellCmd     string
 	UserLocalShellPending bool
 	UserLocalShellResult  string

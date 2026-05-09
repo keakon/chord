@@ -52,7 +52,7 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Bash",
+			Name: "Shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -72,12 +72,12 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 	if a.turn.MalformedCount != 0 {
 		t.Fatalf("MalformedCount = %d, want 0 during recovery path", a.turn.MalformedCount)
 	}
-	if got := a.turn.LastTruncatedToolName; got != "Bash" {
-		t.Fatalf("LastTruncatedToolName = %q, want Bash", got)
+	if got := a.turn.LastTruncatedToolName; got != "Shell" {
+		t.Fatalf("LastTruncatedToolName = %q, want Shell", got)
 	}
 	if got := a.pendingRecoveryPrompt; got == "" {
 		t.Fatal("expected recovery prompt to be set as turn overlay")
-	} else if want := `tool "Bash"`; !strings.Contains(got, want) {
+	} else if want := `tool "Shell"`; !strings.Contains(got, want) {
 		t.Fatalf("recovery prompt %q does not contain %q", got, want)
 	}
 }
@@ -94,7 +94,7 @@ func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUn
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Bash",
+			Name: "Shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -131,7 +131,7 @@ func TestHandleLLMResponseTruncatedMalformedSchedulesCompactionBeforeAbort(t *te
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Bash",
+			Name: "Shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -163,7 +163,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 1024, "")
 	a.newTurn()
 	a.turn.InLengthRecovery = true
-	a.turn.LastTruncatedToolName = "Bash"
+	a.turn.LastTruncatedToolName = "Shell"
 	a.pendingUserMessages = []pendingUserMessage{{Content: "queued after compaction"}}
 
 	pending := &pendingMainLLMCall{
@@ -178,7 +178,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 	// Recovery prompt should be set as request-scoped overlay (not in ctxMgr).
 	if got := a.pendingRecoveryPrompt; got == "" {
 		t.Fatal("expected recovery prompt to be set as turn overlay after compaction resume")
-	} else if want := `tool "Bash"`; !strings.Contains(got, want) {
+	} else if want := `tool "Shell"`; !strings.Contains(got, want) {
 		t.Fatalf("recovery prompt %q does not contain %q", got, want)
 	}
 	if _, err := a.llmClient.CompleteStream(context.Background(), nil, nil, nil); err != nil {
@@ -209,7 +209,7 @@ func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
 	a.newTurn()
 	a.turn.InLengthRecovery = true
 	a.turn.LengthRecoveryCount = 2
-	a.turn.LastTruncatedToolName = "Bash"
+	a.turn.LastTruncatedToolName = "Shell"
 
 	payload := &LLMResponsePayload{
 		Content:    "done",
@@ -277,7 +277,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryFailureAborts(t *testi
 	a.llmClient = llm.NewClient(providerCfg, &recordingLengthRecoveryProvider{}, "test-model", 1024, "")
 	a.newTurn()
 	a.turn.InLengthRecovery = true
-	a.turn.LastTruncatedToolName = "Bash"
+	a.turn.LastTruncatedToolName = "Shell"
 
 	pending := &pendingMainLLMCall{
 		turnID:       a.turn.ID,

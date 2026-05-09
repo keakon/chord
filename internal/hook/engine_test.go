@@ -52,7 +52,7 @@ func TestHookPureHelpers(t *testing.T) {
 
 func TestHookFiltersAndEnvHelpers(t *testing.T) {
 	env := testEnv(OnToolBatchComplete, map[string]any{
-		"tool_name":  "Bash",
+		"tool_name":  "Shell",
 		"path":       "internal/agent/main.go",
 		"timeout_ms": float64(1500),
 		"error_kind": "tool_error",
@@ -66,7 +66,7 @@ func TestHookFiltersAndEnvHelpers(t *testing.T) {
 		},
 	})
 
-	if !matchesToolFilter([]string{"Bash"}, env) || matchesToolFilter([]string{"Edit"}, env) || matchesToolFilter([]string{"Glob"}, env) {
+	if !matchesToolFilter([]string{"Shell"}, env) || matchesToolFilter([]string{"Edit"}, env) || matchesToolFilter([]string{"Glob"}, env) {
 		t.Fatal("matchesToolFilter unexpected")
 	}
 	if !matchesPathFilter([]string{"internal/**/*.go"}, env) || matchesPathFilter([]string{"docs/**"}, env) {
@@ -84,7 +84,7 @@ func TestHookFiltersAndEnvHelpers(t *testing.T) {
 
 	vars := buildHookEnv(env, HookDef{Environment: map[string]string{"CUSTOM": "value", "EMPTY": ""}})
 	joined := "\n" + strings.Join(vars, "\n") + "\n"
-	for _, want := range []string{"CHORD_HOOK_POINT=on_tool_batch_complete", "CHORD_HOOK_TURN_ID=42", "CHORD_HOOK_TOOL_NAME=Bash", "CHORD_HOOK_TIMEOUT_MS=1500", "CHORD_HOOK_ERROR_KIND=tool_error", "CUSTOM=value"} {
+	for _, want := range []string{"CHORD_HOOK_POINT=on_tool_batch_complete", "CHORD_HOOK_TURN_ID=42", "CHORD_HOOK_TOOL_NAME=Shell", "CHORD_HOOK_TIMEOUT_MS=1500", "CHORD_HOOK_ERROR_KIND=tool_error", "CUSTOM=value"} {
 		if !strings.Contains(joined, "\n"+want+"\n") {
 			t.Fatalf("buildHookEnv missing %q in %q", want, joined)
 		}
@@ -97,7 +97,7 @@ func TestHookFiltersAndEnvHelpers(t *testing.T) {
 func TestNoopEngine(t *testing.T) {
 	e := &NoopEngine{}
 	result, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
-		"tool_name": "Bash",
+		"tool_name": "Shell",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -110,13 +110,13 @@ func TestNoopEngine(t *testing.T) {
 func TestCommandEngine_SyncBlockAndModify(t *testing.T) {
 	e := NewCommandEngine(map[string][]HookDef{
 		OnToolCall: {
-			shellHook("modify", OnToolCall, `echo '{"action":"modify","data":{"tool_name":"Bash","args":{"command":"echo safe"}}}'`),
+			shellHook("modify", OnToolCall, `echo '{"action":"modify","data":{"tool_name":"Shell","args":{"command":"echo safe"}}}'`),
 			shellHook("block", OnToolCall, `echo '{"action":"block","message":"denied"}'`),
 		},
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
-		"tool_name": "Bash",
+		"tool_name": "Shell",
 		"args":      map[string]any{"command": "rm -rf /"},
 	}))
 	if err != nil {
@@ -138,7 +138,7 @@ func TestCommandEngine_SyncModifyCarriesData(t *testing.T) {
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnBeforeToolResultAppend, map[string]any{
-		"tool_name":      "Bash",
+		"tool_name":      "Shell",
 		"display_result": "raw",
 		"context_result": "raw",
 	}))
@@ -161,10 +161,10 @@ func TestCommandEngine_ToolFilter(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	e := NewCommandEngine(map[string][]HookDef{
 		OnToolCall: {{
-			Name:    "bash-only",
+			Name:    "shell-only",
 			Point:   OnToolCall,
 			Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"action":"continue"}'`, marker)},
-			Tools:   []string{"Bash"},
+			Tools:   []string{"Shell"},
 		}},
 	})
 
@@ -277,7 +277,7 @@ func TestCommandEngine_ArgvMode(t *testing.T) {
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
-		"tool_name": "Bash",
+		"tool_name": "Shell",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

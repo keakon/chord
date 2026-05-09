@@ -43,12 +43,12 @@ log_level: info
 # context:
 #   compact_model: anthropic/claude-opus-4.7   # use the same model for compaction
 #
-# # Hooks: audit Bash, lint Go on edit batches, redact secrets from output
+# # Hooks: audit Shell, lint Go on edit batches, redact secrets from output
 # hooks:
 #   on_tool_call:
-#     - name: audit-bash
-#       tools: ["Bash"]
-#       command: ["./scripts/chord-hooks/audit-bash.sh"]
+#     - name: audit-shell
+#       tools: ["Shell"]
+#       command: ["./scripts/chord-hooks/audit-shell.sh"]
 #       timeout: 5
 #
 #   on_tool_batch_complete:
@@ -64,7 +64,7 @@ log_level: info
 #
 #   on_before_tool_result_append:
 #     - name: redact-keys
-#       tools: ["Bash", "WebFetch", "Read"]
+#       tools: ["Shell", "WebFetch", "Read"]
 #       command: ["./scripts/chord-hooks/redact-keys.sh"]
 #       timeout: 3
 #
@@ -107,7 +107,7 @@ log_level: info
 #     Write: ask
 #     Edit: ask
 #     Delete: ask
-#     Bash:
+#     Shell:
 #       "go test ./...": allow
 #       "go build ./...": allow
 #       "git status": allow

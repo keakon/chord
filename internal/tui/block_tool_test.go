@@ -155,7 +155,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 			"Successfully wrote 66 lines, 1976 bytes",
 			"",
 			"LSP diagnostics in other files:",
-			"<project-root>/internal/tools/bash_test.go",
+			"<project-root>/internal/tools/shell_test.go",
 			"[H] 259:23 Ranging over SplitSeq is more efficient",
 		}, "\n"),
 		displayWorkingDir: wd,
@@ -387,11 +387,11 @@ func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
 	}
 }
 
-func TestCollapsedBashToolShowsExpandHintForHiddenOutput(t *testing.T) {
+func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"printf 'one\ntwo\nthree\n'","description":"show lines"}`,
 		ResultContent:          "one\ntwo\nthree",
 		ResultDone:             true,
@@ -403,7 +403,7 @@ func TestCollapsedBashToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	// Short output: stdout is already shown inline, but expanded mode still adds
 	// exit status + stream headers, so we should still show an expand hint.
 	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
 		t.Fatalf("expected all output lines to be shown inline for short output; got:\n%s", joined)
@@ -414,7 +414,7 @@ func TestCollapsedBashDoesNotDuplicateDescriptionInSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"ls /tmp","description":"List temp files"}`,
 		ResultContent:          "file1\nfile2\nfile3",
 		ResultDone:             true,
@@ -445,7 +445,7 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"cat big.txt","description":"show file"}`,
 		ResultContent:          strings.Join(lines, "\n"),
 		ResultDone:             true,
@@ -454,10 +454,10 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Bash with long output to show expand hint; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with long output to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line 8") {
-		t.Fatalf("did not expect collapsed Bash with long output to reveal all lines; got:\n%s", joined)
+		t.Fatalf("did not expect collapsed Shell with long output to reveal all lines; got:\n%s", joined)
 	}
 }
 
@@ -492,7 +492,7 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolResult,
-		ToolName:   "Bash",
+		ToolName:   "Shell",
 		Content:    "Error: " + strings.Repeat("x", 220),
 		IsError:    true,
 		Collapsed:  false,
@@ -555,7 +555,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -569,7 +569,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 
-	if !strings.Contains(joined, "Bash echo first (timeout=120)") {
+	if !strings.Contains(joined, "Shell echo first (timeout=120)") {
 		t.Fatalf("expected header to contain only first command line with timeout; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "echo second (timeout=120)") {
@@ -582,7 +582,7 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -590,11 +590,11 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Bash Search existing permission-related tests (timeout=120)") {
-		t.Fatalf("expected collapsed multiline Bash header to use description; got:\n%s", joined)
+	if !strings.Contains(joined, "Shell Search existing permission-related tests (timeout=120)") {
+		t.Fatalf("expected collapsed multiline Shell header to use description; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") {
-		t.Fatalf("expected collapsed multiline Bash to show command preview block; got:\n%s", joined)
+		t.Fatalf("expected collapsed multiline Shell to show command preview block; got:\n%s", joined)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"sleep 1","timeout":2400}`,
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -610,8 +610,8 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Bash sleep 1 (timeout=2400→600)") {
-		t.Fatalf("expected collapsed Bash header to show requested and effective capped foreground timeout; got:\n%s", joined)
+	if !strings.Contains(joined, "Shell sleep 1 (timeout=2400→600)") {
+		t.Fatalf("expected collapsed Shell header to show requested and effective capped foreground timeout; got:\n%s", joined)
 	}
 }
 
@@ -620,7 +620,7 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":"   ","timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -628,8 +628,8 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Bash python3 - <<'PY' (timeout=120)") {
-		t.Fatalf("expected collapsed multiline Bash header to fall back to command first line; got:\n%s", joined)
+	if !strings.Contains(joined, "Shell python3 - <<'PY' (timeout=120)") {
+		t.Fatalf("expected collapsed multiline Shell header to fall back to command first line; got:\n%s", joined)
 	}
 }
 
@@ -638,7 +638,7 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -646,14 +646,14 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Bash Search existing permission-related tests (timeout=120)") {
-		t.Fatalf("expected expanded Bash header to use summary description; got:\n%s", joined)
+	if !strings.Contains(joined, "Shell Search existing permission-related tests (timeout=120)") {
+		t.Fatalf("expected expanded Shell header to use summary description; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") || !strings.Contains(joined, "from pathlib import Path") || !strings.Contains(joined, "print('ok')") {
-		t.Fatalf("expected expanded Bash to show full command block; got:\n%s", joined)
+		t.Fatalf("expected expanded Shell to show full command block; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "description: Search existing permission-related tests") {
-		t.Fatalf("expected expanded Bash detail lines to still include description metadata; got:\n%s", joined)
+		t.Fatalf("expected expanded Shell detail lines to still include description metadata; got:\n%s", joined)
 	}
 }
 
@@ -662,7 +662,7 @@ func TestExpandedBashShowsIndentedContinuationLines(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -697,13 +697,13 @@ func TestExpandedBashShowsIndentedContinuationLines(t *testing.T) {
 		}
 	}
 	if !foundContinuation {
-		t.Fatalf("expected expanded Bash view to include continuation lines; got:\n%s", strings.Join(plain, "\n"))
+		t.Fatalf("expected expanded Shell view to include continuation lines; got:\n%s", strings.Join(plain, "\n"))
 	}
 	if !foundIndentedContinuation {
-		t.Fatalf("expected expanded Bash continuation line to be indented; got:\n%s", strings.Join(plain, "\n"))
+		t.Fatalf("expected expanded Shell continuation line to be indented; got:\n%s", strings.Join(plain, "\n"))
 	}
 	if !foundIndentedNested {
-		t.Fatalf("expected expanded Bash nested continuation line to preserve extra indentation; got:\n%s", strings.Join(plain, "\n"))
+		t.Fatalf("expected expanded Shell nested continuation line to preserve extra indentation; got:\n%s", strings.Join(plain, "\n"))
 	}
 }
 
@@ -712,7 +712,7 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -721,18 +721,18 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "echo first") || !strings.Contains(joined, "echo second") {
-		t.Fatalf("expected collapsed Bash to show command preview lines; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell to show command preview lines; got:\n%s", joined)
 	}
 	// Even when stdout/stderr are fully visible inline, expanded mode still adds
 	// exit status + stream headers, so we should show an expand hint.
 	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
-		t.Fatalf("expected collapsed Bash with short output to show full command; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with short output to show full command; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "ok") {
-		t.Fatalf("expected collapsed Bash with short output to show result inline; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with short output to show result inline; got:\n%s", joined)
 	}
 }
 
@@ -741,7 +741,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "one\ntwo\nthree",
 		ResultDone:             true,
@@ -752,7 +752,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	// Short output: all stdout/stderr are shown inline, but expanded mode still
 	// adds exit status + stream headers, so we should show an expand hint.
 	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Bash with short output to show expand hint; got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
 		t.Fatalf("expected full command to be shown for short output; got:\n%s", joined)
@@ -835,7 +835,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
-		ToolName:                   "Bash",
+		ToolName:                   "Shell",
 		Content:                    `{"command":"command -v benchstat || true"}`,
 		Collapsed:                  true,
 		ResultDone:                 false,
@@ -844,8 +844,8 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
-	if !strings.Contains(joined, "⏸ Bash command -v benchstat || true") {
-		t.Fatalf("expected queued Bash header; got:\n%s", joined)
+	if !strings.Contains(joined, "⏸ Shell command -v benchstat || true") {
+		t.Fatalf("expected queued Shell header; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected queued header badge; got:\n%s", joined)
@@ -883,7 +883,7 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:        1,
 		Type:      BlockToolCall,
-		ToolName:  "Bash",
+		ToolName:  "Shell",
 		Content:   `{"command":"printf '\u001b[32mok\u001b[0m'","description":"\u001b[36mdesc\u001b[0m"}`,
 		Collapsed: true,
 		ResultContent: strings.Join([]string{
@@ -899,11 +899,11 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected Bash card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected Shell card to not contain raw ESC: %q", joined)
 	}
 	for _, want := range []string{`\x1b[36mdesc\x1b[0m`, `\x1b[31mline-1\x1b[0m`} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("expected Bash card to contain %q, got:\n%s", want, joined)
+			t.Fatalf("expected Shell card to contain %q, got:\n%s", want, joined)
 		}
 	}
 }
@@ -916,7 +916,7 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Bash",
+		ToolName:      "Shell",
 		Content:       `{"command":"cat huge.log","description":"show huge log"}`,
 		Collapsed:     true,
 		ResultContent: strings.Join(lines, "\n"),
@@ -925,10 +925,10 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "line-00000") {
-		t.Fatalf("expected collapsed Bash preview to show first line, got:\n%s", joined)
+		t.Fatalf("expected collapsed Shell preview to show first line, got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line-49999") {
-		t.Fatalf("collapsed Bash preview should not render the hidden tail, got:\n%s", joined)
+		t.Fatalf("collapsed Shell preview should not render the hidden tail, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "49999 more lines · [space] expand") {
 		t.Fatalf("expected cheap hidden-line hint for large output, got:\n%s", joined)
@@ -1025,7 +1025,7 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 	block := &Block{
 		ID:                 1,
 		Type:               BlockToolCall,
-		ToolName:           "Bash",
+		ToolName:           "Shell",
 		Content:            `{"command":"echo hi"}`,
 		Collapsed:          true,
 		ResultDone:         false,
@@ -1036,13 +1036,13 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 	if strings.Contains(joined, "calling") {
 		t.Fatalf("active tool header should not render calling text; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Bash echo hi") {
+	if !strings.Contains(joined, "Shell echo hi") {
 		t.Fatalf("expected active tool header to keep stable tool name and summary; got:\n%s", joined)
 	}
 }
 
 func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
-	line := renderQueuedToolHeaderBadge("  ▸ Bash", 24)
+	line := renderQueuedToolHeaderBadge("  ▸ Shell", 24)
 	plain := stripANSI(line)
 	if got := ansi.StringWidth(plain); got != 24 {
 		t.Fatalf("queued header width = %d, want 24; got %q", got, plain)
@@ -1169,7 +1169,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"false"}`,
 		ResultContent:          "stdout\n\nError: exit code 1",
 		ResultStatus:           agent.ToolResultStatusError,
@@ -1181,11 +1181,11 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	joinedANSI := strings.Join(lines, "\n")
 	joinedPlain := stripANSI(joinedANSI)
 
-	if !strings.Contains(joinedPlain, "✗ Bash false") {
-		t.Fatalf("expected collapsed Bash error prefix; got:\n%s", joinedPlain)
+	if !strings.Contains(joinedPlain, "✗ Shell false") {
+		t.Fatalf("expected collapsed Shell error prefix; got:\n%s", joinedPlain)
 	}
 	if !strings.Contains(joinedPlain, "stdout") {
-		t.Fatalf("expected preserved stdout in collapsed Bash error; got:\n%s", joinedPlain)
+		t.Fatalf("expected preserved stdout in collapsed Shell error; got:\n%s", joinedPlain)
 	}
 	if !strings.Contains(joinedANSI, "\x1b[1;38;5;196m") && !strings.Contains(joinedANSI, "\x1b[38;5;196m") {
 		t.Fatalf("expected error styling ANSI sequence; got:\n%q", joinedANSI)
@@ -1196,7 +1196,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"cd /home/user/projects/sample-repo && git ls-files -s | grep '\\u0000' || true","description":"No-op check for nulls in git index","timeout":60,"workdir":""}`,
 		ResultContent:          "exit code 1 after output:\nstarting command: fork/exec /bin/bash: invalid argument",
 		ResultDone:             true,
@@ -1213,7 +1213,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 		}
 	}
 	if target < 0 {
-		t.Fatalf("did not find wrapped bash error body in rendered lines:\n%s", strings.Join(stripANSILines(lines), "\n"))
+		t.Fatalf("did not find wrapped shell error body in rendered lines:\n%s", strings.Join(stripANSILines(lines), "\n"))
 	}
 
 	line := lines[target]
@@ -1243,7 +1243,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 		}
 	}
 	if checked == 0 {
-		t.Fatal("expected trailing padding spaces on bash error line")
+		t.Fatal("expected trailing padding spaces on shell error line")
 	}
 }
 
@@ -1547,7 +1547,7 @@ func TestBashExpandedMetaShowsRelativeWorkdirInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                fmt.Sprintf(`{"command":"pwd","workdir":%q}`, workdir),
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
@@ -1555,7 +1555,7 @@ func TestBashExpandedMetaShowsRelativeWorkdirInsideWorkingDir(t *testing.T) {
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "workdir: internal/tui") && !strings.Contains(joined, "Workdir: internal/tui") {
-		t.Fatalf("expected bash expanded body to show relative workdir; got:\n%s", joined)
+		t.Fatalf("expected shell expanded body to show relative workdir; got:\n%s", joined)
 	}
 	if strings.Contains(joined, workdir) {
 		t.Fatalf("did not expect bash body to show absolute workdir; got:\n%s", joined)
@@ -1566,7 +1566,7 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"go test ./internal/tui/..."}`,
 		ResultContent:          "ok\nsecond line",
 		ResultDone:             true,
@@ -1575,10 +1575,10 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "ok") {
-		t.Fatalf("expected Bash collapsed summary to show success output summary; got:\n%s", joined)
+		t.Fatalf("expected Shell collapsed summary to show success output summary; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "Passed · 2 lines output") {
-		t.Fatalf("expected Bash collapsed summary to prefer output summary over legacy line-count summary; got:\n%s", joined)
+		t.Fatalf("expected Shell collapsed summary to prefer output summary over legacy line-count summary; got:\n%s", joined)
 	}
 }
 
@@ -1732,7 +1732,7 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"echo hi"}`,
 		ResultContent:          "Cancelled",
 		ResultStatus:           agent.ToolResultStatusCancelled,
@@ -1741,8 +1741,8 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Bash") {
-		t.Fatalf("expected Bash header to remain visible, got:\n%s", plain)
+	if !strings.Contains(plain, "Shell") {
+		t.Fatalf("expected Shell header to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
@@ -2095,7 +2095,7 @@ func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"printf test"}`,
 		ResultContent:          "\x1b[31mred\x1b[0m\nplain",
 		ResultDone:             true,
@@ -2104,13 +2104,13 @@ func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected rendered Bash card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected rendered Shell card to not contain raw ESC: %q", joined)
 	}
 	if !strings.Contains(joined, `\x1b[31mred\x1b[0m`) {
-		t.Fatalf("expected Bash output to show ANSI literally, got:\n%s", joined)
+		t.Fatalf("expected Shell output to show ANSI literally, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "plain") {
-		t.Fatalf("expected Bash output to keep plain text, got:\n%s", joined)
+		t.Fatalf("expected Shell output to keep plain text, got:\n%s", joined)
 	}
 }
 

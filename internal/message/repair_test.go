@@ -43,7 +43,7 @@ func TestRepairOrphanToolResults_DropsOrphanOutput(t *testing.T) {
 
 func TestRepairOrphanToolResults_UserBetweenAssistantAndTool(t *testing.T) {
 	msgs := []Message{
-		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_x", Name: "Bash", Args: []byte(`{}`)}}},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_x", Name: "Shell", Args: []byte(`{}`)}}},
 		{Role: "user", Content: "wait"},
 		{Role: "tool", ToolCallID: "call_x", Content: "done"},
 	}

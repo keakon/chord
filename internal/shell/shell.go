@@ -68,8 +68,8 @@ func detectWindowsShell() (ShellType, error) {
 	}
 
 	// Check Git Bash
-	if gitBash, err := findGitBash(); err == nil {
-		_ = gitBash // found
+	if gitShell, err := findGitBash(); err == nil {
+		_ = gitShell // found
 		return ShellGitBash, nil
 	}
 
@@ -119,8 +119,8 @@ func GetShellCommand(shellType ShellType, command string) (string, []string) {
 		return "powershell", []string{"-Command", command}
 	case ShellGitBash:
 		// Use bash from Git for Windows
-		if gitBash, err := findGitBash(); err == nil {
-			return gitBash, []string{"-c", command}
+		if gitShell, err := findGitBash(); err == nil {
+			return gitShell, []string{"-c", command}
 		}
 		return "bash", []string{"-c", command}
 	case ShellPOSIX:
@@ -147,7 +147,7 @@ func GetShellDescription(shellType ShellType) string {
 }
 
 // ParseShellType converts a shell type string (e.g. "bash", "powershell",
-// "git-bash", "posix") back to a ShellType. Unknown values fall back to Bash.
+// "git-bash", "posix") back to a ShellType. Unknown values fall back to bash.
 func ParseShellType(s string) ShellType {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "powershell":

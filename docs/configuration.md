@@ -28,10 +28,10 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 - Always enabled; there is no `early_tool_execution` toggle.
 - Eligible tools: `Read`, `Grep`, `Glob`, rollback-safe file mutation tools
   (`Write`, `Edit`, `Delete`), plus a conservative read-only subset of
-  `Bash` (single command only; no pipes/redirects/`&&`/`;`):
+  `Shell` (single command only; no pipes/redirects/`&&`/`;`):
   - `pwd`, `ls`, `cat`, `which`
   - `git status|log|diff|show|branch|rev-parse`
-- Not eligible: non-read-only `Bash`, interactive/control tools, or any call that
+- Not eligible: non-read-only `Shell`, interactive/control tools, or any call that
   requires permission action `ask`.
 - Speculative file mutations are real on-disk writes/deletes, but the runtime
   captures pre-state first and rolls them back if finalize discards the call.

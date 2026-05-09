@@ -44,7 +44,7 @@ func ToolCallLabel(toolName string) string {
 }
 
 // LabelLocalShell is the block label for TUI !shell runs (client-side bash -c).
-// Not the same as TOOL CALL (Bash): no LLM/agent round-trip.
+// Not the same as TOOL CALL (Shell): no LLM/agent round-trip.
 const LabelLocalShell = "LOCAL SHELL (!):"
 
 // LocalShellCopyBody builds the plain body after LabelLocalShell.

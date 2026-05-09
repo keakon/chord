@@ -322,7 +322,7 @@ func BuiltinAgentConfigs() map[string]*AgentConfig {
 // DefaultPlannerAgent returns the built-in planner agent configuration.
 // The planner agent is specialised for codebase exploration and plan generation.
 // It is read-heavy by default: Read/Grep/Glob are allowed, plan-file writes ask,
-// and Bash also asks so the prompt/runtime boundary stays conservative.
+// and Shell also asks so the prompt/runtime boundary stays conservative.
 // It has access to Handoff to signal plan completion.
 func DefaultPlannerAgent() *AgentConfig {
 	// Build permission node: read-heavy, free exploration.
@@ -331,7 +331,7 @@ func DefaultPlannerAgent() *AgentConfig {
 Read: allow
 Grep: allow
 Glob: allow
-Bash: ask
+Shell: ask
 Write: ask
 Edit: ask
 Handoff: allow
@@ -372,7 +372,7 @@ Write: ask
 Edit: ask
 Grep: allow
 Glob: allow
-Bash: ask
+Shell: ask
 Task: allow
 TodoWrite: allow
 Skill: allow

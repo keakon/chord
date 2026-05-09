@@ -32,7 +32,7 @@ func TestSpeculativeExecutionPolicyAllowsSafeReadOnlyTools(t *testing.T) {
 
 func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 	registry := tools.NewRegistry()
-	registry.Register(tools.NewBashTool("bash"))
+	registry.Register(tools.NewShellTool("bash"))
 
 	allowed := []string{
 		`{"command":"pwd"}`,
@@ -47,9 +47,9 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 		`{"command":"git rev-parse HEAD"}`,
 	}
 	for _, args := range allowed {
-		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tools.NameBash, json.RawMessage(args))
+		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tools.NameShell, json.RawMessage(args))
 		if !decision.Allowed {
-			t.Fatalf("Bash args %s rejected: %s", args, decision.Reason)
+			t.Fatalf("Shell args %s rejected: %s", args, decision.Reason)
 		}
 	}
 
@@ -62,9 +62,9 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 		`{"command":"rm README.md"}`,
 	}
 	for _, args := range rejected {
-		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tools.NameBash, json.RawMessage(args))
+		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tools.NameShell, json.RawMessage(args))
 		if decision.Allowed {
-			t.Fatalf("Bash args %s allowed, want reject", args)
+			t.Fatalf("Shell args %s allowed, want reject", args)
 		}
 	}
 }
@@ -93,7 +93,7 @@ func TestSpeculativeExecutionPolicyAllowsRollbackFileMutationTools(t *testing.T)
 
 func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T) {
 	registry := tools.NewRegistry()
-	registry.Register(tools.NewBashTool("bash"))
+	registry.Register(tools.NewShellTool("bash"))
 	registry.Register(tools.NewQuestionTool(nil))
 	registry.Register(tools.NewTodoWriteTool(nil))
 
@@ -101,7 +101,7 @@ func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T)
 		name string
 		args string
 	}{
-		{tools.NameBash, `{"command":"go test ./..."}`},
+		{tools.NameShell, `{"command":"go test ./..."}`},
 		{tools.NameQuestion, `{"questions":[{"header":"H","question":"Q?"}]}`},
 		{tools.NameTodoWrite, `{"todos":[]}`},
 	}

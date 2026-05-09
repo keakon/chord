@@ -44,17 +44,17 @@ func (c *cappedWriter) String() string {
 	return s
 }
 
-// BashTool executes shell commands.
-type BashTool struct {
+// ShellTool executes shell commands.
+type ShellTool struct {
 	shellType string // "bash", "powershell", "git-bash", or "posix"
 }
 
-// NewBashTool creates a BashTool with the detected shell type.
-func NewBashTool(shellType string) BashTool {
-	return BashTool{shellType: shellType}
+// NewShellTool creates a ShellTool with the detected shell type.
+func NewShellTool(shellType string) ShellTool {
+	return ShellTool{shellType: shellType}
 }
 
-type bashArgs struct {
+type shellArgs struct {
 	Command     string `json:"command"`
 	Description string `json:"description,omitempty"`
 	Workdir     string `json:"workdir,omitempty"`
@@ -68,11 +68,11 @@ const (
 )
 
 const (
-	BashDefaultTimeoutSec = defaultTimeoutSec
-	BashMaxTimeoutSec     = maxTimeoutSec
+	ShellDefaultTimeoutSec = defaultTimeoutSec
+	ShellMaxTimeoutSec     = maxTimeoutSec
 )
 
-type BashTimeoutInfo struct {
+type ShellTimeoutInfo struct {
 	RequestedSec int
 	EffectiveSec int
 	HasRequested bool
@@ -81,15 +81,15 @@ type BashTimeoutInfo struct {
 	Clamped      bool
 }
 
-func ResolveBashTimeout(timeout *int) BashTimeoutInfo {
+func ResolveShellTimeout(timeout *int) ShellTimeoutInfo {
 	if timeout == nil {
-		return ResolveBashTimeoutValue(0, false)
+		return ResolveShellTimeoutValue(0, false)
 	}
-	return ResolveBashTimeoutValue(*timeout, true)
+	return ResolveShellTimeoutValue(*timeout, true)
 }
 
-func ResolveBashTimeoutValue(requestedSec int, hasTimeout bool) BashTimeoutInfo {
-	info := BashTimeoutInfo{
+func ResolveShellTimeoutValue(requestedSec int, hasTimeout bool) ShellTimeoutInfo {
+	info := ShellTimeoutInfo{
 		RequestedSec: requestedSec,
 		HasRequested: hasTimeout,
 		HasLimit:     true,
@@ -107,15 +107,15 @@ func ResolveBashTimeoutValue(requestedSec int, hasTimeout bool) BashTimeoutInfo 
 	return info
 }
 
-func ResolveSpawnTimeout(timeout *int) BashTimeoutInfo {
+func ResolveSpawnTimeout(timeout *int) ShellTimeoutInfo {
 	if timeout == nil {
 		return ResolveSpawnTimeoutValue(0, false)
 	}
 	return ResolveSpawnTimeoutValue(*timeout, true)
 }
 
-func ResolveSpawnTimeoutValue(requestedSec int, hasTimeout bool) BashTimeoutInfo {
-	info := BashTimeoutInfo{
+func ResolveSpawnTimeoutValue(requestedSec int, hasTimeout bool) ShellTimeoutInfo {
+	info := ShellTimeoutInfo{
 		RequestedSec: requestedSec,
 		HasRequested: hasTimeout,
 	}
@@ -131,31 +131,31 @@ func ResolveSpawnTimeoutValue(requestedSec int, hasTimeout bool) BashTimeoutInfo
 	return info
 }
 
-func (BashTool) Name() string { return "Bash" }
+func (ShellTool) Name() string { return "Shell" }
 
-func (BashTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
+func (ShellTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
 	return ConcurrencyPolicy{
-		Resource:             "process:bash",
+		Resource:             "process:shell",
 		Mode:                 ConcurrencyModeExclusive,
 		AbortSiblingsOnError: true,
 	}
 }
 
-func (t BashTool) Description() string {
-	return bashToolDescription(nil, t.shellType)
+func (t ShellTool) Description() string {
+	return shellToolDescription(nil, t.shellType)
 }
 
-func (t BashTool) DescriptionForTools(visible map[string]struct{}) string {
-	return bashToolDescription(visible, t.shellType)
+func (t ShellTool) DescriptionForTools(visible map[string]struct{}) string {
+	return shellToolDescription(visible, t.shellType)
 }
 
-func bashToolDescription(visible map[string]struct{}, shellType string) string {
+func shellToolDescription(visible map[string]struct{}, shellType string) string {
 	var shellDesc string
 	switch shellType {
 	case "powershell":
 		shellDesc = "Execute a shell command via PowerShell."
 	case "git-bash":
-		shellDesc = "Execute a shell command via Git Bash."
+		shellDesc = "Execute a shell command via Git Shell."
 	case "posix":
 		shellDesc = "Execute a shell command (POSIX sh; avoid bash-specific syntax like [[ ]])."
 	default:
@@ -182,12 +182,12 @@ func bashToolDescription(visible map[string]struct{}, shellType string) string {
 	}
 	parts = append(parts,
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
-		"Use Bash mainly for tests, builds, git, and other system commands.",
+		"Use Shell mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
-		"For native filesystem operations with no dedicated built-in tool, Bash is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		"If file-reading, search, or code-navigation tools are hidden or denied in this role, Bash is not a substitute for them.",
+		"For native filesystem operations with no dedicated built-in tool, Shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
+		"If file-reading, search, or code-navigation tools are hidden or denied in this role, Shell is not a substitute for them.",
 		"Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
-		"If file-editing tools are hidden or denied in this role, Bash is not a substitute for them.",
+		"If file-editing tools are hidden or denied in this role, Shell is not a substitute for them.",
 		"For explicit file deletions, prefer `Delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool is exclusively for foreground execution — all background process management uses the Spawn tool.",
@@ -200,7 +200,7 @@ func bashToolDescription(visible map[string]struct{}, shellType string) string {
 	return strings.Join(parts, " ")
 }
 
-func (BashTool) Parameters() map[string]any {
+func (ShellTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -226,10 +226,10 @@ func (BashTool) Parameters() map[string]any {
 	}
 }
 
-func (BashTool) IsReadOnly() bool { return false }
+func (ShellTool) IsReadOnly() bool { return false }
 
-func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a bashArgs
+func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	var a shellArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
@@ -240,14 +240,14 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("timeout must be a positive integer")
 	}
 	if a.Description != "" {
-		log.Debugf("bash tool description=%v command=%v", a.Description, a.Command)
+		log.Debugf("shell tool description=%v command=%v", a.Description, a.Command)
 	}
 
 	if finding := DetectInteractiveShellCommand(a.Command); finding != nil {
 		return "", finding.Error()
 	}
 
-	timeoutInfo := ResolveBashTimeout(a.Timeout)
+	timeoutInfo := ResolveShellTimeout(a.Timeout)
 	timeout := time.Duration(timeoutInfo.EffectiveSec) * time.Second
 
 	// Use the detected shell type to construct the correct command.
@@ -260,7 +260,7 @@ func (t BashTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	buf := &cappedWriter{maxBytes: maxOutputBytes}
 	cmd.Stdout = buf
 	cmd.Stderr = buf
-	// BashTool is intentionally non-interactive. Leaving Stdin nil makes Go
+	// ShellTool is intentionally non-interactive. Leaving Stdin nil makes Go
 	// connect the child process to the null device instead of the TUI stdin.
 	cmd.Env = appendNonInteractiveEnv(nil)
 	if err := cmd.Start(); err != nil {

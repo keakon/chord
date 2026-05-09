@@ -85,7 +85,7 @@ log_level: info
 #     Glob: allow
 #     Edit: deny
 #     Write: deny
-#     Bash: ask
+#     Shell: ask
 #   ---
 #   You review code changes for correctness, safety, and style.
 #   Speak plainly and call out the most impactful issues first.

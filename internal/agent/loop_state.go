@@ -181,7 +181,7 @@ func isVerificationLikeToolResult(payload *ToolResultPayload, result string) boo
 	}
 	name := strings.ToLower(strings.TrimSpace(payload.Name))
 	result = strings.ToLower(strings.TrimSpace(result))
-	if name == "bash" {
+	if name == "shell" {
 		return strings.Contains(result, "go test") ||
 			strings.Contains(result, "staticcheck") ||
 			strings.Contains(result, "go vet") ||

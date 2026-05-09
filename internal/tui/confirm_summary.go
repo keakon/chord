@@ -102,7 +102,7 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 	}
 
 	switch strings.ToLower(toolName) {
-	case "bash":
+	case "shell":
 		buildBashConfirmSummary(&summary, parsed)
 	case "edit":
 		buildEditConfirmSummary(&summary, parsed)
@@ -140,7 +140,7 @@ func parseConfirmArgs(argsJSON string) (map[string]any, error) {
 
 func confirmActionText(toolName string) string {
 	switch strings.ToLower(toolName) {
-	case "bash":
+	case "shell":
 		return "Execute shell command"
 	case "spawn":
 		return "Start background process"
@@ -172,7 +172,7 @@ func confirmActionText(toolName string) string {
 
 func confirmRiskForTool(toolName string) confirmRiskLevel {
 	switch strings.ToLower(toolName) {
-	case "bash", "spawn", "spawnstop":
+	case "shell", "spawn", "spawnstop":
 		return confirmRiskHigh
 	case "edit", "write", "delete":
 		return confirmRiskMedium
@@ -212,7 +212,7 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 		requestedTimeout = 0
 	}
 
-	timeoutInfo := tools.ResolveBashTimeoutValue(requestedTimeout, ok)
+	timeoutInfo := tools.ResolveShellTimeoutValue(requestedTimeout, ok)
 	appendConfirmField(&summary.Fields, newConfirmField("Timeout", fmt.Sprintf("%ds", timeoutInfo.EffectiveSec), true))
 	if timeoutInfo.Clamped {
 		summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %ds capped to %ds", timeoutInfo.RequestedSec, timeoutInfo.EffectiveSec))

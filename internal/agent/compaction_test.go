@@ -181,7 +181,7 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 		{Role: "tool", ToolCallID: "tc2", Content: "new read output"},
 		{Role: "user", Content: "u3"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc3", Name: "Bash", Args: json.RawMessage(`{"cmd":"bad"}`)},
+			{ID: "tc3", Name: "Shell", Args: json.RawMessage(`{"cmd":"bad"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc3", Content: "Error: command failed"},
 		{Role: "user", Content: "u4"},
@@ -226,7 +226,7 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Bash", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("test output line\n", 500)},
 		{Role: "user", Content: "u2"},
@@ -235,8 +235,8 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older Bash output omitted to save context; re-run the command if needed.]" {
-		t.Fatalf("expected old successful Bash output to be pruned, got %q", prepared[2].Content)
+	if prepared[2].Content != "[Older Shell output omitted to save context; re-run the command if needed.]" {
+		t.Fatalf("expected old successful Shell output to be pruned, got %q", prepared[2].Content)
 	}
 }
 

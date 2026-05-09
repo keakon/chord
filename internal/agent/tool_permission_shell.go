@@ -8,21 +8,21 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func evaluateBashToolPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {
+func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 
 	var parsed struct {
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal(args, &parsed); err != nil || strings.TrimSpace(parsed.Command) == "" {
-		arg := extractToolArgument("Bash", args)
-		decision.Action = ruleset.Evaluate("Bash", arg)
+		arg := extractToolArgument("Shell", args)
+		decision.Action = ruleset.Evaluate("Shell", arg)
 		decision.MatchArgument = arg
 		return decision
 	}
 
 	rawCommand := strings.TrimSpace(parsed.Command)
-	if exact := ruleset.LastExactPatternMatch("Bash", rawCommand); exact.Found {
+	if exact := ruleset.LastExactPatternMatch("Shell", rawCommand); exact.Found {
 		decision.Action = exact.Rule.Action
 		decision.MatchArgument = rawCommand
 		switch exact.Rule.Action {
@@ -34,9 +34,9 @@ func evaluateBashToolPermission(ruleset permission.Ruleset, args json.RawMessage
 		return decision
 	}
 
-	analysis, err := tools.AnalyzeBashCommand(rawCommand)
+	analysis, err := tools.AnalyzeShellCommand(rawCommand)
 	if err != nil || len(analysis.Subcommands) == 0 {
-		decision.Action = ruleset.Evaluate("Bash", rawCommand)
+		decision.Action = ruleset.Evaluate("Shell", rawCommand)
 		decision.MatchArgument = rawCommand
 		switch decision.Action {
 		case permission.ActionAsk:
@@ -55,7 +55,7 @@ func evaluateBashToolPermission(ruleset permission.Ruleset, args json.RawMessage
 		}
 		items = append(items, permissionAggregateItem{
 			Argument: source,
-			Action:   ruleset.Evaluate("Bash", source),
+			Action:   ruleset.Evaluate("Shell", source),
 		})
 		last := &items[len(items)-1]
 		switch last.Action {
@@ -66,7 +66,7 @@ func evaluateBashToolPermission(ruleset permission.Ruleset, args json.RawMessage
 		}
 	}
 	if len(items) == 0 {
-		decision.Action = ruleset.Evaluate("Bash", rawCommand)
+		decision.Action = ruleset.Evaluate("Shell", rawCommand)
 		decision.MatchArgument = rawCommand
 		return decision
 	}

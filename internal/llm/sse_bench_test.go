@@ -57,11 +57,11 @@ var openAICallbackFixedFixture = []byte(strings.Join([]string{
 }, "\n"))
 
 var responsesCallbackFixedFixture = []byte(strings.Join([]string{
-	`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Bash"}}`,
+	`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell"}}`,
 	`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}`,
 	`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"echo hi"}`,
 	`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"\",\"timeout\":30}"}`,
-	`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Bash","status":"completed"}}`,
+	`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell","status":"completed"}}`,
 	`data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`,
 	`data: [DONE]`,
 	"",

@@ -25,7 +25,7 @@ permission:
   Handoff: deny
   Delegate: deny
   Delete: ask
-  Bash:
+  Shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -40,19 +40,19 @@ permission:
     "git tag *": ask
 ```
 
-这套配置的含义：默认允许大多数工具；禁用 `Handoff` 与 `Delegate`；删除文件和常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `Bash` 下更具体的 `ask` 会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
+这套配置的含义：默认允许大多数工具；禁用 `Handoff` 与 `Delegate`；删除文件和常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `Shell` 下更具体的 `ask` 会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
 
 > 权限属于 Agent 级配置，不是简单的全局开关。
 
-## Bash 与 shell 风险
+## Shell 与 shell 风险
 
-`Bash` 能执行系统命令，应格外谨慎。`Bash` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、shell `read` 提示等，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
+`Shell` 能执行系统命令，应格外谨慎。`Shell` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、shell `read` 提示等，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
 
 常见改写方式：
 
 - 用 `git commit -m "message"` 或 `git commit -F file` 代替会打开编辑器的 `git commit`
 - amend 时如果要保留现有提交信息，使用明确不会打开编辑器的形式，如 `git commit --amend --no-edit` 或 `git commit --amend -C HEAD`
-- 避免在 `Bash` / `Spawn` 中运行交互式 Git patch 流程（`git add -p`、`git commit -p`、`git stash -p`）；改为显式指定 pathspec，或在真实终端中手动执行
+- 避免在 `Shell` / `Spawn` 中运行交互式 Git patch 流程（`git add -p`、`git commit -p`、`git stash -p`）；改为显式指定 pathspec，或在真实终端中手动执行
 - 容器命令不要分配 TTY（如 `docker exec -it`、`docker run -t`、`podman run -t`、`kubectl exec -it`），除非你是在真实终端中手动运行
 - 用 `npm init -y` / `--yes`，或显式提供所有必要选项
 - 需要 sudo 非交互失败时用 `sudo -n`，避免等待密码提示

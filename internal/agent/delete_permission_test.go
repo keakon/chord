@@ -82,14 +82,14 @@ Delete:
 func TestEvaluateToolPermissionBashDenyWinsForCompoundCommand(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "rm *": deny
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `cd build && rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -101,14 +101,14 @@ Bash:
 func TestEvaluateToolPermissionBashAskWhenAnySubcommandNeedsApproval(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "git *": allow
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git status && pwd`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -126,14 +126,14 @@ Bash:
 func TestEvaluateToolPermissionBashAllowsWhenAllSubcommandsAllowed(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "git *": allow
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git status && git diff --stat`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -151,7 +151,7 @@ Bash:
 func TestEvaluateToolPermissionBashExactWholeCommandRuleOverridesSubcommandDeny(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "rm *": deny
   "cd build && rm out.txt": allow
@@ -159,7 +159,7 @@ Bash:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `cd build && rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -171,14 +171,14 @@ Bash:
 func TestEvaluateToolPermissionBashStripsLeadingAssignmentsForSubcommandMatch(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "rm *": deny
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `FOO=bar rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -190,14 +190,14 @@ Bash:
 func TestEvaluateToolPermissionBashFallsBackToWholeCommandOnParseError(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
   "echo hi &&": deny
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `echo hi &&`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -212,13 +212,13 @@ Bash:
 func TestEvaluateToolPermissionBashParseErrorAskIncludesNeedsApproval(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
-Bash:
+Shell:
   "*": ask
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `echo hi &&`)
 
-	got := evaluateToolPermission(ruleset, "Bash", args)
+	got := evaluateToolPermission(ruleset, "Shell", args)
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}

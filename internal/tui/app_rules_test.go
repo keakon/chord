@@ -43,7 +43,7 @@ func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 			currentRole: "builder",
 		},
 		added: []permission.AddedRule{
-			{Role: "builder", Rule: permission.Rule{Permission: "Bash", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
+			{Role: "builder", Rule: permission.Rule{Permission: "Shell", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
 			{Role: "builder", Rule: permission.Rule{Permission: "Write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/permissions/builder.yaml"},
 		},
 	}

@@ -376,13 +376,13 @@ func TestNextLoopAssessmentFromAssistantReturnsBlockedForBlockedTag(t *testing.T
 	}
 }
 
-func TestIsVerificationLikeToolResultDetectsBashValidationOutput(t *testing.T) {
-	payload := &ToolResultPayload{Name: "Bash"}
+func TestIsVerificationLikeToolResultDetectsShellValidationOutput(t *testing.T) {
+	payload := &ToolResultPayload{Name: "Shell"}
 	if !isVerificationLikeToolResult(payload, "go test ./...\nok") {
 		t.Fatal("expected go test output to be treated as verification-like progress")
 	}
 	if isVerificationLikeToolResult(payload, "echo hello") {
-		t.Fatal("unexpected verification classification for non-validation bash output")
+		t.Fatal("unexpected verification classification for non-validation shell output")
 	}
 }
 

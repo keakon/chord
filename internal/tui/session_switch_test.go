@@ -438,11 +438,11 @@ func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterial
 	}
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
-			ID:   "call-bash-window-1",
-			Name: "Bash",
+			ID:   "call-shell-window-1",
+			Name: "Shell",
 			Args: []byte(`{"command":"go test ./internal/tui -count=1","timeout":120}`),
 		}}},
-		message.Message{Role: "tool", ToolCallID: "call-bash-window-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
+		message.Message{Role: "tool", ToolCallID: "call-shell-window-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
 	)
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
 	m := NewModelWithSize(backend, 120, 24)
@@ -458,13 +458,13 @@ func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterial
 	}
 	var targetIndex int = -1
 	for i, block := range state.allBlocks {
-		if block != nil && block.ToolID == "call-bash-window-1" {
+		if block != nil && block.ToolID == "call-shell-window-1" {
 			targetIndex = i
 			break
 		}
 	}
 	if targetIndex < 0 {
-		t.Fatal("expected deferred bash block in state")
+		t.Fatal("expected deferred shell block in state")
 	}
 	target := state.allBlocks[targetIndex]
 	if !m.viewport.spillBlock(target) {
@@ -592,11 +592,11 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	}
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
-			ID:   "call-bash-cold-1",
-			Name: "Bash",
+			ID:   "call-shell-cold-1",
+			Name: "Shell",
 			Args: []byte(`{"command":"go test ./internal/tui -count=1","timeout":120}`),
 		}}},
-		message.Message{Role: "tool", ToolCallID: "call-bash-cold-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
+		message.Message{Role: "tool", ToolCallID: "call-shell-cold-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
 	)
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
 	m := NewModelWithSize(backend, 120, 24)
@@ -612,7 +612,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	}
 	var target *Block
 	for _, block := range state.allBlocks {
-		if block != nil && block.ToolID == "call-bash-cold-1" {
+		if block != nil && block.ToolID == "call-shell-cold-1" {
 			target = block
 			break
 		}
@@ -701,7 +701,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 		message.Message{Role: "tool", ToolCallID: "call-dump-artifact-read-1", Content: "1\tfind artifact line\n2\tdebug dump line"},
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-real-search-1",
-			Name: "Bash",
+			Name: "Shell",
 			Args: []byte(`{"command":"echo real find result","description":"search real transcript","timeout":30}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-real-search-1", Content: "real find result"},
@@ -747,11 +747,11 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	}
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
-			ID:   "call-bash-1",
-			Name: "Bash",
+			ID:   "call-shell-1",
+			Name: "Shell",
 			Args: []byte(`{"command":"python3 - <<'PY'\nprint('alpha')\nPY","description":"Run scripted search","timeout":120}`),
 		}}},
-		message.Message{Role: "tool", ToolCallID: "call-bash-1", Content: "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\nneedle output\nomega"},
+		message.Message{Role: "tool", ToolCallID: "call-shell-1", Content: "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\nneedle output\nomega"},
 	)
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
 	m := NewModelWithSize(backend, 120, 24)
@@ -785,8 +785,8 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	if toolBlock == nil {
 		t.Fatal("matched compact tool block should exist in visible window")
 	}
-	if toolBlock.ToolName != "Bash" {
-		t.Fatalf("matched tool = %q, want Bash", toolBlock.ToolName)
+	if toolBlock.ToolName != "Shell" {
+		t.Fatalf("matched tool = %q, want Shell", toolBlock.ToolName)
 	}
 	if !toolBlock.ToolCallDetailExpanded {
 		t.Fatal("search should expand compact tool detail")

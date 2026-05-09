@@ -13,7 +13,7 @@ const (
 	shellBangMaxBytes   = 512 * 1024 // cap captured output for viewport performance
 )
 
-// cappedWriterShell mirrors tools.BashTool output limiting for local ! commands.
+// cappedWriterShell mirrors tools.ShellTool output limiting for local ! commands.
 type cappedWriterShell struct {
 	buf      []byte
 	total    int64

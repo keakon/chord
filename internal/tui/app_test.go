@@ -886,7 +886,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 		t.Fatalf("first assistant card progress = %q, want delta from card baseline", plain1)
 	}
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{ID: "tool-1", Name: "Bash", AgentID: "main", State: agent.ToolCallExecutionStateRunning}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{ID: "tool-1", Name: "Shell", AgentID: "main", State: agent.ToolCallExecutionStateRunning}})
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
@@ -1754,13 +1754,13 @@ func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-q1",
-		Name:     "Bash",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"command -v benchstat || true"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-q1",
-		Name:     "Bash",
+		Name:     "Shell",
 		ArgsJSON: `{"command":"command -v benchstat || true"}`,
 		State:    agent.ToolCallExecutionStateQueued,
 		AgentID:  "",
@@ -1949,7 +1949,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-elapsed-running",
-		Name:     "Bash",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"sleep 10"}`,
 	}})
@@ -1963,7 +1963,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-elapsed-running",
-		Name:     "Bash",
+		Name:     "Shell",
 		ArgsJSON: `{"command":"sleep 10"}`,
 		State:    agent.ToolCallExecutionStateRunning,
 		AgentID:  "",
@@ -1987,7 +1987,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 	block.StartedAt = time.Now().Add(-7 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-elapsed-running",
-		Name:     "Bash",
+		Name:     "Shell",
 		ArgsJSON: `{"command":"sleep 10"}`,
 		Result:   "done",
 		Status:   agent.ToolResultStatusSuccess,
@@ -2007,7 +2007,7 @@ func TestToolCallUpdateEventCreatesMissingToolBlock(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-missing-update-1",
-		Name:     "Bash",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"echo hello"}`,
 	}})
@@ -2134,23 +2134,23 @@ func TestAnyToolShowsReceivedCharCountFromStreamingArgs(t *testing.T) {
 	updateArgs := `{"command":"echo hello world"}`
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
-		ID:       "call-bash-progress-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: startArgs,
 	}})
-	m.toolArgRenderState["call-bash-progress-1"] = toolArgRenderState{
+	m.toolArgRenderState["call-shell-progress-1"] = toolArgRenderState{
 		lastBytes: len(startArgs),
 		lastAt:    time.Now().Add(-200 * time.Millisecond),
 	}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
-		ID:       "call-bash-progress-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: updateArgs,
 	}})
 
-	block, ok := m.viewport.FindBlockByToolID("call-bash-progress-1")
+	block, ok := m.viewport.FindBlockByToolID("call-shell-progress-1")
 	if !ok {
 		t.Fatal("expected tool block")
 	}
@@ -2218,7 +2218,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 
 func TestToolCharCountProgressUsesExactDigits(t *testing.T) {
 	largeJSON := `{"command":"` + strings.Repeat("x", 2190) + `"}`
-	progress := inferToolArgProgress("Bash", largeJSON)
+	progress := inferToolArgProgress("Shell", largeJSON)
 	if progress == nil {
 		t.Fatal("expected inferred arg progress")
 	}
@@ -2232,13 +2232,13 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 	argsJSON := `{"command":"echo hello world"}`
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
-		ID:       "call-bash-progress-done-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-done-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: argsJSON,
 	}})
 
-	block, ok := m.viewport.FindBlockByToolID("call-bash-progress-done-1")
+	block, ok := m.viewport.FindBlockByToolID("call-shell-progress-done-1")
 	if !ok {
 		t.Fatal("expected tool block")
 	}
@@ -2247,8 +2247,8 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 	}
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
-		ID:                "call-bash-progress-done-1",
-		Name:              "Bash",
+		ID:                "call-shell-progress-done-1",
+		Name:              "Shell",
 		AgentID:           "",
 		ArgsJSON:          argsJSON,
 		ArgsStreamingDone: true,
@@ -2268,7 +2268,7 @@ func TestToolDoesNotShowCharCountWhenNoArgsReceived(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-zero-progress-1",
-		Name:     "Bash",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: ``,
 	}})
@@ -2319,28 +2319,28 @@ func TestToolUpdateAfterExecutionStartsDoesNotRestoreReceivedCharCount(t *testin
 	finalArgs := `{"command":"echo hello world"}`
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
-		ID:       "call-bash-progress-after-running-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-after-running-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: initialArgs,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
-		ID:       "call-bash-progress-after-running-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-after-running-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: initialArgs,
 		State:    agent.ToolCallExecutionStateRunning,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
-		ID:       "call-bash-progress-after-running-1",
-		Name:     "Bash",
+		ID:       "call-shell-progress-after-running-1",
+		Name:     "Shell",
 		AgentID:  "",
 		ArgsJSON: finalArgs,
 	}})
 
-	block, ok := m.viewport.FindBlockByToolID("call-bash-progress-after-running-1")
+	block, ok := m.viewport.FindBlockByToolID("call-shell-progress-after-running-1")
 	if !ok {
-		t.Fatal("expected bash tool block")
+		t.Fatal("expected shell tool block")
 	}
 	if block.ToolProgress != nil {
 		t.Fatalf("expected post-running arg update not to restore temp char count, got %+v", *block.ToolProgress)
@@ -5133,7 +5133,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	older := time.Now().Add(-3 * time.Minute)
 	newer := time.Now().Add(-90 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "done", SettledAt: older})
-	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "Bash", StartedAt: newer})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "Shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
 	if !strings.Contains(out, "⚙ 1m30s") {

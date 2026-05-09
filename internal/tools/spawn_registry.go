@@ -30,7 +30,7 @@ type spawnedProcessStartRequest struct {
 	Command          string
 	Description      string
 	Workdir          string
-	TimeoutInfo      BashTimeoutInfo
+	TimeoutInfo      ShellTimeoutInfo
 	ShellType        string
 	LogDir           string
 	ExposeLogToModel bool

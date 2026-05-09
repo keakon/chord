@@ -8,7 +8,7 @@ import (
 func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"<|tool_calls_section_begin|>"}}]}`,
-		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"functions.Bash:11 <|tool_call_argument_begin|>"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"functions.Shell:11 <|tool_call_argument_begin|>"}}]}`,
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
@@ -40,7 +40,7 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
 
 func TestParseOpenAISSEStream_ThinkingToolcallMarkerSplitAcrossChunks(t *testing.T) {
 	stream := strings.Join([]string{
-		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"<|tool_call_begin|> functions.Bash:"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"<|tool_call_begin|> functions.Shell:"}}]}`,
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"11 <|tool_call_argument_begin|> {"}}]}`,
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,

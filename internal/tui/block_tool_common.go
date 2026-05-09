@@ -402,8 +402,8 @@ func formatToolResultSummaryLine(b *Block) string {
 
 	trimmed := strings.TrimSpace(b.ResultContent)
 	switch b.ToolName {
-	case "Bash":
-		// Bash expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
+	case "Shell":
+		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
 		if b.toolResultIsError() {
 			return ""
 		}

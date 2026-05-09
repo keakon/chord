@@ -172,7 +172,7 @@ func validateOverlayPermissionRoot(root *yaml.Node) error {
 // Required schema is:
 // permission:
 //
-//	Bash:
+//	Shell:
 //	  "git *": allow
 func overlayPermissionMappingNode(root *yaml.Node, create bool) *yaml.Node {
 	if root == nil {

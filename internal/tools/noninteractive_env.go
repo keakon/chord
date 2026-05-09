@@ -13,7 +13,7 @@ var nonInteractiveEnv = []string{
 }
 
 // appendNonInteractiveEnv returns env with low-risk prompt/editor/pager settings
-// that reinforce the non-interactive contract of Bash and Spawn. The process
+// that reinforce the non-interactive contract of Shell and Spawn. The process
 // stdin is intentionally not wired from the TUI; commands that need input should
 // fail fast or be rewritten with explicit non-interactive flags/input.
 func appendNonInteractiveEnv(env []string) []string {

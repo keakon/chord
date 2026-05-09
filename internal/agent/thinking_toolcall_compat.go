@@ -16,7 +16,7 @@ var (
 	thinkingToolcallFunctionLineRe = regexp.MustCompile(`(?s)functions\.[A-Za-z_][A-Za-z0-9_]*:(?:\d+)?(?:\s*\{.*?\})?`)
 	thinkingToolcallExtraBlankRe   = regexp.MustCompile(`\n{3,}`)
 
-	// parseThinkingFuncRe matches function header lines like "functions.Bash:6"
+	// parseThinkingFuncRe matches function header lines like "functions.Shell:6"
 	// or "functions.Read:" (without index). Captures: (1) tool name, (2) optional index.
 	parseThinkingFuncRe = regexp.MustCompile(`functions\.([A-Za-z_][A-Za-z0-9_]*):(\d*)`)
 
@@ -40,12 +40,12 @@ func scrubThinkingToolcallMarkers(text string) string {
 // The expected format (observed from moonshotai/kimi-k2.5):
 //
 //	<|tool_calls_section_begin|>
-//	<|tool_call_begin|> functions.Bash:0 <|tool_call_argument_begin|> {"command": "ls"} <|tool_call_end|>
+//	<|tool_call_begin|> functions.Shell:0 <|tool_call_argument_begin|> {"command": "ls"} <|tool_call_end|>
 //	<|tool_call_begin|> functions.Read:1 <|tool_call_argument_begin|> {"path": "foo.go"} <|tool_call_end|>
 //	<|tool_calls_section_end|>
 //
 // Alternative formats also supported:
-// - Functions followed by arguments without markers: "functions.Bash:0 {\"command\": \"ls\"}"
+// - Functions followed by arguments without markers: "functions.Shell:0 {\"command\": \"ls\"}"
 // - Incomplete sections (only end markers): "...} <|tool_call_end|> <|tool_calls_section_end|>"
 //
 // Whitespace and newlines between markers are inconsistent. The function

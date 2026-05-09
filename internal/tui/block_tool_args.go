@@ -90,7 +90,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	if !b.toolHeaderCacheParamLinesOK {
 		paramVals := vals
 		switch b.ToolName {
-		case "Read", "Delete", "Grep", "Glob", "Bash", "Spawn", "Lsp":
+		case "Read", "Delete", "Grep", "Glob", "Shell", "Spawn", "Lsp":
 			paramVals = cloneToolValsWithDisplayDirs(b, vals)
 		}
 		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
@@ -243,7 +243,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 		return "", ""
 	}
 	switch toolName {
-	case "Bash":
+	case "Shell":
 		mainPart, grayPart := bashSummaryParts(vals)
 		if mainPart == "" {
 			return "", ""
@@ -346,7 +346,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			return b.displayToolPath(filePaths[0]), ""
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), ""
-	case "Grep", "Glob", "Bash", "Spawn", "Lsp":
+	case "Grep", "Glob", "Shell", "Spawn", "Lsp":
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
@@ -413,7 +413,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return pattern + " (path=" + filePath + ")"
 		}
 		return pattern
-	case "Bash", "Spawn", "Lsp":
+	case "Shell", "Spawn", "Lsp":
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
 		return formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
@@ -477,7 +477,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return pattern + " (path=" + filePath + ")"
 		}
 		return pattern
-	case "Bash":
+	case "Shell":
 		cmd := firstDisplayLine(vals["command"])
 		if cmd == "" {
 			return ""
@@ -597,7 +597,7 @@ func extractToolParamsLinesWithParsed(toolName string, keys []string, vals map[s
 	}
 	var lines []string
 	for _, k := range keys {
-		if toolName == "Bash" && k == "command" {
+		if toolName == "Shell" && k == "command" {
 			cmd := vals[k]
 			first := firstDisplayLine(cmd)
 			if len(keys) == 1 {

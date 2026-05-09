@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestAnalyzeBashCommandExtractsCompoundSubcommands(t *testing.T) {
-	analysis, err := AnalyzeBashCommand("echo foo && rm bar")
+func TestAnalyzeShellCommandExtractsCompoundSubcommands(t *testing.T) {
+	analysis, err := AnalyzeShellCommand("echo foo && rm bar")
 	if err != nil {
-		t.Fatalf("AnalyzeBashCommand: %v", err)
+		t.Fatalf("AnalyzeShellCommand: %v", err)
 	}
 	got := make([]string, 0, len(analysis.Subcommands))
 	for _, sub := range analysis.Subcommands {
@@ -20,10 +20,10 @@ func TestAnalyzeBashCommandExtractsCompoundSubcommands(t *testing.T) {
 	}
 }
 
-func TestAnalyzeBashCommandExtractsNestedCommandSubstitution(t *testing.T) {
-	analysis, err := AnalyzeBashCommand(`echo "sha=$(git rev-parse HEAD)" && pwd`)
+func TestAnalyzeShellCommandExtractsNestedCommandSubstitution(t *testing.T) {
+	analysis, err := AnalyzeShellCommand(`echo "sha=$(git rev-parse HEAD)" && pwd`)
 	if err != nil {
-		t.Fatalf("AnalyzeBashCommand: %v", err)
+		t.Fatalf("AnalyzeShellCommand: %v", err)
 	}
 	got := make([]string, 0, len(analysis.Subcommands))
 	for _, sub := range analysis.Subcommands {
@@ -35,10 +35,10 @@ func TestAnalyzeBashCommandExtractsNestedCommandSubstitution(t *testing.T) {
 	}
 }
 
-func TestAnalyzeBashCommandSkipsFunctionBodies(t *testing.T) {
-	analysis, err := AnalyzeBashCommand("cleanup() { rm bar; }\npwd")
+func TestAnalyzeShellCommandSkipsFunctionBodies(t *testing.T) {
+	analysis, err := AnalyzeShellCommand("cleanup() { rm bar; }\npwd")
 	if err != nil {
-		t.Fatalf("AnalyzeBashCommand: %v", err)
+		t.Fatalf("AnalyzeShellCommand: %v", err)
 	}
 	got := make([]string, 0, len(analysis.Subcommands))
 	for _, sub := range analysis.Subcommands {

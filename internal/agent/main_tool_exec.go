@@ -223,7 +223,7 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	args := llm.UnwrapToolArgs(tc.Args)
 	result, err := a.tools.Execute(agentCtx, tc.Name, args)
 	if err != nil {
-		// Preserve the tool output (e.g. Bash stdout/stderr) even on error.
+		// Preserve the tool output (e.g. Shell stdout/stderr) even on error.
 		// The LLM needs this output for effective debugging.
 		if result != "" {
 			truncated := tools.TruncateOutputWithOptions(result, a.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})

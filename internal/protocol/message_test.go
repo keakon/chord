@@ -184,7 +184,7 @@ func TestAllEventPayloads(t *testing.T) {
 		{TypeSessionSelectRequest, nil},
 		{TypeSessionSwitchStarted, SessionSwitchStartedPayload{Kind: "resume", SessionID: "123"}},
 		{TypeSessionRestored, nil},
-		{TypeConfirmRequest, ConfirmRequestPayload{ToolName: "Bash", ArgsJSON: `{"cmd":"rm"}`, TimeoutMS: 3000}},
+		{TypeConfirmRequest, ConfirmRequestPayload{ToolName: "Shell", ArgsJSON: `{"cmd":"rm"}`, TimeoutMS: 3000}},
 		{TypeQuestionRequest, QuestionRequestPayload{
 			ToolName:      "Question",
 			Header:        "Confirm",
@@ -229,10 +229,10 @@ func TestFromAgentEvent_AllTypes(t *testing.T) {
 		{"StreamThinking", agent.StreamThinkingEvent{Text: "think", AgentID: ""}, TypeStreamThinking},
 		{"StreamThinkingDelta", agent.StreamThinkingDeltaEvent{Text: "delta", AgentID: ""}, TypeStreamThinkingDelta},
 		{"StreamRollback", agent.StreamRollbackEvent{Reason: "retry", AgentID: ""}, TypeStreamRollback},
-		{"ToolCallStart", agent.ToolCallStartEvent{ID: "c1", Name: "Bash", ArgsJSON: `{}`, AgentID: ""}, TypeToolCallStart},
-		{"ToolCallUpdate", agent.ToolCallUpdateEvent{ID: "c1", Name: "Bash", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true, AgentID: ""}, TypeToolCallUpdate},
-		{"ToolCallExecution", agent.ToolCallExecutionEvent{ID: "c1", Name: "Bash", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateQueued, AgentID: ""}, TypeToolCallExecution},
-		{"ToolResult", agent.ToolResultEvent{CallID: "c1", Name: "Bash", ArgsJSON: `{}`, Result: "ok", Status: agent.ToolResultStatusSuccess, AgentID: ""}, TypeToolResult},
+		{"ToolCallStart", agent.ToolCallStartEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, AgentID: ""}, TypeToolCallStart},
+		{"ToolCallUpdate", agent.ToolCallUpdateEvent{ID: "c1", Name: "Shell", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true, AgentID: ""}, TypeToolCallUpdate},
+		{"ToolCallExecution", agent.ToolCallExecutionEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateQueued, AgentID: ""}, TypeToolCallExecution},
+		{"ToolResult", agent.ToolResultEvent{CallID: "c1", Name: "Shell", ArgsJSON: `{}`, Result: "ok", Status: agent.ToolResultStatusSuccess, AgentID: ""}, TypeToolResult},
 		{"Error", agent.ErrorEvent{Err: errors.New("oops"), AgentID: "a2"}, TypeError},
 		{"ErrorNil", agent.ErrorEvent{Err: nil, AgentID: ""}, TypeError},
 		{"Idle", agent.IdleEvent{}, TypeIdle},
@@ -246,7 +246,7 @@ func TestFromAgentEvent_AllTypes(t *testing.T) {
 		{"SessionSelect", agent.SessionSelectEvent{}, TypeSessionSelectRequest},
 		{"SessionSwitchStarted", agent.SessionSwitchStartedEvent{Kind: "resume", SessionID: "123"}, TypeSessionSwitchStarted},
 		{"SessionRestored", agent.SessionRestoredEvent{}, TypeSessionRestored},
-		{"ConfirmRequest", agent.ConfirmRequestEvent{ToolName: "Bash", ArgsJSON: `{}`, RequestID: "r1"}, TypeConfirmRequest},
+		{"ConfirmRequest", agent.ConfirmRequestEvent{ToolName: "Shell", ArgsJSON: `{}`, RequestID: "r1"}, TypeConfirmRequest},
 		{"QuestionRequest", agent.QuestionRequestEvent{
 			ToolName:      "Question",
 			Header:        "Proceed",
@@ -293,7 +293,7 @@ func TestFromAgentEvent_StreamTextPayload(t *testing.T) {
 func TestFromAgentEvent_ToolCallUpdatePayload(t *testing.T) {
 	env, err := FromAgentEvent(agent.ToolCallUpdateEvent{
 		ID:                "c1",
-		Name:              "Bash",
+		Name:              "Shell",
 		ArgsJSON:          `{"command":"echo hi"}`,
 		ArgsStreamingDone: true,
 		AgentID:           "a2",
@@ -305,7 +305,7 @@ func TestFromAgentEvent_ToolCallUpdatePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.CallID != "c1" || p.Name != "Bash" || !p.ArgsStreamingDone || p.AgentID != "a2" {
+	if p.CallID != "c1" || p.Name != "Shell" || !p.ArgsStreamingDone || p.AgentID != "a2" {
 		t.Fatalf("payload mismatch: %+v", p)
 	}
 	got, err := ToAgentEvent(env)
@@ -324,7 +324,7 @@ func TestFromAgentEvent_ToolCallUpdatePayload(t *testing.T) {
 func TestFromAgentEvent_ToolCallExecutionPayload(t *testing.T) {
 	env, err := FromAgentEvent(agent.ToolCallExecutionEvent{
 		ID:       "c1",
-		Name:     "Bash",
+		Name:     "Shell",
 		ArgsJSON: `{"command":"echo hi"}`,
 		State:    agent.ToolCallExecutionStateQueued,
 		AgentID:  "a2",
@@ -336,7 +336,7 @@ func TestFromAgentEvent_ToolCallExecutionPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.CallID != "c1" || p.Name != "Bash" || p.State != string(agent.ToolCallExecutionStateQueued) || p.AgentID != "a2" {
+	if p.CallID != "c1" || p.Name != "Shell" || p.State != string(agent.ToolCallExecutionStateQueued) || p.AgentID != "a2" {
 		t.Fatalf("payload mismatch: %+v", p)
 	}
 	got, err := ToAgentEvent(env)
@@ -494,7 +494,7 @@ func TestFromAgentEvent_StreamThinkingDeltaPayload(t *testing.T) {
 func TestConfirmAndQuestionRequestTimeoutRoundTrip(t *testing.T) {
 	t.Run("confirm", func(t *testing.T) {
 		ev := agent.ConfirmRequestEvent{
-			ToolName:       "Bash",
+			ToolName:       "Shell",
 			ArgsJSON:       `{"cmd":"ls"}`,
 			RequestID:      "req-1",
 			Timeout:        3 * time.Second,
@@ -627,7 +627,7 @@ func TestProtocolRoundTripAdditionalEvents(t *testing.T) {
 		},
 		{
 			name:  "tool call execution running",
-			event: agent.ToolCallExecutionEvent{ID: "call-2", Name: "Bash", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateRunning, AgentID: "a2"},
+			event: agent.ToolCallExecutionEvent{ID: "call-2", Name: "Shell", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateRunning, AgentID: "a2"},
 			check: func(t *testing.T, got agent.AgentEvent) {
 				ev := got.(agent.ToolCallExecutionEvent)
 				if ev.ID != "call-2" || ev.State != agent.ToolCallExecutionStateRunning || ev.AgentID != "a2" {
@@ -838,7 +838,7 @@ func TestToAgentEventAdditionalTypesAndErrors(t *testing.T) {
 	})
 
 	t.Run("tool execution unknown state defaults queued", func(t *testing.T) {
-		env, err := NewEnvelope(TypeToolCallExecution, ToolCallExecutionPayload{CallID: "c", Name: "Bash", State: "future"})
+		env, err := NewEnvelope(TypeToolCallExecution, ToolCallExecutionPayload{CallID: "c", Name: "Shell", State: "future"})
 		if err != nil {
 			t.Fatal(err)
 		}

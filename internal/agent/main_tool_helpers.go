@@ -60,7 +60,7 @@ func wrapEditedArgsPermissionDenied(toolName string) error {
 
 func extractToolArgument(toolName string, args []byte) string {
 	switch toolName {
-	case "Bash":
+	case "Shell":
 		var parsed struct {
 			Command string `json:"command"`
 		}

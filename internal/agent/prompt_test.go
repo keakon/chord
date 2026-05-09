@@ -587,15 +587,15 @@ func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 
 func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 
 	defs := a.mainLLMToolDefinitions()
 	if len(defs) != 1 {
 		t.Fatalf("mainLLMToolDefinitions() count = %d, want 1", len(defs))
 	}
-	for _, want := range []string{"Use Bash mainly for tests, builds, git, and other system commands.", "Prefer the smallest safe number of tool calls.", "Bash is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
+	for _, want := range []string{"Use Shell mainly for tests, builds, git, and other system commands.", "Prefer the smallest safe number of tool calls.", "Shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
 		if !strings.Contains(defs[0].Description, want) {
-			t.Fatalf("missing %q in Bash description %q", want, defs[0].Description)
+			t.Fatalf("missing %q in Shell description %q", want, defs[0].Description)
 		}
 	}
 	if strings.Contains(defs[0].Description, "use LSP first") {
@@ -609,17 +609,17 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	defs = a.mainLLMToolDefinitions()
 	bashDesc := ""
 	for _, def := range defs {
-		if def.Name == "Bash" {
+		if def.Name == "Shell" {
 			bashDesc = def.Description
 			break
 		}
 	}
 	if bashDesc == "" {
-		t.Fatal("missing Bash tool definition")
+		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, Bash is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, Bash is not a substitute for them.", "For explicit file deletions, prefer `Delete`", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
+	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, Shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, Shell is not a substitute for them.", "For explicit file deletions, prefer `Delete`", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
 		if !strings.Contains(bashDesc, want) {
-			t.Fatalf("missing %q in Bash description %q", want, bashDesc)
+			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
 	}
 }
@@ -652,13 +652,13 @@ func TestMainAgentCapabilityPromptBlock_UsesVisibleToolsOnly(t *testing.T) {
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 Read: allow
 Grep: allow
 Glob: allow
-Bash: allow
+Shell: allow
 `)}
 	a.rebuildRuleset()
 
@@ -668,13 +668,13 @@ Bash: allow
 		"Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.",
 		"Use `Read` for file contents.",
 		"Use `Glob` / `Grep` for discovery and navigation.",
-		"Use `Bash` mainly for tests, builds, git, and system commands.",
+		"Use `Shell` mainly for tests, builds, git, and system commands.",
 		"## File Inspection Constraints",
 		"File inspection and code-navigation capabilities may be limited in this role.",
-		"Do not use `Bash`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+		"Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 		"## File Modification Constraints",
 		"This role is currently read-only for files",
-		"Do not use `Bash`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
+		"Do not use `Shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
 		"## Risk & Reporting",
 		"ask the user for clarification when they need to choose between materially different options.",
 	} {
@@ -717,10 +717,10 @@ func TestMainAgentCapabilityPromptBlock_ShowsInspectionConstraintsWhenInspection
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
 	a.tools.Register(tools.LspTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Bash: allow
+Shell: allow
 `)}
 	a.rebuildRuleset()
 
@@ -728,7 +728,7 @@ Bash: allow
 	for _, want := range []string{
 		"## File Inspection Constraints",
 		"This role has no direct file inspection or code-navigation tools available in the prompt.",
-		"Do not use `Bash`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+		"Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -738,12 +738,12 @@ Bash: allow
 func TestMainAgentCapabilityPromptBlock_UsesQuestionWhenVisible(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Question: allow
 `)}
 	a.rebuildRuleset()
@@ -757,12 +757,12 @@ Question: allow
 func TestMainAgentCapabilityPromptBlock_OmitsQuestionWhenHidden(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Question: deny
 `)}
 	a.rebuildRuleset()
@@ -782,11 +782,11 @@ func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 	a.tools.Register(tools.EditTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Edit:
   "*": deny
   "internal/tui/*": allow
@@ -815,10 +815,10 @@ func TestMainAgentCapabilityPromptBlock_OnlyTightenedPathsDoesNotImplyScopedWrit
 	a.tools.Register(tools.EditTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Bash: allow
+Shell: allow
 Edit:
   "*": allow
   "internal/tui/*": ask
@@ -838,13 +838,13 @@ Delete: allow
 func TestBuildSystemPrompt_AppendsDynamicCapabilitiesAfterCustomPrompt(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.NewBashTool("bash"))
+	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{
 		SystemPrompt: "## Custom Role\n- Follow the custom workflow",
 		Permission: parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -891,7 +891,7 @@ Bash: allow
 	if customRoleIdx > toolSelectionIdx {
 		t.Fatalf("buildSystemPrompt() should append dynamic capabilities after custom role body, got %q", got)
 	}
-	if !strings.Contains(got, "Use `Read` for file contents.") || !strings.Contains(got, "Use `Bash` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
+	if !strings.Contains(got, "Use `Read` for file contents.") || !strings.Contains(got, "Use `Shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
 		t.Fatalf("buildSystemPrompt() missing visible-tool guidance: %q", got)
 	}
 }
@@ -899,11 +899,11 @@ Bash: allow
 func TestSubAgentBuildSystemPrompt_AppendsDynamicCapabilitiesAfterCustomPrompt(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	reg.Register(tools.NewBashTool("bash"))
+	reg.Register(tools.NewShellTool("bash"))
 	permNode := parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 `)
 	ruleset := permission.ParsePermission(&permNode)
 	s := &SubAgent{
@@ -952,12 +952,12 @@ Bash: allow
 func TestSubAgentBuildSystemPrompt_AdaptsControlGuidanceToVisibleTools(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	reg.Register(tools.NewBashTool("bash"))
+	reg.Register(tools.NewShellTool("bash"))
 	reg.Register(tools.CompleteTool{})
 	permNode := parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 `)
 	ruleset := permission.ParsePermission(&permNode)
 	s := &SubAgent{tools: reg, ruleset: ruleset, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
@@ -977,7 +977,7 @@ Bash: allow
 	permNode = parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Escalate: allow
 Notify: allow
 `)
@@ -1000,12 +1000,12 @@ func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testin
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
 	reg.Register(tools.EditTool{})
-	reg.Register(tools.NewBashTool("bash"))
+	reg.Register(tools.NewShellTool("bash"))
 	reg.Register(tools.NewQuestionTool(nil))
 	permNode := parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Question: allow
 Edit:
   "*": deny
@@ -1036,7 +1036,7 @@ Edit:
 	permNode = parsePermissionNode(t, `
 "*": deny
 Read: allow
-Bash: allow
+Shell: allow
 Notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)

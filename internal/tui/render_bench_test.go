@@ -92,7 +92,7 @@ func benchmarkCompactToolBlock() *Block {
 	return &Block{
 		ID:                     2,
 		Type:                   BlockToolCall,
-		ToolName:               "Bash",
+		ToolName:               "Shell",
 		Content:                `{"command":"git diff -- internal/tui/block_tool.go && go test ./internal/tui -run TestTool -count=1","description":"Inspect tool card rendering","timeout":120,"workdir":"."}`,
 		ResultContent:          strings.Repeat("diff line\n", 20),
 		ResultDone:             true,

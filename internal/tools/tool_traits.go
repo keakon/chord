@@ -10,7 +10,7 @@ const (
 	NameGrep         = "Grep"
 	NameGlob         = "Glob"
 	NameWebFetch     = "WebFetch"
-	NameBash         = "Bash"
+	NameShell        = "Shell"
 	NameSpawn        = "Spawn"
 	NameSpawnStatus  = "SpawnStatus"
 	NameSpawnStop    = "SpawnStop"

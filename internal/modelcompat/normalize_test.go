@@ -61,7 +61,7 @@ func TestNormalizeForTarget_DropsThinkingWithoutProvenance(t *testing.T) {
 func TestNormalizeForTarget_DowngradesStructuredToolsWhenDisabled(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{
-		{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "toolu_1", Name: "Bash", Args: args}}},
+		{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}}},
 		{Role: "tool", ToolCallID: "toolu_1", Content: "ok"},
 	}
 	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
@@ -81,7 +81,7 @@ func TestNormalizeForTarget_DoesNotMutateInput(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           "assistant",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
-		ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Bash", Args: args}},
+		ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}},
 	}}
 	_, _ = NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyOpenAIChat}, NormalizeOptions{StructuredTools: false})
 	if len(msgs[0].ThinkingBlocks) != 1 || len(msgs[0].ToolCalls) != 1 {

@@ -229,7 +229,8 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 					toolRendered = true
 					continue
 				}
-				assistant.ToolCalls = append(assistant.ToolCalls, message.ToolCall{ID: block.ID, Name: block.Name, Args: append(json.RawMessage(nil), block.Input...)})
+				toolName := strings.TrimSpace(block.Name)
+				assistant.ToolCalls = append(assistant.ToolCalls, message.ToolCall{ID: block.ID, Name: toolName, Args: append(json.RawMessage(nil), block.Input...)})
 			default:
 				warns = append(warns, "unsupported assistant content block type="+block.Type)
 			}

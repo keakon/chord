@@ -7,39 +7,39 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// BashAnalysis describes the static shape of a Bash command string.
-type BashAnalysis struct {
+// ShellAnalysis describes the static shape of a Shell command string.
+type ShellAnalysis struct {
 	RawCommand  string
-	Subcommands []BashSubcommand
+	Subcommands []ShellSubcommand
 	ParseMode   string
 }
 
-// BashSubcommand is one atomic simple command extracted from a Bash command.
-type BashSubcommand struct {
+// ShellSubcommand is one atomic simple command extracted from a Shell command.
+type ShellSubcommand struct {
 	Source string
 	Kind   string
 	Index  int
 }
 
-// AnalyzeBashCommand parses a Bash command and extracts simple subcommands in
+// AnalyzeShellCommand parses a Shell command and extracts simple subcommands in
 // source order. Function declaration bodies are skipped so permission matching
 // does not treat dormant helper definitions as immediately executing commands.
-func AnalyzeBashCommand(command string) (BashAnalysis, error) {
-	analysis := BashAnalysis{
+func AnalyzeShellCommand(command string) (ShellAnalysis, error) {
+	analysis := ShellAnalysis{
 		RawCommand: command,
 		ParseMode:  "fallback",
 	}
 	if strings.TrimSpace(command) == "" {
-		return analysis, fmt.Errorf("bash command is empty")
+		return analysis, fmt.Errorf("shell command is empty")
 	}
 
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	file, err := parser.Parse(strings.NewReader(command), "")
 	if err != nil {
-		return analysis, fmt.Errorf("parse bash command: %w", err)
+		return analysis, fmt.Errorf("parse shell command: %w", err)
 	}
 
-	subcommands := make([]BashSubcommand, 0, 4)
+	subcommands := make([]ShellSubcommand, 0, 4)
 	syntax.Walk(file, func(node syntax.Node) bool {
 		switch n := node.(type) {
 		case *syntax.FuncDecl:
@@ -48,11 +48,11 @@ func AnalyzeBashCommand(command string) (BashAnalysis, error) {
 			if len(n.Args) == 0 {
 				return true
 			}
-			source := bashSubcommandSource(command, n)
+			source := shellSubcommandSource(command, n)
 			if source == "" {
 				return true
 			}
-			subcommands = append(subcommands, BashSubcommand{
+			subcommands = append(subcommands, ShellSubcommand{
 				Source: source,
 				Kind:   "simple",
 				Index:  len(subcommands),
@@ -62,14 +62,14 @@ func AnalyzeBashCommand(command string) (BashAnalysis, error) {
 	})
 
 	if len(subcommands) == 0 {
-		return analysis, fmt.Errorf("no simple bash subcommands found")
+		return analysis, fmt.Errorf("no simple shell subcommands found")
 	}
 	analysis.Subcommands = subcommands
 	analysis.ParseMode = "parsed"
 	return analysis, nil
 }
 
-func bashSubcommandSource(command string, expr *syntax.CallExpr) string {
+func shellSubcommandSource(command string, expr *syntax.CallExpr) string {
 	if expr == nil || len(expr.Args) == 0 {
 		return ""
 	}

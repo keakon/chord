@@ -63,7 +63,7 @@ func formatCollapsedBashHeaderPartsWithParsed(keys []string, vals map[string]str
 }
 
 func bashHeaderGrayPart(vals map[string]string) string {
-	timeoutInfo := tools.ResolveBashTimeoutValue(parseBashTimeoutValue(vals["timeout"]), vals["timeout"] != "")
+	timeoutInfo := tools.ResolveShellTimeoutValue(parseBashTimeoutValue(vals["timeout"]), vals["timeout"] != "")
 	var opts []string
 	if timeoutInfo.HasLimit && !timeoutInfo.UsesDefault {
 		if timeoutInfo.Clamped {

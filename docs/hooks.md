@@ -64,7 +64,7 @@ Every hook receives this JSON document on stdin:
   "selected_model": "anthropic/claude-opus-4.7",
   "running_model": "anthropic/claude-opus-4.7",
   "data": {
-    "tool_name": "Bash",
+    "tool_name": "Shell",
     "args": { "command": "git status" }
   }
 }
@@ -133,10 +133,10 @@ Stdout is recorded in logs as a plain string. There is no schema — feel free t
 ```yaml
 hooks:
   on_tool_call:
-    - name: audit-bash
-      command: ["./scripts/audit-bash.sh"]   # or: shell: "./scripts/audit-bash.sh"
+    - name: audit-shell
+      command: ["./scripts/audit-shell.sh"]   # or: shell: "./scripts/audit-shell.sh"
       timeout: 10                             # seconds; default 30
-      tools: ["Bash"]                         # glob match on tool name
+      tools: ["Shell"]                         # glob match on tool name
       paths: ["src/**/*.go"]                  # glob match on relevant paths
       agents: ["main", "reviewer"]            # glob match on agent name
       agent_kinds: ["main", "subagent"]       # exact match
@@ -174,13 +174,13 @@ hooks:
 
 The hook ignores stdout; the side effect is the notification.
 
-### 2. Block destructive bash commands (sync)
+### 2. Block destructive shell commands (sync)
 
 ```yaml
 hooks:
   on_tool_call:
     - name: deny-rm-rf
-      tools: ["Bash"]
+      tools: ["Shell"]
       shell: |
         # Read envelope, check the command, optionally block
         jq -e '.data.args.command | test("^rm -rf|^sudo")' \
@@ -223,7 +223,7 @@ When the lint fails, the truncated tail is appended to the next LLM context so t
 hooks:
   on_before_tool_result_append:
     - name: redact-keys
-      tools: ["Bash", "WebFetch", "Read"]
+      tools: ["Shell", "WebFetch", "Read"]
       shell: |
         envelope=$(cat)
         redacted=$(jq '.data.output |= (gsub("sk-[A-Za-z0-9_-]{20,}"; "sk-REDACTED"))' <<<"$envelope")

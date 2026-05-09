@@ -823,7 +823,7 @@ func TestExportToMarkdownShortToolResult(t *testing.T) {
 			Role:    "assistant",
 			Content: "",
 			ToolCalls: []message.ToolCall{
-				{ID: "c1", Name: "Bash", Args: json.RawMessage(`{"command":"echo hi"}`)},
+				{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)},
 			},
 		},
 		{
@@ -840,7 +840,7 @@ func TestExportToMarkdownShortToolResult(t *testing.T) {
 
 	md := ExportToMarkdown(session)
 
-	if !strings.Contains(md, "TOOL RESULT (Bash):") {
+	if !strings.Contains(md, "TOOL RESULT (Shell):") {
 		t.Error("missing tool result heading")
 	}
 	if !strings.Contains(md, "hi") {

@@ -168,7 +168,7 @@ type QuestionResponse struct {
 // the implementation.
 //
 //   - ctx:          context for cancellation (e.g. turn cancelled while waiting)
-//   - toolName:     the name of the tool being invoked (e.g. "Bash")
+//   - toolName:     the name of the tool being invoked (e.g. "Shell")
 //   - args:         the raw JSON arguments string
 //   - needsApproval: explicit paths covered by this approval prompt (Delete only)
 //   - alreadyAllowed: explicit paths already allowed by rules in the same batch (Delete only)
@@ -978,7 +978,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 }
 
 // cancelActiveWork aborts the active turn (if any), cancels every live
-// SubAgent, and stops orphaned background objects (Bash spawns, etc.). It is
+// SubAgent, and stops orphaned background objects (Shell spawns, etc.). It is
 // the first phase of [MainAgent.Shutdown] and runs synchronously so tool
 // executions and LLM calls observe cancellation before snapshot/persist work
 // begins.
@@ -1885,7 +1885,7 @@ Path: %s
 
 // extractToolArgument returns the string used for permission pattern matching.
 //
-// For Bash the full command string is used (e.g. "git push origin main").
+// For Shell the full command string is used (e.g. "git push origin main").
 // For file tools (Read/Write/Edit) the path argument is extracted so that
 // path-based rules like `Write: { "/etc/*": deny }` work correctly.
 // For search tools (Grep/Glob) the pattern argument is extracted.

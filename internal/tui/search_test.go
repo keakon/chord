@@ -8,7 +8,7 @@ import (
 func TestFindMatchesAtWidthSearchesToolAndResultText(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockAssistant, Content: "plain text"},
-		{Type: BlockToolCall, ToolName: "Bash", Content: `{"command":"echo hi"}`, ResultContent: "needle from result"},
+		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result"},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "needle", 80)
@@ -43,7 +43,7 @@ func TestFindMatchesAtWidthSearchesImageFilenameAndThinking(t *testing.T) {
 func TestFindMatchesAtWidthSkipsDiagnosticArtifactBlocks(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockToolCall, ToolName: "Read", Content: `{"path":"~/.local/state/chord/logs/tui-dumps/tui-dump.log","limit":120}`, ResultContent: "1\tfind artifact line", ResultDone: true},
-		{Type: BlockToolCall, ToolName: "Bash", Content: `{"command":"rg -n find internal/tui"}`, ResultContent: "real find result", ResultDone: true},
+		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"rg -n find internal/tui"}`, ResultContent: "real find result", ResultDone: true},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "find", 80)
@@ -58,7 +58,7 @@ func TestFindMatchesAtWidthSkipsDiagnosticArtifactBlocks(t *testing.T) {
 func TestFindMatchesAtWidthSkipsInvisibleThinkingBlocks(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockThinking, Content: ""},
-		{Type: BlockToolCall, ToolName: "Bash", Content: `{"command":"echo hi"}`, ResultContent: "needle from result", ResultDone: true},
+		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result", ResultDone: true},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "needle", 80)
@@ -82,7 +82,7 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 		t.Fatal("Read tool should show full content when revealed by search")
 	}
 
-	generic := &Block{Type: BlockToolCall, ToolName: "Bash", ToolCallDetailExpanded: false, ResultContent: "needle from result", ResultDone: false, Collapsed: true}
+	generic := &Block{Type: BlockToolCall, ToolName: "Shell", ToolCallDetailExpanded: false, ResultContent: "needle from result", ResultDone: false, Collapsed: true}
 	if !revealSearchMatchedBlock(generic) {
 		t.Fatal("generic tool reveal should report changed state")
 	}

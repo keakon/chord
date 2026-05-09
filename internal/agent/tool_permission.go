@@ -36,8 +36,8 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 	switch toolName {
 	case "Delete":
 		return evaluateDeleteToolPermission(ruleset, unwrapped)
-	case "Bash":
-		return evaluateBashToolPermission(ruleset, unwrapped)
+	case "Shell":
+		return evaluateShellToolPermission(ruleset, unwrapped)
 	default:
 		arg := extractToolArgument(toolName, unwrapped)
 		decision.Action = ruleset.Evaluate(toolName, arg)

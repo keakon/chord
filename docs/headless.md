@@ -129,7 +129,7 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
   "final_args_json": "{\"path\":\"...\"}",
   "edit_summary": "",
   "deny_reason": "",
-  "rule_pattern": "Bash:^git status$",
+  "rule_pattern": "Shell:^git status$",
   "rule_scope": "session"
 }
 ```

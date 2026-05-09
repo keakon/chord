@@ -9,7 +9,7 @@ func TestScrubThinkingToolcallMarkers(t *testing.T) {
 	raw := strings.Join([]string{
 		"analysis before",
 		"<|tool_calls_section_begin|>",
-		"functions.Bash:11",
+		"functions.Shell:11",
 		"<|tool_call_begin|>",
 		"{}",
 		"<|tool_call_end|>",
@@ -20,7 +20,7 @@ func TestScrubThinkingToolcallMarkers(t *testing.T) {
 	if strings.Contains(got, "<|tool_call_begin|>") {
 		t.Fatal("expected marker to be removed")
 	}
-	if strings.Contains(got, "functions.Bash:11") {
+	if strings.Contains(got, "functions.Shell:11") {
 		t.Fatal("expected function template line to be removed")
 	}
 	if !strings.Contains(got, "analysis before") || !strings.Contains(got, "analysis after") {
@@ -31,12 +31,12 @@ func TestScrubThinkingToolcallMarkers(t *testing.T) {
 func TestScrubThinkingToolcallMarkers_MultilineInlineFunctions(t *testing.T) {
 	raw := strings.Join([]string{
 		"some analysis",
-		"functions.Bash:18 {",
+		"functions.Shell:18 {",
 		"  \"cmd\": \"ls\"",
 		"} more analysis",
 	}, "\n")
 	got := scrubThinkingToolcallMarkers(raw)
-	if strings.Contains(got, "functions.Bash") {
+	if strings.Contains(got, "functions.Shell") {
 		t.Fatal("expected multiline function block to be removed")
 	}
 	if !strings.Contains(got, "some analysis") || !strings.Contains(got, "more analysis") {
@@ -50,17 +50,17 @@ func TestScrubThinkingToolcallMarkers_MultilineInlineFunctions(t *testing.T) {
 
 func TestParseThinkingToolcalls_SingleCall(t *testing.T) {
 	// Real format observed from moonshotai/kimi-k2.5 logs.
-	reasoning := ` <|tool_calls_section_begin|> <|tool_call_begin|>   functions.Bash:6 <|tool_call_argument_begin|> {"command": "git diff --staged", "description": "show staged diff"} <|tool_call_end|> <|tool_calls_section_end|>`
+	reasoning := ` <|tool_calls_section_begin|> <|tool_call_begin|>   functions.Shell:6 <|tool_call_argument_begin|> {"command": "git diff --staged", "description": "show staged diff"} <|tool_call_end|> <|tool_calls_section_end|>`
 
 	calls := parseThinkingToolcalls(reasoning)
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))
 	}
-	if calls[0].Name != "Bash" {
-		t.Fatalf("expected tool name Bash, got %q", calls[0].Name)
+	if calls[0].Name != "Shell" {
+		t.Fatalf("expected tool name Shell, got %q", calls[0].Name)
 	}
-	if calls[0].ID != " functions.Bash:6" {
-		t.Fatalf("expected ID ' functions.Bash:6', got %q", calls[0].ID)
+	if calls[0].ID != " functions.Shell:6" {
+		t.Fatalf("expected ID ' functions.Shell:6', got %q", calls[0].ID)
 	}
 	if !strings.Contains(string(calls[0].Args), "git diff --staged") {
 		t.Fatalf("expected args to contain 'git diff --staged', got %s", calls[0].Args)
@@ -83,7 +83,7 @@ func TestParseThinkingToolcalls_MultilineCalls(t *testing.T) {
 	reasoning := strings.Join([]string{
 		"analysis before",
 		"<|tool_calls_section_begin|>",
-		"<|tool_call_begin|> functions.Bash:0 <|tool_call_argument_begin|> {\"command\": \"ls\"} <|tool_call_end|>",
+		"<|tool_call_begin|> functions.Shell:0 <|tool_call_argument_begin|> {\"command\": \"ls\"} <|tool_call_end|>",
 		"<|tool_call_begin|> functions.Read:1 <|tool_call_argument_begin|> {\"path\": \"foo.go\"} <|tool_call_end|>",
 		"<|tool_calls_section_end|>",
 	}, "\n")
@@ -92,14 +92,14 @@ func TestParseThinkingToolcalls_MultilineCalls(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", len(calls))
 	}
-	if calls[0].Name != "Bash" {
-		t.Fatalf("expected first tool Bash, got %q", calls[0].Name)
+	if calls[0].Name != "Shell" {
+		t.Fatalf("expected first tool Shell, got %q", calls[0].Name)
 	}
 	if calls[1].Name != "Read" {
 		t.Fatalf("expected second tool Read, got %q", calls[1].Name)
 	}
-	if calls[0].ID != " functions.Bash:0" {
-		t.Fatalf("expected first ID ' functions.Bash:0', got %q", calls[0].ID)
+	if calls[0].ID != " functions.Shell:0" {
+		t.Fatalf("expected first ID ' functions.Shell:0', got %q", calls[0].ID)
 	}
 	if calls[1].ID != " functions.Read:1" {
 		t.Fatalf("expected second ID ' functions.Read:1', got %q", calls[1].ID)
@@ -121,7 +121,7 @@ func TestParseThinkingToolcalls_EmptyString(t *testing.T) {
 }
 
 func TestParseThinkingToolcalls_MalformedJSON(t *testing.T) {
-	reasoning := `<|tool_calls_section_begin|> <|tool_call_begin|> functions.Bash:0 <|tool_call_argument_begin|> {invalid json <|tool_call_end|> <|tool_calls_section_end|>`
+	reasoning := `<|tool_calls_section_begin|> <|tool_call_begin|> functions.Shell:0 <|tool_call_argument_begin|> {invalid json <|tool_call_end|> <|tool_calls_section_end|>`
 
 	calls := parseThinkingToolcalls(reasoning)
 	if len(calls) != 0 {
@@ -132,7 +132,7 @@ func TestParseThinkingToolcalls_MalformedJSON(t *testing.T) {
 func TestParseThinkingToolcalls_UsesLastSection(t *testing.T) {
 	reasoning := strings.Join([]string{
 		"<|tool_calls_section_begin|>",
-		"<|tool_call_begin|> functions.Bash:0 <|tool_call_argument_begin|> {\"command\": \"old\"} <|tool_call_end|>",
+		"<|tool_call_begin|> functions.Shell:0 <|tool_call_argument_begin|> {\"command\": \"old\"} <|tool_call_end|>",
 		"<|tool_calls_section_end|>",
 		"wait, let me reconsider",
 		"<|tool_calls_section_begin|>",
@@ -150,31 +150,31 @@ func TestParseThinkingToolcalls_UsesLastSection(t *testing.T) {
 }
 
 func TestParseThinkingToolcalls_FunctionWithoutIndex(t *testing.T) {
-	reasoning := `<|tool_calls_section_begin|> <|tool_call_begin|> functions.Bash: <|tool_call_argument_begin|> {"command": "ls"} <|tool_call_end|> <|tool_calls_section_end|>`
+	reasoning := `<|tool_calls_section_begin|> <|tool_call_begin|> functions.Shell: <|tool_call_argument_begin|> {"command": "ls"} <|tool_call_end|> <|tool_calls_section_end|>`
 
 	calls := parseThinkingToolcalls(reasoning)
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))
 	}
-	if calls[0].Name != "Bash" {
-		t.Fatalf("expected tool name Bash, got %q", calls[0].Name)
+	if calls[0].Name != "Shell" {
+		t.Fatalf("expected tool name Shell, got %q", calls[0].Name)
 	}
-	if calls[0].ID != " functions.Bash:" {
-		t.Fatalf("expected ID ' functions.Bash:', got %q", calls[0].ID)
+	if calls[0].ID != " functions.Shell:" {
+		t.Fatalf("expected ID ' functions.Shell:', got %q", calls[0].ID)
 	}
 }
 
 func TestParseThinkingToolcalls_NonStdJSONEscapes(t *testing.T) {
 	// Real case from logs: model emits \xHH in grep pattern args.
 	reasoning := " ```\n" +
-		` <|tool_calls_section_begin|> <|tool_call_begin|>  functions.Bash:15 <|tool_call_argument_begin|> {"command": "git diff --staged | grep -A5 -B5 '\xe8\xa7\xa3' | head -100", "description": "check unicode encoding"} <|tool_call_end|> <|tool_calls_section_end|>`
+		` <|tool_calls_section_begin|> <|tool_call_begin|>  functions.Shell:15 <|tool_call_argument_begin|> {"command": "git diff --staged | grep -A5 -B5 '\xe8\xa7\xa3' | head -100", "description": "check unicode encoding"} <|tool_call_end|> <|tool_calls_section_end|>`
 
 	calls := parseThinkingToolcalls(reasoning)
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))
 	}
-	if calls[0].Name != "Bash" {
-		t.Fatalf("expected tool name Bash, got %q", calls[0].Name)
+	if calls[0].Name != "Shell" {
+		t.Fatalf("expected tool name Shell, got %q", calls[0].Name)
 	}
 	// The \xHH should have been normalised to \u00HH in the args JSON.
 	if !strings.Contains(string(calls[0].Args), `\u00e8\u00a7\u00a3`) {

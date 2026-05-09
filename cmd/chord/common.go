@@ -451,14 +451,14 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.EditTool{})
 	ac.Registry.Register(tools.DeleteTool{})
 
-	// Detect shell type and create appropriate BashTool
+	// Detect shell type and create appropriate ShellTool
 	detectedShell, err := shell.DetectShell()
 	if err != nil {
 		log.Warnf("shell detection failed, using bash as default error=%v", err)
 		detectedShell = shell.ShellBash
 	}
 	log.Debugf("detected shell for command execution shell=%v", detectedShell.String())
-	ac.Registry.Register(tools.NewBashTool(detectedShell.String()))
+	ac.Registry.Register(tools.NewShellTool(detectedShell.String()))
 
 	ac.Registry.Register(tools.NewSpawnTool(detectedShell.String()))
 	ac.Registry.Register(tools.SpawnStatusTool{})

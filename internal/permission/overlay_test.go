@@ -13,7 +13,7 @@ func TestAppendRoleOverlayRule_CreatesNewFile(t *testing.T) {
 	path := filepath.Join(dir, "test-role.yaml")
 
 	rule := Rule{
-		Permission: "Bash",
+		Permission: "Shell",
 		Pattern:    "git log *",
 		Action:     ActionAllow,
 	}
@@ -41,7 +41,7 @@ func TestAppendRoleOverlayRule_Deduplicates(t *testing.T) {
 	path := filepath.Join(dir, "test-role.yaml")
 
 	rule := Rule{
-		Permission: "Bash",
+		Permission: "Shell",
 		Pattern:    "git log *",
 		Action:     ActionAllow,
 	}
@@ -77,7 +77,7 @@ func TestRemoveRoleOverlayRule(t *testing.T) {
 	path := filepath.Join(dir, "test-role.yaml")
 
 	rule := Rule{
-		Permission: "Bash",
+		Permission: "Shell",
 		Pattern:    "git log *",
 		Action:     ActionAllow,
 	}
@@ -105,7 +105,7 @@ func TestRemoveRoleOverlayRule(t *testing.T) {
 
 func TestRemoveRoleOverlayRule_NoFile(t *testing.T) {
 	rule := Rule{
-		Permission: "Bash",
+		Permission: "Shell",
 		Pattern:    "git log *",
 		Action:     ActionAllow,
 	}
@@ -119,15 +119,15 @@ func TestOverlay_AddAndRemove(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("test-role")
 	o.SetBase(Ruleset{
-		{Permission: "Bash", Pattern: "*", Action: ActionAsk},
+		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
 	})
 
-	rule := Rule{Permission: "Bash", Pattern: "git log *", Action: ActionAllow}
+	rule := Rule{Permission: "Shell", Pattern: "git log *", Action: ActionAllow}
 	o.AddSessionRule("test-role", rule)
 
 	// Check merged ruleset
 	merged := o.MergedRuleset()
-	result := merged.Evaluate("Bash", "git log --oneline")
+	result := merged.Evaluate("Shell", "git log --oneline")
 	if result != ActionAllow {
 		t.Errorf("expected ActionAllow after adding session rule, got %v", result)
 	}
@@ -135,7 +135,7 @@ func TestOverlay_AddAndRemove(t *testing.T) {
 	// Remove it
 	o.RemoveSessionRule(0)
 	merged = o.MergedRuleset()
-	result = merged.Evaluate("Bash", "git log --oneline")
+	result = merged.Evaluate("Shell", "git log --oneline")
 	if result != ActionAsk {
 		t.Errorf("expected ActionAsk after removing session rule, got %v", result)
 	}
@@ -145,10 +145,10 @@ func TestOverlay_AddedRules(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
 	o.SetBase(Ruleset{
-		{Permission: "Bash", Pattern: "*", Action: ActionAsk},
+		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
 	})
 
-	rule := Rule{Permission: "Bash", Pattern: "git *", Action: ActionAllow}
+	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
 	o.AddSessionRule("builder", rule)
 
 	added := o.AddedRules()
@@ -166,7 +166,7 @@ func TestOverlay_AddedRules(t *testing.T) {
 func TestOverlay_AddSessionRule_Deduplicates(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
-	rule := Rule{Permission: "Bash", Pattern: "git *", Action: ActionAllow}
+	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
 	o.AddSessionRule("builder", rule)
 	o.AddSessionRule("builder", rule)
 	if got := len(o.AddedRules()); got != 1 {
@@ -179,7 +179,7 @@ func TestOverlay_AddSessionRule_Deduplicates(t *testing.T) {
 
 func TestOverlay_AddProjectRule_PathRequired(t *testing.T) {
 	o := NewOverlay()
-	rule := Rule{Permission: "Bash", Pattern: "git *", Action: ActionAllow}
+	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
 	if err := o.AddProjectRule("builder", rule); err == nil {
 		t.Fatal("expected AddProjectRule to fail when project path is empty")
 	}
@@ -190,11 +190,11 @@ func TestOverlay_LoadOverlayFile_RequiresPermissionRoot(t *testing.T) {
 	legacyPath := filepath.Join(dir, "legacy.yaml")
 	permissionPath := filepath.Join(dir, "permission.yaml")
 
-	legacy := "Bash:\n  \"git *\": allow\n"
+	legacy := "Shell:\n  \"git *\": allow\n"
 	if err := os.WriteFile(legacyPath, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write legacy file: %v", err)
 	}
-	withPermission := "permission:\n  Bash:\n    \"git *\": allow\n"
+	withPermission := "permission:\n  Shell:\n    \"git *\": allow\n"
 	if err := os.WriteFile(permissionPath, []byte(withPermission), 0o644); err != nil {
 		t.Fatalf("write permission file: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestOverlay_LoadOverlayFile_RequiresPermissionRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadOverlayFile(permissionPath) failed: %v", err)
 	}
-	if got := rules.Evaluate("Bash", "git status"); got != ActionAllow {
+	if got := rules.Evaluate("Shell", "git status"); got != ActionAllow {
 		t.Fatalf("evaluate loaded rules = %s, want %s", got, ActionAllow)
 	}
 
@@ -215,12 +215,12 @@ func TestOverlay_LoadOverlayFile_RequiresPermissionRoot(t *testing.T) {
 func TestAppendRoleOverlayRule_RejectsLegacyRootSchema(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "legacy.yaml")
-	legacy := "Bash:\n  \"git *\": allow\n"
+	legacy := "Shell:\n  \"git *\": allow\n"
 	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write legacy file: %v", err)
 	}
 	rule := Rule{
-		Permission: "Bash",
+		Permission: "Shell",
 		Pattern:    "git status *",
 		Action:     ActionAllow,
 	}
@@ -232,11 +232,11 @@ func TestAppendRoleOverlayRule_RejectsLegacyRootSchema(t *testing.T) {
 func TestOverlay_SessionRulesAreRoleScoped(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
-	o.SetBase(Ruleset{{Permission: "Bash", Pattern: "*", Action: ActionAsk}})
-	builderRule := Rule{Permission: "Bash", Pattern: "git *", Action: ActionAllow}
+	o.SetBase(Ruleset{{Permission: "Shell", Pattern: "*", Action: ActionAsk}})
+	builderRule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
 	o.AddSessionRule("builder", builderRule)
 
-	if got := o.MergedRuleset().Evaluate("Bash", "git status"); got != ActionAllow {
+	if got := o.MergedRuleset().Evaluate("Shell", "git status"); got != ActionAllow {
 		t.Fatalf("builder merged evaluation = %s, want %s", got, ActionAllow)
 	}
 	if got := o.SessionRuleCountForRole("builder"); got != 1 {
@@ -244,7 +244,7 @@ func TestOverlay_SessionRulesAreRoleScoped(t *testing.T) {
 	}
 
 	o.SetActiveRole("planner")
-	if got := o.MergedRuleset().Evaluate("Bash", "git status"); got != ActionAsk {
+	if got := o.MergedRuleset().Evaluate("Shell", "git status"); got != ActionAsk {
 		t.Fatalf("planner merged evaluation = %s, want %s", got, ActionAsk)
 	}
 	if got := o.SessionRuleCount(); got != 0 {
@@ -255,7 +255,7 @@ func TestOverlay_SessionRulesAreRoleScoped(t *testing.T) {
 func TestOverlay_RemoveAddedRulePersistentFailureKeepsTrackingState(t *testing.T) {
 	o := NewOverlay()
 	path := filepath.Join(t.TempDir(), "builder.yaml")
-	rule := Rule{Permission: "Bash", Pattern: "git *", Action: ActionAllow}
+	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
 	if err := AppendRoleOverlayRule(path, rule); err != nil {
 		t.Fatalf("AppendRoleOverlayRule failed: %v", err)
 	}
@@ -280,8 +280,8 @@ func TestOverlay_RemoveAddedRulePersistentFailureKeepsTrackingState(t *testing.T
 func TestOverlay_AddedRulesPreserveRemovalIndexOrder(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
-	older := Rule{Permission: "Bash", Pattern: "git log *", Action: ActionAllow}
-	newer := Rule{Permission: "Bash", Pattern: "git status *", Action: ActionAllow}
+	older := Rule{Permission: "Shell", Pattern: "git log *", Action: ActionAllow}
+	newer := Rule{Permission: "Shell", Pattern: "git status *", Action: ActionAllow}
 	o.AddSessionRule("builder", older)
 	o.AddSessionRule("builder", newer)
 

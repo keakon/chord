@@ -48,7 +48,7 @@ func TestNormalizeMessagesForPoolTarget_DowngradesMissingToolResultForAnthropic(
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{{
 		Role:       "assistant",
-		ToolCalls:  []message.ToolCall{{ID: "toolu_1", Name: "Bash", Args: args}},
+		ToolCalls:  []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}},
 		Provenance: &message.MessageProvenance{Source: "import:claude", WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
 	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}})

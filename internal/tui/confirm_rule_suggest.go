@@ -18,14 +18,14 @@ type PatternCandidate struct {
 }
 
 // suggestRulePatterns generates pattern candidates for a tool invocation.
-// toolName: the tool name (e.g. "Bash", "Write")
+// toolName: the tool name (e.g. "Shell", "Write")
 // argsJSON: the tool arguments as JSON
 // needsApproval: explicit paths that need approval (for Delete)
 // cwd: current working directory (for relative path generation)
 func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
 	switch strings.ToLower(toolName) {
-	case "bash":
-		return suggestBashPatterns(argsJSON, needsApproval)
+	case "shell":
+		return suggestShellPatterns(argsJSON, needsApproval)
 	case "edit", "write":
 		return suggestFilePatterns(toolName, argsJSON, cwd)
 	case "webfetch":
@@ -44,12 +44,12 @@ func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd 
 	}
 }
 
-// suggestBashPatterns generates pattern candidates for Bash commands.
-func suggestBashPatterns(argsJSON string, needsApproval []string) []PatternCandidate {
-	command := extractBashCommand(argsJSON)
+// suggestShellPatterns generates pattern candidates for Shell commands.
+func suggestShellPatterns(argsJSON string, needsApproval []string) []PatternCandidate {
+	command := extractShellCommand(argsJSON)
 	if command == "" {
 		return normalizePatternCandidates([]PatternCandidate{
-			{Pattern: "*", Summary: "any Bash command", Broad: true, Default: true},
+			{Pattern: "*", Summary: "any Shell command", Broad: true, Default: true},
 		})
 	}
 
@@ -73,7 +73,7 @@ func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
 		// Complex commands: only literal + very broad
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: trimmed, Summary: "literal (this exact command)", Default: true},
-			{Pattern: "*", Summary: "any Bash command", Broad: true},
+			{Pattern: "*", Summary: "any Shell command", Broad: true},
 		})
 	}
 
@@ -83,7 +83,7 @@ func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
 	parts := strings.Fields(trimmed)
 	if len(parts) == 0 {
 		return normalizePatternCandidates([]PatternCandidate{
-			{Pattern: "*", Summary: "any Bash command", Broad: true, Default: true},
+			{Pattern: "*", Summary: "any Shell command", Broad: true, Default: true},
 		})
 	}
 
@@ -124,7 +124,7 @@ func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
 	// Very broad: *
 	candidates = append(candidates, PatternCandidate{
 		Pattern: "*",
-		Summary: "any Bash command",
+		Summary: "any Shell command",
 		Broad:   true,
 	})
 
@@ -341,8 +341,8 @@ func normalizePatternCandidates(candidates []PatternCandidate) []PatternCandidat
 	return out
 }
 
-// extractBashCommand extracts the command string from Bash tool args JSON.
-func extractBashCommand(argsJSON string) string {
+// extractShellCommand extracts the command string from Shell tool args JSON.
+func extractShellCommand(argsJSON string) string {
 	var parsed struct {
 		Command string `json:"command"`
 	}

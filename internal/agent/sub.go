@@ -209,7 +209,7 @@ type SubAgentConfig struct {
 	Parent        *MainAgent
 	ParentCtx     context.Context
 	Cancel        context.CancelFunc
-	BaseTools     *tools.Registry // shared base tool registry (Read, Write, Edit, Bash, Grep, Glob, etc.)
+	BaseTools     *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
 	ExtraMCPTools []tools.Tool    // agent-specific MCP tools
 	Ruleset       permission.Ruleset
 	WorkDir       string

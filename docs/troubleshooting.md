@@ -107,7 +107,7 @@ This change does not remove session resume support; it only deletes obsolete int
 If a tool card, local shell result, question dialog, or confirmation summary used to show unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:
 
 - upgrade to a build that includes the external-text rendering fix
-- retry the same `Read`, `Bash`, `WebFetch`, or local shell action
+- retry the same `Read`, `Shell`, `WebFetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
 Recent builds now display ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.

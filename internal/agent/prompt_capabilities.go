@@ -70,10 +70,10 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if hasVisibleTool(visible, "Skill") {
 		lines = append(lines, "- Use `Skill` to load additional skill instructions on demand when one of the available skills clearly matches the task.")
 	}
-	if hasVisibleTool(visible, "Bash") {
+	if hasVisibleTool(visible, "Shell") {
 		lines = append(lines,
-			"- Use `Bash` mainly for tests, builds, git, and system commands.",
-			"- For native filesystem operations with no dedicated built-in tool, `Bash` is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
+			"- Use `Shell` mainly for tests, builds, git, and system commands.",
+			"- For native filesystem operations with no dedicated built-in tool, `Shell` is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		)
 	}
 	if len(discoveryTools) > 0 || hasVisibleTool(visible, "Read") {
@@ -102,14 +102,14 @@ func fileInspectionConstraintsPromptBlock(visible map[string]struct{}, ruleset p
 	if !hasRead && !hasGrep && !hasGlob && !hasLsp {
 		lines = []string{
 			"- This role has no direct file inspection or code-navigation tools available in the prompt.",
-			"- Do not use `Bash`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+			"- Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 			inspectionLimitationEscalation(visible, audience, false),
 		}
 	} else {
 		lines = []string{
 			"- File inspection and code-navigation capabilities may be limited in this role. Only use the visible read/search/navigation tools and stay within the allowed permission scope.",
 			"- If a needed inspection or navigation action is unavailable, treat that as a real boundary instead of retrying with equivalent shell commands.",
-			"- Do not use `Bash`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+			"- Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 			inspectionLimitationEscalation(visible, audience, true),
 		}
 	}
@@ -132,14 +132,14 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 	if !hasEdit && !hasWrite && !hasDelete {
 		lines = []string{
 			"- This role is currently read-only for files: do not edit, write, or delete files.",
-			"- Do not use `Bash`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
+			"- Do not use `Shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
 			modificationLimitationEscalation(visible, audience, false),
 		}
 	} else {
 		lines = []string{
 			"- Available file operations are limited in this role. Only use the visible file tools and stay within the allowed permission scope.",
 			"- If a needed file action or target path is unavailable, treat that as a real boundary instead of retrying with equivalent tools.",
-			"- Do not use `Bash`, shell redirection, or inline scripts to simulate hidden or denied file edits, writes, or deletes.",
+			"- Do not use `Shell`, shell redirection, or inline scripts to simulate hidden or denied file edits, writes, or deletes.",
 			modificationLimitationEscalation(visible, audience, true),
 		}
 	}

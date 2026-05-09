@@ -24,7 +24,7 @@ const (
 
 // Rule is a single permission entry: (tool pattern, argument pattern) → action.
 type Rule struct {
-	Permission string // tool name pattern (e.g., "Bash", "Skill", "*")
+	Permission string // tool name pattern (e.g., "Shell", "Skill", "*")
 	Pattern    string // sub-command/argument pattern (e.g., "rm *", "go-expert", "*")
 	Action     Action
 }
@@ -38,7 +38,7 @@ type Ruleset []Rule
 // Supported formats:
 //   - Scalar: "deny"         → [{Permission: "*", Pattern: "*", Action: deny}]
 //   - Mapping with scalar:   "Read: allow" → {Permission: "Read", Pattern: "*", Action: allow}
-//   - Mapping with sub-map:  "Bash: { rm *: deny }" → {Permission: "Bash", Pattern: "rm *", Action: deny}
+//   - Mapping with sub-map:  "Shell: { rm *: deny }" → {Permission: "Shell", Pattern: "rm *", Action: deny}
 func ParsePermission(node *yaml.Node) Ruleset {
 	if node == nil {
 		return nil
@@ -67,7 +67,7 @@ func ParsePermission(node *yaml.Node) Ruleset {
 				Action:     Action(valNode.Value),
 			})
 		case yaml.MappingNode:
-			// Bash: { "rm *": deny, "git *": allow }
+			// Shell: { "rm *": deny, "git *": allow }
 			for j := 0; j < len(valNode.Content); j += 2 {
 				rules = append(rules, Rule{
 					Permission: toolName,

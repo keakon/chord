@@ -46,10 +46,10 @@ func spawnToolDescription(_ map[string]struct{}) string {
 	return "Start a background process that runs independently of the current turn.\n" +
 		"Only use Spawn for processes with real background lifecycle needs — not as a way to parallelize ordinary commands.\n" +
 		"Appropriate: dev servers, file watchers, long-running benchmarks, batch pipelines the user explicitly wants in background.\n" +
-		"It uses the same detected shell environment as the foreground Bash tool.\n" +
+		"It uses the same detected shell environment as the foreground Shell tool.\n" +
 		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
-		"Use foreground Bash for commands whose stdout/stderr you need in this turn.\n" +
-		"You will NOT receive stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits. Services may expose a diagnostic log_file path that you can inspect with foreground Bash when needed.\n" +
+		"Use foreground Shell for commands whose stdout/stderr you need in this turn.\n" +
+		"You will NOT receive stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits. Services may expose a diagnostic log_file path that you can inspect with foreground Shell when needed.\n" +
 		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
 }
 
@@ -98,7 +98,7 @@ func (t SpawnTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 
 	var kind spawnKind
-	var timeoutInfo BashTimeoutInfo
+	var timeoutInfo ShellTimeoutInfo
 	if a.Timeout != nil {
 		kind = spawnKindJob
 		timeoutInfo = ResolveSpawnTimeout(a.Timeout)

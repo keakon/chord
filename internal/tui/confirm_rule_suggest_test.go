@@ -5,9 +5,9 @@ import (
 )
 
 func TestSuggestRulePatterns_BashSimple(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"git log --oneline"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("Shell", `{"command":"git log --oneline"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
-		t.Fatal("expected candidates for simple bash command")
+		t.Fatal("expected candidates for simple shell command")
 	}
 
 	// First candidate should be literal
@@ -29,7 +29,7 @@ func TestSuggestRulePatterns_BashSimple(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"git log --oneline && git status"}`, []string{"git status"}, "/home/user/project")
+	candidates := suggestRulePatterns("Shell", `{"command":"git log --oneline && git status"}`, []string{"git status"}, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
@@ -40,7 +40,7 @@ func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"rm -rf /tmp/foo"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("Shell", `{"command":"rm -rf /tmp/foo"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for high-risk command")
 	}
@@ -57,7 +57,7 @@ func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplex(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"git log | grep foo"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("Shell", `{"command":"git log | grep foo"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for complex command")
 	}
@@ -188,7 +188,7 @@ func TestSuggestRulePatterns_Grep(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSudo(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"sudo apt install foo"}`, nil, "")
+	candidates := suggestRulePatterns("Shell", `{"command":"sudo apt install foo"}`, nil, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for sudo command")
 	}
@@ -198,7 +198,7 @@ func TestSuggestRulePatterns_BashSudo(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, "")
+	candidates := suggestRulePatterns("Shell", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, "")
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for heredoc command")
 	}
@@ -211,7 +211,7 @@ func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) 
 }
 
 func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"echo one\necho two"}`, nil, "")
+	candidates := suggestRulePatterns("Shell", `{"command":"echo one\necho two"}`, nil, "")
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for multiline command")
 	}
@@ -224,7 +224,7 @@ func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
-	candidates := suggestRulePatterns("Bash", `{"command":"ls"}`, nil, "")
+	candidates := suggestRulePatterns("Shell", `{"command":"ls"}`, nil, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for single-word command")
 	}
