@@ -666,7 +666,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			}
 		}
 		go func(callIDs []string) {
-			hookResult, hookErr := a.fireHook(context.Background(), hook.OnAfterLLMCall, turnID, hookCtxData)
+			hookResult, hookErr := a.fireHook(a.parentCtx, hook.OnAfterLLMCall, turnID, hookCtxData)
 			finishedAt := time.Now()
 			for _, callID := range callIDs {
 				a.recordToolTraceOnAfterLLMCallDone(callID, finishedAt)
@@ -687,7 +687,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}(callIDs)
 	} else {
 		go func() {
-			if hookResult, hookErr := a.fireHook(context.Background(), hook.OnAfterLLMCall, turnID, hookCtxData); hookErr != nil {
+			if hookResult, hookErr := a.fireHook(a.parentCtx, hook.OnAfterLLMCall, turnID, hookCtxData); hookErr != nil {
 				log.Warnf("on_after_llm_call hook error error=%v", hookErr)
 			} else if hookResult != nil {
 				switch hookResult.Action {
