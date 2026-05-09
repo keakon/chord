@@ -37,9 +37,33 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 		}
 		return cmd
 	case ModeConfirm:
+		// Bubble Tea v2 may deliver terminal paste as tea.PasteMsg (bracketed paste),
+		// not as a KeyMsg (Super+V). The bubbles/textarea component doesn't handle
+		// tea.PasteMsg, so we must insert the pasted content ourselves.
+		if pm, ok := msg.(tea.PasteMsg); ok {
+			if strings.TrimSpace(pm.Content) == "" {
+				// Some terminals emit an empty PasteMsg for non-text clipboard content.
+				return m.pasteFromClipboard()
+			}
+			switch {
+			case m.confirm.editing:
+				m.confirm.editInput.InsertString(pm.Content)
+				m.recalcViewportSize()
+				return nil
+			case m.confirm.denyingWithReason:
+				m.confirm.denyReasonInput.InsertString(pm.Content)
+				m.recalcViewportSize()
+				return nil
+			}
+		}
 		if m.confirm.editing {
 			var cmd tea.Cmd
 			m.confirm.editInput, cmd = m.confirm.editInput.Update(msg)
+			return cmd
+		}
+		if m.confirm.denyingWithReason {
+			var cmd tea.Cmd
+			m.confirm.denyReasonInput, cmd = m.confirm.denyReasonInput.Update(msg)
 			return cmd
 		}
 	case ModeQuestion:

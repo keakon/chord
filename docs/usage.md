@@ -216,14 +216,14 @@ Currently supported:
 
 Common actions:
 
-- `Ctrl+V` / `Cmd+V`: prefer clipboard image input; otherwise paste text
+- `Ctrl+V` / `Cmd+V`: prefer clipboard image input; otherwise paste text (works in the composer and in confirmation-dialog text fields)
 - `Ctrl+F`: attach image paths from the input box to the current message
 - `Enter` / `o` / `Space`: open the image in the current message in Normal mode
 
 ## Copying text
 
 - Drag in the transcript to select text inside the TUI
-- `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord
+- `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
 - `Ctrl+C`: remains reserved for cancel / quit and is not used for transcript copy
 
 ## Headless

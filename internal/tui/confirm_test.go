@@ -263,6 +263,22 @@ func TestConfirmEditAcceptsClipboardTextMsg(t *testing.T) {
 	}
 }
 
+func TestConfirmEditAcceptsPasteMsg(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 40)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Bash", ArgsJSON: `{"command":"echo old"}`}
+	m.confirm.editing = true
+	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
+	m.confirm.editInput.SetValue("")
+
+	updated, _ := m.Update(tea.PasteMsg{Content: `{"command":"echo pasted"}`})
+	model := updated.(*Model)
+
+	if got := model.confirm.editInput.Value(); got != `{"command":"echo pasted"}` {
+		t.Fatalf("confirm edit input = %q", got)
+	}
+}
+
 func TestConfirmDenyReasonAcceptsClipboardTextMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
@@ -279,6 +295,22 @@ func TestConfirmDenyReasonAcceptsClipboardTextMsg(t *testing.T) {
 	}
 	if got := model.input.Value(); got != "" {
 		t.Fatalf("main input should not receive confirm paste, got %q", got)
+	}
+}
+
+func TestConfirmDenyReasonAcceptsPasteMsg(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 40)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Bash", ArgsJSON: `{"command":"rm"}`}
+	m.confirm.denyingWithReason = true
+	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+	m.confirm.denyReasonInput.SetValue("")
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "because pasted"})
+	model := updated.(*Model)
+
+	if got := model.confirm.denyReasonInput.Value(); got != "because pasted" {
+		t.Fatalf("confirm deny reason input = %q", got)
 	}
 }
 
