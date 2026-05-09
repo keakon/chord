@@ -21,7 +21,11 @@ func newResumeCmd() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(c *cobra.Command, args []string) error {
 			sid := args[0]
-			loc, err := resolveSessionWorktree(context.Background(), sid)
+			ctx := c.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			loc, err := resolveSessionWorktree(ctx, sid)
 			if err != nil {
 				return err
 			}

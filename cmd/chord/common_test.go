@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
@@ -24,6 +25,25 @@ func testOAuthJWTForCommonTest(payload string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	return header + "." + body + ".sig"
+}
+
+func TestNewLSPShutdownContextHasGracePeriodAfterParentCancellation(t *testing.T) {
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	parentCancel()
+	if err := parentCtx.Err(); err == nil {
+		t.Fatal("test setup: parent context was not cancelled")
+	}
+
+	ctx, cancel := newLSPShutdownContext()
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("newLSPShutdownContext() is already cancelled: %v", err)
+	}
+	if deadline, ok := ctx.Deadline(); !ok {
+		t.Fatal("newLSPShutdownContext() has no deadline")
+	} else if remaining := time.Until(deadline); remaining <= 0 || remaining > lspShutdownGrace {
+		t.Fatalf("shutdown grace remaining = %v, want within (0, %v]", remaining, lspShutdownGrace)
+	}
 }
 
 func TestPlanSessionStartupContinueUsesLatestNonEmptySession(t *testing.T) {

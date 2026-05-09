@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // isTUILocalOnlySlashCommand reports whether content is a local-only slash
@@ -51,6 +52,23 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 	}
 }
 
+func (a *MainAgent) focusedSubAgentControlContext(focused *SubAgent) context.Context {
+	if a == nil {
+		return context.Background()
+	}
+	ctx := a.parentCtx
+	if focused == nil {
+		return ctx
+	}
+	if agentID := focused.OwnerAgentID(); agentID != "" {
+		ctx = tools.WithAgentID(ctx, agentID)
+	}
+	if taskID := focused.OwnerTaskID(); taskID != "" {
+		ctx = tools.WithTaskID(ctx, taskID)
+	}
+	return ctx
+}
+
 // SendUserMessage enqueues a user message for processing. It is safe to call
 // from any goroutine (typically the TUI input handler).
 //
@@ -75,7 +93,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
 				return
 			}
-			if _, err := a.NotifySubAgent(context.Background(), taskID, content, "reply"); err != nil {
+			if _, err := a.NotifySubAgent(a.focusedSubAgentControlContext(focused), taskID, content, "reply"); err != nil {
 				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
 			}
 			return
@@ -85,7 +103,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
 				return
 			}
-			if _, err := a.NotifySubAgent(context.Background(), taskID, content, "follow_up"); err != nil {
+			if _, err := a.NotifySubAgent(a.focusedSubAgentControlContext(focused), taskID, content, "follow_up"); err != nil {
 				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
 			}
 			return

@@ -12,11 +12,13 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -65,6 +67,9 @@ func resolvePprofListenAddr() (string, error) {
 }
 
 func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	rootCmd := &cobra.Command{
 		Use:           "chord",
 		Short:         "AI coding assistant with multi-agent orchestration",
@@ -128,7 +133,7 @@ func main() {
 
 	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		// context.Canceled is expected on signal-driven shutdown — exit cleanly.
 		if !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -150,7 +155,11 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	// nil when entered via the worktree resume subcommand or another path
 	// that has already prepared the worktree.
 	if cmd != nil && cmd.Flags().Changed("worktree") && flagWorktreeStartupInfo == nil {
-		info, err := prepareStartupWorktree(context.Background(), flagWorktree)
+		wtCtx := cmd.Context()
+		if wtCtx == nil {
+			wtCtx = context.Background()
+		}
+		info, err := prepareStartupWorktree(wtCtx, flagWorktree)
 		if err != nil {
 			return err
 		}
@@ -596,8 +605,8 @@ Responses-based providers it also prints the final transport used, such as
 This is a connectivity and transport diagnostic, not a full end-to-end agent
 acceptance test. It does not validate tools, long-running session behavior,
 context compaction, or broader orchestration semantics.`,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return testProviders(providerFilter)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return testProviders(cmd.Context(), providerFilter)
 		},
 	}
 	cmd.Flags().StringVar(&providerFilter, "provider", "", "Provider name to test")

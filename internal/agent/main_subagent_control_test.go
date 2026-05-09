@@ -1021,6 +1021,9 @@ func TestFocusedCompletedWorkerDirectInputResumesSameWorker(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.setState(SubAgentStateCompleted, "finished initial pass")
+	sub.ownerAgentID = "main-owner"
+	sub.ownerTaskID = "main-task"
+	a.syncTaskRecordFromSub(sub, "")
 	a.SwitchFocus(sub.instanceID)
 
 	a.SendUserMessage("follow up on edge cases")

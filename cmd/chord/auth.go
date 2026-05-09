@@ -125,13 +125,13 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if flagAuthDeviceCode {
-		return runAuthLoginDevice(providerName, providerCfg, globalProxy)
+		return runAuthLoginDevice(providerName, providerCfg, globalProxy, cmd.Context())
 	}
-	return runAuthLoginBrowser(providerName, providerCfg, globalProxy)
+	return runAuthLoginBrowser(providerName, providerCfg, globalProxy, cmd.Context())
 }
 
-func runAuthLoginBrowser(providerName string, providerCfg config.ProviderConfig, globalProxy string) error {
-	return runAuthLoginBrowserWithIO(os.Stdin, os.Stderr, providerName, providerCfg, globalProxy, openBrowser, clipboard.WriteAll)
+func runAuthLoginBrowser(providerName string, providerCfg config.ProviderConfig, globalProxy string, parentCtx context.Context) error {
+	return runAuthLoginBrowserWithIO(os.Stdin, os.Stderr, providerName, providerCfg, globalProxy, parentCtx, openBrowser, clipboard.WriteAll)
 }
 
 func runAuthLoginBrowserWithIO(
@@ -140,9 +140,13 @@ func runAuthLoginBrowserWithIO(
 	providerName string,
 	providerCfg config.ProviderConfig,
 	globalProxy string,
+	parentCtx context.Context,
 	openFn func(string) error,
 	copyFn func(string) error,
 ) error {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	pkce, err := generateOpenAIPKCE()
 	if err != nil {
 		return fmt.Errorf("generate PKCE: %w", err)
@@ -197,6 +201,11 @@ func runAuthLoginBrowserWithIO(
 				prompt.close()
 			}
 			return err
+		case <-parentCtx.Done():
+			if prompt != nil {
+				prompt.close()
+			}
+			return parentCtx.Err()
 		case <-timer.C:
 			if prompt != nil {
 				prompt.close()
@@ -253,7 +262,7 @@ exchange:
 	return nil
 }
 
-func runAuthLoginDevice(providerName string, providerCfg config.ProviderConfig, globalProxy string) error {
+func runAuthLoginDevice(providerName string, providerCfg config.ProviderConfig, globalProxy string, parentCtx context.Context) error {
 	normalizedCfg, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
 	if err != nil {
 		return fmt.Errorf("provider %q has invalid OAuth config: %w", providerName, err)
@@ -266,10 +275,11 @@ func runAuthLoginDevice(providerName string, providerCfg config.ProviderConfig, 
 	if err != nil {
 		return err
 	}
-	return runOpenAICodexDeviceLogin(providerName, client, normalizedCfg.TokenURL, normalizedCfg.ClientID)
+	return runOpenAICodexDeviceLogin(parentCtx, providerName, client, normalizedCfg.TokenURL, normalizedCfg.ClientID)
 }
 
 func runOpenAICodexDeviceLogin(
+	parentCtx context.Context,
 	providerName string,
 	client *http.Client,
 	tokenURL string,
@@ -290,7 +300,10 @@ func runOpenAICodexDeviceLogin(
 	fmt.Fprintln(os.Stderr, "Complete authorization on another device that is already signed in.")
 
 	interval := openAICodexDevicePollingInterval(deviceResp.Interval)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 15*time.Minute)
 	defer cancel()
 
 	codeResp, err := pollOpenAICodexDeviceAuthorizationCode(

@@ -12,7 +12,10 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func testProviders(providerFilter string) error {
+func testProviders(parentCtx context.Context, providerFilter string) error {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	// Load config
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -133,7 +136,7 @@ func testProviders(providerFilter string) error {
 			continue
 		}
 
-		if err := runTestProviderRequest(provider, testKey, modelID); err != nil {
+		if err := runTestProviderRequest(parentCtx, provider, testKey, modelID); err != nil {
 			fmt.Printf("  ❌ Request failed: %v\n\n", err)
 			continue
 		}
@@ -142,8 +145,8 @@ func testProviders(providerFilter string) error {
 	return nil
 }
 
-func runTestProviderRequest(provider llm.Provider, testKey, modelID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func runTestProviderRequest(parentCtx context.Context, provider llm.Provider, testKey, modelID string) error {
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
 	messages := []message.Message{{Role: "user", Content: "Say hello in one word."}}

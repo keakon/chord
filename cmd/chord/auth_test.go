@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -259,7 +260,7 @@ func TestRunAuthLoginDevice_RequiresPresetCodex(t *testing.T) {
 		Type:     config.ProviderTypeChatCompletions,
 		TokenURL: "https://example.com/oauth/token",
 		ClientID: "client-123",
-	}, "")
+	}, "", context.Background())
 	if err == nil {
 		t.Fatal("expected runAuthLoginDevice to reject non-preset-codex provider")
 	}
@@ -323,7 +324,7 @@ func TestRunAuthLoginDevice_OpenAICodexHeadlessSuccess(t *testing.T) {
 	defer srv.Close()
 	serverURL = srv.URL
 
-	err := runOpenAICodexDeviceLogin("codex", srv.Client(), serverURL+"/oauth/token", "client-123")
+	err := runOpenAICodexDeviceLogin(context.Background(), "codex", srv.Client(), serverURL+"/oauth/token", "client-123")
 	if err != nil {
 		t.Fatalf("runAuthLoginDevice: %v", err)
 	}

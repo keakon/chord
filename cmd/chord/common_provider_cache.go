@@ -119,9 +119,9 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 			}
 		}
 		p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			return llm.FetchCodexUsageSnapshot(ctx, p, key, accountID)
+			return llm.FetchCodexUsageSnapshot(pollCtx, p, key, accountID)
 		})
 	}
 

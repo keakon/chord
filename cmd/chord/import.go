@@ -29,7 +29,11 @@ func newImportCmd() *cobra.Command {
 		Args:          cobra.RangeArgs(1, 2),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
 			source := strings.TrimSpace(args[0])
 			input := ""
 			if len(args) > 1 {
@@ -43,7 +47,7 @@ func newImportCmd() *cobra.Command {
 			}
 
 			res, err := sessionimport.Import(
-				context.Background(),
+				ctx,
 				sessionimport.ImportOptions{
 					Source:        source,
 					InputPath:     input,

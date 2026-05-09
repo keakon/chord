@@ -460,7 +460,10 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 
 func (a *MainAgent) NotifySubAgent(ctx context.Context, taskID, message, kind string) (tools.TaskHandle, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = a.parentCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
 	}
 	callerAgentID := strings.TrimSpace(tools.AgentIDFromContext(ctx))
 	callerTaskID := strings.TrimSpace(tools.TaskIDFromContext(ctx))
@@ -495,7 +498,10 @@ func (a *MainAgent) NotifySubAgent(ctx context.Context, taskID, message, kind st
 
 func (a *MainAgent) CancelSubAgent(ctx context.Context, taskID, reason string) (tools.TaskHandle, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = a.parentCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
 	}
 	callerAgentID := strings.TrimSpace(tools.AgentIDFromContext(ctx))
 	callerTaskID := strings.TrimSpace(tools.TaskIDFromContext(ctx))

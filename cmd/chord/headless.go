@@ -324,7 +324,11 @@ Model pool control commands:
 				}
 			}
 			if cmd.Flags().Changed("worktree") {
-				info, err := prepareStartupWorktree(context.Background(), flagHeadlessWorktree)
+				wtCtx := cmd.Context()
+				if wtCtx == nil {
+					wtCtx = context.Background()
+				}
+				info, err := prepareStartupWorktree(wtCtx, flagHeadlessWorktree)
 				if err != nil {
 					return err
 				}

@@ -647,6 +647,12 @@ func (ac *AppContext) cleanup() {
 	}
 }
 
+func newLSPShutdownContext() (context.Context, context.CancelFunc) {
+	// Close cancels ac.Ctx before stopping subsystems, but LSP shutdown still
+	// needs its own short grace period to send shutdown/exit before force-kill.
+	return context.WithTimeout(context.Background(), lspShutdownGrace)
+}
+
 // Close performs graceful shutdown of all components. It should be called
 // when the application is exiting (typically via defer after initApp).
 func (ac *AppContext) Close() {
@@ -654,7 +660,7 @@ func (ac *AppContext) Close() {
 	ac.Cancel()
 
 	if ac.LSPManager != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lspShutdownGrace)
+		stopCtx, cancel := newLSPShutdownContext()
 		ac.LSPManager.Stop(stopCtx)
 		cancel()
 	}
