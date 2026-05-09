@@ -339,6 +339,17 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	return b.String()
 }
 
+func (m *Model) resetStatusBarCopyRegions() {
+	m.statusPath.value = ""
+	m.statusPath.display = ""
+	m.statusPath.startX = 0
+	m.statusPath.endX = 0
+	m.statusSession.value = ""
+	m.statusSession.display = ""
+	m.statusSession.startX = 0
+	m.statusSession.endX = 0
+}
+
 // renderStatusBar builds the bottom status line using pill-styled components.
 func (m *Model) renderStatusBar() string {
 	var pills []string
@@ -346,10 +357,7 @@ func (m *Model) renderStatusBar() string {
 	quitHint := ""
 	inputs := m.statusBarInputs(time.Now())
 	snap := inputs.Snapshot
-	m.statusPath.value = ""
-	m.statusPath.display = ""
-	m.statusPath.startX = 0
-	m.statusPath.endX = 0
+	m.resetStatusBarCopyRegions()
 
 	// Exit confirmation hint: "press same key again to quit"
 	if m.pendingQuitBy != "" && !m.pendingQuitAt.IsZero() && time.Since(m.pendingQuitAt) < pendingQuitWindow {
@@ -564,14 +572,7 @@ func (m *Model) renderStatusBar() string {
 	sessionValue := sessionID
 	pathText := ""
 	sessionText := ""
-	m.statusPath.value = ""
-	m.statusPath.display = ""
-	m.statusPath.startX = 0
-	m.statusPath.endX = 0
-	m.statusSession.value = ""
-	m.statusSession.display = ""
-	m.statusSession.startX = 0
-	m.statusSession.endX = 0
+	m.resetStatusBarCopyRegions()
 
 	rightReserve := 0
 	availableCenter := effectiveWidth - leftWidth - rightReserve - 8

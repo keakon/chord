@@ -70,6 +70,8 @@ func (m *Model) startRuntimeCacheCleanup() tea.Cmd {
 	}
 	return func() tea.Msg {
 		go func(mgr runtimeCacheManager) {
+			// Cleanup is best-effort startup maintenance. It is intentionally detached
+			// from turn cancellation and bounded by its own short timeout.
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := mgr.CleanupStaleSessions(ctx); err != nil && ctx.Err() == nil {
