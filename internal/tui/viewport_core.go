@@ -218,6 +218,30 @@ func (v *Viewport) InvalidateLastBlock() {
 	v.bumpRenderVersion()
 }
 
+func (v *Viewport) InvalidateBlock(id int) {
+	blocks := v.visibleBlocks()
+	if len(blocks) == 0 {
+		return
+	}
+	v.bumpRenderVersion()
+	last := blocks[len(blocks)-1]
+	if last != nil && last.ID == id {
+		v.markHotBudgetDirty()
+		v.InvalidateLastBlock()
+		return
+	}
+	v.markHotBudgetDirty()
+	if block := v.GetFocusedBlock(id); block != nil {
+		block.InvalidateCache()
+	}
+	v.recalcTotalLines()
+	if v.sticky {
+		v.scrollToEnd()
+	} else {
+		v.clampOffset()
+	}
+}
+
 func (v *Viewport) UpdateLastBlock() {
 	v.lastBlockDirty = false
 	blocks := v.visibleBlocks()

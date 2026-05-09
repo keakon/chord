@@ -25,7 +25,7 @@ func (m *Model) finalizeAssistantBlock() {
 				m.markBlockSettled(m.currentThinkingBlock)
 			}
 			m.currentThinkingBlock.InvalidateCache()
-			m.viewport.UpdateLastBlock()
+			m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
 			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 		}
 		m.currentThinkingBlock = nil
@@ -70,7 +70,7 @@ func (m *Model) finalizeAssistantBlock() {
 		if m.assistantBlockAppended {
 			m.markBlockSettled(m.currentAssistantBlock)
 		}
-		m.viewport.UpdateLastBlock()
+		m.viewport.UpdateBlock(m.currentAssistantBlock.ID)
 		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
 		m.currentAssistantBlock = nil
 		m.assistantBlockAppended = false

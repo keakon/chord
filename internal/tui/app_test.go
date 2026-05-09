@@ -598,6 +598,49 @@ func TestDiagnosticsBundleSuccessTriggersStatusCardAndRedraw(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsBundleShowsImmediatelyWhileAssistantStreamIsActive(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "streaming", Streaming: true}
+	m.nextBlockID++
+	m.currentAssistantBlock = block
+	m.assistantBlockAppended = true
+	m.appendViewportBlock(block)
+
+	updated, cmd := m.Update(diagnosticsBundleMsg{path: "/tmp/chord-diagnostics.zip"})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	if cmd == nil {
+		t.Fatal("successful diagnostics export should schedule toast command")
+	}
+	blocks := model.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("visible block count = %d, want 2", len(blocks))
+	}
+	last := blocks[len(blocks)-1]
+	if last.StatusTitle != "DIAGNOSTICS" {
+		t.Fatalf("StatusTitle = %q, want DIAGNOSTICS", last.StatusTitle)
+	}
+	if got := len(model.pendingLocalStatusCards); got != 0 {
+		t.Fatalf("pendingLocalStatusCards = %d, want 0", got)
+	}
+	if model.currentAssistantBlock != block {
+		t.Fatal("currentAssistantBlock should remain active")
+	}
+
+	model.currentAssistantBlock.Content += " more"
+	model.currentAssistantBlock.InvalidateCache()
+	model.viewport.InvalidateBlock(model.currentAssistantBlock.ID)
+	streamBlock := model.viewport.GetFocusedBlock(block.ID)
+	if streamBlock == nil {
+		t.Fatal("expected streaming assistant block to remain visible")
+	}
+	if streamBlock.Content != "streaming more" {
+		t.Fatalf("stream block content = %q, want updated assistant content", streamBlock.Content)
+	}
+}
+
 func TestEnsureScreenBufferReusesExistingBuffer(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.ensureScreenBuffer(80, 24)

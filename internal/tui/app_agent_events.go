@@ -191,7 +191,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		}
 		m.currentAssistantBlock.InvalidateCache()
 		if m.assistantBlockAppended {
-			m.viewport.InvalidateLastBlock()
+			m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
 		}
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
@@ -234,7 +234,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		}
 		m.currentThinkingBlock.InvalidateCache()
 		if m.thinkingBlockAppended {
-			m.viewport.InvalidateLastBlock()
+			m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
 		}
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
@@ -261,7 +261,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			}
 			m.currentThinkingBlock.InvalidateCache()
 			if m.thinkingBlockAppended {
-				m.viewport.UpdateLastBlock()
+				m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
 			}
 			m.exitRenderFreeze()
 			m.markStreamRenderDirty()
@@ -280,7 +280,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.currentThinkingBlock.InvalidateCache()
 			if m.thinkingBlockAppended {
 				m.markBlockSettled(m.currentThinkingBlock)
-				m.viewport.InvalidateLastBlock()
+				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
 			}
 			m.streamRenderForceView = true
 			m.streamRenderDeferred = false

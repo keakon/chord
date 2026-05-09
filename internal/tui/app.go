@@ -753,7 +753,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.enqueueToast(fmt.Sprintf("Diagnostics export failed: %v", msg.err), "error")
 		}
 		m.recordTUIDiagnostic("diagnostics-bundle-written", "%s", msg.path)
-		m.appendLocalStatusCard("DIAGNOSTICS", formatDiagnosticsStatusCard(msg.path))
+		m.appendDiagnosticsStatusCard(formatDiagnosticsStatusCard(msg.path))
 		return m, tea.Batch(
 			m.enqueueToast("Diagnostics bundle exported", "info"),
 		)

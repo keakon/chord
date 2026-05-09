@@ -32,6 +32,17 @@ func (m *Model) appendLocalStatusCard(title, content string) {
 	m.appendLocalStatusCardNow(card)
 }
 
+func (m *Model) appendDiagnosticsStatusCard(content string) {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	m.appendLocalStatusCardNow(localStatusCard{title: "DIAGNOSTICS", content: content})
+}
+
 func (m *Model) appendLocalStatusCardNow(card localStatusCard) {
 	if m == nil || m.viewport == nil {
 		return
