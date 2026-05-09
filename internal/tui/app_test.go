@@ -224,7 +224,7 @@ func TestStreamBoundaryFlushTriggersContentBoundaryRedrawForFreezeWorkaround(t *
 func TestContentBoundaryRedrawThrottlesAgainstRecentHostRedraw(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.SetFocusResizeFreezeEnabled(true)
-	m.lastHostRedrawAt = time.Now().Add(-contentBoundaryHostRedrawMinInterval / 2)
+	m.lastHostRedrawAt = time.Now().Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
 	m.lastHostRedrawReason = "scroll-flush"
 	m.lastForegroundAt = time.Time{}
 

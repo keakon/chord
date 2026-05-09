@@ -11,12 +11,17 @@ import (
 const (
 	hostRedrawMinInterval = 250 * time.Millisecond
 	hostRedrawSettleDelay = 40 * time.Millisecond
-	// contentBoundaryHostRedrawMinInterval limits the non-periodic redraw used
+	// defaultContentBoundaryHostRedrawMinInterval limits the non-periodic redraw used
 	// when streaming/live appends move the sticky viewport. It intentionally
-	// stays much slower than stream-flush so Ghostty/cmux do not see the old
+	// stays much slower than stream-flush so terminals do not see the old
 	// "clear every frame" race, while still clearing stale bottom rows without
 	// waiting for user scroll or Ctrl+G.
-	contentBoundaryHostRedrawMinInterval = 2 * time.Second
+	defaultContentBoundaryHostRedrawMinInterval = 2 * time.Second
+
+	// riskyHostContentBoundaryHostRedrawMinInterval lowers the content-boundary
+	// throttle for Ghostty/cmux-style terminals that can leave stale cells in
+	// steady-state streaming updates near separators and panel boundaries.
+	riskyHostContentBoundaryHostRedrawMinInterval = 900 * time.Millisecond
 
 	// postFocusSettleRedrawDelay is the delay after focus-settle before
 	// issuing a secondary ClearScreen. cmux / libghostty terminals often
@@ -122,6 +127,16 @@ func (m *Model) hostRedrawSequence(reason string) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) contentBoundaryHostRedrawMinInterval() time.Duration {
+	if m == nil {
+		return defaultContentBoundaryHostRedrawMinInterval
+	}
+	if m.useFocusResizeFreeze {
+		return riskyHostContentBoundaryHostRedrawMinInterval
+	}
+	return defaultContentBoundaryHostRedrawMinInterval
+}
+
 func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 	if m == nil {
 		return nil
@@ -136,7 +151,7 @@ func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 	}
 	if !m.lastHostRedrawAt.IsZero() {
 		since := time.Since(m.lastHostRedrawAt)
-		if since < contentBoundaryHostRedrawMinInterval {
+		if since < m.contentBoundaryHostRedrawMinInterval() {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s content_boundary_throttled=true since_last=%s last_reason=%s", reason, since.Truncate(time.Millisecond), m.lastHostRedrawReason)
 			if fallback := m.maybePostHostRedrawFallbackCmd(reason, m.hostRedrawGeneration, time.Now()); fallback != nil {
 				return fallback

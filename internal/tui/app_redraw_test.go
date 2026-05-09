@@ -37,6 +37,24 @@ func TestHostRedrawSequenceSkipsWindowSizeForFlushReasons(t *testing.T) {
 	}
 }
 
+func TestContentBoundaryHostRedrawMinInterval(t *testing.T) {
+	t.Run("default terminal", func(t *testing.T) {
+		m := NewModelWithSize(nil, 80, 24)
+		m.SetFocusResizeFreezeEnabled(false)
+		if got := m.contentBoundaryHostRedrawMinInterval(); got != defaultContentBoundaryHostRedrawMinInterval {
+			t.Fatalf("contentBoundaryHostRedrawMinInterval = %s, want %s", got, defaultContentBoundaryHostRedrawMinInterval)
+		}
+	})
+
+	t.Run("ghostty/cmux workaround enabled", func(t *testing.T) {
+		m := NewModelWithSize(nil, 80, 24)
+		m.SetFocusResizeFreezeEnabled(true)
+		if got := m.contentBoundaryHostRedrawMinInterval(); got != riskyHostContentBoundaryHostRedrawMinInterval {
+			t.Fatalf("contentBoundaryHostRedrawMinInterval = %s, want %s", got, riskyHostContentBoundaryHostRedrawMinInterval)
+		}
+	})
+}
+
 func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	now := time.Now()
@@ -225,7 +243,7 @@ func TestHostRedrawForContentBoundaryCmdReturnsFallbackWhenThrottledNearFocusRes
 	m.displayState = stateForeground
 	now := time.Now()
 	m.lastForegroundAt = now.Add(-time.Second)
-	m.lastHostRedrawAt = now.Add(-time.Second)
+	m.lastHostRedrawAt = now.Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
 	m.lastHostRedrawReason = "focus-restore"
 	m.hostRedrawGeneration = 7
 
