@@ -537,11 +537,6 @@ func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) boo
 	}
 	aSnap := p.codexSnapshotForKeyStateLocked(a)
 	bSnap := p.codexSnapshotForKeyStateLocked(b)
-	aPenalty := codexCreditsPenalty(aSnap)
-	bPenalty := codexCreditsPenalty(bSnap)
-	if aPenalty != bPenalty {
-		return !aPenalty
-	}
 	aHeadroom, aKnown := codexHeadroomScore(aSnap)
 	bHeadroom, bKnown := codexHeadroomScore(bSnap)
 	if aKnown != bKnown {
@@ -549,6 +544,11 @@ func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) boo
 	}
 	if aKnown && bKnown && aHeadroom != bHeadroom {
 		return aHeadroom > bHeadroom
+	}
+	aPenalty := codexCreditsPenalty(aSnap)
+	bPenalty := codexCreditsPenalty(bSnap)
+	if aPenalty != bPenalty {
+		return !aPenalty
 	}
 	if aSoft && bSoft {
 		aUntil := p.codexSoftCooldownUntilLocked(now, a)
@@ -1476,15 +1476,19 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	go func(providerName string, candidateIdxs []int, ctx context.Context) {
 		const successTTL = time.Minute
 		const failureBackoff = 30 * time.Second
-		for _, credIdx := range candidateIdxs {
+		for _, slot := range candidateIdxs {
 			if ctx.Err() != nil {
 				return
 			}
 			p.mu.Lock()
-			ks := p.keyStateBySlotLocked(credIdx)
+			ks := p.keyStateBySlotLocked(slot)
 			if ks == nil || ks.Invalid || ks.OAuthInfo == nil || ks.OAuthInfo.AccountID == "" {
 				p.mu.Unlock()
 				continue
+			}
+			credIdx := ks.OAuthInfo.CredentialIndex
+			if credIdx < 0 {
+				credIdx = slot
 			}
 			now := time.Now()
 			if p.polledRateLimitInFlight[credIdx] {

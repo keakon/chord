@@ -1227,6 +1227,8 @@ func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	creds := []config.ProviderCredential{
 		{OAuth: &config.OAuthCredential{Access: "oauth-a", Refresh: "refresh-a", Expires: expires, AccountID: "acc-a"}},
+		// Insert an API key between OAuth slots so slot index != OAuth credential index.
+		{APIKey: "api-key-1"},
 		{OAuth: &config.OAuthCredential{Access: "oauth-b", Refresh: "refresh-b", Expires: expires, AccountID: "acc-b"}},
 	}
 	auth := config.AuthConfig{"openai": creds}
@@ -1241,7 +1243,7 @@ func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
 	}, config.ExtractAPIKeys(creds))
 	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
-		"oauth-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
+		"oauth-b": {CredentialIndex: 2, AccountID: "acc-b", Expires: expires},
 	}, "")
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil

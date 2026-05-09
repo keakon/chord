@@ -60,14 +60,19 @@ func (t *testOut) writer() *stdoutWriter {
 }
 
 // drain reads all buffered JSONL lines and returns parsed envelopes.
+//
+// stdoutWriter writes asynchronously in another goroutine. We may need multiple
+// snapshot iterations before we observe the flush marker; accumulate envelopes
+// across iterations so we don't lose messages when the flush marker arrives in
+// a later snapshot.
 func (t *testOut) drain() []headlessEnvelope {
 	flushAck := make(chan struct{})
 	if !t.out.emit(map[string]any{"type": "__test_flush__", "payload": map[string]any{"ack": true}}) {
 		return nil
 	}
 	deadline := time.Now().Add(2 * time.Second)
+	var result []headlessEnvelope
 	for {
-		var result []headlessEnvelope
 		lines := bytes.Split(t.buf.snapshotAndReset(), []byte{'\n'})
 		for _, line := range lines {
 			line = bytes.TrimSpace(line)
@@ -79,7 +84,12 @@ func (t *testOut) drain() []headlessEnvelope {
 				continue
 			}
 			if env.Type == "__test_flush__" {
-				close(flushAck)
+				select {
+				case <-flushAck:
+					// already closed
+				default:
+					close(flushAck)
+				}
 				continue
 			}
 			result = append(result, env)
