@@ -212,6 +212,9 @@ func (WebFetchTool) Parameters() map[string]any {
 func (WebFetchTool) IsReadOnly() bool { return true }
 
 func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var a webFetchArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)

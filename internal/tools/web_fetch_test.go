@@ -94,6 +94,93 @@ func TestHTMLToMarkdownResolvesRelativeLinks(t *testing.T) {
 	}
 }
 
+func TestWebFetchRejectsUnsupportedScheme(t *testing.T) {
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": "file:///etc/passwd"})
+	if err == nil || !strings.Contains(err.Error(), "url must start with http:// or https://") {
+		t.Fatalf("expected unsupported scheme error, got %v", err)
+	}
+}
+
+func TestWebFetchStopsRedirectLoop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.String(), http.StatusFound)
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
+	if err == nil || !strings.Contains(err.Error(), "stopped after 5 redirects") {
+		t.Fatalf("expected redirect loop error, got %v", err)
+	}
+}
+
+func TestWebFetchRejectsRedirectToUnsupportedScheme(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "file:///tmp/chord", http.StatusFound)
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
+	if err == nil || !strings.Contains(err.Error(), "redirect to non-http scheme") {
+		t.Fatalf("expected unsupported redirect scheme error, got %v", err)
+	}
+}
+
+func TestWebFetchHonorsParentContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	raw, err := json.Marshal(map[string]any{"url": server.URL})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	_, err = tool.Execute(ctx, raw)
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+}
+
+func TestWebFetchMalformedHTMLFallsBackBestEffort(t *testing.T) {
+	origExtract := webFetchReadabilityExtract
+	defer func() { webFetchReadabilityExtract = origExtract }()
+	webFetchReadabilityExtract = func(string, readability.ReadabilityOptions, string) (readability.ReadabilityArticle, error) {
+		return readability.ReadabilityArticle{}, errors.New("force fallback")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html><head><title>Broken</title></head><body><main><h1>Broken page<p>still readable`)
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
+	mustContain(t, out, "Title: Broken\n")
+	mustContain(t, out, "Broken page")
+	mustContain(t, out, "still readable")
+}
+
+func TestWebFetchRejectsBinaryResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte{0x00, 0x01, 0x02, 0xff})
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
+	if err == nil || !strings.Contains(err.Error(), "response content is not decodable text") {
+		t.Fatalf("expected binary response error, got %v", err)
+	}
+}
+
 func TestWebFetchUsesDefaultHeadersAndMetadata(t *testing.T) {
 	var gotUA, gotAL, gotAE string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
