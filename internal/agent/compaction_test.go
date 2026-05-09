@@ -582,7 +582,7 @@ func TestFitCompactionInputToContextLimitReturnsErrorForGrosslyOversizedPrompt(t
 		GoalAnchor:       "- improve extraction",
 		ConstraintAnchor: "- do not hardcode",
 		DecisionAnchor:   "- classify issues before changing implementation",
-		ProgressAnchor:   "- latest error: oldString not found",
+		ProgressAnchor:   "- latest error: old_string not found",
 	}
 	_, err := fitCompactionInputToContextLimit(head, input, 20000, "history-1.md", nil, nil, nil, nil, compactReservedOutput)
 	if err == nil {
@@ -594,7 +594,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	head := []message.Message{
 		{Role: "user", Content: "Improve extraction quality and prioritize candidate filtering."},
 		{Role: "assistant", Content: "Classify the failure source before changing prompts or rules."},
-		{Role: "tool", Content: "Error: oldString not found"},
+		{Role: "tool", Content: "Error: old_string not found"},
 	}
 	evidence := []evidenceItem{{Kind: evidenceUserCorrection, Title: "constraint", Excerpt: "do not hardcode"}}
 	tail := []message.Message{{Role: "user", Content: "Continue and prioritize candidate containment handling."}}
@@ -624,7 +624,7 @@ func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 			GoalAnchor:       "- improve extraction quality",
 			ConstraintAnchor: "- do not hardcode",
 			DecisionAnchor:   "- classify failures before choosing the next layer",
-			ProgressAnchor:   "- latest error: oldString not found",
+			ProgressAnchor:   "- latest error: old_string not found",
 		},
 		"history-1.md",
 		nil,

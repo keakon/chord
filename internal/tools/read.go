@@ -33,7 +33,7 @@ func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, not from the gutter. When using Lsp line/character positions, count from the raw source line only."
+	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, not from the gutter. Before Edit, re-read the smallest unique block you plan to replace. Read output normalizes line endings to LF; if a file uses CRLF, Edit old_string must still match the file's raw line endings. When using Lsp line/character positions, count from the raw source line only."
 }
 
 func (ReadTool) Parameters() map[string]any {

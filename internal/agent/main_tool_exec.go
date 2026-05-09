@@ -203,14 +203,15 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 		}
 	}
 
+	if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, trackedFilePath, tc.Name); err != nil {
+		return execResult, wrapTrackedWriteError(err)
+	}
+
 	// Write/Edit: acquire write lock before execution, release after.
 	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := a.fileTrack.AcquireWrite(trackedFilePath, a.instanceID, currentHash); err != nil {
-			if _, ok := errors.AsType[*filelock.ExternalModificationError](err); ok {
-				return execResult, err
-			}
-			return execResult, fmt.Errorf("file conflict: %w", err)
+			return execResult, wrapTrackedWriteError(err)
 		}
 		lockedPath := trackedFilePath
 		defer func() {
@@ -278,6 +279,16 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 		return execResult, err
 	}
 	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
+	if tc.Name == tools.NameEdit {
+		var parsed struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
+			if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, parsed.Path, tc.Name); err != nil {
+				return execResult, wrapTrackedWriteError(err)
+			}
+		}
+	}
 	hooks, err := prepareSpeculativeToolCall(tc, a.fileTrack, a.instanceID)
 	if err != nil {
 		return execResult, err

@@ -3,9 +3,47 @@ package filelock
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
+
+func TestTrackReadAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
+	ft := NewFileTracker()
+	dir := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	pathA := filepath.Join(".", "demo.txt")
+	pathB := "demo.txt"
+	absPath, err := filepath.Abs(pathB)
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+
+	ft.TrackRead(pathA, "agent-1", "hash-v1")
+	if !ft.HasRead(pathB, "agent-1") {
+		t.Fatal("HasRead should treat equivalent relative spellings as the same file")
+	}
+	if !ft.HasRead(absPath, "agent-1") {
+		t.Fatal("HasRead should treat equivalent relative and absolute spellings as the same file")
+	}
+	if err := ft.AcquireWrite(pathB, "agent-1", "hash-v1"); err != nil {
+		t.Fatalf("AcquireWrite with equivalent relative path: %v", err)
+	}
+	ft.ReleaseWrite(absPath, "agent-1", "hash-v2")
+	if err := ft.AcquireWrite(pathA, "agent-1", "hash-v2"); err != nil {
+		t.Fatalf("AcquireWrite after ReleaseWrite via absolute path: %v", err)
+	}
+}
 
 func TestTrackRead_ConcurrentReads(t *testing.T) {
 	ft := NewFileTracker()
@@ -40,8 +78,8 @@ func TestAcquireWrite_WriteWriteConflict(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected ConflictError, got %T: %v", err, err)
 	}
-	if ce.Path != "main.go" {
-		t.Errorf("expected path main.go, got %s", ce.Path)
+	if filepath.Base(ce.Path) != "main.go" {
+		t.Errorf("expected path ending in main.go, got %s", ce.Path)
 	}
 	if ce.ModifiedBy != "agent-1" {
 		t.Errorf("expected ModifiedBy agent-1, got %s", ce.ModifiedBy)
@@ -109,19 +147,30 @@ func TestAcquireWrite_StaleReadDetection(t *testing.T) {
 	ft.ReleaseWrite("main.go", "agent-2", "hash-v2")
 
 	// agent-1's read hash was invalidated by ReleaseWrite (empty sentinel).
-	if err := ft.AcquireWrite("main.go", "agent-1", "hash-v2"); err == nil {
+	err := ft.AcquireWrite("main.go", "agent-1", "hash-v2")
+	if err == nil {
 		t.Fatal("expected stale-read conflict error")
+	}
+	var stale *ConflictError
+	if !errors.As(err, &stale) {
+		t.Fatalf("expected ConflictError, got %T: %v", err, err)
+	}
+	if !strings.Contains(stale.Error(), "re-read this file before editing") {
+		t.Fatalf("stale error = %q, want re-read guidance", stale.Error())
 	}
 
 	ft2 := NewFileTracker()
 	ft2.TrackRead("f.go", "a1", "h1")
-	err := ft2.AcquireWrite("f.go", "a1", "h2")
+	err = ft2.AcquireWrite("f.go", "a1", "h2")
 	if err == nil {
 		t.Fatal("expected external-modification error")
 	}
 	var ext *ExternalModificationError
 	if !errors.As(err, &ext) {
 		t.Fatalf("expected ExternalModificationError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ext.Error(), "re-read this file before editing") {
+		t.Fatalf("external-modification error = %q, want re-read guidance", ext.Error())
 	}
 }
 

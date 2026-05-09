@@ -139,6 +139,16 @@ Recent builds fix two transcript-height accounting bugs:
 - Late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
 - Background idle-sweep cache dropping could miscompute offscreen line offsets when turn-spacing lines were present, causing scroll/selection drift that grew over time.
 
+## Edit reports `file ... has not been read in this conversation`
+
+Recent builds require `Edit` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
+
+If you see this error:
+
+- run `Read` on the target file first;
+- copy `old_string` from the raw source portion only, not the displayed line-number gutter;
+- re-read the smallest unique 2-4 line block before retrying if any earlier edit or external tool may have changed the file.
+
 ## Edit reports `changed on disk since the last read` even when the previous Edit succeeded
 
 This error comes from Chord's in-process optimistic file locking. It means Chord believes the file no longer matches the last content hash it recorded for this agent.

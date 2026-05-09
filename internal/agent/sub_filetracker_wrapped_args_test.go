@@ -68,3 +68,41 @@ func TestSubAgent_ConsecutiveEditsWithWrappedArgsDoNotTriggerStaleReadInFinalize
 		t.Fatalf("file content = %q, want final", got)
 	}
 }
+
+func TestSubAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	parent := newTestMainAgent(t, projectRoot)
+	parent.tools.Register(tools.ReadTool{})
+	parent.tools.Register(tools.EditTool{})
+	sub := newControllableTestSubAgent(t, parent, "task-1")
+
+	readArgs, err := json.Marshal(map[string]any{"path": "./demo.txt"})
+	if err != nil {
+		t.Fatalf("Marshal read args: %v", err)
+	}
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}, false); err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	editArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "old_string": "before", "new_string": "after"})
+	if err != nil {
+		t.Fatalf("Marshal edit args: %v", err)
+	}
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "edit-1", Name: tools.NameEdit, Args: editArgs}, false); err != nil {
+		t.Fatalf("equivalent paths should satisfy read precondition: %v", err)
+	}
+}

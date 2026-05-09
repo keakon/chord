@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/keakon/golog/log"
@@ -31,6 +33,15 @@ type ExternalModificationError struct {
 
 func (e *ExternalModificationError) Error() string { return e.Message }
 
+// UnreadFileError is returned when an Edit attempts to modify a file that this
+// agent has not successfully Read in the current conversation.
+type UnreadFileError struct {
+	Path    string
+	Message string
+}
+
+func (e *UnreadFileError) Error() string { return e.Message }
+
 // readDiskHash computes the SHA-256 hash of the file at path.
 // Returns "" if the file does not exist or cannot be read.
 func readDiskHash(path string) string {
@@ -48,6 +59,21 @@ func readDiskHash(path string) string {
 		return ""
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func normalizeTrackedPath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	path = filepath.Clean(path)
+	if path == "." {
+		return ""
+	}
+	return path
 }
 
 // FileTracker provides in-process optimistic concurrency control for file
@@ -80,6 +106,10 @@ func NewFileTracker() *FileTracker {
 // file. This forms the basis for optimistic lock detection and external
 // modification detection.
 func (t *FileTracker) TrackRead(path, agentID, contentHash string) {
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -92,6 +122,27 @@ func (t *FileTracker) TrackRead(path, agentID, contentHash string) {
 		t.diskHashes[path] = make(map[string]string)
 	}
 	t.diskHashes[path][agentID] = contentHash
+}
+
+// HasRead reports whether the given agent has a recorded successful Read for
+// path in the current tracker state. It returns true even if the agent's read
+// hash was later invalidated to a stale-read sentinel (""), since the agent
+// still needs to re-read before writing.
+func (t *FileTracker) HasRead(path, agentID string) bool {
+	if t == nil {
+		return false
+	}
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if hashes, ok := t.readHashes[path]; ok {
+		_, tracked := hashes[agentID]
+		return tracked
+	}
+	return false
 }
 
 // AcquireWrite attempts to acquire write permission for a file.
@@ -107,6 +158,10 @@ func (t *FileTracker) TrackRead(path, agentID, contentHash string) {
 // currentHash is the hash of the file as computed immediately before calling
 // AcquireWrite (i.e. the hash the caller already has).
 func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return nil
+	}
 	// Read disk hash outside the lock to avoid holding the mutex during I/O.
 	// We capture the diskReadHash under the lock first, then do the I/O.
 	t.mu.Lock()
@@ -146,13 +201,13 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 				// Sentinel from ReleaseWrite: another agent wrote this path.
 				return &ConflictError{
 					Path:    path,
-					Message: fmt.Sprintf("file %s was modified by another agent; re-read to get latest content", path),
+					Message: fmt.Sprintf("file %s was modified after your last read; re-read this file before editing and retry with the latest content", path),
 				}
 			}
 			return &ExternalModificationError{
 				Path: path,
 				Message: fmt.Sprintf(
-					"file %s changed on disk since the last read; re-read to get the latest content",
+					"file %s changed on disk since the last read; re-read this file before editing and retry with the latest content",
 					path,
 				),
 			}
@@ -171,7 +226,7 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 			return &ExternalModificationError{
 				Path: path,
 				Message: fmt.Sprintf(
-					"file %s changed on disk since the last read; re-read to get the latest content",
+					"file %s changed on disk since the last read; re-read this file before editing and retry with the latest content",
 					path,
 				),
 			}
@@ -186,6 +241,10 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 // hashes or invalidating other agents. Use this when a writer acquired the
 // lock but did not commit any on-disk change.
 func (t *FileTracker) AbortWrite(path, agentID string) {
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -198,6 +257,10 @@ func (t *FileTracker) AbortWrite(path, agentID string) {
 // other agents' read hashes for that file (so they will detect stale reads
 // if they attempt to write).
 func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

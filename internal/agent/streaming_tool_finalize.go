@@ -200,14 +200,14 @@ func (a *MainAgent) executeToolCallWithHook(ctx context.Context, tc message.Tool
 		}
 	}
 
+	if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, trackedFilePath, tc.Name); err != nil {
+		return execResult, wrapTrackedWriteError(err)
+	}
+
 	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := a.fileTrack.AcquireWrite(trackedFilePath, a.instanceID, currentHash); err != nil {
-			var ext *filelock.ExternalModificationError
-			if errors.As(err, &ext) {
-				return execResult, err
-			}
-			return execResult, fmt.Errorf("file conflict: %w", err)
+			return execResult, wrapTrackedWriteError(err)
 		}
 		lockedPath := trackedFilePath
 		defer func() {

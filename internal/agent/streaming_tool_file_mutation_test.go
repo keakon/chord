@@ -71,7 +71,14 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.EditTool{})
+
+	// Baseline Read so Edit satisfies the read-before-edit precondition.
+	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

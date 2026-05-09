@@ -819,16 +819,16 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 		}
 	}
 
+	if err := ensureTrackedEditPreconditions(s.parent.fileTrack, s.instanceID, trackedFilePath, tc.Name); err != nil {
+		return execResult, wrapTrackedWriteError(err)
+	}
+
 	// Write/Edit: acquire write lock before execution, release after.
 	// Uses the parent MainAgent's FileTracker (shared, goroutine-safe).
 	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
 		currentHash := computeFileHash(trackedFilePath)
 		if err := s.parent.fileTrack.AcquireWrite(trackedFilePath, s.instanceID, currentHash); err != nil {
-			var ext *filelock.ExternalModificationError
-			if errors.As(err, &ext) {
-				return execResult, err
-			}
-			return execResult, fmt.Errorf("file conflict: %w", err)
+			return execResult, wrapTrackedWriteError(err)
 		}
 		defer func() {
 			newHash := computeFileHash(trackedFilePath)

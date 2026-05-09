@@ -32,7 +32,7 @@ func (EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t EditTool) Description() string {
-	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. old_string must match the file's raw text exactly, including indentation, tabs, spaces, and newlines. If the text came from Read output, do not include the displayed line-number gutter or separator tab. Replaces one occurrence by default; set replace_all to replace every occurrence."
+	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. Precondition: Read the file first in this conversation so Edit operates on current on-disk content; re-read it before retrying after any mismatch or other change. old_string must match the file's raw text exactly, including indentation, tabs, spaces, newlines (including CRLF vs LF), and quote characters. If the text came from Read output, do not include the displayed line-number gutter or separator tab. Prefer the smallest unique 2-4 line block instead of a large stale context block. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
 func (t EditTool) Parameters() map[string]any {
@@ -99,20 +99,29 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	// Check for identical old/new.
 	if decodedOld == decodedNew {
-		return "", fmt.Errorf("oldString and newString are identical, no change needed")
+		return "", fmt.Errorf("old_string and new_string are identical, no change needed")
 	}
 
 	// Count occurrences.
 	count := strings.Count(content, decodedOld)
 	if count == 0 {
+		// Narrow trailing-newline tolerance: if the only difference is the presence
+		// or absence of a single final "\n", and the match is unique, proceed.
+		// This keeps semantics conservative while reducing avoidable retries.
+		if altOld, altNew, altCount, ok := trailingNewlineTolerantEdit(content, decodedOld, decodedNew); ok {
+			count = altCount
+			decodedOld, decodedNew = altOld, altNew
+		}
+	}
+	if count == 0 {
 		hint := buildEditOldStringNotFoundHint(content, decodedOld)
 		if hint != "" {
-			return "", fmt.Errorf("oldString not found in file. %s", hint)
+			return "", fmt.Errorf("old_string not found in file. %s", hint)
 		}
-		return "", fmt.Errorf("oldString not found in file")
+		return "", fmt.Errorf("old_string not found in file")
 	}
 	if count > 1 && !a.ReplaceAll {
-		return "", fmt.Errorf("oldString found %d times, provide more context or set replaceAll", count)
+		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all", count)
 	}
 
 	// Perform replacement.
@@ -153,4 +162,31 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		out = t.LSP.AfterWriteToolResult(ctx, absPath, newContent, out, false)
 	}
 	return out, nil
+}
+
+func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altNew string, altCount int, ok bool) {
+	// Only consider a single final "\n" variance.
+	if strings.HasSuffix(oldText, "\n") {
+		altOld = strings.TrimSuffix(oldText, "\n")
+		if altOld == "" {
+			return "", "", 0, false
+		}
+		altCount = strings.Count(content, altOld)
+		if altCount != 1 {
+			return "", "", 0, false
+		}
+		altNew = strings.TrimSuffix(newText, "\n")
+		return altOld, altNew, altCount, true
+	}
+
+	altOld = oldText + "\n"
+	altCount = strings.Count(content, altOld)
+	if altCount != 1 {
+		return "", "", 0, false
+	}
+	altNew = newText
+	if !strings.HasSuffix(altNew, "\n") {
+		altNew += "\n"
+	}
+	return altOld, altNew, altCount, true
 }
