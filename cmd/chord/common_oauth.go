@@ -44,11 +44,13 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			})
 		}
 		result[cred.OAuth.Access] = llm.OAuthKeySetup{
-			CredentialIndex: credIdx,
-			AccountID:       accountID,
-			Email:           email,
-			Expires:         cred.OAuth.Expires,
-			Status:          cred.OAuth.Status,
+			CredentialIndex:       credIdx,
+			AccountID:             accountID,
+			Email:                 email,
+			Expires:               cred.OAuth.Expires,
+			Status:                cred.OAuth.Status,
+			CodexPrimaryResetAt:   cred.OAuth.CodexPrimaryResetAt,
+			CodexSecondaryResetAt: cred.OAuth.CodexSecondaryResetAt,
 		}
 	}
 	return result, backfills

@@ -66,6 +66,8 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
     access: old-access
     expires: %d
     account_id: acc-1
+    codex_primary_reset_at: 111
+    codex_secondary_reset_at: 222
   # sibling oauth comment
   - refresh: sibling-refresh
     access: sibling-access
@@ -91,9 +93,11 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
 		"old-access": {
-			CredentialIndex: 0,
-			AccountID:       "acc-1",
-			Expires:         auth["openai"][0].OAuth.Expires,
+			CredentialIndex:       0,
+			AccountID:             "acc-1",
+			Expires:               auth["openai"][0].OAuth.Expires,
+			CodexPrimaryResetAt:   auth["openai"][0].OAuth.CodexPrimaryResetAt,
+			CodexSecondaryResetAt: auth["openai"][0].OAuth.CodexSecondaryResetAt,
 		},
 	}, "")
 
@@ -103,6 +107,8 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
     access: old-access
     expires: %d
     account_id: acc-1
+    codex_primary_reset_at: 333
+    codex_secondary_reset_at: 444
   # sibling oauth comment
   - refresh: sibling-refresh
     access: sibling-access
@@ -132,6 +138,9 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	if got := updated["openai"][0].OAuth; got == nil || got.Access != "new-access" || got.Refresh != "new-refresh" {
 		t.Fatalf("expected refreshed primary oauth credential, got %#v", got)
 	}
+	if got := updated["openai"][0].OAuth; got.CodexPrimaryResetAt != 333 || got.CodexSecondaryResetAt != 444 {
+		t.Fatalf("expected refreshed oauth credential to preserve codex reset hints, got %#v", got)
+	}
 	if got := updated["openai"][1].OAuth; got == nil || got.Email != "external@example.com" || got.Status != config.OAuthStatusDeactivated {
 		t.Fatalf("expected sibling oauth credential to keep latest file changes, got %#v", got)
 	}
@@ -143,7 +152,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	for _, want := range []string{"# primary oauth comment", "# sibling oauth comment", "status: deactivated"} {
+	for _, want := range []string{"# primary oauth comment", "# sibling oauth comment", "status: deactivated", "codex_primary_reset_at: 333", "codex_secondary_reset_at: 444"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, string(data))
 		}
@@ -181,6 +190,44 @@ func TestSelectKey_MultipleKeys_Sticky(t *testing.T) {
 		if key != "key-a" {
 			t.Fatalf("call %d: expected key-a (sticky), got %s", i, key)
 		}
+	}
+}
+
+func TestNewProviderConfig_CodexDefaultsToSmartKeyOrder(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"k1", "k2"})
+	if p.keyOrder != config.KeyOrderSmart {
+		t.Fatalf("keyOrder = %q, want %q", p.keyOrder, config.KeyOrderSmart)
+	}
+}
+
+func TestSelectKey_CodexSmartPrefersNonSoftCooledKey(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-a", CodexPrimaryResetAt: time.Now().Add(2 * time.Hour).UnixMilli()}
+	p.keyStates[0].SoftCooldownUntil = time.Now().Add(2 * time.Hour)
+	p.keyStates[1].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-b"}
+	p.mu.Unlock()
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-b" {
+		t.Fatalf("expected non-soft-cooled key-b, got %s", key)
+	}
+}
+
+func TestSelectKey_CodexSmartFallsBackToSoftCooledKey(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-a", CodexPrimaryResetAt: time.Now().Add(2 * time.Hour).UnixMilli()}
+	p.keyStates[0].SoftCooldownUntil = time.Now().Add(2 * time.Hour)
+	p.mu.Unlock()
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-a" {
+		t.Fatalf("expected soft-cooled fallback key-a, got %s", key)
 	}
 }
 
@@ -363,6 +410,37 @@ func TestMarkQuotaExhaustedUntil_blocksSelectionUntilReset(t *testing.T) {
 	}
 	if key != "key-b" {
 		t.Fatalf("selected key = %q, want key-b when key-a exhausted", key)
+	}
+}
+
+func TestMarkKeySuccess_ClearsPersistedCodexResetHints(t *testing.T) {
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:                "oauth-key",
+		Refresh:               "refresh-token",
+		Expires:               time.Now().Add(time.Hour).UnixMilli(),
+		AccountID:             "acc-1",
+		CodexPrimaryResetAt:   time.Now().Add(2 * time.Hour).UnixMilli(),
+		CodexSecondaryResetAt: time.Now().Add(6 * time.Hour).UnixMilli(),
+	}}}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key": {
+			CredentialIndex:       0,
+			AccountID:             "acc-1",
+			Expires:               auth["openai"][0].OAuth.Expires,
+			CodexPrimaryResetAt:   auth["openai"][0].OAuth.CodexPrimaryResetAt,
+			CodexSecondaryResetAt: auth["openai"][0].OAuth.CodexSecondaryResetAt,
+		},
+	}, "")
+	p.MarkKeySuccess("oauth-key")
+	if got := auth["openai"][0].OAuth; got.CodexPrimaryResetAt != 0 || got.CodexSecondaryResetAt != 0 {
+		t.Fatalf("expected MarkKeySuccess to clear persisted codex hints, got %#v", got)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if info := p.keyStates[0].OAuthInfo; info == nil || info.CodexPrimaryResetAt != 0 || info.CodexSecondaryResetAt != 0 {
+		t.Fatalf("expected runtime OAuth info codex hints to be cleared, got %#v", info)
 	}
 }
 

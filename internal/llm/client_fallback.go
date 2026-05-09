@@ -9,7 +9,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ratelimit"
 )
 
 func classifyFallbackReason(err error) string {
@@ -46,38 +45,35 @@ func keySuffix(key string) string {
 }
 
 // confirmedCodexQuotaExhausted reports whether a 429 with Codex OAuth preset
-// has both rate-limit windows at 100% usage, indicating confirmed quota exhaustion.
-// When confirmed, callers mark the key unavailable until window reset instead of
+// has one or more exhausted rate-limit windows with a future reset time.
+// When confirmed, callers mark the key unavailable until the later reset instead of
 // applying a short generic cooldown.
-func confirmedCodexQuotaExhausted(provider *ProviderConfig, key string, apiErr *APIError, now time.Time) (time.Time, bool) {
+func confirmedCodexQuotaExhausted(provider *ProviderConfig, key string, apiErr *APIError, now time.Time) (primaryResetAt, secondaryResetAt int64, until time.Time, ok bool) {
 	if provider == nil || apiErr == nil || apiErr.StatusCode != 429 {
-		return time.Time{}, false
+		return 0, 0, time.Time{}, false
 	}
 	if !provider.usesPresetCodexRateLimitCooldown() || !provider.isOpenAIOAuthKey(key) {
-		return time.Time{}, false
+		return 0, 0, time.Time{}, false
 	}
 	snap := provider.KeySnapshot(key)
 	if snap == nil {
-		return time.Time{}, false
+		return 0, 0, time.Time{}, false
 	}
-	var until time.Time
-	consider := func(w *ratelimit.RateLimitWindow) {
-		if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) {
-			return
-		}
-		if w.UsedPercent() < 100 {
-			return
-		}
-		if until.IsZero() || w.ResetsAt.After(until) {
-			until = w.ResetsAt
+	primaryResetAt = codexWindowResetMillis(snap.Primary, now)
+	secondaryResetAt = codexWindowResetMillis(snap.Secondary, now)
+	if primaryResetAt > 0 {
+		until = time.UnixMilli(primaryResetAt)
+	}
+	if secondaryResetAt > 0 {
+		reset := time.UnixMilli(secondaryResetAt)
+		if until.IsZero() || reset.After(until) {
+			until = reset
 		}
 	}
-	consider(snap.Primary)
-	consider(snap.Secondary)
 	if until.IsZero() {
-		return time.Time{}, false
+		return 0, 0, time.Time{}, false
 	}
-	return until, true
+	return primaryResetAt, secondaryResetAt, until, true
 }
 
 // markKeyCooldownResult describes any key-state changes derived from an API
@@ -91,6 +87,7 @@ type markKeyCooldownResult struct {
 	refreshedKey         string
 	deactivatedAccountID string // non-empty when a codex OAuth key was put into cooldown due to 401/403
 	deactivatedEmail     string // email from the deactivated key's JWT, if available
+	softHintUpdated      bool
 }
 
 // isAccountDeactivated reports whether the API error indicates a permanently
@@ -118,10 +115,11 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 	switch apiErr.StatusCode {
 	case 429:
 		now := time.Now()
-		if until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
+		if primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
 			log.Warnf("API key quota exhausted, marking unavailable until reset key_suffix=%v until=%v", keySuffix(key), until)
 			provider.MarkQuotaExhaustedUntil(key, until)
-			return markKeyCooldownResult{cooldownApplied: true}
+			updated := provider.persistCodexResetHintsForKey(key, primaryResetAt, secondaryResetAt)
+			return markKeyCooldownResult{cooldownApplied: true, softHintUpdated: updated}
 		}
 		cooldown := apiErr.RetryAfter
 		if cooldown <= 0 {

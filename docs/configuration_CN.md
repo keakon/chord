@@ -129,6 +129,23 @@ openai:
 
 可配置多个 key 作为轮换或备用。
 
+对于 `preset: codex` 的 OAuth 凭据，Chord 还可能在 `auth.yaml` 中持久化 provider 专用的软提示字段：
+
+```yaml
+openai:
+  - refresh: "..."
+    access: "..."
+    expires: 1774009702606
+    account_id: acc-1
+    codex_primary_reset_at: 1774013302000
+    codex_secondary_reset_at: 1774600000000
+```
+
+这些 `codex_*_reset_at` 字段是跨重启保留的调度提示，不是硬封禁：
+- 会影响启动后 / 首次选号时的优先级；
+- **不会**仅凭字段本身就让账号绝对不可选；
+- 真正的硬封禁仍来自已确认的请求失败，并只在运行时内存中跟踪。
+
 ## auth.yaml 中的环境变量
 
 `auth.yaml` 的标量 API key 值支持环境变量展开：
@@ -155,6 +172,19 @@ local-provider:
 ## OAuth 登录
 
 当前仅配置了 `preset: codex` 的 provider 支持 OAuth。
+
+对 Codex provider，`key_order` 额外支持：
+- `sequential`
+- `random`
+- `smart`
+
+当 `preset: codex` 且未显式配置 `key_order` 时，Chord 默认使用 `key_order: smart`；其它 provider 仍默认 `sequential`。
+
+`smart` 不改变现有 `key_rotation` 语义，但会在可选的 Codex OAuth 账号之间优先：
+- 绕开仍带有持久化 soft-cooling hint 的账号；
+- 优先当前进程内尚未使用过的账号；
+- 在已有 rate-limit snapshot 时优先剩余额度头寸更高的账号；
+- 当没有更优候选时，仍允许回退尝试 soft-cooled 账号。
 
 ```bash
 # 自动选择已配置的 codex provider

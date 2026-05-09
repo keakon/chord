@@ -142,6 +142,23 @@ openai:
 
 You can list multiple keys for rotation or backup.
 
+For OAuth credentials under `preset: codex`, Chord may also persist provider-specific soft hints in `auth.yaml`:
+
+```yaml
+openai:
+  - refresh: "..."
+    access: "..."
+    expires: 1774009702606
+    account_id: acc-1
+    codex_primary_reset_at: 1774013302000
+    codex_secondary_reset_at: 1774600000000
+```
+
+These `codex_*_reset_at` fields are restart-stable scheduling hints, not hard blocks:
+- they lower priority for startup / first-pick ordering;
+- they do **not** by themselves make the account absolutely unselectable;
+- real hard blocking still comes from confirmed request failures and is tracked in memory.
+
 ## Environment variables in auth.yaml
 
 Provider credentials in `auth.yaml` support environment-variable expansion for scalar API-key values:
@@ -168,6 +185,19 @@ Do not rely on an unset environment variable for this case. An unset `$ENV_VAR` 
 ## OAuth
 
 Only providers with `preset: codex` are treated as OAuth providers.
+
+For Codex providers, `key_order` supports an additional value:
+- `sequential`
+- `random`
+- `smart`
+
+`preset: codex` defaults to `key_order: smart` when `key_order` is omitted. Other providers still default to `sequential`.
+
+`smart` keeps existing `key_rotation` behavior, but ranks selectable Codex OAuth accounts by:
+- avoiding persisted soft-cooled accounts when a better candidate exists;
+- preferring never-used accounts in the current process;
+- preferring higher remaining headroom when rate-limit snapshots are available;
+- falling back to soft-cooled accounts when no better candidate exists.
 
 ```bash
 # auto-select a configured codex provider

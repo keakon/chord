@@ -190,8 +190,9 @@ const (
 	KeyRotationPerRequest = "per_request" // pick a (possibly different) key for every request
 
 	// KeyOrder controls which key is chosen among candidates.
-	KeyOrderSequential = "sequential" // pick the next key in list order (default)
+	KeyOrderSequential = "sequential" // pick the next key in list order (default for non-Codex providers)
 	KeyOrderRandom     = "random"     // pick uniformly at random among available keys
+	KeyOrderSmart      = "smart"      // Codex-aware ordering: prefer non-soft-cooled keys, then never-used / higher headroom
 )
 
 const (
@@ -218,7 +219,7 @@ type ProviderConfig struct {
 	Compat             *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                           // provider-level compat defaults (model-level can override model compat only)
 	Models             map[string]ModelConfig `json:"models" yaml:"models"`
 	KeyRotation        string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
-	KeyOrder           string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default) | "random"
+	KeyOrder           string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
 	Compress           bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
 }
 

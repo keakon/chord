@@ -61,32 +61,38 @@ type Provider interface {
 
 // KeyState tracks the state of a single API key for cooldown and load balancing.
 type KeyState struct {
-	Key            string
-	LastUsed       time.Time
-	CooldownEnd    time.Time
-	CooldownCount  int                             // consecutive cooldowns for exponential backoff
-	OAuthInfo      *OAuthKeyInfo                   // nil if not OAuth
-	RateLimit      *ratelimit.KeyRateLimitSnapshot // latest rate-limit snapshot (nil = no data yet)
-	Recovering     bool                            // true until the key proves healthy again via visible output after a failure/cooldown
-	ExhaustedUntil time.Time                       // confirmed quota exhaustion (e.g. Codex OAuth) until real reset
-	Invalid        bool                            // permanently unusable (OAuth account deactivated or refresh token expired)
+	Key               string
+	LastUsed          time.Time
+	CooldownEnd       time.Time
+	CooldownCount     int                             // consecutive cooldowns for exponential backoff
+	OAuthInfo         *OAuthKeyInfo                   // nil if not OAuth
+	RateLimit         *ratelimit.KeyRateLimitSnapshot // latest rate-limit snapshot (nil = no data yet)
+	Recovering        bool                            // true until the key proves healthy again via visible output after a failure/cooldown
+	ExhaustedUntil    time.Time                       // confirmed quota exhaustion (e.g. Codex OAuth) until real reset
+	Invalid           bool                            // permanently unusable (OAuth account deactivated or refresh token expired)
+	EverSelected      bool                            // true once this slot has been selected in the current process
+	SoftCooldownUntil time.Time                       // persisted Codex soft hint: latest known future reset across windows
 }
 
 // OAuthKeySetup mirrors auth.yaml OAuth credential state needed to initialize a key slot.
 type OAuthKeySetup struct {
-	CredentialIndex int
-	AccountID       string
-	Email           string
-	Expires         int64
-	Status          config.OAuthCredentialStatus
+	CredentialIndex       int
+	AccountID             string
+	Email                 string
+	Expires               int64
+	Status                config.OAuthCredentialStatus
+	CodexPrimaryResetAt   int64
+	CodexSecondaryResetAt int64
 }
 
 // OAuthKeyInfo holds OAuth-specific metadata for a key.
 type OAuthKeyInfo struct {
-	Expires         int64 // millisecond-precision Unix timestamp
-	CredentialIndex int   // index in auth[providerName]
-	AccountID       string
-	Email           string
+	Expires               int64 // millisecond-precision Unix timestamp
+	CredentialIndex       int   // index in auth[providerName]
+	AccountID             string
+	Email                 string
+	CodexPrimaryResetAt   int64
+	CodexSecondaryResetAt int64
 }
 
 // ProviderConfig holds provider-level configuration.
@@ -152,6 +158,24 @@ func (r *OAuthRefresher) persistCredentialStatus(match config.OAuthCredentialMat
 		return fmt.Errorf("persist oauth credential status: %w", err)
 	}
 	return nil
+}
+
+func (r *OAuthRefresher) persistCodexResetHints(match config.OAuthCredentialMatch, primaryResetAt, secondaryResetAt int64) (*config.OAuthCredential, bool, error) {
+	if r == nil || r.authConfig == nil || r.authConfigMu == nil {
+		return nil, false, nil
+	}
+	return r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {
+		changed := false
+		if cred.CodexPrimaryResetAt != primaryResetAt {
+			cred.CodexPrimaryResetAt = primaryResetAt
+			changed = true
+		}
+		if cred.CodexSecondaryResetAt != secondaryResetAt {
+			cred.CodexSecondaryResetAt = secondaryResetAt
+			changed = true
+		}
+		return changed, nil
+	})
 }
 
 func (r *OAuthRefresher) mutateCredential(
@@ -234,7 +258,11 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 	}
 	keyOrder := cfg.KeyOrder
 	if keyOrder == "" {
-		keyOrder = config.KeyOrderSequential
+		if cfg.Preset == config.ProviderPresetCodex {
+			keyOrder = config.KeyOrderSmart
+		} else {
+			keyOrder = config.KeyOrderSequential
+		}
 	}
 
 	// Initialize stickyIdx: for random order, pick a random starting key.
@@ -367,6 +395,9 @@ func (p *ProviderConfig) markQuotaExhaustedLocked(ks *KeyState, until time.Time)
 	if until.After(ks.ExhaustedUntil) {
 		ks.ExhaustedUntil = until
 	}
+	if until.After(ks.SoftCooldownUntil) {
+		ks.SoftCooldownUntil = until
+	}
 	ks.CooldownEnd = time.Time{}
 	ks.Recovering = true
 }
@@ -380,6 +411,199 @@ func (p *ProviderConfig) markTemporaryUnavailableLocked(ks *KeyState, now time.T
 	}
 	ks.CooldownEnd = now.Add(d)
 	ks.Recovering = true
+}
+
+func codexSoftCooldownUntilFromMillis(primaryResetAt, secondaryResetAt int64, now time.Time) time.Time {
+	var until time.Time
+	consider := func(ms int64) {
+		if ms <= 0 {
+			return
+		}
+		reset := time.UnixMilli(ms)
+		if !reset.After(now) {
+			return
+		}
+		if until.IsZero() || reset.After(until) {
+			until = reset
+		}
+	}
+	consider(primaryResetAt)
+	consider(secondaryResetAt)
+	return until
+}
+
+func codexWindowResetMillis(w *ratelimit.RateLimitWindow, now time.Time) int64 {
+	if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) || w.UsedPercent() < 100 {
+		return 0
+	}
+	return w.ResetsAt.UnixMilli()
+}
+
+func codexSoftCooldownUntilFromSnapshot(snap *ratelimit.KeyRateLimitSnapshot, now time.Time) time.Time {
+	if snap == nil {
+		return time.Time{}
+	}
+	var until time.Time
+	consider := func(w *ratelimit.RateLimitWindow) {
+		if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) {
+			return
+		}
+		if until.IsZero() || w.ResetsAt.After(until) {
+			until = w.ResetsAt
+		}
+	}
+	consider(snap.Primary)
+	consider(snap.Secondary)
+	return until
+}
+
+func codexWindowRemainingPct(w *ratelimit.RateLimitWindow) (float64, bool) {
+	if w == nil {
+		return 0, false
+	}
+	used := w.UsedPercent()
+	if used < 0 {
+		return 0, false
+	}
+	remaining := 100 - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining > 100 {
+		remaining = 100
+	}
+	return remaining, true
+}
+
+func codexHeadroomScore(snap *ratelimit.KeyRateLimitSnapshot) (float64, bool) {
+	if snap == nil {
+		return 0, false
+	}
+	pRem, pOK := codexWindowRemainingPct(snap.Primary)
+	sRem, sOK := codexWindowRemainingPct(snap.Secondary)
+	switch {
+	case pOK && sOK:
+		if pRem < sRem {
+			return pRem, true
+		}
+		return sRem, true
+	case pOK:
+		return pRem, true
+	case sOK:
+		return sRem, true
+	default:
+		return 0, false
+	}
+}
+
+func codexCreditsPenalty(snap *ratelimit.KeyRateLimitSnapshot) bool {
+	if snap == nil || snap.Credits == nil {
+		return false
+	}
+	return !snap.Credits.Unlimited && !snap.Credits.HasCredits
+}
+
+func (p *ProviderConfig) codexSnapshotForKeyStateLocked(ks *KeyState) *ratelimit.KeyRateLimitSnapshot {
+	if ks == nil {
+		return nil
+	}
+	if ks.OAuthInfo != nil && p.polledRateLimitByCredIdx != nil {
+		if snap := p.polledRateLimitByCredIdx[ks.OAuthInfo.CredentialIndex]; snap != nil {
+			return snap
+		}
+	}
+	return ks.RateLimit
+}
+
+func (p *ProviderConfig) codexSoftCooldownUntilLocked(now time.Time, ks *KeyState) time.Time {
+	if ks == nil {
+		return time.Time{}
+	}
+	if snapUntil := codexSoftCooldownUntilFromSnapshot(p.codexSnapshotForKeyStateLocked(ks), now); !snapUntil.IsZero() {
+		ks.SoftCooldownUntil = snapUntil
+		return snapUntil
+	}
+	if ks.SoftCooldownUntil.After(now) {
+		return ks.SoftCooldownUntil
+	}
+	if ks.OAuthInfo != nil {
+		until := codexSoftCooldownUntilFromMillis(ks.OAuthInfo.CodexPrimaryResetAt, ks.OAuthInfo.CodexSecondaryResetAt, now)
+		ks.SoftCooldownUntil = until
+		return until
+	}
+	ks.SoftCooldownUntil = time.Time{}
+	return time.Time{}
+}
+
+func (p *ProviderConfig) codexSoftCooledLocked(now time.Time, ks *KeyState) bool {
+	return p.codexSoftCooldownUntilLocked(now, ks).After(now)
+}
+
+func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) bool {
+	if a == nil {
+		return false
+	}
+	if b == nil {
+		return true
+	}
+	aSoft := p.codexSoftCooledLocked(now, a)
+	bSoft := p.codexSoftCooledLocked(now, b)
+	if aSoft != bSoft {
+		return !aSoft
+	}
+	aNever := !a.EverSelected
+	bNever := !b.EverSelected
+	if aNever != bNever {
+		return aNever
+	}
+	aSnap := p.codexSnapshotForKeyStateLocked(a)
+	bSnap := p.codexSnapshotForKeyStateLocked(b)
+	aPenalty := codexCreditsPenalty(aSnap)
+	bPenalty := codexCreditsPenalty(bSnap)
+	if aPenalty != bPenalty {
+		return !aPenalty
+	}
+	aHeadroom, aKnown := codexHeadroomScore(aSnap)
+	bHeadroom, bKnown := codexHeadroomScore(bSnap)
+	if aKnown != bKnown {
+		return aKnown
+	}
+	if aKnown && bKnown && aHeadroom != bHeadroom {
+		return aHeadroom > bHeadroom
+	}
+	if aSoft && bSoft {
+		aUntil := p.codexSoftCooldownUntilLocked(now, a)
+		bUntil := p.codexSoftCooldownUntilLocked(now, b)
+		if !aUntil.Equal(bUntil) {
+			return aUntil.Before(bUntil)
+		}
+	}
+	if !a.LastUsed.Equal(b.LastUsed) {
+		return a.LastUsed.Before(b.LastUsed)
+	}
+	return false
+}
+
+func (p *ProviderConfig) bestCandidateIndexLocked(now time.Time, candidates []int) int {
+	if len(candidates) == 0 {
+		return -1
+	}
+	best := candidates[0]
+	for _, idx := range candidates[1:] {
+		if idx < 0 || idx >= len(p.keyStates) {
+			continue
+		}
+		if p.keyOrder == config.KeyOrderSmart {
+			if p.codexSmartLessLocked(now, p.keyStates[idx], p.keyStates[best]) {
+				best = idx
+			}
+			continue
+		}
+		if p.keyStates[idx].LastUsed.Before(p.keyStates[best].LastUsed) {
+			best = idx
+		}
+	}
+	return best
 }
 
 func (p *ProviderConfig) postSelectLocked(selectedKS *KeyState, selectedIdx int, now time.Time) (string, bool) {
@@ -406,6 +630,7 @@ func (p *ProviderConfig) postSelectLocked(selectedKS *KeyState, selectedIdx int,
 	switched := selectableSlots > 1 && p.lastSelectedSlot >= 0 && p.lastSelectedSlot != selectedIdx
 	p.lastSelectedSlot = selectedIdx
 	p.lastSelectedKey = selectedKey
+	selectedKS.EverSelected = true
 	return selectedKey, switched
 }
 
@@ -431,12 +656,31 @@ func (p *ProviderConfig) pickRandomHealthyCandidateLocked(now time.Time, exclude
 	if len(candidates) == 0 {
 		return -1
 	}
+	if p.keyOrder == config.KeyOrderSmart {
+		return p.bestCandidateIndexLocked(now, candidates)
+	}
 	return candidates[rand.Intn(len(candidates))]
 }
 
 func (p *ProviderConfig) selectOnFailureKeyLocked(now time.Time) (*KeyState, int) {
 	pinnedIdx := p.stickyIdx
-	if pinned := p.keyStateBySlotLocked(pinnedIdx); p.keyStateSelectableLocked(now, pinned) {
+	pinned := p.keyStateBySlotLocked(pinnedIdx)
+	if p.keyOrder == config.KeyOrderSmart && pinned != nil && pinned.EverSelected {
+		if p.keyStateSelectableLocked(now, pinned) {
+			if p.keyStateHealthyLocked(now, pinned) {
+				pinned.LastUsed = now
+				return pinned, pinnedIdx
+			}
+			if altIdx := p.pickRandomHealthyCandidateLocked(now, pinnedIdx); altIdx >= 0 {
+				p.stickyIdx = altIdx
+				selected := p.keyStates[altIdx]
+				selected.LastUsed = now
+				return selected, altIdx
+			}
+			pinned.LastUsed = now
+			return pinned, pinnedIdx
+		}
+	} else if p.keyOrder != config.KeyOrderSmart && pinned != nil && p.keyStateSelectableLocked(now, pinned) {
 		if p.keyStateHealthyLocked(now, pinned) {
 			pinned.LastUsed = now
 			return pinned, pinnedIdx
@@ -473,7 +717,7 @@ func (p *ProviderConfig) selectOnFailureKeyLocked(now time.Time) (*KeyState, int
 	if p.keyOrder == config.KeyOrderRandom {
 		idx = candidates[rand.Intn(len(candidates))]
 	} else {
-		idx = candidates[0]
+		idx = p.bestCandidateIndexLocked(now, candidates)
 	}
 	p.stickyIdx = idx
 	selected := p.keyStates[idx]
@@ -520,10 +764,15 @@ func (p *ProviderConfig) SetOAuthRefresher(
 			continue
 		}
 		ks.OAuthInfo = &OAuthKeyInfo{
-			Expires:         setup.Expires,
-			CredentialIndex: setup.CredentialIndex,
-			AccountID:       setup.AccountID,
-			Email:           setup.Email,
+			Expires:               setup.Expires,
+			CredentialIndex:       setup.CredentialIndex,
+			AccountID:             setup.AccountID,
+			Email:                 setup.Email,
+			CodexPrimaryResetAt:   setup.CodexPrimaryResetAt,
+			CodexSecondaryResetAt: setup.CodexSecondaryResetAt,
+		}
+		if until := codexSoftCooldownUntilFromMillis(setup.CodexPrimaryResetAt, setup.CodexSecondaryResetAt, time.Now()); !until.IsZero() {
+			ks.SoftCooldownUntil = until
 		}
 		ks.Invalid = !setup.Status.IsValid()
 		if ks.Invalid {
@@ -532,6 +781,48 @@ func (p *ProviderConfig) SetOAuthRefresher(
 			ks.ExhaustedUntil = time.Time{}
 		}
 	}
+}
+
+func (p *ProviderConfig) persistCodexResetHintsForKey(key string, primaryResetAt, secondaryResetAt int64) bool {
+	if key == "" || p.oauthRefresher == nil {
+		return false
+	}
+	p.mu.Lock()
+	ks := p.keyStateByKeyLocked(key)
+	if ks == nil || ks.OAuthInfo == nil || ks.OAuthInfo.AccountID == "" {
+		p.mu.Unlock()
+		return false
+	}
+	match := config.OAuthCredentialMatch{AccountID: ks.OAuthInfo.AccountID}
+	if primaryResetAt == 0 && secondaryResetAt == 0 {
+		ks.SoftCooldownUntil = time.Time{}
+	} else if until := codexSoftCooldownUntilFromMillis(primaryResetAt, secondaryResetAt, time.Now()); !until.IsZero() {
+		ks.SoftCooldownUntil = until
+	}
+	if ks.OAuthInfo != nil {
+		ks.OAuthInfo.CodexPrimaryResetAt = primaryResetAt
+		ks.OAuthInfo.CodexSecondaryResetAt = secondaryResetAt
+	}
+	p.mu.Unlock()
+	updated, changed, err := p.oauthRefresher.persistCodexResetHints(match, primaryResetAt, secondaryResetAt)
+	if err != nil {
+		log.Warnf("failed to persist codex reset hints provider=%v error=%v", p.name, err)
+		return false
+	}
+	if updated != nil {
+		p.mu.Lock()
+		if ks := p.keyStateByKeyLocked(key); ks != nil && ks.OAuthInfo != nil {
+			ks.OAuthInfo.CodexPrimaryResetAt = updated.CodexPrimaryResetAt
+			ks.OAuthInfo.CodexSecondaryResetAt = updated.CodexSecondaryResetAt
+			ks.SoftCooldownUntil = codexSoftCooldownUntilFromMillis(updated.CodexPrimaryResetAt, updated.CodexSecondaryResetAt, time.Now())
+		}
+		p.mu.Unlock()
+	}
+	return changed
+}
+
+func (p *ProviderConfig) clearCodexResetHintsForKey(key string) bool {
+	return p.persistCodexResetHintsForKey(key, 0, 0)
 }
 
 // Warmup initialises LastUsed for all keys to time.Now(), simulating a first
@@ -624,19 +915,24 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 				selectedKS.LastUsed = now
 			}
 		} else {
-			var selectedHealthy bool
+			var healthyCandidates []int
+			var fallbackCandidates []int
 			for i, ks := range p.keyStates {
 				if !p.keyStateSelectableLocked(now, ks) {
 					continue
 				}
-				healthy := p.keyStateHealthyLocked(now, ks)
-				if selectedKS == nil || (!selectedHealthy && healthy) || (selectedHealthy == healthy && ks.LastUsed.Before(selectedKS.LastUsed)) {
-					selectedKS = ks
-					selectedIdx = i
-					selectedHealthy = healthy
+				fallbackCandidates = append(fallbackCandidates, i)
+				if p.keyStateHealthyLocked(now, ks) {
+					healthyCandidates = append(healthyCandidates, i)
 				}
 			}
-			if selectedKS != nil {
+			candidates := healthyCandidates
+			if len(candidates) == 0 {
+				candidates = fallbackCandidates
+			}
+			selectedIdx = p.bestCandidateIndexLocked(now, candidates)
+			if selectedIdx >= 0 {
+				selectedKS = p.keyStates[selectedIdx]
 				selectedKS.LastUsed = now
 			}
 		}
@@ -726,16 +1022,21 @@ func (p *ProviderConfig) MarkKeySuccess(key string) {
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	ks := p.keyStateByKeyLocked(key)
 	if ks == nil {
+		p.mu.Unlock()
 		return
 	}
 	ks.CooldownCount = 0
 	if !ks.ExhaustedUntil.After(time.Now()) {
 		ks.ExhaustedUntil = time.Time{}
 	}
+	clearSoftHints := ks.OAuthInfo != nil && (ks.OAuthInfo.CodexPrimaryResetAt != 0 || ks.OAuthInfo.CodexSecondaryResetAt != 0)
 	p.markHealthyLocked(ks)
+	p.mu.Unlock()
+	if clearSoftHints {
+		p.clearCodexResetHintsForKey(key)
+	}
 }
 
 // UpdateKeySnapshot stores the latest rate-limit snapshot for the given key.
@@ -1321,8 +1622,19 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	}
 
 	match := config.OAuthCredentialMatch{AccountID: credCopy.AccountID}
+	preservedPrimaryResetAt := credCopy.CodexPrimaryResetAt
+	preservedSecondaryResetAt := credCopy.CodexSecondaryResetAt
 	persistedCred, _, persistErr := r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {
-		*cred = *newCred
+		newCopy := *newCred
+		newCopy.CodexPrimaryResetAt = cred.CodexPrimaryResetAt
+		if newCopy.CodexPrimaryResetAt == 0 {
+			newCopy.CodexPrimaryResetAt = preservedPrimaryResetAt
+		}
+		newCopy.CodexSecondaryResetAt = cred.CodexSecondaryResetAt
+		if newCopy.CodexSecondaryResetAt == 0 {
+			newCopy.CodexSecondaryResetAt = preservedSecondaryResetAt
+		}
+		*cred = newCopy
 		return true, nil
 	})
 	if persistErr != nil {
@@ -1336,6 +1648,9 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	// Update in-memory key state.
 	ks.Key = persistedCred.Access
 	ks.OAuthInfo.Expires = persistedCred.Expires
+	ks.OAuthInfo.CodexPrimaryResetAt = persistedCred.CodexPrimaryResetAt
+	ks.OAuthInfo.CodexSecondaryResetAt = persistedCred.CodexSecondaryResetAt
+	ks.SoftCooldownUntil = codexSoftCooldownUntilFromMillis(persistedCred.CodexPrimaryResetAt, persistedCred.CodexSecondaryResetAt, time.Now())
 	if persistedCred.AccountID != "" {
 		ks.OAuthInfo.AccountID = persistedCred.AccountID
 	}

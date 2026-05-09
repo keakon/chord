@@ -137,6 +137,73 @@ func TestUpdateOAuthCredentialInFile_RequiresAccountIDMatch(t *testing.T) {
 		t.Fatalf("expected oauth credential not found error, got %v", err)
 	}
 }
+
+func TestUpdateOAuthCredentialInFile_UpdatesAndClearsCodexResetHints(t *testing.T) {
+	path := writeAuthFixture(t, `# auth comment
+openai:
+  - refresh: refresh-token
+    access: access-token
+    expires: 111
+    account_id: acc-1
+    # provider-local hints
+    codex_primary_reset_at: 1000
+    codex_secondary_reset_at: 2000
+anthropic:
+  - sk-ant-test
+`)
+
+	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{AccountID: "acc-1"}, func(cred *OAuthCredential) (bool, error) {
+		cred.CodexPrimaryResetAt = 3333
+		cred.CodexSecondaryResetAt = 4444
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile(update): %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when updating codex reset hints")
+	}
+	if updated == nil || updated.CodexPrimaryResetAt != 3333 || updated.CodexSecondaryResetAt != 4444 {
+		t.Fatalf("updated credential = %#v, want reset hints 3333/4444", updated)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.CodexPrimaryResetAt != 3333 || got.CodexSecondaryResetAt != 4444 {
+		t.Fatalf("auth config oauth = %#v, want reset hints 3333/4444", got)
+	}
+
+	auth, updated, changed, err = UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{AccountID: "acc-1"}, func(cred *OAuthCredential) (bool, error) {
+		cred.CodexPrimaryResetAt = 0
+		cred.CodexSecondaryResetAt = 0
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile(clear): %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when clearing codex reset hints")
+	}
+	if updated == nil || updated.CodexPrimaryResetAt != 0 || updated.CodexSecondaryResetAt != 0 {
+		t.Fatalf("updated credential after clear = %#v, want zero reset hints", updated)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.CodexPrimaryResetAt != 0 || got.CodexSecondaryResetAt != 0 {
+		t.Fatalf("auth config oauth after clear = %#v, want zero reset hints", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"# auth comment", "anthropic:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"codex_primary_reset_at:", "codex_secondary_reset_at:"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("expected auth.yaml to clear %q, got:\n%s", unwanted, text)
+		}
+	}
+}
 func writeAuthFixture(t *testing.T, body string) string {
 	t.Helper()
 	path := t.TempDir() + "/auth.yaml"

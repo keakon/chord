@@ -345,6 +345,8 @@ func updateOAuthMappingNode(node *yaml.Node, cred *OAuthCredential) bool {
 	changed = setMappingString(node, "account_id", cred.AccountID, true) || changed
 	changed = setMappingString(node, "email", cred.Email, true) || changed
 	changed = setMappingString(node, "status", string(cred.Status), true) || changed
+	changed = setMappingOptionalInt64(node, "codex_primary_reset_at", cred.CodexPrimaryResetAt) || changed
+	changed = setMappingOptionalInt64(node, "codex_secondary_reset_at", cred.CodexSecondaryResetAt) || changed
 	return changed
 }
 
@@ -378,6 +380,13 @@ func setMappingInt64(node *yaml.Node, key string, value int64) bool {
 	}
 	appendMappingScalar(node, key, "!!int", text)
 	return true
+}
+
+func setMappingOptionalInt64(node *yaml.Node, key string, value int64) bool {
+	if value == 0 {
+		return removeMappingKey(node, key)
+	}
+	return setMappingInt64(node, key, value)
 }
 
 func appendMappingScalar(node *yaml.Node, key, tag, value string) {

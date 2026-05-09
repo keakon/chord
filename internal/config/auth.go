@@ -44,12 +44,14 @@ func (s OAuthCredentialStatus) IsValid() bool {
 // OAuthCredential stores OAuth token information.
 // expires is a millisecond-precision Unix timestamp.
 type OAuthCredential struct {
-	Refresh   string                `yaml:"refresh"`
-	Access    string                `yaml:"access"`
-	Expires   int64                 `yaml:"expires"`
-	AccountID string                `yaml:"account_id,omitempty"`
-	Email     string                `yaml:"email,omitempty"`
-	Status    OAuthCredentialStatus `yaml:"status,omitempty"`
+	Refresh               string                `yaml:"refresh"`
+	Access                string                `yaml:"access"`
+	Expires               int64                 `yaml:"expires"`
+	AccountID             string                `yaml:"account_id,omitempty"`
+	Email                 string                `yaml:"email,omitempty"`
+	Status                OAuthCredentialStatus `yaml:"status,omitempty"`
+	CodexPrimaryResetAt   int64                 `yaml:"codex_primary_reset_at,omitempty"`
+	CodexSecondaryResetAt int64                 `yaml:"codex_secondary_reset_at,omitempty"`
 }
 
 type oauthTokenClaims struct {
