@@ -75,6 +75,29 @@ jobs:
         run: |
           go vet ./...
 
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test with -race
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The race detector slows execution 2-20x, so this job runs in
+          # parallel with the coverage job rather than gating on it.
+          # -count=1 disables the test cache so the race instrumentation
+          # actually runs on every CI invocation.
+          go test -race -count=1 -timeout=10m ./...
+
   staticcheck:
     name: Staticcheck
     runs-on: ubuntu-latest
