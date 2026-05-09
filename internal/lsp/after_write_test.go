@@ -63,6 +63,51 @@ func TestAfterWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.
 	}
 }
 
+func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.T) {
+	mgr, path, _ := newAfterWriteTestManager(t)
+
+	origDidChange := afterWriteDidChange
+	origAwait := afterWriteAwaitWaiter
+	t.Cleanup(func() {
+		afterWriteDidChange = origDidChange
+		afterWriteAwaitWaiter = origAwait
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var didChangeErr error
+	var awaitErr error
+	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) error {
+		if gotPath != path {
+			t.Fatalf("didChange path = %q, want %q", gotPath, path)
+		}
+		if content != "package main" {
+			t.Fatalf("didChange content = %q, want package main", content)
+		}
+		didChangeErr = gotCtx.Err()
+		return nil
+	}
+	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan []Diagnostic, _ time.Duration) ([]Diagnostic, bool) {
+		if gotPath != path {
+			t.Fatalf("await path = %q, want %q", gotPath, path)
+		}
+		awaitErr = gotCtx.Err()
+		return nil, false
+	}
+
+	out := mgr.AfterWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false)
+	if out != "Successfully wrote 12 bytes" {
+		t.Fatalf("AfterWriteToolResult output = %q", out)
+	}
+	if didChangeErr != context.Canceled {
+		t.Fatalf("didChange ctx err = %v, want context.Canceled", didChangeErr)
+	}
+	if awaitErr != context.Canceled {
+		t.Fatalf("await ctx err = %v, want context.Canceled", awaitErr)
+	}
+}
+
 func TestAfterWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T) {
 	mgr, path, _ := newAfterWriteTestManager(t)
 

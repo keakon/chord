@@ -97,6 +97,16 @@ func newConfirmTextarea(width, height int, value string) textarea.Model {
 	return ta
 }
 
+func (m *Model) activeConfirmTextarea() (*textarea.Model, string, bool) {
+	if m.confirm.editing {
+		return &m.confirm.editInput, "Command", true
+	}
+	if m.confirm.denyingWithReason {
+		return &m.confirm.denyReasonInput, "Reason", true
+	}
+	return nil, "", false
+}
+
 // handleConfirmKey processes key events while in ModeConfirm.
 func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	if m.confirm.editing {

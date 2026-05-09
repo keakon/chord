@@ -91,7 +91,7 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.lineCountCache = 0
 	payloadBlock.viewportCache = nil
 	payloadBlock.viewportCacheWidth = 0
-	payloadBlock.diffHL = nil
+	payloadBlock.codeHL = nil
 
 	payload, err := json.Marshal(&payloadBlock)
 	if err != nil {
@@ -325,7 +325,7 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.lineCountCache = 0
 	block.viewportCache = nil
 	block.viewportCacheWidth = 0
-	block.diffHL = nil
+	block.codeHL = nil
 	v.hotBytes -= size
 	if v.hotBytes < 0 {
 		v.hotBytes = 0

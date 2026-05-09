@@ -46,7 +46,7 @@ staticcheck:
 	$(STATICCHECK) -checks 'all,-ST1000' $(PKGS)
 
 gopls-check:
-	git ls-files '*.go' | xargs $(GOPLS) check
+	git ls-files -z '*.go' | xargs -0 $(GOPLS) check
 
 docs-check:
 	./scripts/check_docs_consistency.sh

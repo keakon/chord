@@ -69,7 +69,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			codeWidth:           codeWidth,
 			defaultVisibleLines: maxReadDefaultLines,
 			expanded:            b.ReadContentExpanded,
-			highlighter:         &b.diffHL,
+			highlighter:         &b.codeHL,
 		})...)
 	}
 	result = appendToolElapsedFooter(result, b)

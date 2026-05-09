@@ -65,7 +65,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 				codeWidth:           codeWidth,
 				defaultVisibleLines: maxReadDefaultLines,
 				expanded:            b.ReadContentExpanded,
-				highlighter:         &b.diffHL,
+				highlighter:         &b.codeHL,
 			})...)
 		}
 	}

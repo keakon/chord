@@ -116,7 +116,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	if diffWidth < 10 {
 		diffWidth = 10
 	}
-	hl := ensureCodeHighlighter(&b.diffHL, filePath, diffContentSample(b.Diff))
+	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffContentSample(b.Diff))
 	diffLines := strings.Split(b.Diff, "\n")
 	shownLines := 0
 	seenHunk := false

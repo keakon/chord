@@ -45,25 +45,15 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 				// Some terminals emit an empty PasteMsg for non-text clipboard content.
 				return m.pasteFromClipboard()
 			}
-			switch {
-			case m.confirm.editing:
-				m.confirm.editInput.InsertString(pm.Content)
-				m.recalcViewportSize()
-				return nil
-			case m.confirm.denyingWithReason:
-				m.confirm.denyReasonInput.InsertString(pm.Content)
+			if input, _, ok := m.activeConfirmTextarea(); ok {
+				input.InsertString(pm.Content)
 				m.recalcViewportSize()
 				return nil
 			}
 		}
-		if m.confirm.editing {
-			var cmd tea.Cmd
-			m.confirm.editInput, cmd = m.confirm.editInput.Update(msg)
-			return cmd
-		}
-		if m.confirm.denyingWithReason {
-			var cmd tea.Cmd
-			m.confirm.denyReasonInput, cmd = m.confirm.denyReasonInput.Update(msg)
+		if input, _, ok := m.activeConfirmTextarea(); ok {
+			updated, cmd := input.Update(msg)
+			*input = updated
 			return cmd
 		}
 	case ModeQuestion:

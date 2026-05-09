@@ -101,10 +101,10 @@ type Block struct {
 	// between compact (first param + 10 result lines) and full (all params + full output).
 	ToolCallDetailExpanded bool
 
-	// diffHL is a lazily-initialised syntax highlighter shared by code-like
-	// tool renderers (Read/Write/Edit). It caches lexer detection and rendered
-	// snippets across renders of the same block.
-	diffHL *codeHighlighter
+	// codeHL is a lazily-initialised syntax highlighter shared by code-like
+	// tool renderers (Read/Write/Edit) and assistant markdown code blocks. It
+	// caches lexer detection and rendered snippets across renders of the same block.
+	codeHL *codeHighlighter
 
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.

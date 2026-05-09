@@ -554,7 +554,7 @@ func (b *Block) renderAssistant(width int) []string {
 					// Rebuild settled cache only when frontier advances, width changes,
 					// or the stable prefix text itself changed.
 					if frontier != b.streamSettledFrontier || b.streamSettledWidth != contentWidth || settledRaw != b.streamSettledRaw {
-						sL, sS, sW := renderAssistantMarkdownContent(settledRaw, settledRaw, contentWidth, continuationExtra, &b.diffHL)
+						sL, sS, sW := renderAssistantMarkdownContent(settledRaw, settledRaw, contentWidth, continuationExtra, &b.codeHL)
 						b.streamSettledRaw = settledRaw
 						b.streamSettledLines = sL
 						b.streamSettledSyntheticPrefixWidths = sS
@@ -599,7 +599,7 @@ func (b *Block) renderAssistant(width int) []string {
 				}
 			} else {
 				b.InvalidateStreamingSettledCache()
-				b.mdCache, b.mdCacheSyntheticPrefixWidths, b.mdCacheSoftWrapContinuations = renderAssistantMarkdownContent(bodyContent, bodyContent, contentWidth, continuationExtra, &b.diffHL)
+				b.mdCache, b.mdCacheSyntheticPrefixWidths, b.mdCacheSoftWrapContinuations = renderAssistantMarkdownContent(bodyContent, bodyContent, contentWidth, continuationExtra, &b.codeHL)
 			}
 			b.mdCacheWidth = width
 		}

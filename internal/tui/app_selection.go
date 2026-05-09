@@ -522,15 +522,9 @@ func blockPlainContent(b *Block) string {
 func (m *Model) handleSuperCopy() tea.Cmd {
 	// In confirm sub-modes, the focused textarea isn't m.input, so copy from it.
 	if m.mode == ModeConfirm {
-		if m.confirm.editing {
-			if v := m.confirm.editInput.Value(); v != "" {
-				return writeClipboardCmd(v, "Command copied to clipboard")
-			}
-			return nil
-		}
-		if m.confirm.denyingWithReason {
-			if v := m.confirm.denyReasonInput.Value(); v != "" {
-				return writeClipboardCmd(v, "Reason copied to clipboard")
+		if input, label, ok := m.activeConfirmTextarea(); ok {
+			if v := input.Value(); v != "" {
+				return writeClipboardCmd(v, label+" copied to clipboard")
 			}
 			return nil
 		}

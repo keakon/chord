@@ -138,7 +138,7 @@ jobs:
 
       - name: Gopls check
         run: |
-          git ls-files '*.go' | xargs gopls check
+          git ls-files -z '*.go' | xargs -0 gopls check
 
   gofmt:
     name: Check Go formatting

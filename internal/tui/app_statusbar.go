@@ -572,7 +572,6 @@ func (m *Model) renderStatusBar() string {
 	sessionValue := sessionID
 	pathText := ""
 	sessionText := ""
-	m.resetStatusBarCopyRegions()
 
 	rightReserve := 0
 	availableCenter := effectiveWidth - leftWidth - rightReserve - 8

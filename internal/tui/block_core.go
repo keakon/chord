@@ -13,7 +13,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 		return nil
 	}
 	clone := *src
-	clone.diffHL = nil
+	clone.codeHL = nil
 	clone.richMarkdownHL = nil
 	clone.thinkingStreamSettled = nil
 	clone.toolArgsCacheKeys = append([]string(nil), src.toolArgsCacheKeys...)
