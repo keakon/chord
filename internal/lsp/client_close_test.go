@@ -295,7 +295,7 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 			normalizeWaiterPath(path): {},
 		},
 	}
-	if err := mgr.DidCloseErr(path); err != nil {
+	if err := mgr.DidCloseErr(context.Background(), path); err != nil {
 		t.Fatalf("DidCloseErr() error = %v", err)
 	}
 	if len(fake.didCloseURIs) != 1 {

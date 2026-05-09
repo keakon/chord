@@ -86,7 +86,7 @@ func TestReadToolExecuteNormalizesCRLFOutput(t *testing.T) {
 	}
 }
 
-func TestReadToolWarmupUsesBackgroundContextAndAbsolutePath(t *testing.T) {
+func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -123,8 +123,8 @@ func TestReadToolWarmupUsesBackgroundContextAndAbsolutePath(t *testing.T) {
 	if starter.calls != 1 {
 		t.Fatalf("Start calls = %d, want 1", starter.calls)
 	}
-	if starter.ctx != context.Background() {
-		t.Fatalf("Start context = %v, want context.Background()", starter.ctx)
+	if starter.ctx != ctx {
+		t.Fatalf("Start context = %v, want ctx", starter.ctx)
 	}
 	wantPath, err := filepath.Abs("sample.txt")
 	if err != nil {

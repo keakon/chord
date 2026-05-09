@@ -491,29 +491,35 @@ func (m *Manager) ClientForPath(ctx context.Context, path string) (*Client, bool
 }
 
 // DidOpen sends didOpen to all clients that handle path; maintains version per client.
-func (m *Manager) DidOpen(path string, content string) {
+func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	for _, c := range m.clients {
 		if c.HandlesFile(path) {
-			_ = c.DidOpen(context.Background(), path, content)
+			_ = c.DidOpen(ctx, path, content)
 		}
 	}
 }
 
 // DidChange sends didChange to all clients that handle path.
-func (m *Manager) DidChange(path string, content string) {
-	_ = m.DidChangeErr(path, content)
+func (m *Manager) DidChange(ctx context.Context, path string, content string) {
+	_ = m.DidChangeErr(ctx, path, content)
 }
 
 // DidChangeErr is like DidChange but returns the first notify error from any client.
-func (m *Manager) DidChangeErr(path string, content string) error {
+func (m *Manager) DidChangeErr(ctx context.Context, path string, content string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	var first error
 	for _, c := range m.clients {
 		if c.HandlesFile(path) {
-			if err := c.DidChange(context.Background(), path, content); err != nil && first == nil {
+			if err := c.DidChange(ctx, path, content); err != nil && first == nil {
 				first = err
 			}
 		}
@@ -523,12 +529,15 @@ func (m *Manager) DidChangeErr(path string, content string) error {
 
 // DidClose sends didClose to all clients that handle path, clears cached diagnostics for that path,
 // and refreshes sidebar/server counts.
-func (m *Manager) DidClose(path string) {
-	_ = m.DidCloseErr(path)
+func (m *Manager) DidClose(ctx context.Context, path string) {
+	_ = m.DidCloseErr(ctx, path)
 }
 
 // DidCloseErr is like DidClose but returns the first notify error from any client.
-func (m *Manager) DidCloseErr(path string) error {
+func (m *Manager) DidCloseErr(ctx context.Context, path string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	path = normalizeWaiterPath(path)
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
@@ -538,7 +547,7 @@ func (m *Manager) DidCloseErr(path string) error {
 		if !c.HandlesFile(path) {
 			continue
 		}
-		if err := c.DidClose(context.Background(), path); err != nil && first == nil {
+		if err := c.DidClose(ctx, path); err != nil && first == nil {
 			first = err
 		}
 		c.clearDiagnosticsForPath(path)

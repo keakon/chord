@@ -27,8 +27,8 @@ var (
 	afterWriteWaitForClient = func(m *Manager, ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
 		return m.waitForClientForPath(ctx, path, timeout)
 	}
-	afterWriteDidChange = func(m *Manager, path string, content string) error {
-		return m.DidChangeErr(path, content)
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) error {
+		return m.DidChangeErr(ctx, path, content)
 	}
 	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan []Diagnostic, timeout time.Duration) ([]Diagnostic, bool) {
 		return m.AwaitWaiter(ctx, path, ch, timeout)
@@ -70,7 +70,7 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	if err := afterWriteDidChange(m, absPath, content); err != nil {
+	if err := afterWriteDidChange(m, ctx, absPath, content); err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
 	}
 

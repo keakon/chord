@@ -217,7 +217,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 		if err != nil {
 			if os.IsNotExist(err) {
 				result.AlreadyAbsent = append(result.AlreadyAbsent, path)
-				t.clearLSPDeleteState(path)
+				t.clearLSPDeleteState(ctx, path)
 				processed++
 				reportToolProgress(ctx, ToolProgressSnapshot{Label: "paths", Current: processed, Total: totalPaths})
 				continue
@@ -257,7 +257,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 		if err := os.Remove(path); err != nil {
 			if os.IsNotExist(err) {
 				result.AlreadyAbsent = append(result.AlreadyAbsent, path)
-				t.clearLSPDeleteState(path)
+				t.clearLSPDeleteState(ctx, path)
 				processed++
 				reportToolProgress(ctx, ToolProgressSnapshot{Label: "paths", Current: processed, Total: totalPaths})
 				continue
@@ -270,7 +270,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 		}
 		invalidatePathCache(path)
 		result.Deleted = append(result.Deleted, path)
-		t.clearLSPDeleteState(path)
+		t.clearLSPDeleteState(ctx, path)
 		processed++
 		reportToolProgress(ctx, ToolProgressSnapshot{Label: "paths", Current: processed, Total: totalPaths})
 	}
@@ -278,13 +278,16 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 	return result, nil
 }
 
-func (t DeleteTool) clearLSPDeleteState(path string) {
+func (t DeleteTool) clearLSPDeleteState(ctx context.Context, path string) {
 	if t.LSP == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if absPath, err := filepath.Abs(path); err == nil {
 		t.LSP.UnmarkTouched(absPath)
-		_ = t.LSP.DidCloseErr(absPath)
+		_ = t.LSP.DidCloseErr(ctx, absPath)
 	}
 }
 

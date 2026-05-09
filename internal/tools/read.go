@@ -170,7 +170,10 @@ func truncateReadContentToBudget(prefixLines, numberedLines []string, startLine,
 	)
 }
 
-func (t ReadTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
+func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var a readArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -267,7 +270,7 @@ func (t ReadTool) Execute(_ context.Context, raw json.RawMessage) (string, error
 
 	if t.LSP != nil {
 		if absPath, absErr := filepath.Abs(a.Path); absErr == nil {
-			t.LSP.Start(context.Background(), absPath)
+			t.LSP.Start(ctx, absPath)
 		}
 	}
 
