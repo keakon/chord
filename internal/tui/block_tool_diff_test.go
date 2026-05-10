@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -33,11 +35,65 @@ func TestLexerForFilePathUsesSpecialFilenameWithSuffix(t *testing.T) {
 	}
 }
 
+func TestLexerForFilePathUsesMDXAsMarkdown(t *testing.T) {
+	hl := newCodeHighlighter("website/src/content/docs/index.mdx", "# Hello\n\n<Component />\n")
+	lexer := hl.getLexer("# Hello\n")
+	if lexer == nil {
+		t.Fatal("expected lexer for .mdx extension")
+	}
+	if got := lexer.Config().Name; got != "markdown" {
+		t.Fatalf("expected Markdown lexer for .mdx, got %q", got)
+	}
+}
+
+func TestLexerForExplicitMDXLanguageUsesMarkdown(t *testing.T) {
+	hl := newCodeHighlighterWithLanguage("", "# Hello\n\n<Component />\n", "mdx")
+	lexer := hl.getLexer("# Hello\n")
+	if lexer == nil {
+		t.Fatal("expected lexer for mdx language hint")
+	}
+	if got := lexer.Config().Name; got != "markdown" {
+		t.Fatalf("expected Markdown lexer for mdx language hint, got %q", got)
+	}
+}
+
 func TestLexerForFilePathDisablesHighlightForUnknownExtension(t *testing.T) {
 	hl := newCodeHighlighter("notes.unknownext", "package tools\n")
 	rendered := hl.highlightLine("package tools", "")
 	if rendered != "package tools" {
 		t.Fatalf("expected unknown extension to remain plain text, got %q", rendered)
+	}
+}
+
+func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		bgTerm string
+	}{
+		{name: "add", bgTerm: diffAddBg},
+		{name: "delete", bgTerm: diffDelBg},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			hl := newCodeHighlighter("notes.unknownext", "package tools\n")
+			rendered := hl.highlightLine("package tools", tt.bgTerm)
+			if plain := stripANSI(rendered); plain != "package tools" {
+				t.Fatalf("expected unknown extension background fallback to preserve text, got %q", plain)
+			}
+			wantBg := ansiSeqForColor(lipgloss.Color(tt.bgTerm), false)
+			if wantBg == "" {
+				t.Fatal("expected diff background color to produce ANSI background sequence")
+			}
+			if !strings.Contains(rendered, wantBg) {
+				t.Fatalf("expected unknown extension fallback to keep diff background %q, got %q", wantBg, rendered)
+			}
+			spaceRendered := hl.highlightLine("    ", tt.bgTerm)
+			if plain := stripANSI(spaceRendered); plain != "    " {
+				t.Fatalf("expected whitespace-only fallback to preserve spaces, got %q", plain)
+			}
+			if !strings.Contains(spaceRendered, wantBg) {
+				t.Fatalf("expected whitespace-only fallback to keep diff background %q, got %q", wantBg, spaceRendered)
+			}
+		})
 	}
 }
 

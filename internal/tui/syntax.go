@@ -57,6 +57,7 @@ var syntaxHighlightExtWhitelist = map[string]struct{}{
 	".lua":     {},
 	".m":       {},
 	".md":      {},
+	".mdx":     {},
 	".mjs":     {},
 	".mm":      {},
 	".nim":     {},
@@ -85,6 +86,10 @@ var syntaxHighlightExtWhitelist = map[string]struct{}{
 	".yml":     {},
 	".zig":     {},
 	".zsh":     {},
+}
+
+var syntaxHighlightExtAliases = map[string]string{
+	".mdx": "markdown",
 }
 
 type specialFilenameLexerRule struct {
@@ -118,6 +123,9 @@ func lexerForWhitelistedExtension(base string) chroma.Lexer {
 	}
 	if _, ok := syntaxHighlightExtWhitelist[ext]; !ok {
 		return nil
+	}
+	if lexerName, ok := syntaxHighlightExtAliases[ext]; ok {
+		return lexers.Get(lexerName)
 	}
 	return lexers.Get(ext)
 }
@@ -234,6 +242,8 @@ func normalizeCodeFenceLanguage(language string) string {
 		return "bash"
 	case "yml":
 		return "yaml"
+	case "mdx":
+		return "markdown"
 	default:
 		return language
 	}
@@ -321,8 +331,12 @@ func (h *codeHighlighter) highlightSnippet(source, bgTerm string) string {
 // highlightRendered syntax-highlights the given source and preserves its
 // original newline structure.
 func (h *codeHighlighter) highlightRendered(source, bgTerm string) string {
+	var bg color.Color
+	if bgTerm != "" {
+		bg = lipgloss.Color(bgTerm)
+	}
 	if strings.TrimSpace(source) == "" {
-		return source
+		return renderPlainWithBackground(source, bg)
 	}
 
 	// Compute FNV-1a 64-bit cache key over bgTerm + NUL + source.
@@ -335,27 +349,25 @@ func (h *codeHighlighter) highlightRendered(source, bgTerm string) string {
 		return cached
 	}
 
-	var bg color.Color
-	if bgTerm != "" {
-		bg = lipgloss.Color(bgTerm)
-	}
-
 	l := h.getLexer(source)
 	if l == nil {
-		return source
+		return h.cacheRendered(key, renderPlainWithBackground(source, bg))
 	}
 	it, err := l.Tokenise(nil, source)
 	if err != nil {
-		return source
+		return h.cacheRendered(key, renderPlainWithBackground(source, bg))
 	}
 
 	f := bgFormatter{bg: bg}
 	var buf bytes.Buffer
 	if err = f.Format(&buf, h.chromaStyle, it); err != nil {
-		return source
+		return h.cacheRendered(key, renderPlainWithBackground(source, bg))
 	}
 
-	result := buf.String()
+	return h.cacheRendered(key, buf.String())
+}
+
+func (h *codeHighlighter) cacheRendered(key uint64, result string) string {
 	// Evict the entire cache when it grows too large to bound memory usage.
 	// A simple full-clear is sufficient: the cache is per-Block and a single
 	// diff rarely exceeds 1024 unique lines in practice.
@@ -365,6 +377,18 @@ func (h *codeHighlighter) highlightRendered(source, bgTerm string) string {
 	}
 	h.renderCache[key] = result
 	return result
+}
+
+func renderPlainWithBackground(source string, bg color.Color) string {
+	bgSeq := ansiSeqForColor(bg, false)
+	if bgSeq == "" {
+		return source
+	}
+	var buf bytes.Buffer
+	if err := writeStyledTokenValue(&buf, bgSeq, source); err != nil {
+		return source
+	}
+	return buf.String()
 }
 
 // bgFormatter is a chroma formatter that renders tokens with syntax colors
