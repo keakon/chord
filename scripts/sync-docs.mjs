@@ -118,6 +118,14 @@ function rewriteLinks(body, lang) {
     });
 }
 
+function anchorForYamlHeading(filename) {
+  return `#${filename.toLowerCase().replace(/\./g, '')}`;
+}
+
+function rewriteExampleIndexYamlLinks(body) {
+  return body.replace(/\(\.\/([\w.-]+\.yaml)\)/g, (_m, filename) => `(${anchorForYamlHeading(filename)})`);
+}
+
 // Promote the simple "> **Note:**" / "> **Important:** / **Warning:**" patterns
 // into Starlight ::: admonitions.
 function rewriteAdmonitions(body) {
@@ -178,6 +186,7 @@ async function syncExamples() {
     const { title, body } = extractTitleAndBody(raw);
     const description = deriveDescription(body);
     let intro = rewriteLinks(body, lang);
+    intro = rewriteExampleIndexYamlLinks(intro);
     intro = rewriteAdmonitions(intro);
 
     let out = buildFrontmatter({ title, description });

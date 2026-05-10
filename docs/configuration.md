@@ -155,6 +155,7 @@ openai:
 ```
 
 These `codex_*_reset_at` fields are restart-stable scheduling hints, not hard blocks:
+
 - they lower priority for startup / first-pick ordering;
 - they do **not** by themselves make the account absolutely unselectable;
 - real hard blocking still comes from confirmed request failures and is tracked in memory.
@@ -187,6 +188,7 @@ Do not rely on an unset environment variable for this case. An unset `$ENV_VAR` 
 Only providers with `preset: codex` are treated as OAuth providers.
 
 For Codex providers, `key_order` supports an additional value:
+
 - `sequential`
 - `random`
 - `smart`
@@ -194,6 +196,7 @@ For Codex providers, `key_order` supports an additional value:
 `preset: codex` defaults to `key_order: smart` when `key_order` is omitted. Other providers still default to `sequential`.
 
 `smart` keeps existing `key_rotation` behavior, but ranks selectable Codex OAuth accounts by:
+
 - avoiding persisted soft-cooled accounts when a better candidate exists;
 - preferring never-used accounts in the current process;
 - preferring higher remaining headroom when rate-limit snapshots are available;

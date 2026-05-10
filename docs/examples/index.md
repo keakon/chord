@@ -4,10 +4,10 @@ This directory contains end-to-end, copy-paste-ready `config.yaml` examples.
 
 | File                                                   | Use case                                                                                       |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| [`anthropic-minimal.yaml`](#anthropic-minimalyaml)   | Smallest working config — one provider, one key, one model pool                                |
-| [`codex-oauth-with-lsp.yaml`](#codex-oauth-with-lspyaml) | Codex OAuth + Go and Python LSP + a "reviewer" SubAgent                                    |
-| [`openai-compat-load-balance.yaml`](#openai-compat-load-balanceyaml) | Multi-key rotation against an OpenAI-compatible gateway, with backup-endpoint failover |
-| [`team-ready.yaml`](#team-readyyaml)                 | Strict per-agent permissions, hooks for auditing/lint, project-level `.chord/` overrides       |
+| [`anthropic-minimal.yaml`](./anthropic-minimal.yaml)   | Smallest working config — one provider, one key, one model pool                                |
+| [`codex-oauth-with-lsp.yaml`](./codex-oauth-with-lsp.yaml) | Codex OAuth + Go and Python LSP + a "reviewer" SubAgent                                    |
+| [`openai-compat-load-balance.yaml`](./openai-compat-load-balance.yaml) | Multi-key rotation against an OpenAI-compatible gateway, with backup-endpoint failover |
+| [`team-ready.yaml`](./team-ready.yaml)                 | Strict per-agent permissions, hooks for auditing/lint, project-level `.chord/` overrides       |
 
 These are starting points, not opinionated truth. Most fields are optional — see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet) for what each one does.
 
