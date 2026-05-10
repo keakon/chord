@@ -209,7 +209,7 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 
 // buildLines constructs the per-entry display lines for the agent list.
 // Each agent is rendered as a compact single line: "{indicator} {short-name}".
-// Up to 3 recently edited files are shown as sub-lines beneath each agent.
+// Up to 3 recently changed files are shown as sub-lines beneath each agent.
 func (s Sidebar) buildLines(innerWidth int) []string {
 	var lines []string
 	for _, entry := range s.agents {
@@ -244,23 +244,32 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 		for _, fe := range files {
 			baseName := filepath.Base(fe.Path)
 			var parts string
-			if fe.Added > 0 {
-				parts += SidebarAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
-			}
-			if fe.Removed > 0 {
-				if parts != "" {
-					parts += " "
+			if !fe.Deleted {
+				if fe.Added > 0 {
+					parts += SidebarAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
 				}
-				parts += SidebarRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+				if fe.Removed > 0 {
+					if parts != "" {
+						parts += " "
+					}
+					parts += SidebarRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+				}
 			}
 			statStr := parts
-			maxStatW := len(fmt.Sprintf("+%d -%d", fe.Added, fe.Removed))
+			maxStatW := 0
+			if statStr != "" {
+				maxStatW = len(fmt.Sprintf("+%d -%d", fe.Added, fe.Removed))
+			}
 			maxNameW := innerWidth - 2 - 1 - maxStatW
 			if maxNameW < 4 {
 				maxNameW = 4
 			}
 			baseName = truncateOneLine(baseName, maxNameW)
-			fileLine := SidebarFileStyle.Render(fmt.Sprintf("  %s ", baseName)) + statStr
+			namePart := SidebarFileStyle.Render(baseName)
+			if fe.Deleted {
+				namePart = SidebarFileStyle.Strikethrough(true).Render(baseName)
+			}
+			fileLine := SidebarFileStyle.Render("  ") + namePart + SidebarFileStyle.Render(" ") + statStr
 			lines = append(lines, fileLine)
 		}
 		if extra > 0 {

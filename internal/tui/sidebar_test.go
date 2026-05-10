@@ -28,6 +28,43 @@ func TestSidebarAddFileEditUsesExplicitStats(t *testing.T) {
 	}
 }
 
+func TestSidebarAddFileDeleteMarksDeletedWithoutFakeLineCount(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+
+	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
+
+	edits := sidebar.agents[0].EditedFiles
+	if len(edits) != 1 {
+		t.Fatalf("changed files = %d, want 1", len(edits))
+	}
+	if !edits[0].Deleted {
+		t.Fatalf("deleted flag = false, want true: %+v", edits[0])
+	}
+	if edits[0].Added != 0 || edits[0].Removed != 0 {
+		t.Fatalf("deleted file diff stats = +%d -%d, want +0 -0", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarAddFileEditAfterDeleteClearsDeletedState(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+
+	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
+	sidebar.AddFileEdit("main", "/tmp/obsolete.go", 3, 0)
+
+	edits := sidebar.agents[0].EditedFiles
+	if len(edits) != 1 {
+		t.Fatalf("changed files = %d, want 1", len(edits))
+	}
+	if edits[0].Deleted {
+		t.Fatalf("deleted flag should clear after later edit: %+v", edits[0])
+	}
+	if edits[0].Added != 3 || edits[0].Removed != 0 {
+		t.Fatalf("diff stats = +%d -%d, want +3 -0", edits[0].Added, edits[0].Removed)
+	}
+}
+
 func TestSidebarAddFileEditAccumulatesCounts(t *testing.T) {
 	sidebar := NewSidebar(DefaultTheme())
 	sidebar.Update(nil, "main", "builder")
@@ -120,6 +157,25 @@ func TestSidebarBuildLines_UsesTaskDescForSubagents(t *testing.T) {
 	}
 	if strings.Contains(plain, "coder") {
 		t.Fatalf("sidebar should prefer task description over agent short name, got %q", plain)
+	}
+}
+
+func TestSidebarBuildLinesDeletedFileUsesStrikethroughWithoutStats(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
+
+	lines := sidebar.buildLines(40)
+	joined := strings.Join(lines, "\n")
+	plain := stripANSI(joined)
+	if !strings.Contains(plain, "obsolete.go") {
+		t.Fatalf("deleted file missing from sidebar lines: %q", plain)
+	}
+	if strings.Contains(plain, "-1") || strings.Contains(plain, "+0") {
+		t.Fatalf("deleted file should not show fake line stats, got %q", plain)
+	}
+	if !strings.Contains(joined, "\x1b[9m") && !strings.Contains(joined, ";9m") {
+		t.Fatalf("deleted file should render with strikethrough, got %q", joined)
 	}
 }
 

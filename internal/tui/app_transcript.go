@@ -157,30 +157,26 @@ func (m *Model) logTranscriptRebuildTiming(reason string, messageCount, blockCou
 }
 
 // rebuildSidebarFileEditsFromMessages scans the message history and reconstructs
-// the sidebar file-edit statistics. Called after session restore so EDITED FILES
-// shows historical edits even before any new tool calls arrive.
+// sidebar changed-file statistics from stored diffs. Delete tool calls are not
+// restored because older transcripts do not carry reliable deleted-file state.
 func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 	// Reset file edits for main agent (sub-agents manage their own edits live).
 	m.sidebar.ClearFileEdits("main")
-	// Build tool-call-id → (name, paths) index from assistant messages.
-	type callInfo struct {
-		name  string
-		paths []string
-	}
-	calls := make(map[string]callInfo)
+	// Build tool-call-id → paths index from assistant messages.
+	calls := make(map[string][]string)
 	for _, msg := range msgs {
 		if msg.Role != "assistant" {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "Edit" && tc.Name != "Delete" {
+			if tc.Name != "Write" && tc.Name != "Edit" {
 				continue
 			}
-			paths := extractTranscriptToolPaths(tc.Name, tc.Args)
+			paths := extractTranscriptToolPaths(tc.Args)
 			if len(paths) == 0 {
 				continue
 			}
-			calls[tc.ID] = callInfo{name: tc.Name, paths: paths}
+			calls[tc.ID] = paths
 		}
 	}
 	// Walk tool result messages and record file edits.
@@ -188,39 +184,22 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 		if msg.Role != "tool" {
 			continue
 		}
-		info, ok := calls[msg.ToolCallID]
-		if !ok {
+		paths, ok := calls[msg.ToolCallID]
+		if !ok || msg.ToolDiff == "" {
 			continue
 		}
-		if info.name == tools.NameDelete {
-			groups := tools.ParseDeleteResult(msg.Content)
-			for _, path := range groups.Deleted {
-				m.sidebar.AddFileEdit("main", path, 0, 1)
-			}
-			continue
-		}
-		if msg.ToolDiff == "" {
-			continue
-		}
-		for _, path := range info.paths {
+		for _, path := range paths {
 			m.sidebar.AddFileEdit("main", path, msg.ToolDiffAdded, msg.ToolDiffRemoved)
 		}
 	}
 }
 
-func extractTranscriptToolPaths(toolName string, args json.RawMessage) []string {
-	switch toolName {
-	case "Delete":
-		if req, err := tools.DecodeDeleteRequest(args); err == nil {
-			return append([]string(nil), req.Paths...)
-		}
-	default:
-		var parsed struct {
-			Path string `json:"path"`
-		}
-		if json.Unmarshal(args, &parsed) == nil && parsed.Path != "" {
-			return []string{parsed.Path}
-		}
+func extractTranscriptToolPaths(args json.RawMessage) []string {
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(args, &parsed) == nil && parsed.Path != "" {
+		return []string{parsed.Path}
 	}
 	return nil
 }

@@ -443,7 +443,7 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 		return ""
 	}
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionFiles)
-	filesLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "EDITED FILES", fmt.Sprintf("%d", len(editedFiles)))}
+	filesLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "CHANGED FILES", fmt.Sprintf("%d", len(editedFiles)))}
 	if !expanded {
 		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 	}
@@ -454,14 +454,16 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	for _, fe := range visibleFiles {
 		baseName := filepath.Base(fe.Path)
 		var parts string
-		if fe.Added > 0 {
-			parts += InfoPanelEditAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
-		}
-		if fe.Removed > 0 {
-			if parts != "" {
-				parts += InfoPanelDim.Render(" ")
+		if !fe.Deleted {
+			if fe.Added > 0 {
+				parts += InfoPanelEditAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
 			}
-			parts += InfoPanelEditRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+			if fe.Removed > 0 {
+				if parts != "" {
+					parts += InfoPanelDim.Render(" ")
+				}
+				parts += InfoPanelEditRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+			}
 		}
 		statStr := parts
 		availName := lineW - infoPanelCollapsibleContentInset
@@ -471,7 +473,11 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 		if availName < 1 {
 			availName = 1
 		}
-		namePart := InfoPanelDim.Render(truncateOneLine(baseName, availName))
+		nameStyle := InfoPanelDim
+		if fe.Deleted {
+			nameStyle = nameStyle.Strikethrough(true)
+		}
+		namePart := nameStyle.Render(truncateOneLine(baseName, availName))
 		var fileLine string
 		if statStr != "" {
 			fileLine = renderInfoPanelCollapsibleContentLine(lineW,

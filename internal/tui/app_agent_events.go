@@ -841,7 +841,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				if evt.Name == tools.NameDelete {
 					groups := tools.ParseDeleteResult(evt.Result)
 					for _, path := range groups.Deleted {
-						m.sidebar.AddFileEdit(evt.AgentID, path, 0, 1)
+						m.sidebar.AddFileDelete(evt.AgentID, path)
 						effects.refreshSidebar = true
 						effects.invalidateUsage = true
 					}

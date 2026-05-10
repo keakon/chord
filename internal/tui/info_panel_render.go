@@ -163,12 +163,13 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionSkills))
 	appendSep()
 
-	// Edited files
+	// Changed files
 	for _, fe := range m.sidebar.CurrentAgentFiles() {
 		b.WriteByte('F')
 		b.WriteString(fe.Path)
 		appendInt(fe.Added)
 		appendInt(fe.Removed)
+		appendBool(fe.Deleted)
 		appendSep()
 	}
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionFiles))

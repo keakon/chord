@@ -676,29 +676,48 @@ func TestRenderInfoPanelEditedFilesStatsPreserveInfoPanelBackground(t *testing.T
 	wantSep := InfoPanelDim.Render(" ")
 	wantRem := InfoPanelEditRemovedStyle.Render("-1")
 	if !strings.Contains(rendered, wantAdd) {
-		t.Fatalf("EDITED FILES +N should use info-panel background; want segment %q in output", wantAdd)
+		t.Fatalf("CHANGED FILES +N should use info-panel background; want segment %q in output", wantAdd)
 	}
 	if !strings.Contains(rendered, wantSep) {
-		t.Fatalf("EDITED FILES separator space should use info-panel background; want segment %q in output", wantSep)
+		t.Fatalf("CHANGED FILES separator space should use info-panel background; want segment %q in output", wantSep)
 	}
 	if !strings.Contains(rendered, wantRem) {
-		t.Fatalf("EDITED FILES -N should use info-panel background; want segment %q in output", wantRem)
+		t.Fatalf("CHANGED FILES -N should use info-panel background; want segment %q in output", wantRem)
 	}
 	if !strings.Contains(rendered, wantAdd+wantSep+wantRem) {
-		t.Fatalf("EDITED FILES +N/-N sequence should preserve panel background across separator; want substring %q in output", wantAdd+wantSep+wantRem)
+		t.Fatalf("CHANGED FILES +N/-N sequence should preserve panel background across separator; want substring %q in output", wantAdd+wantSep+wantRem)
 	}
 	badAdd := SidebarAddedStyle.Render("+2")
 	badRem := SidebarRemovedStyle.Render("-1")
 	if strings.Contains(rendered, badAdd) {
-		t.Fatalf("EDITED FILES should not use sidebar-only add style (no panel bg); got bare segment %q", badAdd)
+		t.Fatalf("CHANGED FILES should not use sidebar-only add style (no panel bg); got bare segment %q", badAdd)
 	}
 	if strings.Contains(rendered, badRem) {
-		t.Fatalf("EDITED FILES should not use sidebar-only remove style (no panel bg); got bare segment %q", badRem)
+		t.Fatalf("CHANGED FILES should not use sidebar-only remove style (no panel bg); got bare segment %q", badRem)
 	}
 
-	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ EDITED FILES")
+	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ CHANGED FILES")
 	if len(section) == 0 || !strings.HasPrefix(section[0], "foo.go +2 -1") {
-		t.Fatalf("EDITED FILES rows should remain visible in plain section extraction; got %#v", section)
+		t.Fatalf("CHANGED FILES rows should remain visible in plain section extraction; got %#v", section)
+	}
+}
+
+func TestRenderInfoPanelChangedFilesDeletedFileUsesStrikethroughWithoutStats(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileDelete("main", "/tmp/obsolete.go")
+
+	rendered := m.renderInfoPanel(48, 24)
+	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ CHANGED FILES")
+	if len(section) == 0 || !strings.HasPrefix(section[0], "obsolete.go") {
+		t.Fatalf("deleted changed-file row missing; section=%#v", section)
+	}
+	if strings.Contains(section[0], "-1") || strings.Contains(section[0], "+0") {
+		t.Fatalf("deleted changed-file row should not show fake stats: %#v", section)
+	}
+	if !strings.Contains(rendered, "\x1b[9m") && !strings.Contains(rendered, ";9m") {
+		t.Fatalf("deleted changed-file row should render with strikethrough, got %q", rendered)
 	}
 }
 
@@ -710,9 +729,9 @@ func TestRenderInfoPanelEditedFilesLimitsVisibleRows(t *testing.T) {
 		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%02d.go", i), i, 0)
 	}
 
-	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 40)), "▼ EDITED FILES")
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 40)), "▼ CHANGED FILES")
 	if got, want := len(section), infoPanelEditedFilesLimit+1; got != want {
-		t.Fatalf("EDITED FILES rows = %d, want %d; section=%#v", got, want, section)
+		t.Fatalf("CHANGED FILES rows = %d, want %d; section=%#v", got, want, section)
 	}
 	if !strings.HasPrefix(section[0], "file-01.go +1") {
 		t.Fatalf("first visible edited file = %q, want file-01.go", section[0])
@@ -725,7 +744,7 @@ func TestRenderInfoPanelEditedFilesLimitsVisibleRows(t *testing.T) {
 		t.Fatalf("overflow row = %q, want %q", got, want)
 	}
 	if strings.Contains(strings.Join(section, "\n"), "file-21.go") {
-		t.Fatalf("EDITED FILES should hide files beyond limit; section=%#v", section)
+		t.Fatalf("CHANGED FILES should hide files beyond limit; section=%#v", section)
 	}
 }
 
@@ -737,9 +756,9 @@ func TestRenderInfoPanelCollapsedEditedFilesShowsCountOnly(t *testing.T) {
 	m.sidebar.AddFileEdit("main", "/tmp/bar.go", 1, 0)
 	m.infoPanelCollapsedSections[infoPanelSectionFiles] = true
 
-	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▶ EDITED FILES")
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▶ CHANGED FILES")
 	if len(section) != 0 {
-		t.Fatalf("collapsed EDITED FILES section should not render body lines, got %#v", section)
+		t.Fatalf("collapsed CHANGED FILES section should not render body lines, got %#v", section)
 	}
 }
 
@@ -1283,7 +1302,7 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 		{title: "▼ MCP", want: "   ● exa"},
 		{title: "▼ TODOS", want: "   ▶ Investigate spacing"},
 		{title: "▼ SKILLS", want: "   go-expert"},
-		{title: "▼ EDITED FILES", want: "   foo.go +2 -1"},
+		{title: "▼ CHANGED FILES", want: "   foo.go +2 -1"},
 		{title: "▼ AGENTS", want: "   ● builder"},
 	}
 	for _, tc := range cases {
@@ -1323,8 +1342,8 @@ func normalizeInfoPanelSectionTitle(line string) string {
 		return "SKILLS"
 	case strings.HasPrefix(line, "TODOS"):
 		return "TODOS"
-	case strings.HasPrefix(line, "EDITED FILES"):
-		return "EDITED FILES"
+	case strings.HasPrefix(line, "CHANGED FILES"):
+		return "CHANGED FILES"
 	default:
 		return ""
 	}

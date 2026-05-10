@@ -9,11 +9,12 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// FileEdit records a single file-edit event (Write, Edit, or Delete tool call).
+// FileEdit records a single changed-file event (Write, Edit, or Delete tool call).
 type FileEdit struct {
 	Path    string // file path
 	Added   int    // added lines
 	Removed int    // removed lines
+	Deleted bool   // file was deleted
 }
 
 // SidebarEntry represents a single agent in the sidebar listing.
@@ -25,7 +26,7 @@ type SidebarEntry struct {
 	Color        string     // optional ANSI color code for TUI display
 	SelectedRef  string     // last known primary model ref (SubAgent only; may include @variant)
 	RunningRef   string     // last known effective running ref (SubAgent only)
-	EditedFiles  []FileEdit // recent file edits, in order
+	EditedFiles  []FileEdit // recent file changes, in order
 	Activity     string     // latest runtime activity/detail snapshot; AGENTS rows may choose not to render it
 	LastSummary  string
 	UrgentCount  int
@@ -253,6 +254,15 @@ func (s *Sidebar) SubAgentLabels(agentID string) (agentDefName, taskDesc string,
 // AddFileEdit records a file edit event for the given agent.
 // If the file was already edited, the line counts are accumulated.
 func (s *Sidebar) AddFileEdit(agentID, filePath string, added, removed int) {
+	s.addFileChange(agentID, filePath, added, removed, false)
+}
+
+// AddFileDelete records a deleted-file event for the given agent.
+func (s *Sidebar) AddFileDelete(agentID, filePath string) {
+	s.addFileChange(agentID, filePath, 0, 0, true)
+}
+
+func (s *Sidebar) addFileChange(agentID, filePath string, added, removed int, deleted bool) {
 	agentID = normalizeSidebarAgentID(agentID)
 	for i := range s.agents {
 		if s.agents[i].ID != agentID {
@@ -263,11 +273,16 @@ func (s *Sidebar) AddFileEdit(agentID, filePath string, added, removed int) {
 			if s.agents[i].EditedFiles[j].Path == filePath {
 				s.agents[i].EditedFiles[j].Added += added
 				s.agents[i].EditedFiles[j].Removed += removed
+				if deleted {
+					s.agents[i].EditedFiles[j].Deleted = true
+				} else if added != 0 || removed != 0 {
+					s.agents[i].EditedFiles[j].Deleted = false
+				}
 				return
 			}
 		}
 		// Skip empty new files (no visible diff stats to show).
-		if added == 0 && removed == 0 {
+		if added == 0 && removed == 0 && !deleted {
 			return
 		}
 		// New file entry (cap at 50 to avoid unbounded growth).
@@ -276,6 +291,7 @@ func (s *Sidebar) AddFileEdit(agentID, filePath string, added, removed int) {
 			Path:    filePath,
 			Added:   added,
 			Removed: removed,
+			Deleted: deleted,
 		})
 		if len(s.agents[i].EditedFiles) > maxEditedFiles {
 			s.agents[i].EditedFiles = s.agents[i].EditedFiles[len(s.agents[i].EditedFiles)-maxEditedFiles:]
@@ -302,7 +318,7 @@ func (s *Sidebar) ClearFileEdits(agentID string) {
 	}
 }
 
-// CurrentAgentFiles returns the edited files for the currently focused agent.
+// CurrentAgentFiles returns the changed files for the currently focused agent.
 func (s *Sidebar) CurrentAgentFiles() []FileEdit {
 	focusedID := s.focusedID
 	if focusedID == "" {

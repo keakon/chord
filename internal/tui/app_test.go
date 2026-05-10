@@ -2731,6 +2731,35 @@ func TestWarnToastForcesPriorityBoundaryFlush(t *testing.T) {
 	}
 }
 
+func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.sidebar.Update(nil, "main", "builder")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-delete-file-1",
+		Name:     "Delete",
+		ArgsJSON: `{"paths":["obsolete.go"],"reason":"cleanup"}`,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-delete-file-1",
+		Name:     "Delete",
+		ArgsJSON: `{"paths":["obsolete.go"],"reason":"cleanup"}`,
+		Result:   "Delete completed.\n\nDeleted (1):\n- obsolete.go",
+		Status:   agent.ToolResultStatusSuccess,
+	}})
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if len(edits) != 1 {
+		t.Fatalf("changed files = %d, want 1: %+v", len(edits), edits)
+	}
+	if edits[0].Path != "obsolete.go" || !edits[0].Deleted {
+		t.Fatalf("changed file = %+v, want deleted obsolete.go", edits[0])
+	}
+	if edits[0].Added != 0 || edits[0].Removed != 0 {
+		t.Fatalf("deleted file stats = +%d -%d, want +0 -0", edits[0].Added, edits[0].Removed)
+	}
+}
+
 func TestToolResultForcesPriorityBoundaryFlush(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
