@@ -102,6 +102,8 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 
 ### Action 名速查
 
+这里的 action 名是 `config.yaml` 里（`keymap:`）用的名称。
+
 | Action                     | 默认值                            |
 | -------------------------- | --------------------------------- |
 | `insert_escape`            | `["esc"]`                         |

@@ -102,6 +102,8 @@ Action names are lower snake_case mirrors of the [`KeyMap` fields](https://githu
 
 ### Action name reference
 
+Action names here are the names used in `config.yaml` (for `keymap:`).
+
 | Action                     | Default                          |
 | -------------------------- | -------------------------------- |
 | `insert_escape`            | `["esc"]`                        |
