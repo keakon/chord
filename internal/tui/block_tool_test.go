@@ -1672,6 +1672,34 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 	}
 }
 
+func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "Edit",
+		Content:  `{"path":"internal/tui/sidebar_render.go","old_string":"for _, fe := range files {\nbaseName := filepath.Base(fe.Path)\nvar parts string","new_string":""}`,
+		ResultContent: strings.Join([]string{
+			"old_string not found in file. Indentation mismatch? A unique match exists if leading whitespace is ignored. Example block:",
+			"\t\t\tfor _, fe := range files {",
+			"\t\t\t\tbaseName := filepath.Base(fe.Path)",
+			"\t\t\t\tvar parts string",
+		}, "\n"),
+		ResultStatus: agent.ToolResultStatusError,
+		ResultDone:   true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "            for _, fe := range files {") {
+		t.Fatalf("expected first example line indentation to be preserved; got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "                baseName := filepath.Base(fe.Path)") {
+		t.Fatalf("expected nested example line indentation to be preserved; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "    for _, fe := range files {") && !strings.Contains(plain, "            for _, fe := range files {") {
+		t.Fatalf("example block indentation appears trimmed; got:\n%s", plain)
+	}
+}
+
 func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,
