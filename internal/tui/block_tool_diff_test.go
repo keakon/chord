@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
@@ -43,6 +44,17 @@ func TestLexerForFilePathUsesMDXAsMarkdown(t *testing.T) {
 	}
 	if got := lexer.Config().Name; got != "markdown" {
 		t.Fatalf("expected Markdown lexer for .mdx, got %q", got)
+	}
+}
+
+func TestLexerForFilePathUsesMarkdownExtensionAsMarkdown(t *testing.T) {
+	hl := newCodeHighlighter("README.markdown", "# Hello\n\nContent\n")
+	lexer := hl.getLexer("# Hello\n")
+	if lexer == nil {
+		t.Fatal("expected lexer for .markdown extension")
+	}
+	if got := lexer.Config().Name; got != "markdown" {
+		t.Fatalf("expected Markdown lexer for .markdown, got %q", got)
 	}
 }
 
@@ -127,6 +139,49 @@ func TestRenderInlineDiffLineKeepsSingleTokenInsertionSingleLine(t *testing.T) {
 	}
 	if !strings.Contains(plain, "myHTTPVariable") {
 		t.Fatalf("expected inserted token to remain visible, got %q", plain)
+	}
+}
+
+func TestHighlightCodeLinesKeepsMarkdownEOFBlockMarkersStyled(t *testing.T) {
+	hl := newCodeHighlighter("plan.md", "")
+	lines := []string{
+		"1. first item",
+		"2. second item",
+	}
+
+	rendered := highlightCodeLines(hl, lines, "")
+	if len(rendered) != len(lines) {
+		t.Fatalf("expected %d highlighted lines, got %d: %#v", len(lines), len(rendered), rendered)
+	}
+	keywordSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()), true)
+	if keywordSeq == "" {
+		t.Fatal("expected markdown keyword colour to produce an ANSI sequence")
+	}
+	for i, line := range rendered {
+		marker := fmt.Sprintf("%d.", i+1)
+		if !strings.Contains(line, keywordSeq+marker) {
+			t.Fatalf("expected marker %q to be highlighted with keyword style; got %q", marker, line)
+		}
+	}
+}
+
+func TestHighlightCodeLinesKeepsMarkdownEOFHeadingStyled(t *testing.T) {
+	hl := newCodeHighlighter("notes.md", "")
+	lines := []string{
+		"# first heading",
+		"## second heading",
+	}
+
+	rendered := highlightCodeLines(hl, lines, "")
+	if len(rendered) != len(lines) {
+		t.Fatalf("expected %d highlighted lines, got %d: %#v", len(lines), len(rendered), rendered)
+	}
+	subheadingSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.GenericSubheading).Colour.String()), true)
+	if subheadingSeq == "" {
+		t.Fatal("expected markdown subheading colour to produce an ANSI sequence")
+	}
+	if !strings.Contains(rendered[1], subheadingSeq+"## second heading") {
+		t.Fatalf("expected EOF subheading to be highlighted with subheading style; got %q", rendered[1])
 	}
 }
 

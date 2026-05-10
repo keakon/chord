@@ -4,6 +4,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- TUI: fixed syntax highlighting for Markdown previews so EOF block markers (ordered lists, headings, and similar line-based syntax) keep the same colour as preceding lines in `Read`/`Write` tool cards and fenced code blocks.
+
 ## 0.5.2 - 2026-05-11
 
 - Worktree: `chord worktree finish` now supports `--check`, which runs a temporary isolated rebase preflight so you can see whether the worktree would finish cleanly without mutating the real worktree or leaving it mid-rebase on conflicts.

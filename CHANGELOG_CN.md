@@ -4,6 +4,8 @@
 
 ## 未发布
 
+- TUI：修复 Markdown 预览的语法高亮；文件末尾的有序列表、标题等按行识别的语法标记，现在会在 `Read` / `Write` 工具卡片和 fenced code block 中保持与前面行一致的颜色。
+
 ## 0.5.2 - 2026-05-11
 
 - Worktree：`chord worktree finish` 现支持 `--check`，会在临时隔离 worktree 中预检一次 rebase，让你提前知道能否干净收尾，同时不改动真实 worktree，也不会在冲突时把它留在半个 rebase 状态。

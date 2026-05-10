@@ -563,7 +563,12 @@ func highlightCodeLines(h *codeHighlighter, lines []string, bgTerm string) []str
 	if len(lines) == 0 {
 		return nil
 	}
-	highlighted := h.highlightSnippet(strings.Join(lines, "\n"), bgTerm)
+	source := strings.Join(lines, "\n")
+	if source != "" {
+		source += "\n"
+	}
+	highlighted := h.highlightSnippet(source, bgTerm)
+	highlighted = strings.TrimSuffix(highlighted, "\n")
 	highlightedLines := strings.Split(highlighted, "\n")
 	if len(highlightedLines) == len(lines) {
 		return highlightedLines
