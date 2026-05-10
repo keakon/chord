@@ -98,34 +98,62 @@ func postHostRedrawFallbackCmd(generation uint64, reason string, delay time.Dura
 	})
 }
 
-func hostRedrawSuppressesPostFocusFallback(reason string) bool {
-	switch strings.TrimSpace(reason) {
-	case "content-boundary", "live-append", "scroll-flush", "stream-flush", "background-dirty-focus", "post-focus-settle-redraw":
-		return false
-	default:
-		return true
+type hostRedrawReasonPolicy struct {
+	requestWindowSize         bool
+	suppressPostFocusFallback bool
+	suppressPeriodicViewer    bool
+	postHostFallbackReason    string
+	postHostFallbackDelay     time.Duration
+}
+
+func hostRedrawPolicyForReason(reason string) hostRedrawReasonPolicy {
+	policy := hostRedrawReasonPolicy{
+		// Unknown reasons are treated as strong enough to suppress the late
+		// post-focus fallback. This preserves the previous conservative default:
+		// only known weak/incremental redraws allow the late fallback to run.
+		suppressPostFocusFallback: true,
 	}
+
+	switch strings.TrimSpace(reason) {
+	case "focus-restore", "post-focus-settle-fallback":
+		policy.requestWindowSize = true
+	case "post-focus-settle-redraw":
+		policy.requestWindowSize = true
+		policy.suppressPostFocusFallback = false
+	case "stream-flush":
+		policy.suppressPostFocusFallback = false
+		policy.suppressPeriodicViewer = true
+	case "scroll-flush":
+		policy.suppressPostFocusFallback = false
+		policy.suppressPeriodicViewer = true
+		policy.postHostFallbackReason = "scroll-flush-fallback"
+		policy.postHostFallbackDelay = scrollFlushFallbackRedrawDelay
+	case "content-boundary", "live-append":
+		policy.suppressPostFocusFallback = false
+		policy.postHostFallbackReason = "content-boundary-fallback"
+		policy.postHostFallbackDelay = contentBoundaryFallbackRedrawDelay
+	case "background-dirty-focus":
+		policy.suppressPostFocusFallback = false
+		policy.postHostFallbackReason = "background-dirty-focus-fallback"
+		policy.postHostFallbackDelay = contentBoundaryFallbackRedrawDelay
+	}
+
+	return policy
+}
+
+func hostRedrawSuppressesPostFocusFallback(reason string) bool {
+	return hostRedrawPolicyForReason(reason).suppressPostFocusFallback
 }
 
 func (m *Model) suppressPeriodicViewerHostRedraw(reason string) bool {
 	if m == nil || m.mode != ModeImageViewer || !m.imageViewer.Open {
 		return false
 	}
-	switch strings.TrimSpace(reason) {
-	case "stream-flush", "scroll-flush":
-		return true
-	default:
-		return false
-	}
+	return hostRedrawPolicyForReason(reason).suppressPeriodicViewer
 }
 
 func hostRedrawRequestsWindowSize(reason string) bool {
-	switch strings.TrimSpace(reason) {
-	case "focus-restore", "post-focus-settle-redraw":
-		return true
-	default:
-		return false
-	}
+	return hostRedrawPolicyForReason(reason).requestWindowSize
 }
 
 func (m *Model) hostRedrawSequence(reason string) []tea.Cmd {
@@ -180,16 +208,12 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 	if sinceFocus < 0 || sinceFocus > scrollFlushFallbackAfterFocusWindow {
 		return nil
 	}
-	switch reason {
-	case "scroll-flush":
-		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
-		return postHostRedrawFallbackCmd(generation, reason, scrollFlushFallbackRedrawDelay)
-	case "content-boundary", "live-append", "background-dirty-focus":
-		m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
-		return postHostRedrawFallbackCmd(generation, reason, contentBoundaryFallbackRedrawDelay)
-	default:
+	policy := hostRedrawPolicyForReason(reason)
+	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
 		return nil
 	}
+	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
+	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
 }
 
 func (m *Model) markNextViewReplay() {

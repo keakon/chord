@@ -18,6 +18,50 @@ func containsCmd(cmds []tea.Cmd, target tea.Cmd) bool {
 	return false
 }
 
+func TestHostRedrawPolicyForReason(t *testing.T) {
+	tests := []struct {
+		reason                    string
+		requestWindowSize         bool
+		suppressPostFocusFallback bool
+		suppressPeriodicViewer    bool
+		postHostFallbackReason    string
+		postHostFallbackDelay     time.Duration
+	}{
+		{reason: "focus-restore", requestWindowSize: true, suppressPostFocusFallback: true},
+		{reason: "post-focus-settle-redraw", requestWindowSize: true, suppressPostFocusFallback: false},
+		{reason: "post-focus-settle-fallback", requestWindowSize: true, suppressPostFocusFallback: true},
+		{reason: "stream-flush", suppressPostFocusFallback: false, suppressPeriodicViewer: true},
+		{reason: "scroll-flush", suppressPostFocusFallback: false, suppressPeriodicViewer: true, postHostFallbackReason: "scroll-flush-fallback", postHostFallbackDelay: scrollFlushFallbackRedrawDelay},
+		{reason: "content-boundary", suppressPostFocusFallback: false, postHostFallbackReason: "content-boundary-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
+		{reason: "live-append", suppressPostFocusFallback: false, postHostFallbackReason: "content-boundary-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
+		{reason: "background-dirty-focus", suppressPostFocusFallback: false, postHostFallbackReason: "background-dirty-focus-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
+		{reason: "content-boundary-fallback", suppressPostFocusFallback: true},
+		{reason: "debug-dump", suppressPostFocusFallback: true},
+		{reason: "unknown", suppressPostFocusFallback: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.reason, func(t *testing.T) {
+			got := hostRedrawPolicyForReason(tc.reason)
+			if got.requestWindowSize != tc.requestWindowSize {
+				t.Fatalf("requestWindowSize = %t, want %t", got.requestWindowSize, tc.requestWindowSize)
+			}
+			if got.suppressPostFocusFallback != tc.suppressPostFocusFallback {
+				t.Fatalf("suppressPostFocusFallback = %t, want %t", got.suppressPostFocusFallback, tc.suppressPostFocusFallback)
+			}
+			if got.suppressPeriodicViewer != tc.suppressPeriodicViewer {
+				t.Fatalf("suppressPeriodicViewer = %t, want %t", got.suppressPeriodicViewer, tc.suppressPeriodicViewer)
+			}
+			if got.postHostFallbackReason != tc.postHostFallbackReason {
+				t.Fatalf("postHostFallbackReason = %q, want %q", got.postHostFallbackReason, tc.postHostFallbackReason)
+			}
+			if got.postHostFallbackDelay != tc.postHostFallbackDelay {
+				t.Fatalf("postHostFallbackDelay = %s, want %s", got.postHostFallbackDelay, tc.postHostFallbackDelay)
+			}
+		})
+	}
+}
+
 func TestHostRedrawSequenceSkipsWindowSizeForPureRepairReasons(t *testing.T) {
 	tests := []string{
 		"stream-flush",
@@ -29,7 +73,6 @@ func TestHostRedrawSequenceSkipsWindowSizeForPureRepairReasons(t *testing.T) {
 		"live-append",
 		"background-dirty-focus",
 		"background-dirty-focus-fallback",
-		"post-focus-settle-fallback",
 	}
 	for _, reason := range tests {
 		t.Run(reason, func(t *testing.T) {
@@ -70,7 +113,7 @@ func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	now := time.Now()
 
-	for _, reason := range []string{"scroll-flush", "content-boundary", "live-append"} {
+	for _, reason := range []string{"scroll-flush", "content-boundary", "live-append", "background-dirty-focus"} {
 		t.Run(reason, func(t *testing.T) {
 			m.lastForegroundAt = time.Time{}
 			if cmd := m.maybePostHostRedrawFallbackCmd(reason, 1, now); cmd != nil {
@@ -200,14 +243,14 @@ func TestPostFocusSettleFallbackTriggersStrongHostRedraw(t *testing.T) {
 	}
 
 	cmds := m.hostRedrawSequence("post-focus-settle-fallback")
-	if len(cmds) != 2 {
-		t.Fatalf("post-focus-settle-fallback redraw cmd count = %d, want 2", len(cmds))
+	if len(cmds) != 3 {
+		t.Fatalf("post-focus-settle-fallback redraw cmd count = %d, want 3", len(cmds))
 	}
 	if !containsCmd(cmds, tea.ClearScreen) {
 		t.Fatal("post-focus-settle-fallback redraw should include ClearScreen")
 	}
-	if containsCmd(cmds, tea.RequestWindowSize) {
-		t.Fatal("post-focus-settle-fallback redraw should not include RequestWindowSize")
+	if !containsCmd(cmds, tea.RequestWindowSize) {
+		t.Fatal("post-focus-settle-fallback redraw should include RequestWindowSize")
 	}
 }
 
@@ -237,17 +280,21 @@ func TestPostHostRedrawFallbackTriggersLateScrollRedraw(t *testing.T) {
 }
 
 func TestPostHostRedrawFallbackTriggersLateContentBoundaryRedraw(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.hostRedrawGeneration = 4
-	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+	for _, reason := range []string{"content-boundary", "live-append"} {
+		t.Run(reason, func(t *testing.T) {
+			m := NewModelWithSize(nil, 120, 40)
+			m.SetFocusResizeFreezeEnabled(true)
+			m.hostRedrawGeneration = 4
+			m.lastHostRedrawAt = time.Now().Add(-time.Second)
 
-	cmd := m.handlePostHostRedrawFallback(postHostRedrawFallbackMsg{generation: 4, reason: "content-boundary"})
-	if cmd == nil {
-		t.Fatal("matching content-boundary fallback should schedule a host redraw")
-	}
-	if m.lastHostRedrawReason != "content-boundary-fallback" {
-		t.Fatalf("lastHostRedrawReason = %q, want content-boundary-fallback", m.lastHostRedrawReason)
+			cmd := m.handlePostHostRedrawFallback(postHostRedrawFallbackMsg{generation: 4, reason: reason})
+			if cmd == nil {
+				t.Fatalf("matching %s fallback should schedule a host redraw", reason)
+			}
+			if m.lastHostRedrawReason != "content-boundary-fallback" {
+				t.Fatalf("lastHostRedrawReason = %q, want content-boundary-fallback", m.lastHostRedrawReason)
+			}
+		})
 	}
 }
 
@@ -370,7 +417,7 @@ func TestPostHostRedrawFallbackTriggersBackgroundDirtyFocusFallback(t *testing.T
 }
 
 func TestHostRedrawSequenceRequestsWindowSizeOnlyForStrongFocusRecovery(t *testing.T) {
-	tests := []string{"focus-restore", "post-focus-settle-redraw"}
+	tests := []string{"focus-restore", "post-focus-settle-redraw", "post-focus-settle-fallback"}
 	for _, reason := range tests {
 		t.Run(reason, func(t *testing.T) {
 			m := NewModelWithSize(nil, 80, 24)

@@ -6,6 +6,7 @@
 
 - Worktree：`chord worktree finish` 现支持 `--check`，会在临时隔离 worktree 中预检一次 rebase，让你提前知道能否干净收尾，同时不改动真实 worktree，也不会在冲突时把它留在半个 rebase 状态。
 - **不兼容变更：** 模型可见的命令执行工具从 `Bash` 重命名为 `Shell`。运行时不提供别名或兼容映射；升级前请同步更新权限规则（`permission.Shell`）、hook 的工具过滤器、skills 的 `allowed_tools`、已导入/已保存的结构化工具调用、headless / tool event 消费方、gateway，以及所有引用旧 `Bash` 工具名的自定义提示词或集成。
+- TUI：增强了 Ghostty/cmux 在切换标签页或重新获焦后的恢复。较晚的 `post-focus-settle-fallback` 现在会在重放整帧前重新校验终端尺寸，减少首轮 `focus-restore` redraw 后仍残留横向分隔线伪影或旧 cell 的情况。
 - TUI：侧边栏 / 信息面板中的文件列表从 `EDITED FILES` 改名为 `CHANGED FILES`；新产生的 `Delete` 工具结果会把被删除文件显示为删除线文件名，并且不再显示伪造的 `-1` 行数统计。
 - TUI：`Write` 工具卡片现在会用带行号、语法高亮的预览展示写入后的文件内容，并与 `Read` 卡片共享默认前 10 行、按空格展开的行为。
 - Runtime / LLM 重试：API `402` 用量/余额耗尽错误现在会按 per-key 限流处理：Chord 会冷却已耗尽的 key，并在 fallback 前优先尝试同模型下配置的其它 key，避免反复重试同一个已耗尽 key。
