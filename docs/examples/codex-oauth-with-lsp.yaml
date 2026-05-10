@@ -1,11 +1,10 @@
-# Codex OAuth + LSP + custom agent
+# Codex OAuth + LSP workstation
 #
-# A practical setup if you have an OpenAI ChatGPT / Codex subscription, want
-# real LSP-backed code awareness for Go and Python, and want a dedicated
-# "reviewer" SubAgent.
+# Pair with `chord auth codex` for ~/.config/chord/auth.yaml, and keep any
+# extra agents in ~/.config/chord/agents/*.md instead of embedding them here.
 #
-# Pair with ~/.config/chord/auth.yaml that has Codex OAuth tokens stored via
-# `chord auth codex`.
+# This example intentionally uses a conservative gpt-5.5 baseline:
+# context=400000, input=272000, output=32000.
 
 providers:
   codex:
@@ -14,8 +13,9 @@ providers:
     models:
       gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
         reasoning:
           summary: auto
         text:
@@ -30,7 +30,6 @@ providers:
         modalities:
           input: [text, image]
 
-  # A fallback OpenAI-compatible provider (e.g. for cheap / fast tasks).
   fast:
     type: chat-completions
     api_url: https://api.openai.com/v1/chat/completions
@@ -38,6 +37,7 @@ providers:
       gpt-5.4-mini:
         limit:
           context: 200000
+          input: 183616
           output: 16384
 
 model_pools:
@@ -47,7 +47,6 @@ model_pools:
   fast:
     - fast/gpt-5.4-mini
 
-# LSP — install gopls + pyright separately
 lsp:
   gopls:
     command: gopls
@@ -61,31 +60,14 @@ lsp:
       python.analysis:
         typeCheckingMode: standard
 
-# Compaction friendly to long sessions
 context:
   auto_compact: true
   compact_threshold: 0.8
   compact_model: fast/gpt-5.4-mini
+  compaction:
+    reserved: 16000
 
 desktop_notification: true
-prevent_sleep: true                 # macOS only
+prevent_sleep: true
 ime_switch_target: com.apple.keylayout.ABC
 log_level: info
-
-# An additional reviewer SubAgent ships in ~/.config/chord/agents/reviewer.md:
-#
-#   ---
-#   name: reviewer
-#   description: Critical code reviewer
-#   mode: subagent
-#   model_pools: [thinking]
-#   permission:
-#     Read: allow
-#     Grep: allow
-#     Glob: allow
-#     Edit: deny
-#     Write: deny
-#     Shell: ask
-#   ---
-#   You review code changes for correctness, safety, and style.
-#   Speak plainly and call out the most impactful issues first.

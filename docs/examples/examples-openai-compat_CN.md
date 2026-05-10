@@ -1,14 +1,24 @@
-# OpenAI-compatible gateway: multi-key rotation + endpoint failover
-#
-# Pair with ~/.config/chord/auth.yaml:
-#
-#   primary:
-#     - "$PRIMARY_KEY_A"
-#     - "$PRIMARY_KEY_B"
-#     - "$PRIMARY_KEY_C"
-#   backup:
-#     - "$BACKUP_KEY"
+# OpenAI 兼容网关
 
+这个场景适合挂在 OpenAI 兼容网关前：
+
+- 一个 provider 下放多个 key，做轮询或故障切换
+- 模型池里先走主 endpoint，再回退到备用 endpoint
+
+## `~/.config/chord/auth.yaml`
+
+```yaml
+primary:
+  - "$PRIMARY_KEY_A"
+  - "$PRIMARY_KEY_B"
+  - "$PRIMARY_KEY_C"
+backup:
+  - "$BACKUP_KEY"
+```
+
+## `~/.config/chord/config.yaml`
+
+```yaml
 providers:
   primary:
     type: chat-completions
@@ -46,3 +56,12 @@ context:
   compact_model: primary/llama3-8b
 
 log_level: info
+```
+
+需要全局代理的话，再额外加：
+
+```yaml
+proxy: socks5://127.0.0.1:1080
+```
+
+这个示例的重点不是 agent，而是 provider / key / pool 的故障转移链。

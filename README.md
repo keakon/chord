@@ -58,8 +58,9 @@ providers:
     models:
       openai/gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
         modalities:
           input: [text, image]
 model_pools:
@@ -78,7 +79,7 @@ YAML
 cd my-project && chord
 ```
 
-For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For ready-to-copy config files, see [Examples](./docs/examples/index.md).
+For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For `gpt-5.5`, these docs use the conservative baseline `context=400000`, `input=272000`, `output=32000` unless you have verified provider-specific limits. For ready-to-copy config files, see [Examples](./docs/examples/index.md).
 
 ### Release download notes
 

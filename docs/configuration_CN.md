@@ -43,6 +43,7 @@ providers:
       Qwen/Qwen3.5-397B-A17B:
         limit:
           context: 262144
+          input: 262144
           output: 65536
         modalities:
           input: [text, image]
@@ -72,9 +73,12 @@ providers:
     models:
       gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
 ```
+
+对 `gpt-5.5`，除非你已经核实当前 provider 的专用限制，否则建议先用保守的 split-limit 配置。当前文档以 `context=400000`、`input=272000`、`output=32000` 作为文档基线，这样自动压缩和 oversize 恢复会与常见的输入上限观测保持一致；这并不表示所有 provider / runtime 都暴露同一组限制。
 
 ### OpenAI Codex preset
 
@@ -84,10 +88,11 @@ providers:
     preset: codex
     type: responses
     models:
-      gpt-5.4:
+      gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
 ```
 
 ### Google Gemini
@@ -129,10 +134,10 @@ openai:
 
 可配置多个 key 作为轮换或备用。
 
-对于 `preset: codex` 的 OAuth 凭据，Chord 还可能在 `auth.yaml` 中持久化 provider 专用的软提示字段：
+对于 `preset: codex` 的 OAuth 凭据，Chord 还可能在 `auth.yaml` 中、同一个 provider key 下，持久化 provider 专用的软提示字段。例如当 `config.yaml` 中的 provider 名叫 `codex` 时：
 
 ```yaml
-openai:
+codex:
   - refresh: "..."
     access: "..."
     expires: 1774009702606
@@ -251,7 +256,8 @@ model_templates:
   gpt-400k: &gpt-400k
     limit:
       context: 400000
-      output: 128000
+      input: 272000
+      output: 32000
     reasoning:
       summary: auto
     text:
@@ -269,6 +275,7 @@ model_templates:
   gpt-1m: &gpt-1m
     limit:
       context: 1000000
+      input: 922000
       output: 128000
     reasoning:
       summary: auto
@@ -307,15 +314,13 @@ providers:
   codex:
     preset: codex
     models:
-      gpt-5.2: *gpt-400k
-      gpt-5.4: *gpt-1m
+      gpt-5.5: *gpt-400k
 
   openai:
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.2: *gpt-400k
       gpt-5.4: *gpt-1m
-      gpt-5.5: *gpt-1m
+      gpt-5.5: *gpt-400k
 
   anthropic:
     type: messages
@@ -326,7 +331,8 @@ providers:
 
 用到的模型字段含义：
 
-- `limit.context`：模型上下文窗口大小。
+- `limit.context`：已知时表示总请求窗口大小。
+- `limit.input`：输入侧 token 预算。Chord 用它来决定自动压缩阈值、oversize 恢复等输入预算相关逻辑。若省略，则为兼容旧配置，自动回退到 `limit.context`。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
 - `limit.output`：模型自身最大输出 token。实际请求还会受 `max_output_tokens` 限制。
 - `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
 - `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
@@ -360,7 +366,9 @@ providers:
 
 ## 输出 token 上限
 
-`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用上下文限制。
+`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制。
+
+对 split-limit 模型，`limit.input` 仍然只表示输入侧预算，用于自动压缩和 oversize 恢复。降低它或降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
 
 ```yaml
 max_output_tokens: 32000
@@ -506,7 +514,34 @@ context:
   compact_model: openai/gpt-5.4-mini
 ```
 
-模型上下文较小时，建议保持自动压缩开启。
+自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，为兼容旧配置，回退到 `limit.context`。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。
+
+可通过配置预留 headroom，用于 tokenizer 漂移、tool schema 开销和压缩/恢复安全余量：
+
+```yaml
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+  compaction:
+    reserved: 16000
+```
+
+例如当模型配置为 `input: 272000` 时，以上配置会让自动压缩按 `256000` 的可用输入预算触发。
+
+对 split-limit 模型，已知限制时建议三个字段都写明：
+
+```yaml
+providers:
+  openai:
+    models:
+      gpt-5.5:
+        limit:
+          context: 400000
+          input: 272000
+          output: 32000
+```
+
+原因是降低 `output` 并不会提高 provider 的硬输入上限。若所选模型输入预算较小，或 provider 明确区分 input/output limit，建议保持自动压缩开启。
 
 ## Provider 连通性自检
 
@@ -528,7 +563,7 @@ chord test-providers --provider openai
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为 `provider/model`（或 `model@variant`）。见 [模型池](#模型池)。           |
-| `context`               | object                | 见下文                          | global / project         | `auto_compact`、`compact_threshold`、`compact_model`。见 [上下文压缩](#上下文压缩)。                                  |
+| `context`               | object                | 见下文                          | global / project         | `auto_compact`、`compact_threshold`、`compact_model`、`compaction.reserved`。见 [上下文压缩](#上下文压缩)。                                  |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
@@ -543,7 +578,7 @@ chord test-providers --provider openai
 | `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
-| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制。                                                    |
+| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
 | `worktree`              | object                | 空                              | global / project         | `chord --worktree` 与 `chord worktree …` 子命令的默认值。                                                            |
@@ -562,8 +597,10 @@ chord test-providers --provider openai
 
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
-| `limit.context`   | int    | 上下文 token 上限。                                                                                               |
+| `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，也会作为输入预算的回退值。                                       |
+| `limit.input`     | int    | 输入侧 token 预算。对 split-limit 模型，Chord 用它决定自动压缩与 oversize 恢复等输入预算相关逻辑。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
+| `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compact_threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
 | `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |
 | `text.verbosity`  | string | OpenAI 文本详细程度提示，支持的模型生效。                                                                      |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |

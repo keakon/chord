@@ -55,8 +55,9 @@ providers:
     models:
       openai/gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
         modalities:
           input: [text, image]
 ```
@@ -85,9 +86,12 @@ providers:
     models:
       gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
 ```
+
+For `gpt-5.5`, use a conservative split-limit config unless you have verified provider-specific numbers. Chord's current docs use `context=400000`, `input=272000`, `output=32000` as a documentation baseline because that keeps auto-compaction and oversize recovery aligned with a commonly observed input-side cap; it is not a claim that every provider/runtime exposes the same limits.
 
 ### OpenAI Codex preset
 
@@ -97,10 +101,11 @@ providers:
     preset: codex
     type: responses
     models:
-      gpt-5.4:
+      gpt-5.5:
         limit:
-          context: 1000000
-          output: 128000
+          context: 400000
+          input: 272000
+          output: 32000
 ```
 
 ### Google Gemini
@@ -142,10 +147,10 @@ openai:
 
 You can list multiple keys for rotation or backup.
 
-For OAuth credentials under `preset: codex`, Chord may also persist provider-specific soft hints in `auth.yaml`:
+For OAuth credentials under `preset: codex`, Chord may also persist provider-specific soft hints in `auth.yaml` under the same provider key. For example, if the provider is named `codex` in `config.yaml`:
 
 ```yaml
-openai:
+codex:
   - refresh: "..."
     access: "..."
     expires: 1774009702606
@@ -277,7 +282,8 @@ model_templates:
   gpt-400k: &gpt-400k
     limit:
       context: 400000
-      output: 128000
+      input: 272000
+      output: 32000
     reasoning:
       summary: auto
     text:
@@ -295,6 +301,7 @@ model_templates:
   gpt-1m: &gpt-1m
     limit:
       context: 1000000
+      input: 922000
       output: 128000
     reasoning:
       summary: auto
@@ -333,15 +340,13 @@ providers:
   codex:
     preset: codex
     models:
-      gpt-5.2: *gpt-400k
-      gpt-5.4: *gpt-1m
+      gpt-5.5: *gpt-400k
 
   openai:
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.2: *gpt-400k
       gpt-5.4: *gpt-1m
-      gpt-5.5: *gpt-1m
+      gpt-5.5: *gpt-400k
 
   anthropic:
     type: messages
@@ -352,7 +357,12 @@ providers:
 
 Model fields used in the example:
 
-- `limit.context`: model context window size.
+- `limit.context`: total request window in tokens when the provider exposes it.
+- `limit.input`: input-side token budget. Chord uses this for auto-compaction,
+  oversize recovery, and other prompt-size decisions. If omitted, Chord falls
+  back to `limit.context` for backward compatibility. It does not by itself
+  reduce requested output tokens; output clamping follows `limit.output`,
+  `max_output_tokens`, and any total-context (`limit.context`) remainder.
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`.
 - `reasoning`: OpenAI reasoning options, mainly for Responses-style reasoning
@@ -402,7 +412,9 @@ unless your provider or gateway benefits from compressed request bodies.
 
 ## Output token cap
 
-Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available context.
+Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known).
+
+On split-limit models, `limit.input` remains an input-side budget for compaction and oversize recovery. Lowering `max_output_tokens` can reduce cost and long-response failure risk, but it does **not** increase a provider's input allowance or replace `limit.input`.
 
 ```yaml
 max_output_tokens: 32000
@@ -559,8 +571,41 @@ context:
   compact_model: openai/gpt-5.4-mini
 ```
 
-Keeping automatic compaction enabled is recommended when your selected models
-have smaller context windows.
+Automatic compaction is driven by the **usable input-side** budget. If a model config
+sets `limit.input`, Chord starts from that value; otherwise it falls back to
+`limit.context` for backward compatibility. If `context.compaction.reserved` is
+set, Chord subtracts it before applying `compact_threshold`.
+
+You can reserve headroom for tokenizer drift, tool-schema overhead, and
+compaction/recovery safety margin:
+
+```yaml
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+  compaction:
+    reserved: 16000
+```
+
+With that setting, a model configured as `input: 272000` will trigger automatic
+compaction based on a usable input budget of `256000` tokens.
+
+For split-limit models, use all three fields when you know them:
+
+```yaml
+providers:
+  openai:
+    models:
+      gpt-5.5:
+        limit:
+          context: 400000
+          input: 272000
+          output: 32000
+```
+
+This matters because reducing `output` does not increase a provider's hard
+input allowance. Keeping automatic compaction enabled is recommended when your
+selected models have smaller input budgets or split input/output limits.
 
 ## Provider connectivity check
 
@@ -582,7 +627,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of `provider/model` (and `model@variant`) refs. See [Model pools](#model-pools-selecting-providermodel). |
-| `context`               | object                | see below                        | global / project         | `auto_compact`, `compact_threshold`, `compact_model`. See [Context compaction](#context-compaction).                     |
+| `context`               | object                | see below                        | global / project         | `auto_compact`, `compact_threshold`, `compact_model`, `compaction.reserved`. See [Context compaction](#context-compaction).                     |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
@@ -597,7 +642,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization — LSP](./customization.md#lsp).                                          |
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
-| `max_output_tokens`     | int                   | model-default                    | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`.                  |
+| `max_output_tokens`     | int                   | model-default                    | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`; reasoning requests also respect it. |
 | `proxy`                 | string                | empty (use env / direct)         | global / project         | Global proxy URL. Per-tool override via `web_fetch.proxy`.                                                              |
 | `web_fetch`             | object                | empty                            | global / project         | `user_agent`, `proxy` (inherits global if nil; empty string = direct). See [WebFetch](#webfetch).                       |
 | `worktree`              | object                | empty                            | global / project         | Defaults for `chord --worktree` and `chord worktree …` subcommands.                                                     |
@@ -616,8 +661,10 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 | Field             | Type   | Description                                                                                                            |
 | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `limit.context`   | int    | Context window size in tokens.                                                                                         |
-| `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                 |
+| `limit.context`   | int    | Total request window in tokens when known. Used as the fallback input budget when `limit.input` is omitted.                      |
+| `limit.input`     | int    | Input-side token budget. Chord uses this for auto-compaction and oversize recovery decisions on split-limit models.               |
+| `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
+| `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compact_threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
 | `reasoning`       | object | OpenAI reasoning options (`summary`, `effort`). Variants commonly override `reasoning.effort`.                         |
 | `text.verbosity`  | string | OpenAI text verbosity hint where supported.                                                                            |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |

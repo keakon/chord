@@ -8,13 +8,12 @@
 //   4. Rewrites relative ./xxx.md links to root /xxx/ slugs for English and /zh/xxx/ for Chinese.
 //   5. Promotes "> **Note:** ...", "> **Important:** ..." block-quotes into
 //      Starlight :::note / :::caution / :::danger admonitions.
-//   6. For docs/examples/index*.md, inlines the four yaml example files as
-//      fenced code blocks so the rendered page is self-contained.
+//   6. Syncs docs/examples/*.md as ordinary markdown pages. Example YAML files
+//      remain source assets and can still be linked from the docs or repository.
 //
 // Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +22,6 @@ const __dirname = path.dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, '..');
 const docsDir = path.join(repoRoot, 'docs');
-const examplesDir = path.join(docsDir, 'examples');
 const websiteContentDir = path.join(repoRoot, 'website', 'src', 'content', 'docs');
 const enDir = websiteContentDir;
 const zhDir = path.join(websiteContentDir, 'zh');
@@ -118,14 +116,6 @@ function rewriteLinks(body, lang) {
     });
 }
 
-function anchorForYamlHeading(filename) {
-  return `#${filename.toLowerCase().replace(/\./g, '')}`;
-}
-
-function rewriteExampleIndexYamlLinks(body) {
-  return body.replace(/\(\.\/([\w.-]+\.yaml)\)/g, (_m, filename) => `(${anchorForYamlHeading(filename)})`);
-}
-
 // Promote the simple "> **Note:**" / "> **Important:** / **Warning:**" patterns
 // into Starlight ::: admonitions.
 function rewriteAdmonitions(body) {
@@ -171,46 +161,6 @@ async function syncOne(srcPath, lang, targetSlug) {
   await writeFile(targetPath, out, 'utf8');
 }
 
-async function syncExamples() {
-  // Build a single page per language: index intro + each yaml as a fenced block.
-  const yamlFiles = (await readdir(examplesDir))
-    .filter((name) => name.endsWith('.yaml'))
-    .sort();
-
-  for (const lang of ['en', 'zh']) {
-    const indexFile = lang === 'zh' ? 'index_CN.md' : 'index.md';
-    const indexPath = path.join(examplesDir, indexFile);
-    if (!existsSync(indexPath)) continue;
-
-    const raw = await readFile(indexPath, 'utf8');
-    const { title, body } = extractTitleAndBody(raw);
-    const description = deriveDescription(body);
-    let intro = rewriteLinks(body, lang);
-    intro = rewriteExampleIndexYamlLinks(intro);
-    intro = rewriteAdmonitions(intro);
-
-    let out = buildFrontmatter({ title, description });
-    out += intro.trimStart();
-    out += '\n\n---\n\n';
-    out += lang === 'zh'
-      ? '## 完整 YAML 内容\n\n下面是上表中每个示例文件的完整内容，可直接复制粘贴。\n\n'
-      : '## Full YAML contents\n\nBelow is the verbatim content of each example file listed above, ready to copy.\n\n';
-    for (const yaml of yamlFiles) {
-      const yamlPath = path.join(examplesDir, yaml);
-      const content = await readFile(yamlPath, 'utf8');
-      out += `### \`${yaml}\`\n\n`;
-      out += '```yaml\n';
-      out += content.replace(/```/g, '` ` `'); // defensive escape
-      out += '```\n\n';
-    }
-
-    const targetDir = lang === 'zh' ? zhDir : enDir;
-    const targetPath = path.join(targetDir, 'examples.md');
-    await mkdir(targetDir, { recursive: true });
-    await writeFile(targetPath, out, 'utf8');
-  }
-}
-
 async function clean() {
   for (const dir of [enDir, zhDir]) {
     await mkdir(dir, { recursive: true });
@@ -238,7 +188,16 @@ async function main() {
     await syncOne(srcPath, lang, slug);
   }
 
-  await syncExamples();
+  const exampleEntries = await readdir(path.join(docsDir, 'examples'), { withFileTypes: true });
+  for (const entry of exampleEntries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith('.md')) continue;
+    const srcPath = path.join(docsDir, 'examples', entry.name);
+    const lang = detectLanguage(entry.name);
+    const baseName = entry.name.replace(/\.md$/, '');
+    const slug = deriveSlug(baseName);
+    await syncOne(srcPath, lang, slug === 'index' ? 'examples' : slug);
+  }
 
   console.log('Synced docs/ → website/src/content/docs/*.md and website/src/content/docs/zh/*.md.');
 }

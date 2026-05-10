@@ -78,6 +78,7 @@ providers:
       Qwen/Qwen3.5-397B-A17B:
         limit:
           context: 262144
+          input: 262144
           output: 65536
         modalities:
           input: [text, image]
@@ -89,7 +90,7 @@ model_pools:
 
 `providers` 定义可用的 API 端点和模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置——只配 provider 不配模型池的话，启动会报找不到默认模型池。内置 `builder` 只引用 `default` 池，不会自动使用全局 `model_pools`；用自定义 `builder` agent 覆盖内置配置时，也必须显式配置 `model_pools` 或 `models`。
 
-换用其他 ModelScope 模型或其他 OpenAI 兼容接口时，把 `api_url`、provider 名和模型名改成对应值，同步更新 `model_pools.default` 中的 `provider/model` 引用即可。
+换用其他 ModelScope 模型或其他 OpenAI 兼容接口时，把 `api_url`、provider 名和模型名改成对应值，同步更新 `model_pools.default` 中的 `provider/model` 引用即可。若模型区分输入和输出限制，请同时配置 `limit.input`；未配置时，Chord 会回退到 `limit.context` 来计算自动压缩和 oversize 恢复预算。
 
 ## 4. 运行
 

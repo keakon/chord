@@ -1,10 +1,17 @@
-# Anthropic minimal — single provider, single key, single pool
-#
-# Pair with ~/.config/chord/auth.yaml:
-#
-#   anthropic:
-#     - "$ANTHROPIC_API_KEY"
+# 最小可用
 
+这是最小可用的单人配置：一个 provider、一个 key、一个模型池。
+
+## `~/.config/chord/auth.yaml`
+
+```yaml
+anthropic:
+  - "$ANTHROPIC_API_KEY"
+```
+
+## `~/.config/chord/config.yaml`
+
+```yaml
 providers:
   anthropic:
     type: messages
@@ -31,3 +38,6 @@ context:
 
 desktop_notification: true
 log_level: info
+```
+
+适合先确认：provider 能连通、凭据没问题、基本对话和自动压缩都正常。

@@ -1,14 +1,12 @@
-# Team-ready: strict permissions, hooks-based auditing, project-level overrides
+# Team-ready project baseline
 #
-# This is the kind of config you would commit as ~/.config/chord/config.yaml
-# **plus** a project-level .chord/config.yaml in your team repository.
+# Keep the shared layout split across real files:
+# - ~/.config/chord/config.yaml          personal defaults + providers
+# - ~/.config/chord/auth.yaml            personal credentials
+# - <repo>/.chord/config.yaml            shared project defaults
+# - <repo>/.chord/agents/*.md            shared agent roles
 #
-# Pair with ~/.config/chord/auth.yaml that has the relevant API keys, and a
-# scripts/chord-hooks/ directory in your repo that contains the hook scripts.
-
-# ---------------------------------------------------------------------------
-# Global ~/.config/chord/config.yaml
-# ---------------------------------------------------------------------------
+# See docs/examples/examples-team*.md for the full multi-file layout.
 
 providers:
   anthropic:
@@ -18,6 +16,7 @@ providers:
       claude-opus-4.7:
         limit:
           context: 1000000
+          input: 1000000
           output: 128000
         thinking:
           type: adaptive
@@ -26,6 +25,8 @@ providers:
 model_pools:
   thinking:
     - anthropic/claude-opus-4.7
+  fast:
+    - anthropic/claude-opus-4.7
 
 context:
   auto_compact: true
@@ -33,87 +34,3 @@ context:
 
 desktop_notification: true
 log_level: info
-
-# ---------------------------------------------------------------------------
-# Project-level <repo>/.chord/config.yaml (commit this)
-# ---------------------------------------------------------------------------
-# Copy the block below into <repo>/.chord/config.yaml — chord merges it on top
-# of the user-level config.
-
-# context:
-#   compact_model: anthropic/claude-opus-4.7   # use the same model for compaction
-#
-# # Hooks: audit Shell, lint Go on edit batches, redact secrets from output
-# hooks:
-#   on_tool_call:
-#     - name: audit-shell
-#       tools: ["Shell"]
-#       command: ["./scripts/chord-hooks/audit-shell.sh"]
-#       timeout: 5
-#
-#   on_tool_batch_complete:
-#     - name: golangci-lint
-#       tools: ["Edit", "Write", "Delete"]
-#       paths: ["**/*.go"]
-#       min_changed_files: 1
-#       command: ["./scripts/chord-hooks/run-golangci-lint.sh"]
-#       result: append_on_failure
-#       result_format: tail
-#       max_result_lines: 80
-#       join: before_next_llm
-#
-#   on_before_tool_result_append:
-#     - name: redact-keys
-#       tools: ["Shell", "WebFetch", "Read"]
-#       command: ["./scripts/chord-hooks/redact-keys.sh"]
-#       timeout: 3
-#
-# # MCP exposes a curated subset of remote tools
-# mcp:
-#   search:
-#     url: https://mcp.exa.ai/mcp
-#     allowed_tools:
-#       - web_search_exa
-#       - web_fetch_exa
-#
-# # LSP for the project's languages
-# lsp:
-#   gopls:
-#     command: gopls
-#     file_types: [".go"]
-#     root_markers: ["go.work", "go.mod"]
-#
-# # Project-scoped slash commands the team shares
-# commands:
-#   /review: |
-#     Please review the staged diff for correctness, security, and style.
-#     Highlight the most impactful issues first.
-#   /commit: |
-#     Generate a Conventional Commit message based on the staged diff.
-
-# ---------------------------------------------------------------------------
-# Per-agent strictness — committed under <repo>/.chord/agents/
-# ---------------------------------------------------------------------------
-# Example: <repo>/.chord/agents/builder.md
-#
-#   ---
-#   name: builder
-#   mode: main
-#   model_pools: [thinking]
-#   permission:
-#     Read: allow
-#     Grep: allow
-#     Glob: allow
-#     Write: ask
-#     Edit: ask
-#     Delete: ask
-#     Shell:
-#       "go test ./...": allow
-#       "go build ./...": allow
-#       "git status": allow
-#       "git diff": allow
-#       "rm *": deny
-#       "sudo *": deny
-#   ---
-#   You are the team's main coder. Default to small, focused commits.
-#   Always run `go test ./...` before considering a task complete.

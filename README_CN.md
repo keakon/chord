@@ -59,6 +59,7 @@ providers:
       Qwen/Qwen3.5-397B-A17B:
         limit:
           context: 262144
+          input: 262144
           output: 65536
         modalities:
           input: [text, image]
@@ -78,7 +79,7 @@ YAML
 cd my-project && chord
 ```
 
-换用其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+换用其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。如果模型区分输入和输出限制，请同时写明 `limit.input`；未配置时，Chord 会回退到 `limit.context`。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
 ### Release 下载说明
 

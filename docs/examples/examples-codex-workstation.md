@@ -1,0 +1,124 @@
+# Codex + LSP
+
+Use this setup when you want:
+
+- OAuth with `preset: codex`
+- Go and Python LSP support
+- an extra read-only reviewer agent
+
+## `~/.config/chord/config.yaml`
+
+```yaml
+providers:
+  codex:
+    preset: codex
+    type: responses
+    models:
+      gpt-5.5:
+        limit:
+          context: 400000
+          input: 272000
+          output: 32000
+        reasoning:
+          summary: auto
+        text:
+          verbosity: medium
+        variants:
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+        modalities:
+          input: [text, image]
+
+  fast:
+    type: chat-completions
+    api_url: https://api.openai.com/v1/chat/completions
+    models:
+      gpt-5.4-mini:
+        limit:
+          context: 200000
+          input: 183616
+          output: 16384
+
+model_pools:
+  thinking:
+    - codex/gpt-5.5@high
+    - codex/gpt-5.5
+  fast:
+    - fast/gpt-5.4-mini
+
+lsp:
+  gopls:
+    command: gopls
+    file_types: [".go"]
+    root_markers: ["go.work", "go.mod", ".git"]
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+    options:
+      python.analysis:
+        typeCheckingMode: standard
+
+context:
+  auto_compact: true
+  compact_threshold: 0.8
+  compact_model: fast/gpt-5.4-mini
+  compaction:
+    reserved: 16000
+
+desktop_notification: true
+prevent_sleep: true
+ime_switch_target: com.apple.keylayout.ABC
+log_level: info
+```
+
+## `~/.config/chord/auth.yaml`
+
+Codex OAuth credentials are usually written by `chord auth codex`, so you do not normally hand-edit them. They are stored under the active provider name, so with the config above `auth.yaml` typically contains entries like:
+
+```yaml
+codex:
+  - refresh: "..."
+    access: "..."
+    expires: 1774009702606
+    account_id: acc-1
+```
+
+## `~/.config/chord/agents/reviewer.md`
+
+```md
+---
+name: "reviewer"
+description: "Read-only code reviewer"
+mode: "subagent"
+model_pools:
+  - thinking
+permission:
+  "*": deny
+  Read: allow
+  Grep: allow
+  Glob: allow
+  Shell:
+    "*": allow
+    "rm *": deny
+    "mv *": deny
+    "git add *": deny
+    "git commit *": deny
+    "git push *": deny
+    "sudo *": deny
+---
+## Role
+
+- Review recent code changes for correctness, risk, and missing verification.
+- Stay read-only; do not modify project files.
+```
+
+Two practical points matter here:
+
+- Split-limit models should set `limit.input`, otherwise auto-compaction and oversize recovery fall back to `limit.context`.
+- Lowering `max_output_tokens` or `limit.output` can reduce cost, but it does not increase a provider's `272k` input allowance.
+- Same-named models on different providers are still tried independently in the fallback chain; Chord does not skip them just because the model name matches.

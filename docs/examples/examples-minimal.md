@@ -1,10 +1,17 @@
-# Anthropic minimal — single provider, single key, single pool
-#
-# Pair with ~/.config/chord/auth.yaml:
-#
-#   anthropic:
-#     - "$ANTHROPIC_API_KEY"
+# Minimal
 
+This is the smallest practical personal setup: one provider, one key, and one model pool.
+
+## `~/.config/chord/auth.yaml`
+
+```yaml
+anthropic:
+  - "$ANTHROPIC_API_KEY"
+```
+
+## `~/.config/chord/config.yaml`
+
+```yaml
 providers:
   anthropic:
     type: messages
@@ -31,3 +38,6 @@ context:
 
 desktop_notification: true
 log_level: info
+```
+
+Use this when you want to verify provider connectivity, credentials, basic chat flow, and auto-compaction with the smallest working config.

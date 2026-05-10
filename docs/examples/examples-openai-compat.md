@@ -1,14 +1,24 @@
-# OpenAI-compatible gateway: multi-key rotation + endpoint failover
-#
-# Pair with ~/.config/chord/auth.yaml:
-#
-#   primary:
-#     - "$PRIMARY_KEY_A"
-#     - "$PRIMARY_KEY_B"
-#     - "$PRIMARY_KEY_C"
-#   backup:
-#     - "$BACKUP_KEY"
+# OpenAI-compatible gateway
 
+Use this pattern when you sit behind an OpenAI-compatible gateway and want:
+
+- multiple keys under a provider for rotation or failover
+- model-pool fallback from a primary endpoint to a backup endpoint
+
+## `~/.config/chord/auth.yaml`
+
+```yaml
+primary:
+  - "$PRIMARY_KEY_A"
+  - "$PRIMARY_KEY_B"
+  - "$PRIMARY_KEY_C"
+backup:
+  - "$BACKUP_KEY"
+```
+
+## `~/.config/chord/config.yaml`
+
+```yaml
 providers:
   primary:
     type: chat-completions
@@ -46,3 +56,12 @@ context:
   compact_model: primary/llama3-8b
 
 log_level: info
+```
+
+If the gateway itself sits behind a proxy, add this separately:
+
+```yaml
+proxy: socks5://127.0.0.1:1080
+```
+
+The main point of this example is the provider / key / pool failover chain, not custom agents.
