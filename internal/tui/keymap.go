@@ -46,7 +46,7 @@ type KeyMap struct {
 
 	// Normal and Insert modes – multi-agent
 	SwitchAgent []string // cycle focused agent view (Shift+Tab)
-	SwitchRole  []string // cycle main agent role (Tab, only in main agent view)
+	SwitchRole  []string // cycle main agent mode (Tab, only when focused on main)
 
 	// Both Insert and Normal modes
 	SwitchModel []string // open model pool selector

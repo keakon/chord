@@ -74,8 +74,8 @@ TUI 有两种模式：
 
 | 按键          | 动作                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `Tab`         | 切换主 agent role（仅在 main-agent 视图下生效）                                                                 |
-| `Shift+Tab`   | 在主 agent 与所有活跃 SubAgent 视图之间循环切换焦点                                                           |
+| `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
+| `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |

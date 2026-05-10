@@ -4,11 +4,11 @@
 
 ## MainAgent
 
-会话内唯一的主 agent。它负责面向用户的对话，也是唯一能派出 SubAgent 的角色。当前主 role 显示在 TUI 状态栏，在 main 视图里用 `Tab` 循环切换。
+会话内唯一的主 agent。它负责面向用户的对话，也是唯一能派出 SubAgent 的角色。当前主模式（role）显示在 TUI 状态栏，仅在 main 视图里可用 `Tab` 循环切换。
 
 ## SubAgent
 
-由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的对话预算（context window，上下文窗口）、system prompt 和权限，完成后通过 `agent_done` 事件汇报摘要。`Shift+Tab` 在多个 SubAgent 视图间切换焦点。
+由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的对话预算（context window，上下文窗口）、system prompt 和权限，完成后通过 `agent_done` 事件汇报摘要。`Shift+Tab` 可在主 agent 与各 SubAgent 之间循环切换当前查看的 agent 视图。
 
 ## Pool（模型池）
 

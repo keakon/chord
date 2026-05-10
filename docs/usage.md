@@ -210,8 +210,8 @@ You can also define **custom** slash commands (per project or globally). See [Cu
 
 Chord supports cooperation between MainAgent and SubAgents.
 
-- `Tab`: switch the main agent role
-- `Shift+Tab`: switch focus between the main agent and subagents
+- `Tab`: cycle the main agent mode (role) shown in the status bar (main view only)
+- `Shift+Tab`: cycle the focused agent view between the main agent and subagents
 
 In a SubAgent view, you can inspect that agent's context and output. Finished SubAgent views are read-only.
 

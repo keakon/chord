@@ -74,8 +74,8 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
-| `Tab`        | Cycle the main agent role (only in the main-agent view)                                                   |
-| `Shift+Tab`  | Cycle focus across the main agent and any active SubAgent views                                           |
+| `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
+| `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
