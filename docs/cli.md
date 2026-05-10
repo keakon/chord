@@ -218,10 +218,13 @@ Rebase the worktree branch onto the main line, fast-forward that main branch to 
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `--onto <branch>`| Target main branch to rebase onto and fast-forward (default: the main worktree's current branch)                            |
 | `--force`        | Relax clean-tree checks; pass `--autostash` to git rebase; force-delete the branch when reclaiming                          |
+| `--check`        | Preview whether the rebase would succeed cleanly in a temporary worktree without mutating the real worktree or branch       |
 
 If a rebase hits conflicts, `finish` exits with explicit recovery hints (`git status`, `git rebase --show-current-patch`, then choose `--skip` / `--continue` / `--abort`) and keeps the worktree and branch so you can resolve and re-run.
 
 If a rebase is already in progress in the worktree, `finish` exits early instead of starting another rebase.
+
+Use `--check` when you want a conflict preflight without leaving the real worktree in a half-rebased state.
 
 ### Examples
 

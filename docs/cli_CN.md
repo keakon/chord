@@ -218,10 +218,13 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `--onto <分支>`  | 目标主分支（默认主 worktree 当前分支）                                                                                |
 | `--force`        | 放宽 clean-tree 检查；用 `git rebase --autostash`；回收时强删分支                                                     |
+| `--check`        | 在临时 worktree 里预检 rebase 是否能干净通过，不改动真实 worktree 和分支                                              |
 
 rebase 出现冲突时，`finish` 会打印恢复指引（`git status`、`git rebase --show-current-patch`，再根据情况选择 `--skip` / `--continue` / `--abort`），同时保留 worktree 与分支，让你解决冲突后重跑。
 
 worktree 内已有进行中的 rebase 时，`finish` 直接退出，提示先完成已有 rebase。
+
+只想提前判断会不会冲突、又不想把真实 worktree 留在半个 rebase 状态时，用 `--check`。
 
 ### 示例
 

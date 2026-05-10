@@ -36,6 +36,18 @@ func runTestGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func mustRunGit(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), gitTestEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return out
+}
+
 // setupTestRepo creates an empty git repo under t.TempDir() with a
 // single commit on its default branch, returns the canonical repo path.
 func setupTestRepo(t *testing.T) string {
@@ -396,6 +408,30 @@ func TestFinish_RefusesDirtyWorktreeWithoutForce(t *testing.T) {
 	}
 }
 
+func TestFinish_RefusesNilPathLocator(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	if _, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: setupTestLocator(t)}); err != nil {
+		t.Fatal(err)
+	}
+	err := Finish(ctx, repo, "feat", FinishOptions{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "finish worktree: nil PathLocator") {
+		t.Fatalf("expected nil PathLocator error, got %v", err)
+	}
+}
+
+func TestFinish_CheckAllowsNilPathLocator(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	if _, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: setupTestLocator(t)}); err != nil {
+		t.Fatal(err)
+	}
+	err := Finish(ctx, repo, "feat", FinishOptions{Check: true}, nil)
+	if err != nil {
+		t.Fatalf("expected check-only finish to allow nil PathLocator, got %v", err)
+	}
+}
+
 func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -434,6 +470,88 @@ func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error message missing %q:\n%s", want, msg)
 		}
+	}
+}
+
+func TestFinish_Check_SucceedsWithoutMutatingWorktree(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	beforeHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+	if err := Finish(ctx, repo, "feat", FinishOptions{Check: true}, pl); err != nil {
+		t.Fatalf("Finish --check: %v", err)
+	}
+	afterHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+	if beforeHead != afterHead {
+		t.Fatalf("worktree HEAD changed during check: before=%s after=%s", beforeHead, afterHead)
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Fatalf("worktree missing after check: %v", err)
+	}
+	status := strings.TrimSpace(string(mustRunGit(t, info.Path, "status", "--short")))
+	if status != "" {
+		t.Fatalf("worktree became dirty after check: %s", status)
+	}
+	branches := string(mustRunGit(t, repo, "branch", "--list", "chord/feat"))
+	if !strings.Contains(branches, "chord/feat") {
+		t.Fatalf("worktree branch missing after check: %s", branches)
+	}
+}
+
+func TestFinish_Check_ReportsConflictsWithoutLeavingRebaseState(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "clash.txt"), []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "clash.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main adds clash")
+
+	if err := os.WriteFile(filepath.Join(info.Path, "clash.txt"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "clash.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree adds clash")
+
+	err = Finish(ctx, repo, "feat", FinishOptions{Check: true}, pl)
+	if err == nil {
+		t.Fatalf("expected check conflict error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"would conflict",
+		"Conflicted files:",
+		"clash.txt",
+		"No changes were made to the real worktree or branch.",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("check error missing %q:\n%s", want, msg)
+		}
+	}
+	if dir, ok, derr := detectRebaseInProgress(ctx, info.Path); derr != nil {
+		t.Fatalf("detectRebaseInProgress: %v", derr)
+	} else if ok {
+		t.Fatalf("real worktree left in rebase state: %s", dir)
+	}
+	status := strings.TrimSpace(string(mustRunGit(t, info.Path, "status", "--short")))
+	if status != "" {
+		t.Fatalf("real worktree became dirty after failed check: %s", status)
 	}
 }
 

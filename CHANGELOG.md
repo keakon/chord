@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Worktree: `chord worktree finish` now supports `--check`, which runs a temporary isolated rebase preflight so you can see whether the worktree would finish cleanly without mutating the real worktree or leaving it mid-rebase on conflicts.
 - **Breaking:** renamed the model-visible command tool from `Bash` to `Shell`. There is no runtime alias or compatibility mapping: update permission rules (`permission.Shell`), hook tool filters, skills `allowed_tools`, imported/saved structured tool calls, headless/tool-event consumers, gateways, and any saved prompts or integrations that refer to the old `Bash` tool name before upgrading.
 - TUI: renamed the sidebar/info-panel file list from `EDITED FILES` to `CHANGED FILES`; files deleted by new `Delete` tool results now render with a strikethrough filename and no fake `-1` line-count stat.
 - TUI: `Write` tool cards now show the written file content as a numbered, syntax-highlighted preview, sharing the same first-10-lines default and space-to-expand behavior as `Read` cards.

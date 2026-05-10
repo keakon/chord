@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -25,6 +26,10 @@ type FinishOptions struct {
 	// Force relaxes the "clean tree" checks and will force-delete the
 	// worktree branch when reclaiming it.
 	Force bool
+	// Check performs a temporary rebase preflight in an isolated worktree and
+	// reports whether Finish is likely to succeed without mutating the real
+	// worktree branch or leaving it mid-rebase.
+	Check bool
 	// BranchPrefix scopes the lookup of the worktree's name to a specific
 	// prefix. Empty falls back to DefaultBranchPrefix. Must match the prefix
 	// Create used.
@@ -43,75 +48,15 @@ type FinishOptions struct {
 //
 // If any step fails, Finish aborts without removing the worktree/branch.
 func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, pathLocator *config.PathLocator) error {
-	if err := ValidateSlug(name); err != nil {
-		return err
-	}
-	if pathLocator == nil {
+	if !opts.Check && pathLocator == nil {
 		return fmt.Errorf("finish worktree: nil PathLocator")
 	}
-	mainRoot, err := GitMainRoot(ctx, repoRoot)
+	mainRoot, info, onto, redundant, err := prepareFinish(ctx, repoRoot, name, opts)
 	if err != nil {
 		return err
 	}
-	info, err := ResolveByName(ctx, mainRoot, name, opts.BranchPrefix)
-	if err != nil {
-		return err
-	}
-
-	onto := strings.TrimSpace(opts.Onto)
-	if onto == "" {
-		onto, err = runGitText(ctx, mainRoot, "branch", "--show-current")
-		if err != nil {
-			return err
-		}
-		if onto == "" {
-			return fmt.Errorf("cannot determine main branch (detached HEAD in %s); pass --onto", mainRoot)
-		}
-	}
-	if onto == info.Branch {
-		return fmt.Errorf("target branch %q equals worktree branch; pass --onto to choose the main branch", onto)
-	}
-
-	if !opts.Force {
-		if dirty, ok := IsDirty(ctx, info.Path); ok && dirty {
-			return fmt.Errorf("worktree %q has uncommitted changes; commit/stash them or pass --force", name)
-		}
-		if dirty, ok := IsDirty(ctx, mainRoot); ok && dirty {
-			return fmt.Errorf("main repository has uncommitted changes; clean it or pass --force")
-		}
-	}
-
-	// 1) Rebase the chord-managed worktree branch onto the target branch.
-	// Be explicit about the branch: users might have checked out something else
-	// inside the worktree, but `finish <name>` is defined in terms of the
-	// chord-managed branch for that worktree.
-	wtBranch, err := runGitText(ctx, info.Path, "branch", "--show-current")
-	if err != nil {
-		return err
-	}
-	if wtBranch == "" {
-		return fmt.Errorf("worktree %q is in detached HEAD state; check out %q (or recreate the worktree) before finishing", name, info.Branch)
-	}
-	if wtBranch != info.Branch {
-		return fmt.Errorf("worktree %q is currently on branch %q (expected %q); check out %q (or pass the correct worktree name)", name, wtBranch, info.Branch, info.Branch)
-	}
-
-	// Avoid starting a nested rebase. A failed rebase is intentionally left for
-	// the user to resolve; if one is already in progress, we should not attempt
-	// to run another `git rebase` from Finish.
-	if dir, ok, derr := detectRebaseInProgress(ctx, info.Path); derr != nil {
-		return derr
-	} else if ok {
-		return fmt.Errorf("worktree %q already has a rebase in progress (%s); resolve it (git rebase --continue/--skip/--abort) and then re-run `chord worktree finish %s`", name, dir, name)
-	}
-
-	// Best-effort preflight: if the worktree branch contains commits that are
-	// patch-equivalent to commits already in the target branch, rebase is more
-	// likely to hit add/add conflicts. We do not auto-skip anything here; the
-	// warning is carried via the eventual error message when rebase fails.
-	var redundant []string
-	if lines, lerr := listRedundantCherryCommits(ctx, mainRoot, onto, info.Branch); lerr == nil {
-		redundant = lines
+	if opts.Check {
+		return checkFinish(ctx, mainRoot, info, name, onto, opts, redundant)
 	}
 
 	rebaseArgs := []string{"rebase"}
@@ -147,6 +92,124 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		return fmt.Errorf("remove worktree %q after merge: %w", name, err)
 	}
 	return nil
+}
+
+func prepareFinish(ctx context.Context, repoRoot, name string, opts FinishOptions) (mainRoot string, info *Info, onto string, redundant []string, err error) {
+	if err := ValidateSlug(name); err != nil {
+		return "", nil, "", nil, err
+	}
+	mainRoot, err = GitMainRoot(ctx, repoRoot)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+	info, err = ResolveByName(ctx, mainRoot, name, opts.BranchPrefix)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+
+	onto = strings.TrimSpace(opts.Onto)
+	if onto == "" {
+		onto, err = runGitText(ctx, mainRoot, "branch", "--show-current")
+		if err != nil {
+			return "", nil, "", nil, err
+		}
+		if onto == "" {
+			return "", nil, "", nil, fmt.Errorf("cannot determine main branch (detached HEAD in %s); pass --onto", mainRoot)
+		}
+	}
+	if onto == info.Branch {
+		return "", nil, "", nil, fmt.Errorf("target branch %q equals worktree branch; pass --onto to choose the main branch", onto)
+	}
+
+	if !opts.Force {
+		if dirty, ok := IsDirty(ctx, info.Path); ok && dirty {
+			return "", nil, "", nil, fmt.Errorf("worktree %q has uncommitted changes; commit/stash them or pass --force", name)
+		}
+		if dirty, ok := IsDirty(ctx, mainRoot); ok && dirty {
+			return "", nil, "", nil, fmt.Errorf("main repository has uncommitted changes; clean it or pass --force")
+		}
+	}
+
+	wtBranch, err := runGitText(ctx, info.Path, "branch", "--show-current")
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+	if wtBranch == "" {
+		return "", nil, "", nil, fmt.Errorf("worktree %q is in detached HEAD state; check out %q (or recreate the worktree) before finishing", name, info.Branch)
+	}
+	if wtBranch != info.Branch {
+		return "", nil, "", nil, fmt.Errorf("worktree %q is currently on branch %q (expected %q); check out %q (or pass the correct worktree name)", name, wtBranch, info.Branch, info.Branch)
+	}
+
+	if dir, ok, derr := detectRebaseInProgress(ctx, info.Path); derr != nil {
+		return "", nil, "", nil, derr
+	} else if ok {
+		return "", nil, "", nil, fmt.Errorf("worktree %q already has a rebase in progress (%s); resolve it (git rebase --continue/--skip/--abort) and then re-run `chord worktree finish %s`", name, dir, name)
+	}
+
+	if lines, lerr := listRedundantCherryCommits(ctx, mainRoot, onto, info.Branch); lerr == nil {
+		redundant = lines
+	}
+	return mainRoot, info, onto, redundant, nil
+}
+
+func checkFinish(ctx context.Context, mainRoot string, info *Info, name, onto string, opts FinishOptions, redundant []string) error {
+	tmpParent, err := os.MkdirTemp("", "chord-finish-check-")
+	if err != nil {
+		return fmt.Errorf("create temporary finish-check directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpParent) }()
+	tmpPath := filepath.Join(tmpParent, name)
+	if _, err := runGit(ctx, mainRoot, "worktree", "add", "--detach", tmpPath, info.Branch); err != nil {
+		return fmt.Errorf("create temporary finish-check worktree for %q: %w", name, err)
+	}
+	defer func() {
+		_, _ = runGit(context.Background(), mainRoot, "worktree", "remove", "--force", tmpPath)
+	}()
+
+	rebaseArgs := []string{"rebase"}
+	if opts.Force {
+		rebaseArgs = append(rebaseArgs, "--autostash")
+	}
+	rebaseArgs = append(rebaseArgs, onto)
+	if _, err := runGit(ctx, tmpPath, rebaseArgs...); err != nil {
+		conflicts, cerr := conflictedFiles(ctx, tmpPath)
+		if cerr == nil && len(conflicts) > 0 {
+			return fmt.Errorf("finish check for worktree %q onto %q would conflict: %w\n\nConflicted files:\n  %s\n\n%s", name, onto, err, strings.Join(conflicts, "\n  "), finishCheckHelp(name, onto))
+		}
+		return fmt.Errorf("finish check for worktree %q onto %q would fail: %w\n\n%s", name, onto, err, finishRebaseHelp(name, onto, info.Path, redundant))
+	}
+	return nil
+}
+
+func conflictedFiles(ctx context.Context, cwd string) ([]string, error) {
+	out, err := runGitText(ctx, cwd, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	var files []string
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+func finishCheckHelp(name, onto string) string {
+	return fmt.Sprintf(
+		"No changes were made to the real worktree or branch.\n\n"+
+			"To inspect or resolve before finishing:\n"+
+			"  cd <worktree-path>\n"+
+			"  git rebase %s\n\n"+
+			"Or continue working and re-run:\n"+
+			"  chord worktree finish %s\n",
+		onto, name,
+	)
 }
 
 func detectRebaseInProgress(ctx context.Context, cwd string) (string, bool, error) {

@@ -176,6 +176,7 @@ func newWorktreeRemoveCmd() *cobra.Command {
 func newWorktreeFinishCmd() *cobra.Command {
 	var onto string
 	var force bool
+	var check bool
 	cmd := &cobra.Command{
 		Use:           "finish <name>",
 		Short:         "Rebase a worktree back onto the main line, then remove the worktree and its branch",
@@ -212,8 +213,16 @@ func newWorktreeFinishCmd() *cobra.Command {
 					}
 				}
 			}
-			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Force: force, BranchPrefix: branchPrefix}, pl); err != nil {
+			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Force: force, Check: check, BranchPrefix: branchPrefix}, pl); err != nil {
 				return err
+			}
+			if check {
+				if ontoUsed != "" {
+					fmt.Fprintf(os.Stdout, "Worktree %s can finish cleanly into %s\n", name, ontoUsed)
+				} else {
+					fmt.Fprintf(os.Stdout, "Worktree %s can finish cleanly\n", name)
+				}
+				return nil
 			}
 			if ontoUsed != "" {
 				fmt.Fprintf(os.Stdout, "Finished worktree %s into %s\n", name, ontoUsed)
@@ -225,5 +234,6 @@ func newWorktreeFinishCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&onto, "onto", "", "target main branch to rebase onto and fast-forward (default: main worktree's current branch)")
 	cmd.Flags().BoolVar(&force, "force", false, "relax clean-tree checks; use git rebase --autostash; force-delete branch when reclaiming")
+	cmd.Flags().BoolVar(&check, "check", false, "preview whether finish can rebase cleanly without mutating the real worktree")
 	return cmd
 }

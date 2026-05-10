@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -97,5 +98,39 @@ func TestWorktreeRemoveCmd_DefaultPreservesBranch(t *testing.T) {
 	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/alpha").CombinedOutput()
 	if !strings.Contains(string(branches), "chord/alpha") {
 		t.Errorf("branch chord/alpha removed by default; should be preserved")
+	}
+}
+
+func TestWorktreeFinishCmd_CheckReportsCleanPreview(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	info, err := prepareStartupWorktree(context.Background(), "alpha")
+	if err != nil {
+		t.Fatalf("prepareStartupWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatalf("write extra: %v", err)
+	}
+	runStartupGit(t, info.Path, "add", "extra.txt")
+	runStartupGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+	beforeHead := strings.TrimSpace(string(mustRunStartupGit(t, info.Path, "rev-parse", "HEAD")))
+
+	chdirForTest(t, repo)
+	cmd := newWorktreeFinishCmd()
+	out, err := captureStdout(t, func() error {
+		cmd.SetArgs([]string{"alpha", "--check", "--onto", "main"})
+		return cmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("finish --check: %v", err)
+	}
+	if !strings.Contains(out, "Worktree alpha can finish cleanly into main") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	afterHead := strings.TrimSpace(string(mustRunStartupGit(t, info.Path, "rev-parse", "HEAD")))
+	if beforeHead != afterHead {
+		t.Fatalf("worktree HEAD changed during check: before=%s after=%s", beforeHead, afterHead)
 	}
 }
