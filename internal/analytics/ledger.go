@@ -120,11 +120,27 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	summary, err := l.ensureSummaryLocked()
+	if err != nil {
+		return err
+	}
+	if summary != nil && summary.FirstUserMessage != "" {
+		if summary.OriginalFirstUserMessage == "" && !summary.FirstUserMessageIsCompactionSummary {
+			summary.OriginalFirstUserMessage = summary.FirstUserMessage
+			summary.OriginalFirstUserMessageIsCompactionSummary = false
+			l.originalFirstUserMessage = summary.OriginalFirstUserMessage
+			return l.writeSummaryLocked(summary)
+		}
+		return nil
+	}
+
 	if l.firstUserMessage != "" {
 		return nil
 	}
 	l.firstUserMessage = preview
-	l.originalFirstUserMessage = preview
+	if l.originalFirstUserMessage == "" {
+		l.originalFirstUserMessage = preview
+	}
 	if l.summaryLoaded && l.summary != nil {
 		if l.summary.FirstUserMessage == "" {
 			l.summary.FirstUserMessage = preview
@@ -425,6 +441,18 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 	}
 	if summary.FirstUserMessage == "" {
 		summary.FirstUserMessage = l.firstUserMessageLocked()
+	}
+	if summary.FirstUserMessage != "" {
+		if summary.FirstUserMessageIsCompactionSummary {
+			l.firstUserMessage = ""
+		} else {
+			l.firstUserMessage = summary.FirstUserMessage
+		}
+	}
+	if summary.OriginalFirstUserMessage != "" && !summary.OriginalFirstUserMessageIsCompactionSummary {
+		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
+	} else if l.originalFirstUserMessage == "" && summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {
+		l.originalFirstUserMessage = summary.FirstUserMessage
 	}
 	if summary.SessionID == "" {
 		summary.SessionID = filepath.Base(l.sessionDir)

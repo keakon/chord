@@ -105,6 +105,86 @@ func TestRewriteFirstUserMessagePreservesOriginalFirstUserMessage(t *testing.T) 
 	}
 }
 
+func TestSetFirstUserMessageAdoptsExistingSummary(t *testing.T) {
+	dir := t.TempDir()
+	seed := &SessionUsageSummary{
+		Version:                  usageSummaryVersion,
+		SessionID:                filepath.Base(dir),
+		FirstUserMessage:         "original first request",
+		OriginalFirstUserMessage: "original first request",
+		Status:                   "active",
+		ByProvider:               make(map[string]*UsageAggregate),
+		ByModelRef:               make(map[string]*UsageAggregate),
+		ByAgent:                  make(map[string]*UsageAggregate),
+		ByPurpose:                make(map[string]*UsageAggregate),
+		ByDate:                   make(map[string]*UsageAggregate),
+		ByDateModelRef:           make(map[string]map[string]*UsageAggregate),
+		ByDateAgent:              make(map[string]map[string]*UsageAggregate),
+	}
+	data, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("Marshal(seed): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), data, 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.SetFirstUserMessage("continue"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage != "original first request" {
+		t.Fatalf("FirstUserMessage = %q, want %q", summary.FirstUserMessage, "original first request")
+	}
+	if summary.OriginalFirstUserMessage != "original first request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want %q", summary.OriginalFirstUserMessage, "original first request")
+	}
+	if got := ledger.OriginalFirstUserMessage(); got != "original first request" {
+		t.Fatalf("OriginalFirstUserMessage() = %q, want %q", got, "original first request")
+	}
+}
+
+func TestSetFirstUserMessageDoesNotBackfillOriginalFromLaterInput(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.SetFirstUserMessage("original first request"); err != nil {
+		t.Fatalf("SetFirstUserMessage(original): %v", err)
+	}
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	summary.OriginalFirstUserMessage = ""
+	data, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("Marshal(summary): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), data, 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+
+	restoredLedger := NewUsageLedger(dir, "/tmp/project")
+	if err := restoredLedger.SetFirstUserMessage("continue"); err != nil {
+		t.Fatalf("SetFirstUserMessage(continue): %v", err)
+	}
+
+	restoredSummary, err := restoredLedger.Summary()
+	if err != nil {
+		t.Fatalf("Summary(restored): %v", err)
+	}
+	if restoredSummary.FirstUserMessage != "original first request" {
+		t.Fatalf("FirstUserMessage = %q, want %q", restoredSummary.FirstUserMessage, "original first request")
+	}
+	if restoredSummary.OriginalFirstUserMessage != "original first request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want %q", restoredSummary.OriginalFirstUserMessage, "original first request")
+	}
+}
+
 func TestRewriteFirstUserMessageWithOriginalForCompactionSeedsHintWhenNothingKnown(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")
