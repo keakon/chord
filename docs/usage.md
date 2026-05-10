@@ -30,7 +30,7 @@ Common keys:
 - `j` / `k`: move between message cards
 - `gg` / `G`: jump to top / bottom
 - `/`: search messages
-- `Ctrl+J`: open the message directory
+- `Ctrl+T`: open the message directory
 - `Ctrl+P`: switch the main role model pool
 - `Ctrl+O`: open the MCP server selector
 - `Ctrl+G`: export a diagnostics bundle
@@ -227,7 +227,7 @@ Currently supported:
 Common actions:
 
 - `Ctrl+V` / `Cmd+V`: prefer clipboard image input; otherwise paste text (works in the composer and in confirmation-dialog text fields)
-- `Ctrl+F`: attach image paths from the input box to the current message
+- To attach an image by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
 - `Enter` / `o` / `Space`: open the image in the current message in Normal mode
 
 ## Copying text

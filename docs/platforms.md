@@ -66,7 +66,7 @@ Inside `tmux` you may need `set -g allow-passthrough on` for OSC 9 to reach the 
 - **Windows Terminal**: works for many cases.
 - **Inside tmux**: image bytes may not pass through.
 
-When clipboard image paste is unavailable, you can always attach images by path with `Ctrl+F`.
+When clipboard image paste is unavailable, you can still bind `insert_attach_file` yourself and attach images by path from the composer.
 
 ### Terminal-rendered images
 

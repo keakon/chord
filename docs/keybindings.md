@@ -21,10 +21,9 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Enter`            | Send the message                                                                               |
 | `Shift+Enter`      | Insert a newline                                                                               |
 | `Ctrl+J`           | Insert a newline (alternative when terminal does not deliver `Shift+Enter`)                    |
-| `Up` / `Ctrl+P`    | Recall the previous user message into the composer (or move history up if composer non-empty)  |
+| `Up`               | Recall the previous user message into the composer (or move history up if composer non-empty)  |
 | `Down` / `Ctrl+N`  | Move history down                                                                              |
 | `Ctrl+V` / `Cmd+V` | Smart paste: image first if clipboard has one, otherwise text                                  |
-| `Ctrl+F`           | Attach an image file by path from the composer                                                 |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 
 ### Normal mode — leaving and meta
@@ -60,7 +59,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 | Key       | Action                                                              |
 | --------- | ------------------------------------------------------------------- |
-| `Ctrl+J`  | Open the message directory (jump-to-card overlay)                   |
+| `Ctrl+T`  | Open the message directory (jump-to-card overlay)                   |
 | `$`       | Open the usage statistics overlay                                   |
 
 ### Normal mode — search
@@ -77,18 +76,9 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | ------------ | --------------------------------------------------------------------------------------------------------- |
 | `Tab`        | Cycle the main agent role (only in the main-agent view)                                                   |
 | `Shift+Tab`  | Cycle focus across the main agent and any active SubAgent views                                           |
-| `Ctrl+P`     | Open the model-pool selector (Normal mode). In Insert mode `Ctrl+P` first acts as history-up.             |
+| `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
-
-### Note on `Ctrl+P`
-
-`Ctrl+P` is bound to two actions and the active mode decides which wins:
-
-- **Normal mode** — opens the model-pool selector (the `SwitchModel` action).
-- **Insert mode** — acts as history-up (the `InsertHistoryUp` action). To switch the pool from Insert mode, type `/models` and press Enter, or press `Esc` to leave Insert mode first.
-
-If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+t`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
 
 ### Note on `Ctrl+O` and MCP
 
@@ -105,7 +95,7 @@ keymap:
   scroll_down: ["down"]        # arrow keys for line scrolling only
   scroll_up: ["up"]
   quit: ["Q"]                  # require shift for quit
-  switch_model: ["ctrl+t"]     # avoid the Ctrl+P insert-mode collision
+  switch_model: ["ctrl+t"]     # choose a different key if you prefer
 ```
 
 Action names are lower snake_case mirrors of the [`KeyMap` fields](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) in `internal/tui/keymap.go`. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
@@ -117,10 +107,10 @@ Action names are lower snake_case mirrors of the [`KeyMap` fields](https://githu
 | `insert_escape`            | `["esc"]`                        |
 | `insert_submit`            | `["enter"]`                      |
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`      |
-| `insert_history_up`        | `["up", "ctrl+p"]`               |
+| `insert_history_up`        | `["up"]`                          |
 | `insert_history_down`      | `["down", "ctrl+n"]`             |
 | `insert_attach_clipboard`  | `["ctrl+v"]`                     |
-| `insert_attach_file`       | `["ctrl+f"]`                     |
+| `insert_attach_file`       | `[]`                              |
 | `insert_clear_input`       | `["ctrl+u"]`                     |
 | `enter_insert`             | `["i"]`                          |
 | `quit`                     | `["q"]`                          |
@@ -135,7 +125,7 @@ Action names are lower snake_case mirrors of the [`KeyMap` fields](https://githu
 | `prev_block`               | `["k", "{"]`                     |
 | `toggle_collapse`          | `["o", "enter", " ", "space"]`   |
 | `fork_session`             | `["e"]`                          |
-| `directory`                | `["ctrl+j"]`                     |
+| `directory`                | `["ctrl+t"]`                     |
 | `usage_stats`              | `["$"]`                          |
 | `search_start`             | `["/"]`                          |
 | `search_next`              | `["n"]`                          |

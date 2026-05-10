@@ -28,7 +28,7 @@ type Mode int
 const (
 	ModeInsert               Mode = iota // text input is active
 	ModeNormal                           // vim-style navigation
-	ModeDirectory                        // Ctrl+J message directory overlay
+	ModeDirectory                        // Ctrl+T message directory overlay
 	ModeConfirm                          // tool permission confirmation dialog
 	ModeQuestion                         // Question tool multi-choice dialog
 	ModeSearch                           // search input active

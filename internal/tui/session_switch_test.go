@@ -2170,7 +2170,7 @@ func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T)
 		t.Fatal("startup transcript should remain deferred for deferred directory test")
 	}
 
-	cmd = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}))
+	cmd = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 't', Mod: tea.ModCtrl}))
 	applyTestCmd(t, &m, cmd)
 	if m.mode != ModeDirectory {
 		t.Fatalf("mode = %v, want ModeDirectory", m.mode)

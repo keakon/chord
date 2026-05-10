@@ -21,10 +21,9 @@ TUI 有两种模式：
 | `Enter`            | 发送消息                                                                                            |
 | `Shift+Enter`      | 输入换行                                                                                            |
 | `Ctrl+J`           | 输入换行（终端不传 `Shift+Enter` 时的备选）                                                         |
-| `Up` / `Ctrl+P`    | 输入框为空时载入上一条用户消息；非空时历史上翻                                                    |
+| `Up`               | 输入框为空时载入上一条用户消息；非空时历史上翻                                                       |
 | `Down` / `Ctrl+N`  | 历史下翻                                                                                            |
 | `Ctrl+V` / `Cmd+V` | 智能粘贴：剪贴板有图先粘图，否则粘文本                                                              |
-| `Ctrl+F`           | 将输入框中写好的图片路径附加到当前消息                                                              |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
 
 ### Normal 模式 — 退出与元操作
@@ -60,7 +59,7 @@ TUI 有两种模式：
 
 | 按键      | 动作                                                |
 | --------- | --------------------------------------------------- |
-| `Ctrl+J`  | 打开消息目录（跳转到指定卡片）                      |
+| `Ctrl+T`  | 打开消息目录（跳转到指定卡片）                      |
 | `$`       | 打开 Usage 统计浮层                                 |
 
 ### Normal 模式 — 搜索
@@ -77,18 +76,9 @@ TUI 有两种模式：
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Tab`         | 切换主 agent role（仅在 main-agent 视图下生效）                                                                 |
 | `Shift+Tab`   | 在主 agent 与所有活跃 SubAgent 视图之间循环切换焦点                                                           |
-| `Ctrl+P`      | 打开模型池选择器（Normal 模式）。Insert 模式下 `Ctrl+P` 优先充当历史上翻                                        |
+| `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
-
-### 关于 `Ctrl+P` 的特别说明
-
-`Ctrl+P` 同时绑了两个动作，由当前模式决定哪个生效：
-
-- **Normal 模式**：打开模型池选择器（`SwitchModel`）
-- **Insert 模式**：触发历史上翻（`InsertHistoryUp`）。要在 Insert 模式切池，可输入 `/models` 回车，或先按 `Esc` 切到 Normal 模式
-
-若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+t`），见下文 [自定义键位](#自定义键位)。
 
 ### 关于 `Ctrl+O` 与 MCP
 
@@ -105,7 +95,7 @@ keymap:
   scroll_down: ["down"]        # 仅用方向键做行滚动
   scroll_up: ["up"]
   quit: ["Q"]                  # 退出要求大写 Q（防误触）
-  switch_model: ["ctrl+t"]     # 避开 Ctrl+P 在 Insert 模式的冲突
+  switch_model: ["ctrl+t"]     # 如果你更喜欢，也可以改成别的键
 ```
 
 action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go)的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
@@ -117,10 +107,10 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `insert_escape`            | `["esc"]`                         |
 | `insert_submit`            | `["enter"]`                       |
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`       |
-| `insert_history_up`        | `["up", "ctrl+p"]`                |
+| `insert_history_up`        | `["up"]`                           |
 | `insert_history_down`      | `["down", "ctrl+n"]`              |
 | `insert_attach_clipboard`  | `["ctrl+v"]`                      |
-| `insert_attach_file`       | `["ctrl+f"]`                      |
+| `insert_attach_file`       | `[]`                               |
 | `insert_clear_input`       | `["ctrl+u"]`                      |
 | `enter_insert`             | `["i"]`                           |
 | `quit`                     | `["q"]`                           |
@@ -135,7 +125,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `prev_block`               | `["k", "{"]`                      |
 | `toggle_collapse`          | `["o", "enter", " ", "space"]`    |
 | `fork_session`             | `["e"]`                           |
-| `directory`                | `["ctrl+j"]`                      |
+| `directory`                | `["ctrl+t"]`                      |
 | `usage_stats`              | `["$"]`                           |
 | `search_start`             | `["/"]`                           |
 | `search_next`              | `["n"]`                           |

@@ -66,7 +66,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 - **Windows Terminal**：多数情况可以。
 - **tmux 内部**：图片字节通常透不过来。
 
-剪贴板图片粘贴不可用时，仍可用 `Ctrl+F` 将输入框中已有的图片路径附加到消息。
+剪贴板图片粘贴不可用时，你仍可自行给 `insert_attach_file` 绑定快捷键，再通过输入框里的图片路径附加图片。
 
 ### 终端图片渲染
 

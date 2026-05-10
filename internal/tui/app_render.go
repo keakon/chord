@@ -68,7 +68,7 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		if len(m.viewport.blocks) == 0 {
 			welcomeHints := []string{
 				DimStyle.Render("Press ? for help · /help for commands"),
-				DimStyle.Render("i: insert  /: search  ctrl+p: model  ctrl+j: directory"),
+				DimStyle.Render("i: insert  /: search  ctrl+p: model  ctrl+t: directory"),
 				DimStyle.Render("enter: send  esc: normal  ctrl+v: paste image"),
 			}
 			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")

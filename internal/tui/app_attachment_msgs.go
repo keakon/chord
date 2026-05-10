@@ -59,7 +59,7 @@ func userLocalShellCopyBody(b *Block) string {
 func (m *Model) pickImageFile() tea.Cmd {
 	path := strings.TrimSpace(m.input.Value())
 	if path == "" {
-		return m.enqueueToast("Enter image path in the input box then press ctrl+f", "info")
+		return m.enqueueToast("Enter an image path in the input box, then use a custom insert_attach_file binding", "info")
 	}
 	return func() tea.Msg {
 		data, mimeType, err := readImageFile(path)

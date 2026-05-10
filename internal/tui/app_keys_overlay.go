@@ -183,7 +183,7 @@ func (m Model) searchCurrentBlockIndex() int {
 
 func (m *Model) handleDirectoryKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
-	case "esc", "ctrl+j", "q":
+	case "esc", "ctrl+t", "q":
 		cmd := m.switchModeWithIME(ModeNormal)
 		m.recalcViewportSize()
 		return cmd
