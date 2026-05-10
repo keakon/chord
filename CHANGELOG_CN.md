@@ -4,11 +4,14 @@
 
 ## 未发布
 
+## 0.5.2 - 2026-05-11
+
 - Worktree：`chord worktree finish` 现支持 `--check`，会在临时隔离 worktree 中预检一次 rebase，让你提前知道能否干净收尾，同时不改动真实 worktree，也不会在冲突时把它留在半个 rebase 状态。
 - **不兼容变更：** 模型可见的命令执行工具从 `Bash` 重命名为 `Shell`。运行时不提供别名或兼容映射；升级前请同步更新权限规则（`permission.Shell`）、hook 的工具过滤器、skills 的 `allowed_tools`、已导入/已保存的结构化工具调用、headless / tool event 消费方、gateway，以及所有引用旧 `Bash` 工具名的自定义提示词或集成。
 - TUI：增强了 Ghostty/cmux 在切换标签页或重新获焦后的恢复。较晚的 `post-focus-settle-fallback` 现在会在重放整帧前重新校验终端尺寸，减少首轮 `focus-restore` redraw 后仍残留横向分隔线伪影或旧 cell 的情况。
 - TUI：侧边栏 / 信息面板中的文件列表从 `EDITED FILES` 改名为 `CHANGED FILES`；新产生的 `Delete` 工具结果会把被删除文件显示为删除线文件名，并且不再显示伪造的 `-1` 行数统计。
 - TUI：`Write` 工具卡片现在会用带行号、语法高亮的预览展示写入后的文件内容，并与 `Read` 卡片共享默认前 10 行、按空格展开的行为。
+- TUI：默认快捷键已在各模式间对齐：`Ctrl+P` 现保留给模型选择器（移除 Insert 模式历史记录绑定）；消息目录/树从 `Ctrl+J` 移至 `Ctrl+T`；默认 `Ctrl+F`“从输入附加图片路径”绑定已移除（如仍需要，可自行配置 `insert_attach_file`）。
 - Runtime / LLM 重试：API `402` 用量/余额耗尽错误现在会按 per-key 限流处理：Chord 会冷却已耗尽的 key，并在 fallback 前优先尝试同模型下配置的其它 key，避免反复重试同一个已耗尽 key。
 - Tools/Safety：收窄非交互 Shell/Spawn 防护规则。普通 stdin 读取（如 shell `read`/`select`）现在会看到 EOF，不再在执行前被拒绝；依赖终端/TTY 的命令仍会被拦截。
 - Runtime/Codex 限流：provider 用量轮询现在会继承应用上下文，因此关闭/取消时会中止待处理的 Codex 用量刷新，而不会继续挂在脱离生命周期的后台上下文上。

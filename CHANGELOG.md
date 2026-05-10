@@ -4,6 +4,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+## 0.5.2 - 2026-05-11
+
 - Worktree: `chord worktree finish` now supports `--check`, which runs a temporary isolated rebase preflight so you can see whether the worktree would finish cleanly without mutating the real worktree or leaving it mid-rebase on conflicts.
 - **Breaking:** renamed the model-visible command tool from `Bash` to `Shell`. There is no runtime alias or compatibility mapping: update permission rules (`permission.Shell`), hook tool filters, skills `allowed_tools`, imported/saved structured tool calls, headless/tool-event consumers, gateways, and any saved prompts or integrations that refer to the old `Bash` tool name before upgrading.
 - TUI: strengthened Ghostty/cmux post-focus recovery for tab/refocus artifacts. The late `post-focus-settle-fallback` pass now revalidates terminal size before replaying the frame, reducing cases where stale horizontal separator lines or other residual cells survive the first focus-restore redraw.
