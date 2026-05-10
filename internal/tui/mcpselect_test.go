@@ -10,6 +10,89 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+func markMCPModelBusy(m *Model) {
+	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityStreaming}
+}
+
+func TestMCPShortcutOpensPanelDirectlyWhileBusy(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", OK: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.mode = ModeNormal
+	markMCPModelBusy(&m)
+
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModCtrl}))
+	if cmd != nil {
+		t.Fatalf("ctrl+o should open MCP panel without command, got cmd %T", cmd)
+	}
+	if m.mode != ModeMCPSelect {
+		t.Fatalf("mode after ctrl+o while busy = %v, want ModeMCPSelect", m.mode)
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+}
+
+func TestMCPShortcutOpensPanelDirectlyFromInsertWhileBusy(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", OK: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.mode = ModeInsert
+	markMCPModelBusy(&m)
+
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModCtrl}))
+	if cmd != nil {
+		t.Fatalf("ctrl+o should open MCP panel without command, got cmd %T", cmd)
+	}
+	if m.mode != ModeMCPSelect {
+		t.Fatalf("mode after insert ctrl+o while busy = %v, want ModeMCPSelect", m.mode)
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+}
+
+func TestRenderMCPSelectDialogShowsReadOnlyWhenBusy(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", OK: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	markMCPModelBusy(&m)
+	m.openMCPSelect()
+
+	plain := stripANSI(m.renderMCPSelectDialog())
+	if !strings.Contains(plain, "Read-only while agent is running") {
+		t.Fatalf("rendered MCP dialog = %q, want read-only running hint", plain)
+	}
+	if !strings.Contains(plain, "enter/e/d disabled while running") {
+		t.Fatalf("rendered MCP dialog = %q, want disabled button hint", plain)
+	}
+	if strings.Contains(plain, "enter toggle") {
+		t.Fatalf("rendered MCP dialog = %q, should not show active toggle hint while busy", plain)
+	}
+}
+
+func TestMCPSelectBusyRejectsToggleWithoutSendingCommand(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", OK: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	markMCPModelBusy(&m)
+	m.openMCPSelect()
+
+	cmd := m.handleMCPSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("expected busy MCP toggle to return toast command")
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+	if m.activeToast == nil {
+		t.Fatal("expected busy MCP toggle to show toast")
+	}
+	if got := m.activeToast.Message; got != mcpSelectBusyMessage {
+		t.Fatalf("toast message = %q, want %q", got, mcpSelectBusyMessage)
+	}
+}
+
 func TestHandleMCPSelectKeyToggleKeepsPanelOpen(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", Disabled: true, Manual: true}}

@@ -78,7 +78,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Tab`        | Cycle the main agent role (only in the main-agent view)                                                   |
 | `Shift+Tab`  | Cycle focus across the main agent and any active SubAgent views                                           |
 | `Ctrl+P`     | Open the model-pool selector (Normal mode). In Insert mode `Ctrl+P` first acts as history-up.             |
-| `Ctrl+O`     | Open the MCP server selector (`/mcp`)                                                                     |
+| `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
 ### Note on `Ctrl+P`
@@ -89,6 +89,10 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 - **Insert mode** — acts as history-up (the `InsertHistoryUp` action). To switch the pool from Insert mode, type `/models` and press Enter, or press `Esc` to leave Insert mode first.
 
 If you want a single key to switch the pool everywhere, rebind `switch_model` to a different key (e.g. `ctrl+t`) in `config.yaml`. See [Customizing key bindings](#customizing-key-bindings) below.
+
+### Note on `Ctrl+O` and MCP
+
+`Ctrl+O` opens the MCP server selector in both Insert and Normal mode. You can open it while the agent is running to inspect server status, but the panel is read-only until the agent returns to idle. Only servers configured with `manual: true` can be toggled; auto-start servers are always read-only in the selector.
 
 ## Customizing key bindings
 

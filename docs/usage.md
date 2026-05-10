@@ -32,6 +32,7 @@ Common keys:
 - `/`: search messages
 - `Ctrl+J`: open the message directory
 - `Ctrl+P`: switch the main role model pool
+- `Ctrl+O`: open the MCP server selector
 - `Ctrl+G`: export a diagnostics bundle
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
@@ -125,11 +126,18 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/resume`: resume a session
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
+- `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
 - `/compact`: manually trigger context compaction
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 - `/diagnostics`: export a diagnostics bundle for troubleshooting
 
 The following commands have more interactive detail, expanded below.
+
+### MCP selector
+
+Press `Ctrl+O` to open the MCP server selector. It lists configured MCP servers, their connection state, and whether manual servers are currently enabled or disabled. Use `j` / `k` to move, `Enter` to toggle the selected manual server, `e` to enable, `d` to disable, and `Esc` to close.
+
+The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. While running, it is read-only: enable/disable actions are disabled until the agent is idle. Auto-start MCP servers are always read-only in this selector; only servers configured with `manual: true` can be changed at runtime.
 
 ### `/export` — export the current session
 

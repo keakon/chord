@@ -328,9 +328,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 
 	// -- MCP selector --------------------------------------------------------
 	case keyMatches(key, m.keyMap.MCP):
-		if m.agent != nil {
-			m.agent.SendUserMessage("/mcp")
-		}
+		m.openMCPSelect()
 		return nil
 
 	// -- model pool selector ---------------------------------------------------

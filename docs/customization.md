@@ -141,6 +141,8 @@ In local mode, MCP connects asynchronously after the TUI starts. Auto-start serv
 
 Use `manual: true` for MCP servers you do not need in every conversation. The server stays disabled at startup, Chord does not connect to it, and its tool descriptions are not added to the default LLM tool context, reducing everyday context overhead. When you need it, enable it manually with `/mcp` (menu) or `/mcp enable <server>`.
 
+In the TUI, press `Ctrl+O` to open the MCP selector. It can be opened while the agent is running to inspect server state, but it is read-only until the agent returns to idle; this keeps the current turn's LLM tool surface stable.
+
 Only `manual: true` servers can be changed at runtime. Auto-start servers remain part of the default tool context, stay read-only, and are not affected by `/mcp enable|disable`.
 
 ## Custom slash commands

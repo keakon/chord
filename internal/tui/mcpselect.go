@@ -21,6 +21,12 @@ type mcpSelectState struct {
 	prevMode Mode
 }
 
+const (
+	mcpSelectIdleHint     = "j/k move  g/G jump  enter toggle  e enable  d disable  esc close  (auto servers are read-only)"
+	mcpSelectReadOnlyHint = "j/k move  g/G jump  enter/e/d disabled while running  esc close"
+	mcpSelectBusyMessage  = "Wait until the agent is idle before changing MCP"
+)
+
 func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
 	rowsCopy := append([]agent.MCPServerDisplay(nil), rows...)
 	sort.Slice(rowsCopy, func(i, j int) bool { return rowsCopy[i].Name < rowsCopy[j].Name })
@@ -110,16 +116,25 @@ func (m *Model) renderMCPSelectDialog() string {
 		return ""
 	}
 
+	readOnly := m.mcpSelectReadOnly()
+	hint := mcpSelectIdleHint
+	if readOnly {
+		hint = mcpSelectReadOnlyHint
+	}
 	overlayCfg := OverlayConfig{
 		Title:    "MCP Servers",
-		Hint:     "j/k move  g/G jump  enter toggle  e enable  d disable  esc close  (auto servers are read-only)",
+		Hint:     hint,
 		MinWidth: 30,
 		MaxWidth: 70,
 	}
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := overlayCfg.MaxWidth - 4
-	prefix := DimStyle.Render(ansi.Truncate("Changes apply immediately while idle", contentWidth, "…"))
+	prefixText := "Changes apply immediately while idle"
+	if readOnly {
+		prefixText = "Read-only while agent is running; changes disabled until idle"
+	}
+	prefix := DimStyle.Render(ansi.Truncate(prefixText, contentWidth, "…"))
 
 	maxVisible := m.mcpSelectMaxVisible()
 	return m.mcpSelect.selector.Render(
@@ -128,7 +143,7 @@ func (m *Model) renderMCPSelectDialog() string {
 		prefix,
 		0,
 		maxVisible,
-		prefix,
+		prefix+"\x00"+hint,
 		nil,
 		area,
 	)
@@ -197,12 +212,16 @@ func (m *Model) handleMCPSelectKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *Model) mcpSelectReadOnly() bool {
+	return m.isAgentBusy()
+}
+
 func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
-	if m.isAgentBusy() {
-		return m.enqueueToast("Wait until the agent is idle before changing MCP", "warn")
+	if m.mcpSelectReadOnly() {
+		return m.enqueueToast(mcpSelectBusyMessage, "warn")
 	}
 	if m.mcpSelect.selector.list == nil {
 		return nil
@@ -242,6 +261,9 @@ func (m *Model) mcpSelectToggleAtIndex(idx int) tea.Cmd {
 		return nil
 	}
 	item := m.mcpSelect.selector.list.items[idx]
+	if m.mcpSelectReadOnly() {
+		return m.enqueueToast(mcpSelectBusyMessage, "warn")
+	}
 	if item.Disabled {
 		return m.enqueueToast("Auto-start MCP servers are read-only", "info")
 	}

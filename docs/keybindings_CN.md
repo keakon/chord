@@ -78,7 +78,7 @@ TUI 有两种模式：
 | `Tab`         | 切换主 agent role（仅在 main-agent 视图下生效）                                                                 |
 | `Shift+Tab`   | 在主 agent 与所有活跃 SubAgent 视图之间循环切换焦点                                                           |
 | `Ctrl+P`      | 打开模型池选择器（Normal 模式）。Insert 模式下 `Ctrl+P` 优先充当历史上翻                                        |
-| `Ctrl+O`      | 打开 MCP server 选择器（`/mcp`）                                                                                |
+| `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 
 ### 关于 `Ctrl+P` 的特别说明
@@ -89,6 +89,10 @@ TUI 有两种模式：
 - **Insert 模式**：触发历史上翻（`InsertHistoryUp`）。要在 Insert 模式切池，可输入 `/models` 回车，或先按 `Esc` 切到 Normal 模式
 
 若希望在两种模式下都用同一个键切池，可将 `switch_model` 改绑到其他键（如 `ctrl+t`），见下文 [自定义键位](#自定义键位)。
+
+### 关于 `Ctrl+O` 与 MCP
+
+`Ctrl+O` 在 Insert 和 Normal 模式下都会打开 MCP server 选择器。Agent 运行中也可以打开它查看 server 状态，但面板会保持只读，直到 agent 回到 idle。只有配置了 `manual: true` 的 server 才能切换启用/禁用；自动启动的 server 在选择器里始终只读。
 
 ## 自定义键位
 

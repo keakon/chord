@@ -46,7 +46,7 @@ func (m *Model) maybeMCPShortcut(key string) bool {
 		trigger = "mcp"
 	}
 	m.recordTUIDiagnostic("local-command", "shortcut:%s", trigger)
-	m.agent.SendUserMessage("/mcp")
+	m.openMCPSelect()
 	return true
 }
 
