@@ -27,6 +27,12 @@ func TestIsRetriable4xxNotRetriableExceptAuth(t *testing.T) {
 	if !isRetriable(&APIError{StatusCode: 401, Message: "auth"}) {
 		t.Fatal("401 should be retriable (next key)")
 	}
+	if !isRetriable(&APIError{StatusCode: 402, Message: "quota exhausted"}) {
+		t.Fatal("402 quota exhaustion should be retriable (next key)")
+	}
+	if !shouldFallback(&APIError{StatusCode: 402, Message: "quota exhausted"}) {
+		t.Fatal("402 quota exhaustion should be fallback-eligible")
+	}
 }
 
 func TestIsConcurrentRequestLimit429(t *testing.T) {

@@ -237,6 +237,8 @@ func shouldFallback(err error) bool {
 	}
 
 	switch apiErr.StatusCode {
+	case 402:
+		return true // Payment/quota exhausted → fallback
 	case 429:
 		return true // Rate limited → fallback
 	case 529:
@@ -383,8 +385,8 @@ func isRetriable(err error) bool {
 	}
 
 	switch apiErr.StatusCode {
-	case 429, 529:
-		return true // Rate limited / Overloaded → retry (respect Retry-After)
+	case 402, 429, 529:
+		return true // Payment/quota exhausted / Rate limited / Overloaded → retry (respect Retry-After)
 	default:
 		// Any other 5xx (500, 502, 522, 523, Cloudflare edges, etc.): prefer rotating
 		// to another key on the same model before advancing to the next model in the

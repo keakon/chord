@@ -20,6 +20,8 @@ func classifyFallbackReason(err error) string {
 	}
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		switch {
+		case apiErr.StatusCode == 402:
+			return "402"
 		case apiErr.StatusCode == 429:
 			return "429"
 		case apiErr.StatusCode >= 500:
@@ -112,7 +114,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		return markKeyCooldownResult{}
 	}
 	switch apiErr.StatusCode {
-	case 429:
+	case 402, 429:
 		now := time.Now()
 		if primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
 			log.Warnf("API key quota exhausted, marking unavailable until reset key_suffix=%v until=%v", keySuffix(key), until)
@@ -127,7 +129,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		if cooldown > time.Minute {
 			cooldown = time.Minute
 		}
-		log.Warnf("API key rate limited, marking cooldown key_suffix=%v cooldown=%v", keySuffix(key), cooldown)
+		log.Warnf("API key temporarily unavailable, marking cooldown key_suffix=%v cooldown=%v", keySuffix(key), cooldown)
 		provider.MarkCooldown(key, cooldown)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 401:

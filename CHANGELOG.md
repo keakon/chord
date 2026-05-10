@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - **Breaking:** renamed the model-visible command tool from `Bash` to `Shell`. There is no runtime alias or compatibility mapping: update permission rules (`permission.Shell`), hook tool filters, skills `allowed_tools`, imported/saved structured tool calls, headless/tool-event consumers, gateways, and any saved prompts or integrations that refer to the old `Bash` tool name before upgrading.
 - TUI: renamed the sidebar/info-panel file list from `EDITED FILES` to `CHANGED FILES`; files deleted by new `Delete` tool results now render with a strikethrough filename and no fake `-1` line-count stat.
 - TUI: `Write` tool cards now show the written file content as a numbered, syntax-highlighted preview, sharing the same first-10-lines default and space-to-expand behavior as `Read` cards.
+- Runtime/LLM retry: API `402` quota/payment exhaustion errors now behave like per-key rate limits: Chord cools down the exhausted key, tries other configured keys for the same model before fallback, and avoids repeatedly retrying the same depleted key.
 - Runtime/Codex rate limits: provider usage polling now inherits the application context, so shutdown/cancel paths stop pending Codex usage refreshes instead of letting them wait on a detached background context.
 - Auth/Codex: browser and device-code login HTTP requests now inherit the CLI command context, so Ctrl+C or parent shutdown can cancel in-flight device-code and token-exchange requests promptly.
 

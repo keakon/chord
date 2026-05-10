@@ -361,7 +361,54 @@ func TestClient_RetriableErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	}
 }
 
-func TestMarkKeyCooldown429UsesRetryAfterOrDefault(t *testing.T) {
+func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("freemodel", "gpt-5.4", []string{"key-a", "key-b", "key-c"})
+	fallbackCfg := testProviderConfig("qt", "glm-5.1")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 402, Message: "quota exhausted; retry later"}},
+		{resp: &message.Response{Content: "ok from second key"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{{resp: &message.Response{Content: "fallback should not run"}}}
+
+	c := &Client{}
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		primaryImpl,
+		"gpt-5.4",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "glm-5.1", MaxTokens: 4096, ContextLimit: 128000}},
+		1,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from second key" {
+		t.Fatalf("response = %#v, want second key success", resp)
+	}
+	if got := len(primaryImpl.apiKeys); got != 2 {
+		t.Fatalf("primary call count = %d, want 2", got)
+	}
+	if primaryImpl.apiKeys[0] != "key-a" || primaryImpl.apiKeys[1] != "key-b" {
+		t.Fatalf("primary apiKeys = %#v, want [key-a key-b]", primaryImpl.apiKeys)
+	}
+	if got := len(fallbackImpl.apiKeys); got != 0 {
+		t.Fatalf("fallback should not run before second key succeeds, got %d calls", got)
+	}
+}
+
+func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 	ctx := context.Background()
 	snapReset := time.Now().Add(3 * time.Minute)
 	snap := &ratelimit.KeyRateLimitSnapshot{
@@ -407,6 +454,21 @@ func TestMarkKeyCooldown429UsesRetryAfterOrDefault(t *testing.T) {
 		remain := time.Until(end)
 		if remain < 55*time.Second || remain > 61*time.Second {
 			t.Fatalf("expected ~1m cooldown cap, got remaining %v", remain)
+		}
+	})
+
+	t.Run("402_uses_same_cooldown_path", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 402, Message: "quota exhausted; retry later"})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true for 402 quota exhaustion")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		remain := time.Until(end)
+		if remain < 500*time.Millisecond || remain > 1500*time.Millisecond {
+			t.Fatalf("expected ~1s cooldown for 402 without Retry-After, got remaining %v", remain)
 		}
 	})
 }
