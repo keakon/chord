@@ -277,6 +277,9 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	case err := <-doneCh:
 		output := buf.String()
 		if err != nil {
+			if ClassifyNonInteractiveRuntimeFailure(a.Command, err, output) != nil {
+				return output, FormatNonInteractiveRuntimeError("Shell", a.Command, err, output)
+			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				return output, fmt.Errorf("exit code %d", exitErr.ExitCode())
 			}

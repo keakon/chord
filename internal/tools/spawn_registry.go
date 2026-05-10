@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +54,7 @@ type spawnedProcess struct {
 	cancelCh         chan string
 	startedCh        chan struct{}
 	logHandle        *os.File
+	output           *cappedWriter
 	done             chan struct{}
 }
 
@@ -99,6 +102,8 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 	// Spawn is intentionally non-interactive. Leaving Stdin nil makes Go connect
 	// the child process to the null device instead of the TUI stdin.
 	cmd.Env = appendNonInteractiveEnv(nil)
+	outputBuf := &cappedWriter{maxBytes: maxOutputBytes}
+	proc.output = outputBuf
 	if req.LogDir != "" {
 		logPath := filepath.Join(req.LogDir, id+".log")
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
@@ -112,8 +117,11 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 		}
 		proc.LogFile = logPath
 		proc.logHandle = f
-		cmd.Stdout = f
-		cmd.Stderr = f
+		cmd.Stdout = io.MultiWriter(f, outputBuf)
+		cmd.Stderr = io.MultiWriter(f, outputBuf)
+	} else {
+		cmd.Stdout = outputBuf
+		cmd.Stderr = outputBuf
 	}
 	proc.cmdMu.Lock()
 	proc.cmd = cmd
@@ -140,7 +148,7 @@ func (r *SpawnRegistry) run(ctx context.Context, proc *spawnedProcess) {
 			if proc.exitErr != nil {
 				status = fmt.Sprintf("finished (error: %v)", proc.exitErr)
 			}
-			msg := fmt.Sprintf("[%s %s finished: %s]\n\nDescription: %s", displaySpawnKind(proc.Kind), proc.ID, status, proc.Description)
+			msg := proc.completionMessage(status)
 			sender.SendAgentEvent(
 				"background_object_finished",
 				proc.AgentID,
@@ -180,7 +188,7 @@ func (r *SpawnRegistry) run(ctx context.Context, proc *spawnedProcess) {
 		case reason := <-proc.cancelCh:
 			proc.exitErr = terminateSpawnProcessGroup(cmd, reason, waitCh)
 		case err := <-waitCh:
-			proc.exitErr = err
+			proc.exitErr = proc.formatRuntimeError(err)
 		case <-timer.C:
 			proc.exitErr = terminateSpawnProcessGroup(cmd, fmt.Sprintf("timed out after %ds", proc.MaxRuntimeSec), waitCh)
 		}
@@ -191,8 +199,52 @@ func (r *SpawnRegistry) run(ctx context.Context, proc *spawnedProcess) {
 	case reason := <-proc.cancelCh:
 		proc.exitErr = terminateSpawnProcessGroup(cmd, reason, waitCh)
 	case err := <-waitCh:
-		proc.exitErr = err
+		proc.exitErr = proc.formatRuntimeError(err)
 	}
+}
+
+func (p *spawnedProcess) formatRuntimeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	output := ""
+	if p != nil && p.output != nil {
+		output = p.output.String()
+	}
+	formatted := FormatNonInteractiveRuntimeError("Spawn", p.Command, err, output)
+	if formatted != err {
+		return formatted
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Errorf("exit code %d", exitErr.ExitCode())
+	}
+	return err
+}
+
+func (p *spawnedProcess) completionMessage(status string) string {
+	if p == nil {
+		return ""
+	}
+	msg := fmt.Sprintf("[%s %s finished: %s]\n\nDescription: %s", displaySpawnKind(p.Kind), p.ID, status, p.Description)
+	if p.exitErr == nil {
+		return msg
+	}
+	output := p.relevantOutputForCompletion()
+	if output != "" && !strings.Contains(status, "Relevant output:\n") {
+		msg += "\n\nRelevant output:\n" + output
+	}
+	return msg
+}
+
+func (p *spawnedProcess) relevantOutputForCompletion() string {
+	if p == nil || p.output == nil {
+		return ""
+	}
+	output := strings.TrimSpace(p.output.String())
+	if output == "" {
+		return ""
+	}
+	return truncateForError(output, 500)
 }
 
 func waitForCommand(cmd *exec.Cmd, done <-chan struct{}) <-chan error {

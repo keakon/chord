@@ -34,9 +34,6 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 	if hasDirectTTYRedirection(tokens) {
 		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "Shell and Spawn run without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
 	}
-	if containsToken(tokens, "stty") {
-		return interactiveFinding("stty", "stty requires a terminal", "Run terminal configuration commands manually in a real terminal.")
-	}
 	commands := splitShellCommandTokens(tokens)
 	for _, cmd := range commands {
 		if finding := detectInteractiveCommandTokens(cmd); finding != nil {
@@ -64,12 +61,18 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 	}
 
 	switch name {
+	case "stty":
+		return interactiveFinding("stty", "stty requires a terminal", "Run terminal configuration commands manually in a real terminal.")
+	case "tput":
+		return interactiveFinding("tput", "tput requires a terminal", "Use explicit terminal capability values in a real terminal, or avoid terminal-dependent queries in Shell/Spawn.")
 	case "sudo":
 		if hasOption(tokens[1:], "-n", "") || hasOption(tokens[1:], "--non-interactive", "") {
 			return nil
 		}
 		return interactiveFinding("sudo", "`sudo` may prompt for a password", "Use `sudo -n` for non-interactive failure, configure passwordless automation, or run this manually in a terminal.")
-	case "ssh", "sftp", "ftp", "telnet", "su", "passwd":
+	case "ssh":
+		return detectInteractiveSSH(tokens)
+	case "sftp", "ftp", "telnet", "su", "passwd":
 		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Run this manually in a terminal or use a non-interactive authentication method.")
 	case "git":
 		return detectInteractiveGit(tokens)
@@ -78,7 +81,7 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 	case "kubectl":
 		return detectInteractiveKubectl(tokens)
 	case "gh":
-		if len(tokens) >= 3 && tokens[1] == "auth" && tokens[2] == "login" {
+		if len(tokens) >= 3 && tokens[1] == "auth" && tokens[2] == "login" && !hasOption(tokens[3:], "", "--with-token") {
 			return interactiveFinding("gh auth login", "`gh auth login` starts an authentication wizard", "Run it manually in a terminal, or provide authentication non-interactively via environment/token configuration.")
 		}
 	case "gcloud":
@@ -86,29 +89,50 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 			return interactiveFinding("gcloud auth login", "`gcloud auth login` starts an authentication wizard", "Run it manually in a terminal or use non-interactive service-account authentication.")
 		}
 	case "az":
-		if len(tokens) >= 2 && tokens[1] == "login" {
+		if len(tokens) >= 2 && tokens[1] == "login" && !hasOption(tokens[2:], "", "--service-principal") {
 			return interactiveFinding("az login", "`az login` starts an authentication wizard", "Run it manually in a terminal or use a non-interactive service-principal/device-code flow outside Shell/Spawn.")
 		}
 	case "aws":
-		if len(tokens) >= 2 && tokens[1] == "configure" {
+		if len(tokens) == 2 && tokens[1] == "configure" {
 			return interactiveFinding("aws configure", "`aws configure` prompts for credentials and configuration", "Set AWS_* environment variables or write config files explicitly instead.")
 		}
-	case "npm", "pnpm", "yarn":
-		if len(tokens) >= 2 && tokens[1] == "init" && !hasYesFlag(tokens[2:]) {
-			return interactiveFinding(name+" init", fmt.Sprintf("`%s init` may prompt for package metadata", name), fmt.Sprintf("Use `%s init -y`/`%s init --yes` or provide all required options explicitly.", name, name))
-		}
-	case "bun":
-		if len(tokens) >= 2 && tokens[1] == "init" {
-			return interactiveFinding("bun init", "`bun init` may prompt for project setup", "Run it manually in a terminal or use a non-interactive project template/setup command.")
-		}
-	case "cargo":
-		if len(tokens) >= 2 && tokens[1] == "login" {
-			return interactiveFinding("cargo login", "`cargo login` may prompt for a token", "Use `cargo login <token>` only when the token is provided explicitly and safely, or run it manually in a terminal.")
-		}
-	case "read", "select":
-		return interactiveFinding(name, fmt.Sprintf("shell builtin `%s` waits for user input", name), "Provide input explicitly with a pipe or here-doc, or rewrite the command to avoid prompting.")
 	}
 	return nil
+}
+
+func detectInteractiveSSH(tokens []string) *InteractiveCommandFinding {
+	if hasOption(tokens[1:], "-t", "") {
+		return interactiveFinding("ssh -t", "`ssh -t` allocates a TTY", "Remove TTY allocation for non-interactive execution, or run the command manually in a terminal.")
+	}
+	hostIndex := -1
+	for i := 1; i < len(tokens); i++ {
+		arg := tokens[i]
+		if arg == "--" {
+			if i+1 < len(tokens) {
+				hostIndex = i + 1
+			}
+			break
+		}
+		if sshOptionConsumesValue(arg) && !strings.Contains(arg, "=") {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		hostIndex = i
+		break
+	}
+	if hostIndex >= 0 && hostIndex == len(tokens)-1 {
+		return interactiveFinding("ssh", "`ssh` without a remote command starts an interactive login session", "Run it manually in a terminal, or provide a remote command and non-interactive authentication/options.")
+	}
+	return nil
+}
+
+func sshOptionConsumesValue(arg string) bool {
+	return arg == "-b" || arg == "-c" || arg == "-D" || arg == "-E" || arg == "-e" || arg == "-F" || arg == "-I" || arg == "-i" ||
+		arg == "-J" || arg == "-L" || arg == "-l" || arg == "-m" || arg == "-O" || arg == "-o" || arg == "-p" || arg == "-Q" ||
+		arg == "-R" || arg == "-S" || arg == "-W" || arg == "-w"
 }
 
 func detectInteractiveGit(tokens []string) *InteractiveCommandFinding {
@@ -292,15 +316,6 @@ func commandBase(s string) string {
 	return s
 }
 
-func containsToken(tokens []string, want string) bool {
-	for _, tok := range tokens {
-		if commandBase(tok) == want {
-			return true
-		}
-	}
-	return false
-}
-
 func gitCommitAvoidsEditor(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -392,10 +407,6 @@ func containerOptionConsumesValue(arg string) bool {
 		arg == "--stop-timeout" || arg == "--storage-opt" || arg == "--sysctl" || arg == "--tmpfs" || arg == "--ulimit" ||
 		arg == "--user" || arg == "-u" || arg == "--userns" || arg == "--uts" || arg == "--volume" || arg == "-v" ||
 		arg == "--volumes-from" || arg == "--workdir" || arg == "-w"
-}
-
-func hasYesFlag(args []string) bool {
-	return hasOption(args, "-y", "--yes")
 }
 
 func hasOption(args []string, short, long string) bool {

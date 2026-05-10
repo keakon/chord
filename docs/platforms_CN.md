@@ -103,6 +103,7 @@ Chord 能在 Windows 上跑，但 Windows 不是主要平台。具体：
 - `prevent_sleep` 是 no-op——请用 Windows 电源设置。
 - `ime_switch_target` 需要 `im-select.exe`。
 - 工具调用中的文件路径走 Windows 风格，反斜杠原样保留。
+- `Shell` 和 `Spawn` 在 Windows 上也仍是非交互的，但超时 / 取消清理依赖直接终止进程，而不是 Unix 风格的 session / 进程组控制；因此对后代进程的清理可能不如 Unix 完整。
 - 遇到 Windows 特有 bug 的话，更可能是「还没人踩到」而非「故意不支持」。请用 `Ctrl+G` 或 `/diagnostics` 导出诊断包再上报。
 
 ## WSL 用户须知

@@ -88,6 +88,23 @@ func TestBashExecuteForegroundTimeoutUsesConfiguredValue(t *testing.T) {
 	}
 }
 
+func TestBashExecutesReadWithClosedStdinInsteadOfRejecting(t *testing.T) {
+	tool := ShellTool{}
+	command := "printf 'stdin_tty='; test -t 0 && echo yes || echo no; printf 'read_result='; IFS= read -r x; printf 'status:%s value:%s\\n' \"$?\" \"$x\""
+	out, err := tool.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": command,
+		"timeout": 5,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	for _, want := range []string{"stdin_tty=no", "read_result=status:1 value:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output = %q, want substring %q", out, want)
+		}
+	}
+}
+
 func TestBashIgnoresLegacyBackgroundFields(t *testing.T) {
 	tool := ShellTool{}
 	for name, args := range map[string]map[string]any{
@@ -329,20 +346,20 @@ func TestBashRejectsInteractiveCommandBeforeExecution(t *testing.T) {
 	}
 }
 
-func TestBashReadFromStdinFailsFast(t *testing.T) {
+func TestBashReadFromStdinSeesEOF(t *testing.T) {
 	start := time.Now()
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "read x",
 		"timeout": 5,
 	}))
 	if err == nil {
-		t.Fatal("expected read to fail or be rejected")
+		t.Fatal("expected read to return non-zero at EOF")
 	}
 	if time.Since(start) >= 2*time.Second {
 		t.Fatalf("read command took too long; output=%q err=%v", out, err)
 	}
-	if !strings.Contains(err.Error(), "interactive command rejected") {
-		t.Fatalf("expected static interactive rejection, got output=%q err=%v", out, err)
+	if !strings.Contains(err.Error(), "exit code 1") {
+		t.Fatalf("expected read to exit after EOF, got output=%q err=%v", out, err)
 	}
 }
 

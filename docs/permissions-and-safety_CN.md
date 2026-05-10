@@ -46,7 +46,12 @@ permission:
 
 ## Shell 与 shell 风险
 
-`Shell` 能执行系统命令，应格外谨慎。`Shell` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、shell `read` 提示等，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
+`Shell` 能执行系统命令，应格外谨慎。`Shell` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。普通 stdin 读取（如 shell `read`/`select`）会看到 EOF，而不是等待模型输入；如果命令需要输入，请通过 pipe、here-doc、文件或参数显式提供。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、以及需要 `/dev/tty` 的命令，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
+
+`Shell` / `Spawn` 的平台说明：
+
+- 在 Unix 上，Chord 会把子进程放到新的 session 中，并在超时/取消时按进程组清理。
+- 在 Windows 上，Chord 仍然保持 `Shell` / `Spawn` 非交互，但这里没有与 Unix `setsid` / 进程组控制完全等价的路径；超时/取消时会退回到直接终止进程，对后代进程的清理可能不如 Unix 完整。
 
 常见改写方式：
 

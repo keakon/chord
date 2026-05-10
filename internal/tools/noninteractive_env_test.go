@@ -12,6 +12,7 @@ func TestAppendNonInteractiveEnvOverridesPromptEditorPager(t *testing.T) {
 		"PATH":                "/bin",
 		"GIT_TERMINAL_PROMPT": "0",
 		"GIT_EDITOR":          "true",
+		"GIT_PAGER":           "cat",
 		"VISUAL":              "true",
 		"EDITOR":              "true",
 		"PAGER":               "cat",

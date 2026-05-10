@@ -5,6 +5,7 @@ import "os"
 var nonInteractiveEnv = []string{
 	"GIT_TERMINAL_PROMPT=0",
 	"GIT_EDITOR=true",
+	"GIT_PAGER=cat",
 	"VISUAL=true",
 	"EDITOR=true",
 	"PAGER=cat",

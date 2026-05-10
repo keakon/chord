@@ -49,7 +49,7 @@ func spawnToolDescription(_ map[string]struct{}) string {
 		"It uses the same detected shell environment as the foreground Shell tool.\n" +
 		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
 		"Use foreground Shell for commands whose stdout/stderr you need in this turn.\n" +
-		"You will NOT receive stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits. Services may expose a diagnostic log_file path that you can inspect with foreground Shell when needed.\n" +
+		"You will NOT receive live stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits and may include a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground Shell when needed.\n" +
 		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
 }
 

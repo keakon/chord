@@ -8,6 +8,7 @@
 - TUI：侧边栏 / 信息面板中的文件列表从 `EDITED FILES` 改名为 `CHANGED FILES`；新产生的 `Delete` 工具结果会把被删除文件显示为删除线文件名，并且不再显示伪造的 `-1` 行数统计。
 - TUI：`Write` 工具卡片现在会用带行号、语法高亮的预览展示写入后的文件内容，并与 `Read` 卡片共享默认前 10 行、按空格展开的行为。
 - Runtime / LLM 重试：API `402` 用量/余额耗尽错误现在会按 per-key 限流处理：Chord 会冷却已耗尽的 key，并在 fallback 前优先尝试同模型下配置的其它 key，避免反复重试同一个已耗尽 key。
+- Tools/Safety：收窄非交互 Shell/Spawn 防护规则。普通 stdin 读取（如 shell `read`/`select`）现在会看到 EOF，不再在执行前被拒绝；依赖终端/TTY 的命令仍会被拦截。
 - Runtime/Codex 限流：provider 用量轮询现在会继承应用上下文，因此关闭/取消时会中止待处理的 Codex 用量刷新，而不会继续挂在脱离生命周期的后台上下文上。
 - Auth/Codex：浏览器登录与设备码登录的 HTTP 请求现在会继承 CLI 命令上下文，因此按 Ctrl+C 或父级关闭时，可以及时取消进行中的设备码与 token 交换请求。
 

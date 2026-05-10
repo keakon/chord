@@ -46,7 +46,12 @@ This means: allow most tools by default; disable `Handoff` and `Delegate`; requi
 
 ## Shell / shell risk
 
-`Shell` can execute system commands and should be treated carefully. `Shell` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and shell `read` prompts should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+`Shell` can execute system commands and should be treated carefully. `Shell` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+
+Platform notes for `Shell` / `Spawn`:
+
+- On Unix, Chord starts child processes in a new session and cleans up by process group on timeout/cancellation.
+- On Windows, Chord still keeps `Shell` / `Spawn` non-interactive, but there is no Unix-equivalent `setsid`/process-group control path here; timeout/cancellation cleanup falls back to direct process termination and may be less complete for descendant processes.
 
 Common rewrites:
 
