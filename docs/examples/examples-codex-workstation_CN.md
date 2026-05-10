@@ -18,7 +18,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
         reasoning:
           summary: auto
         text:
@@ -41,7 +41,7 @@ providers:
         limit:
           context: 200000
           input: 183616
-          output: 16384
+          output: 128000
 
 model_pools:
   thinking:
@@ -119,6 +119,7 @@ permission:
 
 这里最关键的是三点：
 
-- split-limit 模型要把 `limit.input` 配出来，自动压缩和 oversize 恢复才会按输入预算工作。
-- 降低 `max_output_tokens` 或模型 `limit.output` 可以控成本，但不会把 `272k` 的输入上限变大。
+- 大多数模型只写 `limit.context` 就够了，也就是保证“输入 + 输出”不超过总窗口。
+- 某些 GPT 模型还额外有单独的输入上限。这时要配置 `limit.input`，让 Chord 知道何时在 prompt 过大前压缩；否则它会回退到 `limit.context`。
+- `limit.output` 是模型自己的输出能力。Chord 默认的 `max_output_tokens` 仍是 `32000`，所以实际请求会取更小的输出上限；修改这个请求上限不会把 provider 的 `272k` 输入上限变大。
 - 不同 provider 的同名模型仍会分别参与 fallback；Chord 不会仅因为模型名相同就直接跳过。

@@ -75,10 +75,16 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
 ```
 
-对 `gpt-5.5`，除非你已经核实当前 provider 的专用限制，否则建议先用保守的 split-limit 配置。当前文档以 `context=400000`、`input=272000`、`output=32000` 作为文档基线，这样自动压缩和 oversize 恢复会与常见的输入上限观测保持一致；这并不表示所有 provider / runtime 都暴露同一组限制。
+按这个顺序理解模型限制：
+
+1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
+2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会回退到 `limit.context`。
+3. `limit.output` 是模型自己的输出能力。Chord 默认的请求输出上限（`max_output_tokens`）仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
+
+当前文档里的 `gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
 
 ### OpenAI Codex preset
 
@@ -92,7 +98,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
 ```
 
 ### Google Gemini
@@ -102,13 +108,13 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-2.5-flash:
+      gemini-3.1-pro-preview:
         limit:
           context: 1048576
           output: 65536
 ```
 
-Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-2.5-flash`）即为发送给 Gemini 的模型 ID。
+Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-3.1-pro-preview`）即为发送给 Gemini 的模型 ID。
 
 省略 `type` 时，Chord 按以下规则自动推断：
 
@@ -257,7 +263,7 @@ model_templates:
     limit:
       context: 400000
       input: 272000
-      output: 32000
+      output: 128000
     reasoning:
       summary: auto
     text:
@@ -274,7 +280,7 @@ model_templates:
 
   gpt-1m: &gpt-1m
     limit:
-      context: 1000000
+      context: 1050000
       input: 922000
       output: 128000
     reasoning:
@@ -332,8 +338,8 @@ providers:
 用到的模型字段含义：
 
 - `limit.context`：已知时表示总请求窗口大小。
-- `limit.input`：输入侧 token 预算。Chord 用它来决定自动压缩阈值、oversize 恢复等输入预算相关逻辑。若省略，则为兼容旧配置，自动回退到 `limit.context`。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
-- `limit.output`：模型自身最大输出 token。实际请求还会受 `max_output_tokens` 限制。
+- `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，则为兼容旧配置，自动回退到 `limit.context`。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
+- `limit.output`：模型自身最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
 - `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
 - `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
@@ -366,9 +372,9 @@ providers:
 
 ## 输出 token 上限
 
-`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制。
+`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，因此运行时会取适用限制中的最小值。
 
-对 split-limit 模型，`limit.input` 仍然只表示输入侧预算，用于自动压缩和 oversize 恢复。降低它或降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
+`limit.input` 是另一回事：只有当模型除了总上下文窗口外，还额外存在输入上限时才需要配置。降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
 
 ```yaml
 max_output_tokens: 32000
@@ -528,7 +534,7 @@ context:
 
 例如当模型配置为 `input: 272000` 时，以上配置会让自动压缩按 `256000` 的可用输入预算触发。
 
-对 split-limit 模型，已知限制时建议三个字段都写明：
+当 provider 同时公布“总上下文窗口”和“单独的输入上限”时，已知限制的话建议三个字段都写明：
 
 ```yaml
 providers:
@@ -538,7 +544,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
 ```
 
 原因是降低 `output` 并不会提高 provider 的硬输入上限。若所选模型输入预算较小，或 provider 明确区分 input/output limit，建议保持自动压缩开启。
@@ -598,7 +604,7 @@ chord test-providers --provider openai
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
 | `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，也会作为输入预算的回退值。                                       |
-| `limit.input`     | int    | 输入侧 token 预算。对 split-limit 模型，Chord 用它决定自动压缩与 oversize 恢复等输入预算相关逻辑。                |
+| `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compact_threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
 | `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |

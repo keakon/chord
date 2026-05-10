@@ -13,17 +13,17 @@
 
 这些示例是起点，不是模板生成器。字段含义和完整规则见[配置字段速查表](../configuration_CN.md#配置字段速查表)。
 
-## split-limit 模型怎么配
+## 上下文和输出限制
 
-如果 provider 公布了 split limit，建议同时配置：
+按这个顺序理解模型限制字段：
 
-- `limit.context`：总窗口
-- `limit.input`：输入侧预算
-- `limit.output`：输出上限
+- `limit.context`：总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
+- `limit.input`：单独的输入上限。只有 provider 明确公布时才需要写；否则 Chord 会回退到 `limit.context`。
+- `limit.output`：模型自己的输出能力。实际请求还会受 `max_output_tokens` 和 `limit.context` 剩余空间限制。
 
-Chord 会用 `limit.input` 计算自动压缩阈值、oversize 恢复和其他输入预算相关逻辑；未配置时才回退到 `limit.context` 以兼容旧配置。若设置了 `context.compaction.reserved`，Chord 会先扣掉这部分预留，再应用 `compact_threshold`。
+Chord 会用 `limit.input` 判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何恢复。若设置了 `context.compaction.reserved`，Chord 会先扣掉这部分预留，再应用 `compact_threshold`。
 
-以 `gpt-5.5` 为例，当前公开示例统一使用保守基线：`context=400000`、`input=272000`、`output=32000`。这样自动压缩和 oversize 恢复会与常见的输入上限观测保持一致；如果你已经核实某个 provider / runtime 的专用限制，再在自己的配置里显式覆盖。
+以 `gpt-5.5` 为例，当前公开示例使用 `context=400000`、`input=272000`、`output=128000`。Chord 默认的 `max_output_tokens` 仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](../glossary_CN.md)。
 
 ## 各类文件放哪里
 

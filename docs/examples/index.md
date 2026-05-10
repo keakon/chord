@@ -13,17 +13,17 @@ These examples are organized by **real file layout**, not by stuffing multiple f
 
 These examples are starting points, not rigid templates. For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
 
-## Split-limit models
+## Context and output limits
 
-When a provider publishes split limits, prefer setting all of:
+Read model limit fields in this order:
 
-- `limit.context`: total window
-- `limit.input`: input-side budget
-- `limit.output`: output cap
+- `limit.context`: the total window. For most models, input + requested output just needs to fit inside this number.
+- `limit.input`: a separate input cap. Only set this when the provider publishes one; otherwise Chord falls back to `limit.context`.
+- `limit.output`: the model's own output capacity. Actual requests are also capped by `max_output_tokens` and by any remaining room in `limit.context`.
 
-Chord uses `limit.input` for auto-compaction thresholds, oversize recovery, and other input-budget decisions. It only falls back to `limit.context` when `limit.input` is omitted for backward compatibility. If `context.compaction.reserved` is set, Chord subtracts that headroom before applying `compact_threshold`.
+Chord uses `limit.input` to decide when to compact before the prompt is too large and how to recover after a provider rejects a request as too large. If `context.compaction.reserved` is set, Chord subtracts that headroom before applying `compact_threshold`.
 
-For `gpt-5.5`, Chord's public examples use the conservative baseline `context=400000`, `input=272000`, `output=32000`. That keeps auto-compaction and oversize recovery aligned with the commonly observed input-side cap. If you have verified provider-specific numbers for a different runtime, override them explicitly in your own config.
+For `gpt-5.5`, Chord's public examples use `context=400000`, `input=272000`, `output=128000`. Chord still defaults `max_output_tokens` to `32000`, so actual requests use the smaller output limit unless you raise it. Provider docs sometimes call this setup split limits; see [Glossary](../glossary.md).
 
 ## Where things go
 

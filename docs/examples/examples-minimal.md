@@ -40,4 +40,4 @@ desktop_notification: true
 log_level: info
 ```
 
-Use this when you want to verify provider connectivity, credentials, basic chat flow, and auto-compaction with the smallest working config.
+Use this when you want to verify provider connectivity, credentials, basic chat flow, and conversation compaction with the smallest working config.

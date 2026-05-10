@@ -8,7 +8,7 @@ The single main agent for a session. It owns the user-facing conversation and is
 
 ## SubAgent
 
-A delegated agent spawned by the MainAgent (or another SubAgent, when delegation depth allows) to work on a focused task. SubAgents have their own context window, system prompt, and permissions, and report back via an `agent_done` event with a summary. Switch focus across SubAgents with `Shift+Tab`.
+A delegated agent spawned by the MainAgent (or another SubAgent, when delegation depth allows) to work on a focused task. SubAgents have their own conversation budget (context window), system prompt, and permissions, and report back via an `agent_done` event with a summary. Switch focus across SubAgents with `Shift+Tab`.
 
 ## Pool (model pool)
 
@@ -20,7 +20,31 @@ A named parameter preset for a single model — for example `claude-opus-4.7@hig
 
 ## Compaction
 
-The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Triggered automatically when the context approaches the configured threshold, or manually with `/compact`. See [Configuration — Context compaction](./configuration.md#context-compaction).
+The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Configuration — Context compaction](./configuration.md#context-compaction).
+
+## Context window
+
+The maximum number of tokens a model can handle in one request. For most models, the practical rule is: prompt input + requested output must fit inside this window. In config this is `limit.context`.
+
+## Model limits (`limit.*`)
+
+Per-model numbers that tell Chord how much room the provider allows:
+
+- `limit.context`: the total request window.
+- `limit.input`: a separate input cap, only needed when the provider publishes one.
+- `limit.output`: the model's maximum output capacity.
+
+## Split limits
+
+A provider term for models that publish more than one limit, usually a total context window plus a separate input cap. Some GPT models work this way. If provider docs list both numbers, configure both `limit.context` and `limit.input` so Chord can compact before the input is too large.
+
+## Requested output cap (`max_output_tokens`)
+
+The maximum output Chord asks for in a request. It is separate from the model's own `limit.output`. At runtime, Chord uses the smallest applicable value: `max_output_tokens`, the model's `limit.output`, and any remaining room in `limit.context`.
+
+## Oversize recovery
+
+The retry path Chord uses after a provider rejects a request as too large. Chord compacts or trims the conversation according to the configured input budget, then retries when it can do so safely.
 
 ## Worktree
 

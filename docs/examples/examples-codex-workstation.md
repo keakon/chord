@@ -18,7 +18,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
         reasoning:
           summary: auto
         text:
@@ -41,7 +41,7 @@ providers:
         limit:
           context: 200000
           input: 183616
-          output: 16384
+          output: 128000
 
 model_pools:
   thinking:
@@ -119,6 +119,7 @@ permission:
 
 Two practical points matter here:
 
-- Split-limit models should set `limit.input`, otherwise auto-compaction and oversize recovery fall back to `limit.context`.
-- Lowering `max_output_tokens` or `limit.output` can reduce cost, but it does not increase a provider's `272k` input allowance.
+- Most models only need `limit.context`: keep total input + output within that window.
+- Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it falls back to `limit.context`.
+- `limit.output` is the model's own output capacity. Chord still defaults `max_output_tokens` to `32000`, so actual requests use the smaller output limit; changing that request cap does not increase the provider's `272k` input cap.
 - Same-named models on different providers are still tried independently in the fallback chain; Chord does not skip them just because the model name matches.

@@ -21,7 +21,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="稳定长期运行" icon="document">
-    自动压缩将早期对话压成上下文摘要，会话超出 context window 照样能继续——保留继续工作所需的信息。
+    Chord 会在长对话接近模型 token 上限前压缩早期内容，同时保留继续工作所需的信息。
   </Card>
   <Card title="网络状态全程可见" icon="rocket">
     模型调用过程中精确显示请求状态与已等待时间，再也不用猜「是不是卡住了」。

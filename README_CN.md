@@ -12,7 +12,7 @@
 
 先说最容易感受到的核心体验：
 
-- **稳定长期运行。** 自动压缩将长对话浓缩为上下文摘要，会话超出 context window 后照样继续——保留继续工作所需的关键信息，不会出现「它忘了？」的尴尬。
+- **稳定长期运行。** Chord 会在长对话接近模型 token 上限前压缩早期内容，同时保留继续工作所需的信息，不会出现「它忘了？」的尴尬。
 - **网络状态全程可见。** 等模型响应时，Chord 实时显示请求状态和已等待时间。再也不用猜「是不是卡住了」。
 - **键盘优先、Vim 风格。** Insert / Normal 模式、消息搜索、Vim 风格导航、模式切换自动切输入法。退出需连按两次，避免误触 Ctrl+C 丢工作。
 - **模型组合热切换。** 将模型分组到可复用的池（`fast`、`thinking`、`cheap` 等），运行时用 `/models` 或 `Ctrl+P` 切换。每个 agent 独立选池；运行时自动按池内顺序 fallback。
@@ -79,7 +79,7 @@ YAML
 cd my-project && chord
 ```
 
-换用其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。如果模型区分输入和输出限制，请同时写明 `limit.input`；未配置时，Chord 会回退到 `limit.context`。可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+换用其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型自己的输出能力。相关术语见 [术语表](./docs/glossary_CN.md)，可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
 ### Release 下载说明
 

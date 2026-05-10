@@ -8,7 +8,7 @@
 
 ## SubAgent
 
-由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的 context window、system prompt 和权限，完成后通过 `agent_done` 事件汇报摘要。`Shift+Tab` 在多个 SubAgent 视图间切换焦点。
+由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的对话预算（context window，上下文窗口）、system prompt 和权限，完成后通过 `agent_done` 事件汇报摘要。`Shift+Tab` 在多个 SubAgent 视图间切换焦点。
 
 ## Pool（模型池）
 
@@ -20,7 +20,31 @@
 
 ## Compaction（上下文压缩）
 
-将早期对话压缩为摘要的运行时过程，让长会话在超出 context window 后仍能继续。接近阈值时自动触发，也可手动 `/compact`。详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩)。
+将早期对话压缩为摘要的运行时过程，让长会话在接近模型上下文窗口上限时仍能继续。自动压缩表示 Chord 会在请求过大前自动触发；也可以手动执行 `/compact`。详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩)。
+
+## Context window（上下文窗口）
+
+模型一次请求最多能处理的 token 数。对大多数模型，实用规则就是：“输入 + 请求输出”必须放进这个窗口。配置中对应 `limit.context`。
+
+## 模型限制（`limit.*`）
+
+每个模型的容量数字，用来告诉 Chord provider 允许多少 token：
+
+- `limit.context`：总请求窗口。
+- `limit.input`：单独的输入上限，只有 provider 明确公布时才需要写。
+- `limit.output`：模型自己的最大输出能力。
+
+## 分离限制（split limits）
+
+provider 文档里有时会用这个词表示“一个模型公布了不止一种限制”，通常是总上下文窗口外，另外还有单独的输入上限。一些 GPT 模型属于这种情况。如果 provider 文档同时列出这两个数字，就同时配置 `limit.context` 和 `limit.input`，这样 Chord 才能在输入过大前进行压缩。
+
+## 请求输出上限（`max_output_tokens`）
+
+Chord 每次请求时主动要求的最大输出量。它和模型自己的 `limit.output` 不是一回事。运行时会取适用限制中的最小值：`max_output_tokens`、模型的 `limit.output`，以及 `limit.context` 中剩余的空间。
+
+## Oversize recovery（超限恢复）
+
+provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord 会根据已配置的输入预算压缩或裁剪对话，并在可以安全重试时再次发送请求。
 
 ## Worktree
 

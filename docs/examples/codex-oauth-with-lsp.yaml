@@ -3,8 +3,9 @@
 # Pair with `chord auth codex` for ~/.config/chord/auth.yaml, and keep any
 # extra agents in ~/.config/chord/agents/*.md instead of embedding them here.
 #
-# This example intentionally uses a conservative gpt-5.5 baseline:
-# context=400000, input=272000, output=32000.
+# This example uses `gpt-5.5` with `context=400000`, `input=272000`, `output=128000`.
+# Chord still defaults `max_output_tokens` to 32000, so requests use the smaller
+# output limit unless you raise it.
 
 providers:
   codex:
@@ -15,7 +16,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
         reasoning:
           summary: auto
         text:
@@ -38,7 +39,7 @@ providers:
         limit:
           context: 200000
           input: 183616
-          output: 16384
+          output: 128000
 
 model_pools:
   thinking:

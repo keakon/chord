@@ -21,9 +21,8 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="Stable for the long haul" icon="document">
-    Auto-compaction summarises earlier turns into a context summary, so a
-    long session keeps working past the model's context window — without
-    losing the information needed to continue.
+    Chord can summarize earlier turns before a long conversation gets too large
+    for the model, while preserving the information needed to continue.
   </Card>
   <Card title="You see the network state" icon="rocket">
     Precise request status and elapsed wait time during model calls. Never
@@ -79,7 +78,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
             limit:
               context: 400000
               input: 272000
-              output: 32000
+              output: 128000
             modalities:
               input: [text, image]
     model_pools:

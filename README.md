@@ -12,7 +12,7 @@
 
 Start with the core experience you notice immediately:
 
-- **Stable for the long haul.** Auto-compaction keeps a long conversation usable past the model's context window — earlier turns are summarized into a context summary while what is needed to continue is preserved. No more "wait, did it forget?".
+- **Stable for the long haul.** Chord can summarize earlier turns before a long conversation gets too large for the model, while preserving what is needed to continue. No more "wait, did it forget?".
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
 - **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
@@ -60,7 +60,7 @@ providers:
         limit:
           context: 400000
           input: 272000
-          output: 32000
+          output: 128000
         modalities:
           input: [text, image]
 model_pools:
@@ -79,7 +79,7 @@ YAML
 cd my-project && chord
 ```
 
-For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). For `gpt-5.5`, these docs use the conservative baseline `context=400000`, `input=272000`, `output=32000` unless you have verified provider-specific limits. For ready-to-copy config files, see [Examples](./docs/examples/index.md).
+For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). Read model limits in this order: `limit.context` is the total window; for most models, input + requested output just needs to fit there. If a provider also lists a separate input cap (some GPT models do), add `limit.input`; otherwise Chord falls back to `limit.context`. `limit.output` is the model's own output capacity. Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`; the default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it. See [Glossary](./docs/glossary.md) for the related terms.
 
 ### Release download notes
 
