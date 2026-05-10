@@ -82,9 +82,9 @@ providers:
 
 1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会回退到 `limit.context`。
-3. `limit.output` 是模型自己的输出能力。Chord 默认的请求输出上限（`max_output_tokens`）仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
+3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
 
-当前文档里的 `gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
+`gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
 
 ### OpenAI Codex preset
 
@@ -339,7 +339,7 @@ providers:
 
 - `limit.context`：已知时表示总请求窗口大小。
 - `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，则为兼容旧配置，自动回退到 `limit.context`。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
-- `limit.output`：模型自身最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
+- `limit.output`：模型最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
 - `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
 - `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。

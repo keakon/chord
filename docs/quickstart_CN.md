@@ -90,7 +90,7 @@ model_pools:
 
 `providers` 定义可用的 API 端点和模型；`model_pools.default` 定义内置 `builder` / `planner` 默认使用的模型池。两者都需要配置——只配 provider 不配模型池的话，启动会报找不到默认模型池。内置 `builder` 只引用 `default` 池，不会自动使用全局 `model_pools`；用自定义 `builder` agent 覆盖内置配置时，也必须显式配置 `model_pools` 或 `models`。
 
-换用其他 ModelScope 模型或其他 OpenAI 兼容接口时，把 `api_url`、provider 名和模型名改成对应值，同步更新 `model_pools.default` 中的 `provider/model` 引用即可。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型自己的输出能力。相关术语见 [术语表](./glossary_CN.md)。
+换用其他 ModelScope 模型或其他 OpenAI 兼容接口时，把 `api_url`、provider 名和模型名改成对应值，同步更新 `model_pools.default` 中的 `provider/model` 引用即可。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型的最大输出能力，Chord 默认 `max_output_tokens` 仍为 `32000`，实际会取更小的值。相关术语见 [术语表](./glossary_CN.md)。
 
 ## 4. 运行
 
