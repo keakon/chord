@@ -34,6 +34,18 @@ func (a *MainAgent) configuredCompactionProfile() compactionProfile {
 	return compactionProfileAuto
 }
 
+func (a *MainAgent) effectiveCompactionReservedInput() int {
+	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
+		if cfg == nil {
+			continue
+		}
+		if cfg.Context.Compaction.Reserved > 0 {
+			return cfg.Context.Compaction.Reserved
+		}
+	}
+	return 0
+}
+
 func (a *MainAgent) resolveCompactionProfile(todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, evidenceItems []evidenceItem) compactionProfile {
 	switch profile := a.configuredCompactionProfile(); profile {
 	case compactionProfileContinuation, compactionProfileArchival:

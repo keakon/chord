@@ -191,6 +191,8 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	a.turn.InLengthRecovery = false
 	a.turn.LengthRecoveryCount = 0
 	a.turn.LastTruncatedToolName = ""
+	a.turn.OversizeRecoveryCount = 0
+	a.clearPendingCompactionResume()
 
 	compatCfg := a.thinkingToolcallCompat()
 	compatEnabled := compatCfg != nil && compatCfg.EnabledValue()

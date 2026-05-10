@@ -107,6 +107,38 @@ func (a *MainAgent) recordCompactionFailureAnalyticsEvent(err error, class compa
 	})
 }
 
+func (a *MainAgent) recordOversizeRecoveryAnalyticsEvent(action, stage, selectedModelRef, runningModelRef string, diagnostic map[string]string) {
+	if a == nil {
+		return
+	}
+	purpose := oversizeRecoveryAnalyticsPurpose
+	if strings.TrimSpace(action) != "" {
+		purpose += "/" + strings.TrimSpace(action)
+	}
+	if diagnostic == nil {
+		diagnostic = map[string]string{}
+	}
+	if strings.TrimSpace(stage) != "" {
+		diagnostic["stage"] = strings.TrimSpace(stage)
+	}
+	if _, ok := diagnostic["reason"]; !ok {
+		diagnostic["reason"] = "context_length_exceeded"
+	}
+	if _, ok := diagnostic["trigger"]; !ok && a.compactionState.trigger.needed() {
+		diagnostic["trigger"] = a.compactionState.trigger.analyticsName()
+	}
+	a.emitUsageEvent(analytics.UsageEvent{
+		AgentID:          "main",
+		AgentKind:        "main",
+		AgentName:        a.currentAgentName(),
+		Purpose:          purpose,
+		SelectedModelRef: selectedModelRef,
+		RunningModelRef:  runningModelRef,
+		TurnID:           a.currentTurnID(),
+		Diagnostic:       diagnostic,
+	})
+}
+
 func (a *MainAgent) recordUsage(
 	agentID string,
 	agentKind string,

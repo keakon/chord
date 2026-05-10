@@ -25,7 +25,8 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 		"  compact_threshold: 0.75\n" +
 		"  compaction:\n" +
 		"    preset: codex\n" +
-		"    profile: archival\n")
+		"    profile: archival\n" +
+		"    reserved: 16000\n")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -39,6 +40,9 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	}
 	if cfg.Context.Compaction.Profile != CompactionProfileArchival {
 		t.Fatalf("profile = %q, want %q", cfg.Context.Compaction.Profile, CompactionProfileArchival)
+	}
+	if cfg.Context.Compaction.Reserved != 16000 {
+		t.Fatalf("reserved = %d, want 16000", cfg.Context.Compaction.Reserved)
 	}
 	if cfg.Context.CompactThreshold != 0.75 {
 		t.Fatalf("compact_threshold = %v, want 0.75", cfg.Context.CompactThreshold)

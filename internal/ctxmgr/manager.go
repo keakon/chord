@@ -20,9 +20,11 @@ type Manager struct {
 	lastInputTokens        int // prompt size only (for compression threshold)
 	lastTotalContextTokens int // true input-side context burden for sidebar (input + cache_write)
 	maxTokens              int
+	inputBudget            int
+	inputBudgetReserved    int
 
 	autoCompact bool
-	threshold   float64 // fraction of maxTokens that triggers compaction
+	threshold   float64 // fraction of usable input budget that triggers compaction
 
 	stats message.TokenUsage
 }
@@ -32,12 +34,27 @@ type Manager struct {
 //
 //   - maxTokens: the model's context window size (in tokens).
 //   - autoCompact: whether to automatically compact when usage exceeds threshold.
-//   - threshold: fraction (0–1) of maxTokens at which to trigger compaction.
+//   - threshold: fraction (0–1) of the input budget at which to trigger compaction.
 func NewManager(maxTokens int, autoCompact bool, threshold float64) *Manager {
+	return NewManagerWithInputBudget(maxTokens, 0, 0, autoCompact, threshold)
+}
+
+// NewManagerWithInputBudget creates a Manager with separate total-context,
+// input-side budget, and reserved input headroom. If inputBudget <= 0,
+// maxTokens is used for backward compatibility with older single-limit configs.
+func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, autoCompact bool, threshold float64) *Manager {
+	if inputBudget <= 0 {
+		inputBudget = maxTokens
+	}
+	if reservedInput < 0 {
+		reservedInput = 0
+	}
 	return &Manager{
-		maxTokens:   maxTokens,
-		autoCompact: autoCompact,
-		threshold:   threshold,
+		maxTokens:           maxTokens,
+		inputBudget:         inputBudget,
+		inputBudgetReserved: reservedInput,
+		autoCompact:         autoCompact,
+		threshold:           threshold,
 	}
 }
 
@@ -58,9 +75,23 @@ func (m *Manager) SystemPrompt() message.Message {
 // SetMaxTokens updates the context window size (token budget). Thread-safe.
 // This is used when switching to a model with a different context limit.
 func (m *Manager) SetMaxTokens(n int) {
+	m.SetTokenBudgets(n, 0, 0)
+}
+
+// SetTokenBudgets updates total context window, input-side budget, and reserved
+// input headroom. If inputBudget <= 0, maxTokens is used for backward compatibility.
+func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.maxTokens = n
+	if inputBudget <= 0 {
+		inputBudget = maxTokens
+	}
+	if reservedInput < 0 {
+		reservedInput = 0
+	}
+	m.maxTokens = maxTokens
+	m.inputBudget = inputBudget
+	m.inputBudgetReserved = reservedInput
 }
 
 // GetMaxTokens returns the context window size (token budget). Thread-safe.
@@ -68,6 +99,33 @@ func (m *Manager) GetMaxTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.maxTokens
+}
+
+// GetInputBudget returns the configured input-side token budget used for
+// auto-compaction before reserved headroom is applied.
+func (m *Manager) GetInputBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.inputBudget > 0 {
+		return m.inputBudget
+	}
+	return m.maxTokens
+}
+
+// GetUsableInputBudget returns the input-side budget after subtracting reserved
+// headroom for tokenizer drift, summary output, and provider overhead.
+func (m *Manager) GetUsableInputBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	budget := m.inputBudget
+	if budget <= 0 {
+		budget = m.maxTokens
+	}
+	budget -= m.inputBudgetReserved
+	if budget < 0 {
+		return 0
+	}
+	return budget
 }
 
 // IsAutoCompactEnabled reports whether automatic compaction is enabled.
@@ -305,10 +363,15 @@ func EstimateMessageTokens(msg message.Message) int {
 func (m *Manager) ShouldAutoCompact() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.autoCompact || m.maxTokens <= 0 {
+	budget := m.inputBudget
+	if budget <= 0 {
+		budget = m.maxTokens
+	}
+	budget -= m.inputBudgetReserved
+	if !m.autoCompact || budget <= 0 {
 		return false
 	}
-	return float64(m.lastInputTokens) >= m.threshold*float64(m.maxTokens)
+	return float64(m.lastInputTokens) >= m.threshold*float64(budget)
 }
 
 // CompressForTarget compresses a message list to fit within targetTokens

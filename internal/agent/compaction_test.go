@@ -365,6 +365,17 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 	}
 }
 
+func TestLatestRecoverableUserIntentSkipsCompactionSummary(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "original request"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "working"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "[Context Summary]\nsummary", IsCompactionSummary: true})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "final real user intent"})
+	if got := a.latestRecoverableUserIntent(); got != "final real user intent" {
+		t.Fatalf("latestRecoverableUserIntent() = %q, want final real user intent", got)
+	}
+}
+
 func TestHandleCompactCommandSchedulesAsyncCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -1232,6 +1243,58 @@ func TestSpawnFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
 		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
+	}
+}
+
+func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	if !a.ensureOversizeDrivenCompaction() {
+		t.Fatal("expected oversize-driven compaction to start")
+	}
+	if a.turn.OversizeRecoveryCount != 1 {
+		t.Fatalf("OversizeRecoveryCount = %d, want 1", a.turn.OversizeRecoveryCount)
+	}
+	if a.pendingCompactionResume == nil {
+		t.Fatal("expected durable pending compaction resume to be armed")
+	}
+	if a.pendingCompactionResume.OversizeRetryCount != 1 {
+		t.Fatalf("pending oversize retry count = %d, want 1", a.pendingCompactionResume.OversizeRetryCount)
+	}
+	if !a.IsCompactionRunning() {
+		t.Fatal("expected compaction running state")
+	}
+	if !a.compactionState.trigger.OversizeDriven {
+		t.Fatal("expected OversizeDriven trigger to be true")
+	}
+	if a.compactionState.continuation.kind != compactionResumeMainLLM {
+		t.Fatalf("continuation kind = %q, want %q", a.compactionState.continuation.kind, compactionResumeMainLLM)
+	}
+	foundToast := false
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if toast, ok := evt.(ToastEvent); ok && strings.Contains(toast.Message, "compacting context before retry") {
+			foundToast = true
+		}
+	}
+	if !foundToast {
+		t.Fatal("expected oversize-driven compaction toast")
+	}
+}
+
+func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
+	if a.ensureOversizeDrivenCompaction() {
+		t.Fatal("expected oversize-driven compaction to stop after retry limit")
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("expected no compaction running state after retry limit")
 	}
 }
 

@@ -627,6 +627,50 @@ func TestParseResponsesSSE_EarlyCloseBeforeCompletedReturnsError(t *testing.T) {
 	}
 }
 
+func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
+	t.Run("response_failed_context_length_exceeded", func(t *testing.T) {
+		stream := buildSSEStream([]string{
+			`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input is too long for this model","param":"input"}}}`,
+		})
+		_, err := parseResponsesSSE(stream, nil, nil)
+		if err == nil {
+			t.Fatal("parseResponsesSSE err = nil, want APIError")
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("err = %T %v, want *APIError", err, err)
+		}
+		if apiErr.StatusCode != 400 || apiErr.Code != "context_length_exceeded" {
+			t.Fatalf("apiErr = %+v, want status=400 code=context_length_exceeded", apiErr)
+		}
+		if !IsContextLengthExceeded(err) {
+			t.Fatalf("expected IsContextLengthExceeded(%v) = true", err)
+		}
+	})
+
+	t.Run("error_event_preserved_over_incomplete_stream", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"event: error",
+			`data: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"This request exceeds the context window","param":"input"}}`,
+			"",
+		}, "\n")
+		_, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+		if err == nil {
+			t.Fatal("parseResponsesSSE err = nil, want APIError")
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("err = %T %v, want *APIError", err, err)
+		}
+		if strings.Contains(err.Error(), "incomplete SSE stream") {
+			t.Fatalf("err = %v, want provider API error preserved over incomplete SSE", err)
+		}
+		if apiErr.Code != "context_length_exceeded" {
+			t.Fatalf("apiErr.Code = %q, want context_length_exceeded", apiErr.Code)
+		}
+	})
+}
+
 // TestParseResponsesSSE_DuplicateToolCallFromProxy verifies that when a proxy (e.g. qt)
 // replays the same tool call events after they've already been finalized, the parser
 // deduplicates them — producing exactly 1 tool call, not 2.

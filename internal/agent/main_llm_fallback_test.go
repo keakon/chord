@@ -8,9 +8,66 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
+
+func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, true, 0.8)
+
+	providerCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}}
+	client := llm.NewClient(providerCfg, provider, "primary-model", 4096, "sys")
+	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
+
+	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("callLLM err = nil, want pending compaction error")
+	}
+	if !IsContextLengthExceededPendingCompaction(err) {
+		t.Fatalf("err = %v, want pending compaction error", err)
+	}
+	if !a.IsCompactionRunning() {
+		t.Fatal("expected oversize-driven compaction to be running")
+	}
+	if !a.compactionState.trigger.OversizeDriven {
+		t.Fatal("expected oversize-driven trigger")
+	}
+	if got := a.ctxMgr.GetUsableInputBudget(); got != 256000 {
+		t.Fatalf("usable input budget = %d, want 256000", got)
+	}
+	deadline := time.After(2 * time.Second)
+	foundInfo := false
+	for {
+		select {
+		case evt := <-a.Events():
+			switch e := evt.(type) {
+			case InfoEvent:
+				if strings.Contains(e.Message, "compacting context before retry") {
+					foundInfo = true
+				}
+			case ToastEvent:
+				if strings.Contains(e.Message, "Fallback chain exhausted") {
+					t.Fatalf("unexpected fallback exhausted toast during oversize recovery: %+v", e)
+				}
+			}
+			if foundInfo {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for oversize compaction info event")
+		}
+	}
+}
 
 func TestCallLLMShowsFallbackToastOnFirstThinkingToken(t *testing.T) {
 	a := newReadyTestMainAgent(t)
@@ -68,7 +125,10 @@ func TestCallLLMShowsFallbackToastOnFirstThinkingToken(t *testing.T) {
 	}()
 
 	<-fallbackImpl.streamedCh
-	toast := waitForToastEvent(t, a.Events(), "Switched to fallback model")
+	toast := waitForToastEvent(t, a.Events(), "fallback model")
+	if !strings.Contains(toast.Message, "Current model context exceeded") {
+		t.Fatalf("toast = %+v, want explicit context-exceeded fallback message", toast)
+	}
 	if !strings.Contains(toast.Message, "fallback-prov/fallback-model") {
 		t.Fatalf("toast = %+v, want fallback model ref", toast)
 	}

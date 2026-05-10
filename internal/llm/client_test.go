@@ -925,6 +925,142 @@ func TestClientCompleteConnectionEstablishmentTimeoutRetriesProviderNextRound(t 
 	}
 }
 
+func TestClientContextLengthExceededDoesNotRetryKeysAndFallsBackWithinRound(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok from fallback"}}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}})
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1 (do not retry next key on oversize)", got)
+	}
+	if len(primaryImpl.apiKeys) != 1 || primaryImpl.apiKeys[0] != "k1" {
+		t.Fatalf("primary keys = %#v, want only first key tried", primaryImpl.apiKeys)
+	}
+}
+
+func TestClientContextLengthExceededStopsAfterPoolExhaustedWithoutNextRound(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "prompt is too long"}}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("CompleteStream err = nil, want oversize error")
+	}
+	if !IsContextLengthExceeded(err) {
+		t.Fatalf("err = %v, want context length exceeded", err)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+}
+
+func TestClientContextLengthExceededStillTriesSameNamedFallbackOnDifferentProvider(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "openai/gpt-5.5", []string{"k1"})
+	dupCfg := testProviderConfig("dup-prov", "gpt-5.5")
+	okCfg := testProviderConfig("ok-prov", "claude-opus")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}
+	dupImpl := &recordingProvider{}
+	dupImpl.calls = []scriptedCall{{resp: &message.Response{Content: "ok from same-name fallback on different provider"}}}
+	okImpl := &recordingProvider{}
+	okImpl.calls = []scriptedCall{{resp: &message.Response{Content: "should not be used"}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "openai/gpt-5.5", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: dupCfg,
+		ProviderImpl:   dupImpl,
+		ModelID:        "gpt-5.5",
+		MaxTokens:      4096,
+		ContextLimit:   400000,
+		InputLimit:     272000,
+	}, {
+		ProviderConfig: okCfg,
+		ProviderImpl:   okImpl,
+		ModelID:        "claude-opus",
+		MaxTokens:      4096,
+		ContextLimit:   200000,
+		InputLimit:     200000,
+	}})
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from same-name fallback on different provider" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := dupImpl.CallCount(); got != 1 {
+		t.Fatalf("same-name fallback provider calls = %d, want 1", got)
+	}
+	if got := okImpl.CallCount(); got != 0 {
+		t.Fatalf("later distinct fallback calls = %d, want 0", got)
+	}
+}
+
+func TestClampEffectiveMaxTokensUsesTotalContextForOutputClampWhenInputBudgetConfigured(t *testing.T) {
+	model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}}
+	messages := []message.Message{{Role: "user", Content: strings.Repeat("x", 720000)}} // ~240k tokens
+	got := clampEffectiveMaxTokens(model, 128000, 128000, RequestTuning{}, "", messages, nil, 0)
+	if got != 128000 {
+		t.Fatalf("clampEffectiveMaxTokens() = %d, want 128000", got)
+	}
+}
+
+func TestClampEffectiveMaxTokensReasoningStillRespectsGlobalOutputCap(t *testing.T) {
+	model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}}
+	got := clampEffectiveMaxTokens(model, 128000, 32000, RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high"}}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
+	if got != 32000 {
+		t.Fatalf("clampEffectiveMaxTokens() = %d, want 32000", got)
+	}
+}
+
+func TestClassifyFallbackReasonUsesContextLengthExceededCode(t *testing.T) {
+	err := &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}
+	if got := classifyFallbackReason(err); got != "context_length_exceeded" {
+		t.Fatalf("classifyFallbackReason() = %q, want context_length_exceeded", got)
+	}
+}
+
 func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
 	primaryCfg.MarkCooldown("k1", 20*time.Millisecond)

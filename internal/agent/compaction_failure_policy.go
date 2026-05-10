@@ -15,6 +15,7 @@ const (
 	usageDrivenCompactionSuppressTurns    = 3
 	compactionPolicyAnalyticsPurpose      = "compaction_policy"
 	compactionFailureAnalyticsPurpose     = "compaction_failure"
+	oversizeRecoveryAnalyticsPurpose      = "oversize_recovery"
 )
 
 type autoCompactionFailureState struct {
@@ -45,13 +46,17 @@ type compactionTrigger struct {
 	Manual         bool
 	UsageDriven    bool
 	LengthRecovery bool
+	OversizeDriven bool
 }
 
 func (t compactionTrigger) needed() bool {
-	return t.Manual || t.UsageDriven || t.LengthRecovery
+	return t.Manual || t.UsageDriven || t.LengthRecovery || t.OversizeDriven
 }
 
 func (t compactionTrigger) analyticsName() string {
+	if t.OversizeDriven {
+		return "oversize_driven"
+	}
 	if t.LengthRecovery {
 		return "length_recovery_driven"
 	}

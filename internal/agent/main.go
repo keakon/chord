@@ -80,6 +80,7 @@ type Turn struct {
 	InLengthRecovery                   bool
 	LastTruncatedToolName              string
 	LengthRecoveryAutoCompactAttempted bool
+	OversizeRecoveryCount              int
 	malformedInBatch                   int // abnormal calls in the current LLM-response batch
 	CompletedToolCalls                 []any
 	ChangedFiles                       []any
@@ -410,8 +411,26 @@ type MainAgent struct {
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot
 	// turn overlay and never appended to ctxMgr durable messages.
 	pendingRecoveryPrompt string
-	toolTraceMu           sync.Mutex
-	toolTrace             map[string]toolCallStageTrace
+	// pendingAutoContinuePrompt is a request-scoped continuation hint injected
+	// after usage-driven or oversize-driven compaction succeeds, so the next
+	// automatically resumed turn continues the active task without persisting an
+	// extra durable message.
+	pendingAutoContinuePrompt string
+	// pendingAutoContinueReplayPrompt is a one-shot request-scoped reminder that
+	// replays the most recent real user intent after compaction, without
+	// persisting another durable user message or replaying prior tool side effects.
+	pendingAutoContinueReplayPrompt string
+	// pendingCompactionResume keeps the durable recovery intent for a compaction-
+	// driven continuation. It is rebuilt into one-shot request overlays when the
+	// session resumes and the user continues from context, without persisting an
+	// extra user message.
+	pendingCompactionResume *recovery.PendingCompactionResume
+	// newTurnOversizeRecoveryCount carries durable oversize retry state across
+	// /continue or auto-continue boundaries so retry limits remain effective
+	// after restore/restart.
+	newTurnOversizeRecoveryCount int
+	toolTraceMu                  sync.Mutex
+	toolTrace                    map[string]toolCallStageTrace
 
 	// Adhoc task counter for auto-assigning "adhoc-N" IDs.
 	adhocSeq atomic.Uint64
@@ -1021,58 +1040,7 @@ func (a *MainAgent) closeSubAgentMCPServers() {
 // totals into a [recovery.SessionSnapshot] suitable for the final shutdown
 // snapshot.
 func (a *MainAgent) buildShutdownSnapshot() *recovery.SessionSnapshot {
-	a.todoMu.RLock()
-	todoStates := snapshotTodos(a.todoItems)
-	a.todoMu.RUnlock()
-
-	a.mu.RLock()
-	agents := make([]recovery.AgentSnapshot, 0, len(a.subAgents))
-	for _, sub := range a.subAgents {
-		pendingComplete := sub.PendingCompleteIntent()
-		agentSnap := recovery.AgentSnapshot{
-			InstanceID:            sub.instanceID,
-			TaskID:                sub.taskID,
-			AgentDefName:          sub.agentDefName,
-			TaskDesc:              sub.taskDesc,
-			OwnerAgentID:          sub.OwnerAgentID(),
-			OwnerTaskID:           sub.OwnerTaskID(),
-			Depth:                 sub.Depth(),
-			JoinToOwner:           sub.joinToOwner,
-			State:                 string(sub.State()),
-			LastSummary:           sub.LastSummary(),
-			PendingCompleteIntent: pendingComplete != nil,
-		}
-		if pendingComplete != nil {
-			agentSnap.PendingCompleteSummary = pendingComplete.Summary
-			agentSnap.PendingCompleteEnvelope = marshalCompletionEnvelope(pendingComplete.Envelope)
-		}
-		agents = append(agents, agentSnap)
-	}
-	a.mu.RUnlock()
-
-	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
-	usageSnap := a.usageTracker.SessionStats()
-	return &recovery.SessionSnapshot{
-		Todos:                     todoStates,
-		ActiveAgents:              agents,
-		ModelName:                 a.ModelName(),
-		ActiveRole:                a.CurrentRole(),
-		ModelPoolCurrentModelPool: modelPoolCurrentModelPool,
-		ModelPoolAgentOverrides:   modelPoolAgentOverrides,
-		CreatedAt:                 time.Now(),
-		LastInputTokens:           a.ctxMgr.LastInputTokens(),
-		LastTotalContextTokens:    a.ctxMgr.LastTotalContextTokens(),
-		ActiveBackgroundObjects:   spawnStatesForSnapshot(),
-		UsageInputTokens:          usageSnap.InputTokens,
-		UsageOutputTokens:         usageSnap.OutputTokens,
-		UsageCacheReadTokens:      usageSnap.CacheReadTokens,
-		UsageCacheWriteTokens:     usageSnap.CacheWriteTokens,
-		UsageReasoningTokens:      usageSnap.ReasoningTokens,
-		UsageLLMCalls:             usageSnap.LLMCalls,
-		UsageEstimatedCost:        usageSnap.EstimatedCost,
-		UsageByModel:              usageSnap.ByModel,
-		UsageByAgent:              usageSnap.ByAgent,
-	}
+	return a.buildRecoverySnapshot()
 }
 
 // ---------------------------------------------------------------------------

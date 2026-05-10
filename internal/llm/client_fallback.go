@@ -19,6 +19,9 @@ func classifyFallbackReason(err error) string {
 		return "429"
 	}
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		if IsContextLengthExceeded(apiErr) {
+			return "context_length_exceeded"
+		}
 		switch {
 		case apiErr.StatusCode == 402:
 			return "402"
@@ -27,7 +30,7 @@ func classifyFallbackReason(err error) string {
 		case apiErr.StatusCode >= 500:
 			return "5xx"
 		case apiErr.StatusCode == 413:
-			return "context"
+			return "context_length_exceeded"
 		default:
 			return "error"
 		}

@@ -193,6 +193,10 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil
+	a.pendingRecoveryPrompt = ""
+	a.pendingAutoContinuePrompt = ""
+	a.pendingAutoContinueReplayPrompt = ""
+	a.clearPendingCompactionResume()
 	if loopWasEnabled {
 		a.refreshSystemPrompt()
 		a.emitLoopStateChanged()

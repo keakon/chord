@@ -102,6 +102,25 @@ type responseReasoningSummaryTextDone struct {
 	Text string `json:"text"`
 }
 
+type responsesProviderErrorPayload struct {
+	Type     string                 `json:"type"`
+	Code     string                 `json:"code"`
+	Message  string                 `json:"message"`
+	Param    string                 `json:"param"`
+	Error    responsesProviderError `json:"error"`
+	Response struct {
+		Status string                 `json:"status"`
+		Error  responsesProviderError `json:"error"`
+	} `json:"response"`
+}
+
+type responsesProviderError struct {
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Param   string `json:"param"`
+}
+
 type responseCompleted struct {
 	Response responsesCompletedPayload `json:"response"`
 }
@@ -151,6 +170,7 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 		eventDataParts [][]byte
 		progressBytes  int64
 		progressEvents int64
+		providerErr    error
 	)
 	dataChunkIndex = -1
 	flushContent := func() {
@@ -207,7 +227,11 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 			cb:             cb,
 			phaser:         phaser,
 		}
-		return processResponsesEventPayload(state, eventType, eventData, flushContent)
+		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
+		if err != nil {
+			providerErr = err
+		}
+		return outResp, outItems, done, err
 	}
 
 	for {
@@ -265,6 +289,9 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 
 	if !sawDataLine {
 		return nil, nil, fmt.Errorf("empty SSE stream: no data lines")
+	}
+	if providerErr != nil {
+		return nil, nil, providerErr
 	}
 
 	return nil, nil, fmt.Errorf("incomplete SSE stream: stream closed before response.completed")
@@ -399,6 +426,13 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		return nil, nil, false, nil
 
+	case "error", "response.failed":
+		apiErr, err := parseResponsesProviderErrorEvent(eventType, eventData)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("parse %s: %w", eventType, err)
+		}
+		return nil, nil, false, apiErr
+
 	case "response.completed":
 		var completed responseCompleted
 		if err := responsesSSEUnmarshal(eventData, &completed); err != nil {
@@ -437,6 +471,33 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 func responsesSSEUnmarshal(data []byte, v any) error {
 	return sonicjson.ConfigStd.Unmarshal(data, v)
+}
+
+func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIError, error) {
+	var payload responsesProviderErrorPayload
+	if err := responsesSSEUnmarshal(eventData, &payload); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", eventType, err)
+	}
+	errObj := payload.Error
+	if eventType == "response.failed" {
+		errObj = payload.Response.Error
+	}
+	code := strings.TrimSpace(errObj.Code)
+	msg := strings.TrimSpace(errObj.Message)
+	typ := strings.TrimSpace(errObj.Type)
+	if code == "" {
+		code = strings.TrimSpace(payload.Code)
+	}
+	if msg == "" {
+		msg = strings.TrimSpace(payload.Message)
+	}
+	if typ == "" {
+		typ = strings.TrimSpace(payload.Type)
+	}
+	if msg == "" {
+		msg = strings.TrimSpace(string(eventData))
+	}
+	return &APIError{StatusCode: 400, Code: code, Type: typ, Message: msg}, nil
 }
 
 func readSSELine(r *bufio.Reader) ([]byte, error) {

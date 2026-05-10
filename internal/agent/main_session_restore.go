@@ -41,6 +41,7 @@ type loadedSessionState struct {
 	ContextUsage              message.TokenUsage
 	LastInputTokens           int
 	LastTotalContextTokens    int
+	PendingCompactionResume   *recovery.PendingCompactionResume
 	SubAgentStates            []loadedSubAgentState
 	MailboxMessages           []SubAgentMailboxMessage
 	MailboxSeqMax             uint64
@@ -299,6 +300,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.ModelPoolAgentOverrides = cloneStringMap(snap.ModelPoolAgentOverrides)
 	loaded.LastInputTokens = snap.LastInputTokens
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
+	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	if loaded.UsageStats.LLMCalls == 0 && (snap.UsageLLMCalls > 0 || snap.UsageInputTokens > 0) {
 		loaded.ContextUsage = message.TokenUsage{
 			InputTokens:      int(snap.UsageInputTokens),
@@ -491,6 +493,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.ctxMgr.RestoreStats(loaded.ContextUsage)
 	a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
 	a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
+	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(loaded.UsageStats)
 	}

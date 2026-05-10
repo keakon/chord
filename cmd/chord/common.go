@@ -438,8 +438,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	// Context manager.
-	ac.CtxMgr = ctxmgr.NewManager(
+	ac.CtxMgr = ctxmgr.NewManagerWithInputBudget(
 		modelCfg.Limit.Context,
+		modelCfg.Limit.InputBudget(),
+		cfg.Context.Compaction.Reserved,
 		cfg.Context.AutoCompact,
 		cfg.Context.CompactThreshold,
 	)

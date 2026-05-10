@@ -233,6 +233,23 @@ func (a *MainAgent) commitPendingUserMessagesWithoutTurn() {
 	}
 }
 
+func (a *MainAgent) latestRecoverableUserIntent() string {
+	if a == nil || a.ctxMgr == nil {
+		return ""
+	}
+	msgs := a.ctxMgr.Snapshot()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != "user" || msg.IsCompactionSummary {
+			continue
+		}
+		if text := strings.TrimSpace(message.UserPromptPlainText(msg)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
 func upsertPendingDraft(queue []pendingUserMessage, pending pendingUserMessage) []pendingUserMessage {
 	if pending.DraftID != "" {
 		for i := range queue {
@@ -327,7 +344,9 @@ func (a *MainAgent) newTurn() {
 		toolExecutionBatches:  nil,
 		nextToolBatch:         0,
 		activeToolBatchCancel: nil,
+		OversizeRecoveryCount: a.newTurnOversizeRecoveryCount,
 	}
+	a.newTurnOversizeRecoveryCount = 0
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
 	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})

@@ -561,6 +561,11 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		}
 		// Spawn a fresh turn on the compacted context so the model keeps
 		// making progress. Mirrors handleContinueFromContext.
+		a.armOversizeAutoContinueResume()
+		if a.pendingCompactionResume != nil {
+			a.pendingCompactionResume.Mode = a.chooseCompactionResumeMode(a.pendingCompactionResume.UserIntent)
+		}
+		a.applyPendingCompactionResumeOverlaysForContinue()
 		if a.loopState.Enabled {
 			a.loopState.State = LoopStateExecuting
 			a.emitLoopStateChanged()
@@ -638,11 +643,42 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		// Queued user input or reports can still change the prompt surface after a
 		// successful compaction commit. Re-enter the same pre-request compaction gate so
 		// any newly armed automatic request is still honored on resume.
+		if pending.oversizeSuspended && a.pendingCompactionResume != nil {
+			a.applyPendingCompactionResumeOverlays(a.pendingCompactionResume)
+			a.clearPendingCompactionResume()
+			a.saveRecoverySnapshot()
+		}
 		a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
 		return true
 	}
-	// If compaction itself failed, do not immediately retry the same gate; resume
-	// the pending continuation directly to avoid an infinite compaction loop.
+	// If compaction itself failed for an oversize-suspended main request, retrying
+	// the same prompt would just repeat the same context_length_exceeded loop.
+	// Surface actionable guidance instead of immediately reissuing the request.
+	if pending.oversizeSuspended {
+		log.Warnf("oversize-driven compaction failed; aborting suspended main LLM continuation turn_id=%v", pending.turnID)
+		a.recordOversizeRecoveryAnalyticsEvent(
+			"abort_after_compaction_failure",
+			"resume_pending_main_llm",
+			a.ProviderModelRef(),
+			a.RunningModelRef(),
+			map[string]string{"trigger": "oversize_driven", "action": "abort"},
+		)
+		a.emitToTUI(ErrorEvent{
+			Err: fmt.Errorf(
+				"automatic context compaction failed after all available models exceeded the current context; " +
+					"please try /compact or reduce the active context before retrying",
+			),
+		})
+		a.emitToTUI(ToastEvent{
+			Message: "Current context still does not fit. Try /compact or reduce active context.",
+			Level:   "warn",
+		})
+		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "oversize_compaction_failed")
+		a.setIdleAndDrainPending()
+		return true
+	}
+	// If compaction itself failed for a regular main continuation, do not
+	// immediately retry the same gate; resume the pending continuation directly.
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, a.ctxMgr.Snapshot(), pending.agentErrSourceID)
 	return true
 }

@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 type recordingLengthRecoveryProvider struct {
@@ -203,6 +206,82 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 	}
 }
 
+func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newReadyTestMainAgent(t)
+	a.sessionDir = testProjectSessionDir(t, projectRoot, "oversize-overlay")
+	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "finish the refactor safely"})
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "ok", StopReason: "stop"}}}}
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "")
+	a.setPendingCompactionResume(&recovery.PendingCompactionResume{
+		Kind:               string(compactionResumeMainLLM),
+		Mode:               compactionResumeModeReplayUserIntent,
+		UserIntent:         "finish the refactor safely",
+		OversizeRetryCount: 1,
+	})
+
+	pending := &pendingMainLLMCall{
+		turnID:            a.turn.ID,
+		turnEpoch:         a.turn.Epoch,
+		sessionEpoch:      a.sessionEpoch,
+		continuation:      compactionResumeMainLLM,
+		oversizeSuspended: true,
+	}
+
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("expected oversize-suspended main LLM continuation to resume")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		provider.mu.Lock()
+		got := len(provider.seenMessages)
+		provider.mu.Unlock()
+		if got == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for resumed oversize request")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if got := len(provider.seenMessages); got != 1 {
+		t.Fatalf("provider request count = %d, want 1", got)
+	}
+	seen := provider.seenMessages[0]
+	foundContinue := false
+	foundReplay := false
+	for _, msg := range seen {
+		if msg.Role != "user" {
+			continue
+		}
+		if strings.Contains(msg.Content, "context compaction completed successfully") {
+			foundContinue = true
+		}
+		if strings.Contains(msg.Content, "finish the refactor safely") {
+			foundReplay = true
+		}
+	}
+	if !foundContinue {
+		t.Fatal("expected generic auto-continue overlay in resumed oversize request")
+	}
+	if !foundReplay {
+		t.Fatal("expected replay overlay in resumed oversize request")
+	}
+	if a.pendingCompactionResume != nil {
+		t.Fatal("expected durable pending compaction resume to be consumed after oversize resume")
+	}
+}
+
 func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -308,6 +387,46 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryFailureAborts(t *testi
 	}
 	if !foundErr {
 		t.Fatal("expected error event mentioning /compact or new conversation after compaction failure")
+	}
+}
+
+func TestOversizeCompactionFailureAbortsSuspendedMainContinuation(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, &recordingLengthRecoveryProvider{}, "test-model", 1024, "")
+	a.newTurn()
+
+	pending := &pendingMainLLMCall{
+		turnID:            a.turn.ID,
+		turnEpoch:         a.turn.Epoch,
+		sessionEpoch:      a.sessionEpoch,
+		continuation:      compactionResumeMainLLM,
+		oversizeSuspended: true,
+	}
+
+	a.resumePendingMainLLMAfterCompaction(pending, false)
+
+	if a.turn != nil {
+		t.Fatal("expected turn to be cleared after oversize compaction failure abort")
+	}
+	var foundErr bool
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if errEvt, ok := evt.(ErrorEvent); ok {
+			if strings.Contains(errEvt.Err.Error(), "/compact") || strings.Contains(errEvt.Err.Error(), "reduce the active context") {
+				foundErr = true
+				break
+			}
+		}
+	}
+	if !foundErr {
+		t.Fatal("expected error event mentioning /compact or reducing active context after oversize compaction failure")
 	}
 }
 

@@ -27,6 +27,18 @@ func lengthRecoveryPrompt(toolName string) string {
 	return fmt.Sprintf("System note: the previous response was cut off by the output limit while generating arguments for tool %q. Continue directly without apology or recap. Choose exactly one minimal next step. If you need a tool, call exactly one tool with complete JSON arguments and keep the arguments as short as possible. Do not combine code edits, tests, and documentation in the same response.", toolName)
 }
 
+func autoContinuePrompt() string {
+	return "System note: context compaction completed successfully. Continue the active coding task directly without apology or recap. Prefer the smallest next concrete step, and preserve the constraints and decisions captured in the compacted context summary."
+}
+
+func autoContinueReplayPrompt(userIntent string) string {
+	userIntent = strings.TrimSpace(userIntent)
+	if userIntent == "" {
+		return ""
+	}
+	return fmt.Sprintf("System note: after compaction, keep the current task anchored to the latest user intent. The latest user request was: %q. Continue that request directly without apology or recap, unless newer queued user input in this turn supersedes it.", userIntent)
+}
+
 func (a *MainAgent) beginLengthRecoveryRetry(toolName string, turnID uint64, turnCtx context.Context) {
 	a.turn.InLengthRecovery = true
 	recoveryPrompt := lengthRecoveryPrompt(toolName)
@@ -38,6 +50,7 @@ func (a *MainAgent) beginLengthRecoveryRetry(toolName string, turnID uint64, tur
 	// recovery prompt does not survive compaction. See
 
 	a.pendingRecoveryPrompt = recoveryPrompt
+	a.armLengthRecoveryResume(recoveryPrompt)
 	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

@@ -148,6 +148,11 @@ func TestSaveSnapshotWritesCompactJSON(t *testing.T) {
 		Todos:      []TodoState{{ID: "1", Status: "pending", Content: "test"}},
 		ModelName:  "test-model",
 		ActiveRole: "planner",
+		PendingCompactionResume: &PendingCompactionResume{
+			Kind:       "auto_continue",
+			Mode:       "replay_user_intent",
+			UserIntent: "finish the refactor safely",
+		},
 	}
 	if err := rm.SaveSnapshot(snap); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
@@ -171,6 +176,9 @@ func TestSaveSnapshotWritesCompactJSON(t *testing.T) {
 	}
 	if len(decoded.Todos) != 1 || decoded.Todos[0].ID != "1" {
 		t.Fatalf("decoded todos = %+v, want ordered todo with id=1", decoded.Todos)
+	}
+	if decoded.PendingCompactionResume == nil || decoded.PendingCompactionResume.UserIntent != "finish the refactor safely" {
+		t.Fatalf("decoded PendingCompactionResume = %+v, want restored user intent", decoded.PendingCompactionResume)
 	}
 }
 

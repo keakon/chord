@@ -105,6 +105,33 @@ func TestShouldAutoCompact(t *testing.T) {
 	}
 }
 
+func TestShouldAutoCompactUsesInputBudgetWhenConfigured(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217599})
+	if m.ShouldAutoCompact() {
+		t.Fatal("expected threshold check to stay false below 80% of input budget")
+	}
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217600})
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected threshold check to become true at 80% of input budget")
+	}
+}
+
+func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 20000, true, 0.8)
+	if got := m.GetUsableInputBudget(); got != 252000 {
+		t.Fatalf("GetUsableInputBudget() = %d, want 252000", got)
+	}
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 201599})
+	if m.ShouldAutoCompact() {
+		t.Fatal("expected threshold check to stay false below 80% of usable input budget")
+	}
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 201600})
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected threshold check to become true at 80% of usable input budget")
+	}
+}
+
 func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
 	m := NewManager(1000, false, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{

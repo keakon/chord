@@ -180,6 +180,7 @@ func (c *Client) completeStreamWithRetry(
 		// establishment failures should skip sibling targets on the same provider
 		// for this round, but the next round must probe the provider again.
 		skippedProviders := map[*ProviderConfig]bool{}
+		oversizeSeen := newOversizeRegistry()
 		if err := abortIfCancelled(); err != nil {
 			return nil, err
 		}
@@ -225,6 +226,7 @@ func (c *Client) completeStreamWithRetry(
 			modelID      string
 			maxTokens    int
 			contextLimit int
+			inputLimit   int
 			tuning       RequestTuning
 			variant      string
 			isFallback   bool
@@ -237,6 +239,7 @@ func (c *Client) completeStreamWithRetry(
 				modelID:      startModelID,
 				maxTokens:    startMaxTokens,
 				contextLimit: c.ContextLimitForModelRef(providerModelRef(startProvider, startModelID)),
+				inputLimit:   c.InputLimitForModelRef(providerModelRef(startProvider, startModelID)),
 				tuning:       startTuning,
 				variant:      variantForStart,
 				isFallback:   false,
@@ -264,6 +267,7 @@ func (c *Client) completeStreamWithRetry(
 					modelID:      fb.ModelID,
 					maxTokens:    fb.MaxTokens,
 					contextLimit: fb.ContextLimit,
+					inputLimit:   fb.InputLimit,
 					tuning:       fbTuning,
 					variant:      fbVariantUsed,
 					isFallback:   true,
@@ -278,6 +282,10 @@ func (c *Client) completeStreamWithRetry(
 			t := targets[ti]
 			if skippedProviders[t.provider] {
 				log.Infof("skipping model: provider unreachable (dial/DNS/connect error) provider=%v model=%v", t.provider.Name(), t.modelID)
+				continue
+			}
+			if oversizeSeen.seen(t.provider.Name(), t.modelID, t.variant) {
+				log.Infof("skipping model: oversize already confirmed for this provider/model target in this round provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
 			}
 			if t.isFallback {
@@ -467,6 +475,7 @@ func (c *Client) completeStreamWithRetry(
 							status.RunningModelRef = status.RunningModelRef + "@" + t.variant
 						}
 						status.RunningContextLimit = t.contextLimit
+						status.RunningInputLimit = t.inputLimit
 					}
 					modelDone = true
 					break // success: exit key loop
@@ -485,6 +494,7 @@ func (c *Client) completeStreamWithRetry(
 					return nil, err
 				}
 				if !visibleStarted {
+					fallbackEligible := shouldFallback(err)
 					cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, lastErr)
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
@@ -500,9 +510,14 @@ func (c *Client) completeStreamWithRetry(
 					if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 						status.FallbackReason = classifyFallbackReason(err)
 					}
+					if IsContextLengthExceeded(err) {
+						lastErr = err
+						oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+						modelDone = true
+						break
+					}
 
 					retriable := isRetriable(err)
-					fallbackEligible := shouldFallback(err)
 					// 401/403 are treated as per-key failures so selection can prefer other
 					// healthy keys before giving up or switching model.
 					var apiErrPtr *APIError
@@ -549,6 +564,13 @@ func (c *Client) completeStreamWithRetry(
 
 				if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 					status.FallbackReason = classifyFallbackReason(err)
+				}
+				if IsContextLengthExceeded(err) {
+					log.Warnf("context length exceeded; trying next model provider=%v model=%v key_suffix=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
+					lastErr = err
+					oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+					modelDone = true
+					break
 				}
 				log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				if cb != nil {
@@ -613,6 +635,22 @@ func (c *Client) completeStreamWithRetry(
 		// Track that the full model pool was tried and all failed.
 		if fallbackEnabled && status != nil && status.FallbackTriggered {
 			status.FallbackExhausted = true
+		}
+		if IsContextLengthExceeded(lastErr) {
+			if len(targets) > 1 {
+				log.Infof("context length exceeded after model pool exhausted; returning for compaction recovery provider=%v model=%v input_tokens_est=%v", startProvider.Name(), startModelID, estimateRequestInputTokens(systemPrompt, messages, tools))
+			}
+			if cb != nil {
+				cb(message.StreamDelta{
+					Type: "status",
+					Status: &message.StatusDelta{
+						Type:   "retrying",
+						Detail: "pool exhausted; compacting context",
+						Reason: "context_length_exceeded",
+					},
+				})
+			}
+			return nil, lastErr
 		}
 		if _, ok := errors.AsType[*NoUsableKeysError](lastErr); ok {
 			return nil, lastErr
@@ -697,26 +735,26 @@ func clampEffectiveMaxTokens(
 	if model.Limit.Output > 0 && model.Limit.Output < effectiveMaxTokens {
 		effectiveMaxTokens = model.Limit.Output
 	}
-	if tuning.OpenAI.ReasoningEffort == "" {
-		outputCap := outputCapSetting
-		if outputCap <= 0 {
-			outputCap = DefaultOutputTokenMax
+
+	outputCap := outputCapSetting
+	if outputCap <= 0 {
+		outputCap = DefaultOutputTokenMax
+	}
+	if outputCap < effectiveMaxTokens {
+		minForThinking := 0
+		if tuning.Anthropic.ThinkingBudget > 0 {
+			minForThinking = tuning.Anthropic.ThinkingBudget + 1024
+		}
+		if outputCap < minForThinking {
+			outputCap = minForThinking
 		}
 		if outputCap < effectiveMaxTokens {
-			minForThinking := 0
-			if tuning.Anthropic.ThinkingBudget > 0 {
-				minForThinking = tuning.Anthropic.ThinkingBudget + 1024
-			}
-			if outputCap < minForThinking {
-				outputCap = minForThinking
-			}
-			if outputCap < effectiveMaxTokens {
-				effectiveMaxTokens = outputCap
-			}
+			effectiveMaxTokens = outputCap
 		}
 	}
+
+	inputEstimate := max(estimateRequestInputTokens(systemPrompt, messages, tools), lastInputTokens)
 	if model.Limit.Context > 0 {
-		inputEstimate := max(estimateRequestInputTokens(systemPrompt, messages, tools), lastInputTokens)
 		buffer := max(model.Limit.Context/100, 256)
 		contextCap := max(model.Limit.Context-inputEstimate-buffer, 1)
 		if contextCap < effectiveMaxTokens {

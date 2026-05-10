@@ -163,6 +163,10 @@ func IsContextLengthExceeded(err error) bool {
 // oversize signals from various providers.
 func classifyContextLengthExceeded(apiErr *APIError) bool {
 	msg := strings.ToLower(apiErr.Message)
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	if code == "context_length_exceeded" || code == "context_window_exceeded" || code == "input_too_long" {
+		return true
+	}
 
 	switch apiErr.StatusCode {
 	case 400:
@@ -171,6 +175,12 @@ func classifyContextLengthExceeded(apiErr *APIError) bool {
 			return true
 		}
 		if strings.Contains(msg, "maximum context length") {
+			return true
+		}
+		if strings.Contains(msg, "exceeds the context window") {
+			return true
+		}
+		if strings.Contains(msg, "input is too long") {
 			return true
 		}
 		// Anthropic: "prompt is too long"
@@ -186,9 +196,7 @@ func classifyContextLengthExceeded(apiErr *APIError) bool {
 		return true
 	}
 
-	// Also check provider error code field
-	code := strings.ToLower(apiErr.Code)
-	return code == "context_length_exceeded"
+	return false
 }
 
 // shouldFallback determines whether the error warrants falling back to an
@@ -196,6 +204,10 @@ func classifyContextLengthExceeded(apiErr *APIError) bool {
 // Ordering vs key rotation is implemented in client.completeStreamWithRetry
 // (e.g. isPerKeyTimeoutRetry for read timeouts).
 func shouldFallback(err error) bool {
+	if IsContextLengthExceeded(err) {
+		return true
+	}
+
 	// NoUsableKeysError: configured credentials exist but every key is permanently disabled.
 	var noUsable *NoUsableKeysError
 	if errors.As(err, &noUsable) {
@@ -346,6 +358,11 @@ func isPerKeyTimeoutRetry(err error) bool {
 // retriable even when isRetriable is false (401/403, isPerKeyTimeoutRetry).
 
 func isRetriable(err error) bool {
+	// Context length exceeded is a model/context-size signal, not a key-health or
+	// transient stream failure. The current round may still try other models.
+	if IsContextLengthExceeded(err) {
+		return false
+	}
 	// User/system cancellation (e.g. Ctrl+C → turn cancel): never rotate keys or rounds.
 	if errors.Is(err, context.Canceled) {
 		return false
@@ -459,6 +476,9 @@ func isModelIncompatible400(message string) bool {
 // model pool (current cursor-head entry + all remaining configured entries) is exhausted, rather than
 // continuing full retry rounds forever.
 func isTerminalModelPoolFailure(err error) bool {
+	if IsContextLengthExceeded(err) {
+		return true
+	}
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr == nil {
 		return false

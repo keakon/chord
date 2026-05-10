@@ -318,10 +318,23 @@ func (c *ThinkingToolcallCompatConfig) EnabledValue() bool {
 	return *c.Enabled
 }
 
-// ModelLimit defines context and output token limits.
+// ModelLimit defines token limits for a model. Context is the total request
+// window when known, Input is the input-side hard/usable budget when providers
+// expose split limits, and Output is the requested-output hard cap.
 type ModelLimit struct {
 	Context int `json:"context" yaml:"context"`
+	Input   int `json:"input,omitempty" yaml:"input,omitempty"`
 	Output  int `json:"output" yaml:"output"`
+}
+
+// InputBudget returns the input-side budget used for compaction and context
+// usage decisions. Older configs without limit.input keep treating
+// limit.context as the input budget for backward compatibility.
+func (l ModelLimit) InputBudget() int {
+	if l.Input > 0 {
+		return l.Input
+	}
+	return l.Context
 }
 
 // ThinkingConfig controls extended thinking for Anthropic models.
@@ -456,10 +469,12 @@ type ContextConfig struct {
 	Compaction       CompactionConfig `json:"compaction,omitempty" yaml:"compaction,omitempty"`
 }
 
-// CompactionConfig controls durable compaction backend and output profile.
+// CompactionConfig controls durable compaction backend, output profile, and
+// input-budget reservation used by auto-compaction / oversize recovery.
 type CompactionConfig struct {
-	Preset  string `json:"preset,omitempty" yaml:"preset,omitempty"`
-	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Preset   string `json:"preset,omitempty" yaml:"preset,omitempty"`
+	Profile  string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Reserved int    `json:"reserved,omitempty" yaml:"reserved,omitempty"`
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.

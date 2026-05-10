@@ -346,7 +346,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				reason = strings.TrimSpace(confirmedReason)
 			}
 			msg := fmt.Sprintf("Switched to fallback model: %s", confirmedRef)
-			if reason != "" {
+			if reason == "context_length_exceeded" {
+				msg = fmt.Sprintf("Current model context exceeded; switched to fallback model: %s", confirmedRef)
+			} else if reason != "" {
 				msg = fmt.Sprintf("Switched to fallback model (%s): %s", reason, confirmedRef)
 			}
 
@@ -413,7 +415,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				// immediately so the info panel updates without waiting for the response.
 				if delta.Status.Type == "retrying" && delta.Status.ModelRef != "" {
 					if lim := llmClient.ContextLimitForModelRef(delta.Status.ModelRef); lim > 0 {
-						a.ctxMgr.SetMaxTokens(lim)
+						a.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(delta.Status.ModelRef), a.effectiveCompactionReservedInput())
 					}
 					a.llmMu.Lock()
 					a.runningModelRef = delta.Status.ModelRef
@@ -587,17 +589,41 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			return nil, fmt.Errorf("LLM stream failed: %w", err)
 		}
 		callStatus := llmClient.LastCallStatus()
+		// If the context is oversized, suspend behind an in-flight compaction or
+		// proactively start oversize-driven compaction when auto compact is enabled.
+		if llm.IsContextLengthExceeded(err) {
+			if a.IsCompactionRunning() {
+				log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
+				return nil, &contextLengthExceededPendingCompactionError{inner: err}
+			}
+			if a.turn != nil && a.turn.OversizeRecoveryCount >= maxOversizeRecoveryAttempts {
+				a.recordOversizeRecoveryAnalyticsEvent(
+					"abort_retry_limit",
+					"main_llm_error",
+					selectedRef,
+					callStatus.RunningModelRef,
+					map[string]string{"trigger": "oversize_driven", "attempts": fmt.Sprintf("%d", a.turn.OversizeRecoveryCount), "action": "abort"},
+				)
+				return nil, fmt.Errorf("LLM stream failed: automatic context compaction already retried %d times and the context still exceeds all available models; try /compact or reduce the active context", a.turn.OversizeRecoveryCount)
+			}
+			if a.ensureOversizeDrivenCompaction() {
+				a.recordOversizeRecoveryAnalyticsEvent(
+					"trigger_compaction",
+					"main_llm_error",
+					selectedRef,
+					callStatus.RunningModelRef,
+					map[string]string{"trigger": "oversize_driven"},
+				)
+				a.emitToTUI(InfoEvent{Message: "All candidate models exceeded the current context; compacting context before retry"})
+				log.Infof("LLM context length exceeded; started oversize-driven compaction and suspending LLM call error=%v", err)
+				return nil, &contextLengthExceededPendingCompactionError{inner: err}
+			}
+		}
 		if callStatus.FallbackTriggered && callStatus.FallbackExhausted {
 			a.emitToTUI(ToastEvent{
 				Message: "Fallback chain exhausted",
 				Level:   "error",
 			})
-		}
-		// If the context is oversized while compaction is running, suspend and wait
-		// for compaction to apply, then retry instead of surfacing an immediate error.
-		if llm.IsContextLengthExceeded(err) && a.IsCompactionRunning() {
-			log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
-			return nil, &contextLengthExceededPendingCompactionError{inner: err}
 		}
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
 	}
@@ -609,8 +635,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	if callStatus.RunningContextLimit <= 0 {
 		callStatus.RunningContextLimit = llmClient.ContextLimitForModelRef(callStatus.RunningModelRef)
 	}
+	if callStatus.RunningInputLimit <= 0 {
+		callStatus.RunningInputLimit = llmClient.InputLimitForModelRef(callStatus.RunningModelRef)
+	}
 	if callStatus.RunningContextLimit > 0 {
-		a.ctxMgr.SetMaxTokens(callStatus.RunningContextLimit)
+		a.ctxMgr.SetTokenBudgets(callStatus.RunningContextLimit, callStatus.RunningInputLimit, a.effectiveCompactionReservedInput())
 	}
 	a.llmMu.Lock()
 	a.runningModelRef = callStatus.RunningModelRef

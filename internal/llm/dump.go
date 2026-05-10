@@ -27,8 +27,18 @@ type LLMDump struct {
 	RequestBody json.RawMessage `json:"request_body"`
 	SSEChunks   []string        `json:"sse_chunks"`
 	Response    *DumpResponse   `json:"response,omitempty"`
+	Recovery    *DumpRecovery   `json:"recovery,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	DurationMS  int64           `json:"duration_ms"`
+}
+
+// DumpRecovery captures structured recovery metadata useful for diagnosing
+// oversize recovery, compaction recovery, and other control-flow decisions.
+type DumpRecovery struct {
+	Reason string `json:"reason,omitempty"`
+	Stage  string `json:"stage,omitempty"`
+	Action string `json:"action,omitempty"`
+	Code   string `json:"code,omitempty"`
 }
 
 // DumpResponse captures the parsed LLM response.

@@ -33,6 +33,7 @@ type FallbackModel struct {
 	ModelID        string
 	MaxTokens      int
 	ContextLimit   int    // from ModelConfig.Limit.Context
+	InputLimit     int    // from ModelConfig.Limit.Input, falls back to ContextLimit when unset
 	Variant        string // named variant to apply; empty = use model defaults
 }
 
@@ -66,6 +67,7 @@ type CallStatus struct {
 	SelectedModelRef    string
 	RunningModelRef     string
 	RunningContextLimit int
+	RunningInputLimit   int
 	FallbackTriggered   bool
 	FallbackReason      string
 	FallbackExhausted   bool
@@ -396,6 +398,15 @@ func (c *Client) ContextLimitForModelRef(ref string) int {
 	return c.contextLimitForModelRefLocked(ref)
 }
 
+// InputLimitForModelRef returns the configured input-side token budget for a
+// provider/model ref in this client's effective model pool. It falls back to the
+// context limit when limit.input is not configured.
+func (c *Client) InputLimitForModelRef(ref string) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.inputLimitForModelRefLocked(ref)
+}
+
 // ThinkingToolcallCompat returns compatibility config for the active model.
 // Returns nil when the model has no compat block configured.
 func (c *Client) ThinkingToolcallCompat() *config.ThinkingToolcallCompatConfig {
@@ -452,10 +463,17 @@ func (c *Client) CompleteStream(
 	}
 	startRef := modelRefWithVariant(start)
 	startLimit := start.ContextLimit
+	startInputLimit := start.InputLimit
 	if startLimit <= 0 && start.ProviderConfig != nil {
 		if m, ok := start.ProviderConfig.GetModel(start.ModelID); ok {
 			startLimit = m.Limit.Context
+			if startInputLimit <= 0 {
+				startInputLimit = m.Limit.InputBudget()
+			}
 		}
+	}
+	if startInputLimit <= 0 {
+		startInputLimit = startLimit
 	}
 	wireMessages := messages
 	routingGeneration := c.routingGeneration.Load()
@@ -466,6 +484,7 @@ func (c *Client) CompleteStream(
 		SelectedModelRef:    startRef,
 		RunningModelRef:     startRef,
 		RunningContextLimit: startLimit,
+		RunningInputLimit:   startInputLimit,
 	}
 
 	// Single call handles the whole round-based retry chain (cursor-start entry
@@ -563,6 +582,40 @@ func (c *Client) contextLimitForModelRefLocked(ref string) int {
 	return 0
 }
 
+// inputLimitForModelRefLocked must be called with c.mu held (read or write).
+func (c *Client) inputLimitForModelRefLocked(ref string) int {
+	normalizedRef := strings.TrimSpace(ref)
+	if normalizedRef != "" {
+		normalizedRef, _ = config.ParseModelRef(normalizedRef)
+	}
+	if c.provider != nil {
+		primaryRef := providerModelRef(c.provider, c.modelID)
+		if normalizedRef == "" || normalizedRef == primaryRef {
+			if m, ok := c.provider.GetModel(c.modelID); ok {
+				return m.Limit.InputBudget()
+			}
+		}
+	}
+	for _, fb := range c.fallbackModels {
+		if fb.ProviderConfig == nil {
+			continue
+		}
+		if normalizedRef == providerModelRef(fb.ProviderConfig, fb.ModelID) {
+			if fb.InputLimit > 0 {
+				return fb.InputLimit
+			}
+			if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
+				return m.Limit.InputBudget()
+			}
+			if fb.ContextLimit > 0 {
+				return fb.ContextLimit
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
 func (c *Client) getLastInputTokens() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -586,9 +639,11 @@ func (c *Client) getSystemPrompt() string {
 func (c *Client) modelPoolLocked() []FallbackModel {
 	pool := make([]FallbackModel, 0, 1+len(c.fallbackModels))
 	primaryLimit := 0
+	primaryInputLimit := 0
 	if c.provider != nil {
 		if m, ok := c.provider.GetModel(c.modelID); ok {
 			primaryLimit = m.Limit.Context
+			primaryInputLimit = m.Limit.InputBudget()
 		}
 	}
 	pool = append(pool, FallbackModel{
@@ -597,6 +652,7 @@ func (c *Client) modelPoolLocked() []FallbackModel {
 		ModelID:        c.modelID,
 		MaxTokens:      c.maxTokens,
 		ContextLimit:   primaryLimit,
+		InputLimit:     primaryInputLimit,
 		Variant:        c.activeVariant,
 	})
 	pool = append(pool, c.fallbackModels...)

@@ -108,6 +108,51 @@ func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T)
 	}
 }
 
+func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetProviderModelRef("qt/gpt-5.5")
+	a.llmMu.Lock()
+	a.runningModelRef = "qt/gpt-5.5"
+	a.llmMu.Unlock()
+
+	var events []analytics.UsageEvent
+	a.SetUsageEventSink(func(event analytics.UsageEvent) {
+		events = append(events, event)
+	})
+
+	a.recordOversizeRecoveryAnalyticsEvent("trigger_compaction", "main_llm_error", "qt/gpt-5.5", "fallback/gpt-5.5", map[string]string{"trigger": "oversize_driven"})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	evt := events[0]
+	if evt.Purpose != oversizeRecoveryAnalyticsPurpose+"/trigger_compaction" {
+		t.Fatalf("purpose = %q, want %q", evt.Purpose, oversizeRecoveryAnalyticsPurpose+"/trigger_compaction")
+	}
+	if got := evt.Diagnostic["reason"]; got != "context_length_exceeded" {
+		t.Fatalf("diagnostic reason = %q, want context_length_exceeded", got)
+	}
+	if got := evt.Diagnostic["stage"]; got != "main_llm_error" {
+		t.Fatalf("diagnostic stage = %q, want main_llm_error", got)
+	}
+	if got := evt.Diagnostic["trigger"]; got != "oversize_driven" {
+		t.Fatalf("diagnostic trigger = %q, want oversize_driven", got)
+	}
+
+	summary, err := a.usageLedger.Summary()
+	if err != nil {
+		t.Fatalf("usageLedger.Summary(): %v", err)
+	}
+	aggByPurpose, ok := summary.ByPurpose[oversizeRecoveryAnalyticsPurpose+"/trigger_compaction"]
+	if !ok || aggByPurpose == nil {
+		t.Fatalf("missing oversize recovery summary entry; summary=%+v", summary)
+	}
+	if got := aggByPurpose.LLMCalls; got != 1 {
+		t.Fatalf("summary.ByPurpose oversize recovery LLMCalls = %d, want 1", got)
+	}
+}
+
 func TestCompactionFailureAnalyticsEventMarksLengthRecoveryTrigger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

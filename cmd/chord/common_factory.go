@@ -59,7 +59,13 @@ func buildModelPool(
 			ModelID:        fbModelID,
 			MaxTokens:      fbMaxTokens,
 			ContextLimit:   fbCtxLimit,
-			Variant:        fbVariant,
+			InputLimit: func() int {
+				if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
+					return mc.Limit.InputBudget()
+				}
+				return fbCtxLimit
+			}(),
+			Variant: fbVariant,
 		})
 	}
 	if len(pool) == 0 {
@@ -148,7 +154,13 @@ func buildSubAgentLLMFactory(
 					ModelID:        fbModelID,
 					MaxTokens:      fbMaxTokens,
 					ContextLimit:   fbCtxLimit,
-					Variant:        fbVariant,
+					InputLimit: func() int {
+						if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
+							return mc.Limit.InputBudget()
+						}
+						return fbCtxLimit
+					}(),
+					Variant: fbVariant,
 				})
 			}
 			if len(fallbacks) > 0 {

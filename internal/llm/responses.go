@@ -420,6 +420,14 @@ func (r *ResponsesProvider) sendAndParse(
 					Error:       apiErr.Error(),
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
+				if IsContextLengthExceeded(apiErr) {
+					dump.Recovery = &DumpRecovery{
+						Reason: "context_length_exceeded",
+						Stage:  "http_error",
+						Action: "return_error",
+						Code:   strings.TrimSpace(apiErr.Code),
+					}
+				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
 					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
@@ -487,6 +495,14 @@ func (r *ResponsesProvider) sendAndParse(
 			}
 			if parseErr != nil {
 				dump.Error = parseErr.Error()
+				if apiErr, ok := errors.AsType[*APIError](parseErr); ok && IsContextLengthExceeded(apiErr) {
+					dump.Recovery = &DumpRecovery{
+						Reason: "context_length_exceeded",
+						Stage:  "sse_parse",
+						Action: "return_error",
+						Code:   strings.TrimSpace(apiErr.Code),
+					}
+				}
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
 				log.Warnf("failed to write LLM dump error=%v", wErr)

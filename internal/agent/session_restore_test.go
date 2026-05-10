@@ -453,6 +453,46 @@ func TestRestoreSessionAtStartupSynthesizesDanglingToolResultBeforeLaterUser(t *
 	}
 }
 
+func TestRestoreSessionAtStartupRestoresPendingCompactionResume(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "pending-compaction-resume")
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "finish the refactor safely"}); err != nil {
+		t.Fatalf("PersistMessage(user): %v", err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		Todos: []recovery.TodoState{},
+		PendingCompactionResume: &recovery.PendingCompactionResume{
+			Kind:       string(compactionResumeAutoContinue),
+			Mode:       compactionResumeModeReplayUserIntent,
+			UserIntent: "finish the refactor safely",
+		},
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	if a.pendingCompactionResume == nil {
+		t.Fatal("expected pending compaction resume to be restored")
+	}
+
+	a.applyPendingCompactionResumeOverlaysForContinue()
+	if got := a.pendingAutoContinuePrompt; got == "" {
+		t.Fatal("expected auto-continue prompt restored before continue turn")
+	}
+	if got := a.pendingAutoContinueReplayPrompt; !strings.Contains(got, "finish the refactor safely") {
+		t.Fatalf("pendingAutoContinueReplayPrompt = %q, want restored user intent", got)
+	}
+	if a.pendingCompactionResume != nil {
+		t.Fatal("expected pending compaction resume to be consumed on continue")
+	}
+}
+
 func TestRestoreSessionAtStartupRestoresTodoOrderFromSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "todo-order")

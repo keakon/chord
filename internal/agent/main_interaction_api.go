@@ -174,6 +174,7 @@ func (a *MainAgent) handleContinueFromContext(_ Event) {
 		log.Debug("handleContinueFromContext: ignored, turn already active")
 		return
 	}
+	a.applyPendingCompactionResumeOverlaysForContinue()
 	if a.loopState.Enabled {
 		a.loopState.State = LoopStateExecuting
 		a.emitLoopStateChanged()

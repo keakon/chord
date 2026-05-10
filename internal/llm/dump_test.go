@@ -114,6 +114,52 @@ func TestDumpWriterWritePersistsReadableJSONRequestBody(t *testing.T) {
 	}
 }
 
+func TestDumpWriterWritePersistsRecoveryMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewDumpWriter(dir)
+
+	err := writer.Write(&LLMDump{
+		Provider:    "responses",
+		Model:       "gpt-5.5",
+		RequestBody: json.RawMessage(`{"input":"hello"}`),
+		Recovery: &DumpRecovery{
+			Reason: "context_length_exceeded",
+			Stage:  "sse_parse",
+			Action: "return_error",
+			Code:   "context_length_exceeded",
+		},
+		Error: "context too long",
+	})
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var dump struct {
+		Recovery *DumpRecovery `json:"recovery"`
+	}
+	if err := json.Unmarshal(data, &dump); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if dump.Recovery == nil {
+		t.Fatal("recovery = nil, want populated recovery metadata")
+	}
+	if dump.Recovery.Reason != "context_length_exceeded" || dump.Recovery.Stage != "sse_parse" || dump.Recovery.Action != "return_error" || dump.Recovery.Code != "context_length_exceeded" {
+		t.Fatalf("unexpected recovery metadata: %+v", dump.Recovery)
+	}
+}
+
 func TestDumpWriterWriteDecodesCompressedRequestBody(t *testing.T) {
 	dir := t.TempDir()
 	writer := NewDumpWriter(dir)
