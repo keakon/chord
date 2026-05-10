@@ -119,9 +119,18 @@ func (m *Model) suppressPeriodicViewerHostRedraw(reason string) bool {
 	}
 }
 
+func hostRedrawRequestsWindowSize(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case "focus-restore", "post-focus-settle-redraw":
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Model) hostRedrawSequence(reason string) []tea.Cmd {
 	cmds := []tea.Cmd{tea.ClearScreen, hostRedrawSettleCmd(reason, hostRedrawSettleDelay)}
-	if reason != "stream-flush" && reason != "scroll-flush" && reason != "scroll-flush-fallback" && reason != "debug-dump" && reason != "content-boundary" && reason != "live-append" {
+	if hostRedrawRequestsWindowSize(reason) {
 		cmds = append(cmds[:1], append([]tea.Cmd{tea.RequestWindowSize}, cmds[1:]...)...)
 	}
 	return cmds

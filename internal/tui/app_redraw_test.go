@@ -18,8 +18,19 @@ func containsCmd(cmds []tea.Cmd, target tea.Cmd) bool {
 	return false
 }
 
-func TestHostRedrawSequenceSkipsWindowSizeForFlushReasons(t *testing.T) {
-	tests := []string{"stream-flush", "scroll-flush", "scroll-flush-fallback"}
+func TestHostRedrawSequenceSkipsWindowSizeForPureRepairReasons(t *testing.T) {
+	tests := []string{
+		"stream-flush",
+		"scroll-flush",
+		"scroll-flush-fallback",
+		"debug-dump",
+		"content-boundary",
+		"content-boundary-fallback",
+		"live-append",
+		"background-dirty-focus",
+		"background-dirty-focus-fallback",
+		"post-focus-settle-fallback",
+	}
 	for _, reason := range tests {
 		t.Run(reason, func(t *testing.T) {
 			m := NewModelWithSize(nil, 80, 24)
@@ -189,14 +200,14 @@ func TestPostFocusSettleFallbackTriggersStrongHostRedraw(t *testing.T) {
 	}
 
 	cmds := m.hostRedrawSequence("post-focus-settle-fallback")
-	if len(cmds) != 3 {
-		t.Fatalf("post-focus-settle-fallback redraw cmd count = %d, want 3", len(cmds))
+	if len(cmds) != 2 {
+		t.Fatalf("post-focus-settle-fallback redraw cmd count = %d, want 2", len(cmds))
 	}
 	if !containsCmd(cmds, tea.ClearScreen) {
 		t.Fatal("post-focus-settle-fallback redraw should include ClearScreen")
 	}
-	if !containsCmd(cmds, tea.RequestWindowSize) {
-		t.Fatal("post-focus-settle-fallback redraw should include RequestWindowSize")
+	if containsCmd(cmds, tea.RequestWindowSize) {
+		t.Fatal("post-focus-settle-fallback redraw should not include RequestWindowSize")
 	}
 }
 
@@ -358,16 +369,21 @@ func TestPostHostRedrawFallbackTriggersBackgroundDirtyFocusFallback(t *testing.T
 	}
 }
 
-func TestHostRedrawSequenceKeepsWindowSizeForNonFlushReasons(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	cmds := m.hostRedrawSequence("focus-restore")
-	if len(cmds) != 3 {
-		t.Fatalf("focus-restore redraw cmd count = %d, want 3", len(cmds))
-	}
-	if !containsCmd(cmds, tea.ClearScreen) {
-		t.Fatal("focus-restore redraw should include ClearScreen")
-	}
-	if !containsCmd(cmds, tea.RequestWindowSize) {
-		t.Fatal("focus-restore redraw should include RequestWindowSize")
+func TestHostRedrawSequenceRequestsWindowSizeOnlyForStrongFocusRecovery(t *testing.T) {
+	tests := []string{"focus-restore", "post-focus-settle-redraw"}
+	for _, reason := range tests {
+		t.Run(reason, func(t *testing.T) {
+			m := NewModelWithSize(nil, 80, 24)
+			cmds := m.hostRedrawSequence(reason)
+			if len(cmds) != 3 {
+				t.Fatalf("%s redraw cmd count = %d, want 3", reason, len(cmds))
+			}
+			if !containsCmd(cmds, tea.ClearScreen) {
+				t.Fatalf("%s redraw should include ClearScreen", reason)
+			}
+			if !containsCmd(cmds, tea.RequestWindowSize) {
+				t.Fatalf("%s redraw should include RequestWindowSize", reason)
+			}
+		})
 	}
 }
