@@ -185,8 +185,11 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	discarded := entry.discarded || e.ctx.Err() != nil
 	e.mu.Unlock()
 
-	// captureAfter touches the filesystem; run it without holding the executor lock.
-	if !discarded && err == nil && result.speculativeHooks != nil && result.speculativeHooks.captureAfter != nil {
+	// captureAfter records the exact post-execution filesystem state used to
+	// distinguish speculative writes from later external changes. It must run even
+	// when the call was discarded while the tool was still executing; otherwise
+	// rollback lacks the post-state hash and can refuse to restore edited files.
+	if err == nil && result.speculativeHooks != nil && result.speculativeHooks.captureAfter != nil {
 		result.speculativeHooks.captureAfter()
 	}
 

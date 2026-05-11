@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -91,6 +92,57 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 	if _, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
 		t.Fatal("DiscardCall returned false")
 	}
+	waitForFileContent(t, path, "before")
+}
+
+func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "existing.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.EditTool{})
+
+	// Baseline Read so Edit satisfies the read-before-edit precondition.
+	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	toolReturned := make(chan struct{})
+	releaseExecutor := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseExecutor) }) }
+	defer release()
+	exec := NewStreamingToolExecutor(7, ctx, nil, func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		result, err := a.executeToolCallSpeculative(ctx, tc)
+		close(toolReturned)
+		select {
+		case <-releaseExecutor:
+		case <-ctx.Done():
+		}
+		return result, err
+	})
+	call := message.ToolCall{ID: "edit-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"old_string":"before","new_string":"after"}`)}
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	select {
+	case <-toolReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("speculative edit did not return")
+	}
+	waitForFileContent(t, path, "after")
+	if info, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
+		t.Fatal("DiscardCall returned false")
+	} else if info.Completed {
+		t.Fatalf("discard happened after executor completion; test did not exercise executing discard path: %#v", info)
+	}
+	release()
 	waitForFileContent(t, path, "before")
 }
 
