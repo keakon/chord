@@ -5,6 +5,7 @@
 ## 未发布
 
 - TUI：修复 Markdown 预览的语法高亮；文件末尾的有序列表、标题等按行识别的语法标记，现在会在 `Read` / `Write` 工具卡片和 fenced code block 中保持与前面行一致的颜色。
+- CLI：用 `chord doctor models` 替换旧的 `chord test-providers` 入口，新增精确 `provider/model[@variant]` 检查、模型池审计、all-model/all-pool 模式、按目标 timeout、fail-fast、JSON 输出，并覆盖 model / variant tuning。
 
 ## 0.5.2 - 2026-05-11
 

@@ -5,6 +5,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## Unreleased
 
 - TUI: fixed syntax highlighting for Markdown previews so EOF block markers (ordered lists, headings, and similar line-based syntax) keep the same colour as preceding lines in `Read`/`Write` tool cards and fenced code blocks.
+- CLI: replaced the deprecated `chord test-providers` entry point with `chord doctor models`, adding exact `provider/model[@variant]` checks, model-pool audits, all-model/all-pool modes, per-target timeout, fail-fast, JSON output, and model/variant tuning coverage.
 
 ## 0.5.2 - 2026-05-11
 

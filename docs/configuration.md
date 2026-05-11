@@ -241,7 +241,7 @@ chord auth codex --device-code
 
 ## Model pools (selecting provider/model)
 
-Chord selects the active model via **named model pools**.
+Chord selects the active model via **named model pools**. Each pool entry should be a full `provider/model[@variant]` reference so the provider endpoint, auth, protocol, and variant tuning are unambiguous.
 
 Pool definitions live in `config.yaml` (global or project-level), and agent configs
 only *reference* pool names. Agent configs cannot define inline pools.
@@ -645,19 +645,24 @@ This matters because reducing `output` does not increase a provider's hard
 input allowance. Keeping automatic compaction enabled is recommended when your
 selected models have smaller input budgets or split input/output limits.
 
-## Provider connectivity check
+## Provider/model diagnostics
 
 ```bash
-# test all providers
-chord test-providers
+# smoke-test all providers with representative models
+chord doctor models
 
-# test one provider
-chord test-providers --provider openai
+# test one provider's representative model
+chord doctor models --provider openai
+
+# test an exact model or variant
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --provider openai --model gpt-5.5@high
+
+# audit each entry in a model pool independently
+chord doctor models --pool thinking
 ```
 
-This command is useful as an auth and basic connectivity smoke test. It uses
-the same merged global + project config view as normal runtime startup, so
-project-level provider/proxy/model overrides are included.
+Use this command as an auth, endpoint, transport, model, and variant tuning smoke test. It uses the same merged global + project config view as normal runtime startup, so project-level provider/proxy/model overrides are included. Pool diagnostics request each pool entry independently rather than following the normal fallback chain.
 
 ## Configuration cheatsheet
 
@@ -666,7 +671,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | Key                     | Type                  | Default                          | Scope                    | Summary                                                                                                                  |
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
-| `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of `provider/model` (and `model@variant`) refs. See [Model pools](#model-pools-selecting-providermodel). |
+| `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `context`               | object                | see below                        | global / project         | `auto_compact`, `compact_threshold`, `compact_model`, `compaction.reserved`. See [Context compaction](#context-compaction).                     |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |

@@ -224,7 +224,7 @@ chord auth codex --device-code
 
 ## 模型池
 
-Chord 通过命名模型池选择当前使用的模型。
+Chord 通过命名模型池选择当前使用的模型。每个池条目建议写成完整的 `provider/model[@variant]`，这样 provider endpoint、认证、协议以及 variant tuning 都是明确的。
 
 模型池在 `config.yaml`（全局或项目级）中定义；agent 配置只能引用池名，不允许在 agent 中内联定义池。
 
@@ -573,17 +573,24 @@ providers:
 
 原因是降低 `output` 并不会提高 provider 的硬输入上限。若所选模型输入预算较小，或 provider 明确区分 input/output limit，建议保持自动压缩开启。
 
-## Provider 连通性自检
+## Provider/model 诊断
 
 ```bash
-# 检查所有 provider
-chord test-providers
+# 用代表模型冒烟测试所有 provider
+chord doctor models
 
-# 只检查一个 provider
-chord test-providers --provider openai
+# 测试单个 provider 的代表模型
+chord doctor models --provider openai
+
+# 测试精确模型或 variant
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --provider openai --model gpt-5.5@high
+
+# 独立审计模型池中的每个条目
+chord doctor models --pool thinking
 ```
 
-适合做认证与基础连通性的冒烟测试。它读取的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级 provider / proxy / model 覆盖。
+该命令适合做认证、endpoint、transport、模型存在性以及 variant tuning 的冒烟测试。它读取的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级 provider / proxy / model 覆盖。Pool 诊断会逐项独立请求，不走正常 fallback 链。
 
 ## 配置字段速查表
 
@@ -592,7 +599,7 @@ chord test-providers --provider openai
 | Key                     | 类型                  | 默认值                          | 适用层级                 | 简述                                                                                                                  |
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
-| `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为 `provider/model`（或 `model@variant`）。见 [模型池](#模型池)。           |
+| `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `context`               | object                | 见下文                          | global / project         | `auto_compact`、`compact_threshold`、`compact_model`、`compaction.reserved`。见 [上下文压缩](#上下文压缩)。                                  |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |

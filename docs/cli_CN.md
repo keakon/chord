@@ -19,7 +19,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
-| `chord test-providers`            | 用最小请求测试每个已配置 provider 的连通性                        |
+| `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
@@ -124,21 +124,47 @@ chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
 ```
 
-## `chord test-providers`
+## `chord doctor models`
 
-向每个已配置的 provider 发一个最小请求并报告成功/失败。常用于凭据和网络烟雾测试。它使用与正常运行时一致的“全局 + 项目级”合并配置视图。
+对已配置的模型调用链执行轻量诊断，使用与正常 LLM 请求相同的 provider transport 路径。命令会加载 `config.yaml` / `auth.yaml`，把每个目标解析成 canonical `provider/model[@variant]`，应用 model 默认 tuning 和 variant tuning，并报告成功/失败、延迟、文本 chunk 数、可用时的 token usage，以及 Responses provider 的最终 transport（`http` 或 `websocket`）。它使用的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级配置。
+
+默认情况下，Chord 会为每个 provider 测试一个代表模型。代表模型选择是稳定的：优先取所有 `model_pools` 中最先引用该 provider 的模型；若没有任何池引用该 provider，则取该 provider 下按名称排序的第一个 model。
 
 ### Flag
 
-| Flag                  | 说明                                  |
-| --------------------- | ------------------------------------- |
-| `--provider <name>`   | 仅测试指定的 provider；若名字不在合并后的配置里会直接报错 |
+| Flag                   | 说明                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--provider <name>`    | 只测试指定 provider 的代表模型；也可为裸 `--model` 值提供 provider                                    |
+| `--model <ref>`        | 测试单个模型。使用 `provider/model[@variant]`；只有同时传 `--provider` 时才允许 `model[@variant]`      |
+| `--pool <name>`        | 按顺序独立测试指定 `model_pools` 中的每个模型 ref                                                     |
+| `--all-models`         | 测试 `--provider` 下配置的全部模型（必须与 `--provider` 一起使用）                                    |
+| `--all-pools`          | 测试所有已配置 model pool                                                                             |
+| `--timeout <duration>` | 每个模型请求的超时时间（默认 `30s`）                                                                  |
+| `--fail-fast`          | 第一次请求失败或配置错误后停止                                                                        |
+| `--json`               | 输出机器可读 JSON 报告                                                                                |
+
+`--model`、`--pool` 与 `--all-pools` 互斥。Pool 检查不会走 fallback：每个池条目都会单独请求，避免后续模型成功掩盖某个不可用的 fallback 目标。
 
 ### 示例
 
 ```bash
-chord test-providers
-chord test-providers --provider openai
+# 用代表模型冒烟测试所有已配置 provider
+chord doctor models
+
+# 测试某个 provider 的代表模型
+chord doctor models --provider openai
+
+# 测试精确模型或 variant
+chord doctor models --model openai/gpt-5.5
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --provider openai --model gpt-5.5@high
+
+# 审计单个模型池或全部模型池
+chord doctor models --pool thinking
+chord doctor models --all-pools --json
+
+# 测试某 provider 下配置的全部模型
+chord doctor models --provider openai --all-models --fail-fast
 ```
 
 ## `chord cleanup`

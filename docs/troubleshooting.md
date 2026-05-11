@@ -29,7 +29,14 @@ Check:
 You can run:
 
 ```bash
-chord test-providers
+chord doctor models
+```
+
+To narrow the check to a known model or model pool:
+
+```bash
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --pool thinking
 ```
 
 ## 429 / quota exhausted

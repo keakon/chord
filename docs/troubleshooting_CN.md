@@ -29,7 +29,14 @@ go test ./cmd/chord/...
 可以用以下命令排查：
 
 ```bash
-chord test-providers
+chord doctor models
+```
+
+如果要缩小到明确的模型或模型池：
+
+```bash
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --pool thinking
 ```
 
 ## 429 / quota exhausted

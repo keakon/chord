@@ -19,7 +19,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
-| `chord test-providers`           | Smoke-test configured providers with a minimal request           |
+| `chord doctor models`            | Diagnose configured provider/model calls                         |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
@@ -124,21 +124,47 @@ chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
 ```
 
-## `chord test-providers`
+## `chord doctor models`
 
-Send a minimal request to each configured provider and report success / failure. Useful as an auth and connectivity smoke test. The command uses the same merged global + project config view as normal runtime startup.
+Run lightweight diagnostics for configured model calls using the same provider transport path as normal LLM requests. It loads `config.yaml` / `auth.yaml`, resolves each selected target to a canonical `provider/model[@variant]` ref, applies model and variant tuning, and reports success, latency, text chunks, token usage when available, and Responses transport (`http` or `websocket`). The command uses the same merged global + project config view as normal runtime startup.
+
+By default, Chord tests one representative model per configured provider. The representative is stable: the first model referenced by any `model_pools` entry for that provider, or the provider's first model by name when no pool references it.
 
 ### Flags
 
-| Flag                  | Description                            |
-| --------------------- | -------------------------------------- |
-| `--provider <name>`   | Test only the named provider; errors if the name is not in the merged config |
+| Flag                  | Description                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `--provider <name>`   | Test only the named provider's representative model, or provide the provider for a bare `--model` value   |
+| `--model <ref>`       | Test one model. Use `provider/model[@variant]`, or `model[@variant]` only together with `--provider`      |
+| `--pool <name>`       | Test every model ref in the named `model_pools` entry independently, preserving pool order                |
+| `--all-models`        | Test all configured models for `--provider` (must be combined with `--provider`)                          |
+| `--all-pools`         | Test every configured model pool                                                                         |
+| `--timeout <duration>`| Per-model request timeout (default `30s`)                                                                |
+| `--fail-fast`         | Stop after the first failed request or configuration error                                                |
+| `--json`              | Emit a machine-readable JSON report                                                                      |
+
+`--model`, `--pool`, and `--all-pools` are mutually exclusive. Pool checks do not use fallback: each pool entry is requested independently so an unavailable fallback target is not hidden by a later successful model.
 
 ### Examples
 
 ```bash
-chord test-providers
-chord test-providers --provider openai
+# Smoke-test all configured providers with representative models
+chord doctor models
+
+# Test one provider's representative model
+chord doctor models --provider openai
+
+# Test an exact model or variant
+chord doctor models --model openai/gpt-5.5
+chord doctor models --model openai/gpt-5.5@high
+chord doctor models --provider openai --model gpt-5.5@high
+
+# Audit a model pool or all pools
+chord doctor models --pool thinking
+chord doctor models --all-pools --json
+
+# Test every configured model for one provider
+chord doctor models --provider openai --all-models --fail-fast
 ```
 
 ## `chord cleanup`

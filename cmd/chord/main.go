@@ -66,6 +66,31 @@ func resolvePprofListenAddr() (string, error) {
 	return fmt.Sprintf("127.0.0.1:%d", port), nil
 }
 
+type cliExitError struct {
+	code int
+	err  error
+}
+
+func (e cliExitError) Error() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("exit code %d", e.code)
+}
+
+func (e cliExitError) Unwrap() error { return e.err }
+
+func cliExitCode(err error) int {
+	var exitErr cliExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.code
+	}
+	if errors.Is(err, context.Canceled) {
+		return 130
+	}
+	return 1
+}
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -131,14 +156,11 @@ func main() {
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
+	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		// context.Canceled is expected on signal-driven shutdown — exit cleanly.
-		if !errors.Is(err, context.Canceled) {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(cliExitCode(err))
 	}
 }
 
@@ -592,27 +614,4 @@ func hookDefsFromConfig(hc config.HookConfig) []hook.HookDef {
 	addEntries(hook.OnToolBatchComplete, hc.OnToolBatchComplete)
 
 	return defs
-}
-
-func newTestProvidersCmd() *cobra.Command {
-	var providerFilter string
-	cmd := &cobra.Command{
-		Use:   "test-providers",
-		Short: "Test all configured providers with a simple request",
-		Long: `Run a lightweight provider smoke test using the real runtime transport path.
-
-This command verifies config loading, auth availability, proxy wiring, provider
-construction, and whether a minimal request can complete successfully. For
-Responses-based providers it also prints the final transport used, such as
-"websocket" or "http".
-
-This is a connectivity and transport diagnostic, not a full end-to-end agent
-acceptance test. It does not validate tools, long-running session behavior,
-context compaction, or broader orchestration semantics.`,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return testProviders(cmd.Context(), providerFilter)
-		},
-	}
-	cmd.Flags().StringVar(&providerFilter, "provider", "", "Provider name to test")
-	return cmd
 }
