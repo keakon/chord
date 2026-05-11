@@ -255,6 +255,7 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 		cfg.Providers,
 		nil,
 		"",
+		0,
 		nil,
 		nil,
 		"test",
@@ -295,6 +296,7 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 		cfg.Providers,
 		nil,
 		"",
+		0,
 		nil,
 		nil,
 		"test",
@@ -337,6 +339,7 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 		cfg.Providers,
 		nil,
 		"",
+		0,
 		nil,
 		nil,
 		"test",
@@ -398,6 +401,7 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 		cfg.Providers,
 		auth,
 		"",
+		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
 			switch provName {
 			case "openai":
@@ -605,6 +609,7 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 		cfg.Providers,
 		auth,
 		"",
+		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
 			switch provName {
 			case "openai":

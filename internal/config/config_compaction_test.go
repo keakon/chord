@@ -82,3 +82,47 @@ func TestLoadConfigFromPathIgnoresLegacyOutputTokenMax(t *testing.T) {
 		t.Fatalf("legacy output_token_max should be ignored, got max_output_tokens = %d", cfg.MaxOutputTokens)
 	}
 }
+
+func TestModelLimitEffectiveInputBudget(t *testing.T) {
+	const defaultOutputCap = 32000
+
+	cases := []struct {
+		name             string
+		limit            ModelLimit
+		outputCapSetting int
+		want             int
+	}{
+		{
+			name:             "explicit input wins",
+			limit:            ModelLimit{Context: 400000, Input: 272000, Output: 128000},
+			outputCapSetting: 0,
+			want:             272000,
+		},
+		{
+			name:             "default output reserved from context",
+			limit:            ModelLimit{Context: 400000, Output: 128000},
+			outputCapSetting: 0,
+			want:             368000,
+		},
+		{
+			name:             "configured output cap reserved from context",
+			limit:            ModelLimit{Context: 400000, Output: 128000},
+			outputCapSetting: 8192,
+			want:             391808,
+		},
+		{
+			name:             "model output cap bounds reservation",
+			limit:            ModelLimit{Context: 400000, Output: 4096},
+			outputCapSetting: 8192,
+			want:             395904,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.limit.EffectiveInputBudget(tc.outputCapSetting, defaultOutputCap); got != tc.want {
+				t.Fatalf("EffectiveInputBudget() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

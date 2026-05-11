@@ -116,8 +116,8 @@ func (a *MainAgent) trySkipUsageDrivenCompactionAfterShrink(snapshot []message.M
 	if !a.autoCompactRequested.Load() || snapshot == nil {
 		return false
 	}
-	maxTokens := a.ctxMgr.GetMaxTokens()
-	if maxTokens <= 0 {
+	inputBudget := a.ctxMgr.GetUsableInputBudget()
+	if inputBudget <= 0 {
 		return false
 	}
 	threshold := a.ctxMgr.Threshold()
@@ -130,7 +130,7 @@ func (a *MainAgent) trySkipUsageDrivenCompactionAfterShrink(snapshot []message.M
 		prepared,
 		a.mainLLMToolDefinitions(),
 	)
-	thresholdTokens := int(float64(maxTokens) * threshold)
+	thresholdTokens := int(float64(inputBudget) * threshold)
 	if estimate >= thresholdTokens {
 		return false
 	}

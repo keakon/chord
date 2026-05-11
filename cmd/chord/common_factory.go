@@ -26,6 +26,7 @@ func buildModelPool(
 	allProviders map[string]config.ProviderConfig,
 	auth config.AuthConfig,
 	globalProxy string,
+	outputTokenMax int,
 	getProvider getProviderFunc,
 	getProviderImpl getProviderImplFunc,
 	logLabel string,
@@ -61,7 +62,7 @@ func buildModelPool(
 			ContextLimit:   fbCtxLimit,
 			InputLimit: func() int {
 				if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
-					return mc.Limit.InputBudget()
+					return mc.Limit.EffectiveInputBudget(outputTokenMax, llm.DefaultOutputTokenMax)
 				}
 				return fbCtxLimit
 			}(),
@@ -156,7 +157,7 @@ func buildSubAgentLLMFactory(
 					ContextLimit:   fbCtxLimit,
 					InputLimit: func() int {
 						if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
-							return mc.Limit.InputBudget()
+							return mc.Limit.EffectiveInputBudget(cfg.MaxOutputTokens, llm.DefaultOutputTokenMax)
 						}
 						return fbCtxLimit
 					}(),
@@ -212,6 +213,7 @@ func buildMainClientFactory(
 			cfg.Providers,
 			auth,
 			cfg.Proxy,
+			cfg.MaxOutputTokens,
 			ac.GetOrCreateProvider,
 			ac.GetOrCreateProviderImpl,
 			"main-agent",

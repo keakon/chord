@@ -81,7 +81,7 @@ providers:
 按这个顺序理解模型限制：
 
 1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
-2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会回退到 `limit.context`。
+2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会从 `limit.context` 中预留有效请求输出后，推导可用输入预算。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
 
 `gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
@@ -338,7 +338,7 @@ providers:
 用到的模型字段含义：
 
 - `limit.context`：已知时表示总请求窗口大小。
-- `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，则为兼容旧配置，自动回退到 `limit.context`。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
+- `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，Chord 会按 `limit.context - 有效请求输出` 推导输入预算；有效请求输出来自 `max_output_tokens`，并受 `limit.output` 上限约束。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
 - `limit.output`：模型最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
 - `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
 - `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
@@ -520,7 +520,7 @@ context:
   compact_model: openai/gpt-5.4-mini
 ```
 
-自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，为兼容旧配置，回退到 `limit.context`。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。
+自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。
 
 可通过配置预留 headroom，用于 tokenizer 漂移、tool schema 开销和压缩/恢复安全余量：
 
@@ -603,7 +603,7 @@ chord test-providers --provider openai
 
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
-| `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，也会作为输入预算的回退值。                                       |
+| `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 会从中扣除有效请求输出后推导输入预算。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compact_threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |

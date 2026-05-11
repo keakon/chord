@@ -252,8 +252,16 @@ func (c *Client) completeStreamWithRetry(
 			for _, fb := range fallbackModels {
 				var fbTuning RequestTuning
 				fbVariantUsed := ""
+				fbContextLimit := fb.ContextLimit
+				fbInputLimit := fb.InputLimit
 				if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
 					fbTuning = tuningFromModel(m)
+					if fbContextLimit <= 0 {
+						fbContextLimit = m.Limit.Context
+					}
+					if fbInputLimit <= 0 {
+						fbInputLimit = m.Limit.EffectiveInputBudget(outputCapSetting, DefaultOutputTokenMax)
+					}
 					if fb.Variant != "" {
 						if v, ok := m.Variants[fb.Variant]; ok {
 							fbTuning = mergeVariantTuning(fbTuning, v)
@@ -261,13 +269,16 @@ func (c *Client) completeStreamWithRetry(
 						}
 					}
 				}
+				if fbInputLimit <= 0 {
+					fbInputLimit = fbContextLimit
+				}
 				targets = append(targets, target{
 					provider:     fb.ProviderConfig,
 					impl:         fb.ProviderImpl,
 					modelID:      fb.ModelID,
 					maxTokens:    fb.MaxTokens,
-					contextLimit: fb.ContextLimit,
-					inputLimit:   fb.InputLimit,
+					contextLimit: fbContextLimit,
+					inputLimit:   fbInputLimit,
 					tuning:       fbTuning,
 					variant:      fbVariantUsed,
 					isFallback:   true,

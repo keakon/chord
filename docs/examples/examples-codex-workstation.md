@@ -120,6 +120,6 @@ permission:
 Two practical points matter here:
 
 - Most models only need `limit.context`: keep total input + output within that window.
-- Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it falls back to `limit.context`.
+- Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it derives the input budget from `limit.context` minus effective requested output.
 - `limit.output` is the model's own output capacity. Chord still defaults `max_output_tokens` to `32000`, so actual requests use the smaller output limit; changing that request cap does not increase the provider's `272k` input cap.
 - Same-named models on different providers are still tried independently in the fallback chain; Chord does not skip them just because the model name matches.

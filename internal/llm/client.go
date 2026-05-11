@@ -33,7 +33,7 @@ type FallbackModel struct {
 	ModelID        string
 	MaxTokens      int
 	ContextLimit   int    // from ModelConfig.Limit.Context
-	InputLimit     int    // from ModelConfig.Limit.Input, falls back to ContextLimit when unset
+	InputLimit     int    // input-side budget; when unset the client derives limit.input or context-output
 	Variant        string // named variant to apply; empty = use model defaults
 }
 
@@ -398,9 +398,9 @@ func (c *Client) ContextLimitForModelRef(ref string) int {
 	return c.contextLimitForModelRefLocked(ref)
 }
 
-// InputLimitForModelRef returns the configured input-side token budget for a
-// provider/model ref in this client's effective model pool. It falls back to the
-// context limit when limit.input is not configured.
+// InputLimitForModelRef returns the input-side token budget for a provider/model
+// ref in this client's effective model pool. When limit.input is not configured,
+// it derives the budget from limit.context minus the effective max output.
 func (c *Client) InputLimitForModelRef(ref string) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -464,11 +464,13 @@ func (c *Client) CompleteStream(
 	startRef := modelRefWithVariant(start)
 	startLimit := start.ContextLimit
 	startInputLimit := start.InputLimit
-	if startLimit <= 0 && start.ProviderConfig != nil {
+	if (startLimit <= 0 || startInputLimit <= 0) && start.ProviderConfig != nil {
 		if m, ok := start.ProviderConfig.GetModel(start.ModelID); ok {
-			startLimit = m.Limit.Context
+			if startLimit <= 0 {
+				startLimit = m.Limit.Context
+			}
 			if startInputLimit <= 0 {
-				startInputLimit = m.Limit.InputBudget()
+				startInputLimit = m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
 			}
 		}
 	}
@@ -592,7 +594,7 @@ func (c *Client) inputLimitForModelRefLocked(ref string) int {
 		primaryRef := providerModelRef(c.provider, c.modelID)
 		if normalizedRef == "" || normalizedRef == primaryRef {
 			if m, ok := c.provider.GetModel(c.modelID); ok {
-				return m.Limit.InputBudget()
+				return m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
 			}
 		}
 	}
@@ -605,7 +607,7 @@ func (c *Client) inputLimitForModelRefLocked(ref string) int {
 				return fb.InputLimit
 			}
 			if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-				return m.Limit.InputBudget()
+				return m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
 			}
 			if fb.ContextLimit > 0 {
 				return fb.ContextLimit
@@ -643,7 +645,7 @@ func (c *Client) modelPoolLocked() []FallbackModel {
 	if c.provider != nil {
 		if m, ok := c.provider.GetModel(c.modelID); ok {
 			primaryLimit = m.Limit.Context
-			primaryInputLimit = m.Limit.InputBudget()
+			primaryInputLimit = m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
 		}
 	}
 	pool = append(pool, FallbackModel{

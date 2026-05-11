@@ -495,7 +495,7 @@ func resolveModelRef(
 		if err != nil {
 			return nil, nil, "", 0, 0, err
 		}
-		return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.InputBudget(), nil
+		return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.Context, nil
 	}
 
 	// Provider type already normalized during config load
@@ -533,7 +533,7 @@ func resolveModelRef(
 			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 	}
 
-	return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.InputBudget(), nil
+	return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.Context, nil
 }
 
 // hookDefsFromConfig converts the grouped HookConfig from the YAML config

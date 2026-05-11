@@ -327,14 +327,52 @@ type ModelLimit struct {
 	Output  int `json:"output" yaml:"output"`
 }
 
-// InputBudget returns the input-side budget used for compaction and context
-// usage decisions. Older configs without limit.input keep treating
-// limit.context as the input budget for backward compatibility.
+// InputBudget returns the legacy input-side budget used by callers that cannot
+// account for requested output headroom. Older configs without limit.input keep
+// treating limit.context as the input budget for backward compatibility.
 func (l ModelLimit) InputBudget() int {
 	if l.Input > 0 {
 		return l.Input
 	}
 	return l.Context
+}
+
+// EffectiveInputBudget returns the input-side budget for request sizing and
+// automatic compaction. When limit.input is configured it is authoritative;
+// otherwise reserve the effective requested-output budget from the total context
+// window so input + output can still fit inside limit.context.
+func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int) int {
+	if l.Input > 0 {
+		return l.Input
+	}
+	if l.Context <= 0 {
+		return 0
+	}
+	outputBudget := l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
+	if outputBudget <= 0 {
+		return l.Context
+	}
+	budget := l.Context - outputBudget
+	if budget < 1 {
+		return 1
+	}
+	return budget
+}
+
+// EffectiveOutputBudget returns the requested-output budget after applying the
+// global output cap default and the model's own limit.output cap.
+func (l ModelLimit) EffectiveOutputBudget(outputCapSetting, defaultOutputCap int) int {
+	budget := outputCapSetting
+	if budget <= 0 {
+		budget = defaultOutputCap
+	}
+	if l.Output > 0 && (budget <= 0 || l.Output < budget) {
+		budget = l.Output
+	}
+	if budget < 0 {
+		return 0
+	}
+	return budget
 }
 
 // ThinkingConfig controls extended thinking for Anthropic models.

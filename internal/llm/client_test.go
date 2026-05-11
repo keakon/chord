@@ -1054,6 +1054,39 @@ func TestClampEffectiveMaxTokensReasoningStillRespectsGlobalOutputCap(t *testing
 	}
 }
 
+func TestInputLimitForModelRefDerivesContextMinusOutputBudget(t *testing.T) {
+	cfg := NewProviderConfig("prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
+		},
+	}, []string{"k"})
+	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
+
+	if got := c.InputLimitForModelRef("prov/model"); got != 368000 {
+		t.Fatalf("default InputLimitForModelRef() = %d, want 368000", got)
+	}
+	c.SetOutputTokenMax(8192)
+	if got := c.InputLimitForModelRef("prov/model"); got != 391808 {
+		t.Fatalf("configured InputLimitForModelRef() = %d, want 391808", got)
+	}
+}
+
+func TestInputLimitForModelRefUsesExplicitInputLimit(t *testing.T) {
+	cfg := NewProviderConfig("prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}},
+		},
+	}, []string{"k"})
+	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
+	c.SetOutputTokenMax(8192)
+
+	if got := c.InputLimitForModelRef("prov/model"); got != 272000 {
+		t.Fatalf("InputLimitForModelRef() = %d, want 272000", got)
+	}
+}
+
 func TestClassifyFallbackReasonUsesContextLengthExceededCode(t *testing.T) {
 	err := &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}
 	if got := classifyFallbackReason(err); got != "context_length_exceeded" {
@@ -1634,6 +1667,9 @@ func TestClientFallbackChainUsedOnce(t *testing.T) {
 	}
 	if st.RunningContextLimit != 128000 {
 		t.Fatalf("unexpected running context limit: %d", st.RunningContextLimit)
+	}
+	if st.RunningInputLimit != 123904 {
+		t.Fatalf("unexpected running input limit: %d", st.RunningInputLimit)
 	}
 }
 

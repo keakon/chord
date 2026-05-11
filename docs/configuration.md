@@ -94,7 +94,7 @@ providers:
 Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
-2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord falls back to `limit.context`.
+2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget from `limit.context` after reserving effective requested output.
 3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it.
 
 Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. Provider docs sometimes call this setup split limits; see [Glossary](./glossary.md).
@@ -364,10 +364,7 @@ providers:
 Model fields used in the example:
 
 - `limit.context`: total request window in tokens when the provider exposes it.
-- `limit.input`: use this only when the provider also publishes a separate input cap. Chord uses it to decide when to compact before the prompt is too large and how to retry after a provider rejects a too-large request. If omitted, Chord falls
-  back to `limit.context` for backward compatibility. It does not by itself
-  reduce requested output tokens; output clamping follows `limit.output`,
-  `max_output_tokens`, and any total-context (`limit.context`) remainder.
+- `limit.input`: use this only when the provider also publishes a separate input cap. Chord uses it to decide when to compact before the prompt is too large and how to retry after a provider rejects a too-large request. If omitted, Chord derives the input budget from `limit.context` minus the effective requested output (`max_output_tokens`, capped by `limit.output`). It does not by itself reduce requested output tokens; output clamping follows `limit.output`, `max_output_tokens`, and any total-context (`limit.context`) remainder.
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
 - `reasoning`: OpenAI reasoning options, mainly for Responses-style reasoning
@@ -577,9 +574,11 @@ context:
 ```
 
 Automatic compaction is driven by the **usable input-side** budget. If a model config
-sets `limit.input`, Chord starts from that value; otherwise it falls back to
-`limit.context` for backward compatibility. If `context.compaction.reserved` is
-set, Chord subtracts it before applying `compact_threshold`.
+sets `limit.input`, Chord starts from that value; otherwise it starts from
+`limit.context - effective_max_output`, where effective output is `max_output_tokens`
+(or the runtime default) capped by the model's `limit.output`. If
+`context.compaction.reserved` is set, Chord subtracts it before applying
+`compact_threshold`.
 
 You can reserve headroom for tokenizer drift, tool-schema overhead, and
 compaction/recovery safety margin:
@@ -666,7 +665,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 | Field             | Type   | Description                                                                                                            |
 | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `limit.context`   | int    | Total request window in tokens when known. Used as the fallback input budget when `limit.input` is omitted.                      |
+| `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus effective requested output. |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compact_threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |

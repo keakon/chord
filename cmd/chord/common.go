@@ -379,6 +379,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 				cfg.Providers,
 				auth,
 				cfg.Proxy,
+				cfg.MaxOutputTokens,
 				ac.GetOrCreateProvider,
 				ac.GetOrCreateProviderImpl,
 				"builder startup",
@@ -440,7 +441,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// Context manager.
 	ac.CtxMgr = ctxmgr.NewManagerWithInputBudget(
 		modelCfg.Limit.Context,
-		modelCfg.Limit.InputBudget(),
+		modelCfg.Limit.EffectiveInputBudget(cfg.MaxOutputTokens, llm.DefaultOutputTokenMax),
 		cfg.Context.Compaction.Reserved,
 		cfg.Context.AutoCompact,
 		cfg.Context.CompactThreshold,

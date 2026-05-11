@@ -1417,6 +1417,23 @@ func TestUsageDrivenCompactionStillNeededWhenShrinkEstimateRemainsHigh(t *testin
 	}
 }
 
+func TestUsageDrivenCompactionShrinkUsesInputBudget(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.autoCompactRequested.Store(true)
+	snapshot := []message.Message{
+		{Role: "user", Content: strings.Repeat("x", 750000)}, // ~250k estimated input tokens
+	}
+
+	if a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
+		t.Fatal("expected durable compaction to remain armed above input-budget threshold")
+	}
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("expected auto compact request to remain armed")
+	}
+}
+
 func TestLargeTranscriptDoesNotAutoCompactWithoutUsageSignal(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
