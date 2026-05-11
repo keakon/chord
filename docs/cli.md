@@ -128,7 +128,7 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 Run lightweight diagnostics for configured model calls using the same provider transport path as normal LLM requests. It loads `config.yaml` / `auth.yaml`, resolves each selected target to a canonical `provider/model[@variant]` ref, applies model and variant tuning, and reports success, latency, text chunks, token usage when available, and Responses transport (`http` or `websocket`). The command uses the same merged global + project config view as normal runtime startup.
 
-By default, Chord tests one representative model per configured provider. The representative is stable: the first model referenced by any `model_pools` entry for that provider, or the provider's first model by name when no pool references it.
+By default, Chord tests one representative model per configured provider. The representative is stable: the first model referenced by any `model_pools` entry for that provider, or the provider's first model by name when no pool references it. Each diagnostic target makes one request attempt by default; use `--retry` only when you explicitly want to retry transient failures.
 
 ### Flags
 
@@ -140,6 +140,7 @@ By default, Chord tests one representative model per configured provider. The re
 | `--all-models`        | Test all configured models for `--provider` (must be combined with `--provider`)                          |
 | `--all-pools`         | Test every configured model pool                                                                         |
 | `--timeout <duration>`| Per-model request timeout (default `30s`)                                                                |
+| `--retry <count>`     | Maximum request attempts per target (default `1`; client/auth errors such as 400/401/403 are not retried) |
 | `--fail-fast`         | Stop after the first failed request or configuration error                                                |
 | `--json`              | Emit a machine-readable JSON report                                                                      |
 

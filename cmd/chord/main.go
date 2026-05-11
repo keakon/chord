@@ -91,6 +91,20 @@ func cliExitCode(err error) int {
 	return 1
 }
 
+func shouldPrintCLIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr cliExitError
+	if errors.As(err, &exitErr) && exitErr.code == 130 {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
+}
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -156,10 +170,12 @@ func main() {
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
+	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newTestProvidersCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if shouldPrintCLIError(err) {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 		os.Exit(cliExitCode(err))
 	}
 }

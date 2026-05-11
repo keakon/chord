@@ -39,6 +39,7 @@ const (
 	doctorModelResultConfigError = "config_error"
 
 	doctorModelsDefaultTimeout = 30 * time.Second
+	doctorModelsDefaultRetry   = 1
 )
 
 type doctorModelsOptions struct {
@@ -48,6 +49,7 @@ type doctorModelsOptions struct {
 	AllModels bool
 	AllPools  bool
 	Timeout   time.Duration
+	Retry     int
 	FailFast  bool
 	JSON      bool
 	APIBase   string
@@ -142,7 +144,7 @@ func newDoctorCmd() *cobra.Command {
 }
 
 func newDoctorModelsCmd() *cobra.Command {
-	opts := doctorModelsOptions{Timeout: doctorModelsDefaultTimeout}
+	opts := doctorModelsOptions{Timeout: doctorModelsDefaultTimeout, Retry: doctorModelsDefaultRetry}
 	cmd := &cobra.Command{
 		Use:   "models",
 		Short: "Diagnose configured model calls",
@@ -151,9 +153,15 @@ func newDoctorModelsCmd() *cobra.Command {
 The canonical model reference is provider/model[@variant]. Bare model references
 are only accepted when --provider is specified. Model-pool checks test each pool
 entry independently and do not use fallback, so a bad fallback target is not
-hidden by a later successful model.`,
+hidden by a later successful model.
+
+By default, diagnostics make a single request attempt per target. Increase --retry
+only when you explicitly want extra retry rounds for transient failures.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("retry") && opts.Retry <= 0 {
+				return cliExitError{code: 2, err: fmt.Errorf("--retry must be greater than zero")}
+			}
 			opts.Out = cmd.OutOrStdout()
 			opts.APIBase = strings.TrimSpace(flagAPIBase)
 			return runDoctorModels(cmd.Context(), opts)
@@ -165,6 +173,7 @@ hidden by a later successful model.`,
 	cmd.Flags().BoolVar(&opts.AllModels, "all-models", false, "Test all configured models for --provider")
 	cmd.Flags().BoolVar(&opts.AllPools, "all-pools", false, "Test all configured model pools")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", doctorModelsDefaultTimeout, "Per-model request timeout")
+	cmd.Flags().IntVar(&opts.Retry, "retry", doctorModelsDefaultRetry, "Maximum request attempts per target (default 1)")
 	cmd.Flags().BoolVar(&opts.FailFast, "fail-fast", false, "Stop after the first failed request or configuration error")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Write a JSON report")
 	return cmd
@@ -174,6 +183,7 @@ func runDoctorModels(parentCtx context.Context, opts doctorModelsOptions) error 
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
+	opts = normalizeDoctorModelsOptions(opts)
 	out := opts.Out
 	if out == nil {
 		out = os.Stdout
@@ -224,6 +234,13 @@ func runDoctorModels(parentCtx context.Context, opts doctorModelsOptions) error 
 	return nil
 }
 
+func normalizeDoctorModelsOptions(opts doctorModelsOptions) doctorModelsOptions {
+	if opts.Retry == 0 {
+		opts.Retry = doctorModelsDefaultRetry
+	}
+	return opts
+}
+
 func validateDoctorModelsOptions(opts doctorModelsOptions) error {
 	provider := strings.TrimSpace(opts.Provider)
 	modelRef := strings.TrimSpace(opts.ModelRef)
@@ -257,6 +274,9 @@ func validateDoctorModelsOptions(opts doctorModelsOptions) error {
 	}
 	if opts.Timeout <= 0 {
 		return fmt.Errorf("--timeout must be greater than zero")
+	}
+	if opts.Retry < 0 {
+		return fmt.Errorf("--retry must be greater than zero")
 	}
 	return nil
 }
@@ -511,6 +531,10 @@ func providerRepresentativePlanEntries(cfg *config.Config, poolOrder []string, p
 		return []doctorModelPlanEntry{entry}
 	}
 	providerNames := sortedProviderNames(cfg.Providers)
+	if len(providerNames) == 0 {
+		target := doctorModelTarget{Source: doctorModelSourceProviderRepresentative, CanonicalRef: "providers"}
+		return []doctorModelPlanEntry{resultPlanEntry(configErrorResult(target, "no providers configured"))}
+	}
 	entries := make([]doctorModelPlanEntry, 0, len(providerNames))
 	for _, name := range providerNames {
 		entries = append(entries, representativePlanEntryForProvider(cfg, poolOrder, name))
@@ -657,6 +681,17 @@ func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModels
 	report := doctorModelsReport{Mode: plan.Mode, Provider: plan.Provider, ModelRef: plan.ModelRef, PoolName: plan.PoolName}
 	total := len(plan.Entries)
 	for i, entry := range plan.Entries {
+		if report.Canceled {
+			for _, skipped := range plan.Entries[i:] {
+				if skipped.Target == nil && skipped.Result == nil {
+					continue
+				}
+				skippedResult := skippedDoctorModelResult(skipped)
+				report.Results = append(report.Results, skippedResult)
+				accumulateDoctorModelsSummary(&report, skippedResult)
+			}
+			break
+		}
 		var result doctorModelResult
 		if entry.Result != nil {
 			result = *entry.Result
@@ -727,6 +762,9 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 	result.ProviderType = normalizedCfg.Type
 	modelCfg = normalizedCfg.Models[target.ModelName]
 	apiKeys := config.ExtractAPIKeys(creds)
+	if len(apiKeys) > 1 {
+		apiKeys = apiKeys[:1]
+	}
 	llmProviderCfg := llm.NewProviderConfig(target.ProviderName, normalizedCfg, apiKeys)
 	defer llmProviderCfg.StopCodexRateLimitPolling()
 	if normalizedCfg.RateLimit > 0 {
@@ -757,6 +795,8 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 	}
 	client := llm.NewClient(llmProviderCfg, impl, target.ModelName, modelCfg.Limit.Output, "You are a helpful assistant.")
 	client.SetOutputTokenMax(cfg.MaxOutputTokens)
+	client.SetStreamRetryRounds(opts.Retry)
+	client.SetTerminalAPIStatusCodes(400, 401, 403)
 	if target.VariantName != "" {
 		client.SetVariant(target.VariantName)
 	}
@@ -1004,6 +1044,28 @@ func displayDoctorModelRef(result doctorModelResult) string {
 		return result.PoolName
 	}
 	return "unknown"
+}
+
+func newTestProvidersCmd() *cobra.Command {
+	var providerFilter string
+	cmd := &cobra.Command{
+		Use:        "test-providers",
+		Short:      "Deprecated alias for doctor models",
+		Deprecated: "use 'chord doctor models' instead",
+		Hidden:     true,
+		Args:       cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runDoctorModels(cmd.Context(), doctorModelsOptions{
+				Provider: strings.TrimSpace(providerFilter),
+				Timeout:  doctorModelsDefaultTimeout,
+				Retry:    doctorModelsDefaultRetry,
+				Out:      cmd.OutOrStdout(),
+				APIBase:  strings.TrimSpace(flagAPIBase),
+			})
+		},
+	}
+	cmd.Flags().StringVar(&providerFilter, "provider", "", "Provider name to test")
+	return cmd
 }
 
 func parseDoctorModelRef(raw string) (base, variant string) {

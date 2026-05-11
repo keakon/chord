@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/keakon/chord/internal/config"
 )
 
@@ -104,6 +106,20 @@ func TestDoctorModelsPlanRepresentativeSelection(t *testing.T) {
 	want := []string{"anthropic/claude", "local/a-model", "openai/gpt@high"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("targets = %#v, want %#v", got, want)
+	}
+}
+
+func TestDoctorModelsPlanNoProvidersIsConfigError(t *testing.T) {
+	plan, err := buildDoctorModelsPlan(&config.Config{}, nil, doctorModelsOptions{})
+	if err != nil {
+		t.Fatalf("buildDoctorModelsPlan: %v", err)
+	}
+	if len(plan.Entries) != 1 || plan.Entries[0].Result == nil {
+		t.Fatalf("entries = %+v, want config error result", plan.Entries)
+	}
+	result := plan.Entries[0].Result
+	if result.Status != doctorModelResultConfigError || !strings.Contains(result.Error, "no providers configured") {
+		t.Fatalf("result = %+v, want no-providers config error", result)
 	}
 }
 
@@ -197,6 +213,35 @@ func TestDoctorModelsValidateMutuallyExclusiveOptions(t *testing.T) {
 	}
 }
 
+func TestDoctorModelsValidateRetryMustBePositive(t *testing.T) {
+	err := validateDoctorModelsOptions(doctorModelsOptions{Timeout: time.Second, Retry: -1})
+	if err == nil || !strings.Contains(err.Error(), "--retry must be greater than zero") {
+		t.Fatalf("error = %v, want positive retry validation", err)
+	}
+}
+
+func TestDoctorModelsCommandRejectsExplicitZeroRetry(t *testing.T) {
+	cmd := newDoctorCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"models", "--retry", "0"})
+	err := cmd.Execute()
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.code != 2 || !strings.Contains(err.Error(), "--retry must be greater than zero") {
+		t.Fatalf("doctor models --retry 0 err = %v, want exit 2 retry validation", err)
+	}
+}
+
+func TestShouldPrintCLIErrorSuppressesCanceledExit(t *testing.T) {
+	if shouldPrintCLIError(cliExitError{code: 130, err: context.Canceled}) {
+		t.Fatal("should not print CLI error for canceled exit")
+	}
+	if !shouldPrintCLIError(errors.New("boom")) {
+		t.Fatal("should print CLI error for ordinary errors")
+	}
+}
+
 func TestDoctorModelsCommandHelp(t *testing.T) {
 	cmd := newDoctorCmd()
 	var out bytes.Buffer
@@ -207,10 +252,43 @@ func TestDoctorModelsCommandHelp(t *testing.T) {
 		t.Fatalf("doctor models --help: %v", err)
 	}
 	text := out.String()
-	for _, want := range []string{"provider/model[@variant]", "--all-pools", "--fail-fast", "--json"} {
+	for _, want := range []string{"provider/model[@variant]", "--all-pools", "--fail-fast", "--json", "--retry"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestTestProvidersCommandHiddenDeprecatedAlias(t *testing.T) {
+	root := &cobra.Command{Use: "chord"}
+	root.AddCommand(newDoctorCmd(), newTestProvidersCmd())
+	cmd, _, err := root.Find([]string{"test-providers"})
+	if err != nil {
+		t.Fatalf("find test-providers: %v", err)
+	}
+	if cmd == nil || cmd.Use != "test-providers" {
+		t.Fatalf("cmd = %#v, want test-providers", cmd)
+	}
+	if !cmd.Hidden || cmd.Deprecated == "" {
+		t.Fatalf("hidden/deprecated = %v/%q, want hidden deprecated alias", cmd.Hidden, cmd.Deprecated)
+	}
+}
+
+func TestRunDoctorModelsNoProvidersReturnsConfigError(t *testing.T) {
+	setupDoctorModelsConfigHome(t, "{}\n", "")
+
+	var out bytes.Buffer
+	err := runDoctorModels(t.Context(), doctorModelsOptions{Timeout: time.Second, JSON: true, Out: &out})
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.code != 2 {
+		t.Fatalf("runDoctorModels err = %v, want exit 2\noutput: %s", err, out.String())
+	}
+	var report doctorModelsReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, out.String())
+	}
+	if report.Summary.ConfigErrors != 1 || len(report.Results) != 1 || !strings.Contains(report.Results[0].Error, "no providers configured") {
+		t.Fatalf("report = %+v", report)
 	}
 }
 
@@ -579,6 +657,128 @@ func TestRunDoctorModelsCanceledReturnsExit130(t *testing.T) {
 	}
 	if len(report.Results) != 1 || report.Results[0].Status != doctorModelResultFailed || !strings.Contains(strings.ToLower(report.Results[0].Error), "context canceled") {
 		t.Fatalf("results = %+v", report.Results)
+	}
+}
+
+func TestRunDoctorModelsDoesNotRetryAuthOrClientErrors(t *testing.T) {
+	for _, status := range []int{400, 401, 403} {
+		status := status
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				defer r.Body.Close()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"diagnostic client/auth failure","type":"invalid_request_error"}}`))
+			}))
+			defer server.Close()
+
+			setupDoctorModelsConfigHome(t, "providers:\n"+
+				"  local:\n"+
+				"    type: chat-completions\n"+
+				"    api_url: "+server.URL+"/v1/chat/completions\n"+
+				"    models:\n"+
+				"      gpt:\n"+
+				"        limit:\n"+
+				"          context: 1000\n"+
+				"          output: 128\n", "local:\n  - bad-key\n  - second-key\n")
+
+			var out bytes.Buffer
+			err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt", Timeout: 5 * time.Second, Retry: 3, JSON: true, Out: &out})
+			var exitErr cliExitError
+			if !errors.As(err, &exitErr) || exitErr.code != 1 {
+				t.Fatalf("runDoctorModels err = %v, want exit 1\noutput: %s", err, out.String())
+			}
+			if requests.Load() != 1 {
+				t.Fatalf("requests = %d, want 1 for HTTP %d", requests.Load(), status)
+			}
+		})
+	}
+}
+
+func TestRunDoctorModelsRetryAllowsTransientRecovery(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if requests.Add(1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary upstream failure"}}`))
+			return
+		}
+		writeDoctorChatCompletionSSE(t, w)
+	}))
+	defer server.Close()
+
+	setupDoctorModelsConfigHome(t, "providers:\n"+
+		"  local:\n"+
+		"    type: chat-completions\n"+
+		"    api_url: "+server.URL+"/v1/chat/completions\n"+
+		"    models:\n"+
+		"      gpt:\n"+
+		"        limit:\n"+
+		"          context: 1000\n"+
+		"          output: 128\n", "local:\n  - test-key\n")
+
+	var out bytes.Buffer
+	if err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt", Timeout: 5 * time.Second, Retry: 2, JSON: true, Out: &out}); err != nil {
+		t.Fatalf("runDoctorModels: %v\noutput: %s", err, out.String())
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("requests = %d, want 2", requests.Load())
+	}
+	var report doctorModelsReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, out.String())
+	}
+	if report.Summary.Passed != 1 || len(report.Results) != 1 || report.Results[0].Status != doctorModelResultSuccess {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestRunDoctorModelsCanceledSkipsRemainingTargets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		writeDoctorChatCompletionSSE(t, w)
+	}))
+	defer server.Close()
+
+	setupDoctorModelsConfigHome(t, "providers:\n"+
+		"  local:\n"+
+		"    type: chat-completions\n"+
+		"    api_url: "+server.URL+"/v1/chat/completions\n"+
+		"    models:\n"+
+		"      a:\n"+
+		"        limit:\n"+
+		"          context: 1000\n"+
+		"          output: 128\n"+
+		"      b:\n"+
+		"        limit:\n"+
+		"          context: 1000\n"+
+		"          output: 128\n", "local:\n  - test-key\n")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var out bytes.Buffer
+	err := runDoctorModels(ctx, doctorModelsOptions{Provider: "local", AllModels: true, Timeout: 5 * time.Second, JSON: true, Out: &out})
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.code != 130 {
+		t.Fatalf("runDoctorModels err = %v, want exit 130\noutput: %s", err, out.String())
+	}
+	var report doctorModelsReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, out.String())
+	}
+	if !report.Canceled {
+		t.Fatalf("report.Canceled = false, want true; report = %+v", report)
+	}
+	if len(report.Results) != 2 {
+		t.Fatalf("results len = %d, want 2", len(report.Results))
+	}
+	if report.Results[0].Status != doctorModelResultFailed || report.Results[1].Status != doctorModelResultSkipped {
+		t.Fatalf("results = %+v, want failed then skipped", report.Results)
 	}
 }
 

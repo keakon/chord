@@ -40,21 +40,22 @@ type FallbackModel struct {
 
 // Client is the high-level LLM client that handles retries and key selection.
 type Client struct {
-	mu                sync.RWMutex
-	provider          *ProviderConfig
-	providerImpl      Provider
-	modelID           string
-	maxTokens         int
-	outputTokenMax    int // global output token cap (Layer 1); 0 means use DefaultOutputTokenMax
-	streamRetryRounds int // hard cap on public CompleteStream retry rounds; 0 means retry until success/cancel
-	tuning            RequestTuning
-	nextTuning        *RequestTuning
-	activeVariant     string // name of the currently applied variant (empty = none)
-	systemPrompt      string
-	lastInputTokens   int             // tracks last known input token count for context size checks
-	fallbackModels    []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
-	poolCursor        int             // sticky cursor over the effective model pool; success pins, failure advances
-	lastCallStatus    CallStatus
+	mu                     sync.RWMutex
+	provider               *ProviderConfig
+	providerImpl           Provider
+	modelID                string
+	maxTokens              int
+	outputTokenMax         int // global output token cap (Layer 1); 0 means use DefaultOutputTokenMax
+	streamRetryRounds      int // hard cap on public CompleteStream retry rounds; 0 means retry until success/cancel
+	terminalAPIStatusCodes map[int]struct{}
+	tuning                 RequestTuning
+	nextTuning             *RequestTuning
+	activeVariant          string // name of the currently applied variant (empty = none)
+	systemPrompt           string
+	lastInputTokens        int             // tracks last known input token count for context size checks
+	fallbackModels         []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
+	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
+	lastCallStatus         CallStatus
 
 	routingGeneration atomic.Uint64
 	routingChangedCh  chan struct{}
@@ -328,6 +329,41 @@ func (c *Client) SetStreamRetryRounds(n int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.streamRetryRounds = n
+}
+
+// SetTerminalAPIStatusCodes marks API status codes as terminal for this client.
+// Terminal errors are returned immediately without key rotation, model fallback,
+// or another retry round. Normal runtime clients leave this unset; diagnostic
+// callers can use it to avoid retrying deterministic client/auth failures.
+func (c *Client) SetTerminalAPIStatusCodes(statusCodes ...int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(statusCodes) == 0 {
+		c.terminalAPIStatusCodes = nil
+		return
+	}
+	codes := make(map[int]struct{}, len(statusCodes))
+	for _, code := range statusCodes {
+		if code > 0 {
+			codes[code] = struct{}{}
+		}
+	}
+	if len(codes) == 0 {
+		c.terminalAPIStatusCodes = nil
+		return
+	}
+	c.terminalAPIStatusCodes = codes
+}
+
+func (c *Client) isTerminalAPIStatusError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.terminalAPIStatusCodes[apiErr.StatusCode]
+	return ok
 }
 
 // SetVariant applies the named variant from the current cursor head model's Variants map.
