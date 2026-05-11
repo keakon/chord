@@ -686,7 +686,7 @@ func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModels
 				if skipped.Target == nil && skipped.Result == nil {
 					continue
 				}
-				skippedResult := skippedDoctorModelResult(skipped)
+				skippedResult := skippedDoctorModelResult(skipped, "skipped due to cancellation")
 				report.Results = append(report.Results, skippedResult)
 				accumulateDoctorModelsSummary(&report, skippedResult)
 			}
@@ -713,7 +713,7 @@ func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModels
 				if skipped.Target == nil && skipped.Result == nil {
 					continue
 				}
-				skippedResult := skippedDoctorModelResult(skipped)
+				skippedResult := skippedDoctorModelResult(skipped, "skipped due to --fail-fast")
 				report.Results = append(report.Results, skippedResult)
 				accumulateDoctorModelsSummary(&report, skippedResult)
 			}
@@ -882,7 +882,7 @@ func resultFromTarget(target doctorModelTarget) doctorModelResult {
 	}
 }
 
-func skippedDoctorModelResult(entry doctorModelPlanEntry) doctorModelResult {
+func skippedDoctorModelResult(entry doctorModelPlanEntry, reason string) doctorModelResult {
 	var result doctorModelResult
 	if entry.Target != nil {
 		result = resultFromTarget(*entry.Target)
@@ -892,7 +892,7 @@ func skippedDoctorModelResult(entry doctorModelPlanEntry) doctorModelResult {
 		result = doctorModelResult{}
 	}
 	result.Status = doctorModelResultSkipped
-	result.Error = "skipped due to --fail-fast"
+	result.Error = reason
 	return result
 }
 

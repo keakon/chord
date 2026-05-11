@@ -438,6 +438,9 @@ func TestDoctorModelsFailFastMarksRemainingPlanEntriesSkipped(t *testing.T) {
 	if report.Results[0].Status != doctorModelResultConfigError || report.Results[1].Status != doctorModelResultSkipped || report.Results[2].Status != doctorModelResultSkipped {
 		t.Fatalf("results = %+v", report.Results)
 	}
+	if !strings.Contains(report.Results[1].Error, "--fail-fast") || !strings.Contains(report.Results[2].Error, "--fail-fast") {
+		t.Fatalf("skipped errors = %q, %q; want fail-fast reason", report.Results[1].Error, report.Results[2].Error)
+	}
 }
 
 func TestDoctorModelsCommandRejectsPositionalArgs(t *testing.T) {
@@ -779,6 +782,9 @@ func TestRunDoctorModelsCanceledSkipsRemainingTargets(t *testing.T) {
 	}
 	if report.Results[0].Status != doctorModelResultFailed || report.Results[1].Status != doctorModelResultSkipped {
 		t.Fatalf("results = %+v, want failed then skipped", report.Results)
+	}
+	if !strings.Contains(report.Results[1].Error, "cancellation") || strings.Contains(report.Results[1].Error, "--fail-fast") {
+		t.Fatalf("skipped error = %q, want cancellation reason", report.Results[1].Error)
 	}
 }
 

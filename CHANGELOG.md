@@ -4,6 +4,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Runtime/File safety: restored or resumed sessions now rebuild durable `Read` file-state, so later `Edit`/`Write` calls keep the read-before-write safety check without falsely requiring every file to be re-read.
+- Runtime/Compaction: when `limit.input` is omitted, automatic compaction and model-pool fallback sizing now reserve the effective requested-output budget from `limit.context`, reducing oversized prompt retries and premature threshold calculations.
+- Config/Runtime: project `.chord/config.yaml` now merges through the same path for startup, auth login, and model diagnostics; malformed project config is reported instead of silently ignored, and `stream_retry_rounds` can bound public LLM retry rounds for automation.
 - TUI: fixed syntax highlighting for Markdown previews so EOF block markers (ordered lists, headings, and similar line-based syntax) keep the same colour as preceding lines in `Read`/`Write` tool cards and fenced code blocks.
 - CLI: replaced the deprecated `chord test-providers` entry point with `chord doctor models`, adding exact `provider/model[@variant]` checks, model-pool audits, all-model/all-pool modes, per-target timeout, single-attempt diagnostics by default with optional `--retry`, fail-fast, JSON output, and model/variant tuning coverage.
 

@@ -4,6 +4,9 @@
 
 ## 未发布
 
+- Runtime / 文件安全：恢复或继续会话时，现在会重建持久化的 `Read` 文件状态；之后的 `Edit` / `Write` 仍保留“先读后写”保护，但不会再误要求所有文件都重新读取一遍。
+- Runtime / 压缩：未配置 `limit.input` 时，自动压缩和模型池 fallback 的输入预算会从 `limit.context` 中预留有效请求输出，减少超大 prompt 重试和过早/过晚触发阈值的问题。
+- Config / Runtime：项目级 `.chord/config.yaml` 现在在启动、auth login 和模型诊断中走同一套合并逻辑；格式错误的项目配置会明确报错，不再静默忽略，并新增 `stream_retry_rounds` 以便自动化场景限制公开 LLM 重试轮数。
 - TUI：修复 Markdown 预览的语法高亮；文件末尾的有序列表、标题等按行识别的语法标记，现在会在 `Read` / `Write` 工具卡片和 fenced code block 中保持与前面行一致的颜色。
 - CLI：用 `chord doctor models` 替换旧的 `chord test-providers` 入口，新增精确 `provider/model[@variant]` 检查、模型池审计、all-model/all-pool 模式、按目标 timeout、默认单次诊断且可通过 `--retry` 显式重试、fail-fast、JSON 输出，并覆盖 model / variant tuning。
 

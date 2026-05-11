@@ -128,7 +128,7 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 对已配置的模型调用链执行轻量诊断，使用与正常 LLM 请求相同的 provider transport 路径。命令会加载 `config.yaml` / `auth.yaml`，把每个目标解析成 canonical `provider/model[@variant]`，应用 model 默认 tuning 和 variant tuning，并报告成功/失败、延迟、文本 chunk 数、可用时的 token usage，以及 Responses provider 的最终 transport（`http` 或 `websocket`）。它使用的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级配置。
 
-默认情况下，Chord 会为每个 provider 测试一个代表模型。代表模型选择是稳定的：优先取所有 `model_pools` 中最先引用该 provider 的模型；若没有任何池引用该 provider，则取该 provider 下按名称排序的第一个 model。每个诊断目标默认只发起 1 次请求；只有在明确想重试瞬时故障时才使用 `--retry`。
+默认情况下，Chord 会为每个 provider 测试一个代表模型。代表模型选择是稳定的：优先取所有 `model_pools` 中最先引用该 provider 的模型；若没有任何池引用该 provider，则取该 provider 下按名称排序的第一个 model。每个诊断目标默认只发起 1 次请求；只有在明确想重试瞬时故障时才使用 `--retry`。如果某个 provider 配置了多个 credential，诊断会刻意只使用第一个 credential，避免后续 key 掩盖该 credential 的失败。
 
 ### Flag
 
