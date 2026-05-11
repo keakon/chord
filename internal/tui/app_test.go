@@ -7111,3 +7111,39 @@ func TestMarkAgentIdleClearsStreamLastDelta(t *testing.T) {
 		t.Fatal("expected streamLastDeltaAt[main] to be cleared after markAgentIdle")
 	}
 }
+
+func TestHandleStatusCopyClickHitsSessionBeforePathWhenRegionsOverlap(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	m.layout = m.generateLayout(m.width, m.height)
+	m.statusSession = statusBarCopyRegionState{value: "session-value", display: "session", startX: 10, endX: 20}
+	m.statusPath = statusBarCopyRegionState{value: "/tmp/path", display: "path", startX: 10, endX: 20}
+	x, y := 12, m.layout.status.Min.Y
+
+	cmd, handled := m.handleStatusCopyClick(x, y)
+	if !handled || cmd != nil {
+		t.Fatalf("first click handled/cmd = %v/%#v, want handled no command", handled, cmd)
+	}
+	cmd, handled = m.handleStatusCopyClick(x, y)
+	if !handled || cmd == nil {
+		t.Fatalf("second click handled/cmd = %v/%#v, want copy command", handled, cmd)
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("copy command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Session ID copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want session copy", second.success)
+	}
+}
+
+func TestHandleStatusCopyClickIgnoresNonStatusPoint(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	m.layout = m.generateLayout(m.width, m.height)
+	m.statusPath = statusBarCopyRegionState{value: "/tmp/path", display: "path", startX: 10, endX: 20}
+	cmd, handled := m.handleStatusCopyClick(0, m.layout.status.Min.Y)
+	if handled || cmd != nil {
+		t.Fatalf("non-status click handled/cmd = %v/%#v, want false/nil", handled, cmd)
+	}
+}

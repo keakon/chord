@@ -131,6 +131,88 @@ func responseHasUsableOutput(resp *message.Response) bool {
 	return strings.TrimSpace(resp.Content) != "" || len(resp.ToolCalls) > 0 || len(resp.ThinkingBlocks) > 0
 }
 
+type streamRetryTarget struct {
+	provider     *ProviderConfig
+	impl         Provider
+	modelID      string
+	maxTokens    int
+	contextLimit int
+	inputLimit   int
+	tuning       RequestTuning
+	variant      string
+	isFallback   bool
+}
+
+func (c *Client) buildStreamRetryTargets(
+	startProvider *ProviderConfig,
+	startImpl Provider,
+	startModelID string,
+	startMaxTokens int,
+	startTuning RequestTuning,
+	variantForStart string,
+	outputCapSetting int,
+	fallbackEnabled bool,
+	fallbackModels []FallbackModel,
+) []streamRetryTarget {
+	targets := []streamRetryTarget{
+		{
+			provider:     startProvider,
+			impl:         startImpl,
+			modelID:      startModelID,
+			maxTokens:    startMaxTokens,
+			contextLimit: c.ContextLimitForModelRef(providerModelRef(startProvider, startModelID)),
+			inputLimit:   c.InputLimitForModelRef(providerModelRef(startProvider, startModelID)),
+			tuning:       startTuning,
+			variant:      variantForStart,
+			isFallback:   false,
+		},
+	}
+	if !fallbackEnabled {
+		return targets
+	}
+	for _, fb := range fallbackModels {
+		var fbTuning RequestTuning
+		fbVariantUsed := ""
+		fbContextLimit := fb.ContextLimit
+		fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
+		if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
+			fbTuning = tuningFromModel(m)
+			if fbContextLimit <= 0 {
+				fbContextLimit = m.Limit.Context
+			}
+			if fb.Variant != "" {
+				if v, ok := m.Variants[fb.Variant]; ok {
+					fbTuning = mergeVariantTuning(fbTuning, v)
+					fbVariantUsed = fb.Variant
+				}
+			}
+		}
+		if fbInputLimit <= 0 {
+			fbInputLimit = fbContextLimit
+		}
+		targets = append(targets, streamRetryTarget{
+			provider:     fb.ProviderConfig,
+			impl:         fb.ProviderImpl,
+			modelID:      fb.ModelID,
+			maxTokens:    fb.MaxTokens,
+			contextLimit: fbContextLimit,
+			inputLimit:   fbInputLimit,
+			tuning:       fbTuning,
+			variant:      fbVariantUsed,
+			isFallback:   true,
+		})
+	}
+	return targets
+}
+
+func (t streamRetryTarget) displayRef() string {
+	displayRef := providerModelRef(t.provider, t.modelID)
+	if t.variant != "" {
+		displayRef += "@" + t.variant
+	}
+	return displayRef
+}
+
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
 // remaining entries) and, for each model, loops over keys until success, a permanent failure, or
 // keys exhausted. Retriable API errors rotate keys; 401/403 force key rotation
@@ -234,69 +316,17 @@ func (c *Client) completeStreamWithRetry(
 		// Models are tried in order: current cursor-start entry first, then the
 		// remaining pool entries. This implements sticky-cursor failover: the
 		// current successful entry stays pinned until it fails.
-		type target struct {
-			provider     *ProviderConfig
-			impl         Provider
-			modelID      string
-			maxTokens    int
-			contextLimit int
-			inputLimit   int
-			tuning       RequestTuning
-			variant      string
-			isFallback   bool
-		}
-
-		targets := []target{
-			{
-				provider:     startProvider,
-				impl:         startImpl,
-				modelID:      startModelID,
-				maxTokens:    startMaxTokens,
-				contextLimit: c.ContextLimitForModelRef(providerModelRef(startProvider, startModelID)),
-				inputLimit:   c.InputLimitForModelRef(providerModelRef(startProvider, startModelID)),
-				tuning:       startTuning,
-				variant:      variantForStart,
-				isFallback:   false,
-			},
-		}
-
-		// Inject the remaining model-pool entries when enabled. All models in the
-		// pool are tried in order within each attempt round.
-		if fallbackEnabled {
-			for _, fb := range fallbackModels {
-				var fbTuning RequestTuning
-				fbVariantUsed := ""
-				fbContextLimit := fb.ContextLimit
-				fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
-				if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-					fbTuning = tuningFromModel(m)
-					if fbContextLimit <= 0 {
-						fbContextLimit = m.Limit.Context
-					}
-					if fb.Variant != "" {
-						if v, ok := m.Variants[fb.Variant]; ok {
-							fbTuning = mergeVariantTuning(fbTuning, v)
-							fbVariantUsed = fb.Variant
-						}
-					}
-				}
-				if fbInputLimit <= 0 {
-					fbInputLimit = fbContextLimit
-				}
-				targets = append(targets, target{
-					provider:     fb.ProviderConfig,
-					impl:         fb.ProviderImpl,
-					modelID:      fb.ModelID,
-					maxTokens:    fb.MaxTokens,
-					contextLimit: fbContextLimit,
-					inputLimit:   fbInputLimit,
-					tuning:       fbTuning,
-					variant:      fbVariantUsed,
-					isFallback:   true,
-				})
-			}
-		}
-
+		targets := c.buildStreamRetryTargets(
+			startProvider,
+			startImpl,
+			startModelID,
+			startMaxTokens,
+			startTuning,
+			variantForStart,
+			outputCapSetting,
+			fallbackEnabled,
+			fallbackModels,
+		)
 		for ti := 0; ti < len(targets); ti++ {
 			if err := abortIfCancelled(); err != nil {
 				return nil, err
@@ -320,10 +350,7 @@ func (c *Client) completeStreamWithRetry(
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					displayRef := providerModelRef(t.provider, t.modelID)
-					if t.variant != "" {
-						displayRef = displayRef + "@" + t.variant
-					}
+					displayRef := t.displayRef()
 					cb(message.StreamDelta{
 						Type: "status",
 						Status: &message.StatusDelta{

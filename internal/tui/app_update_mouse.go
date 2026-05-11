@@ -9,6 +9,184 @@ import (
 
 const mouseWheelScrollStep = 3
 
+func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
+	mouse := msg.Mouse()
+
+	// Session select overlay (modal): wheel scrolls list.
+	if m.mode == ModeSessionSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.sessionSelect.selector.list != nil {
+				m.sessionSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.sessionSelect.selector.list != nil {
+				m.sessionSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.sessionSelectOptionIndexAt(mouse.X, mouse.Y); ok {
+				if m.sessionSelect.selector.list != nil {
+					m.sessionSelect.selector.list.SetCursor(idx)
+				}
+				return m.selectSessionAtCursor(), true
+			}
+		}
+		return nil, true
+	}
+
+	if m.mode == ModeSessionDeleteConfirm {
+		m.clearChordState()
+		return nil, true
+	}
+
+	if m.mode == ModeModelSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if m.modelSelect.poolCursor > 0 {
+				m.modelSelect.poolCursor--
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.modelSelect.selector.list != nil {
+				m.modelSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+			} else if len(m.modelSelect.poolNames) > 0 && m.modelSelect.poolCursor < len(m.modelSelect.poolNames)-1 {
+				m.modelSelect.poolCursor++
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.poolSelectIndexAt(mouse.X, mouse.Y); ok {
+				if m.modelSelect.selector.list != nil {
+					m.modelSelect.selector.list.SetCursor(idx)
+					m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
+				} else {
+					m.modelSelect.poolCursor = idx
+				}
+				return m.selectPoolAtCursor(), true
+			}
+		}
+		return nil, true
+	}
+
+	if m.mode == ModeMCPSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.mcpSelect.selector.list != nil {
+				m.mcpSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.mcpSelect.selector.list != nil {
+				m.mcpSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.mcpSelectOptionIndexAt(mouse.X, mouse.Y); ok {
+				return m.mcpSelectToggleAtIndex(idx), true
+			}
+		}
+		return nil, true
+	}
+
+	if m.mode == ModeHandoffSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.handoffSelect.selector.list != nil {
+				m.handoffSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.handoffSelect.selector.list != nil {
+				m.handoffSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.handoffSelectOptionIndexAt(mouse.X, mouse.Y); ok {
+				if m.handoffSelect.selector.list != nil {
+					m.handoffSelect.selector.list.SetCursor(idx)
+				}
+				return m.confirmHandoff(), true
+			}
+		}
+		return nil, true
+	}
+
+	// Confirm/Question/Rules/UsageStats/Help overlay modes consume all mouse events
+	// to prevent clicks from passing through to underlying components.
+	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeHelp {
+		m.clearChordState()
+		return nil, true
+	}
+	if m.mode == ModeImageViewer {
+		m.clearChordState()
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			rect, _ := m.imageViewerOverlayRect()
+			if !rect.Empty() {
+				outside := mouse.X < rect.Min.X || mouse.X >= rect.Max.X ||
+					mouse.Y < rect.Min.Y || mouse.Y >= rect.Max.Y
+				if outside {
+					closeCmd := m.closeImageViewer()
+					if closeCmd != nil {
+						return closeCmd, true
+					}
+					return nil, true
+				}
+			}
+		}
+		return nil, true
+	}
+
+	return nil, false
+}
+
+func (m *Model) handleStatusCopyClick(x, y int) (tea.Cmd, bool) {
+	if m.statusSessionContainsPoint(x, y) {
+		return m.handleStatusClipboardClick(x, y, m.statusSession.value, writeStatusSessionClipboardCmd), true
+	}
+	if m.statusPathContainsPoint(x, y) {
+		return m.handleStatusClipboardClick(x, y, m.statusPath.value, writeStatusPathClipboardCmd), true
+	}
+	return nil, false
+}
+
+func (m *Model) handleStatusClipboardClick(x, y int, value string, copyCmd func(string) tea.Cmd) tea.Cmd {
+	m.clearFocusedBlock()
+	now := time.Now()
+	const doubleClickThreshold = 400 * time.Millisecond
+	const clickTolerance = 2
+	if now.Sub(m.statusPathLastClickTime) <= doubleClickThreshold &&
+		abs(x-m.statusPathLastClickX) <= clickTolerance &&
+		abs(y-m.statusPathLastClickY) <= clickTolerance {
+		m.statusPathClickCount++
+	} else {
+		m.statusPathClickCount = 1
+	}
+	m.statusPathLastClickTime = now
+	m.statusPathLastClickX = x
+	m.statusPathLastClickY = y
+	m.clearMouseSelection()
+	m.input.ClearSelection()
+	m.inputMouseDown = false
+	if m.statusPathClickCount >= 2 {
+		m.statusPathClickCount = 0
+		return copyCmd(value)
+	}
+	return nil
+}
+
 func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 	if m.interactionSuppressed() {
 		return nil
@@ -27,141 +205,8 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 		mouse.Y >= m.layout.queue.Min.Y && mouse.Y < m.layout.queue.Max.Y
 	inInfoPanel := m.infoPanelContainsPoint(mouse.X, mouse.Y)
 
-	// Session select overlay (modal): wheel scrolls list
-	if m.mode == ModeSessionSelect {
-		m.clearChordState()
-		switch mouse.Button {
-		case tea.MouseWheelUp:
-			if m.sessionSelect.selector.list != nil {
-				m.sessionSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
-			}
-			return nil
-		case tea.MouseWheelDown:
-			if m.sessionSelect.selector.list != nil {
-				m.sessionSelect.selector.list.HandleWheel(mouseWheelScrollStep)
-			}
-			return nil
-		}
-		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			if idx, ok := m.sessionSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.sessionSelect.selector.list != nil {
-					m.sessionSelect.selector.list.SetCursor(idx)
-				}
-				return m.selectSessionAtCursor()
-			}
-		}
-		return nil
-	}
-
-	if m.mode == ModeSessionDeleteConfirm {
-		m.clearChordState()
-		return nil
-	}
-
-	if m.mode == ModeModelSelect {
-		m.clearChordState()
-		switch mouse.Button {
-		case tea.MouseWheelUp:
-			if m.modelSelect.selector.list != nil {
-				m.modelSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
-				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
-			} else if m.modelSelect.poolCursor > 0 {
-				m.modelSelect.poolCursor--
-			}
-			return nil
-		case tea.MouseWheelDown:
-			if m.modelSelect.selector.list != nil {
-				m.modelSelect.selector.list.HandleWheel(mouseWheelScrollStep)
-				m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
-			} else if len(m.modelSelect.poolNames) > 0 && m.modelSelect.poolCursor < len(m.modelSelect.poolNames)-1 {
-				m.modelSelect.poolCursor++
-			}
-			return nil
-		}
-		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			if idx, ok := m.poolSelectIndexAt(mouse.X, mouse.Y); ok {
-				if m.modelSelect.selector.list != nil {
-					m.modelSelect.selector.list.SetCursor(idx)
-					m.modelSelect.poolCursor = m.modelSelect.selector.list.CursorAt()
-				} else {
-					m.modelSelect.poolCursor = idx
-				}
-				return m.selectPoolAtCursor()
-			}
-		}
-		return nil
-	}
-
-	if m.mode == ModeMCPSelect {
-		m.clearChordState()
-		switch mouse.Button {
-		case tea.MouseWheelUp:
-			if m.mcpSelect.selector.list != nil {
-				m.mcpSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
-			}
-			return nil
-		case tea.MouseWheelDown:
-			if m.mcpSelect.selector.list != nil {
-				m.mcpSelect.selector.list.HandleWheel(mouseWheelScrollStep)
-			}
-			return nil
-		}
-		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			if idx, ok := m.mcpSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				return m.mcpSelectToggleAtIndex(idx)
-			}
-		}
-		return nil
-	}
-
-	if m.mode == ModeHandoffSelect {
-		m.clearChordState()
-		switch mouse.Button {
-		case tea.MouseWheelUp:
-			if m.handoffSelect.selector.list != nil {
-				m.handoffSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
-			}
-			return nil
-		case tea.MouseWheelDown:
-			if m.handoffSelect.selector.list != nil {
-				m.handoffSelect.selector.list.HandleWheel(mouseWheelScrollStep)
-			}
-			return nil
-		}
-		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			if idx, ok := m.handoffSelectOptionIndexAt(mouse.X, mouse.Y); ok {
-				if m.handoffSelect.selector.list != nil {
-					m.handoffSelect.selector.list.SetCursor(idx)
-				}
-				return m.confirmHandoff()
-			}
-		}
-		return nil
-	}
-
-	// Confirm/Question/Rules/UsageStats/Help overlay modes: consume all mouse events to prevent
-	// clicks from passing through to underlying components.
-	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeHelp {
-		m.clearChordState()
-		return nil
-	}
-	if m.mode == ModeImageViewer {
-		m.clearChordState()
-		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
-			rect, _ := m.imageViewerOverlayRect()
-			if !rect.Empty() {
-				outside := mouse.X < rect.Min.X || mouse.X >= rect.Max.X ||
-					mouse.Y < rect.Min.Y || mouse.Y >= rect.Max.Y
-				if outside {
-					closeCmd := m.closeImageViewer()
-					if closeCmd != nil {
-						return closeCmd
-					}
-					return nil
-				}
-			}
-		}
-		return nil
+	if cmd, handled := m.handleModalMouseMsg(msg); handled {
+		return cmd
 	}
 
 	viewportLine := viewportLineRaw
@@ -211,54 +256,10 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 				}
 				return nil
 			}
-			if m.statusSessionContainsPoint(mouse.X, mouse.Y) {
-				m.clearFocusedBlock()
-				now := time.Now()
-				const doubleClickThreshold = 400 * time.Millisecond
-				const clickTolerance = 2
-				if now.Sub(m.statusPathLastClickTime) <= doubleClickThreshold &&
-					abs(mouse.X-m.statusPathLastClickX) <= clickTolerance &&
-					abs(mouse.Y-m.statusPathLastClickY) <= clickTolerance {
-					m.statusPathClickCount++
-				} else {
-					m.statusPathClickCount = 1
-				}
-				m.statusPathLastClickTime = now
-				m.statusPathLastClickX = mouse.X
-				m.statusPathLastClickY = mouse.Y
-				m.clearMouseSelection()
-				m.input.ClearSelection()
-				m.inputMouseDown = false
-				if m.statusPathClickCount >= 2 {
-					m.statusPathClickCount = 0
-					return writeStatusSessionClipboardCmd(m.statusSession.value)
-				}
-				return nil
+			if cmd, handled := m.handleStatusCopyClick(mouse.X, mouse.Y); handled {
+				return cmd
 			}
-			if m.statusPathContainsPoint(mouse.X, mouse.Y) {
-				m.clearFocusedBlock()
-				now := time.Now()
-				const doubleClickThreshold = 400 * time.Millisecond
-				const clickTolerance = 2
-				if now.Sub(m.statusPathLastClickTime) <= doubleClickThreshold &&
-					abs(mouse.X-m.statusPathLastClickX) <= clickTolerance &&
-					abs(mouse.Y-m.statusPathLastClickY) <= clickTolerance {
-					m.statusPathClickCount++
-				} else {
-					m.statusPathClickCount = 1
-				}
-				m.statusPathLastClickTime = now
-				m.statusPathLastClickX = mouse.X
-				m.statusPathLastClickY = mouse.Y
-				m.clearMouseSelection()
-				m.input.ClearSelection()
-				m.inputMouseDown = false
-				if m.statusPathClickCount >= 2 {
-					m.statusPathClickCount = 0
-					return writeStatusPathClipboardCmd(m.statusPath.value)
-				}
-				return nil
-			}
+
 			// Insert mode: click outside input zone -> switch to Normal and blur,
 			// then fall through to start selection so drag works immediately.
 			if m.mode == ModeInsert {

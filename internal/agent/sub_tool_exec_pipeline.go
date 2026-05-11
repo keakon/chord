@@ -1,0 +1,64 @@
+package agent
+
+import (
+	"encoding/json"
+
+	"github.com/keakon/chord/internal/filelock"
+	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
+)
+
+func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
+	var (
+		fileTrack   *filelock.FileTracker
+		eventSender tools.EventSender
+		emit        func(AgentEvent)
+		confirm     ConfirmFunc
+	)
+	if s.parent != nil {
+		fileTrack = s.parent.fileTrack
+		eventSender = s.parent
+		emit = s.parent.emitToTUI
+		confirm = s.parent.confirmFn
+	}
+	return toolExecutionPipeline{
+		agentID:      s.instanceID,
+		eventAgentID: s.instanceID,
+		taskID:       s.taskID,
+		sessionDir:   s.sessionDir,
+		registry:     s.tools,
+		fileTrack:    fileTrack,
+		eventSender:  eventSender,
+		emit:         emit,
+		guidance:     subToolOutputGuidance,
+		logPrefix:    "SubAgent:",
+		currentRuleset: func() permission.Ruleset {
+			return s.ruleset
+		},
+		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
+			if s.parent != nil {
+				s.parent.processRuleIntent(toolName, intent)
+				s.ruleset = s.parent.effectiveRuleset()
+			}
+			return s.ruleset
+		},
+		isInternalTool: isSubAgentInternalTool,
+		confirm:        confirm,
+		currentTurnID:  s.currentTurnID,
+		fireHook:       s.fireHook,
+		updatePending: func(call PendingToolCall) {
+			if s.turn != nil {
+				s.turn.updatePendingToolCall(call)
+			}
+		},
+		checkRepetition: func(name string, args json.RawMessage) bool {
+			if s.repetition == nil {
+				return true
+			}
+			s.repMu.Lock()
+			allowed := s.repetition.Check(name, args)
+			s.repMu.Unlock()
+			return allowed
+		},
+	}
+}

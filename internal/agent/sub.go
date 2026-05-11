@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -12,10 +10,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
-	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -488,7 +484,24 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			s.parent.emitActivity(s.instanceID, ActivityStreaming, "")
 		}
 
+		toolReducer := streamToolDeltaReducer{
+			agentID:                  s.instanceID,
+			turn:                     turn,
+			registry:                 s.tools,
+			ruleset:                  func() permission.Ruleset { return s.ruleset },
+			emit:                     s.parent.emitToTUI,
+			flushBeforeTool:          flushSubTextDelta,
+			promoteStreamingActivity: promoteStreamingActivity,
+			recordToolUseEnd:         s.parent.recordToolTraceToolUseEnd,
+			discardSpeculativeOnRollback: func(turn *Turn, reason string) {
+				s.parent.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
+			},
+		}
+
 		callback := func(delta message.StreamDelta) {
+			if toolReducer.Handle(delta) {
+				return
+			}
 			switch delta.Type {
 			case "text":
 				textAccum.WriteString(delta.Text)
@@ -514,61 +527,6 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 						s.parent.emitToTUI(StreamThinkingEvent{Text: thinkingText, AgentID: s.instanceID})
 					}
 				}
-			case "tool_use_start":
-				flushSubTextDelta() // flush pending text before tool call block
-				promoteStreamingActivity("tool_use_start")
-				if delta.ToolCall != nil {
-					s.turn.recordStreamingToolCall(PendingToolCall{
-						CallID:   delta.ToolCall.ID,
-						Name:     delta.ToolCall.Name,
-						ArgsJSON: delta.ToolCall.Input,
-						AgentID:  s.instanceID,
-					})
-					s.parent.emitToTUI(ToolCallStartEvent{
-						ID:       delta.ToolCall.ID,
-						Name:     delta.ToolCall.Name,
-						ArgsJSON: delta.ToolCall.Input,
-						AgentID:  s.instanceID,
-					})
-				}
-			case "tool_use_delta":
-				if delta.ToolCall != nil && s.turn != nil && delta.ToolCall.ID != "" && delta.ToolCall.Input != "" {
-					promoteStreamingActivity("tool_use_delta")
-					accumulated := s.turn.appendStreamingToolCallInput(delta.ToolCall.ID, delta.ToolCall.Name, delta.ToolCall.Input, s.instanceID)
-					if accumulated != "" {
-						s.parent.emitToTUI(ToolCallUpdateEvent{
-							ID:       delta.ToolCall.ID,
-							Name:     delta.ToolCall.Name,
-							ArgsJSON: accumulated,
-							AgentID:  s.instanceID,
-						})
-					}
-				}
-			case "tool_use_end":
-				if delta.ToolCall != nil && s.turn != nil && delta.ToolCall.ID != "" {
-					callID := delta.ToolCall.ID
-					callName := strings.TrimSpace(delta.ToolCall.Name)
-					argsJSON := ""
-					if call, ok := s.turn.getStreamingToolCall(callID); ok {
-						if callName == "" {
-							callName = call.Name
-						}
-						argsJSON = call.ArgsJSON
-					}
-					decision := evaluateSpeculativeExecutionPolicy(s.tools, s.ruleset, callName, json.RawMessage(argsJSON))
-					logSpeculativeExecutionDecision(callID, callName, decision)
-					if decision.Allowed && s.turn.streamingToolExec != nil {
-						s.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
-					}
-					s.parent.recordToolTraceToolUseEnd(callID, callName, s.instanceID, time.Now())
-					s.parent.emitToTUI(ToolCallUpdateEvent{
-						ID:                callID,
-						Name:              callName,
-						ArgsJSON:          argsJSON,
-						ArgsStreamingDone: true,
-						AgentID:           s.instanceID,
-					})
-				}
 			case "status":
 				if delta.Status != nil {
 					if delta.Status.Type == string(ActivityStreaming) {
@@ -579,15 +537,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 				}
 			case "error":
 				log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", delta.Text, s.instanceID)
-			case "rollback":
-				if s.turn != nil {
-					s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "rollback")
-				}
-				reason := ""
-				if delta.Rollback != nil {
-					reason = delta.Rollback.Reason
-				}
-				s.parent.emitToTUI(StreamRollbackEvent{Reason: reason, AgentID: s.instanceID})
+
 			}
 		}
 
@@ -658,237 +608,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 // repetition detection, hook interception, and output truncation.
 // It uses the SubAgent's own ruleset but the parent's hookEngine and confirmFn.
 func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
-	execResult := ToolExecutionResult{
-		EffectiveArgsJSON: string(tc.Args),
-	}
-	// ----- Permission check -----
-	if len(s.ruleset) > 0 && !isSubAgentInternalTool(tc.Name) {
-		decision := evaluateToolPermission(s.ruleset, tc.Name, tc.Args)
-
-		switch decision.Action {
-		case permission.ActionDeny:
-			log.Warnf("SubAgent: tool call denied by permission agent=%v tool=%v argument=%v", s.instanceID, tc.Name, decision.MatchArgument)
-			return execResult, wrapToolPermissionDenied(tc.Name)
-
-		case permission.ActionAsk:
-			if s.parent.confirmFn == nil {
-				return execResult, wrapToolRequiresConfirmation(tc.Name)
-			}
-			// Tool goroutines serialize naturally on the cap=1 confirmCh;
-			// the channel send can be interrupted by context cancellation.
-			resp, err := s.parent.confirmFn(ctx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths)
-			if err != nil {
-				return execResult, wrapToolConfirmationFailed(tc.Name, err)
-			}
-			if !resp.Approved {
-				denyReason := normalizeDenyReason(resp.DenyReason)
-				log.Infof("SubAgent: tool call rejected by user agent=%v tool=%v argument=%v deny_reason=%v", s.instanceID, tc.Name, decision.MatchArgument, denyReason)
-				return execResult, wrapToolRejectedByUser(tc.Name, denyReason)
-			}
-			if resp.RuleIntent != nil {
-				s.parent.processRuleIntent(tc.Name, resp.RuleIntent)
-				s.ruleset = s.parent.effectiveRuleset()
-			}
-			originalArgs := append(json.RawMessage(nil), tc.Args...)
-			editedArgs, err := applyConfirmedArgsEdits(s.tools, s.ruleset, tc.Name, tc.Args, resp.FinalArgsJSON)
-			if err != nil {
-				return execResult, err
-			}
-			tc.Args = editedArgs
-			execResult.EffectiveArgsJSON = string(tc.Args)
-			execResult.Audit = buildToolArgsAudit(originalArgs, tc.Args, resp.EditSummary)
-			if s.turn != nil {
-				s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
-			}
-			s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
-
-		case permission.ActionAllow:
-			// Execute directly.
-		}
-	}
-
-	// ----- Hook: on_tool_call -----
-	hookResult, hookErr := s.fireHook(ctx, hook.OnToolCall, s.currentTurnID(), buildToolHookData(tc))
-	if hookErr == nil && hookResult != nil {
-		switch hookResult.Action {
-		case hook.ActionBlock:
-			msg := "blocked by hook"
-			if hookResult.Message != "" {
-				msg = hookResult.Message
-			}
-			return execResult, fmt.Errorf("tool %q %s", tc.Name, msg)
-		case hook.ActionModify:
-			if modified, ok := hookResult.Data.(map[string]any); ok {
-				if newArgs, ok := modified["args"]; ok {
-					if raw, err := json.Marshal(newArgs); err == nil {
-						originalArgs := append(json.RawMessage(nil), tc.Args...)
-						tc.Args = raw
-						execResult.EffectiveArgsJSON = string(tc.Args)
-						execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
-						if s.turn != nil {
-							s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
-						}
-						s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
-					}
-				}
-			}
-		}
-	}
-
-	// ----- Repetition guard -----
-	s.repMu.Lock()
-	allowed := s.repetition.Check(tc.Name, tc.Args)
-	s.repMu.Unlock()
-
-	if !allowed {
-		return execResult, fmt.Errorf(
-			"tool %q called too many times with the same arguments (loop detected)",
-			tc.Name,
-		)
-	}
-
-	// ----- Malformed args guard (improvement 1) -----
-	// Detect the sentinel set by the streaming parser when the LLM produces
-	// invalid JSON, and return a guiding error instead of letting the tool
-	// fail with an opaque "field required" message.
-	if llm.IsMalformedArgs(tc.Args) {
-		log.Warnf("SubAgent: tool call has malformed args, returning guidance error agent=%v tool=%v", s.instanceID, tc.Name)
-		return execResult, fmt.Errorf(
-			"tool %q was called with malformed arguments (likely due to output "+
-				"truncation at max_tokens). Please reduce the number of parallel "+
-				"tool calls and retry with properly structured JSON arguments "+
-				"matching the tool's input schema",
-			tc.Name,
-		)
-	}
-
-	// ----- Empty args guard (improvement 4) -----
-	// Mirrors the MainAgent check: catch empty "{}" args for tools with
-	// required parameters before execution, providing a diagnostic message.
-	if llm.IsEmptyArgs(tc.Args) {
-		if tool, ok := s.tools.Get(tc.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				log.Warnf("SubAgent: tool call has empty args but tool requires parameters agent=%v tool=%v required=%v", s.instanceID, tc.Name, req)
-				return execResult, fmt.Errorf(
-					"tool %q was called with empty arguments {}. This typically "+
-						"happens when the model's output was truncated at max_tokens. "+
-						"Please reduce the number of parallel tool calls and retry "+
-						"with the complete required parameters: %v",
-					tc.Name, req,
-				)
-			}
-		}
-	}
-	if err := validateToolArgsAgainstSchema(s.tools, tc.Name, tc.Args); err != nil {
-		return execResult, err
-	}
-	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
-
-	// Attach execution context metadata so tools can identify the invoking
-	// agent and optionally report structured progress.
-	agentCtx := buildToolExecContext(ctx, tc, s.instanceID, s.taskID, s.sessionDir, s.parent, s.parent.emitToTUI)
-	artifactKey := tc.ID
-	if strings.TrimSpace(artifactKey) == "" {
-		artifactKey = tc.Name + "-anonymous"
-	}
-
-	// ----- FileTracker integration -----
-	var (
-		trackedFilePath string
-		deleteLocks     *deleteLockSet
-	)
-	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NameDelete {
-		if tc.Name == tools.NameDelete {
-			locks, err := acquireDeleteLocks(s.parent.fileTrack, s.instanceID, tc.Args)
-			if err != nil {
-				var ext *filelock.ExternalModificationError
-				if errors.As(err, &ext) {
-					return execResult, err
-				}
-				return execResult, fmt.Errorf("file conflict: %w", err)
-			}
-			deleteLocks = locks
-			if deleteLocks != nil {
-				defer deleteLocks.Release()
-			}
-		} else {
-			var parsed struct {
-				Path string `json:"path"`
-			}
-			if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
-				trackedFilePath = parsed.Path
-			}
-		}
-	}
-
-	if err := ensureTrackedEditPreconditions(s.parent.fileTrack, s.instanceID, trackedFilePath, tc.Name); err != nil {
-		return execResult, wrapTrackedWriteError(err)
-	}
-
-	// Write/Edit: acquire write lock before execution, release after.
-	// Uses the parent MainAgent's FileTracker (shared, goroutine-safe).
-	if trackedFilePath != "" && (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) {
-		currentHash := computeFileHash(trackedFilePath)
-		if err := s.parent.fileTrack.AcquireWrite(trackedFilePath, s.instanceID, currentHash); err != nil {
-			return execResult, wrapTrackedWriteError(err)
-		}
-		defer func() {
-			newHash := computeFileHash(trackedFilePath)
-			s.parent.fileTrack.ReleaseWrite(trackedFilePath, s.instanceID, newHash)
-		}()
-	}
-
-	args := llm.UnwrapToolArgs(tc.Args)
-	result, err := s.tools.Execute(agentCtx, tc.Name, args)
-	if err != nil {
-		// Preserve tool output even on error for debugging.
-		if result != "" {
-			truncated := tools.TruncateOutputWithOptions(result, s.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
-			content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, err)
-			content = tools.AppendArtifactGuidance(content, truncated,
-				"Use Grep to search the full content or Read with offset/limit to view specific sections.")
-			execResult.Result = content
-			return execResult, err
-		}
-		return execResult, err
-	}
-	if deleteLocks != nil {
-		deleteLocks.Commit(result)
-		execResult.FileState = buildDeleteFileStateFromResult(result)
-	}
-
-	// Read: track content hash after successful execution for optimistic locking.
-	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		execResult.FileState = buildReadFileState(trackedFilePath)
-		if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
-			s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
-		}
-	}
-
-	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
-		execResult.FileState = buildWriteFileState(trackedFilePath)
-		if tool, ok := s.tools.Get(tc.Name); ok {
-			switch t := tool.(type) {
-			case tools.WriteTool:
-				if t.LSP != nil {
-					execResult.LSPReviews = t.LSP.CurrentReviewSnapshots(trackedFilePath)
-				}
-			case tools.EditTool:
-				if t.LSP != nil {
-					execResult.LSPReviews = t.LSP.CurrentReviewSnapshots(trackedFilePath)
-				}
-			}
-		}
-	}
-
-	// Apply output truncation.
-	truncated := tools.TruncateOutputWithOptions(result, s.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
-	content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, nil)
-	content = tools.AppendArtifactGuidance(content, truncated,
-		"Use Grep to search the full content or Read with offset/limit to view specific sections.")
-
-	execResult.Result = content
-	return execResult, nil
+	return s.toolExecutionPipeline().execute(ctx, tc, true)
 }
 
 // isSubAgentInternalTool reports whether a tool is required for SubAgent

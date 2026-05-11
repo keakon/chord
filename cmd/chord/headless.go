@@ -58,31 +58,44 @@ type headlessEnvelope struct {
 
 // stdoutWriter serializes JSON envelopes to stdout via a single goroutine.
 type stdoutWriter struct {
-	enc *json.Encoder
-	ch  chan any
-	ctx context.Context
+	enc       *json.Encoder
+	ch        chan any
+	ctx       context.Context
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 // newStdoutWriter creates a stdoutWriter with a buffered channel.
 func newStdoutWriter(ctx context.Context, w io.Writer) *stdoutWriter {
 	return &stdoutWriter{
-		enc: json.NewEncoder(w),
-		ch:  make(chan any, 256),
-		ctx: ctx,
+		enc:  json.NewEncoder(w),
+		ch:   make(chan any, 256),
+		ctx:  ctx,
+		done: make(chan struct{}),
 	}
 }
 
 // run processes the channel and writes JSON envelopes to stdout.
 func (w *stdoutWriter) run() {
+	defer close(w.done)
 	for {
 		select {
-		case <-w.ctx.Done():
-			return
 		case msg, ok := <-w.ch:
 			if !ok {
 				return
 			}
 			_ = w.enc.Encode(msg)
+			continue
+		default:
+		}
+		select {
+		case msg, ok := <-w.ch:
+			if !ok {
+				return
+			}
+			_ = w.enc.Encode(msg)
+		case <-w.ctx.Done():
+			return
 		}
 	}
 }
@@ -91,13 +104,28 @@ func (w *stdoutWriter) run() {
 // (stdio is a reliable pipe; confirm_request, question_request, and
 // response events must never be silently dropped).
 // Returns false if the context was cancelled before the message could be sent.
-func (w *stdoutWriter) emit(msg any) bool {
+func (w *stdoutWriter) emit(msg any) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
 	select {
 	case w.ch <- msg:
 		return true
 	case <-w.ctx.Done():
 		return false
 	}
+}
+
+func (w *stdoutWriter) close() {
+	if w == nil {
+		return
+	}
+	w.closeOnce.Do(func() {
+		close(w.ch)
+		<-w.done
+	})
 }
 
 // headlessCommand represents a command received from stdin.
@@ -357,9 +385,93 @@ Model pool control commands:
 	return cmd
 }
 
+// headlessRuntime is the small runtime surface required by headless stdio mode.
+type headlessRuntime interface {
+	Close()
+	Events() <-chan agent.AgentEvent
+	Backend() headlessBackend
+}
+
+type runtimeHeadlessAdapter struct {
+	rt *Runtime
+}
+
+func (a runtimeHeadlessAdapter) Close() {
+	if a.rt != nil {
+		a.rt.Close()
+	}
+}
+
+func (a runtimeHeadlessAdapter) Events() <-chan agent.AgentEvent {
+	if a.rt == nil || a.rt.Agent == nil {
+		ch := make(chan agent.AgentEvent)
+		close(ch)
+		return ch
+	}
+	return a.rt.Agent.Events()
+}
+
+func (a runtimeHeadlessAdapter) Backend() headlessBackend {
+	if a.rt == nil {
+		return nil
+	}
+	return a.rt.Agent
+}
+
+type headlessRunDeps struct {
+	initApp             func(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*AppContext, error)
+	createRuntime       func(*AppContext) (headlessRuntime, error)
+	stdin               io.Reader
+	stdout              io.Writer
+	watchParent         bool
+	parentCheckInterval time.Duration
+	getppid             func() int
+}
+
+func defaultHeadlessRunDeps() headlessRunDeps {
+	return headlessRunDeps{
+		initApp: initApp,
+		createRuntime: func(ac *AppContext) (headlessRuntime, error) {
+			rt, err := createRuntime(ac)
+			if err != nil {
+				return nil, err
+			}
+			return runtimeHeadlessAdapter{rt: rt}, nil
+		},
+		stdin:               os.Stdin,
+		stdout:              os.Stdout,
+		watchParent:         true,
+		parentCheckInterval: time.Second,
+		getppid:             os.Getppid,
+	}
+}
+
 // runHeadless executes the headless mode main loop.
 func runHeadless(_ *cobra.Command, _ []string) error {
-	ac, err := initApp(false, "headless", sessionStartupOptions{
+	return runHeadlessWithDeps(defaultHeadlessRunDeps())
+}
+
+func runHeadlessWithDeps(deps headlessRunDeps) error {
+	if deps.initApp == nil {
+		deps.initApp = defaultHeadlessRunDeps().initApp
+	}
+	if deps.createRuntime == nil {
+		deps.createRuntime = defaultHeadlessRunDeps().createRuntime
+	}
+	if deps.stdin == nil {
+		deps.stdin = os.Stdin
+	}
+	if deps.stdout == nil {
+		deps.stdout = os.Stdout
+	}
+	if deps.getppid == nil {
+		deps.getppid = os.Getppid
+	}
+	if deps.parentCheckInterval <= 0 {
+		deps.parentCheckInterval = time.Second
+	}
+
+	ac, err := deps.initApp(false, "headless", sessionStartupOptions{
 		ContinueLatest: flagContinueSession,
 		ResumeID:       flagResumeSession,
 		NewSessionMeta: flagWorktreeStartupMeta,
@@ -369,35 +481,19 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 	}
 	defer ac.Close()
 
-	// Parent-death watcher: if gateway dies (e.g. SIGKILL), this process may be
-	// reparented. Exit promptly to avoid leaving orphaned session locks.
-	ppid0 := os.Getppid()
-	go func() {
-		t := time.NewTicker(1 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ac.Ctx.Done():
-				return
-			case <-t.C:
-				ppid := os.Getppid()
-				if ppid == 1 || (ppid0 != 0 && ppid != ppid0) {
-					log.Warnf("parent process disappeared, exiting ppid0=%v ppid=%v", ppid0, ppid)
-					ac.Cancel()
-					return
-				}
-			}
-		}
-	}()
+	if deps.watchParent {
+		startHeadlessParentWatcher(ac, deps.getppid(), deps.parentCheckInterval, deps.getppid)
+	}
 
-	rt, err := createRuntime(ac)
+	rt, err := deps.createRuntime(ac)
 	if err != nil {
 		return err
 	}
 	defer rt.Close()
 
-	out := newStdoutWriter(ac.Ctx, os.Stdout)
+	out := newStdoutWriter(ac.Ctx, deps.stdout)
 	go out.run()
+	defer out.close()
 
 	state := &headlessState{}
 	state.updatedAt = time.Now()
@@ -420,8 +516,8 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 		Payload: readyPayload,
 	})
 
-	// Event loop: forward filtered events to stdout
-	events := rt.Agent.Events()
+	// Event loop: forward filtered events to stdout.
+	events := rt.Events()
 	go func() {
 		for ev := range events {
 			envs := filterHeadlessEvent(ev, state)
@@ -431,12 +527,12 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
-	// Command loop: read stdin JSON lines
+	// Command loop: read stdin JSON lines.
 	lines := make(chan []byte, 16)
 	scanErr := make(chan error, 1)
 	go func() {
 		defer close(lines)
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(deps.stdin)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			b := append([]byte(nil), scanner.Bytes()...)
@@ -451,6 +547,7 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
+	backend := rt.Backend()
 	for {
 		select {
 		case <-ac.Ctx.Done():
@@ -466,7 +563,7 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 			return nil
 		case line, ok := <-lines:
 			if !ok {
-				// stdin closed (parent/gateway exited) → exit
+				// stdin closed (parent/gateway exited) → exit.
 				ac.Cancel()
 				return nil
 			}
@@ -485,9 +582,32 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 				})
 				continue
 			}
-			handleHeadlessCommand(hcmd, rt.Agent, state, out, sessionID)
+			handleHeadlessCommand(hcmd, backend, state, out, sessionID)
 		}
 	}
+}
+
+func startHeadlessParentWatcher(ac *AppContext, ppid0 int, interval time.Duration, getppid func() int) {
+	if ac == nil || getppid == nil {
+		return
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ac.Ctx.Done():
+				return
+			case <-t.C:
+				ppid := getppid()
+				if ppid == 1 || (ppid0 != 0 && ppid != ppid0) {
+					log.Warnf("parent process disappeared, exiting ppid0=%v ppid=%v", ppid0, ppid)
+					ac.Cancel()
+					return
+				}
+			}
+		}
+	}()
 }
 
 // headlessBackend is the subset of MainAgent functionality required by headless mode.

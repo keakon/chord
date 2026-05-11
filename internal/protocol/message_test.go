@@ -879,6 +879,74 @@ func TestToAgentEventAdditionalTypesAndErrors(t *testing.T) {
 	})
 }
 
+func TestAgentEventConversionDirectionMatrix(t *testing.T) {
+	t.Run("bidirectional agent events round trip", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			event    agent.AgentEvent
+			wantType string
+		}{
+			{"stream text", agent.StreamTextEvent{Text: "hi", AgentID: "a1"}, TypeStreamText},
+			{"tool result", agent.ToolResultEvent{CallID: "c1", Name: "Read", ArgsJSON: `{}`, Result: "ok", Status: agent.ToolResultStatusSuccess}, TypeToolResult},
+			{"toast", agent.ToastEvent{Message: "saved", Level: "success", AgentID: "a2"}, TypeToast},
+			{"role changed", agent.RoleChangedEvent{Role: "reviewer"}, TypeRoleChanged},
+			{"running model", agent.RunningModelChangedEvent{AgentID: "main", ProviderModelRef: "p/m", RunningModelRef: "p/m"}, TypeRunningModelChanged},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				env, err := FromAgentEvent(tc.event, 77)
+				if err != nil {
+					t.Fatalf("FromAgentEvent: %v", err)
+				}
+				if env.Type != tc.wantType || env.Seq != 77 {
+					t.Fatalf("envelope type/seq = %q/%d, want %q/77", env.Type, env.Seq, tc.wantType)
+				}
+				if _, err := ToAgentEvent(env); err != nil {
+					t.Fatalf("ToAgentEvent: %v", err)
+				}
+			})
+		}
+	})
+
+	t.Run("server push only events convert outward only", func(t *testing.T) {
+		env, err := FromAgentEvent(agent.TodosUpdatedEvent{}, 78)
+		if err != nil {
+			t.Fatalf("FromAgentEvent(TodosUpdatedEvent): %v", err)
+		}
+		if env.Type != TypeTodosUpdated || env.Seq != 78 {
+			t.Fatalf("envelope type/seq = %q/%d, want %q/78", env.Type, env.Seq, TypeTodosUpdated)
+		}
+		if _, err := ToAgentEvent(env); !errors.Is(err, ErrNotAgentEvent) {
+			t.Fatalf("ToAgentEvent(todos_updated) err = %v, want ErrNotAgentEvent", err)
+		}
+	})
+
+	t.Run("client read loop special events are not generic agent events", func(t *testing.T) {
+		for _, typ := range []string{TypeSnapshot, TypeTodosUpdated} {
+			t.Run(typ, func(t *testing.T) {
+				_, err := ToAgentEvent(&Envelope{Type: typ})
+				if !errors.Is(err, ErrNotAgentEvent) {
+					t.Fatalf("err = %v, want ErrNotAgentEvent", err)
+				}
+			})
+		}
+	})
+
+	t.Run("TUI only events are explicitly rejected outward", func(t *testing.T) {
+		cases := []agent.AgentEvent{
+			agent.ThinkingStartedEvent{},
+			agent.PendingDraftConsumedEvent{DraftID: "draft-1"},
+			agent.ToolProgressEvent{CallID: "call-1", Name: "Read"},
+		}
+		for _, ev := range cases {
+			_, err := FromAgentEvent(ev, 1)
+			if !errors.Is(err, ErrTUIOnlyEvent) {
+				t.Fatalf("FromAgentEvent(%T) err = %v, want ErrTUIOnlyEvent", ev, err)
+			}
+		}
+	})
+}
+
 func TestQuestionRequestEventRoundTripPreservesMetadata(t *testing.T) {
 	orig := agent.QuestionRequestEvent{
 		ToolName:      "Question",

@@ -311,3 +311,46 @@ func TestSessionSelectOptionIndexAtUsesListContentBaseRow(t *testing.T) {
 		t.Fatalf("hit-test index = %d, want 0", idx)
 	}
 }
+
+func TestSessionSelectModalMouseWheelIsHandledAndMovesCursor(t *testing.T) {
+	m := newSessionSelectTestModel(testSessionSummaries())
+	m.layout = m.generateLayout(m.width, m.height)
+	if got := m.sessionSelect.selector.list.CursorAt(); got != 0 {
+		t.Fatalf("initial cursor = %d, want 0", got)
+	}
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseWheelMsg{X: 1, Y: 1, Button: tea.MouseWheelDown})
+	if !handled {
+		t.Fatal("session select wheel was not handled")
+	}
+	if cmd != nil {
+		t.Fatalf("wheel returned cmd %#v, want nil", cmd)
+	}
+	if got := m.sessionSelect.selector.list.CursorAt(); got != 2 {
+		t.Fatalf("cursor after wheel down = %d, want clamped last index 2", got)
+	}
+}
+
+func TestSessionSelectModalMouseClickSelectsFilteredOption(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := newSessionSelectTestModel(testSessionSummaries())
+	m.agent = backend
+	m.layout = m.generateLayout(m.width, m.height)
+	m.sessionSelect.filter = "parent"
+	m.rebuildSessionSelectFilteredView(true)
+	_ = m.renderSessionSelectDialog()
+	dialogRect := m.overlayRect(m.renderSessionSelectDialog())
+	clickX := dialogRect.Min.X + 2
+	clickY := dialogRect.Min.Y + 1 + m.sessionSelect.selector.listBaseRow
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("session select click was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := backend.resumeIDs; len(got) != 1 || got[0] != "sess-300" {
+		t.Fatalf("ResumeSessionID() calls = %+v, want [sess-300]", got)
+	}
+}

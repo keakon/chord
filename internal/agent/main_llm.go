@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -311,6 +310,21 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.emitActivity("main", ActivityStreaming, "")
 	}
 
+	toolReducer := streamToolDeltaReducer{
+		agentID:                  "",
+		turn:                     turn,
+		registry:                 a.tools,
+		ruleset:                  a.effectiveRuleset,
+		emit:                     a.emitToTUI,
+		flushBeforeTool:          flushTextDelta,
+		promoteStreamingActivity: promoteStreamingActivity,
+		recordToolUseEnd:         a.recordToolTraceToolUseEnd,
+		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
+			a.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
+		},
+		drainPartialTextOnRollback: true,
+	}
+
 	updateRunningModelRef := func(confirmedRef string) {
 		confirmedRef = strings.TrimSpace(confirmedRef)
 		if confirmedRef == "" {
@@ -379,6 +393,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			requestProgressEvents = delta.Progress.Events
 			a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: requestProgressBytes, Events: requestProgressEvents})
 		}
+		if toolReducer.Handle(delta) {
+			return
+		}
 		switch delta.Type {
 		case "text":
 			closeThinkingBlock()
@@ -439,59 +456,6 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				}
 				a.emitActivity("main", ActivityType(delta.Status.Type), delta.Status.Detail)
 			}
-		case "tool_use_start":
-			flushTextDelta() // flush any pending text before the tool call block
-			promoteStreamingActivity("tool_use_start")
-			if delta.ToolCall != nil {
-				if turn != nil {
-					turn.recordStreamingToolCall(PendingToolCall{
-						CallID:   delta.ToolCall.ID,
-						Name:     delta.ToolCall.Name,
-						ArgsJSON: delta.ToolCall.Input,
-					})
-				}
-				a.emitToTUI(ToolCallStartEvent{
-					ID:       delta.ToolCall.ID,
-					Name:     delta.ToolCall.Name,
-					ArgsJSON: delta.ToolCall.Input,
-				})
-			}
-		case "tool_use_delta":
-			if delta.ToolCall != nil && turn != nil && delta.ToolCall.ID != "" && delta.ToolCall.Input != "" {
-				promoteStreamingActivity("tool_use_delta")
-				accumulated := turn.appendStreamingToolCallInput(delta.ToolCall.ID, delta.ToolCall.Name, delta.ToolCall.Input, "")
-				if accumulated != "" {
-					a.emitToTUI(ToolCallUpdateEvent{
-						ID:       delta.ToolCall.ID,
-						Name:     delta.ToolCall.Name,
-						ArgsJSON: accumulated,
-					})
-				}
-			}
-		case "tool_use_end":
-			if delta.ToolCall != nil && turn != nil && delta.ToolCall.ID != "" {
-				callID := delta.ToolCall.ID
-				callName := strings.TrimSpace(delta.ToolCall.Name)
-				argsJSON := ""
-				if call, ok := turn.getStreamingToolCall(callID); ok {
-					if callName == "" {
-						callName = call.Name
-					}
-					argsJSON = call.ArgsJSON
-				}
-				decision := evaluateSpeculativeExecutionPolicy(a.tools, a.effectiveRuleset(), callName, json.RawMessage(argsJSON))
-				logSpeculativeExecutionDecision(callID, callName, decision)
-				if decision.Allowed && turn.streamingToolExec != nil {
-					turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
-				}
-				a.recordToolTraceToolUseEnd(callID, callName, "", time.Now())
-				a.emitToTUI(ToolCallUpdateEvent{
-					ID:                callID,
-					Name:              callName,
-					ArgsJSON:          argsJSON,
-					ArgsStreamingDone: true,
-				})
-			}
 		case "rate_limits":
 			if delta.RateLimit != nil {
 				a.updateRateLimitSnapshot(delta.RateLimit)
@@ -543,19 +507,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			emitConfirmedSwitchToast(confirmedRef, confirmedReason)
 		case "error":
 			log.Warnf("LLM stream error delta text=%v instance=%v", delta.Text, a.instanceID)
-		case "rollback":
-			// Provider requested rollback of the currently streamed assistant
-			// output (e.g. incremental chain invalid). Drop speculative tool cards
-			// and ask TUI to remove in-flight assistant/thinking blocks.
-			if turn != nil {
-				turn.drainPartialText() // discard rolled-back text
-				a.discardSpeculativeStreamToolsAndClearToolTrace(turn, "rollback")
-			}
-			reason := ""
-			if delta.Rollback != nil {
-				reason = delta.Rollback.Reason
-			}
-			a.emitToTUI(StreamRollbackEvent{Reason: reason, AgentID: ""})
+
 		}
 	}
 

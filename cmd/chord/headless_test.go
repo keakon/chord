@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1527,5 +1529,170 @@ func TestHeadlessSubscribeIgnoresUnknownEventTypes(t *testing.T) {
 	}
 	if !subs["idle"] {
 		t.Error("idle should be in subscriptions")
+	}
+}
+
+type fakeHeadlessRuntime struct {
+	events  chan agent.AgentEvent
+	backend headlessBackend
+	closed  bool
+}
+
+func (f *fakeHeadlessRuntime) Close()                          { f.closed = true }
+func (f *fakeHeadlessRuntime) Events() <-chan agent.AgentEvent { return f.events }
+func (f *fakeHeadlessRuntime) Backend() headlessBackend        { return f.backend }
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+func decodeHeadlessJSONLines(t *testing.T, data []byte) []headlessEnvelope {
+	t.Helper()
+	var envs []headlessEnvelope
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var env headlessEnvelope
+		if err := json.Unmarshal(line, &env); err != nil {
+			t.Fatalf("unmarshal %q: %v", line, err)
+		}
+		envs = append(envs, env)
+	}
+	return envs
+}
+
+func TestStdoutWriterCloseRejectsEmitAfterClose(t *testing.T) {
+	var buf bytes.Buffer
+	out := newStdoutWriter(context.Background(), &buf)
+	go out.run()
+	if !out.emit(headlessEnvelope{Type: "ready"}) {
+		t.Fatal("initial emit returned false")
+	}
+	out.close()
+	if out.emit(headlessEnvelope{Type: "late"}) {
+		t.Fatal("emit after close returned true")
+	}
+	envs := decodeHeadlessJSONLines(t, buf.Bytes())
+	if len(envs) != 1 || envs[0].Type != "ready" {
+		t.Fatalf("envs = %+v, want one ready envelope", envs)
+	}
+}
+
+func TestRunHeadlessWithDepsEmitsReadyAndExitsOnStdinClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-abc")}
+	events := make(chan agent.AgentEvent)
+	close(events)
+	rt := &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}
+	var stdout bytes.Buffer
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return rt, nil
+		},
+		stdin:       strings.NewReader(""),
+		stdout:      &stdout,
+		watchParent: false,
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	if !rt.closed {
+		t.Fatal("runtime was not closed")
+	}
+	envs := decodeHeadlessJSONLines(t, stdout.Bytes())
+	ready := findHeadlessEnvelopeValue(envs, "ready")
+	if ready == nil {
+		t.Fatalf("ready envelope not found in %+v", envs)
+	}
+	payload, ok := ready.Payload.(map[string]any)
+	if !ok || payload["session_id"] != "session-abc" {
+		t.Fatalf("ready payload = %#v, want session_id session-abc", ready.Payload)
+	}
+}
+
+func TestRunHeadlessWithDepsReportsScannerError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-scan")}
+	events := make(chan agent.AgentEvent)
+	close(events)
+	var stdout bytes.Buffer
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}, nil
+		},
+		stdin:       failingReader{err: errors.New("scan boom")},
+		stdout:      &stdout,
+		watchParent: false,
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	envs := decodeHeadlessJSONLines(t, stdout.Bytes())
+	if findHeadlessEnvelopeValue(envs, "ready") == nil {
+		t.Fatalf("ready envelope not found in %+v", envs)
+	}
+	errEnv := findHeadlessEnvelopeValue(envs, "error")
+	if errEnv == nil {
+		t.Fatalf("error envelope not found in %+v", envs)
+	}
+	payload, _ := errEnv.Payload.(map[string]any)
+	msg, _ := payload["message"].(string)
+	if !strings.Contains(msg, "stdin read error: scan boom") {
+		t.Fatalf("error payload = %#v", errEnv.Payload)
+	}
+}
+
+func TestHeadlessParentWatcherCancelsOnParentChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel}
+	calls := make(chan int, 4)
+	getppid := func() int {
+		calls <- 42
+		return 42
+	}
+	startHeadlessParentWatcher(ac, 7, time.Millisecond, getppid)
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("parent watcher did not cancel context after parent changed")
+	}
+}
+
+func TestRunHeadlessWithDepsParentWatcherIsolationDisabled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-no-watch")}
+	events := make(chan agent.AgentEvent)
+	close(events)
+	var getppidCalls int
+	var stdout bytes.Buffer
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}, nil
+		},
+		stdin:       strings.NewReader(""),
+		stdout:      &stdout,
+		watchParent: false,
+		getppid: func() int {
+			getppidCalls++
+			return 1
+		},
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	if getppidCalls != 0 {
+		t.Fatalf("getppid calls = %d, want 0 when parent watcher disabled", getppidCalls)
 	}
 }

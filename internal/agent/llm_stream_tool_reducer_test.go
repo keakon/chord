@@ -1,0 +1,184 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
+)
+
+func newStreamToolReducerTestTurn() *Turn {
+	return &Turn{ID: 1, Epoch: 1, Ctx: context.Background()}
+}
+
+func TestStreamToolDeltaReducerReconcilesToolUseAndStartsSpeculativeExecution(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	started := make(chan message.ToolCall, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		started <- tc
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "ok"}, nil
+	})
+
+	var events []AgentEvent
+	var flushes int
+	var promotions []string
+	var tracedCallID, tracedName, tracedAgent string
+	reducer := streamToolDeltaReducer{
+		agentID:                  "worker-1",
+		turn:                     turn,
+		registry:                 registry,
+		emit:                     func(evt AgentEvent) { events = append(events, evt) },
+		flushBeforeTool:          func() { flushes++ },
+		promoteStreamingActivity: func(source string) { promotions = append(promotions, source) },
+		recordToolUseEnd: func(callID, callName, agentID string, at time.Time) {
+			tracedCallID, tracedName, tracedAgent = callID, callName, agentID
+		},
+	}
+
+	if !reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameRead, Input: `{"path":`}}) {
+		t.Fatal("tool_use_start was not handled")
+	}
+	if !reducer.Handle(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-1", Input: `"README.md"}`}}) {
+		t.Fatal("tool_use_delta was not handled")
+	}
+	if !reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}}) {
+		t.Fatal("tool_use_end was not handled")
+	}
+
+	select {
+	case got := <-started:
+		if got.ID != "call-1" || got.Name != tools.NameRead || string(got.Args) != `{"path":"README.md"}` {
+			t.Fatalf("started call = %+v args=%s", got, got.Args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("speculative execution was not started")
+	}
+	if flushes != 1 {
+		t.Fatalf("flushes = %d, want 1", flushes)
+	}
+	if len(promotions) != 2 || promotions[0] != "tool_use_start" || promotions[1] != "tool_use_delta" {
+		t.Fatalf("promotions = %#v, want start and delta", promotions)
+	}
+	if tracedCallID != "call-1" || tracedName != tools.NameRead || tracedAgent != "worker-1" {
+		t.Fatalf("trace = %q/%q/%q", tracedCallID, tracedName, tracedAgent)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events len = %d, want 3", len(events))
+	}
+	start, ok := events[0].(ToolCallStartEvent)
+	if !ok || start.ID != "call-1" || start.ArgsJSON != `{"path":` || start.AgentID != "worker-1" {
+		t.Fatalf("start event = %#v", events[0])
+	}
+	update, ok := events[1].(ToolCallUpdateEvent)
+	if !ok || update.ArgsJSON != `{"path":"README.md"}` || update.ArgsStreamingDone {
+		t.Fatalf("delta update event = %#v", events[1])
+	}
+	final, ok := events[2].(ToolCallUpdateEvent)
+	if !ok || !final.ArgsStreamingDone || final.ArgsJSON != `{"path":"README.md"}` || final.Name != tools.NameRead {
+		t.Fatalf("final update event = %#v", events[2])
+	}
+}
+
+func TestStreamToolDeltaReducerRejectsSpeculativeExecutionWhenPolicyBlocks(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewQuestionTool(nil))
+	var started bool
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
+		started = true
+		return ToolExecutionResult{}, nil
+	})
+
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{
+		turn:     turn,
+		registry: registry,
+		emit:     func(evt AgentEvent) { events = append(events, evt) },
+	}
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameQuestion, Input: `{"questions":[]}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+
+	if started {
+		t.Fatal("interactive tool was started speculatively")
+	}
+	if len(events) != 2 {
+		t.Fatalf("events len = %d, want start and final update", len(events))
+	}
+	final, ok := events[1].(ToolCallUpdateEvent)
+	if !ok || !final.ArgsStreamingDone || final.Name != tools.NameQuestion {
+		t.Fatalf("final update = %#v", events[1])
+	}
+}
+
+func TestStreamToolDeltaReducerRollbackDrainsPartialTextAndEmitsEvent(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	turn.appendPartialText("visible text")
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "call-3", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`})
+
+	var discardedReason string
+	var discardedTurn *Turn
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{
+		agentID:                    "agent-1",
+		turn:                       turn,
+		emit:                       func(evt AgentEvent) { events = append(events, evt) },
+		drainPartialTextOnRollback: true,
+		discardSpeculativeOnRollback: func(t *Turn, reason string) {
+			discardedTurn = t
+			discardedReason = reason
+		},
+	}
+
+	if !reducer.Handle(message.StreamDelta{Type: "rollback", Rollback: &message.RollbackDelta{Reason: "provider_retry"}}) {
+		t.Fatal("rollback was not handled")
+	}
+	if got := turn.drainPartialText(); got != "" {
+		t.Fatalf("partial text after rollback = %q, want drained", got)
+	}
+	if discardedTurn != turn || discardedReason != "rollback" {
+		t.Fatalf("discard callback = %p/%q, want turn/rollback", discardedTurn, discardedReason)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	rollback, ok := events[0].(StreamRollbackEvent)
+	if !ok || rollback.Reason != "provider_retry" || rollback.AgentID != "agent-1" {
+		t.Fatalf("rollback event = %#v", events[0])
+	}
+}
+
+func TestStreamToolDeltaReducerIgnoresNonToolDelta(t *testing.T) {
+	reducer := streamToolDeltaReducer{}
+	if reducer.Handle(message.StreamDelta{Type: "text", Text: "hi"}) {
+		t.Fatal("text delta should not be handled by tool reducer")
+	}
+}
+
+func TestStreamToolDeltaReducerDeltaCanCreateMissingStartMetadata(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	startedArgs := make(chan json.RawMessage, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		startedArgs <- tc.Args
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "ok"}, nil
+	})
+
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
+	reducer.Handle(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-4", Name: tools.NameRead, Input: `{"path":"README.md"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-4"}})
+
+	select {
+	case got := <-startedArgs:
+		if string(got) != `{"path":"README.md"}` {
+			t.Fatalf("started args = %s", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("speculative execution did not start from delta-created metadata")
+	}
+}
