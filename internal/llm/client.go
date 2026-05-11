@@ -28,13 +28,14 @@ const DefaultStreamRetryRounds = 3
 // client. Requests start from the current sticky cursor and only advance to the
 // next entry when the current entry fails.
 type FallbackModel struct {
-	ProviderConfig *ProviderConfig
-	ProviderImpl   Provider
-	ModelID        string
-	MaxTokens      int
-	ContextLimit   int    // from ModelConfig.Limit.Context
-	InputLimit     int    // input-side budget; when unset the client derives limit.input or context-output
-	Variant        string // named variant to apply; empty = use model defaults
+	ProviderConfig   *ProviderConfig
+	ProviderImpl     Provider
+	ModelID          string
+	MaxTokens        int
+	ContextLimit     int    // from ModelConfig.Limit.Context
+	InputLimit       int    // fixed input-side override; when zero the client derives the current budget from model limits/output cap
+	DeriveInputLimit bool   // when true, re-derive InputLimit from the current output cap and use InputLimit only as a fallback cache
+	Variant          string // named variant to apply; empty = use model defaults
 }
 
 // Client is the high-level LLM client that handles retries and key selection.
@@ -476,15 +477,10 @@ func (c *Client) CompleteStream(
 	}
 	startRef := modelRefWithVariant(start)
 	startLimit := start.ContextLimit
-	startInputLimit := start.InputLimit
-	if (startLimit <= 0 || startInputLimit <= 0) && start.ProviderConfig != nil {
+	startInputLimit := resolveFallbackInputLimit(start, c.outputTokenMax)
+	if startLimit <= 0 && start.ProviderConfig != nil {
 		if m, ok := start.ProviderConfig.GetModel(start.ModelID); ok {
-			if startLimit <= 0 {
-				startLimit = m.Limit.Context
-			}
-			if startInputLimit <= 0 {
-				startInputLimit = m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
-			}
+			startLimit = m.Limit.Context
 		}
 	}
 	if startInputLimit <= 0 {
@@ -621,17 +617,28 @@ func (c *Client) inputLimitForModelRefLocked(ref string) int {
 			continue
 		}
 		if normalizedRef == providerModelRef(fb.ProviderConfig, fb.ModelID) {
-			if fb.InputLimit > 0 {
-				return fb.InputLimit
-			}
-			if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-				return m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
-			}
-			if fb.ContextLimit > 0 {
-				return fb.ContextLimit
-			}
-			return 0
+			return resolveFallbackInputLimit(fb, c.outputTokenMax)
 		}
+	}
+	return 0
+}
+
+func resolveFallbackInputLimit(target FallbackModel, outputTokenMax int) int {
+	if target.InputLimit > 0 && !target.DeriveInputLimit {
+		return target.InputLimit
+	}
+	if target.ProviderConfig != nil {
+		if m, ok := target.ProviderConfig.GetModel(target.ModelID); ok {
+			if budget := m.Limit.EffectiveInputBudget(outputTokenMax, DefaultOutputTokenMax); budget > 0 {
+				return budget
+			}
+		}
+	}
+	if target.InputLimit > 0 {
+		return target.InputLimit
+	}
+	if target.ContextLimit > 0 {
+		return target.ContextLimit
 	}
 	return 0
 }

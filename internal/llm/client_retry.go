@@ -267,14 +267,11 @@ func (c *Client) completeStreamWithRetry(
 				var fbTuning RequestTuning
 				fbVariantUsed := ""
 				fbContextLimit := fb.ContextLimit
-				fbInputLimit := fb.InputLimit
+				fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
 				if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
 					fbTuning = tuningFromModel(m)
 					if fbContextLimit <= 0 {
 						fbContextLimit = m.Limit.Context
-					}
-					if fbInputLimit <= 0 {
-						fbInputLimit = m.Limit.EffectiveInputBudget(outputCapSetting, DefaultOutputTokenMax)
 					}
 					if fb.Variant != "" {
 						if v, ok := m.Variants[fb.Variant]; ok {

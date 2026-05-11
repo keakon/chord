@@ -1107,6 +1107,54 @@ func TestInputLimitForModelRefUsesExplicitInputLimit(t *testing.T) {
 	}
 }
 
+func TestClientFallbackRunningInputLimitRecomputesDerivedBudgetAfterOutputCapChange(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
+		},
+	}, []string{"k2"})
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok from fallback"}}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetModelPool([]FallbackModel{{
+		ProviderConfig: primaryCfg,
+		ProviderImpl:   primaryImpl,
+		ModelID:        "primary-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}, {
+		ProviderConfig:   fallbackCfg,
+		ProviderImpl:     fallbackImpl,
+		ModelID:          "fallback-model",
+		MaxTokens:        128000,
+		ContextLimit:     400000,
+		InputLimit:       368000,
+		DeriveInputLimit: true,
+	}}, 0)
+	c.SetOutputTokenMax(8192)
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	st := c.LastCallStatus()
+	if got := st.RunningModelRef; got != "fallback-prov/fallback-model" {
+		t.Fatalf("RunningModelRef = %q, want fallback-prov/fallback-model", got)
+	}
+	if got := st.RunningInputLimit; got != 391808 {
+		t.Fatalf("RunningInputLimit = %d, want 391808 after output cap update", got)
+	}
+}
+
 func TestClassifyFallbackReasonUsesContextLengthExceededCode(t *testing.T) {
 	err := &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}
 	if got := classifyFallbackReason(err); got != "context_length_exceeded" {

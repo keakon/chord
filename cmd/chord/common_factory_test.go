@@ -368,6 +368,54 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 	}
 }
 
+func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"gpt-5.5": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
+					"gpt-5":   {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}},
+				},
+			},
+		},
+	}
+
+	pool, selectedIdx := buildModelPool(
+		context.Background(),
+		[]string{"openai/gpt-5.5", "openai/gpt-5"},
+		"",
+		"openai/gpt-5.5",
+		cfg.Providers,
+		nil,
+		"",
+		0,
+		nil,
+		nil,
+		"test",
+	)
+	if selectedIdx != 0 {
+		t.Fatalf("selectedIdx = %d, want 0", selectedIdx)
+	}
+	if len(pool) != 2 {
+		t.Fatalf("pool len = %d, want 2", len(pool))
+	}
+	if !pool[0].DeriveInputLimit {
+		t.Fatal("expected split-less model pool entry to mark input budget as dynamic")
+	}
+	if got := pool[0].InputLimit; got != 368000 {
+		t.Fatalf("derived pool[0] InputLimit = %d, want 368000 cached fallback", got)
+	}
+	if pool[1].DeriveInputLimit {
+		t.Fatal("expected explicit limit.input model pool entry to keep fixed input budget")
+	}
+	if got := pool[1].InputLimit; got != 272000 {
+		t.Fatalf("explicit pool[1] InputLimit = %d, want 272000", got)
+	}
+}
+
 func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 	t.Parallel()
 

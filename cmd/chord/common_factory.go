@@ -18,6 +18,18 @@ func parseRoleModelRef(ref, defaultVariant string) (baseRef, variant string) {
 	return baseRef, variant
 }
 
+func fallbackInputLimitConfig(providerCfg *llm.ProviderConfig, modelID string, contextLimit, outputTokenMax int) (inputLimit int, derive bool) {
+	if providerCfg != nil {
+		if mc, ok := providerCfg.GetModel(modelID); ok {
+			if mc.Limit.Input > 0 {
+				return mc.Limit.Input, false
+			}
+			return mc.Limit.EffectiveInputBudget(outputTokenMax, llm.DefaultOutputTokenMax), true
+		}
+	}
+	return contextLimit, false
+}
+
 func buildModelPool(
 	parentCtx context.Context,
 	modelRefs []string,
@@ -54,19 +66,16 @@ func buildModelPool(
 		if config.NormalizeModelRef(ref) == selectedBaseRef && selectedIdx < 0 {
 			selectedIdx = len(pool)
 		}
+		inputLimit, deriveInputLimit := fallbackInputLimitConfig(fbProvCfg, fbModelID, fbCtxLimit, outputTokenMax)
 		pool = append(pool, llm.FallbackModel{
-			ProviderConfig: fbProvCfg,
-			ProviderImpl:   fbImpl,
-			ModelID:        fbModelID,
-			MaxTokens:      fbMaxTokens,
-			ContextLimit:   fbCtxLimit,
-			InputLimit: func() int {
-				if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
-					return mc.Limit.EffectiveInputBudget(outputTokenMax, llm.DefaultOutputTokenMax)
-				}
-				return fbCtxLimit
-			}(),
-			Variant: fbVariant,
+			ProviderConfig:   fbProvCfg,
+			ProviderImpl:     fbImpl,
+			ModelID:          fbModelID,
+			MaxTokens:        fbMaxTokens,
+			ContextLimit:     fbCtxLimit,
+			InputLimit:       inputLimit,
+			DeriveInputLimit: deriveInputLimit,
+			Variant:          fbVariant,
 		})
 	}
 	if len(pool) == 0 {
@@ -152,19 +161,16 @@ func buildSubAgentLLMFactory(
 					log.Warnf("failed to resolve agent fallback model, skipping model_ref=%v error=%v", ref, fbErr)
 					continue
 				}
+				inputLimit, deriveInputLimit := fallbackInputLimitConfig(fbProvCfg, fbModelID, fbCtxLimit, cfg.MaxOutputTokens)
 				fallbacks = append(fallbacks, llm.FallbackModel{
-					ProviderConfig: fbProvCfg,
-					ProviderImpl:   fbImpl,
-					ModelID:        fbModelID,
-					MaxTokens:      fbMaxTokens,
-					ContextLimit:   fbCtxLimit,
-					InputLimit: func() int {
-						if mc, ok := fbProvCfg.GetModel(fbModelID); ok {
-							return mc.Limit.EffectiveInputBudget(cfg.MaxOutputTokens, llm.DefaultOutputTokenMax)
-						}
-						return fbCtxLimit
-					}(),
-					Variant: fbVariant,
+					ProviderConfig:   fbProvCfg,
+					ProviderImpl:     fbImpl,
+					ModelID:          fbModelID,
+					MaxTokens:        fbMaxTokens,
+					ContextLimit:     fbCtxLimit,
+					InputLimit:       inputLimit,
+					DeriveInputLimit: deriveInputLimit,
+					Variant:          fbVariant,
 				})
 			}
 			if len(fallbacks) > 0 {
