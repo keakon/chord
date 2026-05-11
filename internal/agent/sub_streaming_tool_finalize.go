@@ -40,7 +40,10 @@ func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *to
 	if strings.TrimSpace(parsed.Path) == "" {
 		return
 	}
-	hash := computeFileHash(parsed.Path)
+	hash := firstReadHashForPath(result.FileState, parsed.Path)
+	if hash == "" {
+		hash = computeFileHash(parsed.Path)
+	}
 	s.parent.fileTrack.TrackRead(parsed.Path, s.instanceID, hash)
 }
 
@@ -102,9 +105,10 @@ func (s *SubAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolC
 				if modified, ok := hookResult.Data.(map[string]any); ok {
 					if newArgs, ok := modified["args"]; ok {
 						if raw, err := json.Marshal(newArgs); err == nil {
+							originalArgs := append(json.RawMessage(nil), tc.Args...)
 							tc.Args = raw
 							execResult.EffectiveArgsJSON = string(tc.Args)
-							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, tc.Args)
+							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
 							if s.turn != nil {
 								s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 							}
@@ -214,10 +218,16 @@ func (s *SubAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolC
 	}
 	if deleteLocks != nil {
 		deleteLocks.Commit(result)
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		hash := computeFileHash(trackedFilePath)
-		s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
+		execResult.FileState = buildReadFileState(trackedFilePath)
+		if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
+			s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
+		}
+	}
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
+		execResult.FileState = buildWriteFileState(trackedFilePath)
 	}
 	truncated := tools.TruncateOutputWithOptions(result, s.sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 	content := tools.NormalizeEmptySuccessOutput(tc.Name, truncated.Content, nil)
@@ -265,6 +275,21 @@ func (s *SubAgent) executeToolCallSpeculative(ctx context.Context, tc message.To
 			return execResult, err
 		}
 		return execResult, err
+	}
+	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit {
+		var parsed struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
+			switch tc.Name {
+			case tools.NameRead:
+				execResult.FileState = buildReadFileState(parsed.Path)
+			case tools.NameWrite, tools.NameEdit:
+				execResult.FileState = buildWriteFileState(parsed.Path)
+			}
+		}
+	} else if tc.Name == tools.NameDelete {
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && execResult.PreFilePath != "" {
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(s.tools, tc.Name, execResult.PreFilePath)

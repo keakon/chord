@@ -161,3 +161,16 @@ func TestBuildToolArgsAuditMarksUserModified(t *testing.T) {
 		t.Fatalf("EditSummary = %q", audit.EditSummary)
 	}
 }
+
+func TestSyncAuditEffectiveArgsCreatesAuditForHookOnlyMutation(t *testing.T) {
+	audit := syncAuditEffectiveArgs(nil, json.RawMessage(`{"path":"before.txt"}`), json.RawMessage(`{"path":"after.txt"}`))
+	if audit == nil {
+		t.Fatal("expected hook-only args mutation to create audit")
+	}
+	if audit.OriginalArgsJSON != `{"path":"before.txt"}` || audit.EffectiveArgsJSON != `{"path":"after.txt"}` {
+		t.Fatalf("audit = %#v, want original/effective args persisted", audit)
+	}
+	if !audit.UserModified {
+		t.Fatal("expected hook-only args mutation to mark UserModified")
+	}
+}

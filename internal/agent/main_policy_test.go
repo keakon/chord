@@ -142,6 +142,36 @@ func TestStartPlanExecutionPropagatesNewSessionIDToProvider(t *testing.T) {
 	}
 }
 
+func TestStartPlanExecutionResetsTrackedReadState(t *testing.T) {
+	projectRoot := t.TempDir()
+	planPath := filepath.Join(projectRoot, "plan.md")
+	stalePath := filepath.Join(projectRoot, "stale.txt")
+	if err := os.WriteFile(planPath, []byte("# Plan\n\n- task\n"), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	if err := os.WriteFile(stalePath, []byte("before"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Description: "Builder role"},
+	})
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.fileTrack.TrackRead(stalePath, a.instanceID, computeFileHash(stalePath))
+
+	a.startPlanExecution(planPath, "builder")
+
+	if a.fileTrack.HasRead(stalePath, a.instanceID) {
+		t.Fatal("plan execution should reset tracked reads from the previous session runtime")
+	}
+	if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, stalePath, tools.NameEdit); err == nil || !strings.Contains(err.Error(), "has not been read") {
+		t.Fatalf("edit precondition error = %v, want unread-file error after execution session reset", err)
+	}
+}
+
 func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWithDelegateAvailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	planPath := filepath.Join(projectRoot, "plan.md")

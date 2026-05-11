@@ -125,6 +125,7 @@ type ToolExecutionResult struct {
 	EffectiveArgsJSON string
 	Audit             *message.ToolArgsAudit
 	LSPReviews        []message.LSPReview
+	FileState         *message.ToolFileState
 	PreFilePath       string
 	PreContent        string
 	PreExisted        bool

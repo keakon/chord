@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -98,12 +99,16 @@ func extractToolArgument(toolName string, args []byte) string {
 }
 
 func computeFileHash(path string) string {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func isInternalControlTool(_ string) bool { return false }

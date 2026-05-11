@@ -99,9 +99,10 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 			if modified, ok := hookResult.Data.(map[string]any); ok {
 				if newArgs, ok := modified["args"]; ok {
 					if raw, err := json.Marshal(newArgs); err == nil {
+						originalArgs := append(json.RawMessage(nil), tc.Args...)
 						tc.Args = raw
 						execResult.EffectiveArgsJSON = string(tc.Args)
-						execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, tc.Args)
+						execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
 						if a.turn != nil {
 							a.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 						}
@@ -237,15 +238,19 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 	}
 	if deleteLocks != nil {
 		deleteLocks.Commit(result)
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 
 	// Read: track content hash after successful execution for optimistic locking.
 	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		hash := computeFileHash(trackedFilePath)
-		a.fileTrack.TrackRead(trackedFilePath, a.instanceID, hash)
+		execResult.FileState = buildReadFileState(trackedFilePath)
+		if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
+			a.fileTrack.TrackRead(trackedFilePath, a.instanceID, hash)
+		}
 	}
 
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
+		execResult.FileState = buildWriteFileState(trackedFilePath)
 		if tool, ok := a.tools.Get(tc.Name); ok {
 			switch t := tool.(type) {
 			case tools.WriteTool:
@@ -311,6 +316,21 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 			return execResult, err
 		}
 		return execResult, err
+	}
+	if tc.Name == tools.NameRead || tc.Name == tools.NameWrite || tc.Name == tools.NameEdit {
+		var parsed struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &parsed) == nil {
+			switch tc.Name {
+			case tools.NameRead:
+				execResult.FileState = buildReadFileState(parsed.Path)
+			case tools.NameWrite, tools.NameEdit:
+				execResult.FileState = buildWriteFileState(parsed.Path)
+			}
+		}
+	} else if tc.Name == tools.NameDelete {
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && execResult.PreFilePath != "" {
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(a.tools, tc.Name, execResult.PreFilePath)

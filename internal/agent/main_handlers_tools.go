@@ -85,6 +85,7 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 			Role:       "tool",
 			ToolCallID: call.CallID,
 			Content:    msgText,
+			ToolStatus: string(status),
 			Audit:      call.Audit.Clone(),
 		}
 		a.ctxMgr.Append(toolMsg)
@@ -190,6 +191,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		ToolDiffAdded:   payload.DiffAdded,
 		ToolDiffRemoved: payload.DiffRemoved,
 		ToolDurationMs:  payload.Duration.Milliseconds(),
+		ToolStatus:      string(toolResultStatusFromError(isError)),
+		FileState:       payload.FileState.Clone(),
 		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
 		Audit:           payload.Audit.Clone(),
 		Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),

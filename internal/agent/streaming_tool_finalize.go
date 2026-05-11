@@ -43,7 +43,10 @@ func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *
 	if strings.TrimSpace(parsed.Path) == "" {
 		return
 	}
-	hash := computeFileHash(parsed.Path)
+	hash := firstReadHashForPath(payload.FileState, parsed.Path)
+	if hash == "" {
+		hash = computeFileHash(parsed.Path)
+	}
 	a.fileTrack.TrackRead(parsed.Path, a.instanceID, hash)
 }
 
@@ -113,9 +116,10 @@ func (a *MainAgent) executeToolCallWithHook(ctx context.Context, tc message.Tool
 				if modified, ok := hookResult.Data.(map[string]any); ok {
 					if newArgs, ok := modified["args"]; ok {
 						if raw, err := json.Marshal(newArgs); err == nil {
+							originalArgs := append(json.RawMessage(nil), tc.Args...)
 							tc.Args = raw
 							execResult.EffectiveArgsJSON = string(tc.Args)
-							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, tc.Args)
+							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
 							if a.turn != nil {
 								a.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 							}
@@ -230,10 +234,16 @@ func (a *MainAgent) executeToolCallWithHook(ctx context.Context, tc message.Tool
 	}
 	if deleteLocks != nil {
 		deleteLocks.Commit(result)
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		hash := computeFileHash(trackedFilePath)
-		a.fileTrack.TrackRead(trackedFilePath, a.instanceID, hash)
+		execResult.FileState = buildReadFileState(trackedFilePath)
+		if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
+			a.fileTrack.TrackRead(trackedFilePath, a.instanceID, hash)
+		}
+	}
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
+		execResult.FileState = buildWriteFileState(trackedFilePath)
 	}
 
 	// Apply output truncation.

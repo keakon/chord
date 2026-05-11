@@ -26,6 +26,39 @@ type ToolArgsAudit struct {
 	EditSummary       string `json:"edit_summary,omitempty"`
 }
 
+// ToolFileState records durable file-state metadata emitted by file tools.
+// It is used only to restore runtime safety sentinels across session restore;
+// file contents are not persisted here or re-injected into model context.
+type ToolFileState struct {
+	Reads   []TrackedFileState `json:"reads,omitempty"`
+	Writes  []TrackedFileState `json:"writes,omitempty"`
+	Deletes []TrackedFileState `json:"deletes,omitempty"`
+}
+
+// TrackedFileState records the observed state of one file at tool completion.
+type TrackedFileState struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256,omitempty"`
+	Exists bool   `json:"exists"`
+}
+
+func (s *ToolFileState) Clone() *ToolFileState {
+	if s == nil {
+		return nil
+	}
+	cloned := &ToolFileState{}
+	if len(s.Reads) > 0 {
+		cloned.Reads = append([]TrackedFileState(nil), s.Reads...)
+	}
+	if len(s.Writes) > 0 {
+		cloned.Writes = append([]TrackedFileState(nil), s.Writes...)
+	}
+	if len(s.Deletes) > 0 {
+		cloned.Deletes = append([]TrackedFileState(nil), s.Deletes...)
+	}
+	return cloned
+}
+
 type LSPReview struct {
 	ServerID string `json:"server_id,omitempty"`
 	Errors   int    `json:"errors,omitempty"`
@@ -53,6 +86,8 @@ type Message struct {
 	ToolDiffAdded       int                `json:"tool_diff_added,omitempty"`       // total added lines for Write/Edit; computed before diff truncation
 	ToolDiffRemoved     int                `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/Edit; computed before diff truncation
 	ToolDurationMs      int64              `json:"tool_duration_ms,omitempty"`      // final tool elapsed time in milliseconds for restored footer display
+	ToolStatus          string             `json:"tool_status,omitempty"`           // terminal tool status: success|error|cancelled
+	FileState           *ToolFileState     `json:"file_state,omitempty"`            // durable file-state metadata for restore-time safety sentinels
 	LSPReviews          []LSPReview        `json:"lsp_reviews,omitempty"`           // per-server last-review snapshot for the directly edited file only
 	Audit               *ToolArgsAudit     `json:"audit,omitempty"`                 // tool-call audit metadata when effective args differ after confirmation
 	IsCompactionSummary bool               `json:"is_compaction_summary,omitempty"` // first user message after compaction (summary of archived history)

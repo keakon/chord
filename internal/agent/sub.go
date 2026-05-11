@@ -53,6 +53,7 @@ type toolResult struct {
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
 	LSPReviews       []message.LSPReview // last-review snapshot for the directly edited file only
+	FileState        *message.ToolFileState
 	speculativeHooks *speculativeToolHooks
 }
 
@@ -720,9 +721,10 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 			if modified, ok := hookResult.Data.(map[string]any); ok {
 				if newArgs, ok := modified["args"]; ok {
 					if raw, err := json.Marshal(newArgs); err == nil {
+						originalArgs := append(json.RawMessage(nil), tc.Args...)
 						tc.Args = raw
 						execResult.EffectiveArgsJSON = string(tc.Args)
-						execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, tc.Args)
+						execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
 						if s.turn != nil {
 							s.turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 						}
@@ -852,15 +854,19 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 	}
 	if deleteLocks != nil {
 		deleteLocks.Commit(result)
+		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 
 	// Read: track content hash after successful execution for optimistic locking.
 	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		hash := computeFileHash(trackedFilePath)
-		s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
+		execResult.FileState = buildReadFileState(trackedFilePath)
+		if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
+			s.parent.fileTrack.TrackRead(trackedFilePath, s.instanceID, hash)
+		}
 	}
 
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
+		execResult.FileState = buildWriteFileState(trackedFilePath)
 		if tool, ok := s.tools.Get(tc.Name); ok {
 			switch t := tool.(type) {
 			case tools.WriteTool:

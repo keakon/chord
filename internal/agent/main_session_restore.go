@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
@@ -490,6 +491,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.resetRuntimeEvidenceFromMessages(loaded.Messages)
+	a.fileTrack = filelock.NewFileTracker()
+	a.restoreMainTrackedFileState(loaded.Messages)
 	a.ctxMgr.RestoreStats(loaded.ContextUsage)
 	a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
 	a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)

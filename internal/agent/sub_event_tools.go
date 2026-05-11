@@ -76,10 +76,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				if modified, ok := hookResult.Data.(map[string]any); ok {
 					if newArgs, ok := modified["args"]; ok {
 						if raw, err := json.Marshal(newArgs); err == nil {
+							originalArgs := append(json.RawMessage(nil), effective.Args...)
 							effective.Args = raw
 							execResult.EffectiveArgsJSON = string(raw)
+							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, effective.Args)
 							hookModified = true
-							turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON})
+							turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 							s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
 						}
 					}
@@ -101,11 +103,15 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 		}
 
 		if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
+			audit := payload.Audit
+			if execResult.Audit != nil {
+				audit = execResult.Audit
+			}
 			tr := &toolResult{
 				CallID:           payload.CallID,
 				Name:             payload.Name,
 				ArgsJSON:         execResult.EffectiveArgsJSON,
-				Audit:            payload.Audit,
+				Audit:            audit,
 				Result:           payload.Result,
 				Error:            payload.Error,
 				TurnID:           turn.ID,
@@ -115,6 +121,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				DiffRemoved:      payload.DiffRemoved,
 				FileCreated:      payload.FileCreated,
 				LSPReviews:       append([]message.LSPReview(nil), payload.LSPReviews...),
+				FileState:        payload.FileState.Clone(),
 				speculativeHooks: payload.speculativeHooks,
 			}
 			s.commitPromotedToolSideEffects(effective, tr)
@@ -163,7 +170,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), Duration: time.Since(startedAt)}:
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -227,7 +234,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), Duration: time.Since(startedAt)}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -301,6 +308,8 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		ToolDiffAdded:   result.DiffAdded,
 		ToolDiffRemoved: result.DiffRemoved,
 		ToolDurationMs:  result.Duration.Milliseconds(),
+		ToolStatus:      string(toolResultStatusFromError(isError)),
+		FileState:       result.FileState.Clone(),
 		LSPReviews:      append([]message.LSPReview(nil), result.LSPReviews...),
 		Audit:           result.Audit.Clone(),
 		Provenance:      toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),

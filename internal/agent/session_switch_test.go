@@ -570,6 +570,45 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	}
 }
 
+func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T) {
+	projectRoot := t.TempDir()
+	alphaPath := filepath.Join(projectRoot, "alpha.txt")
+	betaPath := filepath.Join(projectRoot, "beta.txt")
+	writeTestFile(t, alphaPath, "alpha")
+	writeTestFile(t, betaPath, "beta")
+
+	a := newRestoreEditTestAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.fileTrack.TrackRead(betaPath, a.instanceID, computeFileHash(betaPath))
+
+	msgs := []message.Message{{Role: "user", Content: "read alpha"}}
+	msgs = append(msgs, restoreReadMessages(t, "read-alpha", alphaPath, computeFileHash(alphaPath), nil)...)
+	msgs = append(msgs,
+		message.Message{Role: "user", Content: "fork here"},
+		restoreAssistantCall(t, "read-beta", tools.NameRead, map[string]any{"path": betaPath}, nil),
+		message.Message{
+			Role:       "tool",
+			ToolCallID: "read-beta",
+			ToolStatus: string(ToolResultStatusSuccess),
+			Content:    "1\tbeta",
+			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: betaPath, SHA256: computeFileHash(betaPath), Exists: true}}},
+		},
+	)
+	a.ctxMgr.RestoreMessages(msgs)
+
+	a.handleForkSessionCommand(3)
+
+	mustExecuteEdit(t, a, alphaPath, "alpha", "alpha-updated")
+	if a.fileTrack.HasRead(betaPath, a.instanceID) {
+		t.Fatal("fork should not preserve tracked reads that occur after the fork prefix")
+	}
+	if err := executeEdit(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+		t.Fatalf("beta edit error = %v, want unread-file error after fork", err)
+	}
+}
+
 func TestHandleForkSessionCommandRePersistsImageAssetsIntoNewSession(t *testing.T) {
 	projectRoot := t.TempDir()
 	oldSessionDir := testProjectSessionDir(t, projectRoot, "old")

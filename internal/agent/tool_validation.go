@@ -57,9 +57,9 @@ func buildToolArgsAudit(original json.RawMessage, effective json.RawMessage, edi
 	}
 }
 
-func syncAuditEffectiveArgs(audit *message.ToolArgsAudit, effective json.RawMessage) *message.ToolArgsAudit {
+func syncAuditEffectiveArgs(audit *message.ToolArgsAudit, original json.RawMessage, effective json.RawMessage) *message.ToolArgsAudit {
 	if audit == nil {
-		return nil
+		return buildToolArgsAudit(original, effective, "")
 	}
 	cloned := audit.Clone()
 	cloned.EffectiveArgsJSON = strings.TrimSpace(string(effective))

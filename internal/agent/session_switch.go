@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
@@ -202,6 +203,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 		a.emitLoopStateChanged()
 	}
 	a.ctxMgr.RestoreMessages(nil)
+	a.fileTrack = filelock.NewFileTracker()
 	a.clearEvidenceCandidates()
 	a.compactionFileCtxMu.Lock()
 	a.compactionFileCtxSig = ""
@@ -341,6 +343,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 
 	a.ctxMgr.RestoreMessages(prefix)
+	a.restoreMainTrackedFileState(prefix)
 	a.resetRuntimeEvidenceFromMessages(prefix)
 	todos := rebuildTodosFromMessages(prefix)
 	a.todoMu.Lock()

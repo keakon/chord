@@ -398,10 +398,12 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					if modified, ok := hookResult.Data.(map[string]any); ok {
 						if newArgs, ok := modified["args"]; ok {
 							if raw, err := json.Marshal(newArgs); err == nil {
+								originalArgs := append(json.RawMessage(nil), effective.Args...)
 								effective.Args = raw
 								execResult.EffectiveArgsJSON = string(raw)
+								execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, effective.Args)
 								hookModified = true
-								turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+								turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 								a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true})
 							}
 						}
@@ -422,9 +424,12 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 
 			if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
 				promoted = true
-				turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON})
+				turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 				payload.TurnID = turnID
 				payload.ArgsJSON = execResult.EffectiveArgsJSON
+				if execResult.Audit != nil {
+					payload.Audit = execResult.Audit
+				}
 				// Commit missing post-exec side effects for reused speculative results before persisting.
 				a.commitPromotedToolSideEffects(effective, payload)
 				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
@@ -433,8 +438,8 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				log.Debugf("speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
 				if hookModified {
 					// Hook already ran and mutated args; execute without firing on_tool_call again.
-					turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON})
-					batchPendingCall := PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON}
+					turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
+					batchPendingCall := PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit}
 					now := time.Now()
 					a.logToolTraceExecutionRunning(batchPendingCall, now)
 					emitToolExecutionState(a.emitToTUI, []PendingToolCall{batchPendingCall}, ToolCallExecutionStateRunning)
@@ -462,7 +467,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
 						}
-						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...)}})
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone()}})
 					}(effective)
 					promoted = true
 					continue
@@ -542,6 +547,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					DiffRemoved: diff.Removed,
 					FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted,
 					LSPReviews:  append([]message.LSPReview(nil), execResult.LSPReviews...),
+					FileState:   execResult.FileState.Clone(),
 				},
 			})
 		}(tc)

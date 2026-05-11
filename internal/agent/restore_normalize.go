@@ -129,5 +129,6 @@ func syntheticInterruptedToolResult(callID string) message.Message {
 		Role:       "tool",
 		ToolCallID: callID,
 		Content:    toolCallFailureMessage(errRestoreToolResultMissing),
+		ToolStatus: string(ToolResultStatusError),
 	}
 }

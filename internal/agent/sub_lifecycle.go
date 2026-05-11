@@ -96,6 +96,7 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 			Role:       "tool",
 			ToolCallID: call.CallID,
 			Content:    msgText,
+			ToolStatus: string(status),
 			Audit:      call.Audit.Clone(),
 		}
 		s.ctxMgr.Append(toolMsg)
