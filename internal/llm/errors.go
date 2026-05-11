@@ -341,21 +341,29 @@ func skipRemainingModelsOnProvider(err error) bool {
 	return errors.As(err, &noUsable)
 }
 
+const (
+	providerSkipReasonNoUsableKeys               = "no_usable_keys"
+	providerSkipReasonConnectionEstablishment    = "connection_establishment_timeout"
+	providerSkipReasonProviderUnreachable        = "provider_unreachable"
+	providerSkipReasonTimeoutBeforeVisibleOutput = "timeout_before_visible_output"
+	providerSkipReasonGeneric                    = "provider_skipped"
+)
+
 func providerSkipReason(err error) string {
 	var noUsable *NoUsableKeysError
 	if errors.As(err, &noUsable) {
-		return "no_usable_keys"
+		return providerSkipReasonNoUsableKeys
 	}
 	if isConnectionEstablishmentTimeout(err) {
-		return "connection_establishment_timeout"
+		return providerSkipReasonConnectionEstablishment
 	}
 	if isProviderUnreachable(err) {
-		return "provider_unreachable"
+		return providerSkipReasonProviderUnreachable
 	}
 	if isTimeoutLikeError(err) {
-		return "timeout_before_visible_output"
+		return providerSkipReasonTimeoutBeforeVisibleOutput
 	}
-	return "provider_skipped"
+	return providerSkipReasonGeneric
 }
 
 // isRetriable determines whether the error can be retried on the same model

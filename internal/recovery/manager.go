@@ -34,8 +34,8 @@ type SessionSnapshot struct {
 	LegacyModelPoolCurrentRole string                   `json:"model_pool_current_role,omitempty"`
 	ModelPoolAgentOverrides    map[string]string        `json:"model_pool_agent_overrides,omitempty"`
 	CreatedAt                  time.Time                `json:"created_at"`
-	LastInputTokens            int                      `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compression)
-	LastTotalContextTokens     int                      `json:"last_total_context_tokens,omitempty"` // true input-side context burden when saved (input + cache_write); restored for CONTEXT USAGE
+	LastInputTokens            int                      `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compaction/input-budget displays)
+	LastTotalContextTokens     int                      `json:"last_total_context_tokens,omitempty"` // true input-side context burden when saved (input + cache_write); restored for diagnostics/full-burden displays
 	CompactionGeneration       uint64                   `json:"compaction_generation,omitempty"`
 	LastHistoryIndex           int                      `json:"last_history_index,omitempty"`
 	SessionEpoch               uint64                   `json:"session_epoch,omitempty"`

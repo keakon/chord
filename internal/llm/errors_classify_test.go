@@ -1,6 +1,9 @@
 package llm
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsRetriable5xxRotatesKeysBeforeFallback(t *testing.T) {
 	t.Parallel()
@@ -45,6 +48,13 @@ func TestIsConcurrentRequestLimit429(t *testing.T) {
 	}
 	if isConcurrentRequestLimit429(&APIError{StatusCode: 500, Message: "Too many concurrent requests for this model"}) {
 		t.Fatal("non-429 errors should not be treated as concurrent-request throttling")
+	}
+}
+
+func TestProviderSkipReasonTimeoutBeforeVisibleOutput(t *testing.T) {
+	t.Parallel()
+	if got := providerSkipReason(&ChunkTimeoutError{d: time.Second}); got != providerSkipReasonTimeoutBeforeVisibleOutput {
+		t.Fatalf("providerSkipReason(chunk timeout) = %q, want %q", got, providerSkipReasonTimeoutBeforeVisibleOutput)
 	}
 }
 

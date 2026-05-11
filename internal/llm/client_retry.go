@@ -558,7 +558,7 @@ func (c *Client) completeStreamWithRetry(
 					// the next provider/model.
 					if !retriable && isTimeoutLikeError(err) {
 						log.Warnf("invisible timeout before visible output; skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-						skippedProviders[t.provider] = "timeout_before_visible_output"
+						skippedProviders[t.provider] = providerSkipReason(err)
 					}
 
 					if !retriable {

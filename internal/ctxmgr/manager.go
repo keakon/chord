@@ -17,8 +17,8 @@ type Manager struct {
 	mu                     sync.RWMutex
 	systemPrompt           message.Message
 	messages               []message.Message
-	lastInputTokens        int // prompt size only (for compression threshold)
-	lastTotalContextTokens int // true input-side context burden for sidebar (input + cache_write)
+	lastInputTokens        int // prompt size only (for compaction thresholds and input-budget displays)
+	lastTotalContextTokens int // true input-side context burden (input + cache_write) for recovery/diagnostics
 	maxTokens              int
 	inputBudget            int
 	inputBudgetReserved    int
@@ -189,8 +189,8 @@ func (m *Manager) Snapshot() []message.Message {
 
 // RestoreMessages replaces the entire message history with msgs.
 // When msgs is nil or empty (e.g. plan execution or role switch with clear history),
-// lastInputTokens and lastTotalContextTokens are reset to 0 so the sidebar CONTEXT USAGE
-// shows the new state until the next LLM call updates it.
+// lastInputTokens and lastTotalContextTokens are reset to 0 so context indicators
+// stay empty until the next LLM call refreshes the tracked usage.
 //
 // Orphan tool results (tool_call_id not declared by any preceding assistant message)
 // are dropped so resumed sessions and compaction commits stay valid for strict APIs.
@@ -262,7 +262,7 @@ func (m *Manager) RestoreStats(usage message.TokenUsage) {
 }
 
 // UpdateFromUsage accumulates token usage statistics from an API response.
-// lastInputTokens = prompt size (for compression).
+// lastInputTokens = prompt size (for compaction thresholds and input-budget displays).
 // lastTotalContextTokens = actual context-window burden from the most recent request:
 // input_tokens plus cache_creation_input_tokens. Anthropic input_tokens already
 // includes cache_read_input_tokens, while output/reasoning are generated after
@@ -295,7 +295,7 @@ func (m *Manager) LastInputTokens() int {
 
 // LastTotalContextTokens returns the true input-side context burden from the
 // most recent API call: input_tokens plus cache_creation_input_tokens.
-// Used for sidebar CONTEXT USAGE.
+// Preserved for recovery and diagnostics when callers need the full prompt-side burden.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -317,7 +317,7 @@ func (m *Manager) SetLastTotalContextTokens(n int) {
 }
 
 // SetLastInputTokens sets the last input token count (e.g. when restoring a
-// session from snapshot so the context usage panel shows the correct value).
+// session from snapshot so input-budget-based context indicators show the correct value).
 func (m *Manager) SetLastInputTokens(n int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -325,8 +325,9 @@ func (m *Manager) SetLastInputTokens(n int) {
 }
 
 // EstimateTotalTokens returns a rough token count for the current message list.
-// Uses the same heuristic as CompressForTarget (~3 chars per token). Used when
-// restoring a session without snapshot so the sidebar CONTEXT USAGE shows a sensible value.
+// Uses the same heuristic as CompressForTarget (~3 chars per token). Available as
+// a restore-time fallback when callers need an approximate prompt burden before the
+// next LLM call refreshes tracked usage.
 func (m *Manager) EstimateTotalTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
