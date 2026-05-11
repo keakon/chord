@@ -59,6 +59,7 @@ type doctorModelsOptions struct {
 type doctorModelsRuntimeConfig struct {
 	Cfg       *config.Config
 	Auth      config.AuthConfig
+	AuthMu    sync.Mutex
 	AuthPath  string
 	PoolOrder []string
 }
@@ -334,6 +335,30 @@ func loadDoctorModelsRuntimeConfig() (*doctorModelsRuntimeConfig, error) {
 		return nil, fmt.Errorf("load auth: %w", err)
 	}
 	return &doctorModelsRuntimeConfig{Cfg: cfg, Auth: auth, AuthPath: authPath, PoolOrder: poolOrder}, nil
+}
+
+func (r *doctorModelsRuntimeConfig) providerCredentials(provider string) []config.ProviderCredential {
+	if r == nil {
+		return nil
+	}
+	r.AuthMu.Lock()
+	defer r.AuthMu.Unlock()
+	return cloneProviderCredentials(r.Auth[provider])
+}
+
+func cloneProviderCredentials(creds []config.ProviderCredential) []config.ProviderCredential {
+	if len(creds) == 0 {
+		return nil
+	}
+	cloned := make([]config.ProviderCredential, len(creds))
+	for i, cred := range creds {
+		cloned[i] = cred
+		if cred.OAuth != nil {
+			oauth := *cred.OAuth
+			cloned[i].OAuth = &oauth
+		}
+	}
+	return cloned
 }
 
 func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
@@ -723,6 +748,27 @@ func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModels
 	return report
 }
 
+func configureDoctorModelsOAuthRefresher(runtimeCfg *doctorModelsRuntimeConfig, providerName string, providerCfg config.ProviderConfig, creds []config.ProviderCredential, llmProviderCfg *llm.ProviderConfig, effectiveProxy string) error {
+	if runtimeCfg == nil || llmProviderCfg == nil {
+		return nil
+	}
+	tokenURL, clientID, ok, err := resolveProviderOAuthSettings(providerCfg, creds)
+	if err != nil {
+		return fmt.Errorf("resolve OAuth settings for provider %q: %w", providerName, err)
+	}
+	if !ok {
+		return nil
+	}
+	oauthMap, backfills := oauthCredentialMap(creds)
+	llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, effectiveProxy)
+	if len(backfills) > 0 {
+		if saveErr := persistOAuthMetadataBackfills(runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, providerName, backfills); saveErr != nil {
+			log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", providerName, saveErr)
+		}
+	}
+	return nil
+}
+
 func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModelsRuntimeConfig, target doctorModelTarget, opts doctorModelsOptions) doctorModelResult {
 	result := resultFromTarget(target)
 	if runtimeCfg == nil || runtimeCfg.Cfg == nil {
@@ -751,7 +797,7 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		}
 	}
 
-	creds := runtimeCfg.Auth[target.ProviderName]
+	creds := runtimeCfg.providerCredentials(target.ProviderName)
 	providerCfg = applyDoctorModelsAPIBase(providerCfg, opts.APIBase)
 	normalizedCfg, err := normalizeProviderConfig(target.ProviderName, providerCfg, creds)
 	if err != nil {
@@ -771,20 +817,10 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		llmProviderCfg.SetRateLimiter(normalizedCfg.RateLimit)
 	}
 	effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, cfg.Proxy)
-	if tokenURL, clientID, ok, err := resolveProviderOAuthSettings(normalizedCfg, creds); err != nil {
+	if err := configureDoctorModelsOAuthRefresher(runtimeCfg, target.ProviderName, normalizedCfg, creds, llmProviderCfg, effectiveProxy); err != nil {
 		result.Status = doctorModelResultConfigError
-		result.Error = fmt.Sprintf("resolve OAuth settings for provider %q: %v", target.ProviderName, err)
+		result.Error = err.Error()
 		return result
-	} else if ok {
-		authCopy := runtimeCfg.Auth
-		var authMu sync.Mutex
-		oauthMap, backfills := oauthCredentialMap(creds)
-		llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, &authCopy, &authMu, oauthMap, effectiveProxy)
-		if len(backfills) > 0 {
-			if saveErr := persistOAuthMetadataBackfills(runtimeCfg.AuthPath, &authCopy, &authMu, target.ProviderName, backfills); saveErr != nil {
-				log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", target.ProviderName, saveErr)
-			}
-		}
 	}
 
 	impl, err := newDoctorModelProvider(normalizedCfg.Type, llmProviderCfg, effectiveProxy, target.ProviderName)

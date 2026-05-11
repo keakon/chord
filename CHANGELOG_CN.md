@@ -11,6 +11,7 @@
 - Config / Runtime：项目级 `.chord/config.yaml` 现在在启动、auth login 和模型诊断中走同一套合并逻辑；格式错误的项目配置会明确报错，不再静默忽略，并新增 `stream_retry_rounds` 以便自动化场景限制公开 LLM 重试轮数。
 - TUI：修复 Markdown 预览的语法高亮；文件末尾的有序列表、标题等按行识别的语法标记，现在会在 `Read` / `Write` 工具卡片和 fenced code block 中保持与前面行一致的颜色。
 - CLI：用 `chord doctor models` 替换旧的 `chord test-providers` 入口，新增精确 `provider/model[@variant]` 检查、模型池审计、all-model/all-pool 模式、按目标 timeout、默认单次诊断且可通过 `--retry` 显式重试、fail-fast、JSON 输出，并覆盖 model / variant tuning。
+- CLI / Doctor：`chord doctor models` 在多目标诊断过程中会复用最新的 OAuth 凭据状态（刷新/过期/停用等），避免使用过期快照导致误报。
 
 ## 0.5.2 - 2026-05-11
 

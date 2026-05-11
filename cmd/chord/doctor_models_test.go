@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 )
 
 func testDoctorModelsConfig() *config.Config {
@@ -991,6 +992,132 @@ func TestRunDoctorModelsUnsupportedProviderTypeIsConfigError(t *testing.T) {
 	}
 	if report.Summary.ConfigErrors != 1 || len(report.ConfigErrors) != 1 || !strings.Contains(report.ConfigErrors[0].Error, "invalid provider type") {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-a
+    access: access-a
+    expires: 32503680000000
+    account_id: acc-a
+  - refresh: refresh-b
+    access: access-b
+    expires: 32503680000000
+    account_id: acc-b
+`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	runtimeCfg := &doctorModelsRuntimeConfig{Auth: auth, AuthPath: authPath}
+	providerCfg := config.ProviderConfig{
+		Type:     config.ProviderTypeResponses,
+		Preset:   config.ProviderPresetCodex,
+		APIURL:   config.OpenAICodexResponsesURL,
+		TokenURL: config.OpenAIOAuthTokenURL,
+		ClientID: config.OpenAIOAuthClientID,
+		Models: map[string]config.ModelConfig{
+			"gpt": {Limit: config.ModelLimit{Context: 1000, Output: 128}},
+		},
+	}
+	creds := runtimeCfg.providerCredentials("openai")
+	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
+	if err := configureDoctorModelsOAuthRefresher(runtimeCfg, "openai", providerCfg, creds, llmProviderCfg, ""); err != nil {
+		t.Fatalf("configureDoctorModelsOAuthRefresher: %v", err)
+	}
+
+	llmProviderCfg.MarkExpired("access-a")
+
+	runtimeCfg.AuthMu.Lock()
+	gotFirst := runtimeCfg.Auth["openai"][0].OAuth.Status
+	gotSecond := runtimeCfg.Auth["openai"][1].OAuth.Status
+	runtimeCfg.AuthMu.Unlock()
+	if gotFirst != config.OAuthStatusExpired {
+		t.Fatalf("runtime auth first credential status = %q, want %q", gotFirst, config.OAuthStatusExpired)
+	}
+	if gotSecond != config.OAuthStatusNormal {
+		t.Fatalf("runtime auth sibling credential status = %q, want normal", gotSecond)
+	}
+
+	credsAfter := runtimeCfg.providerCredentials("openai")
+	if credsAfter[0].OAuth == nil || credsAfter[0].OAuth.Status != config.OAuthStatusExpired {
+		t.Fatalf("next target credentials did not observe expired status: %#v", credsAfter[0].OAuth)
+	}
+}
+
+func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: old-refresh
+    access: old-access
+    expires: 32503680000000
+    account_id: acc-a
+  - refresh: sibling-refresh
+    access: sibling-access
+    expires: 32503680000000
+    account_id: acc-b
+`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var refreshRequests atomic.Int32
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`))
+	}))
+	defer refreshServer.Close()
+
+	runtimeCfg := &doctorModelsRuntimeConfig{Auth: auth, AuthPath: authPath}
+	providerCfg := config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"gpt": {Limit: config.ModelLimit{Context: 1000, Output: 128}},
+		},
+	}
+	creds := runtimeCfg.providerCredentials("openai")
+	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
+	oauthMap, _ := oauthCredentialMap(creds)
+	llmProviderCfg.SetOAuthRefresher(refreshServer.URL, "client-id", runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, "")
+
+	refreshedKey, ok, err := llmProviderCfg.TryRefreshOAuthKey(context.Background(), "old-access")
+	if err != nil {
+		t.Fatalf("TryRefreshOAuthKey: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for OAuth refresh")
+	}
+	if refreshedKey != "new-access" {
+		t.Fatalf("refreshedKey = %q, want new-access", refreshedKey)
+	}
+	if refreshRequests.Load() != 1 {
+		t.Fatalf("refreshRequests = %d, want 1", refreshRequests.Load())
+	}
+
+	runtimeCfg.AuthMu.Lock()
+	gotFirst := runtimeCfg.Auth["openai"][0].OAuth
+	gotSecond := runtimeCfg.Auth["openai"][1].OAuth
+	runtimeCfg.AuthMu.Unlock()
+	if gotFirst == nil || gotFirst.Access != "new-access" || gotFirst.Refresh != "new-refresh" {
+		t.Fatalf("runtime auth first credential = %#v, want refreshed tokens", gotFirst)
+	}
+	if gotSecond == nil || gotSecond.Access != "sibling-access" || gotSecond.Refresh != "sibling-refresh" {
+		t.Fatalf("runtime auth sibling credential = %#v, want unchanged sibling", gotSecond)
+	}
+
+	credsAfter := runtimeCfg.providerCredentials("openai")
+	if credsAfter[0].OAuth == nil || credsAfter[0].OAuth.Access != "new-access" || credsAfter[0].OAuth.Refresh != "new-refresh" {
+		t.Fatalf("next target credentials did not observe refreshed token: %#v", credsAfter[0].OAuth)
+	}
+	if credsAfter[1].OAuth == nil || credsAfter[1].OAuth.Access != "sibling-access" {
+		t.Fatalf("next target sibling credential changed unexpectedly: %#v", credsAfter[1].OAuth)
 	}
 }
 

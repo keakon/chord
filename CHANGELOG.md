@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Config/Runtime: project `.chord/config.yaml` now merges through the same path for startup, auth login, and model diagnostics; malformed project config is reported instead of silently ignored, and `stream_retry_rounds` can bound public LLM retry rounds for automation.
 - TUI: fixed syntax highlighting for Markdown previews so EOF block markers (ordered lists, headings, and similar line-based syntax) keep the same colour as preceding lines in `Read`/`Write` tool cards and fenced code blocks.
 - CLI: replaced the deprecated `chord test-providers` entry point with `chord doctor models`, adding exact `provider/model[@variant]` checks, model-pool audits, all-model/all-pool modes, per-target timeout, single-attempt diagnostics by default with optional `--retry`, fail-fast, JSON output, and model/variant tuning coverage.
+- CLI/Doctor: `chord doctor models` now reuses refreshed OAuth credential status across multi-target runs, avoiding stale token reuse and misleading failures.
 
 ## 0.5.2 - 2026-05-11
 
