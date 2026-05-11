@@ -1787,7 +1787,11 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 
 	// Release p.mu during the network call to avoid blocking other key selections.
 	p.mu.Unlock()
-	newCred, err := config.RefreshOAuthToken(ctx, r.httpClient, r.tokenURL, r.clientID, &credCopy)
+	refreshFn := config.RefreshOAuthToken
+	if p.oauthProfile == config.OAuthProfileOpenAICodex {
+		refreshFn = config.RefreshOpenAICodexOAuthToken
+	}
+	newCred, err := refreshFn(ctx, r.httpClient, r.tokenURL, r.clientID, &credCopy)
 	p.mu.Lock()
 
 	if err != nil {

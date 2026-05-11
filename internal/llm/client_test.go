@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -505,11 +506,19 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	ctx := context.Background()
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Fatalf("ParseForm: %v", err)
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
 		}
-		if got := r.Form.Get("grant_type"); got != "refresh_token" {
-			t.Fatalf("grant_type = %q, want refresh_token", got)
+		var body struct {
+			GrantType    string `json:"grant_type"`
+			RefreshToken string `json:"refresh_token"`
+			ClientID     string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode body: %v", err)
+		}
+		if body.GrantType != "refresh_token" {
+			t.Fatalf("grant_type = %q, want refresh_token", body.GrantType)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}`)

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -231,11 +232,18 @@ func SaveAuthConfig(path string, auth AuthConfig) error {
 
 // tokenResponse is the JSON response from an OAuth token endpoint.
 type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
-	IDToken      string `json:"id_token"`
+	AccessToken  *string `json:"access_token"`
+	RefreshToken *string `json:"refresh_token"`
+	ExpiresIn    *int64  `json:"expires_in"`
+	IDToken      *string `json:"id_token"`
 }
+
+type refreshRequestFormat int
+
+const (
+	refreshRequestFormURLEncoded refreshRequestFormat = iota
+	refreshRequestJSON
+)
 
 type oauthErrorEnvelope struct {
 	Error *struct {
@@ -281,20 +289,69 @@ func IsRefreshTokenInvalid(err error) bool {
 
 // RefreshOAuthToken refreshes an OAuth credential using the refresh_token grant.
 // If the response omits refresh_token, the original refresh token is reused.
+// Fields omitted by the response retain their prior values.
 // expires is stored as a millisecond-precision Unix timestamp.
 func RefreshOAuthToken(ctx context.Context, httpClient *http.Client, tokenURL, clientID string, cred *OAuthCredential) (*OAuthCredential, error) {
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", cred.Refresh)
-	if clientID != "" {
-		form.Set("client_id", clientID)
+	return refreshOAuthTokenWithFormat(ctx, httpClient, tokenURL, clientID, cred, refreshRequestFormURLEncoded)
+}
+
+// RefreshOpenAICodexOAuthToken mirrors the official Codex refresh transport:
+// JSON request body plus partial-update persistence semantics on the response.
+func RefreshOpenAICodexOAuthToken(ctx context.Context, httpClient *http.Client, tokenURL, clientID string, cred *OAuthCredential) (*OAuthCredential, error) {
+	return refreshOAuthTokenWithFormat(ctx, httpClient, tokenURL, clientID, cred, refreshRequestJSON)
+}
+
+func refreshOAuthTokenWithFormat(
+	ctx context.Context,
+	httpClient *http.Client,
+	tokenURL, clientID string,
+	cred *OAuthCredential,
+	format refreshRequestFormat,
+) (*OAuthCredential, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if cred == nil {
+		return nil, fmt.Errorf("oauth credential is nil")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	var (
+		bodyReader  io.Reader
+		contentType string
+	)
+	switch format {
+	case refreshRequestJSON:
+		requestBody := map[string]string{
+			"grant_type":    "refresh_token",
+			"refresh_token": cred.Refresh,
+		}
+		if clientID != "" {
+			requestBody["client_id"] = clientID
+		}
+		payload, err := json.Marshal(requestBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal token request: %w", err)
+		}
+		bodyReader = bytes.NewReader(payload)
+		contentType = "application/json"
+	case refreshRequestFormURLEncoded:
+		form := url.Values{}
+		form.Set("grant_type", "refresh_token")
+		form.Set("refresh_token", cred.Refresh)
+		if clientID != "" {
+			form.Set("client_id", clientID)
+		}
+		bodyReader = strings.NewReader(form.Encode())
+		contentType = "application/x-www-form-urlencoded"
+	default:
+		return nil, fmt.Errorf("unsupported refresh request format %d", format)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("build token request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", contentType)
 
 	client := httpClient
 	if client == nil {
@@ -327,19 +384,31 @@ func RefreshOAuthToken(ctx context.Context, httpClient *http.Client, tokenURL, c
 	if err := json.Unmarshal(body, &tr); err != nil {
 		return nil, fmt.Errorf("parse token response: %w", err)
 	}
+	return mergeOAuthRefreshResponse(cred, tr), nil
+}
 
-	newRefresh := tr.RefreshToken
-	if newRefresh == "" {
-		newRefresh = cred.Refresh
+func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCredential {
+	access := cred.Access
+	if tr.AccessToken != nil && *tr.AccessToken != "" {
+		access = *tr.AccessToken
 	}
 
-	var expires int64
-	if tr.ExpiresIn > 0 {
-		expires = (time.Now().Unix() + tr.ExpiresIn) * 1000
+	refresh := cred.Refresh
+	if tr.RefreshToken != nil && *tr.RefreshToken != "" {
+		refresh = *tr.RefreshToken
 	}
 
-	idClaims := extractOAuthClaims(tr.IDToken)
-	accessClaims := extractOAuthClaims(tr.AccessToken)
+	expires := cred.Expires
+	if tr.ExpiresIn != nil && *tr.ExpiresIn > 0 {
+		expires = (time.Now().Unix() + *tr.ExpiresIn) * 1000
+	}
+
+	idToken := ""
+	if tr.IDToken != nil {
+		idToken = *tr.IDToken
+	}
+	idClaims := extractOAuthClaims(idToken)
+	accessClaims := extractOAuthClaims(access)
 
 	accountID := extractOAuthAccountIDFromClaims(idClaims)
 	if accountID == "" {
@@ -364,13 +433,13 @@ func RefreshOAuthToken(ctx context.Context, httpClient *http.Client, tokenURL, c
 	}
 
 	return &OAuthCredential{
-		Access:    tr.AccessToken,
-		Refresh:   newRefresh,
+		Access:    access,
+		Refresh:   refresh,
 		Expires:   expires,
 		AccountID: accountID,
 		Email:     email,
 		// Status is cleared on successful refresh (credential is now valid)
-	}, nil
+	}
 }
 
 // LoadAuthFromEnv loads authentication configuration from environment variables.

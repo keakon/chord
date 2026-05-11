@@ -1,8 +1,13 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -466,6 +471,122 @@ func TestIsRefreshTokenInvalid(t *testing.T) {
 				t.Fatalf("IsRefreshTokenInvalid() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRefreshOAuthToken_ReusesExistingRefreshWhenResponseOmitsRefreshToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/x-www-form-urlencoded") {
+			t.Fatalf("Content-Type = %q, want application/x-www-form-urlencoded", got)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("grant_type"); got != "refresh_token" {
+			t.Fatalf("grant_type = %q, want refresh_token", got)
+		}
+		if got := r.Form.Get("refresh_token"); got != "old-refresh" {
+			t.Fatalf("refresh_token = %q, want old-refresh", got)
+		}
+		if got := r.Form.Get("client_id"); got != "client-123" {
+			t.Fatalf("client_id = %q, want client-123", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access-token","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	cred := &OAuthCredential{
+		Refresh:   "old-refresh",
+		Access:    "old-access",
+		Expires:   123,
+		AccountID: "acc-1",
+		Email:     "old@example.com",
+	}
+	updated, err := RefreshOAuthToken(context.Background(), server.Client(), server.URL, "client-123", cred)
+	if err != nil {
+		t.Fatalf("RefreshOAuthToken: %v", err)
+	}
+	if updated.Refresh != "old-refresh" {
+		t.Fatalf("Refresh = %q, want old-refresh", updated.Refresh)
+	}
+	if updated.Access != "new-access-token" {
+		t.Fatalf("Access = %q, want new-access-token", updated.Access)
+	}
+}
+
+func TestRefreshOpenAICodexOAuthToken_UsesJSONRequestAndPartialUpdate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var body struct {
+			GrantType    string `json:"grant_type"`
+			RefreshToken string `json:"refresh_token"`
+			ClientID     string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode body: %v", err)
+		}
+		if body.GrantType != "refresh_token" {
+			t.Fatalf("grant_type = %q, want refresh_token", body.GrantType)
+		}
+		if body.RefreshToken != "old-refresh" {
+			t.Fatalf("refresh_token = %q, want old-refresh", body.RefreshToken)
+		}
+		if body.ClientID != "client-123" {
+			t.Fatalf("client_id = %q, want client-123", body.ClientID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access-token","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	cred := &OAuthCredential{
+		Refresh:   "old-refresh",
+		Access:    "old-access",
+		Expires:   123,
+		AccountID: "acc-1",
+		Email:     "old@example.com",
+	}
+	updated, err := RefreshOpenAICodexOAuthToken(context.Background(), server.Client(), server.URL, "client-123", cred)
+	if err != nil {
+		t.Fatalf("RefreshOpenAICodexOAuthToken: %v", err)
+	}
+	if updated.Refresh != "old-refresh" {
+		t.Fatalf("Refresh = %q, want old-refresh", updated.Refresh)
+	}
+	if updated.Access != "new-access-token" {
+		t.Fatalf("Access = %q, want new-access-token", updated.Access)
+	}
+}
+
+func TestRefreshOAuthToken_ReusesExistingAccessWhenResponseOmitsAccessToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"refresh_token":"new-refresh-token","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	cred := &OAuthCredential{
+		Refresh:   "old-refresh",
+		Access:    "old-access",
+		Expires:   123,
+		AccountID: "acc-1",
+		Email:     "old@example.com",
+	}
+	updated, err := RefreshOAuthToken(context.Background(), server.Client(), server.URL, "client-123", cred)
+	if err != nil {
+		t.Fatalf("RefreshOAuthToken: %v", err)
+	}
+	if updated.Access != "old-access" {
+		t.Fatalf("Access = %q, want old-access", updated.Access)
+	}
+	if updated.Refresh != "new-refresh-token" {
+		t.Fatalf("Refresh = %q, want new-refresh-token", updated.Refresh)
+	}
+	if updated.Expires == cred.Expires {
+		t.Fatalf("Expires = %d, want updated value different from %d", updated.Expires, cred.Expires)
 	}
 }
 

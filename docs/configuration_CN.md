@@ -209,7 +209,7 @@ local-provider:
 - 在已有 rate-limit snapshot 时优先剩余额度头寸更高的账号；
 - 当没有更优候选时，仍允许回退尝试 soft-cooled 账号。
 
-当 Codex client 变为活跃状态后，Chord 还可能在后台探测其他 OAuth slot，以刷新缓存的 headroom 快照。这个 warm-up 是 best-effort、低并发的，并且会在活跃 client 被替换时取消。
+当 Codex client 变为活跃状态后，Chord 还可能在后台探测其他 OAuth slot，以刷新缓存的 headroom 快照。这个 warm-up 是 best-effort、低并发的，会在活跃 client 被替换时取消，并且在账号不可用时可能同步更新持久化的 OAuth 凭据状态。
 
 ```bash
 # 自动选择已配置的 codex provider
