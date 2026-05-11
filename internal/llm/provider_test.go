@@ -159,6 +159,99 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	}
 }
 
+func TestSelectKeyOnDemandInvalidRefreshMarksExpiredWithoutAccountID(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	expires := time.Now().Add(-time.Minute).UnixMilli()
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+  - refresh: old-refresh
+    access: old-access
+    expires: %d
+`, expires)), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"old-access"})
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
+	}))
+	defer refreshServer.Close()
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+		"old-access": {CredentialIndex: 0, Expires: expires},
+	}, "")
+
+	_, _, err = p.SelectKeyWithContext(context.Background())
+	if err == nil {
+		t.Fatal("expected invalid refresh token error")
+	}
+	if !strings.Contains(err.Error(), "OAuth refresh token invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig(updated): %v", err)
+	}
+	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected auth.yaml OAuth credential status=expired, got %#v", got)
+	}
+}
+
+func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	expired := time.Now().Add(-time.Minute).UnixMilli()
+	valid := time.Now().Add(time.Hour).UnixMilli()
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+  - refresh: old-refresh
+    access: old-access
+    expires: %d
+  - refresh: valid-refresh
+    access: valid-access
+    expires: %d
+`, expired, valid)), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex, KeyOrder: config.KeyOrderSequential}, []string{"old-access", "valid-access"})
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
+	}))
+	defer refreshServer.Close()
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+		"old-access":   {CredentialIndex: 0, Expires: expired},
+		"valid-access": {CredentialIndex: 1, Expires: valid},
+	}, "")
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "valid-access" {
+		t.Fatalf("selected key = %q, want valid-access", key)
+	}
+	updated, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig(updated): %v", err)
+	}
+	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected first OAuth credential status=expired, got %#v", got)
+	}
+	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected second OAuth credential to remain normal, got %#v", got)
+	}
+}
+
 func TestSelectKey_SingleKey(t *testing.T) {
 	p := newTestProviderConfig([]string{"key-a"})
 	key, _, err := p.SelectKeyWithContext(context.Background())

@@ -12,9 +12,12 @@ import (
 )
 
 // OAuthCredentialMatch identifies an OAuth credential slot inside auth.yaml.
-// AccountID is the only supported selector.
+// AccountID is the preferred stable selector. Access and CredentialIndex are
+// fallback selectors for legacy credentials that do not yet have account_id.
 type OAuthCredentialMatch struct {
-	AccountID string
+	AccountID       string
+	Access          string
+	CredentialIndex *int
 }
 
 type authYAMLDocument struct {
@@ -321,6 +324,7 @@ func (d *authYAMLDocument) updateOAuthCredential(
 }
 
 func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCredentialMatch) *authCredentialNodeRef {
+	var fallback *authCredentialNodeRef
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
 			continue
@@ -328,8 +332,14 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 		if match.AccountID != "" && refs[i].credential.OAuth.AccountID == match.AccountID {
 			return &refs[i]
 		}
+		if fallback == nil && match.Access != "" && refs[i].credential.OAuth.Access == match.Access {
+			fallback = &refs[i]
+		}
+		if fallback == nil && match.CredentialIndex != nil && refs[i].visibleIndex == *match.CredentialIndex {
+			fallback = &refs[i]
+		}
 	}
-	return nil
+	return fallback
 }
 func newOAuthCredentialNode(cred *OAuthCredential) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}

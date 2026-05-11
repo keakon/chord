@@ -515,18 +515,21 @@ func (c *Client) completeStreamWithRetry(
 				if err := abortIfCancelled(); err != nil {
 					return nil, err
 				}
-				if c.isTerminalAPIStatusError(err) {
-					log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-					return nil, err
-				}
 				if !visibleStarted {
 					fallbackEligible := shouldFallback(err)
 					cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, lastErr)
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
+					if (cooldownResult.expiredAccountID != "" || cooldownResult.expiredEmail != "") && cb != nil {
+						cb(message.StreamDelta{Type: "key_expired", AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
+					}
 					if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
 						cb(message.StreamDelta{Type: "key_deactivated", AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
+					}
+					if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
+						log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+						return nil, err
 					}
 					cooldownApplied := cooldownResult.cooldownApplied
 					keyForRotationCooldown := apiKey

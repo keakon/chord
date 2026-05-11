@@ -118,7 +118,7 @@ type ToolDefinition struct {
 type StreamDelta struct {
 	// Type is one of: "text", "tool_use_start", "tool_use_delta", "tool_use_end",
 	// "thinking", "thinking_end", "error", "status", "rate_limits", "rollback",
-	// "key_switched", "key_confirmed", "key_deactivated".
+	// "key_switched", "key_confirmed", "key_deactivated", "key_expired".
 	//
 	// key_confirmed may carry Status.ModelRef/Status.Reason to identify the
 	// effective model that produced the first visible token for the current
@@ -129,8 +129,8 @@ type StreamDelta struct {
 	Status    *StatusDelta                    // for Type="status"
 	RateLimit *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
 	Rollback  *RollbackDelta                  // for Type="rollback"
-	AccountID string                          // for Type="key_deactivated": the deactivated OAuth account ID
-	Email     string                          // for Type="key_deactivated": the deactivated OAuth account email, if available
+	AccountID string                          // for Type="key_deactivated"/"key_expired": the OAuth account ID
+	Email     string                          // for Type="key_deactivated"/"key_expired": the OAuth account email, if available
 	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
 }
 

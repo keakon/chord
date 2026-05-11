@@ -209,15 +209,28 @@ func (r *OAuthRefresher) mutateCredentialInMemory(
 	r.authConfigMu.Lock()
 	defer r.authConfigMu.Unlock()
 
-	if match.AccountID == "" {
-		return nil, false, fmt.Errorf("oauth credential account_id is required for provider %q", r.providerName)
+	if match.AccountID == "" && match.Access == "" && match.CredentialIndex == nil {
+		return nil, false, fmt.Errorf("oauth credential selector is required for provider %q", r.providerName)
 	}
 	creds := (*r.authConfig)[r.providerName]
+	matchIdx := -1
 	for i := range creds {
-		if creds[i].OAuth == nil || creds[i].OAuth.AccountID != match.AccountID {
+		if creds[i].OAuth == nil {
 			continue
 		}
-		updated := *creds[i].OAuth
+		if match.AccountID != "" && creds[i].OAuth.AccountID == match.AccountID {
+			matchIdx = i
+			break
+		}
+		if matchIdx < 0 && match.Access != "" && creds[i].OAuth.Access == match.Access {
+			matchIdx = i
+		}
+		if matchIdx < 0 && match.CredentialIndex != nil && i == *match.CredentialIndex {
+			matchIdx = i
+		}
+	}
+	if matchIdx >= 0 {
+		updated := *creds[matchIdx].OAuth
 		changed, err := mutate(&updated)
 		if err != nil {
 			return nil, false, err
@@ -225,7 +238,7 @@ func (r *OAuthRefresher) mutateCredentialInMemory(
 		if !changed {
 			return &updated, false, nil
 		}
-		creds[i].OAuth = &updated
+		creds[matchIdx].OAuth = &updated
 		return &updated, true, nil
 	}
 	return nil, false, fmt.Errorf("oauth credential not found for provider %q", r.providerName)
@@ -768,11 +781,12 @@ func (p *ProviderConfig) persistCodexResetHintsForKey(key string, primaryResetAt
 	}
 	p.mu.Lock()
 	ks := p.keyStateByKeyLocked(key)
-	if ks == nil || ks.OAuthInfo == nil || ks.OAuthInfo.AccountID == "" {
+	if ks == nil || ks.OAuthInfo == nil {
 		p.mu.Unlock()
 		return false
 	}
-	match := config.OAuthCredentialMatch{AccountID: ks.OAuthInfo.AccountID}
+	credentialIndex := ks.OAuthInfo.CredentialIndex
+	match := config.OAuthCredentialMatch{AccountID: ks.OAuthInfo.AccountID, Access: ks.Key, CredentialIndex: &credentialIndex}
 	if primaryResetAt == 0 && secondaryResetAt == 0 {
 		ks.SoftCooldownUntil = time.Time{}
 	} else if until := codexSoftCooldownUntilFromMillis(primaryResetAt, secondaryResetAt, time.Now()); !until.IsZero() {
@@ -930,6 +944,22 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil {
 		if selectedKS.Key == "" || isExpiringSoon(selectedKS.OAuthInfo.Expires) {
 			if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
+				if config.IsRefreshTokenInvalid(err) {
+					persist := p.markInvalidKeyStateLocked(selectedKS, config.OAuthStatusExpired)
+					hasRemaining := false
+					for _, ks := range p.keyStates {
+						if !ks.Invalid {
+							hasRemaining = true
+							break
+						}
+					}
+					p.mu.Unlock()
+					p.persistInvalidOAuthCredential(persist)
+					if hasRemaining {
+						return p.SelectKeyWithContext(ctx)
+					}
+					return "", false, fmt.Errorf("OAuth refresh token invalid provider=%v: %w", p.name, err)
+				}
 				// Log warning but continue with the old token (might still work).
 				log.Warnf("failed to refresh OAuth token on-demand provider=%v error=%v", p.name, err)
 			}
@@ -1293,32 +1323,46 @@ func (p *ProviderConfig) MarkExpired(key string) {
 	p.markInvalid(key, config.OAuthStatusExpired)
 }
 
+type invalidOAuthCredentialPersist struct {
+	refresher *OAuthRefresher
+	match     config.OAuthCredentialMatch
+	status    config.OAuthCredentialStatus
+}
+
 // markInvalid is the shared implementation for marking a key as permanently invalid.
 func (p *ProviderConfig) markInvalid(key string, status config.OAuthCredentialStatus) {
 	if key == "" {
 		return
 	}
 	p.mu.Lock()
-	ks := p.keyStateByKeyLocked(key)
+	persist := p.markInvalidKeyStateLocked(p.keyStateByKeyLocked(key), status)
+	p.mu.Unlock()
+	p.persistInvalidOAuthCredential(persist)
+}
+
+func (p *ProviderConfig) markInvalidKeyStateLocked(ks *KeyState, status config.OAuthCredentialStatus) invalidOAuthCredentialPersist {
 	if ks == nil {
-		p.mu.Unlock()
-		return
+		return invalidOAuthCredentialPersist{}
 	}
 	ks.Invalid = true
 	ks.Recovering = false
 	ks.CooldownEnd = time.Time{}
 	ks.ExhaustedUntil = time.Time{}
-	refresher := p.oauthRefresher
-	match := config.OAuthCredentialMatch{}
+	match := config.OAuthCredentialMatch{Access: ks.Key}
 	if ks.OAuthInfo != nil {
+		credentialIndex := ks.OAuthInfo.CredentialIndex
 		match.AccountID = ks.OAuthInfo.AccountID
+		match.CredentialIndex = &credentialIndex
 	}
-	p.mu.Unlock()
-	if refresher == nil || match.AccountID == "" {
+	return invalidOAuthCredentialPersist{refresher: p.oauthRefresher, match: match, status: status}
+}
+
+func (p *ProviderConfig) persistInvalidOAuthCredential(persist invalidOAuthCredentialPersist) {
+	if persist.refresher == nil || (persist.match.AccountID == "" && persist.match.Access == "" && persist.match.CredentialIndex == nil) {
 		return
 	}
-	if err := refresher.persistCredentialStatus(match, status); err != nil {
-		log.Warnf("failed to persist invalid OAuth credential status provider=%v status=%v error=%v", p.name, status, err)
+	if err := persist.refresher.persistCredentialStatus(persist.match, persist.status); err != nil {
+		log.Warnf("failed to persist invalid OAuth credential status provider=%v status=%v error=%v", p.name, persist.status, err)
 	}
 }
 
@@ -1703,7 +1747,8 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 		return err
 	}
 
-	match := config.OAuthCredentialMatch{AccountID: credCopy.AccountID}
+	credentialIndex := credIdx
+	match := config.OAuthCredentialMatch{AccountID: credCopy.AccountID, Access: credCopy.Access, CredentialIndex: &credentialIndex}
 	preservedPrimaryResetAt := credCopy.CodexPrimaryResetAt
 	preservedSecondaryResetAt := credCopy.CodexSecondaryResetAt
 	persistedCred, _, persistErr := r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {

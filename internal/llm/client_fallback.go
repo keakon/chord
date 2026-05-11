@@ -90,6 +90,8 @@ type markKeyCooldownResult struct {
 	cooldownApplied      bool
 	oauthRefreshed       bool
 	refreshedKey         string
+	expiredAccountID     string // non-empty when a codex OAuth refresh token was marked expired
+	expiredEmail         string // email from the expired key's JWT, if available
 	deactivatedAccountID string // non-empty when a codex OAuth key was put into cooldown due to 401/403
 	deactivatedEmail     string // email from the deactivated key's JWT, if available
 }
@@ -143,9 +145,15 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 			log.Infof("OAuth token refreshed after 401, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
 		} else if config.IsRefreshTokenInvalid(refreshErr) {
+			info := provider.oauthInfoForKey(key)
 			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
-			return markKeyCooldownResult{cooldownApplied: true}
+			result := markKeyCooldownResult{cooldownApplied: true}
+			if info != nil {
+				result.expiredAccountID = info.AccountID
+				result.expiredEmail = info.Email
+			}
+			return result
 		}
 		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
 			log.Warnf("OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
@@ -165,9 +173,15 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 			log.Infof("OAuth token refreshed after 403, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
 		} else if config.IsRefreshTokenInvalid(refreshErr) {
+			info := provider.oauthInfoForKey(key)
 			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
-			return markKeyCooldownResult{cooldownApplied: true}
+			result := markKeyCooldownResult{cooldownApplied: true}
+			if info != nil {
+				result.expiredAccountID = info.AccountID
+				result.expiredEmail = info.Email
+			}
+			return result
 		}
 		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
 			log.Warnf("OAuth account deactivated (403), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)

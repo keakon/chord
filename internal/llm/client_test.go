@@ -677,6 +677,57 @@ func TestMarkKeyCooldown403OAuthNoRefresherDeactivatesKey(t *testing.T) {
 	}
 }
 
+func TestCompleteStreamTerminal401MarksExpiredOAuthBeforeReturning(t *testing.T) {
+	ctx := context.Background()
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:    "oauth-key",
+		Refresh:   "refresh-token",
+		Expires:   expires,
+		AccountID: "acc-1",
+		Email:     "user@example.com",
+	}}}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Email: "user@example.com", Expires: expires},
+	}, "")
+	impl := &constantErrProvider{err: &APIError{StatusCode: 401, Message: "unauthorized"}}
+	client := NewClient(p, impl, "model", 128, "")
+	client.SetTerminalAPIStatusCodes(401)
+
+	var deltas []message.StreamDelta
+	_, err := client.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hello"}}, nil, func(delta message.StreamDelta) {
+		deltas = append(deltas, delta)
+	})
+	if err == nil {
+		t.Fatal("expected terminal API error")
+	}
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected auth config OAuth credential to be marked expired, got %q", auth["openai"][0].OAuth.Status)
+	}
+	if impl.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", impl.calls)
+	}
+	foundExpiredDelta := false
+	for _, delta := range deltas {
+		if delta.Type == "key_expired" && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
+			foundExpiredDelta = true
+			break
+		}
+	}
+	if !foundExpiredDelta {
+		t.Fatalf("expected key_expired delta with account metadata, got %#v", deltas)
+	}
+}
+
 func TestMarkKeyCooldown403OAuthNonDeactivationMessageUsesCooldown(t *testing.T) {
 	ctx := context.Background()
 	p := newTestProviderConfig([]string{"oauth-key"})

@@ -138,6 +138,68 @@ func TestUpdateOAuthCredentialInFile_RequiresAccountIDMatch(t *testing.T) {
 	}
 }
 
+func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedVisibleCredentials(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - $UNSET_AUTH_SLOT
+  - sk-live
+  - ""
+  - refresh: target-refresh
+    access: target-access
+    expires: 111
+  - refresh: sibling-refresh
+    access: sibling-access
+    expires: 222
+`)
+	_ = os.Unsetenv("UNSET_AUTH_SLOT")
+
+	credentialIndex := 2
+	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{
+		Access:          "missing-access",
+		CredentialIndex: &credentialIndex,
+	}, func(cred *OAuthCredential) (bool, error) {
+		cred.Status = OAuthStatusExpired
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when credential index fallback matches target OAuth credential")
+	}
+	if updated == nil || updated.Access != "target-access" || updated.Status != OAuthStatusExpired {
+		t.Fatalf("updated credential = %#v, want target-access with expired status", updated)
+	}
+
+	creds := auth["openai"]
+	if len(creds) != 4 {
+		t.Fatalf("expected 4 visible openai credentials after filtering hidden env slot, got %#v", creds)
+	}
+	if creds[0].APIKey != "sk-live" {
+		t.Fatalf("expected first visible credential to be API key, got %#v", creds[0])
+	}
+	if !creds[1].ExplicitEmpty {
+		t.Fatalf("expected second visible credential to be explicit empty, got %#v", creds[1])
+	}
+	if got := creds[2].OAuth; got == nil || got.Access != "target-access" || got.Status != OAuthStatusExpired {
+		t.Fatalf("expected credential index 2 OAuth to be marked expired, got %#v", got)
+	}
+	if got := creds[3].OAuth; got == nil || got.Access != "sibling-access" || got.Status != OAuthStatusNormal {
+		t.Fatalf("expected sibling OAuth credential to remain unchanged, got %#v", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "access: target-access\n    expires: 111\n    status: expired") {
+		t.Fatalf("expected target OAuth slot to gain expired status, got:\n%s", text)
+	}
+	if strings.Contains(text, "access: sibling-access\n    expires: 222\n    status: expired") {
+		t.Fatalf("expected sibling OAuth slot to remain unchanged, got:\n%s", text)
+	}
+}
+
 func TestUpdateOAuthCredentialInFile_UpdatesAndClearsCodexResetHints(t *testing.T) {
 	path := writeAuthFixture(t, `# auth comment
 openai:

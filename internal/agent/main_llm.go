@@ -514,6 +514,20 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			}
 			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", ident), Level: "error"})
 			a.emitToTUI(KeyPoolChangedEvent{})
+		case "key_expired":
+			var ident string
+			switch {
+			case delta.Email != "" && delta.AccountID != "":
+				ident = fmt.Sprintf("%s (%s)", delta.Email, delta.AccountID)
+			case delta.Email != "":
+				ident = delta.Email
+			case delta.AccountID != "":
+				ident = delta.AccountID
+			default:
+				ident = "unknown"
+			}
+			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", ident), Level: "error"})
+			a.emitToTUI(KeyPoolChangedEvent{})
 		case "key_confirmed":
 			// First visible token received on the current key: update key availability now.
 			a.emitToTUI(KeyPoolChangedEvent{})

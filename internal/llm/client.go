@@ -332,9 +332,11 @@ func (c *Client) SetStreamRetryRounds(n int) {
 }
 
 // SetTerminalAPIStatusCodes marks API status codes as terminal for this client.
-// Terminal errors are returned immediately without key rotation, model fallback,
-// or another retry round. Normal runtime clients leave this unset; diagnostic
-// callers can use it to avoid retrying deterministic client/auth failures.
+// Terminal errors still run per-key bookkeeping (for example OAuth refresh-token
+// expiry/deactivation marking) before returning; a successful OAuth refresh is
+// treated as remediation and may still be retried. Normal runtime clients leave
+// this unset; diagnostic callers can use it to avoid retrying deterministic
+// client/auth failures.
 func (c *Client) SetTerminalAPIStatusCodes(statusCodes ...int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
