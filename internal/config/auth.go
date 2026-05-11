@@ -129,6 +129,12 @@ type ProviderCredential struct {
 	ExplicitEmpty bool
 }
 
+// isRetainedProviderCredential reports whether a credential survives the
+// normalized AuthConfig view returned by LoadAuthConfig.
+func isRetainedProviderCredential(c ProviderCredential) bool {
+	return c.APIKey != "" || c.OAuth != nil || c.ExplicitEmpty
+}
+
 // MarshalYAML implements union serialization.
 // OAuth credentials are serialized as a mapping; API keys as a scalar string.
 func (c ProviderCredential) MarshalYAML() (interface{}, error) {

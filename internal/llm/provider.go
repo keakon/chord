@@ -214,19 +214,39 @@ func (r *OAuthRefresher) mutateCredentialInMemory(
 	}
 	creds := (*r.authConfig)[r.providerName]
 	matchIdx := -1
+	accessFallbackIdx := -1
+	credentialIndexFallbackIdx := -1
 	for i := range creds {
 		if creds[i].OAuth == nil {
 			continue
 		}
-		if match.AccountID != "" && creds[i].OAuth.AccountID == match.AccountID {
-			matchIdx = i
-			break
+		oauth := creds[i].OAuth
+		if match.AccountID != "" && oauth.AccountID == match.AccountID {
+			if match.Access != "" && oauth.Access == match.Access {
+				matchIdx = i
+				break
+			}
+			if match.CredentialIndex != nil && i == *match.CredentialIndex {
+				matchIdx = i
+				break
+			}
+			if matchIdx < 0 {
+				matchIdx = i
+			}
+			continue
 		}
-		if matchIdx < 0 && match.Access != "" && creds[i].OAuth.Access == match.Access {
-			matchIdx = i
+		if accessFallbackIdx < 0 && match.Access != "" && oauth.Access == match.Access {
+			accessFallbackIdx = i
 		}
-		if matchIdx < 0 && match.CredentialIndex != nil && i == *match.CredentialIndex {
-			matchIdx = i
+		if credentialIndexFallbackIdx < 0 && match.CredentialIndex != nil && i == *match.CredentialIndex {
+			credentialIndexFallbackIdx = i
+		}
+	}
+	if matchIdx < 0 {
+		if accessFallbackIdx >= 0 {
+			matchIdx = accessFallbackIdx
+		} else if credentialIndexFallbackIdx >= 0 {
+			matchIdx = credentialIndexFallbackIdx
 		}
 	}
 	if matchIdx >= 0 {
@@ -1560,7 +1580,11 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 			}
 			p.mu.Unlock()
 			if err != nil {
-				log.Debugf("codex warmup usage probe failed provider=%v account_id=%v error=%v", providerName, accountID, err)
+				if p.handleCodexWarmupAuthFailure(ctx, key, err) {
+					log.Debugf("codex warmup auth failure handled provider=%v account_id=%v error=%v", providerName, accountID, err)
+				} else {
+					log.Debugf("codex warmup usage probe failed provider=%v account_id=%v error=%v", providerName, accountID, err)
+				}
 				continue
 			}
 			for _, snap := range snaps {
@@ -1576,6 +1600,30 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	}(p.name, candidates, ctx)
 
 	return true
+}
+
+func (p *ProviderConfig) handleCodexWarmupAuthFailure(ctx context.Context, key string, err error) bool {
+	var apiErr *APIError
+	if !isAPIError(err, &apiErr) {
+		return false
+	}
+	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
+		return false
+	}
+	if info := p.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
+		log.Warnf("codex warmup detected OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+		p.MarkDeactivated(key)
+		return true
+	}
+	if refreshedKey, ok, refreshErr := p.TryRefreshOAuthKey(ctx, key); ok {
+		log.Infof("OAuth token refreshed during codex warmup key_suffix=%v", keySuffix(refreshedKey))
+		return true
+	} else if config.IsRefreshTokenInvalid(refreshErr) {
+		log.Warnf("codex warmup detected OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
+		p.MarkExpired(key)
+		return true
+	}
+	return false
 }
 
 func (p *ProviderConfig) WakeCodexRateLimitPolling() {

@@ -2,6 +2,11 @@ package llm
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -68,6 +73,195 @@ func TestResolveCodexUsageURL(t *testing.T) {
 			t.Fatalf("resolveCodexUsageURL(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
+}
+
+func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-a
+    access: access-a
+    expires: 32503680000000
+    account_id: acc-a
+  - refresh: refresh-b
+    access: access-b
+    expires: 32503680000000
+    account_id: acc-b
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+
+	seenA := make(chan struct{}, 1)
+	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("ChatGPT-Account-ID") {
+		case "acc-a":
+			select {
+			case seenA <- struct{}{}:
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"error":{"message":"account deactivated","code":"account_deactivated"}}`)
+		case "acc-b":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":20,"reset_after_seconds":3600}},"credits":{"has_credits":true,"unlimited":false}}`)
+		default:
+			t.Errorf("unexpected account id %q", r.Header.Get("ChatGPT-Account-ID"))
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer usageServer.Close()
+
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{
+		Type:     config.ProviderTypeResponses,
+		APIURL:   usageServer.URL + "/backend-api/codex/responses",
+		Preset:   config.ProviderPresetCodex,
+		KeyOrder: config.KeyOrderSequential,
+	}, config.ExtractAPIKeys(auth["openai"]))
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, &auth, &authMu, map[string]OAuthKeySetup{
+		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
+		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
+	}, "")
+	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		return nil, nil
+	})
+	defer prov.StopCodexRateLimitPolling()
+
+	if !prov.StartCodexWarmup(t.Context()) {
+		t.Fatal("expected codex warmup to start")
+	}
+	select {
+	case <-seenA:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup did not probe deactivated account")
+	}
+
+	waitForOAuthStatusInAuthFile(t, authPath, "access-a", config.OAuthStatusDeactivated)
+	updated, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig(updated): %v", err)
+	}
+	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected sibling OAuth credential to remain normal, got %#v", got)
+	}
+}
+
+func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-a
+    access: access-a
+    expires: 32503680000000
+    account_id: acc-a
+  - refresh: refresh-b
+    access: access-b
+    expires: 32503680000000
+    account_id: acc-b
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+
+	seenA := make(chan struct{}, 1)
+	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("ChatGPT-Account-ID") {
+		case "acc-a":
+			select {
+			case seenA <- struct{}{}:
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":{"message":"access token expired","code":"invalid_token"}}`)
+		case "acc-b":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":20,"reset_after_seconds":3600}},"credits":{"has_credits":true,"unlimited":false}}`)
+		default:
+			t.Errorf("unexpected account id %q", r.Header.Get("ChatGPT-Account-ID"))
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer usageServer.Close()
+
+	refreshHit := make(chan struct{}, 1)
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case refreshHit <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
+	}))
+	defer refreshServer.Close()
+
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{
+		Type:     config.ProviderTypeResponses,
+		APIURL:   usageServer.URL + "/backend-api/codex/responses",
+		Preset:   config.ProviderPresetCodex,
+		KeyOrder: config.KeyOrderSequential,
+	}, config.ExtractAPIKeys(auth["openai"]))
+	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
+		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
+	}, "")
+	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		return nil, nil
+	})
+	defer prov.StopCodexRateLimitPolling()
+
+	if !prov.StartCodexWarmup(t.Context()) {
+		t.Fatal("expected codex warmup to start")
+	}
+	select {
+	case <-seenA:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup did not probe expired account")
+	}
+	select {
+	case <-refreshHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup did not attempt OAuth refresh after 401")
+	}
+
+	waitForOAuthStatusInAuthFile(t, authPath, "access-a", config.OAuthStatusExpired)
+	updated, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig(updated): %v", err)
+	}
+	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected sibling OAuth credential to remain normal, got %#v", got)
+	}
+}
+
+func waitForOAuthStatusInAuthFile(t *testing.T, authPath, access string, want config.OAuthCredentialStatus) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var lastStatus config.OAuthCredentialStatus
+	for time.Now().Before(deadline) {
+		auth, err := config.LoadAuthConfig(authPath)
+		if err != nil {
+			t.Fatalf("LoadAuthConfig(%s): %v", authPath, err)
+		}
+		for _, cred := range auth["openai"] {
+			if cred.OAuth != nil && cred.OAuth.Access == access {
+				lastStatus = cred.OAuth.Status
+				if lastStatus == want {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("OAuth credential %q status = %q, want %q", access, lastStatus, want)
 }
 
 func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing.T) {

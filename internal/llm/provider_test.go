@@ -28,6 +28,28 @@ func newTestProviderConfig(keys []string) *ProviderConfig {
 	return NewProviderConfig("test", cfg, keys)
 }
 
+func TestMutateCredentialInMemoryUsesIndexToDisambiguateDuplicateAccountID(t *testing.T) {
+	auth := config.AuthConfig{
+		"openai": {
+			{OAuth: &config.OAuthCredential{Refresh: "refresh-a", Access: "access-a", Expires: 111, AccountID: "shared-acc"}},
+			{OAuth: &config.OAuthCredential{Refresh: "refresh-b", Access: "access-b", Expires: 222, AccountID: "shared-acc"}},
+		},
+	}
+	authMu := &sync.Mutex{}
+	r := &OAuthRefresher{providerName: "openai", authConfig: &auth, authConfigMu: authMu}
+
+	credentialIndex := 1
+	if err := r.persistCredentialStatus(config.OAuthCredentialMatch{AccountID: "shared-acc", CredentialIndex: &credentialIndex}, config.OAuthStatusExpired); err != nil {
+		t.Fatalf("persistCredentialStatus: %v", err)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Access != "access-a" || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected first duplicate account_id credential unchanged, got %#v", got)
+	}
+	if got := auth["openai"][1].OAuth; got == nil || got.Access != "access-b" || got.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected second duplicate account_id credential marked expired, got %#v", got)
+	}
+}
+
 // --- SelectKey / SelectKeyWithContext ---
 
 func TestSelectKey_NoKeys(t *testing.T) {

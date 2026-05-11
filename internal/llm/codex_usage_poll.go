@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,13 +66,11 @@ func FetchCodexUsageSnapshot(ctx context.Context, provider *ProviderConfig, key,
 		return nil, fmt.Errorf("read codex usage response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		var compact any
-		if json.Unmarshal(body, &compact) == nil {
-			if b, mErr := json.Marshal(compact); mErr == nil {
-				body = b
-			}
+		apiErr := parseOpenAIHTTPErrorFromBytes(resp.StatusCode, resp.Header, body)
+		if strings.TrimSpace(apiErr.Message) == "" {
+			apiErr.Message = strings.TrimSpace(string(body))
 		}
-		return nil, fmt.Errorf("codex usage endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, apiErr
 	}
 	snaps, err := ratelimit.ParseCodexUsagePayload(body)
 	if err != nil {

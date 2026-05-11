@@ -12,8 +12,11 @@ import (
 )
 
 // OAuthCredentialMatch identifies an OAuth credential slot inside auth.yaml.
-// AccountID is the preferred stable selector. Access and CredentialIndex are
-// fallback selectors for legacy credentials that do not yet have account_id.
+// AccountID is the preferred selector when unique, while Access and
+// CredentialIndex act as fallbacks for legacy credentials without account_id and
+// as disambiguators when multiple OAuth slots share the same account_id.
+// CredentialIndex uses the normalized AuthConfig index, after filtering unset
+// environment-variable credentials the same way LoadAuthConfig does.
 type OAuthCredentialMatch struct {
 	AccountID       string
 	Access          string
@@ -26,9 +29,9 @@ type authYAMLDocument struct {
 }
 
 type authCredentialNodeRef struct {
-	node         *yaml.Node
-	credential   ProviderCredential
-	visibleIndex int
+	node            *yaml.Node
+	credential      ProviderCredential
+	normalizedIndex int
 }
 
 func UpsertOAuthCredentialInFile(path, provider string, cred *OAuthCredential) (AuthConfig, error) {
@@ -201,7 +204,7 @@ func normalizeAuthConfig(raw map[string][]ProviderCredential) AuthConfig {
 	for provider, creds := range raw {
 		var filtered []ProviderCredential
 		for _, c := range creds {
-			if c.APIKey == "" && c.OAuth == nil && !c.ExplicitEmpty {
+			if !isRetainedProviderCredential(c) {
 				continue
 			}
 			filtered = append(filtered, c)
@@ -241,20 +244,20 @@ func (d *authYAMLDocument) providerCredentialRefs(provider string) ([]authCreden
 		return nil, seq, err
 	}
 	refs := make([]authCredentialNodeRef, 0, len(seq.Content))
-	visibleIndex := 0
+	normalizedIndex := 0
 	for _, node := range seq.Content {
 		var cred ProviderCredential
 		if err := node.Decode(&cred); err != nil {
 			return nil, nil, fmt.Errorf("decode auth provider %q credential: %w", provider, err)
 		}
 		ref := authCredentialNodeRef{
-			node:         node,
-			credential:   cred,
-			visibleIndex: -1,
+			node:            node,
+			credential:      cred,
+			normalizedIndex: -1,
 		}
-		if cred.APIKey != "" || cred.OAuth != nil || cred.ExplicitEmpty {
-			ref.visibleIndex = visibleIndex
-			visibleIndex++
+		if isRetainedProviderCredential(cred) {
+			ref.normalizedIndex = normalizedIndex
+			normalizedIndex++
 		}
 		refs = append(refs, ref)
 	}
@@ -324,23 +327,49 @@ func (d *authYAMLDocument) updateOAuthCredential(
 }
 
 func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCredentialMatch) *authCredentialNodeRef {
-	var fallback *authCredentialNodeRef
+	var (
+		accountIDMatch        *authCredentialNodeRef
+		accountIndexMatch     *authCredentialNodeRef
+		accessFallback        *authCredentialNodeRef
+		credentialIdxFallback *authCredentialNodeRef
+	)
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
 			continue
 		}
-		if match.AccountID != "" && refs[i].credential.OAuth.AccountID == match.AccountID {
-			return &refs[i]
+		oauth := refs[i].credential.OAuth
+		if match.AccountID != "" && oauth.AccountID == match.AccountID {
+			if match.Access != "" && oauth.Access == match.Access {
+				return &refs[i]
+			}
+			if match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
+				accountIndexMatch = &refs[i]
+				continue
+			}
+			if accountIDMatch == nil {
+				accountIDMatch = &refs[i]
+			}
+			continue
 		}
-		if fallback == nil && match.Access != "" && refs[i].credential.OAuth.Access == match.Access {
-			fallback = &refs[i]
+		if accessFallback == nil && match.Access != "" && oauth.Access == match.Access {
+			accessFallback = &refs[i]
 		}
-		if fallback == nil && match.CredentialIndex != nil && refs[i].visibleIndex == *match.CredentialIndex {
-			fallback = &refs[i]
+		if credentialIdxFallback == nil && match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
+			credentialIdxFallback = &refs[i]
 		}
 	}
-	return fallback
+	if accountIndexMatch != nil {
+		return accountIndexMatch
+	}
+	if accountIDMatch != nil {
+		return accountIDMatch
+	}
+	if accessFallback != nil {
+		return accessFallback
+	}
+	return credentialIdxFallback
 }
+
 func newOAuthCredentialNode(cred *OAuthCredential) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 	updateOAuthMappingNode(node, cred)

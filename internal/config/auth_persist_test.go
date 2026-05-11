@@ -138,7 +138,7 @@ func TestUpdateOAuthCredentialInFile_RequiresAccountIDMatch(t *testing.T) {
 	}
 }
 
-func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedVisibleCredentials(t *testing.T) {
+func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedNormalizedCredentials(t *testing.T) {
 	path := writeAuthFixture(t, `openai:
   - $UNSET_AUTH_SLOT
   - sk-live
@@ -172,13 +172,13 @@ func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedVisib
 
 	creds := auth["openai"]
 	if len(creds) != 4 {
-		t.Fatalf("expected 4 visible openai credentials after filtering hidden env slot, got %#v", creds)
+		t.Fatalf("expected 4 normalized openai credentials after filtering hidden env slot, got %#v", creds)
 	}
 	if creds[0].APIKey != "sk-live" {
-		t.Fatalf("expected first visible credential to be API key, got %#v", creds[0])
+		t.Fatalf("expected first normalized credential to be API key, got %#v", creds[0])
 	}
 	if !creds[1].ExplicitEmpty {
-		t.Fatalf("expected second visible credential to be explicit empty, got %#v", creds[1])
+		t.Fatalf("expected second normalized credential to be explicit empty, got %#v", creds[1])
 	}
 	if got := creds[2].OAuth; got == nil || got.Access != "target-access" || got.Status != OAuthStatusExpired {
 		t.Fatalf("expected credential index 2 OAuth to be marked expired, got %#v", got)
@@ -197,6 +197,56 @@ func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedVisib
 	}
 	if strings.Contains(text, "access: sibling-access\n    expires: 222\n    status: expired") {
 		t.Fatalf("expected sibling OAuth slot to remain unchanged, got:\n%s", text)
+	}
+}
+
+func TestUpdateOAuthCredentialInFile_PrefersAccessAndCredentialIndexWhenAccountIDIsDuplicated(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - refresh: refresh-a
+    access: access-a
+    expires: 111
+    account_id: shared-acc
+  - refresh: refresh-b
+    access: access-b
+    expires: 222
+    account_id: shared-acc
+`)
+
+	credentialIndex := 1
+	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{
+		AccountID:       "shared-acc",
+		Access:          "access-b",
+		CredentialIndex: &credentialIndex,
+	}, func(cred *OAuthCredential) (bool, error) {
+		cred.Status = OAuthStatusExpired
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when duplicate account_id is disambiguated by access/index")
+	}
+	if updated == nil || updated.Access != "access-b" || updated.Status != OAuthStatusExpired {
+		t.Fatalf("updated credential = %#v, want access-b with expired status", updated)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Access != "access-a" || got.Status != OAuthStatusNormal {
+		t.Fatalf("expected first duplicate account_id credential unchanged, got %#v", got)
+	}
+	if got := auth["openai"][1].OAuth; got == nil || got.Access != "access-b" || got.Status != OAuthStatusExpired {
+		t.Fatalf("expected second duplicate account_id credential marked expired, got %#v", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "access: access-a\n    expires: 111\n    account_id: shared-acc\n    status: expired") {
+		t.Fatalf("expected first duplicate account_id slot to remain unchanged, got:\n%s", text)
+	}
+	if !strings.Contains(text, "access: access-b\n    expires: 222\n    account_id: shared-acc\n    status: expired") {
+		t.Fatalf("expected second duplicate account_id slot to be marked expired, got:\n%s", text)
 	}
 }
 
