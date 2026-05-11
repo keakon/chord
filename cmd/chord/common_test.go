@@ -309,6 +309,31 @@ func TestRuntimeMCPControlAggregatesValidationErrors(t *testing.T) {
 	}
 }
 
+func TestInitAppReturnsProjectConfigParseError(t *testing.T) {
+	configHome := t.TempDir()
+	projectRoot := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir project .chord: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, ".chord", "config.yaml"), []byte("hooks: [\n"), 0o644); err != nil {
+		t.Fatalf("write malformed project config: %v", err)
+	}
+	chdirForTest(t, projectRoot)
+
+	ac, err := initApp(false, "test", sessionStartupOptions{})
+	if ac != nil {
+		ac.Close()
+		t.Fatal("expected initApp to fail for malformed project config")
+	}
+	if err == nil || !strings.Contains(err.Error(), "load config") || !strings.Contains(err.Error(), "parse config") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 	projectRoot := t.TempDir()
 	chordHome := t.TempDir()
@@ -343,10 +368,7 @@ func TestSkillLoadDirsAppendsConfiguredPathsAfterDefaults(t *testing.T) {
 		ProjectRoot: projectRoot,
 		ConfigHome:  chordHome,
 		Cfg: &config.Config{Skills: config.SkillsConfig{
-			Paths: []string{globalExtra},
-		}},
-		ProjectCfg: &config.Config{Skills: config.SkillsConfig{
-			Paths: []string{projectExtra},
+			Paths: []string{globalExtra, projectExtra},
 		}},
 	}
 

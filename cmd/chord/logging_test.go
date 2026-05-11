@@ -46,6 +46,21 @@ func TestRotatingLogFileRotatesAtSoftLimit(t *testing.T) {
 	}
 }
 
+func TestRotatingLogFileCloseIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chord.log")
+	w, err := newRotatingLogFileWithOptions(path, rotatingLogOptions{MaintenanceInterval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("newRotatingLogFileWithOptions: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
 func TestResolveLogLevelProjectOverridesGlobal(t *testing.T) {
 	global := &config.Config{LogLevel: "info"}
 	project := &config.Config{LogLevel: "debug"}

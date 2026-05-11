@@ -35,6 +35,7 @@ type rotatingLogFile struct {
 	bytesSinceCheck int64
 	stderrRedirect  *stderrRedirect
 	closed          bool
+	stopOnce        sync.Once
 	stopCh          chan struct{}
 	doneCh          chan struct{}
 }
@@ -139,7 +140,12 @@ func (w *rotatingLogFile) Sync() error {
 }
 
 func (w *rotatingLogFile) Close() error {
-	close(w.stopCh)
+	if w == nil {
+		return nil
+	}
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
 	<-w.doneCh
 
 	w.mu.Lock()

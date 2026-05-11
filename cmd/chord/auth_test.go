@@ -86,6 +86,72 @@ func TestEligibleAuthLoginProviders(t *testing.T) {
 	}
 }
 
+func TestLoadAuthLoginProvidersIncludesProjectOverrides(t *testing.T) {
+	configHome := t.TempDir()
+	projectRoot := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	globalConfigPath := filepath.Join(configHome, "config.yaml")
+	if err := os.WriteFile(globalConfigPath, []byte(`providers:
+  global:
+    preset: codex
+    type: responses
+    api_url: https://global.example/v1/responses
+    models:
+      gpt-5:
+        limit:
+          context: 8192
+          output: 1024
+proxy: https://global-proxy.example
+`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir project .chord: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, ".chord", "config.yaml"), []byte(`providers:
+  project:
+    preset: codex
+    type: responses
+    api_url: https://project.example/v1/responses
+    models:
+      gpt-5-mini:
+        limit:
+          context: 4096
+          output: 512
+proxy: socks5://project-proxy.example:1080
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	defer func() {
+		if chdirErr := os.Chdir(cwd); chdirErr != nil {
+			t.Fatalf("restore cwd: %v", chdirErr)
+		}
+	}()
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Chdir(projectRoot): %v", err)
+	}
+
+	providers, proxy, err := loadAuthLoginProviders()
+	if err != nil {
+		t.Fatalf("loadAuthLoginProviders: %v", err)
+	}
+	if proxy != "socks5://project-proxy.example:1080" {
+		t.Fatalf("proxy = %q, want project override", proxy)
+	}
+	if _, ok := providers["global"]; !ok {
+		t.Fatal("expected global provider to remain available")
+	}
+	if _, ok := providers["project"]; !ok {
+		t.Fatal("expected project provider to be merged in")
+	}
+}
+
 func TestPromptAuthLoginProvider(t *testing.T) {
 	t.Run("single provider", func(t *testing.T) {
 		var out bytes.Buffer

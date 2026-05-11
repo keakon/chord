@@ -107,6 +107,30 @@ func chdirForTest(t *testing.T, dir string) {
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 }
 
+func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
+	repo := setupStartupRepo(t)
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte("worktree:\n  branch_prefix: global/\n"), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir project .chord: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".chord", "config.yaml"), []byte("worktree:\n  branch_prefix: project\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	chdirForTest(t, repo)
+
+	got, err := startupBranchPrefix()
+	if err != nil {
+		t.Fatalf("startupBranchPrefix: %v", err)
+	}
+	if got != "project/" {
+		t.Fatalf("startupBranchPrefix() = %q, want project/", got)
+	}
+}
+
 func TestPrepareStartupWorktree_ChdirAndIndex(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)

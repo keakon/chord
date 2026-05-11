@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -28,20 +29,21 @@ type Config struct {
 	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.
-	PreventSleep    *bool               `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
-	KeyMap          map[string][]string `json:"keymap,omitempty" yaml:"keymap,omitempty"`                       // custom key bindings (snake_case action → key list)
-	Commands        map[string]string   `json:"commands,omitempty" yaml:"commands,omitempty"`                   // custom slash commands: "/cmd" → text to send as message
-	IMESwitchTarget string              `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"` // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
-	LogLevel        string              `json:"log_level" yaml:"log_level"`                                     // log verbosity: "debug", "info" (default), "warn", "error"
-	Paths           PathsConfig         `json:"paths,omitempty" yaml:"paths,omitempty"`                         // user-level state/cache/logs path overrides
-	Maintenance     MaintenanceConfig   `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`             // optional cleanup/status checks
-	LSP             LSPConfig           `json:"lsp" yaml:"lsp"`                                                 // LSP server config
-	MCP             MCPConfig           `json:"mcp,omitempty" yaml:"mcp,omitempty"`                             // MCP server configs
-	Hooks           HookConfig          `json:"hooks,omitempty" yaml:"hooks,omitempty"`                         // lifecycle hook configs
-	MaxOutputTokens int                 `json:"max_output_tokens" yaml:"max_output_tokens"`                     // global output token cap (0 = use DefaultOutputTokenMax)
-	Proxy           string              `json:"proxy,omitempty" yaml:"proxy,omitempty"`                         // global proxy URL (http/https/socks5), empty = no proxy
-	WebFetch        WebFetchConfig      `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                 // WebFetch-specific options
-	Worktree        WorktreeConfig      `json:"worktree,omitempty" yaml:"worktree,omitempty"`                   // git worktree integration options
+	PreventSleep      *bool               `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
+	KeyMap            map[string][]string `json:"keymap,omitempty" yaml:"keymap,omitempty"`                       // custom key bindings (snake_case action → key list)
+	Commands          map[string]string   `json:"commands,omitempty" yaml:"commands,omitempty"`                   // custom slash commands: "/cmd" → text to send as message
+	IMESwitchTarget   string              `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"` // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
+	LogLevel          string              `json:"log_level" yaml:"log_level"`                                     // log verbosity: "debug", "info" (default), "warn", "error"
+	Paths             PathsConfig         `json:"paths,omitempty" yaml:"paths,omitempty"`                         // user-level state/cache/logs path overrides
+	Maintenance       MaintenanceConfig   `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`             // optional cleanup/status checks
+	LSP               LSPConfig           `json:"lsp" yaml:"lsp"`                                                 // LSP server config
+	MCP               MCPConfig           `json:"mcp,omitempty" yaml:"mcp,omitempty"`                             // MCP server configs
+	Hooks             HookConfig          `json:"hooks,omitempty" yaml:"hooks,omitempty"`                         // lifecycle hook configs
+	MaxOutputTokens   int                 `json:"max_output_tokens" yaml:"max_output_tokens"`                     // global output token cap (0 = use DefaultOutputTokenMax)
+	StreamRetryRounds int                 `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                 // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
+	Proxy             string              `json:"proxy,omitempty" yaml:"proxy,omitempty"`                         // global proxy URL (http/https/socks5), empty = no proxy
+	WebFetch          WebFetchConfig      `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                 // WebFetch-specific options
+	Worktree          WorktreeConfig      `json:"worktree,omitempty" yaml:"worktree,omitempty"`                   // git worktree integration options
 }
 
 // WebFetchConfig controls WebFetch runtime behavior.
@@ -538,9 +540,12 @@ func LoadConfig() (*Config, error) {
 	return LoadConfigFromPath(configPath)
 }
 
+// ProjectConfigPath returns the project-local config path under .chord/.
+func ProjectConfigPath(projectRoot string) string {
+	return filepath.Join(projectRoot, ".chord", "config.yaml")
+}
+
 // LoadConfigFromPath loads configuration from an arbitrary YAML file path.
-// This supports both global (<config-home>/config.yaml) and project-level
-// (.chord/config.yaml) configs, which share the same format.
 // The config is initialised with DefaultConfig() values before unmarshalling,
 // so omitted YAML fields retain their defaults (e.g. compact_threshold: 0.8).
 func LoadConfigFromPath(path string) (*Config, error) {
@@ -548,11 +553,173 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
+	return loadConfigData(path, data, true)
+}
 
-	cfg := DefaultConfig()
+// LoadConfigOverrideFromPath loads a config file without applying built-in
+// defaults. This is used for project-level overrides so omitted fields stay
+// unset and do not accidentally shadow global defaults.
+func LoadConfigOverrideFromPath(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	return loadConfigData(path, data, false)
+}
+
+// MergeProjectConfig overlays a project-level .chord/config.yaml onto an
+// already-loaded global config. Missing project configs are ignored. Only keys
+// documented as project-scoped participate in the merge; global-only keys such
+// as paths.* and maintenance.* are intentionally ignored here.
+func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *Config, err error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, base, nil
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil, base, nil
+		}
+		return nil, nil, fmt.Errorf("read config %s: %w", path, readErr)
+	}
+	projectCfg, err = loadConfigData(path, data, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	merged, err = mergeConfigOverrideData(base, data, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return projectCfg, merged, nil
+}
+
+func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error) {
+	cfg := &Config{}
+	if withDefaults {
+		cfg = DefaultConfig()
+	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-
 	return cfg, nil
+}
+
+var projectScopedTopLevelKeys = map[string]bool{
+	"providers":            true,
+	"model_pools":          true,
+	"context":              true,
+	"skills":               true,
+	"confirm_timeout":      true,
+	"diff":                 true,
+	"desktop_notification": true,
+	"prevent_sleep":        true,
+	"keymap":               true,
+	"commands":             true,
+	"ime_switch_target":    true,
+	"log_level":            true,
+	"lsp":                  true,
+	"mcp":                  true,
+	"hooks":                true,
+	"max_output_tokens":    true,
+	"stream_retry_rounds":  true,
+	"proxy":                true,
+	"web_fetch":            true,
+	"worktree":             true,
+}
+
+func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string) (*Config, error) {
+	baseMap, err := configToYAMLMap(base)
+	if err != nil {
+		return nil, err
+	}
+	var overrideMap map[string]any
+	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", overridePath, err)
+	}
+	mergeProjectConfigMap(baseMap, overrideMap, nil)
+	mergedData, err := yaml.Marshal(baseMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal merged config %s: %w", overridePath, err)
+	}
+	return loadConfigData(overridePath, mergedData, false)
+}
+
+func configToYAMLMap(cfg *Config) (map[string]any, error) {
+	if cfg == nil {
+		return map[string]any{}, nil
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	var out map[string]any
+	if err := yaml.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("parse config yaml: %w", err)
+	}
+	if out == nil {
+		return map[string]any{}, nil
+	}
+	return out, nil
+}
+
+func mergeProjectConfigMap(dst, src map[string]any, path []string) {
+	if dst == nil || src == nil {
+		return
+	}
+	for key, raw := range src {
+		if len(path) == 0 && !projectScopedTopLevelKeys[key] {
+			continue
+		}
+		if len(path) == 1 && path[0] == "skills" && key == "paths" {
+			dst[key] = appendYAMLSequences(dst[key], raw)
+			continue
+		}
+		if len(path) == 1 && path[0] == "hooks" {
+			dst[key] = appendYAMLSequences(dst[key], raw)
+			continue
+		}
+		if childDst, ok := dst[key].(map[string]any); ok {
+			if childSrc, ok := raw.(map[string]any); ok {
+				mergeProjectConfigMap(childDst, childSrc, append(path, key))
+				dst[key] = childDst
+				continue
+			}
+		}
+		dst[key] = cloneYAMLValue(raw)
+	}
+}
+
+func appendYAMLSequences(base, extra any) any {
+	baseSeq, _ := base.([]any)
+	extraSeq, ok := extra.([]any)
+	if !ok {
+		return cloneYAMLValue(extra)
+	}
+	out := make([]any, 0, len(baseSeq)+len(extraSeq))
+	for _, item := range baseSeq {
+		out = append(out, cloneYAMLValue(item))
+	}
+	for _, item := range extraSeq {
+		out = append(out, cloneYAMLValue(item))
+	}
+	return out
+}
+
+func cloneYAMLValue(v any) any {
+	switch vv := v.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(vv))
+		for k, child := range vv {
+			cloned[k] = cloneYAMLValue(child)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(vv))
+		for i, child := range vv {
+			cloned[i] = cloneYAMLValue(child)
+		}
+		return cloned
+	default:
+		return vv
+	}
 }

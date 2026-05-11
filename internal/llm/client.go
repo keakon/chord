@@ -39,20 +39,21 @@ type FallbackModel struct {
 
 // Client is the high-level LLM client that handles retries and key selection.
 type Client struct {
-	mu              sync.RWMutex
-	provider        *ProviderConfig
-	providerImpl    Provider
-	modelID         string
-	maxTokens       int
-	outputTokenMax  int // global output token cap (Layer 1); 0 means use DefaultOutputTokenMax
-	tuning          RequestTuning
-	nextTuning      *RequestTuning
-	activeVariant   string // name of the currently applied variant (empty = none)
-	systemPrompt    string
-	lastInputTokens int             // tracks last known input token count for context size checks
-	fallbackModels  []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
-	poolCursor      int             // sticky cursor over the effective model pool; success pins, failure advances
-	lastCallStatus  CallStatus
+	mu                sync.RWMutex
+	provider          *ProviderConfig
+	providerImpl      Provider
+	modelID           string
+	maxTokens         int
+	outputTokenMax    int // global output token cap (Layer 1); 0 means use DefaultOutputTokenMax
+	streamRetryRounds int // hard cap on public CompleteStream retry rounds; 0 means retry until success/cancel
+	tuning            RequestTuning
+	nextTuning        *RequestTuning
+	activeVariant     string // name of the currently applied variant (empty = none)
+	systemPrompt      string
+	lastInputTokens   int             // tracks last known input token count for context size checks
+	fallbackModels    []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
+	poolCursor        int             // sticky cursor over the effective model pool; success pins, failure advances
+	lastCallStatus    CallStatus
 
 	routingGeneration atomic.Uint64
 	routingChangedCh  chan struct{}
@@ -316,6 +317,18 @@ func (c *Client) SetOutputTokenMax(n int) {
 	c.outputTokenMax = n
 }
 
+// SetStreamRetryRounds sets a hard cap on public CompleteStream retry rounds.
+// Values <= 0 keep the default behavior of retrying full rounds until success,
+// cancellation, or a non-retriable terminal failure.
+func (c *Client) SetStreamRetryRounds(n int) {
+	if n < 0 {
+		n = 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.streamRetryRounds = n
+}
+
 // SetVariant applies the named variant from the current cursor head model's Variants map.
 // If the variant name is empty or not found, it is a no-op.
 // Variant fields (Thinking, Reasoning) override the model-level defaults.
@@ -480,6 +493,7 @@ func (c *Client) CompleteStream(
 	wireMessages := messages
 	routingGeneration := c.routingGeneration.Load()
 	routingChangedCh := c.routingChangedCh
+	streamRetryRounds := c.streamRetryRounds
 	c.mu.Unlock()
 
 	status := CallStatus{
@@ -492,10 +506,14 @@ func (c *Client) CompleteStream(
 	// Single call handles the whole round-based retry chain (cursor-start entry
 	// + remaining pool). AllKeysCoolingError records the shortest wait seen in
 	// the round, continues through remaining targets, then waits only between rounds.
+	maxAttempts := 0
+	if streamRetryRounds > 0 {
+		maxAttempts = -streamRetryRounds
+	}
 	resp, err := c.completeStreamWithRetry(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
-		wireMessages, tools, cb, true, orderedFallbacks, 0, &status,
+		wireMessages, tools, cb, true, orderedFallbacks, maxAttempts, &status,
 		routingGeneration, routingChangedCh,
 	)
 

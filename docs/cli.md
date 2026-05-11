@@ -126,13 +126,13 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 ## `chord test-providers`
 
-Send a minimal request to each configured provider and report success / failure. Useful as an auth and connectivity smoke test.
+Send a minimal request to each configured provider and report success / failure. Useful as an auth and connectivity smoke test. The command uses the same merged global + project config view as normal runtime startup.
 
 ### Flags
 
 | Flag                  | Description                            |
 | --------------------- | -------------------------------------- |
-| `--provider <name>`   | Test only the named provider           |
+| `--provider <name>`   | Test only the named provider; errors if the name is not in the merged config |
 
 ### Examples
 

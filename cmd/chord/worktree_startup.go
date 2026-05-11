@@ -54,6 +54,13 @@ func startupBranchPrefix() (string, error) {
 	if cfg == nil {
 		return worktree.DefaultBranchPrefix, nil
 	}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(cwd))
+		if mergeErr != nil {
+			return "", mergeErr
+		}
+		cfg = mergedCfg
+	}
 	return worktree.NormalizeBranchPrefix(cfg.Worktree.BranchPrefix)
 }
 

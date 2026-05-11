@@ -126,13 +126,13 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 ## `chord test-providers`
 
-向每个已配置的 provider 发一个最小请求并报告成功/失败。常用于凭据和网络烟雾测试。
+向每个已配置的 provider 发一个最小请求并报告成功/失败。常用于凭据和网络烟雾测试。它使用与正常运行时一致的“全局 + 项目级”合并配置视图。
 
 ### Flag
 
 | Flag                  | 说明                                  |
 | --------------------- | ------------------------------------- |
-| `--provider <name>`   | 仅测试指定的 provider                 |
+| `--provider <name>`   | 仅测试指定的 provider；若名字不在合并后的配置里会直接报错 |
 
 ### 示例
 

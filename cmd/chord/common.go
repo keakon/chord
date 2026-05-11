@@ -51,6 +51,7 @@ type AppContext struct {
 	ProjectLocator *config.ProjectLocator
 	SessionDir     string
 	Cfg            *config.Config
+	GlobalCfg      *config.Config
 	ProjectCfg     *config.Config
 	Auth           config.AuthConfig
 	LLMClient      *llm.Client
@@ -124,15 +125,23 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	// Configuration.
-	cfg, err := config.LoadConfig()
+	globalCfg, err := config.LoadConfig()
 	if err != nil {
 		ac.Cancel()
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	projectConfigPath := config.ProjectConfigPath(projectRoot)
+	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)
+	if err != nil {
+		ac.Cancel()
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	ac.GlobalCfg = globalCfg
+	ac.ProjectCfg = projectCfg
 	ac.Cfg = cfg
 
 	// Resolve path policy once so later startup steps can reuse it.
-	pathLocator, err := config.ResolvePathLocator(cfg, config.PathOptions{})
+	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
 	if err != nil {
 		ac.cleanup()
 		return nil, fmt.Errorf("resolve storage paths: %w", err)
@@ -146,23 +155,23 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.ProjectLocator = projectLocator
 	ac.ConfigHome = pathLocator.ConfigHome
 
-	if cfg.Maintenance.SizeCheckOnStartup {
+	if globalCfg.Maintenance.SizeCheckOnStartup {
 		go func() {
 			st, err := maintenance.BuildStatus(pathLocator)
 			if err != nil {
 				log.Warnf("maintenance size check failed error=%v", err)
 				return
 			}
-			if cfg.Maintenance.WarnStateBytes > 0 && st.StateBytes >= cfg.Maintenance.WarnStateBytes {
+			if globalCfg.Maintenance.WarnStateBytes > 0 && st.StateBytes >= globalCfg.Maintenance.WarnStateBytes {
 				log.Warnf("Chord state directory is large path=%v bytes=%v", st.StateDir, st.StateBytes)
 			}
-			if cfg.Maintenance.WarnCacheBytes > 0 && st.CacheBytes >= cfg.Maintenance.WarnCacheBytes {
+			if globalCfg.Maintenance.WarnCacheBytes > 0 && st.CacheBytes >= globalCfg.Maintenance.WarnCacheBytes {
 				log.Warnf("Chord cache directory is large path=%v bytes=%v", st.CacheDir, st.CacheBytes)
 			}
 		}()
 	}
 
-	logLevel := resolveLogLevel(cfg, nil)
+	logLevel := resolveLogLevel(globalCfg, projectCfg)
 	ac.logLevel = logLevel
 	logCtx := logContext{PWD: projectRoot, PID: os.Getpid()}
 	ac.logCtx = logCtx
@@ -186,23 +195,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	log.Infof("chord starting %s", buildinfo.Current().LogString())
-
-	// Try to load project-level config (.chord/config.yaml).
-	projectConfigPath := filepath.Join(projectRoot, ".chord", "config.yaml")
-	if pc, err := config.LoadConfigFromPath(projectConfigPath); err == nil {
-		applyProjectConfigOverrides(ac, pc)
+	if projectCfg != nil {
+		log.Info("loaded project config")
 		log.Debugf("loaded project config path=%v", projectConfigPath)
-	}
-
-	if ac.ProjectCfg != nil && ac.ProjectCfg.LogLevel != "" {
-		ac.logLevel = resolveLogLevel(ac.Cfg, ac.ProjectCfg)
-		if ac.LogWriter != nil {
-			logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
-			setDefaultLogger(logger)
-			ac.StderrRedirect.SetLogger(logger)
-		} else {
-			setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
-		}
 	}
 
 	// Resolve agent configs once and reuse the result for both default-model
@@ -351,6 +346,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		"", // system prompt is set by agent.NewMainAgent
 	)
 	llmClient.SetOutputTokenMax(cfg.MaxOutputTokens)
+	llmClient.SetStreamRetryRounds(cfg.StreamRetryRounds)
 	if initialVariant != "" {
 		llmClient.SetVariant(initialVariant)
 	}
@@ -473,9 +469,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	// MCP servers.
 	mcpConfigs := mcp.ServerConfigsFromConfig(cfg.MCP)
-	if ac.ProjectCfg != nil {
-		mcpConfigs = append(mcpConfigs, mcp.ServerConfigsFromConfig(ac.ProjectCfg.MCP)...)
-	}
 	syncMCPPromptBlock := ""
 	if len(mcpConfigs) > 0 {
 		if asyncMCP {
@@ -506,9 +499,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	// Hook engine.
 	hookDefs := hookDefsFromConfig(cfg.Hooks)
-	if ac.ProjectCfg != nil {
-		hookDefs = append(hookDefs, hookDefsFromConfig(ac.ProjectCfg.Hooks)...)
-	}
 	if len(hookDefs) > 0 {
 		ac.HookEngine = hook.NewCommandEngineFromList(hookDefs)
 		log.Debugf("hook engine loaded hook_count=%v", len(hookDefs))
@@ -520,7 +510,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent = agent.NewMainAgent(
 		ac.Ctx, llmClient, ac.CtxMgr, ac.Registry, ac.HookEngine,
 		ac.SessionDir, modelID, projectRoot,
-		cfg, ac.ProjectCfg,
+		cfg, nil,
 		mcp.ClientInfo{Name: "chord", Version: Version},
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))

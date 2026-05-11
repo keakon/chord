@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,13 +18,24 @@ func testProviders(parentCtx context.Context, providerFilter string) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	// Load config
+	// Load config.
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(cwd))
+		if mergeErr != nil {
+			return fmt.Errorf("load project config: %w", mergeErr)
+		}
+		cfg = mergedCfg
+	}
+	providerNames, err := selectedProviderNames(cfg.Providers, providerFilter)
+	if err != nil {
+		return err
+	}
 
-	// Load auth
+	// Load auth.
 	authPath, err := config.AuthPath()
 	if err != nil {
 		return fmt.Errorf("get auth path: %w", err)
@@ -32,13 +45,10 @@ func testProviders(parentCtx context.Context, providerFilter string) error {
 		return fmt.Errorf("load auth: %w", err)
 	}
 
-	fmt.Printf("Testing %d providers...\n\n", len(cfg.Providers))
+	fmt.Printf("Testing %d provider(s)...\n\n", len(providerNames))
 
-	for provName, provCfg := range cfg.Providers {
-		// Filter by provider flag if specified
-		if providerFilter != "" && provName != providerFilter {
-			continue
-		}
+	for _, provName := range providerNames {
+		provCfg := cfg.Providers[provName]
 
 		fmt.Printf("=== Provider: %s ===\n", provName)
 
@@ -64,12 +74,7 @@ func testProviders(parentCtx context.Context, providerFilter string) error {
 		// Create provider config
 		providerConfig := llm.NewProviderConfig(provName, normalizedCfg, []string{testKey})
 
-		// Pick first model
-		var modelID string
-		for m := range normalizedCfg.Models {
-			modelID = m
-			break
-		}
+		modelID := firstSortedModelID(normalizedCfg.Models)
 		if modelID == "" {
 			fmt.Printf("  ⚠️  No models configured for provider %q\n\n", provName)
 			continue
@@ -143,6 +148,37 @@ func testProviders(parentCtx context.Context, providerFilter string) error {
 	}
 
 	return nil
+}
+
+func selectedProviderNames(providers map[string]config.ProviderConfig, providerFilter string) ([]string, error) {
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers configured")
+	}
+	providerFilter = strings.TrimSpace(providerFilter)
+	if providerFilter != "" {
+		if _, ok := providers[providerFilter]; !ok {
+			return nil, fmt.Errorf("provider %q not found in merged config", providerFilter)
+		}
+		return []string{providerFilter}, nil
+	}
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func firstSortedModelID(models map[string]config.ModelConfig) string {
+	if len(models) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(models))
+	for name := range models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names[0]
 }
 
 func runTestProviderRequest(parentCtx context.Context, provider llm.Provider, testKey, modelID string) error {

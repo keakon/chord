@@ -20,8 +20,8 @@ func loadCustomCommands(ac *AppContext) {
 		projectCfgCommands = ac.ProjectCfg.Commands
 	}
 	var globalCfgCommands map[string]string
-	if ac.Cfg != nil {
-		globalCfgCommands = ac.Cfg.Commands
+	if ac.GlobalCfg != nil {
+		globalCfgCommands = ac.GlobalCfg.Commands
 	}
 	projectCfgPath := filepath.Join(ac.ProjectRoot, ".chord", "config.yaml")
 	globalCfgPath := filepath.Join(ac.ConfigHome, "config.yaml")
@@ -70,9 +70,6 @@ func skillLoadDirsForWorkDir(ac *AppContext, cwd string) []string {
 	}
 	if ac.Cfg != nil && len(ac.Cfg.Skills.Paths) > 0 {
 		skillDirs = append(skillDirs, ac.Cfg.Skills.Paths...)
-	}
-	if ac.ProjectCfg != nil && len(ac.ProjectCfg.Skills.Paths) > 0 {
-		skillDirs = append(skillDirs, ac.ProjectCfg.Skills.Paths...)
 	}
 	return skillDirs
 }

@@ -100,6 +100,7 @@ func buildSubAgentLLMFactory(
 				systemPrompt,
 			)
 			c.SetOutputTokenMax(cfg.MaxOutputTokens)
+			c.SetStreamRetryRounds(cfg.StreamRetryRounds)
 			c.SetVariant(variant)
 			return c
 		}
@@ -125,12 +126,14 @@ func buildSubAgentLLMFactory(
 			c := llm.NewClient(providerCfg, llmProvider, modelID,
 				modelCfg.Limit.Output, systemPrompt)
 			c.SetOutputTokenMax(cfg.MaxOutputTokens)
+			c.SetStreamRetryRounds(cfg.StreamRetryRounds)
 			c.SetVariant(firstVariant)
 			return c
 		}
 
 		client := llm.NewClient(pProvCfg, pImpl, pModelID, pMaxTokens, systemPrompt)
 		client.SetOutputTokenMax(cfg.MaxOutputTokens)
+		client.SetStreamRetryRounds(cfg.StreamRetryRounds)
 		client.SetVariant(firstVariant)
 
 		if len(agentModels) > 1 {
@@ -197,6 +200,7 @@ func buildMainClientFactory(
 
 		client := llm.NewClient(pProvCfg, pImpl, pModelID, pMaxTokens, "")
 		client.SetOutputTokenMax(cfg.MaxOutputTokens)
+		client.SetStreamRetryRounds(cfg.StreamRetryRounds)
 		client.SetVariant(selectedVariant)
 
 		roleModels := ac.MainAgent.CurrentRoleModelRefs()

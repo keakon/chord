@@ -40,7 +40,7 @@ You send these on stdin. Unknown command types are answered with an `error` enve
 
 ### `subscribe`
 
-Select which event types you want pushed. Defaults to none (you receive only request/response envelopes for your own commands until you subscribe).
+Select which event types you want pushed. If you never send `subscribe`, Chord forwards **all** optional event types by default. Sending `subscribe` replaces that default with an explicit allowlist.
 
 ```json
 {"type": "subscribe", "events": ["activity", "assistant_message", "idle", "tool_result"]}
@@ -182,7 +182,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `assistant_rollback`    | Discard in-flight streamed assistant output (mostly relevant for streaming UIs)                   | `agent_id`, `reason`                                                                                         |
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
-| `todos`                 | Replacement todo list                                                                             | `todos[]` with `{title, status}`                                                                             |
+| `todos`                 | Replacement todo list                                                                             | `todos[]` with `{id, content, status, active_form}`                                                          |
 | `error`                 | Runtime error                                                                                     | `agent_id`, `message`                                                                                        |
 
 `assistant_message.text` is empty only in pathological cases — Chord logs a warning when this happens, and gateway integrations should usually skip such messages instead of forwarding empty text downstream.

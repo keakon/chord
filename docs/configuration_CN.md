@@ -18,6 +18,15 @@ Chord 将行为配置与凭据配置分开管理。
 
 兼顾用户习惯、项目差异和不同 Agent 的能力特化。
 
+项目配置 `.chord/config.yaml` 会先按“无内置默认值注入”的方式加载，再覆盖到已加载的全局配置上。因此：
+
+- 项目里没写的字段会保持真正的未设置状态，不会意外遮蔽全局默认值；
+- 项目配置写坏了会直接作为启动错误暴露，而不是被静默忽略；
+- `paths.*`、`maintenance.*` 这类仅全局生效的字段，即使写进项目配置也会被忽略；
+- 大多数标量值和对象值会按同一路径直接覆盖全局值；
+- `model_pools` 按 pool 名称合并：项目里同名 pool 会覆盖全局定义；
+- 追加型扩展点会保留全局条目并附加项目条目：当前包括 `skills.paths` 和 `hooks.*` 下各触发点的 hook 列表，它们是 append，不是 replace。
+
 ## 流式工具早执行
 
 模型仍在流式输出响应、工具参数刚完整时，Chord 会提前执行一小批安全的只读工具，而不必等服务商完成最终确认（`CompleteStream()` 返回）后才开始。这能显著缩短最终确认阶段的体感等待时间。
@@ -380,6 +389,19 @@ providers:
 max_output_tokens: 32000
 ```
 
+## 流式重试上限
+
+`stream_retry_rounds` 用来给公开 LLM 流式请求的“整轮重试”设置硬上限。
+每一轮里仍会按正常顺序遍历当前模型池和 provider key；这个设置限制的是 `CompleteStream` 最多做多少轮完整重试。
+
+- `0` 保持默认行为：一直重试，直到成功、被取消，或遇到终态失败；
+- 正整数表示最多重试这么多轮，即使是 cooling / 并发 429 这类通常会继续等待的错误，也会在达到上限后停止；
+- 这个选项更适合自动化或 headless 场景：用可预测时延换取更明确的退出边界。
+
+```yaml
+stream_retry_rounds: 3
+```
+
 ## 本地 TUI 选项
 
 以下选项影响本地 TUI，可写在全局配置中，也可由项目级 `.chord/config.yaml` 覆盖。
@@ -559,7 +581,7 @@ chord test-providers
 chord test-providers --provider openai
 ```
 
-适合做认证与基础连通性的冒烟测试。
+适合做认证与基础连通性的冒烟测试。它读取的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级 provider / proxy / model 覆盖。
 
 ## 配置字段速查表
 
@@ -585,6 +607,7 @@ chord test-providers --provider openai
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
 | `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
+| `stream_retry_rounds`   | int                   | `0`（重试直到成功/取消）       | global / project         | 公开 LLM 流式请求的整轮重试硬上限。`0` 表示一直重试，直到成功、取消或终态失败。                                       |
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
 | `worktree`              | object                | 空                              | global / project         | `chord --worktree` 与 `chord worktree …` 子命令的默认值。                                                            |

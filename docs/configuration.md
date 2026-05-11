@@ -19,6 +19,16 @@ A practical precedence model is:
 This lets you keep personal defaults, project-specific behavior, and per-agent
 capabilities separate.
 
+Project config is loaded from `.chord/config.yaml` without injecting built-in
+defaults first, then merged onto the already-loaded global config. That means:
+
+- omitted project fields stay truly unset instead of silently shadowing global defaults;
+- malformed project config is treated as a startup error, not ignored;
+- global-only keys such as `paths.*` and `maintenance.*` are ignored in project config;
+- most scalar and object values override the global value at the same key;
+- `model_pools` merge by pool name, with same-name project pools overriding the global definition;
+- append-style extension points keep global entries and add project entries: currently `skills.paths` and per-trigger hook arrays under `hooks.*` append rather than replace.
+
 ## Streaming tool execution (early execution)
 
 Chord executes a small safe subset of tools *speculatively* while the model response
@@ -422,6 +432,21 @@ Use `max_output_tokens` to set a global cap on requested output tokens. The effe
 max_output_tokens: 32000
 ```
 
+## Stream retry cap
+
+Use `stream_retry_rounds` to put a hard ceiling on public LLM retry rounds.
+Each round can still walk the current model pool and each provider key in the
+normal order; this setting limits how many full rounds `CompleteStream` will
+make before giving up.
+
+- `0` keeps the default behavior: retry until success, cancellation, or a terminal failure.
+- Positive values stop after that many rounds, even for cooling / concurrent-request retry classes.
+- This is mainly useful for automation or headless environments that prefer bounded latency over maximum persistence.
+
+```yaml
+stream_retry_rounds: 3
+```
+
 ## Local TUI options
 
 These options affect the local TUI. They can be set in the global config and
@@ -621,7 +646,9 @@ chord test-providers
 chord test-providers --provider openai
 ```
 
-This command is useful as an auth and basic connectivity smoke test.
+This command is useful as an auth and basic connectivity smoke test. It uses
+the same merged global + project config view as normal runtime startup, so
+project-level provider/proxy/model overrides are included.
 
 ## Configuration cheatsheet
 
@@ -647,6 +674,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
 | `max_output_tokens`     | int                   | model-default                    | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`; reasoning requests also respect it. |
+| `stream_retry_rounds`   | int                   | `0` (retry until success/cancel) | global / project         | Hard cap on public LLM full-round retries. `0` keeps retrying until success, cancellation, or terminal failure. |
 | `proxy`                 | string                | empty (use env / direct)         | global / project         | Global proxy URL. Per-tool override via `web_fetch.proxy`.                                                              |
 | `web_fetch`             | object                | empty                            | global / project         | `user_agent`, `proxy` (inherits global if nil; empty string = direct). See [WebFetch](#webfetch).                       |
 | `worktree`              | object                | empty                            | global / project         | Defaults for `chord --worktree` and `chord worktree …` subcommands.                                                     |

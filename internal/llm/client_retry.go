@@ -73,11 +73,18 @@ func isAllKeysCoolingError(err error) bool {
 }
 
 func shouldContinueRetry(retryCount, maxAttempts int, lastErr error) bool {
+	return shouldContinueRetryMode(retryCount, maxAttempts, lastErr, false)
+}
+
+func shouldContinueRetryMode(retryCount, maxAttempts int, lastErr error, hardCap bool) bool {
 	if maxAttempts <= 0 {
 		return true
 	}
 	if retryCount < maxAttempts {
 		return true
+	}
+	if hardCap {
+		return false
 	}
 	return isAllKeysCoolingError(lastErr) || isConcurrentRequestLimit429(lastErr)
 }
@@ -162,6 +169,11 @@ func (c *Client) completeStreamWithRetry(
 		return nil
 	}
 
+	hardCap := false
+	if maxAttempts < 0 {
+		hardCap = true
+		maxAttempts = -maxAttempts
+	}
 	if maxAttempts <= 0 {
 		maxAttempts = 0
 	}
@@ -173,9 +185,11 @@ func (c *Client) completeStreamWithRetry(
 
 	retryCount := 0
 
-	// 默认 public stream path 使用无限轮重试；若显式传入 maxAttempts>0，则按
-	// shouldContinueRetry 的规则收敛。AllKeysCooling/部分 429 仍可超出显式上限。
-	for round := 0; shouldContinueRetry(retryCount, maxAttempts, lastErr); round++ {
+	// Public CompleteStream defaults to unlimited full-round retries. Callers can
+	// pass a positive maxAttempts for the historical soft cap (cooling /
+	// concurrent-request 429 may continue past it), or a negative value to apply
+	// a hard cap that stops after that many rounds regardless of error class.
+	for round := 0; shouldContinueRetryMode(retryCount, maxAttempts, lastErr, hardCap); round++ {
 		// skippedProviders only applies within the current round. Connection-
 		// establishment failures should skip sibling targets on the same provider
 		// for this round, but the next round must probe the provider again.

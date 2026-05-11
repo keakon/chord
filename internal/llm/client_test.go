@@ -879,6 +879,26 @@ func TestClientCompleteStreamDefaultRetriesOrdinaryErrorsUntilRecovery(t *testin
 	}
 }
 
+func TestClientCompleteStreamConfiguredRetryRoundsHardCapsConcurrent429(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	impl := &constantErrProvider{err: &APIError{StatusCode: 429, Message: `{"error":"Too many concurrent requests for this model"}`}}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected configured retry cap to stop concurrent-request 429 retries")
+	}
+	if resp != nil {
+		t.Fatalf("resp = %#v, want nil on capped retry failure", resp)
+	}
+	if got := impl.calls; got != 1 {
+		t.Fatalf("provider calls = %d, want 1 when stream_retry_rounds=1", got)
+	}
+}
+
 func TestClientCompleteStreamConnectionEstablishmentTimeoutRetriesProviderNextRound(t *testing.T) {
 	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
 	impl := &recordingProvider{}

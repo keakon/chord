@@ -371,26 +371,21 @@ func loadAuthLoginProviders() (map[string]config.ProviderConfig, string, error) 
 	if err != nil {
 		return nil, "", fmt.Errorf("load global config: %w", err)
 	}
-	allProviders := make(map[string]config.ProviderConfig, len(cfg.Providers))
-	for name, providerCfg := range cfg.Providers {
+	effectiveCfg := cfg
+
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(cwd))
+		if mergeErr != nil {
+			return nil, "", fmt.Errorf("load project config: %w", mergeErr)
+		}
+		effectiveCfg = mergedCfg
+	}
+
+	allProviders := make(map[string]config.ProviderConfig, len(effectiveCfg.Providers))
+	for name, providerCfg := range effectiveCfg.Providers {
 		allProviders[name] = providerCfg
 	}
-
-	cwd, err := os.Getwd()
-	if err == nil {
-		projectConfigPath := filepath.Join(cwd, ".chord", "config.yaml")
-		if _, statErr := os.Stat(projectConfigPath); statErr == nil {
-			projectCfg, loadErr := config.LoadConfigFromPath(projectConfigPath)
-			if loadErr != nil {
-				return nil, "", fmt.Errorf("load project config: %w", loadErr)
-			}
-			for name, providerCfg := range projectCfg.Providers {
-				allProviders[name] = providerCfg
-			}
-		}
-	}
-
-	return allProviders, cfg.Proxy, nil
+	return allProviders, effectiveCfg.Proxy, nil
 }
 
 func eligibleAuthLoginProviders(allProviders map[string]config.ProviderConfig) []string {
