@@ -10,6 +10,7 @@ func TestActivityFrameAdvancesOnAnimTick(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.animRunning = true
+	m.animTickGeneration = 1
 	m.activitySpinnerFrameIndex = 0
 
 	if got := m.activityFrame(); got != activeToolSpinnerSegments[0] {
@@ -17,7 +18,7 @@ func TestActivityFrameAdvancesOnAnimTick(t *testing.T) {
 	}
 
 	for i := 1; i <= len(activeToolSpinnerSegments); i++ {
-		_ = m.handleAnimTick()
+		_ = m.handleAnimTick(animTickMsg{generation: m.animTickGeneration, source: animTickSourceVisual})
 		want := activeToolSpinnerSegments[i%len(activeToolSpinnerSegments)]
 		if got := m.activityFrame(); got != want {
 			t.Fatalf("frame after %d ticks = %q, want %q", i, got, want)

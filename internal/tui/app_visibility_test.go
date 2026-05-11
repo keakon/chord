@@ -144,8 +144,9 @@ func TestAnimTickStopsWhenCompactingIsOnlyActivity(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}
 	m.animRunning = true
+	m.animTickGeneration = 1
 
-	updated, cmd := m.Update(animTickMsg(time.Now()))
+	updated, cmd := m.Update(animTickMsg{generation: 1, source: animTickSourceVisual})
 	model := updated.(*Model)
 
 	if cmd != nil {
@@ -153,6 +154,9 @@ func TestAnimTickStopsWhenCompactingIsOnlyActivity(t *testing.T) {
 	}
 	if model.animRunning {
 		t.Fatal("compacting-only anim tick should stop the visual animation loop")
+	}
+	if model.animTickGeneration != 2 {
+		t.Fatalf("animTickGeneration = %d, want 2 after stopping animation", model.animTickGeneration)
 	}
 }
 
@@ -336,11 +340,12 @@ func TestBackgroundIdleSweepMaintainsBusyBackground(t *testing.T) {
 func TestBackgroundIdleEntersRenderFreezeAfterQuietPeriod(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
+	m.animTickGeneration = 1
 	m.backgroundIdleSince = time.Now().Add(-11 * time.Second)
 	m.cachedFullView = tea.View{Content: "frozen"}
 	m.cachedFullViewValid = true
 
-	cmd := m.handleAnimTick()
+	cmd := m.handleAnimTick(animTickMsg{generation: 1, source: animTickSourceHousekeeping})
 	if cmd == nil {
 		t.Fatal("background idle anim tick should continue housekeeping")
 	}
@@ -349,6 +354,132 @@ func TestBackgroundIdleEntersRenderFreezeAfterQuietPeriod(t *testing.T) {
 	}
 	if !m.cachedFrozenViewValid || m.cachedFrozenView.Content != "frozen" {
 		t.Fatal("render freeze should capture cached frozen view")
+	}
+}
+
+func TestStaleVisualAnimTickDoesNotReviveAnimation(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.animRunning = true
+	m.animTickGeneration = 3
+	m.activitySpinnerFrameIndex = 1
+
+	cmd := m.handleAnimTick(animTickMsg{generation: 2, source: animTickSourceVisual})
+	if cmd != nil {
+		t.Fatal("stale visual anim tick should be ignored")
+	}
+	if !m.animRunning {
+		t.Fatal("stale visual anim tick should not stop active animation")
+	}
+	if m.activitySpinnerFrameIndex != 1 {
+		t.Fatalf("activitySpinnerFrameIndex = %d, want unchanged 1", m.activitySpinnerFrameIndex)
+	}
+	if m.animTickGeneration != 3 {
+		t.Fatalf("animTickGeneration = %d, want unchanged 3", m.animTickGeneration)
+	}
+}
+
+func TestHousekeepingTickDoesNotReviveVisualAnimationAfterFocusRestart(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.animTickGeneration = 5
+
+	staleCmd := m.handleAnimTick(animTickMsg{generation: 4, source: animTickSourceHousekeeping})
+	if staleCmd != nil {
+		t.Fatal("stale housekeeping tick should be ignored")
+	}
+
+	m.displayState = stateForeground
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	startCmd := m.startActiveAnimation()
+	if startCmd == nil {
+		t.Fatal("startActiveAnimation should schedule a fresh visual tick")
+	}
+	if !m.animRunning {
+		t.Fatal("visual animation should be running after restart")
+	}
+	if m.animTickGeneration != 6 {
+		t.Fatalf("animTickGeneration = %d, want 6 after restart", m.animTickGeneration)
+	}
+
+	cmd := m.handleAnimTick(animTickMsg{generation: 5, source: animTickSourceHousekeeping})
+	if cmd != nil {
+		t.Fatal("stale housekeeping tick from prior generation should not reschedule animation")
+	}
+	if !m.animRunning {
+		t.Fatal("stale housekeeping tick should not stop the fresh visual animation")
+	}
+	if m.activitySpinnerFrameIndex != 0 {
+		t.Fatalf("activitySpinnerFrameIndex = %d, want unchanged 0", m.activitySpinnerFrameIndex)
+	}
+}
+
+func TestBackgroundIdleTransitionSchedulesFreshHousekeepingAfterStoppingAnimation(t *testing.T) {
+	oldIdleCadence := backgroundIdleCadence
+	backgroundIdleCadence.housekeepingDelay = time.Nanosecond
+	t.Cleanup(func() { backgroundIdleCadence = oldIdleCadence })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.animRunning = true
+	m.animTickGeneration = 7
+	m.idleSweepScheduled = true // keep the assertion focused on housekeeping, not idle-sweep scheduling.
+	m.backgroundIdleSince = time.Now()
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+	if cmd == nil {
+		t.Fatal("background active→idle transition should schedule housekeeping after stopping animation")
+	}
+	if m.animRunning {
+		t.Fatal("idle transition should stop visual animation")
+	}
+	if m.animTickGeneration != 8 {
+		t.Fatalf("animTickGeneration = %d, want 8 after stopping animation", m.animTickGeneration)
+	}
+
+	messages := collectCommandMessages(cmd)
+	var foundHousekeeping bool
+	for _, msg := range messages {
+		tick, ok := msg.(animTickMsg)
+		if !ok {
+			continue
+		}
+		if tick.source == animTickSourceVisual {
+			t.Fatalf("idle transition scheduled visual tick: %+v", tick)
+		}
+		if tick.source == animTickSourceHousekeeping {
+			foundHousekeeping = true
+			if tick.generation != m.animTickGeneration {
+				t.Fatalf("housekeeping tick generation = %d, want current generation %d", tick.generation, m.animTickGeneration)
+			}
+		}
+	}
+	if !foundHousekeeping {
+		t.Fatalf("background active→idle transition did not schedule housekeeping tick; messages=%#v", messages)
+	}
+
+	if staleCmd := m.handleAnimTick(animTickMsg{generation: 7, source: animTickSourceVisual}); staleCmd != nil {
+		t.Fatal("stale visual tick from stopped generation should be ignored")
+	}
+}
+
+func collectCommandMessages(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case nil:
+		return nil
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, sub := range msg {
+			out = append(out, collectCommandMessages(sub)...)
+		}
+		return out
+	default:
+		return []tea.Msg{msg}
 	}
 }
 

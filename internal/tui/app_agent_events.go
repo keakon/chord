@@ -346,6 +346,9 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		pendingAutoContinue := !skipDrain && (m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.queuedDrafts) > 0))
 		m.inflightDraft = nil
 		m.stopActiveAnimationIfIdle()
+		if prevMain != "" && prevMain != agent.ActivityIdle && !mainLoopBusy {
+			effects.addFollowup(m.scheduleBackgroundHousekeeping())
+		}
 		if !skipDrain && !m.queueSyncEnabled {
 			effects.addFollowup(m.drainQueuedDrafts())
 		}
@@ -433,6 +436,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.markBlockSettled(block)
 		}
 		m.stopActiveAnimationIfIdle()
+		if prevType != "" && prevType != agent.ActivityIdle {
+			effects.addFollowup(m.scheduleBackgroundHousekeeping())
+		}
 		return true, effects
 	case agent.AgentStatusEvent:
 		m.sidebar.UpdateStatus(evt.AgentID, evt.Status)
@@ -445,6 +451,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 				m.markAgentIdle(evt.AgentID)
 				m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 				m.stopActiveAnimationIfIdle()
+				if prevType != "" && prevType != agent.ActivityIdle {
+					effects.addFollowup(m.scheduleBackgroundHousekeeping())
+				}
 			}
 		}
 		effects.refreshSidebar = true
@@ -523,6 +532,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		effects.addFollowup(m.startActiveAnimation())
 		if evt.Type == agent.ActivityIdle {
 			m.stopActiveAnimationIfIdle()
+			if prev.Type != "" && prev.Type != agent.ActivityIdle {
+				effects.addFollowup(m.scheduleBackgroundHousekeeping())
+			}
 		}
 		return true, effects
 	case agent.RequestProgressEvent:

@@ -924,7 +924,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleTerminalTitleTick(msg)
 
 	case animTickMsg:
-		return m, m.handleAnimTick()
+		return m, m.handleAnimTick(msg)
 
 	case idleSweepTickMsg:
 		return m, m.handleIdleSweepTick(msg)
@@ -1010,7 +1010,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Animation tick (replaces Bubble Tea spinner for status-bar + tool-call anim)
 // ---------------------------------------------------------------------------
 
-type animTickMsg time.Time
+type animTickSource uint8
+
+const (
+	animTickSourceVisual animTickSource = iota
+	animTickSourceHousekeeping
+)
+
+type animTickMsg struct {
+	generation uint64
+	source     animTickSource
+}
 
 type requestProgressState struct {
 	RawBytes      int64

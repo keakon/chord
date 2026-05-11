@@ -72,6 +72,7 @@ func (m *Model) stopActiveAnimationIfIdle() {
 		return
 	}
 	m.animRunning = false
+	m.invalidateAnimTicks()
 	m.activitySpinnerFrameIndex = 0
 	_ = m.syncTerminalTitleState()
 }
@@ -90,16 +91,34 @@ func (m *Model) markAgentIdle(agentID string) {
 	delete(m.streamLastDeltaAt, agentID)
 }
 
-func animTickCmd(delay time.Duration) tea.Cmd {
+func animTickCmd(generation uint64, source animTickSource, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = foregroundCadence.visualAnimDelay
 		if delay <= 0 {
 			delay = visualSpinnerCadence
 		}
 	}
-	return tea.Tick(delay, func(t time.Time) tea.Msg {
-		return animTickMsg(t)
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return animTickMsg{generation: generation, source: source}
 	})
+}
+
+func (m *Model) invalidateAnimTicks() {
+	if m == nil {
+		return
+	}
+	m.animTickGeneration++
+}
+
+func (m *Model) scheduleBackgroundHousekeeping() tea.Cmd {
+	if m == nil || m.displayState != stateBackground || m.hasActiveAnimation() {
+		return nil
+	}
+	delay := m.currentCadence().housekeepingDelay
+	if delay <= 0 {
+		delay = backgroundHousekeepingDelay
+	}
+	return animTickCmd(m.animTickGeneration, animTickSourceHousekeeping, delay)
 }
 
 // startAnimTick starts the animation ticker only if it is not already running.
@@ -114,12 +133,14 @@ func (m *Model) startAnimTick() tea.Cmd {
 	if cadence.visualAnimDelay <= 0 {
 		m.animRunning = false
 		m.activitySpinnerFrameIndex = 0
+		m.invalidateAnimTicks()
 		return m.syncTerminalTitleState()
 	}
+	m.invalidateAnimTicks()
 	m.animRunning = true
 	m.activitySpinnerFrameIndex = 0
 	titleCmd := m.syncTerminalTitleState()
-	return tea.Batch(animTickCmd(cadence.visualAnimDelay), titleCmd)
+	return tea.Batch(animTickCmd(m.animTickGeneration, animTickSourceVisual, cadence.visualAnimDelay), titleCmd)
 }
 
 // activityFrame returns a non-empty string when animation is active,

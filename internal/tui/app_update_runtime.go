@@ -51,7 +51,10 @@ func (m *Model) handleTerminalTitleTick(msg terminalTitleTickMsg) tea.Cmd {
 	return terminalTitleTickCmd(m.terminalTitleTickGeneration, delay)
 }
 
-func (m *Model) handleAnimTick() tea.Cmd {
+func (m *Model) handleAnimTick(msg animTickMsg) tea.Cmd {
+	if msg.generation != m.animTickGeneration {
+		return nil
+	}
 	// Housekeeping: chord timeout (must run even in background).
 	if m.chord.active() && time.Since(m.chord.startAt) >= normalChordTimeout {
 		m.clearChordState()
@@ -66,15 +69,16 @@ func (m *Model) handleAnimTick() tea.Cmd {
 	m.flushVisibleRequestProgress(time.Now())
 
 	// Visual animation: only continue if profile allows and there's active animation.
-	if cadence.visualAnimDelay > 0 && m.hasActiveAnimation() {
+	if msg.source == animTickSourceVisual && cadence.visualAnimDelay > 0 && m.hasActiveAnimation() {
 		if n := len(activeToolSpinnerSegments); n > 0 {
 			m.activitySpinnerFrameIndex = (m.activitySpinnerFrameIndex + 1) % n
 		}
-		return tea.Batch(animTickCmd(cadence.visualAnimDelay), m.scheduleStreamFlush(0))
+		return tea.Batch(animTickCmd(m.animTickGeneration, animTickSourceVisual, cadence.visualAnimDelay), m.scheduleStreamFlush(0))
 	}
 
 	// Visual animation disabled or no active animation.
 	m.animRunning = false
+	m.invalidateAnimTicks()
 	m.activitySpinnerFrameIndex = 0
 	// Stop or downgrade the terminal title ticker to the current title mode.
 	_ = m.syncTerminalTitleState()
@@ -84,18 +88,12 @@ func (m *Model) handleAnimTick() tea.Cmd {
 	// state tracking continue.
 	if m.displayState != stateForeground {
 		if entered := m.tryEnterRenderFreeze("background-idle"); entered {
-			return tea.Tick(backgroundIdleAnimTickCadence, func(time.Time) tea.Msg {
-				return animTickMsg(time.Now())
-			})
+			return animTickCmd(m.animTickGeneration, animTickSourceHousekeeping, backgroundIdleAnimTickCadence)
 		}
 		if idleCmd := m.updateBackgroundIdleSweepState(); idleCmd != nil {
-			return tea.Batch(idleCmd, tea.Tick(cadence.housekeepingDelay, func(time.Time) tea.Msg {
-				return animTickMsg(time.Now())
-			}))
+			return tea.Batch(idleCmd, animTickCmd(m.animTickGeneration, animTickSourceHousekeeping, cadence.housekeepingDelay))
 		}
-		return tea.Tick(cadence.housekeepingDelay, func(time.Time) tea.Msg {
-			return animTickMsg(time.Now())
-		})
+		return animTickCmd(m.animTickGeneration, animTickSourceHousekeeping, cadence.housekeepingDelay)
 	}
 	return nil
 }

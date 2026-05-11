@@ -28,6 +28,7 @@ type startupRestoreState struct {
 
 type renderRuntimeState struct {
 	animRunning                      bool
+	animTickGeneration               uint64
 	activitySpinnerFrameIndex        int
 	statusBarTickGeneration          uint64
 	statusBarTickScheduled           bool
