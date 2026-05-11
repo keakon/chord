@@ -46,10 +46,10 @@ const (
 	postFocusSettleFallbackDelay = 1500 * time.Millisecond
 
 	// scrollFlushFallbackRedrawDelay is a follow-up redraw for scroll flushes that
-	// happen shortly after a focus restore. In Ghostty/cmux the initial scroll
-	// redraw can still race with the host's lingering surface recovery; a later
-	// redraw after scrolling settles helps clear stale cells without turning every
-	// ordinary scroll into a double-clear sequence.
+	// need a later recovery pass. It is used both for scrolls shortly after a
+	// focus restore and for throttled scroll bursts on Ghostty/cmux-style hosts,
+	// where the initial redraw can still race with lingering surface recovery or
+	// be skipped by the min-interval gate.
 	scrollFlushFallbackRedrawDelay = 900 * time.Millisecond
 
 	// contentBoundaryFallbackRedrawDelay schedules a late redraw when a
@@ -216,6 +216,18 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
 }
 
+func (m *Model) maybePostThrottledScrollRedrawFallbackCmd(reason string, generation uint64) tea.Cmd {
+	if m == nil || !m.useFocusResizeFreeze || strings.TrimSpace(reason) != "scroll-flush" {
+		return nil
+	}
+	policy := hostRedrawPolicyForReason(reason)
+	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
+		return nil
+	}
+	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d throttled=true risky_host=%t", strings.TrimSpace(reason), generation, m.useFocusResizeFreeze)
+	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
+}
+
 func (m *Model) markNextViewReplay() {
 	if m == nil {
 		return
@@ -247,6 +259,9 @@ func (m *Model) hostRedrawCmdWithOptions(reason string, bypassMinInterval bool) 
 		since := now.Sub(m.lastHostRedrawAt)
 		if since < hostRedrawMinInterval {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s throttled=true since_last=%s last_reason=%s", reason, since.Truncate(time.Millisecond), m.lastHostRedrawReason)
+			if fallback := m.maybePostThrottledScrollRedrawFallbackCmd(reason, m.hostRedrawGeneration); fallback != nil {
+				return fallback
+			}
 			return nil
 		}
 	}

@@ -18,6 +18,18 @@ func containsCmd(cmds []tea.Cmd, target tea.Cmd) bool {
 	return false
 }
 
+func hasDiagnosticEvent(events []tuiDiagnosticEvent, kind, detailSubstr string) bool {
+	for _, evt := range events {
+		if evt.Kind != kind {
+			continue
+		}
+		if detailSubstr == "" || strings.Contains(evt.Detail, detailSubstr) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHostRedrawPolicyForReason(t *testing.T) {
 	tests := []struct {
 		reason                    string
@@ -130,6 +142,68 @@ func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 				t.Fatalf("%s fallback should arm inside the post-focus window", reason)
 			}
 		})
+	}
+}
+
+func TestHostRedrawCmdDoesNotArmSuccessfulScrollFallbackOutsideFocusWindow(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+	m.lastHostRedrawAt = now.Add(-hostRedrawMinInterval - time.Second)
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawCmd("scroll-flush")
+	if cmd == nil {
+		t.Fatal("successful scroll-flush should still schedule the primary host redraw")
+	}
+	if m.hostRedrawGeneration != 8 {
+		t.Fatalf("hostRedrawGeneration = %d, want 8", m.hostRedrawGeneration)
+	}
+	if hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "reason=scroll-flush") {
+		t.Fatal("successful scroll-flush outside the focus window should not arm a fallback")
+	}
+}
+
+func TestHostRedrawCmdArmsFallbackForThrottledScrollBurstOutsideFocusWindow(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+	m.lastHostRedrawAt = now.Add(-hostRedrawMinInterval / 2)
+	m.lastHostRedrawReason = "scroll-flush"
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawCmd("scroll-flush")
+	if cmd == nil {
+		t.Fatal("throttled scroll-flush should arm a delayed fallback on risky hosts")
+	}
+	if m.hostRedrawGeneration != 7 {
+		t.Fatalf("hostRedrawGeneration = %d, want unchanged 7", m.hostRedrawGeneration)
+	}
+	if m.lastHostRedrawReason != "scroll-flush" {
+		t.Fatalf("lastHostRedrawReason = %q, want unchanged scroll-flush", m.lastHostRedrawReason)
+	}
+	if !hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "throttled=true") {
+		t.Fatalf("recent events missing throttled fallback arm marker: %#v", m.snapshotTUIDiagnosticEvents())
+	}
+}
+
+func TestHostRedrawCmdDoesNotArmFallbackForThrottledNonScroll(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+	m.lastHostRedrawAt = now.Add(-hostRedrawMinInterval / 2)
+	m.lastHostRedrawReason = "stream-flush"
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawCmd("stream-flush")
+	if cmd != nil {
+		t.Fatalf("throttled non-scroll redraw should not arm a fallback, got %#v", cmd)
+	}
+	if hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "") {
+		t.Fatalf("throttled non-scroll redraw should not arm fallback: %#v", m.snapshotTUIDiagnosticEvents())
 	}
 }
 
