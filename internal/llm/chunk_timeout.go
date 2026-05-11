@@ -18,8 +18,9 @@ const (
 )
 
 // ChunkTimeoutError is a net.Error-compatible error returned when no SSE chunk
-// arrives within the configured timeout. It satisfies isPerKeyTimeoutRetry so
-// the retry logic rotates API keys before falling back to another model.
+// arrives within the configured timeout. Before any visible output it is treated
+// like a provider-skip timeout (advance to another provider/model); after visible
+// output the caller may retry on the same key.
 type ChunkTimeoutError struct{ d time.Duration }
 
 func (e *ChunkTimeoutError) Error() string {
@@ -56,8 +57,8 @@ type chunkTimeoutDiagnostics interface {
 //
 // When the timer fires it sets timedOut and calls cancel so the underlying
 // HTTP body read is interrupted. Read() then returns a *ChunkTimeoutError
-// (implements net.Error) instead of context.Canceled, so error classification
-// treats it as a per-key retriable read-phase timeout.
+// (implements net.Error) instead of context.Canceled, so higher-level retry
+// classification can distinguish timeout handling from ordinary cancellation.
 type ChunkTimeoutReader struct {
 	r        io.Reader
 	cancel   func()

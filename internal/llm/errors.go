@@ -202,7 +202,8 @@ func classifyContextLengthExceeded(apiErr *APIError) bool {
 // shouldFallback determines whether the error warrants falling back to an
 // alternative model once the current model's keys are exhausted.
 // Ordering vs key rotation is implemented in client.completeStreamWithRetry
-// (e.g. isPerKeyTimeoutRetry for read timeouts).
+// (for example: invisible timeouts skip the current provider, while visible
+// stream timeouts retry on the same key).
 func shouldFallback(err error) bool {
 	if IsContextLengthExceeded(err) {
 		return true
@@ -231,9 +232,8 @@ func shouldFallback(err error) bool {
 		return true
 	}
 
-	// Network timeouts: always eligible to try another model after keys are exhausted
-	// (per-key vs per-model ordering is decided in client.go using
-	// isConnectionEstablishmentTimeout / isPerKeyTimeoutRetry).
+	// Network timeouts: always eligible to try another model. Exact routing
+	// order (skip-provider vs same-key visible retry) is decided in client.go.
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
@@ -341,21 +341,29 @@ func skipRemainingModelsOnProvider(err error) bool {
 	return errors.As(err, &noUsable)
 }
 
-// isPerKeyTimeoutRetry reports whether err is a timeout after connectivity is
-// established (e.g. waiting on response bytes) where another API key may help.
-// Connection-establishment timeouts are excluded; those skip straight to the
-// next model/provider.
-func isPerKeyTimeoutRetry(err error) bool {
-	if !isTimeoutLikeError(err) {
-		return false
+func providerSkipReason(err error) string {
+	var noUsable *NoUsableKeysError
+	if errors.As(err, &noUsable) {
+		return "no_usable_keys"
 	}
-	return !isConnectionEstablishmentTimeout(err)
+	if isConnectionEstablishmentTimeout(err) {
+		return "connection_establishment_timeout"
+	}
+	if isProviderUnreachable(err) {
+		return "provider_unreachable"
+	}
+	if isTimeoutLikeError(err) {
+		return "timeout_before_visible_output"
+	}
+	return "provider_skipped"
 }
 
 // isRetriable determines whether the error can be retried on the same model
-// by selecting another key (same-key exponential backoff is not used for
-// timeouts). client.completeStreamWithRetry may treat some errors as key-
-// retriable even when isRetriable is false (401/403, isPerKeyTimeoutRetry).
+// by selecting another key. Timeouts are excluded from this path: invisible
+// timeouts advance to the next provider/model, while visible stream timeouts
+// are handled by the caller's same-key retry path. client.completeStreamWithRetry
+// may still treat some errors as key-retriable even when isRetriable is false
+// (currently 401/403).
 
 func isRetriable(err error) bool {
 	// Context length exceeded is a model/context-size signal, not a key-health or
@@ -367,8 +375,9 @@ func isRetriable(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	// Timeouts: not retriable in the sense of exponential backoff on the same key;
-	// client.go may still rotate keys for response-phase timeouts.
+	// Timeouts do not rotate keys through this generic retriable path. Higher-level
+	// retry routing skips the provider for pre-visible timeouts and retries the
+	// same key after visible stream interruptions.
 	if isTimeoutLikeError(err) {
 		return false
 	}

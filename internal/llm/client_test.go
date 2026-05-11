@@ -2139,13 +2139,12 @@ func TestModelPoolStickyCursorDoesNotLeakPrimaryVariantToVariantlessPinnedFallba
 	}
 }
 
-func TestClientReadTimeoutTriesNextKeyBeforeFallbackModel(t *testing.T) {
+func TestClientReadTimeoutSkipsRemainingKeysAndFallsBack(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
 
 	primaryImpl := &recordingProvider{}
 	primaryImpl.calls = []scriptedCall{
-		{err: testNetTimeoutErr{timeout: true}},
 		{err: testNetTimeoutErr{timeout: true}},
 	}
 	fallbackImpl := &scriptedProvider{
@@ -2170,14 +2169,89 @@ func TestClientReadTimeoutTriesNextKeyBeforeFallbackModel(t *testing.T) {
 	if resp == nil || resp.Content != "from fallback" {
 		t.Fatalf("unexpected response: %#v", resp)
 	}
-	if primaryImpl.CallCount() != 2 {
-		t.Fatalf("initial-entry CallCount=%d, want 2 (both keys before advancing to the next pool entry)", primaryImpl.CallCount())
+	if primaryImpl.CallCount() != 1 {
+		t.Fatalf("initial-entry CallCount=%d, want 1 (invisible timeout skips second key)", primaryImpl.CallCount())
 	}
-	if len(primaryImpl.apiKeys) != 2 || primaryImpl.apiKeys[0] != "k1" || primaryImpl.apiKeys[1] != "k2" {
-		t.Fatalf("initial-entry keys = %#v, want [k1 k2]", primaryImpl.apiKeys)
+	if len(primaryImpl.apiKeys) != 1 || primaryImpl.apiKeys[0] != "k1" {
+		t.Fatalf("initial-entry keys = %#v, want [k1]", primaryImpl.apiKeys)
 	}
 	if fallbackImpl.CallCount() != 1 {
 		t.Fatalf("fallback CallCount=%d, want 1", fallbackImpl.CallCount())
+	}
+	status := c.LastCallStatus()
+	if !status.FallbackTriggered {
+		t.Fatal("expected FallbackTriggered=true")
+	}
+	if status.FallbackReason != "timeout" {
+		t.Fatalf("FallbackReason = %q, want timeout", status.FallbackReason)
+	}
+}
+
+func TestClientReadTimeoutSkipsSiblingTargetsOnSameProvider(t *testing.T) {
+	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {
+				Limit: config.ModelLimit{Context: 128000, Output: 4096},
+			},
+			"sibling-model": {
+				Limit: config.ModelLimit{Context: 128000, Output: 4096},
+			},
+		},
+	}, []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{err: testNetTimeoutErr{timeout: true}}}
+	siblingImpl := &recordingProvider{}
+	siblingImpl.calls = []scriptedCall{{resp: &message.Response{Content: "sibling should not run"}}}
+	fallbackImpl := &scriptedProvider{
+		calls: []scriptedCall{{resp: &message.Response{Content: "from fallback"}}},
+	}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{
+		{
+			ProviderConfig: primaryCfg,
+			ProviderImpl:   siblingImpl,
+			ModelID:        "sibling-model",
+			MaxTokens:      4096,
+			ContextLimit:   128000,
+		},
+		{
+			ProviderConfig: fallbackCfg,
+			ProviderImpl:   fallbackImpl,
+			ModelID:        "fallback-model",
+			MaxTokens:      4096,
+			ContextLimit:   128000,
+		},
+	})
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if primaryImpl.CallCount() != 1 {
+		t.Fatalf("primary CallCount=%d, want 1", primaryImpl.CallCount())
+	}
+	if len(primaryImpl.apiKeys) != 1 || primaryImpl.apiKeys[0] != "k1" {
+		t.Fatalf("primary keys = %#v, want [k1]", primaryImpl.apiKeys)
+	}
+	if siblingImpl.CallCount() != 0 {
+		t.Fatalf("sibling same-provider CallCount=%d, want 0", siblingImpl.CallCount())
+	}
+	if fallbackImpl.CallCount() != 1 {
+		t.Fatalf("fallback CallCount=%d, want 1", fallbackImpl.CallCount())
+	}
+	status := c.LastCallStatus()
+	if !status.FallbackTriggered {
+		t.Fatal("expected FallbackTriggered=true")
+	}
+	if status.FallbackReason != "timeout" {
+		t.Fatalf("FallbackReason = %q, want timeout", status.FallbackReason)
 	}
 }
 
@@ -2193,7 +2267,7 @@ func TestClientRetryEmitsRollbackAfterVisibleToolStream(t *testing.T) {
 				err: testNetTimeoutErr{timeout: true},
 			},
 			{
-				resp: &message.Response{Content: "second key ok"},
+				resp: &message.Response{Content: "same key ok"},
 			},
 		},
 	}
@@ -2207,7 +2281,7 @@ func TestClientRetryEmitsRollbackAfterVisibleToolStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
-	if resp == nil || resp.Content != "second key ok" {
+	if resp == nil || resp.Content != "same key ok" {
 		t.Fatalf("unexpected response: %#v", resp)
 	}
 
@@ -2228,52 +2302,31 @@ func TestClientRetryEmitsRollbackAfterVisibleToolStream(t *testing.T) {
 	}
 }
 
-func TestClientCompleteReadTimeoutSecondKeySucceedsNoFallback(t *testing.T) {
+func TestClientReadTimeoutWithoutFallbackDoesNotRotateKeyWithinRound(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
 	primaryImpl := &recordingProvider{}
 	primaryImpl.calls = []scriptedCall{
 		{err: testNetTimeoutErr{timeout: true}},
-		{resp: &message.Response{Content: "second key ok"}},
+		{resp: &message.Response{Content: "second round ok"}},
 	}
 	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
 
 	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if resp == nil || resp.Content != "second key ok" {
-		t.Fatalf("unexpected response: %#v", resp)
+	if resp != nil {
+		t.Fatalf("resp = %#v, want nil", resp)
 	}
-	if primaryImpl.CallCount() != 2 {
-		t.Fatalf("initial-entry CallCount=%d, want 2", primaryImpl.CallCount())
+	if !isTimeoutLikeError(err) {
+		t.Fatalf("err = %v, want timeout-like error", err)
 	}
-	if len(primaryImpl.apiKeys) != 2 || primaryImpl.apiKeys[0] != "k1" || primaryImpl.apiKeys[1] != "k2" {
-		t.Fatalf("initial-entry keys = %#v, want [k1 k2]", primaryImpl.apiKeys)
+	if primaryImpl.CallCount() != 1 {
+		t.Fatalf("initial-entry CallCount=%d, want 1 in a single round", primaryImpl.CallCount())
 	}
-}
-
-func TestClientReadTimeoutSecondKeySucceedsNoFallback(t *testing.T) {
-	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
-	primaryImpl := &recordingProvider{}
-	primaryImpl.calls = []scriptedCall{
-		{err: testNetTimeoutErr{timeout: true}},
-		{resp: &message.Response{Content: "second key ok"}},
-	}
-
-	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
-
-	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
-	if resp == nil || resp.Content != "second key ok" {
-		t.Fatalf("unexpected response: %#v", resp)
-	}
-	if primaryImpl.CallCount() != 2 {
-		t.Fatalf("initial-entry CallCount=%d, want 2", primaryImpl.CallCount())
-	}
-	if len(primaryImpl.apiKeys) != 2 || primaryImpl.apiKeys[0] != "k1" || primaryImpl.apiKeys[1] != "k2" {
-		t.Fatalf("initial-entry keys = %#v, want [k1 k2]", primaryImpl.apiKeys)
+	if len(primaryImpl.apiKeys) != 1 || primaryImpl.apiKeys[0] != "k1" {
+		t.Fatalf("initial-entry keys = %#v, want [k1]", primaryImpl.apiKeys)
 	}
 }
 

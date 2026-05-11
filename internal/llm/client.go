@@ -482,10 +482,10 @@ func (c *Client) SupportsInput(modality string) bool {
 
 // CompleteStream sends a streaming completion request with automatic retries.
 // Routing uses completeStreamWithRetry: within each model, keys are tried
-// according to isRetriable/shouldFallback plus overrides (401/403, response-
-// phase timeouts via isPerKeyTimeoutRetry). Connection-establishment timeouts
-// skip remaining keys on the provider and may skip other models on the same
-// provider (skipRemainingModelsOnProvider).
+// according to isRetriable/shouldFallback plus overrides (currently 401/403).
+// Timeouts before any visible output skip remaining keys on the provider and
+// may skip other models on the same provider (skipRemainingModelsOnProvider);
+// visible stream interruptions retry on the same key.
 //
 // Retries happen in full rounds with exponential backoff between rounds; each
 // round walks the model pool and each model's selectable keys.

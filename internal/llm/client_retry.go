@@ -134,11 +134,11 @@ func responseHasUsableOutput(resp *message.Response) bool {
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
 // remaining entries) and, for each model, loops over keys until success, a permanent failure, or
 // keys exhausted. Retriable API errors rotate keys; 401/403 force key rotation
-// (OAuth refresh when possible). Response-phase net timeouts also rotate keys
-// before advancing to the next model (isPerKeyTimeoutRetry). Dial/connect and
-// TLS handshake timeouts do not rotate keys and skip sibling targets on that
-// provider for the current round. Exponential backoff applies between full
-// rounds, not between keys.
+// (OAuth refresh when possible). Timeouts before any visible output do not
+// rotate to another key on the same provider; they skip sibling targets on that
+// provider for the current round and advance to the next provider/model. Visible
+// stream interruptions are retried by the caller on the same key. Exponential
+// backoff applies between full rounds, not between keys.
 func (c *Client) completeStreamWithRetry(
 	ctx context.Context,
 	startProvider *ProviderConfig,
@@ -190,10 +190,10 @@ func (c *Client) completeStreamWithRetry(
 	// concurrent-request 429 may continue past it), or a negative value to apply
 	// a hard cap that stops after that many rounds regardless of error class.
 	for round := 0; shouldContinueRetryMode(retryCount, maxAttempts, lastErr, hardCap); round++ {
-		// skippedProviders only applies within the current round. Connection-
-		// establishment failures should skip sibling targets on the same provider
-		// for this round, but the next round must probe the provider again.
-		skippedProviders := map[*ProviderConfig]bool{}
+		// skippedProviders only applies within the current round. Provider-level
+		// failures (including pre-visible timeouts) should skip sibling targets on
+		// the same provider for this round, but the next round must probe again.
+		skippedProviders := map[*ProviderConfig]string{}
 		oversizeSeen := newOversizeRegistry()
 		if err := abortIfCancelled(); err != nil {
 			return nil, err
@@ -302,8 +302,8 @@ func (c *Client) completeStreamWithRetry(
 				return nil, err
 			}
 			t := targets[ti]
-			if skippedProviders[t.provider] {
-				log.Infof("skipping model: provider unreachable (dial/DNS/connect error) provider=%v model=%v", t.provider.Name(), t.modelID)
+			if skipReason, ok := skippedProviders[t.provider]; ok {
+				log.Infof("skipping model: provider skipped for current round provider=%v model=%v reason=%v", t.provider.Name(), t.modelID, skipReason)
 				continue
 			}
 			if oversizeSeen.seen(t.provider.Name(), t.modelID, t.variant) {
@@ -545,7 +545,6 @@ func (c *Client) completeStreamWithRetry(
 						modelDone = true
 						break
 					}
-
 					retriable := isRetriable(err)
 					// 401/403 are treated as per-key failures so selection can prefer other
 					// healthy keys before giving up or switching model.
@@ -553,11 +552,13 @@ func (c *Client) completeStreamWithRetry(
 					if errors.As(err, &apiErrPtr) && apiErrPtr != nil && (apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403) {
 						retriable = true
 					}
-					// Response-phase timeouts before any visible output: try other keys on
-					// this model first. Connection-establishment timeouts (dial/connect/TLS
-					// handshake) skip keys and move to the next model/provider.
-					if !retriable && fallbackEligible && keyAttempt+1 < keyCount && isPerKeyTimeoutRetry(err) {
-						retriable = true
+					// A timeout before any visible output now follows the same routing policy
+					// as dial/connect/TLS-handshake failures: do not spend the remaining keys
+					// or sibling targets on this provider in the current round; advance to
+					// the next provider/model.
+					if !retriable && isTimeoutLikeError(err) {
+						log.Warnf("invisible timeout before visible output; skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+						skippedProviders[t.provider] = "timeout_before_visible_output"
 					}
 
 					if !retriable {
@@ -621,10 +622,10 @@ func (c *Client) completeStreamWithRetry(
 			if !modelDone {
 				modelDone = true
 			}
-			// Dial/connect failures and connection-establishment timeouts skip all
-			// remaining models on this provider (same endpoint for every key).
+			// Provider-unusable failures skip all remaining targets on this
+			// provider for the current round.
 			if skipRemainingModelsOnProvider(lastErr) {
-				skippedProviders[t.provider] = true
+				skippedProviders[t.provider] = providerSkipReason(lastErr)
 			}
 
 			// If request succeeded, check for semantically empty output before returning.
