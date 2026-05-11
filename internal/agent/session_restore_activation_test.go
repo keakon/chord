@@ -33,7 +33,7 @@ func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.
 		t.Fatalf("GetUsageStats() = %+v, want loaded usage stats", stats)
 	}
 	current, _ := a.GetContextStats()
-	if current != 29 {
-		t.Fatalf("GetContextStats current = %d, want loaded total context tokens29", current)
+	if current != 11 {
+		t.Fatalf("GetContextStats current = %d, want loaded input tokens 11", current)
 	}
 }

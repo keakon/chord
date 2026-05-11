@@ -69,7 +69,7 @@ func (a *MainAgent) ClearPendingInteractions() {
 	a.questionMapMu.Unlock()
 }
 
-// AgentContextUsage holds context stats for one agent (main or sub) for sidebar display.
+// AgentContextUsage holds input-context stats for one agent (main or sub) for sidebar display.
 type AgentContextUsage struct {
 	AgentID             string
 	ContextCurrent      int

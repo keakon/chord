@@ -35,13 +35,13 @@ func (a *MainAgent) GetSidebarUsageStats() analytics.SessionStats {
 	return a.usageTracker.SessionStatsForAgent("main")
 }
 
-// GetContextStats returns current context usage and limit for the focused agent.
-// Current = input + output + cache + reasoning from last API response (all count toward context).
+// GetContextStats returns current input-context usage and usable input budget for the focused agent.
+// current is the last input token count from the most recent API call; limit is the usable input budget after reserved headroom.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return sub.GetContextStats()
 	}
-	return a.ctxMgr.LastTotalContextTokens(), a.ctxMgr.GetMaxTokens()
+	return a.ctxMgr.LastInputTokens(), a.ctxMgr.GetUsableInputBudget()
 }
 
 // GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar).

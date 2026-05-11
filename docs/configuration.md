@@ -612,7 +612,9 @@ sets `limit.input`, Chord starts from that value; otherwise it starts from
 `limit.context - effective_max_output`, where effective output is `max_output_tokens`
 (or the runtime default) capped by the model's `limit.output`. If
 `context.compaction.reserved` is set, Chord subtracts it before applying
-`compact_threshold`.
+`compact_threshold`. The TUI `Context` indicator in the info panel and footer uses
+this same input-budget calculation, so its percentage matches auto-compaction
+thresholds instead of the model's total context window.
 
 You can reserve headroom for tokenizer drift, tool-schema overhead, and
 compaction/recovery safety margin:

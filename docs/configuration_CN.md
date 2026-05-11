@@ -544,7 +544,7 @@ context:
   compact_model: openai/gpt-5.4-mini
 ```
 
-自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。
+自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。TUI 信息面板和底部栏里的 `Context` 百分比也使用这套输入预算口径，因此会与自动压缩阈值对齐，而不是按模型总上下文窗口计算。
 
 可通过配置预留 headroom，用于 tokenizer 漂移、tool schema 开销和压缩/恢复安全余量：
 

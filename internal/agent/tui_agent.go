@@ -142,8 +142,8 @@ type UsageReporter interface {
 	// GetSidebarUsageStats returns token/cost totals for the focused agent only, aligned with
 	// GetContextStats and GetTokenUsage for the right info panel and footer pills.
 	GetSidebarUsageStats() analytics.SessionStats
-	// GetContextStats returns current context usage and limit for the focused agent.
-	// current is the last input token count (approximate context window usage); limit is the model context limit (0 if unknown).
+	// GetContextStats returns current input-context usage and usable input budget for the focused agent.
+	// current is the last input token count; limit is the usable input budget (0 if unknown).
 	GetContextStats() (current, limit int)
 	// GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar). -1 if unknown.
 	GetContextMessageCount() int

@@ -393,8 +393,17 @@ func TestRenderInfoPanelShowsUsageWhenContextNonZero(t *testing.T) {
 	if !strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should show USAGE when context > 0; got %q", plain)
 	}
-	if !strings.Contains(plain, "Context: 2.0k (1%)") {
-		t.Fatalf("rendered info panel should show context summary inside USAGE; got %q", plain)
+}
+
+func TestRenderInfoPanelShowsUsageUsesInputBudgetRatherThanTotalContextWindow(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 50_000
+	backend.contextLimit = 100_000
+	m := NewModel(backend)
+
+	plain := stripANSI(m.renderInfoPanel(40, 24))
+	if !strings.Contains(plain, "Context: 50.0k (50%)") {
+		t.Fatalf("rendered info panel should show input-budget percentage; got %q", plain)
 	}
 }
 

@@ -927,6 +927,6 @@ func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, 
 	return b.String()
 }
 
-// formatContextPill formats context usage for the status bar: "42% (72.7K)" or "(72.7K)" when limit is 0.
+// formatContextPill formats input-budget usage for the status bar: "42% (72.7K)" or "(72.7K)" when limit is 0.
 // Returns "" when current is 0 (including unknown limit) so the footer stays minimal in narrow layouts.
 // renderContextPill renders the context pill with color by pressure: < 60% green, 60–85% yellow, > 85% red.

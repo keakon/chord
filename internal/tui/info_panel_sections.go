@@ -121,7 +121,7 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 }
 
 func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
-	// current = last round input+cache (input-side tokens that occupy the context window); percent = current/limit.
+	// current = last request input tokens; percent = current / usable input budget.
 	// Color by usage: green normal, orange >50%, red >80% (value and gauge match).
 	current, limit := m.agent.GetContextStats()
 	percent := 0.0
