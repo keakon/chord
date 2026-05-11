@@ -20,7 +20,10 @@ This lets you keep personal defaults, project-specific behavior, and per-agent
 capabilities separate.
 
 Project config is loaded from `.chord/config.yaml` without injecting built-in
-defaults first, then merged onto the already-loaded global config. That means:
+defaults first, then merged onto the already-loaded global config. Runtime
+commands treat the current working directory as the project root, so the
+project-layer config is read from `./.chord/config.yaml` under the startup cwd
+rather than by searching parent directories. That means:
 
 - omitted project fields stay truly unset instead of silently shadowing global defaults;
 - malformed project config is treated as a startup error, not ignored;
@@ -438,6 +441,12 @@ Use `stream_retry_rounds` to put a hard ceiling on public LLM retry rounds.
 Each round can still walk the current model pool and each provider key in the
 normal order; this setting limits how many full rounds `CompleteStream` will
 make before giving up.
+
+A "round" here means the whole public retry pass, not a single provider/model
+attempt. For example, `stream_retry_rounds: 2` allows at most two full passes
+through the active routing chain. Once the cap is reached, Chord stops even for
+retry classes that would normally wait and continue, such as all-keys-cooling
+or concurrent-request 429 responses.
 
 - `0` keeps the default behavior: retry until success, cancellation, or a terminal failure.
 - Positive values stop after that many rounds, even for cooling / concurrent-request retry classes.
