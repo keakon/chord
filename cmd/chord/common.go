@@ -92,6 +92,70 @@ func (ac *AppContext) GetOrCreateProviderImpl(provName string, cfg config.Provid
 	return ac.ProviderCache.getOrCreateImpl(provName, cfg, providerCfg, modelID)
 }
 
+type initAppStartupPlan struct {
+	ProjectRoot       string
+	ChordDir          string
+	PathLocator       *config.PathLocator
+	ProjectLocator    *config.ProjectLocator
+	ConfigHome        string
+	GlobalConfig      *config.Config
+	ProjectConfig     *config.Config
+	Config            *config.Config
+	ProjectConfigPath string
+}
+
+func planInitAppStartup(projectRoot string) (*initAppStartupPlan, error) {
+	if strings.TrimSpace(projectRoot) == "" {
+		return nil, fmt.Errorf("project root is empty")
+	}
+	chordDir := filepath.Join(projectRoot, ".chord")
+	if err := os.MkdirAll(chordDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create .chord directory: %w", err)
+	}
+	globalCfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	projectConfigPath := config.ProjectConfigPath(projectRoot)
+	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("resolve storage paths: %w", err)
+	}
+	projectLocator, err := pathLocator.EnsureProject(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project storage paths: %w", err)
+	}
+	return &initAppStartupPlan{
+		ProjectRoot:       projectRoot,
+		ChordDir:          chordDir,
+		PathLocator:       pathLocator,
+		ProjectLocator:    projectLocator,
+		ConfigHome:        pathLocator.ConfigHome,
+		GlobalConfig:      globalCfg,
+		ProjectConfig:     projectCfg,
+		Config:            cfg,
+		ProjectConfigPath: projectConfigPath,
+	}, nil
+}
+
+func applyInitAppStartupPlan(ac *AppContext, plan *initAppStartupPlan) {
+	if ac == nil || plan == nil {
+		return
+	}
+	ac.ProjectRoot = plan.ProjectRoot
+	ac.ChordDir = plan.ChordDir
+	ac.PathLocator = plan.PathLocator
+	ac.ProjectLocator = plan.ProjectLocator
+	ac.ConfigHome = plan.ConfigHome
+	ac.GlobalCfg = plan.GlobalConfig
+	ac.ProjectCfg = plan.ProjectConfig
+	ac.Cfg = plan.Config
+}
+
 // initApp performs the shared initialization sequence used by local TUI and
 // headless control-plane entrypoints. It sets up: signal context, project root, logging, config,
 // auth, LLM client, session directory, context manager, tool registry, MCP,
@@ -115,45 +179,18 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		ac.Cancel()
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
-	ac.ProjectRoot = projectRoot
-
-	// Runtime directory.
-	ac.ChordDir = filepath.Join(projectRoot, ".chord")
-	if err := os.MkdirAll(ac.ChordDir, 0o700); err != nil {
-		ac.Cancel()
-		return nil, fmt.Errorf("create .chord directory: %w", err)
-	}
-
-	// Configuration.
-	globalCfg, err := config.LoadConfig()
+	startupPlan, err := planInitAppStartup(projectRoot)
 	if err != nil {
 		ac.Cancel()
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, err
 	}
-	projectConfigPath := config.ProjectConfigPath(projectRoot)
-	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)
-	if err != nil {
-		ac.Cancel()
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-	ac.GlobalCfg = globalCfg
-	ac.ProjectCfg = projectCfg
-	ac.Cfg = cfg
-
-	// Resolve path policy once so later startup steps can reuse it.
-	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
-	if err != nil {
-		ac.cleanup()
-		return nil, fmt.Errorf("resolve storage paths: %w", err)
-	}
-	projectLocator, err := pathLocator.EnsureProject(projectRoot)
-	if err != nil {
-		ac.cleanup()
-		return nil, fmt.Errorf("resolve project storage paths: %w", err)
-	}
-	ac.PathLocator = pathLocator
-	ac.ProjectLocator = projectLocator
-	ac.ConfigHome = pathLocator.ConfigHome
+	applyInitAppStartupPlan(ac, startupPlan)
+	globalCfg := ac.GlobalCfg
+	projectCfg := ac.ProjectCfg
+	cfg := ac.Cfg
+	pathLocator := ac.PathLocator
+	projectLocator := ac.ProjectLocator
+	projectConfigPath := startupPlan.ProjectConfigPath
 
 	if globalCfg.Maintenance.SizeCheckOnStartup {
 		go func() {

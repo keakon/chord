@@ -181,6 +181,198 @@ func (a *MainAgent) PrewarmModelPolicy() error {
 	return a.ensureMainModelPolicy()
 }
 
+type mainLLMStreamState struct {
+	pendingKeySwitch      bool
+	pendingSwitchBack     bool
+	pendingFallbackRef    string
+	pendingFallbackReason string
+	streamingPromoted     bool
+	requestProgressBytes  int64
+	requestProgressEvents int64
+}
+
+func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, prevRunningRef string, turn *Turn, scrubThinkingMarkers bool, state *mainLLMStreamState) *llmStreamReducer {
+	if state == nil {
+		state = &mainLLMStreamState{}
+	}
+	state.pendingSwitchBack = prevRunningRef != "" && prevRunningRef != selectedRef && modelNameFromRef(prevRunningRef) != modelNameFromRef(selectedRef)
+
+	promoteStreamingActivity := func(source string) {
+		if state.streamingPromoted {
+			return
+		}
+		state.streamingPromoted = true
+		a.emitActivity("main", ActivityStreaming, "")
+	}
+
+	updateRunningModelRef := func(confirmedRef string) {
+		confirmedRef = strings.TrimSpace(confirmedRef)
+		if confirmedRef == "" {
+			return
+		}
+		a.llmMu.Lock()
+		prev := a.runningModelRef
+		a.runningModelRef = confirmedRef
+		provRef := a.providerModelRef
+		a.llmMu.Unlock()
+		if confirmedRef != prev {
+			a.emitToTUI(RunningModelChangedEvent{
+				AgentID:          a.instanceID,
+				ProviderModelRef: provRef,
+				RunningModelRef:  confirmedRef,
+			})
+		}
+	}
+
+	emitConfirmedSwitchToast := func(confirmedRef, confirmedReason string) {
+		confirmedRef = strings.TrimSpace(confirmedRef)
+		// If we had queued a fallback candidate but the first visible token came
+		// from a different model, discard the stale candidate to avoid emitting
+		// a misleading toast on a later key_confirmed.
+		if state.pendingFallbackRef != "" && confirmedRef != "" && confirmedRef != state.pendingFallbackRef {
+			state.pendingFallbackRef = ""
+			state.pendingFallbackReason = ""
+		}
+		switch {
+		case state.pendingFallbackRef != "" && confirmedRef != "" && confirmedRef == state.pendingFallbackRef:
+			reason := strings.TrimSpace(state.pendingFallbackReason)
+			if reason == "" {
+				reason = strings.TrimSpace(confirmedReason)
+			}
+			msg := fmt.Sprintf("Switched to fallback model: %s", confirmedRef)
+			if reason == "context_length_exceeded" {
+				msg = fmt.Sprintf("Current model context exceeded; switched to fallback model: %s", confirmedRef)
+			} else if reason != "" {
+				msg = fmt.Sprintf("Switched to fallback model (%s): %s", reason, confirmedRef)
+			}
+
+			a.emitToTUI(ToastEvent{Message: msg, Level: "warn"})
+		case state.pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef):
+			msg := "Switched back to selected model"
+
+			a.emitToTUI(ToastEvent{Message: msg, Level: "info"})
+		case state.pendingKeySwitch:
+			a.emitToTUI(ToastEvent{Message: "Switched key", Level: "info"})
+		default:
+			return
+		}
+
+		state.pendingKeySwitch = false
+		// Only clear switch-back after it is actually confirmed on a visible token.
+		if state.pendingFallbackRef != "" && confirmedRef == state.pendingFallbackRef {
+			state.pendingFallbackRef = ""
+			state.pendingFallbackReason = ""
+		} else if state.pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef) {
+			state.pendingSwitchBack = false
+		}
+	}
+
+	streamReducer := &llmStreamReducer{}
+	streamReducer.content = streamContentReducer{
+		agentID: "",
+		emit:    a.emitToTUI,
+		appendPartialText: func(text string) {
+			if turn != nil {
+				turn.appendPartialText(text)
+			}
+		},
+		scrubThinkingDelta:      scrubThinkingMarkers,
+		scrubThinkingFinal:      scrubThinkingMarkers,
+		emitThinkingStarted:     true,
+		ignoreThinkingAfterText: true,
+		closeThinkingOnText:     true,
+		closeThinkingOnFinish:   true,
+		thinkingCommitMode:      streamContentCommitEmpty,
+		textFlushInterval:       defaultStreamTextFlushInterval,
+		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
+	}
+	streamReducer.tool = streamToolDeltaReducer{
+		agentID:                  "",
+		turn:                     turn,
+		registry:                 a.tools,
+		ruleset:                  a.effectiveRuleset,
+		emit:                     a.emitToTUI,
+		flushBeforeTool:          streamReducer.content.flushTextDelta,
+		promoteStreamingActivity: promoteStreamingActivity,
+		recordToolUseEnd:         a.recordToolTraceToolUseEnd,
+		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
+			a.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
+		},
+		drainPartialTextOnRollback: true,
+	}
+	streamReducer.emitActivity = func(activity ActivityType, detail string) {
+		a.emitActivity("main", activity, detail)
+	}
+	streamReducer.promoteStreamingActivity = promoteStreamingActivity
+	streamReducer.onProgress = func(progress *message.StreamProgressDelta) {
+		state.requestProgressBytes = progress.Bytes
+		state.requestProgressEvents = progress.Events
+		a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
+	}
+	streamReducer.beforeStatus = func(status *message.StatusDelta) {
+		// When a fallback model is being tried, emit RunningModelChangedEvent
+		// immediately so the info panel updates without waiting for the response.
+		if status.Type == "retrying" && status.ModelRef != "" {
+			if llmClient != nil {
+				if lim := llmClient.ContextLimitForModelRef(status.ModelRef); lim > 0 {
+					a.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(status.ModelRef), a.effectiveCompactionReservedInput())
+				}
+			}
+			a.llmMu.Lock()
+			a.runningModelRef = status.ModelRef
+			provRef := a.providerModelRef
+			a.llmMu.Unlock()
+			a.emitToTUI(RunningModelChangedEvent{
+				AgentID:          a.instanceID,
+				ProviderModelRef: provRef,
+				RunningModelRef:  status.ModelRef,
+			})
+			// Only treat as fallback if the model name differs from selected.
+			// Same model name with different provider is effectively a key switch.
+			if modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
+				state.pendingFallbackRef = status.ModelRef
+				state.pendingFallbackReason = status.Reason
+			}
+		}
+	}
+	streamReducer.onRateLimits = func(delta message.StreamDelta) {
+		if delta.RateLimit != nil {
+			a.updateRateLimitSnapshot(delta.RateLimit)
+		}
+	}
+	streamReducer.onKeySwitched = func() {
+		a.clearCurrentRateLimitSnapshot()
+		state.pendingKeySwitch = true
+		a.emitToTUI(KeyPoolChangedEvent{})
+	}
+	streamReducer.onKeyDeactivated = func(email, accountID string) {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", streamKeyIdentity(email, accountID)), Level: "error"})
+		a.emitToTUI(KeyPoolChangedEvent{})
+	}
+	streamReducer.onKeyExpired = func(email, accountID string) {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error"})
+		a.emitToTUI(KeyPoolChangedEvent{})
+	}
+	streamReducer.onKeyConfirmed = func(status *message.StatusDelta) {
+		// First visible token received on the current key: update key availability now.
+		a.emitToTUI(KeyPoolChangedEvent{})
+		confirmedRef := ""
+		confirmedReason := ""
+		if status != nil {
+			confirmedRef = status.ModelRef
+			confirmedReason = status.Reason
+		}
+		// Ensure the sidebar reflects the model that actually produced the first visible token.
+		updateRunningModelRef(confirmedRef)
+		// Confirmed toasts must be keyed off the model that actually emitted output.
+		emitConfirmedSwitchToast(confirmedRef, confirmedReason)
+	}
+	streamReducer.onError = func(text string) {
+		log.Warnf("LLM stream error delta text=%v instance=%v", text, a.instanceID)
+	}
+	return streamReducer
+}
+
 // callLLM invokes the LLM with the given message history. Streaming deltas are
 // forwarded to the TUI in real-time via emitToTUI. Token usage is recorded in
 // the context manager.
@@ -233,283 +425,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	toolDefs := a.mainLLMToolDefinitions()
 
 	// The stream callback runs on the goroutine that owns the HTTP response
-	// reader, so text/thinking deltas should remain best-effort. A small set of
-	// low-frequency visibility events (for example speculative tool-card start)
-	// may still use the reliable output path because dropping them would leave
-	// the UI in an unrecoverable state.
-	//
-	// Both text and thinking deltas are batched before emission to avoid
-	// flooding the output channel when a proxy delivers the entire response
-	// in a single burst (all chunks arriving within a few milliseconds).
-	// Text is flushed every ~20ms; thinking every ~150ms. A final flush
-	// happens after CompleteStream returns so no content is lost.
-	var (
-		textAccum    strings.Builder
-		textLastEmit time.Time
-
-		thinkingAccum    strings.Builder
-		thinkingActive   bool
-		thinkingLastEmit time.Time
-
-		pendingKeySwitch      bool
-		pendingSwitchBack     = prevRunningRef != "" && prevRunningRef != selectedRef && modelNameFromRef(prevRunningRef) != modelNameFromRef(selectedRef)
-		pendingFallbackRef    string
-		pendingFallbackReason string
-		streamingPromoted     bool
-		requestProgressBytes  int64
-		requestProgressEvents int64
-		responseTextStarted   bool
-	)
-	const (
-		textFlushInterval     = 20 * time.Millisecond
-		thinkingFlushInterval = 150 * time.Millisecond
-	)
-
-	flushTextDelta := func() {
-		if textAccum.Len() > 0 {
-			text := textAccum.String()
-			textAccum.Reset()
-			a.emitToTUI(StreamTextEvent{Text: text})
-		}
-		textLastEmit = time.Now()
-	}
-
-	flushThinkingDelta := func() {
-		if thinkingAccum.Len() > 0 {
-			delta := thinkingAccum.String()
-			thinkingAccum.Reset()
-			if scrubThinkingMarkers {
-				delta = scrubThinkingToolcallMarkers(delta)
-			}
-			if strings.TrimSpace(delta) != "" {
-				a.emitToTUI(StreamThinkingDeltaEvent{Text: delta, AgentID: ""})
-			}
-		}
-		thinkingLastEmit = time.Now()
-	}
-
-	// closeThinkingBlock flushes any pending thinking before transitioning out
-	// of the thinking phase. In particular, the first text token is a hard
-	// boundary: thinking must be visible and settled before assistant text is
-	// emitted, otherwise delayed thinking batches can be appended below text.
-	closeThinkingBlock := func() {
-		if !thinkingActive && thinkingAccum.Len() == 0 {
-			return
-		}
-		flushThinkingDelta()
-		thinkingActive = false
-		// Send the complete thinking block as commit signal for TUI.
-		a.emitToTUI(StreamThinkingEvent{AgentID: ""})
-	}
-
-	promoteStreamingActivity := func(source string) {
-		if streamingPromoted {
-			return
-		}
-		streamingPromoted = true
-		a.emitActivity("main", ActivityStreaming, "")
-	}
-
-	toolReducer := streamToolDeltaReducer{
-		agentID:                  "",
-		turn:                     turn,
-		registry:                 a.tools,
-		ruleset:                  a.effectiveRuleset,
-		emit:                     a.emitToTUI,
-		flushBeforeTool:          flushTextDelta,
-		promoteStreamingActivity: promoteStreamingActivity,
-		recordToolUseEnd:         a.recordToolTraceToolUseEnd,
-		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
-			a.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
-		},
-		drainPartialTextOnRollback: true,
-	}
-
-	updateRunningModelRef := func(confirmedRef string) {
-		confirmedRef = strings.TrimSpace(confirmedRef)
-		if confirmedRef == "" {
-			return
-		}
-		a.llmMu.Lock()
-		prev := a.runningModelRef
-		a.runningModelRef = confirmedRef
-		provRef := a.providerModelRef
-		a.llmMu.Unlock()
-		if confirmedRef != prev {
-			a.emitToTUI(RunningModelChangedEvent{
-				AgentID:          a.instanceID,
-				ProviderModelRef: provRef,
-				RunningModelRef:  confirmedRef,
-			})
-		}
-	}
-
-	emitConfirmedSwitchToast := func(confirmedRef, confirmedReason string) {
-		confirmedRef = strings.TrimSpace(confirmedRef)
-		// If we had queued a fallback candidate but the first visible token came
-		// from a different model, discard the stale candidate to avoid emitting
-		// a misleading toast on a later key_confirmed.
-		if pendingFallbackRef != "" && confirmedRef != "" && confirmedRef != pendingFallbackRef {
-			pendingFallbackRef = ""
-			pendingFallbackReason = ""
-		}
-		switch {
-		case pendingFallbackRef != "" && confirmedRef != "" && confirmedRef == pendingFallbackRef:
-			reason := strings.TrimSpace(pendingFallbackReason)
-			if reason == "" {
-				reason = strings.TrimSpace(confirmedReason)
-			}
-			msg := fmt.Sprintf("Switched to fallback model: %s", confirmedRef)
-			if reason == "context_length_exceeded" {
-				msg = fmt.Sprintf("Current model context exceeded; switched to fallback model: %s", confirmedRef)
-			} else if reason != "" {
-				msg = fmt.Sprintf("Switched to fallback model (%s): %s", reason, confirmedRef)
-			}
-
-			a.emitToTUI(ToastEvent{Message: msg, Level: "warn"})
-		case pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef):
-			msg := "Switched back to selected model"
-
-			a.emitToTUI(ToastEvent{Message: msg, Level: "info"})
-		case pendingKeySwitch:
-			a.emitToTUI(ToastEvent{Message: "Switched key", Level: "info"})
-		default:
-			return
-		}
-
-		pendingKeySwitch = false
-		// Only clear switch-back after it is actually confirmed on a visible token.
-		if pendingFallbackRef != "" && confirmedRef == pendingFallbackRef {
-			pendingFallbackRef = ""
-			pendingFallbackReason = ""
-		} else if pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef) {
-			pendingSwitchBack = false
-		}
-	}
-
-	callback := func(delta message.StreamDelta) {
-		if delta.Progress != nil {
-			requestProgressBytes = delta.Progress.Bytes
-			requestProgressEvents = delta.Progress.Events
-			a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: requestProgressBytes, Events: requestProgressEvents})
-		}
-		if toolReducer.Handle(delta) {
-			return
-		}
-		switch delta.Type {
-		case "text":
-			closeThinkingBlock()
-			responseTextStarted = true
-			textAccum.WriteString(delta.Text)
-			if turn != nil {
-				turn.appendPartialText(delta.Text)
-			}
-			if textLastEmit.IsZero() {
-				// Emit the first delta immediately for perceived responsiveness.
-				flushTextDelta()
-			} else if time.Since(textLastEmit) >= textFlushInterval {
-				flushTextDelta()
-			}
-		case "thinking":
-			if responseTextStarted {
-				break
-			}
-			flushTextDelta() // flush any pending text before switching to thinking
-			if !thinkingActive {
-				thinkingActive = true
-				a.emitToTUI(ThinkingStartedEvent{})
-				thinkingLastEmit = time.Now()
-			}
-			thinkingAccum.WriteString(delta.Text)
-			if time.Since(thinkingLastEmit) >= thinkingFlushInterval {
-				flushThinkingDelta()
-			}
-		case "thinking_end":
-			closeThinkingBlock()
-		case "status":
-			if delta.Status != nil {
-				// When a fallback model is being tried, emit RunningModelChangedEvent
-				// immediately so the info panel updates without waiting for the response.
-				if delta.Status.Type == "retrying" && delta.Status.ModelRef != "" {
-					if lim := llmClient.ContextLimitForModelRef(delta.Status.ModelRef); lim > 0 {
-						a.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(delta.Status.ModelRef), a.effectiveCompactionReservedInput())
-					}
-					a.llmMu.Lock()
-					a.runningModelRef = delta.Status.ModelRef
-					provRef := a.providerModelRef
-					a.llmMu.Unlock()
-					a.emitToTUI(RunningModelChangedEvent{
-						AgentID:          a.instanceID,
-						ProviderModelRef: provRef,
-						RunningModelRef:  delta.Status.ModelRef,
-					})
-					// Only treat as fallback if the model name differs from selected.
-					// Same model name with different provider is effectively a key switch.
-					if modelNameFromRef(delta.Status.ModelRef) != modelNameFromRef(selectedRef) {
-						pendingFallbackRef = delta.Status.ModelRef
-						pendingFallbackReason = delta.Status.Reason
-					}
-				}
-				if delta.Status.Type == string(ActivityStreaming) {
-					promoteStreamingActivity("llm_status")
-					return
-				}
-				a.emitActivity("main", ActivityType(delta.Status.Type), delta.Status.Detail)
-			}
-		case "rate_limits":
-			if delta.RateLimit != nil {
-				a.updateRateLimitSnapshot(delta.RateLimit)
-			}
-		case "key_switched":
-			a.clearCurrentRateLimitSnapshot()
-			pendingKeySwitch = true
-			a.emitToTUI(KeyPoolChangedEvent{})
-		case "key_deactivated":
-			var ident string
-			switch {
-			case delta.Email != "" && delta.AccountID != "":
-				ident = fmt.Sprintf("%s (%s)", delta.Email, delta.AccountID)
-			case delta.Email != "":
-				ident = delta.Email
-			case delta.AccountID != "":
-				ident = delta.AccountID
-			default:
-				ident = "unknown"
-			}
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", ident), Level: "error"})
-			a.emitToTUI(KeyPoolChangedEvent{})
-		case "key_expired":
-			var ident string
-			switch {
-			case delta.Email != "" && delta.AccountID != "":
-				ident = fmt.Sprintf("%s (%s)", delta.Email, delta.AccountID)
-			case delta.Email != "":
-				ident = delta.Email
-			case delta.AccountID != "":
-				ident = delta.AccountID
-			default:
-				ident = "unknown"
-			}
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", ident), Level: "error"})
-			a.emitToTUI(KeyPoolChangedEvent{})
-		case "key_confirmed":
-			// First visible token received on the current key: update key availability now.
-			a.emitToTUI(KeyPoolChangedEvent{})
-			confirmedRef := ""
-			confirmedReason := ""
-			if delta.Status != nil {
-				confirmedRef = delta.Status.ModelRef
-				confirmedReason = delta.Status.Reason
-			}
-			// Ensure the sidebar reflects the model that actually produced the first visible token.
-			updateRunningModelRef(confirmedRef)
-			// Confirmed toasts must be keyed off the model that actually emitted output.
-			emitConfirmedSwitchToast(confirmedRef, confirmedReason)
-		case "error":
-			log.Warnf("LLM stream error delta text=%v instance=%v", delta.Text, a.instanceID)
-
-		}
-	}
+	// reader, so high-volume deltas stay best-effort while durable/structural
+	// events are emitted through the shared reducer.
+	streamState := &mainLLMStreamState{}
+	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState)
+	callback := streamReducer.Handle
 
 	// Hook: on_before_llm_call (before LLM call).
 	hookResult, hookErr := a.fireHook(ctx, hook.OnBeforeLLMCall, turnID, map[string]any{
@@ -544,9 +464,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// though it is already persisted to the JSONL log. If the stream ends
 	// while still thinking, close that block before flushing any following
 	// text so the viewport order stays stable.
-	closeThinkingBlock()
-	flushTextDelta()
-	a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: requestProgressBytes, Events: requestProgressEvents, Done: true})
+	streamReducer.Finish()
+	a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 	if err != nil {
 		// Skip fallback exhausted toast for context cancellation (user CancelCurrentTurn).
 		// All cancel-path errors use %w wrapping around ctx.Err(), so errors.Is

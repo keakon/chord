@@ -17,6 +17,10 @@ import (
 // first (sidebar, main, infoPanel, input, toast, status), then overlays (session/model
 // dialogs, slash completion). Dialogs and completion are drawn last so they float on top.
 func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
+	return m.drawFrame(scr, area)
+}
+
+func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 	w, h := area.Dx(), area.Dy()
 	layout := m.generateLayout(w, h)
 	m.layout = layout
@@ -29,7 +33,23 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 	}
 
 	// ---- Base layer ----
+	m.drawBaseLayers(scr, layout)
 
+	// ---- Overlay layer (drawn last so they float on top) ----
+	m.drawOverlayLayers(scr, area, layout)
+
+	// Cursor for input focus: textarea returns position relative to its content;
+	// add layout offset. No border/padding: Y offset is separator line (1), X has no extra padding.
+	if m.cachedInputCursorOK {
+		cur := m.cachedInputCursor
+		cur.Y += layout.input.Min.Y + 1 // separator line(1)
+		cur.X += layout.input.Min.X
+		return &cur
+	}
+	return nil
+}
+
+func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 	// Main: viewport, directory, or welcome (no dialogs here; those are overlay)
 	viewportWidth := layout.main.Dx()
 	viewportHeight := layout.main.Dy()
@@ -104,7 +124,10 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		}
 		m.drawCachedRenderableToClearedArea(scr, layout.main, &m.cachedMainRender)
 	}
+}
 
+func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
+	m.drawMainLayer(scr, layout)
 	// Info panel
 	if layout.infoPanel.Dx() > 0 {
 		infoView := m.renderInfoPanel(layout.infoPanel.Dx(), m.viewport.height)
@@ -260,7 +283,9 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		m.drawCachedRenderableToClearedArea(scr, layout.status, &m.cachedStatusRender)
 	}
 
-	// ---- Overlay layer (drawn last so they float on top) ----
+}
+
+func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tuiLayout) {
 	// Dialogs use full-screen bounds (area) so they overlay everything
 	// (sidebar, infoPanel, etc.) so they appear on top of all other layers.
 
@@ -321,7 +346,7 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 
 	// Slash completion: draw absolutely last, above all other dialogs/panels
 	if m.mode == ModeInsert {
-		if drop := m.renderSlashCompletionDropdown(inputValue); drop != "" {
+		if drop := m.renderSlashCompletionDropdown(m.input.DisplayValue()); drop != "" {
 			// Slash completion: draw at bottom of main area
 			dropLines := strings.Count(drop, "\n") + 1
 			dy := layout.main.Dy()
@@ -346,16 +371,6 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 			uv.NewStyledString(popup).Draw(scr, popupRect)
 		}
 	}
-
-	// Cursor for input focus: textarea returns position relative to its content;
-	// add layout offset. No border/padding: Y offset is separator line (1), X has no extra padding.
-	if m.cachedInputCursorOK {
-		cur := m.cachedInputCursor
-		cur.Y += layout.input.Min.Y + 1 // separator line(1)
-		cur.X += layout.input.Min.X
-		return &cur
-	}
-	return nil
 }
 
 // View renders the entire screen (Bubble Tea v2: returns tea.View with Content from buffer).

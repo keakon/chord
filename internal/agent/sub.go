@@ -455,26 +455,10 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 		}
 
 		// Streaming callback: forward deltas to the parent's TUI output
-		// tagged with this SubAgent's instance ID.
-		// Text and thinking deltas are batched to avoid flooding the output
-		// channel when a proxy delivers all chunks in a burst.
-		var (
-			textAccum    strings.Builder
-			textLastEmit time.Time
-
-			thinkingAccum strings.Builder
-		)
-		const subTextFlushInterval = 20 * time.Millisecond
+		// tagged with this SubAgent's instance ID. Shared reducer logic mirrors
+		// MainAgent for text/tool/status handling while preserving SubAgent's
+		// historical immediate thinking-delta behavior.
 		streamingPromoted := false
-
-		flushSubTextDelta := func() {
-			if textAccum.Len() > 0 {
-				text := textAccum.String()
-				textAccum.Reset()
-				s.parent.emitToTUI(StreamTextEvent{Text: text, AgentID: s.instanceID})
-			}
-			textLastEmit = time.Now()
-		}
 		promoteStreamingActivity := func(source string) {
 			if streamingPromoted {
 				return
@@ -484,66 +468,42 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			s.parent.emitActivity(s.instanceID, ActivityStreaming, "")
 		}
 
-		toolReducer := streamToolDeltaReducer{
+		streamReducer := &llmStreamReducer{}
+		streamReducer.content = streamContentReducer{
+			agentID:               s.instanceID,
+			emit:                  s.parent.emitToTUI,
+			scrubThinkingDelta:    false,
+			scrubThinkingFinal:    scrubThinkingMarkers,
+			thinkingCommitMode:    streamContentCommitFullText,
+			textFlushInterval:     defaultStreamTextFlushInterval,
+			thinkingFlushInterval: 0,
+		}
+		streamReducer.tool = streamToolDeltaReducer{
 			agentID:                  s.instanceID,
 			turn:                     turn,
 			registry:                 s.tools,
 			ruleset:                  func() permission.Ruleset { return s.ruleset },
 			emit:                     s.parent.emitToTUI,
-			flushBeforeTool:          flushSubTextDelta,
+			flushBeforeTool:          streamReducer.content.flushTextDelta,
 			promoteStreamingActivity: promoteStreamingActivity,
 			recordToolUseEnd:         s.parent.recordToolTraceToolUseEnd,
 			discardSpeculativeOnRollback: func(turn *Turn, reason string) {
 				s.parent.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
 			},
 		}
-
-		callback := func(delta message.StreamDelta) {
-			if toolReducer.Handle(delta) {
-				return
-			}
-			switch delta.Type {
-			case "text":
-				textAccum.WriteString(delta.Text)
-				if textLastEmit.IsZero() {
-					flushSubTextDelta() // first delta: emit immediately
-				} else if time.Since(textLastEmit) >= subTextFlushInterval {
-					flushSubTextDelta()
-				}
-			case "thinking":
-				flushSubTextDelta() // flush pending text before thinking
-				thinkingAccum.WriteString(delta.Text)
-				if delta.Text != "" {
-					s.parent.emitToTUI(StreamThinkingDeltaEvent{Text: delta.Text, AgentID: s.instanceID})
-				}
-			case "thinking_end":
-				if thinkingAccum.Len() > 0 {
-					thinkingText := thinkingAccum.String()
-					thinkingAccum.Reset()
-					if scrubThinkingMarkers {
-						thinkingText = scrubThinkingToolcallMarkers(thinkingText)
-					}
-					if strings.TrimSpace(thinkingText) != "" {
-						s.parent.emitToTUI(StreamThinkingEvent{Text: thinkingText, AgentID: s.instanceID})
-					}
-				}
-			case "status":
-				if delta.Status != nil {
-					if delta.Status.Type == string(ActivityStreaming) {
-						promoteStreamingActivity("llm_status")
-						return
-					}
-					s.parent.emitActivity(s.instanceID, ActivityType(delta.Status.Type), delta.Status.Detail)
-				}
-			case "error":
-				log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", delta.Text, s.instanceID)
-
-			}
+		streamReducer.emitActivity = func(activity ActivityType, detail string) {
+			s.parent.emitActivity(s.instanceID, activity, detail)
 		}
+		streamReducer.promoteStreamingActivity = promoteStreamingActivity
+		streamReducer.onError = func(text string) {
+			log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", text, s.instanceID)
+		}
+
+		callback := streamReducer.Handle
 
 		s.parent.emitActivity(s.instanceID, ActivityConnecting, "")
 		resp, err := llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
-		flushSubTextDelta() // final flush: emit any remaining accumulated text
+		streamReducer.Finish() // final flush: emit any remaining accumulated text
 		if turn.Ctx.Err() != nil {
 			return // turn cancelled
 		}

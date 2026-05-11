@@ -187,28 +187,20 @@ func (m *Model) handleStatusClipboardClick(x, y int, value string, copyCmd func(
 	return nil
 }
 
-func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
-	if m.interactionSuppressed() {
-		return nil
-	}
+type mouseHitZones struct {
+	viewportLineRaw int
+	viewportColRaw  int
+	viewportLine    int
+	viewportCol     int
+	inViewport      bool
+	inInputZone     bool
+	inQueueZone     bool
+	inInfoPanel     bool
+}
 
-	mouse := msg.Mouse()
+func (m *Model) mouseHitZones(mouse tea.Mouse) mouseHitZones {
 	viewportLineRaw := mouse.Y
 	viewportColRaw := mouse.X
-	inViewport := viewportLineRaw >= 0 && viewportLineRaw < m.viewport.height &&
-		viewportColRaw >= 0 && viewportColRaw < m.viewport.width
-	inInputZone := m.layout.input.Dx() > 0 &&
-		mouse.X >= m.layout.input.Min.X && mouse.X < m.layout.input.Max.X &&
-		mouse.Y >= m.layout.input.Min.Y && mouse.Y < m.layout.input.Max.Y
-	inQueueZone := m.layout.queue.Dx() > 0 &&
-		mouse.X >= m.layout.queue.Min.X && mouse.X < m.layout.queue.Max.X &&
-		mouse.Y >= m.layout.queue.Min.Y && mouse.Y < m.layout.queue.Max.Y
-	inInfoPanel := m.infoPanelContainsPoint(mouse.X, mouse.Y)
-
-	if cmd, handled := m.handleModalMouseMsg(msg); handled {
-		return cmd
-	}
-
 	viewportLine := viewportLineRaw
 	viewportCol := viewportColRaw + 1
 	if viewportLine < 0 {
@@ -223,269 +215,326 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
 	if viewportCol >= m.viewport.width {
 		viewportCol = m.viewport.width - 1
 	}
+	return mouseHitZones{
+		viewportLineRaw: viewportLineRaw,
+		viewportColRaw:  viewportColRaw,
+		viewportLine:    viewportLine,
+		viewportCol:     viewportCol,
+		inViewport: viewportLineRaw >= 0 && viewportLineRaw < m.viewport.height &&
+			viewportColRaw >= 0 && viewportColRaw < m.viewport.width,
+		inInputZone: m.layout.input.Dx() > 0 &&
+			mouse.X >= m.layout.input.Min.X && mouse.X < m.layout.input.Max.X &&
+			mouse.Y >= m.layout.input.Min.Y && mouse.Y < m.layout.input.Max.Y,
+		inQueueZone: m.layout.queue.Dx() > 0 &&
+			mouse.X >= m.layout.queue.Min.X && mouse.X < m.layout.queue.Max.X &&
+			mouse.Y >= m.layout.queue.Min.Y && mouse.Y < m.layout.queue.Max.Y,
+		inInfoPanel: m.infoPanelContainsPoint(mouse.X, mouse.Y),
+	}
+}
 
+func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
+	if m.interactionSuppressed() {
+		return nil
+	}
+
+	if cmd, handled := m.handleModalMouseMsg(msg); handled {
+		return cmd
+	}
+
+	mouse := msg.Mouse()
+	hits := m.mouseHitZones(mouse)
 	switch msg.(type) {
 	case tea.MouseClickMsg:
-		if mouse.Button == tea.MouseLeft {
-			m.clearChordState()
-			if inQueueZone {
-				m.clearFocusedBlock()
-				if idx, remove, ok := m.queuedDraftActionAt(mouse.X, mouse.Y); ok {
-					if remove {
-						return m.deleteQueuedDraftAt(idx)
-					}
-					return m.editQueuedDraftAt(idx)
-				}
-				return nil
-			}
-			if inInfoPanel {
-				m.clearFocusedBlock()
-				m.clearMouseSelection()
-				m.input.ClearSelection()
-				m.inputMouseDown = false
-				if agentID, ok := m.infoPanelAgentAtPoint(mouse.X, mouse.Y); ok {
-					if agentID == "main" {
-						agentID = ""
-					}
-					m.setFocusedAgent(agentID)
-					m.recalcViewportSize()
-					return m.restartStatusBarTick()
-				}
-				if section, ok := m.infoPanelSectionAtPoint(mouse.X, mouse.Y); ok {
-					m.toggleInfoPanelSection(section)
-				}
-				return nil
-			}
-			if cmd, handled := m.handleStatusCopyClick(mouse.X, mouse.Y); handled {
-				return cmd
-			}
-
-			// Insert mode: click outside input zone -> switch to Normal and blur,
-			// then fall through to start selection so drag works immediately.
-			if m.mode == ModeInsert {
-				if !inInputZone {
-					cmd := m.switchModeWithIME(ModeNormal)
-					m.recalcViewportSize()
-					if cmd != nil {
-						return cmd
-					}
-					// Fall through to Normal-mode selection handling below.
-				} else {
-					if line, col, ok := m.input.SelectionPointAt(
-						mouse.Y-m.layout.input.Min.Y-1,
-						mouse.X-m.layout.input.Min.X-inputPromptWidth,
-					); ok {
-						m.clearMouseSelection()
-						m.input.StartSelection(line, col)
-						m.inputMouseDown = true
-					} else {
-						m.input.ClearSelection()
-						m.inputMouseDown = false
-					}
-					return nil
-				}
-			}
-			// Normal mode: click in input zone -> switch to Insert and focus.
-			if m.mode == ModeNormal && inInputZone {
-				m.switchModeWithIME(ModeInsert)
-				m.recalcViewportSize()
-				m.clearFocusedBlock()
-				if line, col, ok := m.input.SelectionPointAt(
-					mouse.Y-m.layout.input.Min.Y-1,
-					mouse.X-m.layout.input.Min.X-inputPromptWidth,
-				); ok {
-					m.clearMouseSelection()
-					m.input.StartSelection(line, col)
-					m.inputMouseDown = true
-				} else {
-					m.input.ClearSelection()
-					m.inputMouseDown = false
-				}
-				return m.input.Focus()
-			}
-			if inViewport {
-				m.input.ClearSelection()
-				m.inputMouseDown = false
-				if block, lineInBlock := m.viewportResolveMouse(viewportLine); block != nil {
-					col := clampCol(viewportCol, m.viewport.width)
-					// Double/triple click for word/line selection.
-					const doubleClickThreshold = 400 * time.Millisecond
-					const clickTolerance = 2
-					now := time.Now()
-					if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
-						abs(mouse.X-m.lastClickX) <= clickTolerance &&
-						abs(mouse.Y-m.lastClickY) <= clickTolerance {
-						m.clickCount++
-					} else {
-						m.clickCount = 1
-					}
-					m.lastClickTime = now
-					m.lastClickX = mouse.X
-					m.lastClickY = mouse.Y
-
-					if m.clickCount == 2 {
-						plain, _ := m.viewport.GetLinePlain(block.ID, lineInBlock)
-						sCol, eCol := WordBoundsAtCol(plain, col)
-						if sCol < eCol {
-							m.selStartBlockID = block.ID
-							m.selStartLine = lineInBlock
-							m.selStartCol = sCol
-							m.selEndBlockID = block.ID
-							m.selEndLine = lineInBlock
-							m.selEndCol = eCol
-							m.selEndInclusiveForCopy = false
-							m.mouseDown = false
-						} else {
-							m.mouseDown = true
-							m.selStartBlockID = block.ID
-							m.selStartLine = lineInBlock
-							m.selStartCol = col
-							m.selEndBlockID = block.ID
-							m.selEndLine = lineInBlock
-							m.selEndCol = col
-							m.selEndInclusiveForCopy = true
-						}
-					} else if m.clickCount >= 3 {
-						_, lineWidth := m.viewport.GetLinePlain(block.ID, lineInBlock)
-						m.clickCount = 0
-						if lineWidth > 0 {
-							m.selStartBlockID = block.ID
-							m.selStartLine = lineInBlock
-							m.selStartCol = 0
-							m.selEndBlockID = block.ID
-							m.selEndLine = lineInBlock
-							m.selEndCol = lineWidth
-							m.selEndInclusiveForCopy = false
-							m.mouseDown = false
-						} else {
-							// Empty line: treat as single click (point selection).
-							m.mouseDown = true
-							m.selStartBlockID = block.ID
-							m.selStartLine = lineInBlock
-							m.selStartCol = col
-							m.selEndBlockID = block.ID
-							m.selEndLine = lineInBlock
-							m.selEndCol = col
-							m.selEndInclusiveForCopy = true
-						}
-					} else {
-						if block.ID != m.focusedBlockID {
-							if m.focusedBlockID >= 0 {
-								for _, b := range m.viewport.blocks {
-									if b.ID == m.focusedBlockID {
-										b.Focused = false
-										b.InvalidateCache()
-										break
-									}
-								}
-							}
-							if isSelectableBlockType(block.Type) {
-								m.focusedBlockID = block.ID
-								block.Focused = true
-								block.InvalidateCache()
-							} else {
-								m.focusedBlockID = -1
-							}
-							// Clicking a Delegate block that has a linked subagent switches to that agent's view.
-							m.maybeSwitchToTaskAgent(block)
-							if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
-								m.clearMouseSelection()
-								m.mouseDown = false
-								return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps)
-							}
-							// Do not scroll on click; only j/k/g/G etc. reposition the view.
-						} else {
-							// Already focused: clicking again on a Delegate block still switches to subagent view.
-							m.maybeSwitchToTaskAgent(block)
-							if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
-								m.clearMouseSelection()
-								m.mouseDown = false
-								return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps)
-							}
-						}
-						m.mouseDown = true
-						m.selStartBlockID = block.ID
-						m.selStartLine = lineInBlock
-						m.selStartCol = col
-						m.selEndBlockID = block.ID
-						m.selEndLine = lineInBlock
-						m.selEndCol = col
-						m.selEndInclusiveForCopy = true
-					}
-				}
-			} else {
-				m.input.ClearSelection()
-				m.inputMouseDown = false
-				m.clearFocusedBlock()
-				// Outside viewport: resolve focus from zones (e.g. directory overlay).
-				// Zone bounds are from last Scan; we don't pass v2 MouseMsg to bubblezone.
-				// Use viewport resolution for blocks (already have inViewport coords).
-				for _, b := range m.viewport.blocks {
-					idStr := fmt.Sprintf("block-%d", b.ID)
-					z := m.zone.Get(idStr)
-					if !z.IsZero() && mouse.X >= z.StartX && mouse.X <= z.EndX && mouse.Y >= z.StartY && mouse.Y <= z.EndY {
-						if b.ID != m.focusedBlockID {
-							if m.focusedBlockID >= 0 {
-								for _, oldB := range m.viewport.blocks {
-									if oldB.ID == m.focusedBlockID {
-										oldB.Focused = false
-										oldB.InvalidateCache()
-										break
-									}
-								}
-							}
-							if isSelectableBlockType(b.Type) {
-								m.focusedBlockID = b.ID
-								b.Focused = true
-								b.InvalidateCache()
-							} else {
-								m.focusedBlockID = -1
-							}
-							m.maybeSwitchToTaskAgent(b)
-						}
-						break
-					}
-				}
-			}
-			return nil
-		}
+		return m.handleMouseClick(mouse, hits)
 	case tea.MouseMotionMsg:
-		if m.inputMouseDown && inInputZone {
-			if line, col, ok := m.input.SelectionPointAt(
-				mouse.Y-m.layout.input.Min.Y-1,
-				mouse.X-m.layout.input.Min.X-inputPromptWidth,
-			); ok {
-				m.input.UpdateSelection(line, col)
-			}
-			return nil
-		}
-		if m.mouseDown && inViewport {
-			if block, lineInBlock := m.viewportResolveMouse(viewportLine); block != nil {
-				m.selEndBlockID = block.ID
-				m.selEndLine = lineInBlock
-				m.selEndCol = clampCol(viewportCol, m.viewport.width)
-				m.selEndInclusiveForCopy = true
-			}
-			return nil
-		}
+		return m.handleMouseMotion(mouse, hits)
 	case tea.MouseReleaseMsg:
-		if mouse.Button == tea.MouseLeft {
-			m.mouseDown = false
+		return m.handleMouseRelease(mouse)
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(mouse)
+	}
+	return nil
+}
+
+func (m *Model) handleMouseClick(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
+	if mouse.Button != tea.MouseLeft {
+		return nil
+	}
+	m.clearChordState()
+	if hits.inQueueZone {
+		return m.handleQueueMouseClick(mouse)
+	}
+	if hits.inInfoPanel {
+		return m.handleInfoPanelMouseClick(mouse)
+	}
+	if cmd, handled := m.handleStatusCopyClick(mouse.X, mouse.Y); handled {
+		return cmd
+	}
+	if cmd, handled := m.handleInputZoneMouseClick(mouse, hits); handled {
+		return cmd
+	}
+	if hits.inViewport {
+		return m.handleViewportMouseClick(mouse, hits)
+	}
+	return m.handleOutsideViewportMouseClick(mouse)
+}
+
+func (m *Model) handleQueueMouseClick(mouse tea.Mouse) tea.Cmd {
+	m.clearFocusedBlock()
+	if idx, remove, ok := m.queuedDraftActionAt(mouse.X, mouse.Y); ok {
+		if remove {
+			return m.deleteQueuedDraftAt(idx)
+		}
+		return m.editQueuedDraftAt(idx)
+	}
+	return nil
+}
+
+func (m *Model) handleInfoPanelMouseClick(mouse tea.Mouse) tea.Cmd {
+	m.clearFocusedBlock()
+	m.clearMouseSelection()
+	m.input.ClearSelection()
+	m.inputMouseDown = false
+	if agentID, ok := m.infoPanelAgentAtPoint(mouse.X, mouse.Y); ok {
+		if agentID == "main" {
+			agentID = ""
+		}
+		m.setFocusedAgent(agentID)
+		m.recalcViewportSize()
+		return m.restartStatusBarTick()
+	}
+	if section, ok := m.infoPanelSectionAtPoint(mouse.X, mouse.Y); ok {
+		m.toggleInfoPanelSection(section)
+	}
+	return nil
+}
+
+func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (tea.Cmd, bool) {
+	// Insert mode: click outside input zone -> switch to Normal and blur,
+	// then fall through to start selection so drag works immediately.
+	if m.mode == ModeInsert {
+		if !hits.inInputZone {
+			cmd := m.switchModeWithIME(ModeNormal)
+			m.recalcViewportSize()
+			if cmd != nil {
+				return cmd, true
+			}
+			return nil, false
+		}
+		if line, col, ok := m.input.SelectionPointAt(
+			mouse.Y-m.layout.input.Min.Y-1,
+			mouse.X-m.layout.input.Min.X-inputPromptWidth,
+		); ok {
+			m.clearMouseSelection()
+			m.input.StartSelection(line, col)
+			m.inputMouseDown = true
+		} else {
+			m.input.ClearSelection()
 			m.inputMouseDown = false
 		}
+		return nil, true
+	}
+	// Normal mode: click in input zone -> switch to Insert and focus.
+	if m.mode == ModeNormal && hits.inInputZone {
+		m.switchModeWithIME(ModeInsert)
+		m.recalcViewportSize()
+		m.clearFocusedBlock()
+		if line, col, ok := m.input.SelectionPointAt(
+			mouse.Y-m.layout.input.Min.Y-1,
+			mouse.X-m.layout.input.Min.X-inputPromptWidth,
+		); ok {
+			m.clearMouseSelection()
+			m.input.StartSelection(line, col)
+			m.inputMouseDown = true
+		} else {
+			m.input.ClearSelection()
+			m.inputMouseDown = false
+		}
+		return m.input.Focus(), true
+	}
+	return nil, false
+}
+
+func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
+	m.input.ClearSelection()
+	m.inputMouseDown = false
+	block, lineInBlock := m.viewportResolveMouse(hits.viewportLine)
+	if block == nil {
+		return nil
+	}
+	col := clampCol(hits.viewportCol, m.viewport.width)
+	if cmd, handled := m.handleViewportSelectionClick(mouse, block, lineInBlock, col); handled {
+		return cmd
+	}
+	return nil
+}
+
+func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, lineInBlock, col int) (tea.Cmd, bool) {
+	// Double/triple click for word/line selection.
+	const doubleClickThreshold = 400 * time.Millisecond
+	const clickTolerance = 2
+	now := time.Now()
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(mouse.X-m.lastClickX) <= clickTolerance &&
+		abs(mouse.Y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+	m.lastClickTime = now
+	m.lastClickX = mouse.X
+	m.lastClickY = mouse.Y
+
+	if m.clickCount == 2 {
+		plain, _ := m.viewport.GetLinePlain(block.ID, lineInBlock)
+		sCol, eCol := WordBoundsAtCol(plain, col)
+		if sCol < eCol {
+			m.selStartBlockID = block.ID
+			m.selStartLine = lineInBlock
+			m.selStartCol = sCol
+			m.selEndBlockID = block.ID
+			m.selEndLine = lineInBlock
+			m.selEndCol = eCol
+			m.selEndInclusiveForCopy = false
+			m.mouseDown = false
+		} else {
+			m.startPointSelection(block.ID, lineInBlock, col)
+		}
+		return nil, true
+	}
+	if m.clickCount >= 3 {
+		_, lineWidth := m.viewport.GetLinePlain(block.ID, lineInBlock)
+		m.clickCount = 0
+		if lineWidth > 0 {
+			m.selStartBlockID = block.ID
+			m.selStartLine = lineInBlock
+			m.selStartCol = 0
+			m.selEndBlockID = block.ID
+			m.selEndLine = lineInBlock
+			m.selEndCol = lineWidth
+			m.selEndInclusiveForCopy = false
+			m.mouseDown = false
+		} else {
+			// Empty line: treat as single click (point selection).
+			m.startPointSelection(block.ID, lineInBlock, col)
+		}
+		return nil, true
 	}
 
-	// Wheel: scroll viewport
-	if _, isWheel := msg.(tea.MouseWheelMsg); isWheel {
-		switch mouse.Button {
-		case tea.MouseWheelUp:
-			m.pendingScrollDelta -= mouseWheelScrollStep
-			return m.scheduleScrollFlush(16 * time.Millisecond)
-		case tea.MouseWheelDown:
-			m.pendingScrollDelta += mouseWheelScrollStep
-			return m.scheduleScrollFlush(16 * time.Millisecond)
+	if block.ID != m.focusedBlockID {
+		m.setFocusedViewportBlock(block)
+		// Clicking a Delegate block that has a linked subagent switches to that agent's view.
+		m.maybeSwitchToTaskAgent(block)
+		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
+			m.clearMouseSelection()
+			m.mouseDown = false
+			return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps), true
+		}
+		// Do not scroll on click; only j/k/g/G etc. reposition the view.
+	} else {
+		// Already focused: clicking again on a Delegate block still switches to subagent view.
+		m.maybeSwitchToTaskAgent(block)
+		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
+			m.clearMouseSelection()
+			m.mouseDown = false
+			return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps), true
 		}
 	}
+	m.startPointSelection(block.ID, lineInBlock, col)
+	return nil, true
+}
 
+func (m *Model) startPointSelection(blockID, line, col int) {
+	m.mouseDown = true
+	m.selStartBlockID = blockID
+	m.selStartLine = line
+	m.selStartCol = col
+	m.selEndBlockID = blockID
+	m.selEndLine = line
+	m.selEndCol = col
+	m.selEndInclusiveForCopy = true
+}
+
+func (m *Model) setFocusedViewportBlock(block *Block) {
+	if m.focusedBlockID >= 0 {
+		for _, b := range m.viewport.blocks {
+			if b.ID == m.focusedBlockID {
+				b.Focused = false
+				b.InvalidateCache()
+				break
+			}
+		}
+	}
+	if block != nil && isSelectableBlockType(block.Type) {
+		m.focusedBlockID = block.ID
+		block.Focused = true
+		block.InvalidateCache()
+		return
+	}
+	m.focusedBlockID = -1
+}
+
+func (m *Model) handleOutsideViewportMouseClick(mouse tea.Mouse) tea.Cmd {
+	m.input.ClearSelection()
+	m.inputMouseDown = false
+	m.clearFocusedBlock()
+	// Outside viewport: resolve focus from zones (e.g. directory overlay).
+	// Zone bounds are from last Scan; we don't pass v2 MouseMsg to bubblezone.
+	// Use viewport resolution for blocks (already have inViewport coords).
+	for _, b := range m.viewport.blocks {
+		idStr := fmt.Sprintf("block-%d", b.ID)
+		z := m.zone.Get(idStr)
+		if z.IsZero() || mouse.X < z.StartX || mouse.X > z.EndX || mouse.Y < z.StartY || mouse.Y > z.EndY {
+			continue
+		}
+		if b.ID != m.focusedBlockID {
+			m.setFocusedViewportBlock(b)
+			m.maybeSwitchToTaskAgent(b)
+		}
+		break
+	}
 	return nil
+}
+
+func (m *Model) handleMouseMotion(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
+	if m.inputMouseDown && hits.inInputZone {
+		if line, col, ok := m.input.SelectionPointAt(
+			mouse.Y-m.layout.input.Min.Y-1,
+			mouse.X-m.layout.input.Min.X-inputPromptWidth,
+		); ok {
+			m.input.UpdateSelection(line, col)
+		}
+		return nil
+	}
+	if m.mouseDown && hits.inViewport {
+		if block, lineInBlock := m.viewportResolveMouse(hits.viewportLine); block != nil {
+			m.selEndBlockID = block.ID
+			m.selEndLine = lineInBlock
+			m.selEndCol = clampCol(hits.viewportCol, m.viewport.width)
+			m.selEndInclusiveForCopy = true
+		}
+		return nil
+	}
+	return nil
+}
+
+func (m *Model) handleMouseRelease(mouse tea.Mouse) tea.Cmd {
+	if mouse.Button == tea.MouseLeft {
+		m.mouseDown = false
+		m.inputMouseDown = false
+	}
+	return nil
+}
+
+func (m *Model) handleMouseWheel(mouse tea.Mouse) tea.Cmd {
+	switch mouse.Button {
+	case tea.MouseWheelUp:
+		m.pendingScrollDelta -= mouseWheelScrollStep
+		return m.scheduleScrollFlush(16 * time.Millisecond)
+	case tea.MouseWheelDown:
+		m.pendingScrollDelta += mouseWheelScrollStep
+		return m.scheduleScrollFlush(16 * time.Millisecond)
+	default:
+		return nil
+	}
 }

@@ -213,6 +213,64 @@ func (t streamRetryTarget) displayRef() string {
 	return displayRef
 }
 
+func emitStreamStatus(cb StreamCallback, typ, detail string) {
+	if cb == nil {
+		return
+	}
+	cb(message.StreamDelta{
+		Type: "status",
+		Status: &message.StatusDelta{
+			Type:   typ,
+			Detail: detail,
+		},
+	})
+}
+
+func emitStreamStatusDelta(cb StreamCallback, status message.StatusDelta) {
+	if cb == nil {
+		return
+	}
+	cb(message.StreamDelta{Type: "status", Status: &status})
+}
+
+func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
+	keySuffixValue := keySuffix(apiKey)
+	return &visibleStreamTracker{
+		inner:         cb,
+		providerModel: modelRef,
+		keySuffix:     keySuffixValue,
+		keyAttempt:    keyAttempt + 1,
+		keyCount:      keyCount,
+		onVisibleStart: func() {
+			target.provider.MarkKeySuccess(apiKey)
+			log.Debugf("LLM emitting streaming status after visible output provider=%v model=%v key_suffix=%v key_attempt=%v key_total=%v", target.provider.Name(), modelRef, keySuffixValue, keyAttempt+1, keyCount)
+			if cb == nil {
+				return
+			}
+			emitStreamStatus(cb, "streaming", "")
+			// key_confirmed must carry the effective model ref so the agent/UI can
+			// confirm routing decisions (fallback/key switch) only after the model
+			// actually begins emitting visible output.
+			cb(message.StreamDelta{
+				Type: "key_confirmed",
+				Status: &message.StatusDelta{
+					ModelRef: modelRef,
+					Reason:   attemptReason,
+				},
+			})
+		},
+	}
+}
+
+func updateSuccessfulCallStatus(status *CallStatus, target streamRetryTarget) {
+	if status == nil {
+		return
+	}
+	status.RunningModelRef = target.displayRef()
+	status.RunningContextLimit = target.contextLimit
+	status.RunningInputLimit = target.inputLimit
+}
+
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
 // remaining entries) and, for each model, loops over keys until success, a permanent failure, or
 // keys exhausted. Retriable API errors rotate keys; 401/403 force key rotation
@@ -434,13 +492,7 @@ func (c *Client) completeStreamWithRetry(
 								if err := abortIfCancelled(); err != nil {
 									return nil, err
 								}
-								cb(message.StreamDelta{
-									Type: "status",
-									Status: &message.StatusDelta{
-										Type:   "cooling",
-										Detail: wait.Round(time.Second).String(),
-									},
-								})
+								emitStreamStatus(cb, "cooling", wait.Round(time.Second).String())
 							}
 						}
 					} else {
@@ -457,42 +509,13 @@ func (c *Client) completeStreamWithRetry(
 				}
 
 				log.Debugf("LLM request provider=%v model=%v key_suffix=%v max_tokens=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), effectiveMaxTokens)
-				modelRef := providerModelRef(t.provider, t.modelID)
-				if t.variant != "" {
-					modelRef = modelRef + "@" + t.variant
-				}
-				keySuffixValue := keySuffix(apiKey)
+				modelRef := t.displayRef()
 				attemptReason := ""
 				if t.isFallback && status != nil {
 					attemptReason = status.FallbackReason
 				}
-				tracker := &visibleStreamTracker{
-					inner:         cb,
-					providerModel: modelRef,
-					keySuffix:     keySuffixValue,
-					keyAttempt:    keyAttempt + 1,
-					keyCount:      keyCount,
-					onVisibleStart: func() {
-						t.provider.MarkKeySuccess(apiKey)
-						log.Debugf("LLM emitting streaming status after visible output provider=%v model=%v key_suffix=%v key_attempt=%v key_total=%v", t.provider.Name(), modelRef, keySuffixValue, keyAttempt+1, keyCount)
-						if cb != nil {
-							cb(message.StreamDelta{
-								Type:   "status",
-								Status: &message.StatusDelta{Type: "streaming"},
-							})
-							// key_confirmed must carry the effective model ref so the
-							// agent/UI can confirm routing decisions (fallback/key switch)
-							// only after the model actually begins emitting visible output.
-							cb(message.StreamDelta{
-								Type: "key_confirmed",
-								Status: &message.StatusDelta{
-									ModelRef: modelRef,
-									Reason:   attemptReason,
-								},
-							})
-						}
-					},
-				}
+				tracker := newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
+
 				resp, err = t.impl.CompleteStream(
 					ctx,
 					apiKey,
@@ -518,14 +541,7 @@ func (c *Client) completeStreamWithRetry(
 						c.setLastInputTokens(resp.Usage.InputTokens)
 					}
 					log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
-					if status != nil {
-						status.RunningModelRef = providerModelRef(t.provider, t.modelID)
-						if t.variant != "" {
-							status.RunningModelRef = status.RunningModelRef + "@" + t.variant
-						}
-						status.RunningContextLimit = t.contextLimit
-						status.RunningInputLimit = t.inputLimit
-					}
+					updateSuccessfulCallStatus(status, t)
 					modelDone = true
 					break // success: exit key loop
 				}
@@ -608,13 +624,7 @@ func (c *Client) completeStreamWithRetry(
 						if err := abortIfCancelled(); err != nil {
 							return nil, err
 						}
-						cb(message.StreamDelta{
-							Type: "status",
-							Status: &message.StatusDelta{
-								Type:   "retrying_key",
-								Detail: fmt.Sprintf("%d/%d", keyAttempt+2, keyCount),
-							},
-						})
+						emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
 					}
 					continue
 				}
@@ -634,13 +644,7 @@ func (c *Client) completeStreamWithRetry(
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					cb(message.StreamDelta{
-						Type: "status",
-						Status: &message.StatusDelta{
-							Type:   "retrying",
-							Detail: "same key",
-						},
-					})
+					emitStreamStatus(cb, "retrying", "same key")
 				}
 				continue
 			} // end key loop
@@ -671,13 +675,7 @@ func (c *Client) completeStreamWithRetry(
 					t.provider.MarkRecovering(apiKey)
 					resp = nil
 					if cb != nil {
-						cb(message.StreamDelta{
-							Type: "status",
-							Status: &message.StatusDelta{
-								Type:   "retrying_key",
-								Detail: "next",
-							},
-						})
+						emitStreamStatus(cb, "retrying_key", "next")
 					}
 					continue
 				}
@@ -697,16 +695,11 @@ func (c *Client) completeStreamWithRetry(
 			if len(targets) > 1 {
 				log.Infof("context length exceeded after model pool exhausted; returning for compaction recovery provider=%v model=%v input_tokens_est=%v", startProvider.Name(), startModelID, estimateRequestInputTokens(systemPrompt, messages, tools))
 			}
-			if cb != nil {
-				cb(message.StreamDelta{
-					Type: "status",
-					Status: &message.StatusDelta{
-						Type:   "retrying",
-						Detail: "pool exhausted; compacting context",
-						Reason: "context_length_exceeded",
-					},
-				})
-			}
+			emitStreamStatusDelta(cb, message.StatusDelta{
+				Type:   "retrying",
+				Detail: "pool exhausted; compacting context",
+				Reason: "context_length_exceeded",
+			})
 			return nil, lastErr
 		}
 		if _, ok := errors.AsType[*NoUsableKeysError](lastErr); ok {
