@@ -183,10 +183,10 @@ chord cleanup status
 Sample output:
 
 ```text
-state_dir: /Users/me/.local/state/chord (12345678 bytes)
-cache_dir: /Users/me/.cache/chord (4567890 bytes)
-logs_dir:  /Users/me/.local/state/chord/logs (123456 bytes)
-sessions:  42 across 7 projects
+state_dir: /Users/me/.local/state/chord (29.6 GB)
+cache_dir: /Users/me/.cache/chord (847 B)
+logs_dir: /Users/me/.local/state/chord/logs (263.5 MB)
+sessions: 42 across 7 projects
 ```
 
 ### `chord cleanup sessions | cache | logs | project`
@@ -216,6 +216,13 @@ chord cleanup sessions --older-than 720h --yes
 
 # Clear all rebuildable cache (will reload on next run)
 chord cleanup cache --yes
+```
+
+Sample output:
+
+```text
+would remove /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
+dry-run: pass --yes to delete
 ```
 
 ## `chord worktree`

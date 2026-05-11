@@ -4,6 +4,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- CLI: `chord cleanup` now reports state/cache/log sizes with human-readable binary units (`B`, `KB`, `MB`, `GB`, ...) in both `status` and cleanup preview/delete output instead of raw byte counts.
+
 ## 0.5.3 - 2026-05-11
 
 - Runtime/File safety: restored or resumed sessions now rebuild durable `Read` file-state, so later `Edit`/`Write` calls keep the read-before-write safety check without falsely requiring every file to be re-read.

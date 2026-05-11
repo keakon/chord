@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/bytefmt"
 )
 
 func formatBusyTotalWall(d time.Duration) string {
@@ -54,23 +55,7 @@ func formatStatusBarStartedAt(t time.Time) string {
 }
 
 func formatStatusBarBytes(n int64) string {
-	if n <= 0 {
-		return "0 B"
-	}
-	units := []string{"B", "KB", "MB", "GB", "TB"}
-	value := float64(n)
-	idx := 0
-	for value >= 1024 && idx < len(units)-1 {
-		value /= 1024
-		idx++
-	}
-	if idx == 0 {
-		return fmt.Sprintf("%d %s", n, units[idx])
-	}
-	if value >= 10 {
-		return fmt.Sprintf("%.0f %s", value, units[idx])
-	}
-	return fmt.Sprintf("%.1f %s", value, units[idx])
+	return bytefmt.Compact(n)
 }
 
 func formatStatusBarEvents(n int64, short bool) string {

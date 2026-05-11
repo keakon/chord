@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/maintenance"
 )
@@ -24,10 +26,7 @@ func newCleanupCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stdout, "state_dir: %s (%d bytes)\ncache_dir: %s (%d bytes)\nlogs_dir: %s (%d bytes)\nsessions: %d across %d projects\n", st.StateDir, st.StateBytes, st.CacheDir, st.CacheBytes, st.LogsDir, st.LogsBytes, st.SessionCount, st.ProjectCount)
-		for _, w := range st.Warnings {
-			fmt.Fprintf(os.Stdout, "warning: %s\n", w)
-		}
+		writeCleanupStatus(os.Stdout, st)
 		return nil
 	}}
 	runCleanup := func(kind string) error {
@@ -57,11 +56,7 @@ func newCleanupCmd() *cobra.Command {
 			verb = "removed"
 		}
 		for _, c := range res.Candidates {
-			if c.Skip != "" {
-				fmt.Fprintf(os.Stdout, "skip %s: %s\n", c.Path, c.Skip)
-				continue
-			}
-			fmt.Fprintf(os.Stdout, "%s %s (%d bytes)\n", verb, c.Path, c.Bytes)
+			writeCleanupCandidate(os.Stdout, verb, c)
 		}
 		if !yes {
 			fmt.Fprintln(os.Stdout, "dry-run: pass --yes to delete")
@@ -77,4 +72,19 @@ func newCleanupCmd() *cobra.Command {
 	}
 	cmd.AddCommand(statusCmd)
 	return cmd
+}
+
+func writeCleanupStatus(w io.Writer, st *maintenance.Status) {
+	fmt.Fprintf(w, "state_dir: %s (%s)\ncache_dir: %s (%s)\nlogs_dir: %s (%s)\nsessions: %d across %d projects\n", st.StateDir, bytefmt.Short(st.StateBytes), st.CacheDir, bytefmt.Short(st.CacheBytes), st.LogsDir, bytefmt.Short(st.LogsBytes), st.SessionCount, st.ProjectCount)
+	for _, warning := range st.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+	}
+}
+
+func writeCleanupCandidate(w io.Writer, verb string, candidate maintenance.CleanupCandidate) {
+	if candidate.Skip != "" {
+		fmt.Fprintf(w, "skip %s: %s\n", candidate.Path, candidate.Skip)
+		return
+	}
+	fmt.Fprintf(w, "%s %s (%s)\n", verb, candidate.Path, bytefmt.Short(candidate.Bytes))
 }
