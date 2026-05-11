@@ -54,9 +54,10 @@ const (
 
 	// contentBoundaryFallbackRedrawDelay schedules a late redraw when a
 	// content-boundary redraw was suppressed by the slower content-boundary
-	// throttle during the focus-recovery window. This keeps ordinary steady-state
-	// updates single-pass, but gives Ghostty/cmux one more chance to clear stale
-	// cells after tab restore without waiting for another user action.
+	// throttle. Near focus-restore it repairs host recovery races; in steady-state
+	// it is only used for Ghostty/cmux content-boundary-class bursts
+	// (content-boundary/live-append) so ordinary updates stay single-pass and
+	// scroll recovery keeps its own fallback.
 	contentBoundaryFallbackRedrawDelay = 900 * time.Millisecond
 
 	// scrollFlushFallbackAfterFocusWindow limits the late scroll redraw to the
@@ -187,10 +188,14 @@ func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 		return nil
 	}
 	if !m.lastHostRedrawAt.IsZero() {
-		since := time.Since(m.lastHostRedrawAt)
+		now := time.Now()
+		since := now.Sub(m.lastHostRedrawAt)
 		if since < m.contentBoundaryHostRedrawMinInterval() {
 			m.recordTUIDiagnostic("host-redraw-skip", "reason=%s content_boundary_throttled=true since_last=%s last_reason=%s", reason, since.Truncate(time.Millisecond), m.lastHostRedrawReason)
-			if fallback := m.maybePostHostRedrawFallbackCmd(reason, m.hostRedrawGeneration, time.Now()); fallback != nil {
+			if fallback := m.maybePostHostRedrawFallbackCmd(reason, m.hostRedrawGeneration, now); fallback != nil {
+				return fallback
+			}
+			if fallback := m.maybePostThrottledContentBoundaryRedrawFallbackCmd(reason, m.hostRedrawGeneration); fallback != nil {
 				return fallback
 			}
 			return nil
@@ -213,6 +218,28 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 		return nil
 	}
 	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
+	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
+}
+
+func isContentBoundaryClassRedrawReason(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case "content-boundary", "live-append":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) maybePostThrottledContentBoundaryRedrawFallbackCmd(reason string, generation uint64) tea.Cmd {
+	reason = strings.TrimSpace(reason)
+	if m == nil || !m.useFocusResizeFreeze || !isContentBoundaryClassRedrawReason(reason) || !isContentBoundaryClassRedrawReason(m.lastHostRedrawReason) {
+		return nil
+	}
+	policy := hostRedrawPolicyForReason(reason)
+	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
+		return nil
+	}
+	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d content_boundary_throttled=true risky_host=%t last_reason=%s", reason, generation, m.useFocusResizeFreeze, strings.TrimSpace(m.lastHostRedrawReason))
 	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
 }
 

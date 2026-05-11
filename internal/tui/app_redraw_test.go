@@ -207,6 +207,83 @@ func TestHostRedrawCmdDoesNotArmFallbackForThrottledNonScroll(t *testing.T) {
 	}
 }
 
+func TestHostRedrawForContentBoundaryCmdArmsFallbackForThrottledContentBoundaryClassOutsideFocusWindow(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		lastReason string
+	}{
+		{name: "content-boundary-after-content-boundary", reason: "content-boundary", lastReason: "content-boundary"},
+		{name: "live-append-after-live-append", reason: "live-append", lastReason: "live-append"},
+		{name: "content-boundary-after-live-append", reason: "content-boundary", lastReason: "live-append"},
+		{name: "live-append-after-content-boundary", reason: "live-append", lastReason: "content-boundary"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModelWithSize(nil, 120, 40)
+			m.SetFocusResizeFreezeEnabled(true)
+			m.displayState = stateForeground
+			now := time.Now()
+			m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+			m.lastHostRedrawAt = now.Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
+			m.lastHostRedrawReason = tt.lastReason
+			m.hostRedrawGeneration = 7
+
+			cmd := m.hostRedrawForContentBoundaryCmd(tt.reason)
+			if cmd == nil {
+				t.Fatalf("throttled content-boundary-class %s after %s should arm a delayed fallback on risky hosts", tt.reason, tt.lastReason)
+			}
+			if m.hostRedrawGeneration != 7 {
+				t.Fatalf("hostRedrawGeneration = %d, want unchanged 7", m.hostRedrawGeneration)
+			}
+			if m.lastHostRedrawReason != tt.lastReason {
+				t.Fatalf("lastHostRedrawReason = %q, want unchanged %s", m.lastHostRedrawReason, tt.lastReason)
+			}
+			if !hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "content_boundary_throttled=true") {
+				t.Fatalf("recent events missing content-boundary fallback arm marker: %#v", m.snapshotTUIDiagnosticEvents())
+			}
+		})
+	}
+}
+
+func TestHostRedrawForContentBoundaryCmdDoesNotArmSteadyFallbackAfterScrollRedraw(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	m.displayState = stateForeground
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+	m.lastHostRedrawAt = now.Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
+	m.lastHostRedrawReason = "scroll-flush"
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawForContentBoundaryCmd("content-boundary")
+	if cmd != nil {
+		t.Fatalf("content-boundary after recent scroll redraw should keep using the scroll fallback path, got %#v", cmd)
+	}
+	if hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "content_boundary_throttled=true") {
+		t.Fatalf("non-content-boundary-class throttle should not arm a separate fallback: %#v", m.snapshotTUIDiagnosticEvents())
+	}
+}
+
+func TestHostRedrawForContentBoundaryCmdDoesNotArmSteadyFallbackOnNonRiskyHost(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(false)
+	m.displayState = stateForeground
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-scrollFlushFallbackAfterFocusWindow - time.Second)
+	m.lastHostRedrawAt = now.Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
+	m.lastHostRedrawReason = "content-boundary"
+	m.hostRedrawGeneration = 7
+
+	cmd := m.hostRedrawForContentBoundaryCmd("content-boundary")
+	if cmd != nil {
+		t.Fatalf("non-risky host should keep throttled content-boundary single-pass, got %#v", cmd)
+	}
+	if hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "post-host-redraw-fallback-arm", "content_boundary_throttled=true") {
+		t.Fatalf("non-risky host should not arm content-boundary fallback: %#v", m.snapshotTUIDiagnosticEvents())
+	}
+}
+
 func TestPostFocusSettleFallbackSkipsWhenStrongHostRedrawAlreadyRanAfterFocus(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
