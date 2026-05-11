@@ -1536,9 +1536,15 @@ type fakeHeadlessRuntime struct {
 	events  chan agent.AgentEvent
 	backend headlessBackend
 	closed  bool
+	onClose func()
 }
 
-func (f *fakeHeadlessRuntime) Close()                          { f.closed = true }
+func (f *fakeHeadlessRuntime) Close() {
+	if f.onClose != nil {
+		f.onClose()
+	}
+	f.closed = true
+}
 func (f *fakeHeadlessRuntime) Events() <-chan agent.AgentEvent { return f.events }
 func (f *fakeHeadlessRuntime) Backend() headlessBackend        { return f.backend }
 
@@ -1664,6 +1670,80 @@ func TestHeadlessParentWatcherCancelsOnParentChange(t *testing.T) {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
 		t.Fatal("parent watcher did not cancel context after parent changed")
+	}
+}
+
+func TestRunHeadlessWithDepsClosesRuntimeBeforeDeferredAppClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-close-order")}
+	closeOrder := make([]string, 0, 2)
+	origCancel := ac.Cancel
+	ac.Cancel = func() {
+		closeOrder = append(closeOrder, "app")
+		origCancel()
+	}
+	// AppContext.Close is a method, so verify ordering by observing runtime close
+	// before context cancellation triggered by deferred ac.Close().
+	events := make(chan agent.AgentEvent)
+	close(events)
+	rt := &fakeHeadlessRuntime{
+		events:  events,
+		backend: &mockBackend{},
+		onClose: func() { closeOrder = append(closeOrder, "runtime") },
+	}
+	var stdout bytes.Buffer
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return rt, nil
+		},
+		stdin:       strings.NewReader(""),
+		stdout:      &stdout,
+		watchParent: false,
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	if len(closeOrder) < 3 {
+		t.Fatalf("close order = %#v, want stdin-cancel, runtime close, final app close", closeOrder)
+	}
+	if closeOrder[len(closeOrder)-2] != "runtime" || closeOrder[len(closeOrder)-1] != "app" {
+		t.Fatalf("close order = %#v, want runtime immediately before final app close", closeOrder)
+	}
+}
+
+func TestRunHeadlessWithDepsReportsRuntimeInitFailureAndClosesApp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-init-fail")}
+	closed := make(chan struct{}, 1)
+	origCancel := ac.Cancel
+	ac.Cancel = func() {
+		select {
+		case closed <- struct{}{}:
+		default:
+		}
+		origCancel()
+	}
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return nil, errors.New("runtime boom")
+		},
+		stdin:       strings.NewReader(""),
+		stdout:      &bytes.Buffer{},
+		watchParent: false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime boom") {
+		t.Fatalf("runHeadlessWithDeps err = %v, want runtime boom", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("app context close/cancel was not triggered on runtime init failure")
 	}
 }
 

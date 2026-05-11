@@ -234,6 +234,87 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 	return snap
 }
 
+func (m *Model) statusBarModePill(modeText string) string {
+	modeStyle := ModeNormalStyle
+	switch m.mode {
+	case ModeInsert:
+		modeStyle = ModeInsertStyle
+	case ModeConfirm, ModeSessionDeleteConfirm:
+		modeStyle = ModeConfirmStyle
+	case ModeQuestion:
+		modeStyle = ModeQuestionStyle
+	case ModeSearch:
+		modeStyle = ModeSearchStyle
+	case ModeModelSelect:
+		modeStyle = ModeModelSelectStyle
+	}
+	if m.cachedStatusBarModeKey == modeText {
+		return m.cachedStatusBarModePill
+	}
+	modePill := modeStyle.Render(modeText)
+	m.cachedStatusBarModeKey = modeText
+	m.cachedStatusBarModePill = modePill
+	return modePill
+}
+
+func (m *Model) statusBarViewingPill(viewingLabel, viewingColor string) string {
+	viewingKey := viewingLabel + "|" + viewingColor
+	if m.cachedStatusBarViewingKey == viewingKey {
+		return m.cachedStatusBarViewingPill
+	}
+	viewingPill := renderStatusBarViewingPill(viewingLabel, viewingColor)
+	m.cachedStatusBarViewingKey = viewingKey
+	m.cachedStatusBarViewingPill = viewingPill
+	return viewingPill
+}
+
+func (m *Model) appendStatusBarLoopPill(pills []string, inputs statusBarInputs) []string {
+	if inputs.LoopState == "" {
+		return pills
+	}
+	label := "LOOP"
+	switch string(inputs.LoopState) {
+	case "completed", "blocked", "budget_exhausted":
+		label = "LOOP"
+	default:
+		iter := inputs.LoopIteration
+		maxIter := inputs.LoopMaxIterations
+		if iter > 0 || maxIter > 0 {
+			displayIter := iter
+			if displayIter == 0 {
+				displayIter = 1
+			}
+			if maxIter > 0 {
+				label = fmt.Sprintf("LOOP %d/%d", displayIter, maxIter)
+			} else {
+				label = fmt.Sprintf("LOOP %d", displayIter)
+			}
+		}
+	}
+	return append(pills, StatusHintStyle.Render(label))
+}
+
+func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
+	snap := inputs.Snapshot
+	pills := []string{
+		m.statusBarModePill(inputs.ModeText),
+		m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor),
+	}
+	return m.appendStatusBarLoopPill(pills, inputs)
+}
+
+func (m *Model) statusBarSearchPill() string {
+	if !m.search.State.Active || m.search.State.Query == "" {
+		return ""
+	}
+	total := len(m.search.State.Matches)
+	current := m.search.State.Current + 1
+	if total == 0 {
+		current = 0
+	}
+	return PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", m.search.State.Query, current, total))
+}
+
 func (m *Model) statusBarModeText() string {
 	switch m.mode {
 	case ModeInsert:
@@ -368,120 +449,15 @@ func (m *Model) renderStatusBar() string {
 		quitHint = hint
 	}
 
-	// Mode pill (first)
-	var modeText string
-	var modeStyle lipgloss.Style
-	switch m.mode {
-	case ModeInsert:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeInsertStyle
-	case ModeNormal:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeDirectory:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeConfirm:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeConfirmStyle
-	case ModeQuestion:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeQuestionStyle
-	case ModeSearch:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeSearchStyle
-	case ModeModelSelect:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeModelSelectStyle
-	case ModeMCPSelect:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeSessionSelect:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeSessionDeleteConfirm:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeConfirmStyle
-	case ModeHandoffSelect:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeUsageStats:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeHelp:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeImageViewer:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	case ModeRules:
-		modeText = m.statusBarModeText()
-		modeStyle = ModeNormalStyle
-	}
-	modePill := ""
-	if m.cachedStatusBarModeKey == modeText {
-		modePill = m.cachedStatusBarModePill
-	} else {
-		modePill = modeStyle.Render(modeText)
-		m.cachedStatusBarModeKey = modeText
-		m.cachedStatusBarModePill = modePill
-	}
-	pills = append(pills, modePill)
-
-	// Viewing pill: role name for main agent, instance ID for sub-agents.
-	// viewing is kept as the raw ID used by downstream model/proxy logic.
-	viewing := m.focusedAgentID
-	if viewing == "" {
-		viewing = "main"
-	}
-	viewingLabel := snap.viewingLabel
-	viewingColor := snap.viewingColor
-	viewingPill := ""
-	viewingKey := viewingLabel + "|" + viewingColor
-	if m.cachedStatusBarViewingKey == viewingKey {
-		viewingPill = m.cachedStatusBarViewingPill
-	} else {
-		viewingPill = renderStatusBarViewingPill(viewingLabel, viewingColor)
-		m.cachedStatusBarViewingKey = viewingKey
-		m.cachedStatusBarViewingPill = viewingPill
-	}
-	pills = append(pills, viewingPill)
-	if inputs.LoopState != "" {
-		label := "LOOP"
-		switch string(inputs.LoopState) {
-		case "completed", "blocked", "budget_exhausted":
-			label = "LOOP"
-		default:
-			iter := inputs.LoopIteration
-			maxIter := inputs.LoopMaxIterations
-			if iter > 0 || maxIter > 0 {
-				displayIter := iter
-				if displayIter == 0 {
-					displayIter = 1
-				}
-				if maxIter > 0 {
-					label = fmt.Sprintf("LOOP %d/%d", displayIter, maxIter)
-				} else {
-					label = fmt.Sprintf("LOOP %d", displayIter)
-				}
-			}
-		}
-		pills = append(pills, StatusHintStyle.Render(label))
-	}
+	pills = m.buildStatusBarLeadingPills(inputs)
 	sessionID := snap.sessionID
 
 	if m.width >= 80 {
 		shortHelp = ""
 	}
 
-	// InfoPanel visibility flag
-	infoPanelVisible := m.rightPanelVisible && m.mode != ModeDirectory && m.mode != ModeHelp
-
-	// Only show technical details in status bar if InfoPanel is HIDDEN
-	if !infoPanelVisible {
-		// Compute effective width and left-pills width (sum of already-built pills).
-		// We accumulate pill widths directly instead of JoinHorizontal+Width to avoid
-		// a throw-away render pass that was the main source of wasted work per frame.
+	// Only show technical details in status bar if InfoPanel is HIDDEN.
+	if !inputs.InfoPanelVisible {
 		effW := m.width - statusBarLeftMargin - statusBarRightMargin
 		if effW < 0 {
 			effW = 0
@@ -490,21 +466,14 @@ func (m *Model) renderStatusBar() string {
 		for _, p := range pills {
 			leftW += lipgloss.Width(p)
 		}
-
 		pills = m.appendStatusBarModelPills(pills, snap, effW, leftW)
-
 	}
 
-	if m.search.State.Active && m.search.State.Query != "" {
-		total := len(m.search.State.Matches)
-		current := m.search.State.Current + 1
-		if total == 0 {
-			current = 0
-		}
-		pills = append(pills, PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", m.search.State.Query, current, total)))
+	if searchPill := m.statusBarSearchPill(); searchPill != "" {
+		pills = append(pills, searchPill)
 	}
 
-	leftPillsKey := statusBarLeftPillsKey(modeText, viewingLabel, viewingColor, pills[2:])
+	leftPillsKey := statusBarLeftPillsKey(inputs.ModeText, snap.viewingLabel, snap.viewingColor, pills[2:])
 	leftSide := ""
 	leftWidth := 0
 	if m.cachedStatusBarPillsKey == leftPillsKey {
@@ -560,27 +529,64 @@ func (m *Model) renderStatusBar() string {
 		effectiveWidth = 0
 	}
 
-	// Activity (center lane)
-	statusActiveID := m.focusedAgentID
-	if statusActiveID == "" {
-		statusActiveID = "main"
-	}
-	statusActivity := m.activities[statusActiveID]
-	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
-
-	pathValue := displayWorkingDir(m.workingDir)
+	pathValue := inputs.WorkingDirDisplay
 	sessionValue := sessionID
-	pathText := ""
-	sessionText := ""
+	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
+	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
+	if activityWidth == 0 && leftWidth <= rightStart {
+		if m.statusPath.display != "" {
+			pathWidth := ansi.StringWidth(m.statusPath.display)
+			m.statusPath.startX = statusBarLeftMargin + rightStart
+			m.statusPath.endX = m.statusPath.startX + pathWidth
+		}
+		if m.statusSession.display != "" {
+			sessionOffset := 0
+			if m.statusPath.display != "" {
+				sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
+			}
+			sessionWidth := ansi.StringWidth(m.statusSession.display)
+			m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
+			m.statusSession.endX = m.statusSession.startX + sessionWidth
+		}
+		statusLine := leftSide + strings.Repeat(" ", max(rightStart-leftWidth, 0)) + rightSide
+		if rightWidth == 0 && leftWidth < effectiveWidth {
+			statusLine += strings.Repeat(" ", effectiveWidth-leftWidth)
+		}
+		padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
+		return StatusBarStyle.Width(m.width).Render(padded)
+	}
 
-	rightReserve := 0
-	availableCenter := effectiveWidth - leftWidth - rightReserve - 8
+	if m.statusPath.display != "" {
+		pathWidth := ansi.StringWidth(m.statusPath.display)
+		m.statusPath.startX = statusBarLeftMargin + rightStart
+		m.statusPath.endX = m.statusPath.startX + pathWidth
+	}
+	if m.statusSession.display != "" {
+		sessionOffset := 0
+		if m.statusPath.display != "" {
+			sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
+		}
+		sessionWidth := ansi.StringWidth(m.statusSession.display)
+		m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
+		m.statusSession.endX = m.statusSession.startX + sessionWidth
+	}
+
+	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
+	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
+	return StatusBarStyle.Width(m.width).Render(padded)
+}
+
+func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWidth, leftWidth int) (string, int) {
+	statusActiveID := inputs.StatusActiveID
+	statusActivity := inputs.StatusActivity
+	availableCenter := effectiveWidth - leftWidth - 8
 	if availableCenter < 0 {
 		availableCenter = 0
 	}
 	activityText := ""
 	activityWidth := 0
-	compactIdle := m.width < 100 || !infoPanelVisible
+	compactIdle := m.width < 100 || !inputs.InfoPanelVisible
 	activityKey := ""
 	cacheActivity := false
 	rawActivity := agent.AgentActivityEvent{}
@@ -589,8 +595,6 @@ func (m *Model) renderStatusBar() string {
 		m.statusBarSyntheticConnectingLogKey = ""
 		activityText = m.sessionSwitchStatusText(availableCenter)
 	case statusActivity.Type == agent.ActivityCompacting:
-		// Compaction is handled in the background lane, not the central lane
-		// Show idle or fall through to check for other activities
 		m.statusBarSyntheticConnectingLogKey = ""
 		cacheActivity = true
 		if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
@@ -599,8 +603,6 @@ func (m *Model) renderStatusBar() string {
 			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 		}
 	case m.isFocusedAgentBusy():
-		// inflightDraft makes us "busy" before AgentActivityEvent arrives; if the
-		// activity update was dropped earlier, avoid showing idle + busy animation.
 		sa := statusActivity
 		if m.inflightDraftBelongsToAgent(statusActiveID) && (sa.Type == "" || sa.Type == agent.ActivityIdle) {
 			logKey := statusActiveID + "|" + m.inflightDraft.ID
@@ -646,144 +648,104 @@ func (m *Model) renderStatusBar() string {
 		}
 		activityWidth = lipgloss.Width(activityText)
 	}
+	return activityText, activityWidth
+}
 
+func (m *Model) renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string) (string, int, int) {
+	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
-	rightSide := ""
-	rightStart := 0
 	if m.cachedStatusBarRightKey == rightKey {
-		rightSide = m.cachedStatusBarRightSide
-		rightStart = m.cachedStatusBarRightStart
 		m.statusPath.value = m.cachedStatusBarPathValue
 		m.statusPath.display = m.cachedStatusBarPathShown
 		m.statusSession.value = m.cachedStatusBarSessionValue
 		m.statusSession.display = m.cachedStatusBarSessionShown
-	} else {
-		availableRight := effectiveWidth - leftWidth
-		if activityWidth > 0 {
-			centerStart := max((effectiveWidth-activityWidth)/2, leftWidth+2)
-			centerEnd := centerStart + activityWidth
-			rightFreeFromCenter := effectiveWidth - centerEnd
-			if rightFreeFromCenter > 0 {
-				availableRight = min(availableRight, rightFreeFromCenter)
-			}
+		return m.cachedStatusBarRightSide, m.cachedStatusBarRightStart, m.cachedStatusBarRightWidth
+	}
+
+	rightSide := ""
+	rightStart := 0
+	pathText := ""
+	sessionText := ""
+	availableRight := effectiveWidth - leftWidth
+	if activityWidth > 0 {
+		centerStart := max((effectiveWidth-activityWidth)/2, leftWidth+2)
+		centerEnd := centerStart + activityWidth
+		rightFreeFromCenter := effectiveWidth - centerEnd
+		if rightFreeFromCenter > 0 {
+			availableRight = min(availableRight, rightFreeFromCenter)
 		}
-		if availableRight > 0 {
-			availableSession := availableRight
-			if m.width < statusBarSessionMinVisibleCols {
+	}
+	if availableRight > 0 {
+		availableSession := availableRight
+		if m.width < statusBarSessionMinVisibleCols {
+			availableSession = 0
+		}
+		if pathValue != "" {
+			if availableSession > statusBarSessionMinWidth+separatorWidth {
+				availableSession -= statusBarSessionMinWidth + separatorWidth
+			} else {
 				availableSession = 0
 			}
-			if pathValue != "" {
-				if availableSession > statusBarSessionMinWidth+separatorWidth {
-					availableSession -= statusBarSessionMinWidth + separatorWidth
-				} else {
-					availableSession = 0
-				}
-			}
-			if sessionValue != "" {
-				sessionLabel := "SID " + sessionValue
-				if availableSession >= max(statusBarSessionMinWidth, len(sessionLabel)) {
-					sessionDisplay := truncateMiddleDisplay(sessionLabel, availableSession)
-					if sessionDisplay != "" {
-						sessionText = StatusBarPathStyle.Render(sessionDisplay)
-						m.statusSession.value = sessionValue
-						m.statusSession.display = sessionDisplay
-					}
-				}
-			}
-			availablePath := availableRight
-			if m.statusSession.display != "" {
-				availablePath -= ansi.StringWidth(m.statusSession.display)
-				if pathValue != "" {
-					availablePath -= separatorWidth
-				}
-			}
-			if pathValue != "" && availablePath > 0 {
-				displayPath := truncateMiddleDisplay(pathValue, availablePath)
-				if displayPath != "" {
-					pathText = StatusBarPathStyle.Render(displayPath)
-					m.statusPath.value = pathValue
-					m.statusPath.display = displayPath
+		}
+		if sessionValue != "" {
+			sessionLabel := "SID " + sessionValue
+			if availableSession >= max(statusBarSessionMinWidth, len(sessionLabel)) {
+				sessionDisplay := truncateMiddleDisplay(sessionLabel, availableSession)
+				if sessionDisplay != "" {
+					sessionText = StatusBarPathStyle.Render(sessionDisplay)
+					m.statusSession.value = sessionValue
+					m.statusSession.display = sessionDisplay
 				}
 			}
 		}
-
-		rightParts := make([]string, 0, 5)
-
-		// Add compaction background pill (highest priority)
-		if compactionPill := m.renderCompactionBackgroundPill(); compactionPill != "" {
-			rightParts = append(rightParts, compactionPill)
-		}
-
-		if pathText != "" {
-			if len(rightParts) > 0 {
-				rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
-			}
-			rightParts = append(rightParts, pathText)
-		}
-		if sessionText != "" {
-			if len(rightParts) > 0 {
-				rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
-			}
-			rightParts = append(rightParts, sessionText)
-		}
-		rightSide = lipgloss.JoinHorizontal(lipgloss.Center, rightParts...)
-		rightWidth := lipgloss.Width(rightSide)
-		rightStart = effectiveWidth - rightWidth
-		if rightStart < 0 {
-			rightStart = 0
-		}
-		m.cachedStatusBarRightKey = rightKey
-		m.cachedStatusBarRightSide = rightSide
-		m.cachedStatusBarRightWidth = rightWidth
-		m.cachedStatusBarRightStart = rightStart
-		m.cachedStatusBarPathValue = m.statusPath.value
-		m.cachedStatusBarPathShown = m.statusPath.display
-		m.cachedStatusBarSessionValue = m.statusSession.value
-		m.cachedStatusBarSessionShown = m.statusSession.display
-	}
-	rightWidth := m.cachedStatusBarRightWidth
-
-	if activityWidth == 0 && leftWidth <= rightStart {
-		if m.statusPath.display != "" {
-			pathWidth := ansi.StringWidth(m.statusPath.display)
-			m.statusPath.startX = statusBarLeftMargin + rightStart
-			m.statusPath.endX = m.statusPath.startX + pathWidth
-		}
+		availablePath := availableRight
 		if m.statusSession.display != "" {
-			sessionOffset := 0
-			if m.statusPath.display != "" {
-				sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
+			availablePath -= ansi.StringWidth(m.statusSession.display)
+			if pathValue != "" {
+				availablePath -= separatorWidth
 			}
-			sessionWidth := ansi.StringWidth(m.statusSession.display)
-			m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
-			m.statusSession.endX = m.statusSession.startX + sessionWidth
 		}
-		statusLine := leftSide + strings.Repeat(" ", max(rightStart-leftWidth, 0)) + rightSide
-		if rightWidth == 0 && leftWidth < effectiveWidth {
-			statusLine += strings.Repeat(" ", effectiveWidth-leftWidth)
+		if pathValue != "" && availablePath > 0 {
+			displayPath := truncateMiddleDisplay(pathValue, availablePath)
+			if displayPath != "" {
+				pathText = StatusBarPathStyle.Render(displayPath)
+				m.statusPath.value = pathValue
+				m.statusPath.display = displayPath
+			}
 		}
-		padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
-		return StatusBarStyle.Width(m.width).Render(padded)
 	}
 
-	if m.statusPath.display != "" {
-		pathWidth := ansi.StringWidth(m.statusPath.display)
-		m.statusPath.startX = statusBarLeftMargin + rightStart
-		m.statusPath.endX = m.statusPath.startX + pathWidth
+	rightParts := make([]string, 0, 5)
+	if compactionPill := m.renderCompactionBackgroundPill(); compactionPill != "" {
+		rightParts = append(rightParts, compactionPill)
 	}
-	if m.statusSession.display != "" {
-		sessionOffset := 0
-		if m.statusPath.display != "" {
-			sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
+	if pathText != "" {
+		if len(rightParts) > 0 {
+			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
 		}
-		sessionWidth := ansi.StringWidth(m.statusSession.display)
-		m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
-		m.statusSession.endX = m.statusSession.startX + sessionWidth
+		rightParts = append(rightParts, pathText)
 	}
-
-	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
-	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
-	return StatusBarStyle.Width(m.width).Render(padded)
+	if sessionText != "" {
+		if len(rightParts) > 0 {
+			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
+		}
+		rightParts = append(rightParts, sessionText)
+	}
+	rightSide = lipgloss.JoinHorizontal(lipgloss.Center, rightParts...)
+	rightWidth := lipgloss.Width(rightSide)
+	rightStart = effectiveWidth - rightWidth
+	if rightStart < 0 {
+		rightStart = 0
+	}
+	m.cachedStatusBarRightKey = rightKey
+	m.cachedStatusBarRightSide = rightSide
+	m.cachedStatusBarRightWidth = rightWidth
+	m.cachedStatusBarRightStart = rightStart
+	m.cachedStatusBarPathValue = m.statusPath.value
+	m.cachedStatusBarPathShown = m.statusPath.display
+	m.cachedStatusBarSessionValue = m.statusSession.value
+	m.cachedStatusBarSessionShown = m.statusSession.display
+	return rightSide, rightStart, rightWidth
 }
 
 func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, rightSide string, activityText string, activityWidth, effectiveWidth int) string {

@@ -156,6 +156,178 @@ func applyInitAppStartupPlan(ac *AppContext, plan *initAppStartupPlan) {
 	ac.Cfg = plan.Config
 }
 
+type initialLLMSetup struct {
+	ProviderName   string
+	ModelID        string
+	InitialVariant string
+	ModelCfg       config.ModelConfig
+	ProviderCfg    *llm.ProviderConfig
+	Provider       llm.Provider
+	Client         *llm.Client
+}
+
+func resolveInitialModelSelection(agentConfigs map[string]*config.AgentConfig, poolPolicy *agent.RuntimeModelPoolPolicy) (string, string) {
+	if agentConfigs == nil {
+		return "", ""
+	}
+	builderCfg, ok := agentConfigs["builder"]
+	if !ok || len(builderCfg.Models) == 0 {
+		return "", ""
+	}
+	if resolvedRef := poolPolicy.ResolveInitialModelRef("builder", builderCfg); resolvedRef != "" {
+		return config.ParseModelRef(resolvedRef)
+	}
+	if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
+		if firstPoolRefs := builderCfg.PoolModels(poolNames[0]); len(firstPoolRefs) > 0 {
+			providerModel, variant := config.ParseModelRef(firstPoolRefs[0])
+			if variant == "" {
+				variant = builderCfg.Variant
+			}
+			return providerModel, variant
+		}
+	}
+	return "", ""
+}
+
+func configureInitialClientModelPool(
+	ac *AppContext,
+	client *llm.Client,
+	cfg *config.Config,
+	auth config.AuthConfig,
+	agentConfigs map[string]*config.AgentConfig,
+	poolPolicy *agent.RuntimeModelPoolPolicy,
+	defaultProviderModel string,
+) {
+	if ac == nil || client == nil || cfg == nil || agentConfigs == nil {
+		return
+	}
+	builderCfg, ok := agentConfigs["builder"]
+	if !ok || len(builderCfg.Models) == 0 {
+		return
+	}
+	var poolModels []string
+	if poolPolicy != nil {
+		poolModels = poolPolicy.EffectiveModels("builder", builderCfg)
+	}
+	if len(poolModels) == 0 {
+		if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
+			poolModels = builderCfg.PoolModels(poolNames[0])
+		}
+	}
+	pool, selectedIdx := buildModelPool(
+		ac.Ctx,
+		poolModels,
+		builderCfg.Variant,
+		defaultProviderModel,
+		cfg.Providers,
+		auth,
+		cfg.Proxy,
+		cfg.MaxOutputTokens,
+		ac.GetOrCreateProvider,
+		ac.GetOrCreateProviderImpl,
+		"builder startup",
+	)
+	if len(pool) > 1 {
+		client.SetModelPool(pool, selectedIdx)
+		log.Debugf("initial LLM client configured with builder model pool size=%v selected_idx=%v", len(pool), selectedIdx)
+	}
+}
+
+func setupInitialLLMClient(
+	ac *AppContext,
+	cfg *config.Config,
+	auth config.AuthConfig,
+	authPath string,
+	agentConfigs map[string]*config.AgentConfig,
+	poolPolicy *agent.RuntimeModelPoolPolicy,
+	defaultProviderModel, defaultVariant string,
+) (*initialLLMSetup, error) {
+	if ac == nil || cfg == nil {
+		return nil, fmt.Errorf("missing app config for initial LLM setup")
+	}
+	providerName := ""
+	if defaultProviderModel != "" {
+		parts := strings.SplitN(defaultProviderModel, "/", 2)
+		if len(parts) == 2 {
+			providerName = parts[0]
+		}
+	}
+	cfgProvider, ok := cfg.Providers[providerName]
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found in config", providerName)
+	}
+	modelID := ""
+	initialVariant := ""
+	if defaultProviderModel != "" {
+		parts := strings.SplitN(defaultProviderModel, "/", 2)
+		if len(parts) == 2 {
+			modelID = parts[1]
+			initialVariant = defaultVariant
+		}
+	}
+	if modelID == "" {
+		return nil, fmt.Errorf("no initial model ID resolved from builder agent config")
+	}
+	modelCfg, ok := cfgProvider.Models[modelID]
+	if !ok {
+		return nil, fmt.Errorf("model %q not found in provider %q", modelID, providerName)
+	}
+
+	ac.ProviderCache = &providerCache{
+		m:        make(map[string]*llm.ProviderConfig),
+		impls:    make(map[string]llm.Provider),
+		ctx:      ac.Ctx,
+		auth:     auth,
+		authPath: authPath,
+		cfg:      cfg,
+	}
+	if flagAPIBase != "" {
+		cfgProvider.APIURL = flagAPIBase
+	}
+	creds := auth[providerName]
+	apiKeys := config.ExtractAPIKeys(creds)
+	providerCfg, err := ac.GetOrCreateProvider(providerName, cfgProvider, apiKeys)
+	if err != nil {
+		return nil, err
+	}
+	if cfgProvider.RateLimit > 0 {
+		providerCfg.SetRateLimiter(cfgProvider.RateLimit)
+	}
+
+	effectiveProxy := llm.ResolveEffectiveProxy(cfgProvider.Proxy, cfg.Proxy)
+	logEffectiveProxy(effectiveProxy)
+	llmProvider, err := ac.GetOrCreateProviderImpl(providerName, cfgProvider, providerCfg, modelID)
+	if err != nil {
+		return nil, err
+	}
+	if providerCfg.Type() == config.ProviderTypeResponses {
+		log.Debugf("using Responses API model=%v api_url=%v", modelID, providerCfg.APIURL())
+	}
+
+	llmClient := llm.NewClient(
+		providerCfg,
+		llmProvider,
+		modelID,
+		modelCfg.Limit.Output,
+		"",
+	)
+	llmClient.SetOutputTokenMax(cfg.MaxOutputTokens)
+	llmClient.SetStreamRetryRounds(cfg.StreamRetryRounds)
+	if initialVariant != "" {
+		llmClient.SetVariant(initialVariant)
+	}
+	configureInitialClientModelPool(ac, llmClient, cfg, auth, agentConfigs, poolPolicy, defaultProviderModel)
+	return &initialLLMSetup{
+		ProviderName:   providerName,
+		ModelID:        modelID,
+		InitialVariant: initialVariant,
+		ModelCfg:       modelCfg,
+		ProviderCfg:    providerCfg,
+		Provider:       llmProvider,
+		Client:         llmClient,
+	}, nil
+}
+
 // initApp performs the shared initialization sequence used by local TUI and
 // headless control-plane entrypoints. It sets up: signal context, project root, logging, config,
 // auth, LLM client, session directory, context manager, tool registry, MCP,
@@ -271,166 +443,40 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		poolPolicy.SetAgentOverride(agentName, poolName)
 	}
 
-	// Determine active provider name and default model from builder agent pool.
-	var defaultProviderModel string
-	var defaultVariant string
-	if agentConfigs != nil {
-		if builderCfg, ok := agentConfigs["builder"]; ok && len(builderCfg.Models) > 0 {
-			if resolvedRef := poolPolicy.ResolveInitialModelRef("builder", builderCfg); resolvedRef != "" {
-				defaultProviderModel, defaultVariant = config.ParseModelRef(resolvedRef)
-			} else if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
-				if firstPoolRefs := builderCfg.PoolModels(poolNames[0]); len(firstPoolRefs) > 0 {
-					defaultProviderModel, defaultVariant = config.ParseModelRef(firstPoolRefs[0])
-					if defaultVariant == "" {
-						defaultVariant = builderCfg.Variant
-					}
-				}
-			}
-		}
-	}
+	// Determine the initial builder model before constructing the first shared LLM client.
+	defaultProviderModel, defaultVariant := resolveInitialModelSelection(agentConfigs, poolPolicy)
 	if defaultProviderModel == "" {
 		ac.cleanup()
 		return nil, fmt.Errorf("no initial model resolved from builder agent config: ensure builder agent defines at least one non-empty model pool")
 	}
 
-	ac.ProviderName = ""
-	if defaultProviderModel != "" {
-		parts := strings.SplitN(defaultProviderModel, "/", 2)
-		if len(parts) == 2 {
-			ac.ProviderName = parts[0]
-		}
-	}
-
-	// Auth and API keys.
 	authPath := filepath.Join(pathLocator.ConfigHome, "auth.yaml")
-
 	auth, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		ac.cleanup()
 		return nil, fmt.Errorf("load auth config: %w", err)
 	}
-
 	ac.Auth = auth
 
-	creds := auth[ac.ProviderName]
-	apiKeys := config.ExtractAPIKeys(creds)
-
-	// Active model.
-	cfgProvider, ok := cfg.Providers[ac.ProviderName]
-	if !ok {
-		ac.cleanup()
-		return nil, fmt.Errorf("provider %q not found in config", ac.ProviderName)
-	}
-
-	modelID := ""
-	initialVariant := ""
-	if defaultProviderModel != "" {
-		parts := strings.SplitN(defaultProviderModel, "/", 2)
-		if len(parts) == 2 {
-			modelID = parts[1]
-			initialVariant = defaultVariant
-		}
-	}
-	if modelID == "" {
-		ac.cleanup()
-		return nil, fmt.Errorf("no initial model ID resolved from builder agent config")
-	}
-	modelCfg, ok := cfgProvider.Models[modelID]
-	if !ok {
-		ac.cleanup()
-		return nil, fmt.Errorf("model %q not found in provider %q", modelID, ac.ProviderName)
-	}
-	ac.ModelID = modelID
-
-	// LLM client.
-	ac.ProviderCache = &providerCache{
-		m:        make(map[string]*llm.ProviderConfig),
-		impls:    make(map[string]llm.Provider),
-		ctx:      ac.Ctx,
-		auth:     auth,
-		authPath: authPath,
-		cfg:      cfg,
-	}
-	if flagAPIBase != "" {
-		cfgProvider.APIURL = flagAPIBase
-	}
-	providerCfg, err := ac.GetOrCreateProvider(ac.ProviderName, cfgProvider, apiKeys)
+	initialLLM, err := setupInitialLLMClient(ac, cfg, auth, authPath, agentConfigs, poolPolicy, defaultProviderModel, defaultVariant)
 	if err != nil {
 		ac.cleanup()
 		return nil, err
 	}
-	if cfgProvider.RateLimit > 0 {
-		providerCfg.SetRateLimiter(cfgProvider.RateLimit)
-	}
+	ac.ProviderName = initialLLM.ProviderName
+	ac.ModelID = initialLLM.ModelID
+	ac.LLMClient = initialLLM.Client
+	ac.ProviderCfg = initialLLM.ProviderCfg
+	ac.LLMProvider = initialLLM.Provider
+	ac.ModelCfg = initialLLM.ModelCfg
+	llmClient := initialLLM.Client
+	providerCfg := initialLLM.ProviderCfg
+	llmProvider := initialLLM.Provider
+	modelID := initialLLM.ModelID
+	modelCfg := initialLLM.ModelCfg
+	initialVariant := initialLLM.InitialVariant
 
-	effectiveProxy := llm.ResolveEffectiveProxy(cfgProvider.Proxy, cfg.Proxy)
-	logEffectiveProxy(effectiveProxy)
-	var llmProvider llm.Provider
-	llmProvider, err = ac.GetOrCreateProviderImpl(ac.ProviderName, cfgProvider, providerCfg, modelID)
-	if err != nil {
-		ac.cleanup()
-		return nil, err
-	}
-	if providerCfg.Type() == config.ProviderTypeResponses {
-		log.Debugf("using Responses API model=%v api_url=%v", modelID, providerCfg.APIURL())
-	}
-
-	llmClient := llm.NewClient(
-		providerCfg,
-		llmProvider,
-		modelID,
-		modelCfg.Limit.Output,
-		"", // system prompt is set by agent.NewMainAgent
-	)
-	llmClient.SetOutputTokenMax(cfg.MaxOutputTokens)
-	llmClient.SetStreamRetryRounds(cfg.StreamRetryRounds)
-	if initialVariant != "" {
-		llmClient.SetVariant(initialVariant)
-	}
-
-	// Configure model pool fallbacks for the initial client using the builder
-	// agent's effective model pool. The initial MainAgent client is used for the
-	// first builder turn before any role/model switch occurs, so without this the
-	// very first request can only retry keys on the initial model.
-	if agentConfigs != nil {
-		if builderCfg, ok := agentConfigs["builder"]; ok && len(builderCfg.Models) > 0 {
-			var poolModels []string
-			if poolPolicy != nil {
-				poolModels = poolPolicy.EffectiveModels("builder", builderCfg)
-			}
-			if len(poolModels) == 0 {
-				if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
-					poolModels = builderCfg.PoolModels(poolNames[0])
-				}
-			}
-
-			pool, selectedIdx := buildModelPool(
-				ac.Ctx,
-				poolModels,
-				builderCfg.Variant,
-				defaultProviderModel,
-				cfg.Providers,
-				auth,
-				cfg.Proxy,
-				cfg.MaxOutputTokens,
-				ac.GetOrCreateProvider,
-				ac.GetOrCreateProviderImpl,
-				"builder startup",
-			)
-			if len(pool) > 1 {
-				llmClient.SetModelPool(pool, selectedIdx)
-				log.Debugf("initial LLM client configured with builder model pool size=%v selected_idx=%v", len(pool), selectedIdx)
-			}
-		}
-	}
-
-	ac.LLMClient = llmClient
-	ac.ProviderCfg = providerCfg
-	ac.LLMProvider = llmProvider
-	ac.ModelCfg = modelCfg
-
-	log.Infof("configuration loaded model=%v max_output_tokens=%v context_window=%v", modelID, modelCfg.Limit.Output, modelCfg.Limit.Context)
-
+	log.Infof("configuration loaded model=%v max_output_tokens=%v context_window=%v", initialLLM.ModelID, initialLLM.ModelCfg.Limit.Output, initialLLM.ModelCfg.Limit.Context)
 	// Session directory.
 	sessionPlan, err := planSessionStartup(projectLocator.ProjectSessionsDir, sessionOpts)
 	if err != nil {

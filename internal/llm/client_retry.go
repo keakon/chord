@@ -271,6 +271,285 @@ func updateSuccessfulCallStatus(status *CallStatus, target streamRetryTarget) {
 	status.RunningInputLimit = target.inputLimit
 }
 
+type streamTargetAttemptResult struct {
+	resp                *message.Response
+	lastErr             error
+	pendingRoundWait    time.Duration
+	roundHadUsableReply bool
+	skipProvider        bool
+}
+
+func (c *Client) completeStreamTarget(
+	ctx context.Context,
+	t streamRetryTarget,
+	round int,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	cb StreamCallback,
+	fallbackEnabled bool,
+	fallbackModels []FallbackModel,
+	currentRoundWait time.Duration,
+	hasNextTarget bool,
+	status *CallStatus,
+	systemPrompt string,
+	outputCapSetting int,
+	lastInputTokens int,
+	abortIfCancelled func() error,
+	oversizeSeen *oversizeRegistry,
+) (streamTargetAttemptResult, int, error) {
+	result := streamTargetAttemptResult{}
+	if t.isFallback {
+		log.Infof("trying fallback model in retry rotation provider=%v model=%v attempt=%v", t.provider.Name(), t.modelID, round+1)
+		if cb != nil {
+			reason := ""
+			if status != nil {
+				reason = status.FallbackReason
+			}
+			if err := abortIfCancelled(); err != nil {
+				return result, lastInputTokens, err
+			}
+			emitStreamStatusDelta(cb, message.StatusDelta{
+				Type:     "retrying",
+				Detail:   fmt.Sprintf("fallback: %s", t.modelID),
+				ModelRef: t.displayRef(),
+				Reason:   reason,
+			})
+		}
+		if status != nil {
+			status.FallbackTriggered = true
+		}
+	}
+
+	keyCount := t.provider.KeyCount()
+	if keyCount == 0 {
+		keyCount = 1
+	}
+	targetMessages := messages
+	targetMessages, _ = normalizeMessagesForPoolTarget(targetMessages, FallbackModel{
+		ProviderConfig: t.provider,
+		ProviderImpl:   t.impl,
+		ModelID:        t.modelID,
+		MaxTokens:      t.maxTokens,
+		ContextLimit:   t.contextLimit,
+		Variant:        t.variant,
+	}, t.tuning)
+	effectiveMaxTokens := t.maxTokens
+	if m, ok := t.provider.GetModel(t.modelID); ok {
+		effectiveMaxTokens = clampEffectiveMaxTokens(
+			m,
+			effectiveMaxTokens,
+			outputCapSetting,
+			t.tuning,
+			systemPrompt,
+			targetMessages,
+			tools,
+			lastInputTokens,
+		)
+	}
+	var apiKey string
+	var resp *message.Response
+	var err error
+	modelDone := false
+	for keyAttempt := 0; keyAttempt < keyCount; keyAttempt++ {
+		if err := abortIfCancelled(); err != nil {
+			return result, lastInputTokens, err
+		}
+		var keySwitched bool
+		apiKey, keySwitched, err = t.provider.SelectKeyWithContext(ctx)
+		if err := abortIfCancelled(); err != nil {
+			return result, lastInputTokens, err
+		}
+		if keySwitched {
+			t.provider.ClearInlineDisplayRateLimitSnapshot()
+			if cb != nil {
+				cb(message.StreamDelta{Type: "key_switched"})
+			}
+			t.provider.WakeCodexRateLimitPolling()
+		}
+		if err != nil {
+			if _, ok := errors.AsType[*NoUsableKeysError](err); ok {
+				result.lastErr = err
+				break
+			}
+			if cooling, ok := errors.AsType[*AllKeysCoolingError](err); ok {
+				result.lastErr = err
+				result.pendingRoundWait = mergeRoundWait(result.pendingRoundWait, cooling.RetryAfter)
+				if hasNextTarget {
+					log.Infof("all API keys cooling; trying next model provider=%v model=%v", t.provider.Name(), t.modelID)
+				} else {
+					wait := mergeRoundWait(currentRoundWait, cooling.RetryAfter)
+					log.Infof("all API keys cooling; waiting before retry provider=%v model=%v attempt=%v retry_after=%v", t.provider.Name(), t.modelID, round+1, wait)
+					if cb != nil {
+						if err := abortIfCancelled(); err != nil {
+							return result, lastInputTokens, err
+						}
+						emitStreamStatus(cb, "cooling", wait.Round(time.Second).String())
+					}
+				}
+			} else {
+				result.lastErr = err
+			}
+			break
+		}
+
+		if modelDone {
+			break
+		}
+
+		log.Debugf("LLM request provider=%v model=%v key_suffix=%v max_tokens=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), effectiveMaxTokens)
+		modelRef := t.displayRef()
+		attemptReason := ""
+		if t.isFallback && status != nil {
+			attemptReason = status.FallbackReason
+		}
+		tracker := newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
+
+		resp, err = t.impl.CompleteStream(
+			ctx,
+			apiKey,
+			t.modelID,
+			systemPrompt,
+			targetMessages,
+			tools,
+			effectiveMaxTokens,
+			t.tuning,
+			tracker.Callback,
+		)
+		if err == nil {
+			if responseHasUsableOutput(resp) {
+				result.roundHadUsableReply = true
+			}
+			t.provider.MarkKeySuccess(apiKey)
+			t.provider.WakeCodexRateLimitPolling()
+			inputTok, outputTok := 0, 0
+			if resp.Usage != nil {
+				inputTok = resp.Usage.InputTokens
+				outputTok = resp.Usage.OutputTokens
+				lastInputTokens = resp.Usage.InputTokens
+				c.setLastInputTokens(resp.Usage.InputTokens)
+			}
+			log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
+			updateSuccessfulCallStatus(status, t)
+			modelDone = true
+			break
+		}
+
+		if err := abortIfCancelled(); err != nil {
+			return result, lastInputTokens, err
+		}
+
+		result.lastErr = err
+		visibleStarted := tracker.visible
+		tracker.EmitRollback(err.Error())
+		if err := abortIfCancelled(); err != nil {
+			return result, lastInputTokens, err
+		}
+		if !visibleStarted {
+			fallbackEligible := shouldFallback(err)
+			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
+			if err := abortIfCancelled(); err != nil {
+				return result, lastInputTokens, err
+			}
+			if (cooldownResult.expiredAccountID != "" || cooldownResult.expiredEmail != "") && cb != nil {
+				cb(message.StreamDelta{Type: "key_expired", AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
+			}
+			if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
+				cb(message.StreamDelta{Type: "key_deactivated", AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
+			}
+			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
+				log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				return result, lastInputTokens, err
+			}
+			cooldownApplied := cooldownResult.cooldownApplied
+			keyForRotationCooldown := apiKey
+			if cooldownResult.refreshedKey != "" {
+				keyForRotationCooldown = cooldownResult.refreshedKey
+			}
+			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
+				status.FallbackReason = classifyFallbackReason(err)
+			}
+			if IsContextLengthExceeded(err) {
+				result.lastErr = err
+				oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+				modelDone = true
+				break
+			}
+
+			retriable := isRetriable(err)
+			var apiErrPtr *APIError
+			if errors.As(err, &apiErrPtr) && apiErrPtr != nil && (apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403) {
+				retriable = true
+			}
+			if !retriable && isTimeoutLikeError(err) {
+				log.Warnf("invisible timeout before visible output; skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				result.skipProvider = true
+			}
+
+			if !retriable {
+				log.Errorf("non-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
+					modelDone = true
+					break
+				}
+				modelDone = true
+				break
+			}
+
+			if !cooldownApplied && keyForRotationCooldown != "" {
+				t.provider.MarkRecovering(keyForRotationCooldown)
+			}
+
+			log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+			if cb != nil && keyAttempt+1 < keyCount {
+				if err := abortIfCancelled(); err != nil {
+					return result, lastInputTokens, err
+				}
+				emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
+			}
+			continue
+		}
+
+		if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
+			status.FallbackReason = classifyFallbackReason(err)
+		}
+		if IsContextLengthExceeded(err) {
+			log.Warnf("context length exceeded; trying next model provider=%v model=%v key_suffix=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
+			result.lastErr = err
+			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+			modelDone = true
+			break
+		}
+		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+		if cb != nil {
+			if err := abortIfCancelled(); err != nil {
+				return result, lastInputTokens, err
+			}
+			emitStreamStatus(cb, "retrying", "same key")
+		}
+	}
+	if !modelDone {
+		modelDone = true
+	}
+	result.skipProvider = result.skipProvider || skipRemainingModelsOnProvider(result.lastErr)
+	if resp != nil && err == nil {
+		if !responseHasUsableOutput(resp) {
+			emptyErr := error(&EmptyResponseError{})
+			if resp.StopReason == "length" || resp.StopReason == "max_tokens" {
+				emptyErr = &EmptyTruncationError{}
+			}
+			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_suffix=%v stop_reason=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), resp.StopReason)
+			result.lastErr = emptyErr
+			t.provider.MarkRecovering(apiKey)
+			if cb != nil {
+				emitStreamStatus(cb, "retrying_key", "next")
+			}
+			return result, lastInputTokens, nil
+		}
+		result.resp = resp
+	}
+	return result, lastInputTokens, nil
+}
+
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
 // remaining entries) and, for each model, loops over keys until success, a permanent failure, or
 // keys exhausted. Retriable API errors rotate keys; 401/403 force key rotation
@@ -398,291 +677,41 @@ func (c *Client) completeStreamWithRetry(
 				log.Infof("skipping model: oversize already confirmed for this provider/model target in this round provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
 			}
-			if t.isFallback {
-				log.Infof("trying fallback model in retry rotation provider=%v model=%v attempt=%v", t.provider.Name(), t.modelID, round+1)
-				if cb != nil {
-					reason := ""
-					if status != nil {
-						reason = status.FallbackReason
-					}
-					if err := abortIfCancelled(); err != nil {
-						return nil, err
-					}
-					displayRef := t.displayRef()
-					cb(message.StreamDelta{
-						Type: "status",
-						Status: &message.StatusDelta{
-							Type:     "retrying",
-							Detail:   fmt.Sprintf("fallback: %s", t.modelID),
-							ModelRef: displayRef,
-							Reason:   reason,
-						},
-					})
+			if targetResult, updatedLastInputTokens, err := c.completeStreamTarget(
+				ctx,
+				t,
+				round,
+				messages,
+				tools,
+				cb,
+				fallbackEnabled,
+				fallbackModels,
+				pendingRoundWait,
+				ti < len(targets)-1,
+				status,
+				systemPrompt,
+				outputCapSetting,
+				lastInputTokens,
+				abortIfCancelled,
+				oversizeSeen,
+			); err != nil {
+				return nil, err
+			} else {
+				lastInputTokens = updatedLastInputTokens
+				lastErr = targetResult.lastErr
+				pendingRoundWait = mergeRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
+				if targetResult.roundHadUsableReply {
+					roundHadUsableReply = true
 				}
-				if status != nil {
-					status.FallbackTriggered = true
+				if targetResult.skipProvider {
+					skippedProviders[t.provider] = providerSkipReason(lastErr)
 				}
-			}
-
-			// Try all keys for this model. Loop until a request succeeds,
-			// a non-key error occurs, or all keys are exhausted (AllKeysCoolingError).
-			keyCount := t.provider.KeyCount()
-			if keyCount == 0 {
-				keyCount = 1
-			}
-			targetMessages := messages
-			targetMessages, _ = normalizeMessagesForPoolTarget(targetMessages, FallbackModel{
-				ProviderConfig: t.provider,
-				ProviderImpl:   t.impl,
-				ModelID:        t.modelID,
-				MaxTokens:      t.maxTokens,
-				ContextLimit:   t.contextLimit,
-				Variant:        t.variant,
-			}, t.tuning)
-			effectiveMaxTokens := t.maxTokens
-			if m, ok := t.provider.GetModel(t.modelID); ok {
-				effectiveMaxTokens = clampEffectiveMaxTokens(
-					m,
-					effectiveMaxTokens,
-					outputCapSetting,
-					t.tuning,
-					systemPrompt,
-					targetMessages,
-					tools,
-					lastInputTokens,
-				)
-			}
-			var apiKey string
-			var resp *message.Response
-			var err error
-			modelDone := false
-			for keyAttempt := 0; keyAttempt < keyCount; keyAttempt++ {
-				if err := abortIfCancelled(); err != nil {
-					return nil, err
+				if targetResult.resp != nil {
+					return targetResult.resp, nil
 				}
-				var keySwitched bool
-				apiKey, keySwitched, err = t.provider.SelectKeyWithContext(ctx)
-				if err := abortIfCancelled(); err != nil {
-					return nil, err
-				}
-				if keySwitched {
-					t.provider.ClearInlineDisplayRateLimitSnapshot()
-					if cb != nil {
-						cb(message.StreamDelta{Type: "key_switched"})
-					}
-					t.provider.WakeCodexRateLimitPolling()
-				}
-				if err != nil {
-					if _, ok := errors.AsType[*NoUsableKeysError](err); ok {
-						lastErr = err
-						break // exit key loop, move to next model
-					}
-					// AllKeysCoolingError: all keys exhausted for this model.
-					if cooling, ok := errors.AsType[*AllKeysCoolingError](err); ok {
-						lastErr = err
-						pendingRoundWait = mergeRoundWait(pendingRoundWait, cooling.RetryAfter)
-						if ti < len(targets)-1 {
-							// Fallback target available: skip to it immediately without waiting.
-							log.Infof("all API keys cooling; trying next model provider=%v model=%v", t.provider.Name(), t.modelID)
-						} else {
-							// Last target: wait only between rounds.
-							wait := pendingRoundWait
-							log.Infof("all API keys cooling; waiting before retry provider=%v model=%v attempt=%v retry_after=%v", t.provider.Name(), t.modelID, round+1, wait)
-							if cb != nil {
-								if err := abortIfCancelled(); err != nil {
-									return nil, err
-								}
-								emitStreamStatus(cb, "cooling", wait.Round(time.Second).String())
-							}
-						}
-					} else {
-						lastErr = err
-					}
-					break // exit key loop, move to next model
-				}
-
-				// Make the request with this key.
-				// Context size pre-check and token budget are computed once per target
-				// and reused across key retries in the same round.
-				if modelDone {
-					break
-				}
-
-				log.Debugf("LLM request provider=%v model=%v key_suffix=%v max_tokens=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), effectiveMaxTokens)
-				modelRef := t.displayRef()
-				attemptReason := ""
-				if t.isFallback && status != nil {
-					attemptReason = status.FallbackReason
-				}
-				tracker := newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
-
-				resp, err = t.impl.CompleteStream(
-					ctx,
-					apiKey,
-					t.modelID,
-					systemPrompt,
-					targetMessages,
-					tools,
-					effectiveMaxTokens,
-					t.tuning,
-					tracker.Callback,
-				)
-				if err == nil {
-					if responseHasUsableOutput(resp) {
-						roundHadUsableReply = true
-					}
-					t.provider.MarkKeySuccess(apiKey)
-					t.provider.WakeCodexRateLimitPolling()
-					inputTok, outputTok := 0, 0
-					if resp.Usage != nil {
-						inputTok = resp.Usage.InputTokens
-						outputTok = resp.Usage.OutputTokens
-						lastInputTokens = resp.Usage.InputTokens
-						c.setLastInputTokens(resp.Usage.InputTokens)
-					}
-					log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
-					updateSuccessfulCallStatus(status, t)
-					modelDone = true
-					break // success: exit key loop
-				}
-
-				// Turn cancelled (e.g. Ctrl+C) or routing changed after a failed
-				// attempt: do not rotate keys, advance models, or backoff.
-				if err := abortIfCancelled(); err != nil {
-					return nil, err
-				}
-
-				lastErr = err
-				visibleStarted := tracker.visible
-				tracker.EmitRollback(err.Error())
-				if err := abortIfCancelled(); err != nil {
-					return nil, err
-				}
-				if !visibleStarted {
-					fallbackEligible := shouldFallback(err)
-					cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, lastErr)
-					if err := abortIfCancelled(); err != nil {
-						return nil, err
-					}
-					if (cooldownResult.expiredAccountID != "" || cooldownResult.expiredEmail != "") && cb != nil {
-						cb(message.StreamDelta{Type: "key_expired", AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
-					}
-					if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
-						cb(message.StreamDelta{Type: "key_deactivated", AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
-					}
-					if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
-						log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-						return nil, err
-					}
-					cooldownApplied := cooldownResult.cooldownApplied
-					keyForRotationCooldown := apiKey
-					if cooldownResult.refreshedKey != "" {
-						keyForRotationCooldown = cooldownResult.refreshedKey
-					}
-					if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
-						status.FallbackReason = classifyFallbackReason(err)
-					}
-					if IsContextLengthExceeded(err) {
-						lastErr = err
-						oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-						modelDone = true
-						break
-					}
-					retriable := isRetriable(err)
-					// 401/403 are treated as per-key failures so selection can prefer other
-					// healthy keys before giving up or switching model.
-					var apiErrPtr *APIError
-					if errors.As(err, &apiErrPtr) && apiErrPtr != nil && (apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403) {
-						retriable = true
-					}
-					// A timeout before any visible output now follows the same routing policy
-					// as dial/connect/TLS-handshake failures: do not spend the remaining keys
-					// or sibling targets on this provider in the current round; advance to
-					// the next provider/model.
-					if !retriable && isTimeoutLikeError(err) {
-						log.Warnf("invisible timeout before visible output; skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-						skippedProviders[t.provider] = providerSkipReason(err)
-					}
-
-					if !retriable {
-						log.Errorf("non-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
-							// fallback-eligible: move on to next model in pool
-							modelDone = true
-							break
-						}
-						modelDone = true // stop trying other keys for this model
-						break
-					}
-
-					if !cooldownApplied && keyForRotationCooldown != "" {
-						t.provider.MarkRecovering(keyForRotationCooldown)
-					}
-
-					log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-					if cb != nil && keyAttempt+1 < keyCount {
-						if err := abortIfCancelled(); err != nil {
-							return nil, err
-						}
-						emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
-					}
-					continue
-				}
-
-				if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
-					status.FallbackReason = classifyFallbackReason(err)
-				}
-				if IsContextLengthExceeded(err) {
-					log.Warnf("context length exceeded; trying next model provider=%v model=%v key_suffix=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
-					lastErr = err
-					oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-					modelDone = true
-					break
-				}
-				log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-				if cb != nil {
-					if err := abortIfCancelled(); err != nil {
-						return nil, err
-					}
-					emitStreamStatus(cb, "retrying", "same key")
-				}
-				continue
-			} // end key loop
-			// All keys exhausted with retriable errors: mark done so the targets
-			// loop moves on to the next model rather than waiting for next attempt.
-			if !modelDone {
-				modelDone = true
-			}
-			// Provider-unusable failures skip all remaining targets on this
-			// provider for the current round.
-			if skipRemainingModelsOnProvider(lastErr) {
-				skippedProviders[t.provider] = providerSkipReason(lastErr)
-			}
-
-			// If request succeeded, check for semantically empty output before returning.
-			// A response with no content, no tool calls, and no thinking blocks means
-			// this key produced nothing useful. Mark it recovering so future selection
-			// prefers other healthy keys, then let the current round continue through the
-			// remaining target/model chain.
-			if resp != nil && err == nil {
-				if !responseHasUsableOutput(resp) {
-					emptyErr := error(&EmptyResponseError{})
-					if resp.StopReason == "length" || resp.StopReason == "max_tokens" {
-						emptyErr = &EmptyTruncationError{}
-					}
-					log.Warnf("model returned empty response, trying next key provider=%v model=%v key_suffix=%v stop_reason=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), resp.StopReason)
-					lastErr = emptyErr
-					t.provider.MarkRecovering(apiKey)
-					resp = nil
-					if cb != nil {
-						emitStreamStatus(cb, "retrying_key", "next")
-					}
-					continue
-				}
-				return resp, nil
 			}
 			// Stop immediately only for permanent failures (auth, permission, malformed request).
-			if modelDone && isPermanentFailure(lastErr) {
+			if isPermanentFailure(lastErr) {
 				log.Errorf("LLM permanent failure, giving up provider=%v model=%v error=%v", startProvider.Name(), startModelID, lastErr)
 				return nil, lastErr
 			}
