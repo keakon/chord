@@ -312,3 +312,44 @@ func TestMCPSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 		t.Fatalf("hit-test index = %d, want %d (window start)", idx, start)
 	}
 }
+
+func TestMCPSelectModalMouseWheelMovesCursor(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", Manual: true}, {Name: "beta", Manual: true}, {Name: "gamma", Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.openMCPSelect()
+	m.layout = m.generateLayout(m.width, m.height)
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseWheelMsg{X: 1, Y: 1, Button: tea.MouseWheelDown})
+	if !handled {
+		t.Fatal("MCP select wheel was not handled")
+	}
+	if cmd != nil {
+		t.Fatalf("wheel returned cmd %#v, want nil", cmd)
+	}
+	if got := m.mcpSelect.selector.list.CursorAt(); got != 2 {
+		t.Fatalf("cursor after wheel down = %d, want 2", got)
+	}
+}
+
+func TestMCPSelectModalMouseClickTogglesClickedRow(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", Disabled: true, Manual: true}, {Name: "beta", Disabled: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.openMCPSelect()
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.renderMCPSelectDialog()
+	dialogRect := m.overlayRect(m.renderMCPSelectDialog())
+	clickX := dialogRect.Min.X + 2
+	clickY := dialogRect.Min.Y + 1 + m.mcpSelect.selector.listBaseRow + 1
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("MCP select click was not handled")
+	}
+	_ = cmd
+	selected, ok := m.mcpSelect.selector.list.SelectedItem()
+	if !ok || selected.ID != "beta" {
+		t.Fatalf("selected item after click = %#v, want beta", selected)
+	}
+}

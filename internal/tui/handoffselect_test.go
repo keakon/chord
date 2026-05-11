@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
@@ -64,5 +66,43 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	}
 	if idx != start {
 		t.Fatalf("hit-test index = %d, want %d (window start)", idx, start)
+	}
+}
+
+func TestHandoffSelectModalMouseWheelMovesCursor(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	m.layout = m.generateLayout(m.width, m.height)
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseWheelMsg{X: 1, Y: 1, Button: tea.MouseWheelDown})
+	if !handled {
+		t.Fatal("handoff select wheel was not handled")
+	}
+	if cmd != nil {
+		t.Fatalf("wheel returned cmd %#v, want nil", cmd)
+	}
+	if got := m.handoffSelect.selector.list.CursorAt(); got != 2 {
+		t.Fatalf("cursor after wheel down = %d, want 2", got)
+	}
+}
+
+func TestHandoffSelectModalMouseClickUpdatesCursorAndReturnsCommand(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.renderHandoffSelectDialog()
+	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
+	clickX := dialogRect.Min.X + 2
+	clickY := dialogRect.Min.Y + 1 + m.handoffSelect.selector.listBaseRow + 1
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("handoff select click was not handled")
+	}
+	_ = cmd
+	if got := m.handoffSelect.selector.list.CursorAt(); got != 1 {
+		t.Fatalf("cursor after click = %d, want 1", got)
 	}
 }
