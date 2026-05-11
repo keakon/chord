@@ -136,9 +136,39 @@ func (e *StreamingToolExecutor) AcquireExecutionSlot(ctx context.Context) func()
 	}
 	select {
 	case e.sem <- struct{}{}:
-		return func() { e.releaseExecutionSlot() }
+		release := func() { e.releaseExecutionSlot() }
+		if !e.waitForDiscardedMutationRollback(ctx) {
+			release()
+			return nil
+		}
+		return release
 	case <-ctx.Done():
 		return nil
+	}
+}
+
+func (e *StreamingToolExecutor) waitForDiscardedMutationRollback(ctx context.Context) bool {
+	if e == nil || ctx == nil {
+		return true
+	}
+	for {
+		e.mu.Lock()
+		var done <-chan struct{}
+		for _, entry := range e.entries {
+			if entry != nil && entry.discarded && len(entry.conflictKeys) > 0 {
+				done = entry.done
+				break
+			}
+		}
+		e.mu.Unlock()
+		if done == nil {
+			return true
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return false
+		}
 	}
 }
 
@@ -204,12 +234,19 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		entry.state = streamingToolCompleted
 	}
 	e.mu.Unlock()
-	close(entry.done)
 
 	if discarded {
 		rollbackSpeculativeToolHooks(result)
+		e.mu.Lock()
+		if e.entries[entry.call.ID] == entry {
+			delete(e.entries, entry.call.ID)
+		}
+		e.releaseConflictKeysLocked(entry)
+		e.mu.Unlock()
+		close(entry.done)
 		return
 	}
+	close(entry.done)
 	if e.emit == nil {
 		return
 	}
@@ -294,11 +331,14 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
 	started := !entry.startedAt.IsZero()
 	completed := entry.state == streamingToolCompleted || entry.state == streamingToolYielded
+	retainUntilRunEntryRollback := started && !completed
 	entry.discarded = true
 	entry.discardWhy = reason
 	entry.state = streamingToolDiscarded
-	delete(e.entries, callID)
-	e.releaseConflictKeysLocked(entry)
+	if !retainUntilRunEntryRollback {
+		delete(e.entries, callID)
+		e.releaseConflictKeysLocked(entry)
+	}
 	info := StreamingToolDiscardInfo{
 		CallID:      entry.call.ID,
 		Name:        entry.call.Name,
@@ -326,7 +366,7 @@ func (e *StreamingToolExecutor) DiscardCall(callID, reason string) (StreamingToo
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	entry := e.entries[callID]
-	if entry == nil {
+	if entry == nil || entry.discarded {
 		return StreamingToolDiscardInfo{}, false
 	}
 	info := e.discardEntryLocked(callID, entry, reason)
@@ -352,6 +392,9 @@ func (e *StreamingToolExecutor) DiscardExceptInfo(valid map[string]struct{}, rea
 	defer e.mu.Unlock()
 	var discarded []StreamingToolDiscardInfo
 	for id, entry := range e.entries {
+		if entry == nil || entry.discarded {
+			continue
+		}
 		if _, ok := valid[id]; ok {
 			continue
 		}
@@ -381,7 +424,7 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 		return ""
 	}
 	for _, entry := range e.entries {
-		if entry == nil || entry.discarded || len(entry.conflictKeys) == 0 {
+		if entry == nil || len(entry.conflictKeys) == 0 {
 			continue
 		}
 		if isFileMutationTool(entry.call.Name) {

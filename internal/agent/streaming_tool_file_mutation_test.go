@@ -146,6 +146,93 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 	waitForFileContent(t, path, "before")
 }
 
+func TestSpeculativeWriteDiscardWhileExecutingRetainsConflictUntilRollback(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "new.txt")
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{})
+	a.tools.Register(tools.ReadTool{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	toolReturned := make(chan struct{})
+	releaseExecutor := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseExecutor) }) }
+	defer release()
+	exec := NewStreamingToolExecutor(7, ctx, nil, func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		result, err := a.executeToolCallSpeculative(ctx, tc)
+		if tc.ID == "write-1" {
+			close(toolReturned)
+			select {
+			case <-releaseExecutor:
+			case <-ctx.Done():
+			}
+		}
+		return result, err
+	})
+	first := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"first"}`)}
+	second := message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"second"}`)}
+	read := message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)}
+	if !exec.Start(first) {
+		t.Fatal("first Start returned false")
+	}
+	select {
+	case <-toolReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first speculative write did not return")
+	}
+	waitForFileContent(t, path, "first")
+	if info, ok := exec.DiscardCall(first.ID, "filtered"); !ok {
+		t.Fatal("DiscardCall returned false")
+	} else if !info.Started || info.Completed {
+		t.Fatalf("discard info=%#v, want started and not completed", info)
+	}
+	if exec.Start(second) {
+		t.Fatal("second same-path write started before discarded write rolled back")
+	}
+	if exec.Start(read) {
+		t.Fatal("read started while discarded speculative mutation was still dirty")
+	}
+	finalizedSlot := make(chan func(), 1)
+	go func() {
+		finalizedSlot <- exec.AcquireExecutionSlot(ctx)
+	}()
+	select {
+	case releaseSlot := <-finalizedSlot:
+		if releaseSlot != nil {
+			releaseSlot()
+		}
+		t.Fatal("finalized execution slot acquired before discarded write rolled back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	waitForMissingFile(t, path)
+	var releaseSlot func()
+	select {
+	case releaseSlot = <-finalizedSlot:
+	case <-time.After(2 * time.Second):
+		t.Fatal("finalized execution slot did not unblock after discarded write rollback")
+	}
+	if releaseSlot == nil {
+		t.Fatal("AcquireExecutionSlot returned nil before context cancellation")
+	}
+	releaseSlot()
+	deadline := time.Now().Add(2 * time.Second)
+	for !exec.Start(second) {
+		if time.Now().After(deadline) {
+			t.Fatal("second same-path write did not start after discarded write rollback")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	payload, ok, drift := exec.Promote(second)
+	if drift || !ok || payload == nil || payload.Error != nil {
+		t.Fatalf("Promote payload=%#v ok=%v drift=%v", payload, ok, drift)
+	}
+	a.commitPromotedToolSideEffects(second, payload)
+	waitForFileContent(t, path, "second")
+}
+
 func TestSpeculativeDeleteDiscardRestoresDeletedFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "delete.txt")
