@@ -1160,8 +1160,8 @@ func TestHandleInsertHistoryUpLoadsLastUserMessageIntoComposer(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 
-	if got := m.input.Value(); got != "[Pasted text #1 +11 lines]" {
-		t.Fatalf("input value = %q, want inline placeholder", got)
+	if got := m.input.Value(); got != "[Pasted text #1 +11 lines]"+inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want inline text placeholder followed by image token", got)
 	}
 	if !m.input.HasInlinePastes() {
 		t.Fatal("expected inline paste metadata to be restored")
@@ -2997,8 +2997,8 @@ func TestForkSessionEventBackfillsTextInlinePastesAndImages(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert after ForkSessionEvent", m.mode)
 	}
-	if got := m.input.Value(); got != "[Pasted text #1 +59 lines]" {
-		t.Fatalf("input value = %q, want inline paste placeholder", got)
+	if got := m.input.Value(); got != "[Pasted text #1 +59 lines]"+inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want inline paste placeholder followed by image token", got)
 	}
 	if !m.input.HasInlinePastes() {
 		t.Fatal("expected inline paste metadata to be restored for large paste part")
@@ -3104,6 +3104,13 @@ func TestForkSessionEventBackfillsImagesOnly(t *testing.T) {
 	}
 	if got := m.attachments[1].FileName; got != "diagram.png" {
 		t.Fatalf("attachments[1].FileName = %q, want diagram.png", got)
+	}
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want two inline image placeholders", got)
+	}
+	pastes := m.input.InlinePastes()
+	if len(pastes) != 2 || pastes[0].Kind != inlineTokenImage || pastes[1].Kind != inlineTokenImage {
+		t.Fatalf("inline pastes = %#v, want two image tokens", pastes)
 	}
 }
 

@@ -10,8 +10,9 @@ import (
 )
 
 type attachmentReadyMsg struct {
-	attachment Attachment
-	err        error
+	attachment                Attachment
+	err                       error
+	inlineImagePlaceholderRaw string
 }
 
 // shellBangResultMsg carries output from a local !command (TUI shell).

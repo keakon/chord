@@ -52,7 +52,11 @@ func checkImageSize(data []byte) error {
 
 // readImageFromClipboard reads an image from the system clipboard.
 // Returns the raw bytes and MIME type, or an error.
-func readImageFromClipboard() ([]byte, string, error) {
+//
+// It is a variable so unit tests can stub it.
+var readImageFromClipboard = readImageFromClipboardImpl
+
+func readImageFromClipboardImpl() ([]byte, string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		return clipboardImageDarwin()

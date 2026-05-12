@@ -764,13 +764,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case attachmentReadyMsg:
 		if msg.err != nil {
+			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
 			return m, m.enqueueToast(msg.err.Error(), "error")
 		}
 		const maxBytes = 5 * 1024 * 1024
 		if len(m.attachments) >= maxInlineImageAttachments {
+			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
 			return m, m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn")
 		}
 		if len(msg.attachment.Data) > maxBytes {
+			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
 			return m, m.enqueueToast("Image exceeds 5 MB limit", "warn")
 		}
 		m.attachments = append(m.attachments, msg.attachment)
@@ -817,12 +820,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recalcViewportSize()
 			return m, nil
 		}
-		m.input.InsertString(string(msg))
-		m.input.syncHeight()
-		if m.atMentionOpen {
-			m.syncAtMentionQuery()
-		}
-		m.recalcViewportSize()
+		m.insertComposerText(string(msg))
 		return m, nil
 
 	case atMentionFilesLoadedMsg:

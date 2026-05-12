@@ -106,6 +106,22 @@ func TestUpdateLastBlockDoesNotPopulateLineCache(t *testing.T) {
 	}
 }
 
+func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(24, 2)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("slice me ", 40)}
+	v.AppendBlock(block)
+	if total := v.lineCount(block, v.width); total <= v.height {
+		t.Fatalf("lineCount = %d, want > viewport height %d for partial render", total, v.height)
+	}
+
+	_ = v.Render("", nil, -1)
+
+	if got := len(block.viewportCache); got != 0 {
+		t.Fatalf("viewport cache len = %d, want 0 after partial render", got)
+	}
+}
+
 func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	v := NewViewport(80, 12)
 	mainBlock := &Block{ID: 1, Type: BlockAssistant, Content: "main"}

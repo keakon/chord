@@ -153,6 +153,192 @@ func TestHandleInsertKeySubmitsFileRefsParsedFromLargePaste(t *testing.T) {
 	}
 }
 
+func TestHandleInsertKeySubmitsImagePlaceholderBeforeLargePasteAndFileRef(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.workingDir = t.TempDir()
+	mustWriteFile(t, filepath.Join(m.workingDir, "docs", "RATE_LIMIT_PLAN.md"), "rate limit plan")
+
+	longText := strings.Join([]string{
+		"line1",
+		"line2",
+		"line3",
+		"line4",
+		"line5",
+		"line6",
+		"line7",
+		"line8",
+		"line9",
+		"line10",
+		"see @docs/RATE_LIMIT_PLAN.md",
+	}, "\n")
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder() = false, want true")
+	}
+	if !m.input.InsertLargePaste(longText) {
+		t.Fatal("InsertLargePaste() = false, want true")
+	}
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	parts := backend.sentMultipart[0]
+	if len(parts) != 3 {
+		t.Fatalf("sent parts len = %d, want 3 (image + hidden paste + file)", len(parts))
+	}
+	if parts[0].Type != "image" {
+		t.Fatalf("parts[0].Type = %q, want image", parts[0].Type)
+	}
+	if parts[1].Type != "text" || parts[1].Text != longText || parts[1].DisplayText == "" {
+		t.Fatalf("parts[1] = %#v, want hidden large-paste text part", parts[1])
+	}
+	if !strings.Contains(parts[2].Text, `<file path="docs/RATE_LIMIT_PLAN.md">`) {
+		t.Fatalf("parts[2] = %q, want embedded file ref", parts[2].Text)
+	}
+	if got := m.viewport.visibleBlocks()[0].Content; got != longText {
+		t.Fatalf("user block content = %q, want full pasted text", got)
+	}
+	if got := m.viewport.visibleBlocks()[0].FileRefs; len(got) != 1 || got[0] != "docs/RATE_LIMIT_PLAN.md" {
+		t.Fatalf("user block file refs = %#v, want docs/RATE_LIMIT_PLAN.md", got)
+	}
+}
+
+func TestHandleInsertKeyKeepsLiteralImagePlaceholderText(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.SetValue("[image1]")
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	parts := backend.sentMultipart[0]
+	if len(parts) != 2 {
+		t.Fatalf("sent parts len = %d, want 2 (literal text + image)", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "[image1]" {
+		t.Fatalf("parts[0] = %#v, want literal text part", parts[0])
+	}
+	if parts[1].Type != "image" {
+		t.Fatalf("parts[1].Type = %q, want image", parts[1].Type)
+	}
+}
+
+func TestBackspaceRemovesInlineImagePlaceholderAndAttachmentAsWhole(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{
+		{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}},
+		{FileName: "image2.png", MimeType: "image/png", Data: []byte{2}},
+	}
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
+	}
+	if !m.input.InsertImagePlaceholder(2) {
+		t.Fatal("InsertImagePlaceholder(2) = false, want true")
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want single image placeholder", got)
+	}
+	pastes := m.input.InlinePastes()
+	if len(pastes) != 1 {
+		t.Fatalf("inline paste count = %d, want 1", len(pastes))
+	}
+	if got := pastes[0].RawContent; got != imagePlaceholder(1) {
+		t.Fatalf("remaining placeholder raw = %q, want %q", got, imagePlaceholder(1))
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments len = %d, want 1", got)
+	}
+	if got := m.attachments[0].FileName; got != "image1.png" {
+		t.Fatalf("remaining attachment name = %q, want image1.png", got)
+	}
+}
+
+func TestTypingAfterInlineImagePlaceholderAppendsText(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Text: "a"}))
+
+	if got, want := m.input.Value(), inlineImagePlaceholderDisplay+"a"; got != want {
+		t.Fatalf("input value = %q, want %q", got, want)
+	}
+}
+
+func TestTypingInsideInlineImagePlaceholderMovesCursorWithoutSplittingToken(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}}}
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
+	}
+	m.input.SetCursorPosition(0, 3)
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Text: "x"}))
+
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want unchanged whole image token", got)
+	}
+	if got := m.input.Column(); got != 0 {
+		t.Fatalf("cursor column = %d, want moved to token start", got)
+	}
+}
+
+func TestInsertComposerTextPreservesExistingInlineTokens(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	if !m.input.InsertLargePaste(strings.Join([]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}, "\n")) {
+		t.Fatal("InsertLargePaste() = false, want true")
+	}
+	m.insertComposerText(" tail")
+
+	if !m.input.HasInlinePastes() {
+		t.Fatal("inline token metadata should be preserved")
+	}
+	parts := m.input.ContentParts()
+	if len(parts) != 2 {
+		t.Fatalf("content parts len = %d, want 2", len(parts))
+	}
+	if parts[0].DisplayText == "" {
+		t.Fatal("first part should remain inline placeholder")
+	}
+	if parts[1].Text != " tail" {
+		t.Fatalf("second part text = %q, want %q", parts[1].Text, " tail")
+	}
+}
+
+func TestLoadQueuedDraftIntoComposerRestoresInlineImagePlaceholder(t *testing.T) {
+	m := NewModel(nil)
+	draft := queuedDraft{Parts: []message.ContentPart{{Type: "image", MimeType: "image/png", Data: []byte{1}, FileName: "image1.png"}}}
+
+	_ = m.loadQueuedDraftIntoComposer(draft)
+
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay)
+	}
+	pastes := m.input.InlinePastes()
+	if len(pastes) != 1 || pastes[0].Kind != inlineTokenImage {
+		t.Fatalf("inline pastes = %#v, want one image token", pastes)
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments len = %d, want 1", got)
+	}
+}
+
 func TestBackspaceRemovesInlinePlaceholderAsWhole(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert

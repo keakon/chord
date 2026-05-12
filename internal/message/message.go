@@ -11,6 +11,7 @@ type ContentPart struct {
 	Type        string `json:"type"`                   // "text" or "image"
 	Text        string `json:"text,omitempty"`         // for type="text"
 	DisplayText string `json:"display_text,omitempty"` // optional TUI-only summary for large hidden text parts
+	InlineToken string `json:"inline_token,omitempty"` // optional TUI-only marker for atomic inline composer tokens
 	MimeType    string `json:"mime_type,omitempty"`    // for type="image", e.g. "image/png"
 	Data        []byte `json:"data,omitempty"`         // for type="image", raw bytes (not persisted; loaded from ImagePath)
 	ImagePath   string `json:"image_path,omitempty"`   // for type="image", path to persisted image file on disk

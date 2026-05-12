@@ -26,10 +26,13 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	if isSuperV(msg) {
 		switch m.mode {
 		case ModeInsert:
+			if cmd := m.tryPasteImageIntoComposer(""); cmd != nil {
+				return cmd
+			}
 			return m.pasteFromClipboard()
 		case ModeConfirm:
 			if m.confirm.editing || m.confirm.denyingWithReason {
-				return m.pasteFromClipboard()
+				return pasteTextFromClipboard()
 			}
 		}
 	}

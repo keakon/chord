@@ -16,7 +16,10 @@ type clipboardWriteResultMsg struct {
 
 type clipboardTextMsg string
 
-var clipboardWriteAll = clipboard.WriteAll
+var (
+	clipboardReadAll  = clipboard.ReadAll
+	clipboardWriteAll = clipboard.WriteAll
+)
 
 func writeClipboardCmd(text, success string) tea.Cmd {
 	return tea.Sequence(
@@ -26,6 +29,20 @@ func writeClipboardCmd(text, success string) tea.Cmd {
 			return clipboardWriteResultMsg{success: success, err: err}
 		},
 	)
+}
+
+func readClipboardTextMsg() tea.Msg {
+	text, err := clipboardReadAll()
+	if err != nil || text == "" {
+		return nil
+	}
+	return clipboardTextMsg(text)
+}
+
+func pasteTextFromClipboard() tea.Cmd {
+	return func() tea.Msg {
+		return readClipboardTextMsg()
+	}
 }
 
 func attachmentFromImagePath(path string, index int) (Attachment, error) {
@@ -57,8 +74,22 @@ func pasteAttachmentFromPath(path string, index int) tea.Msg {
 	return attachmentReadyMsg{attachment: attachment}
 }
 
+func (m *Model) pasteImageFromClipboard() tea.Msg {
+	data, mimeType, err := readImageFromClipboard()
+	if err != nil {
+		return nil
+	}
+	imageName := fmt.Sprintf("image%d%s", len(m.attachments)+1, attachmentExtForMimeType(mimeType))
+	return attachmentReadyMsg{attachment: Attachment{
+		FileName: imageName,
+		MimeType: mimeType,
+		Data:     data,
+	}}
+}
+
 func (m *Model) pasteFromClipboard() tea.Cmd {
 	return func() tea.Msg {
+		// Try to attach an image from the system clipboard first.
 		data, mimeType, err := readImageFromClipboard()
 		if err == nil {
 			imageName := fmt.Sprintf("image%d%s", len(m.attachments)+1, attachmentExtForMimeType(mimeType))
@@ -68,11 +99,8 @@ func (m *Model) pasteFromClipboard() tea.Cmd {
 				Data:     data,
 			}}
 		}
-		text, err := clipboard.ReadAll()
-		if err != nil || text == "" {
-			return nil
-		}
-		return clipboardTextMsg(text)
+		// No image in clipboard: fall back to textual clipboard contents.
+		return readClipboardTextMsg()
 	}
 }
 

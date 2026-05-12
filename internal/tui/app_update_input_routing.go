@@ -1,49 +1,195 @@
 package tui
 
 import (
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/message"
 )
+
+var imagePlaceholderRE = regexp.MustCompile(`\[image(\d+)\]`)
+
+const inlineImagePlaceholderDisplay = "[image]"
+
+func imagePlaceholder(index int) string {
+	if index <= 0 {
+		index = 1
+	}
+	return fmt.Sprintf("[image%d]", index)
+}
+
+func inlineImagePlaceholderIndex(raw string) (int, bool) {
+	m := imagePlaceholderRE.FindStringSubmatch(raw)
+	if len(m) != 2 || m[0] != raw {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(m[1])
+	if err != nil || idx < 1 {
+		return 0, false
+	}
+	return idx, true
+}
+
+func isInlineImagePlaceholderPart(part message.ContentPart) bool {
+	if part.Type != "text" {
+		return false
+	}
+	if part.InlineToken != "" && part.InlineToken != inlineImageTokenMarker {
+		return false
+	}
+	if part.InlineToken == "" && part.DisplayText != inlineImagePlaceholderDisplay {
+		return false
+	}
+	_, ok := inlineImagePlaceholderIndex(part.Text)
+	return ok
+}
+
+func attachmentContentPart(att Attachment) message.ContentPart {
+	return message.ContentPart{Type: "image", MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath, FileName: att.FileName}
+}
+
+func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
+	if part.Type != "text" || part.Text == "" || message.IsFileRefContent(part.Text) {
+		return []message.ContentPart{part}
+	}
+	if !isInlineImagePlaceholderPart(part) {
+		return []message.ContentPart{part}
+	}
+	imageIndex, ok := inlineImagePlaceholderIndex(part.Text)
+	if !ok || imageIndex < 1 || imageIndex > len(attachments) {
+		return []message.ContentPart{{Type: "text", Text: part.Text}}
+	}
+	used[imageIndex-1] = true
+	return []message.ContentPart{attachmentContentPart(attachments[imageIndex-1])}
+}
+
+// interleaveImageAttachments replaces atomic inline image placeholder parts with
+// image content parts in the same positions.
+//
+// Placeholders:
+// - N is 1-based and refers to the Nth pending attachment (current attachments slice order).
+// - Only explicit inline image placeholder parts are converted.
+// - Unknown/out-of-range placeholders are kept as literal text.
+// - Any attachment not referenced by a placeholder is appended to the end.
+func interleaveImageAttachments(parts []message.ContentPart, attachments []Attachment) []message.ContentPart {
+	if len(parts) == 0 && len(attachments) == 0 {
+		return nil
+	}
+
+	used := make([]bool, len(attachments))
+	out := make([]message.ContentPart, 0, len(parts)+len(attachments))
+	for _, part := range parts {
+		out = append(out, interleaveImageAttachmentsInTextPart(part, attachments, used)...)
+	}
+	for i, att := range attachments {
+		if used[i] {
+			continue
+		}
+		out = append(out, attachmentContentPart(att))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (m *Model) removeAttachmentForInlinePaste(paste inlineLargePaste) {
+	if paste.Kind != inlineTokenImage {
+		return
+	}
+	imageIndex, ok := inlineImagePlaceholderIndex(paste.RawContent)
+	if !ok || imageIndex < 1 || imageIndex > len(m.attachments) {
+		return
+	}
+	m.attachments = append(m.attachments[:imageIndex-1], m.attachments[imageIndex:]...)
+	m.input.ReindexInlineImagePlaceholdersAfterRemoval(imageIndex)
+}
+
+func (m *Model) insertComposerText(text string) {
+	m.input.ClearSelection()
+	if !m.input.InsertLargePaste(text) {
+		m.input.InsertStringPreserveInlinePastes(text)
+	}
+	m.input.syncHeight()
+	if m.atMentionOpen {
+		m.syncAtMentionQuery()
+	}
+	m.recalcViewportSize()
+}
+
+func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) {
+	if raw == "" || !m.input.RemoveInlineImagePlaceholderByRaw(raw) {
+		return
+	}
+	m.input.syncHeight()
+	if m.atMentionOpen {
+		m.syncAtMentionQuery()
+	}
+	m.recalcViewportSize()
+}
+
+func (m *Model) tryPasteImageIntoComposer(pastedText string) tea.Cmd {
+	if len(m.attachments) >= maxInlineImageAttachments {
+		return nil
+	}
+	img := m.pasteImageFromClipboard()
+	if img == nil {
+		return nil
+	}
+	m.input.ClearSelection()
+	placeholderRaw := imagePlaceholder(len(m.attachments) + 1)
+	m.input.InsertImagePlaceholder(len(m.attachments) + 1)
+	if pastedText != "" {
+		m.insertComposerText(pastedText)
+	} else {
+		m.input.syncHeight()
+		if m.atMentionOpen {
+			m.syncAtMentionQuery()
+		}
+		m.recalcViewportSize()
+	}
+	return func() tea.Msg {
+		if attach, ok := img.(attachmentReadyMsg); ok {
+			attach.inlineImagePlaceholderRaw = placeholderRaw
+			return attach
+		}
+		return img
+	}
+}
 
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 	switch m.mode {
 	case ModeInsert:
-		// PasteMsg (bracket paste via cmd+v): if content is empty the clipboard
-		// likely holds an image, so try image paste instead of inserting nothing.
+		// PasteMsg (bracket paste): prefer an image from the system clipboard.
+		// Many terminals either emit an empty PasteMsg for non-text clipboard
+		// content, or paste a textual representation. We do NOT auto-convert
+		// pasted paths/URIs into attachments.
 		if pm, ok := msg.(tea.PasteMsg); ok {
+			if cmd := m.tryPasteImageIntoComposer(pm.Content); cmd != nil {
+				return cmd
+			}
 			if strings.TrimSpace(pm.Content) == "" {
-				return m.pasteFromClipboard()
+				return pasteTextFromClipboard()
 			}
-			m.input.ClearSelection()
-			if m.input.InsertLargePaste(pm.Content) {
-				m.input.syncHeight()
-				if m.atMentionOpen {
-					m.syncAtMentionQuery()
-				}
-				m.recalcViewportSize()
-				return nil
-			}
+			m.insertComposerText(pm.Content)
+			return nil
 		}
-		cmd := m.input.Update(msg)
-		// PasteMsg may insert multiple lines; sync the input height so all
-		// pasted content is visible.
-		if _, ok := msg.(tea.PasteMsg); ok {
-			m.input.syncHeight()
-			if m.atMentionOpen {
-				m.syncAtMentionQuery()
-			}
-			m.recalcViewportSize()
-		}
-		return cmd
+		return m.input.Update(msg)
 	case ModeConfirm:
 		// Bubble Tea v2 may deliver terminal paste as tea.PasteMsg (bracketed paste),
 		// not as a KeyMsg (Super+V). The bubbles/textarea component doesn't handle
-		// tea.PasteMsg, so we must insert the pasted content ourselves.
+		// tea.PasteMsg, so we must handle it here.
+		//
+		// Confirm dialogs are text editors; we do not attach images here.
+		// If the terminal emits an empty PasteMsg for non-text clipboard content,
+		// fall back to reading the textual clipboard content.
 		if pm, ok := msg.(tea.PasteMsg); ok {
 			if strings.TrimSpace(pm.Content) == "" {
-				// Some terminals emit an empty PasteMsg for non-text clipboard content.
-				return m.pasteFromClipboard()
+				return pasteTextFromClipboard()
 			}
 			if input, _, ok := m.activeConfirmTextarea(); ok {
 				input.InsertString(pm.Content)

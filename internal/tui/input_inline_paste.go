@@ -53,9 +53,9 @@ func (i *Input) rebuildDisplay(display string, cursor int) {
 	i.SetCursorPosition(row, col)
 }
 
-func (i *Input) RemoveInlinePasteAtCursor() bool {
+func (i *Input) RemoveInlinePasteAtCursor() (inlineLargePaste, bool) {
 	if len(i.inlinePastes) == 0 {
-		return false
+		return inlineLargePaste{}, false
 	}
 	cursor := runeOffsetFromRowCol(i.DisplayValue(), i.Line(), i.Column())
 	idx := -1
@@ -66,15 +66,14 @@ func (i *Input) RemoveInlinePasteAtCursor() bool {
 		}
 	}
 	if idx < 0 {
-		return false
+		return inlineLargePaste{}, false
 	}
-	i.removeInlinePaste(idx)
-	return true
+	return i.removeInlinePaste(idx), true
 }
 
-func (i *Input) RemoveInlinePasteForwardAtCursor() bool {
+func (i *Input) RemoveInlinePasteForwardAtCursor() (inlineLargePaste, bool) {
 	if len(i.inlinePastes) == 0 {
-		return false
+		return inlineLargePaste{}, false
 	}
 	cursor := runeOffsetFromRowCol(i.DisplayValue(), i.Line(), i.Column())
 	idx := -1
@@ -85,15 +84,14 @@ func (i *Input) RemoveInlinePasteForwardAtCursor() bool {
 		}
 	}
 	if idx < 0 {
-		return false
+		return inlineLargePaste{}, false
 	}
-	i.removeInlinePaste(idx)
-	return true
+	return i.removeInlinePaste(idx), true
 }
 
-func (i *Input) removeInlinePaste(idx int) {
+func (i *Input) removeInlinePaste(idx int) inlineLargePaste {
 	if idx < 0 || idx >= len(i.inlinePastes) {
-		return
+		return inlineLargePaste{}
 	}
 	paste := i.inlinePastes[idx]
 	runes := []rune(i.DisplayValue())
@@ -106,6 +104,7 @@ func (i *Input) removeInlinePaste(idx int) {
 	i.inlinePastes = append(i.inlinePastes[:idx], i.inlinePastes[idx+1:]...)
 	i.rebuildDisplay(string(runes), paste.Start)
 	i.ClearSelection()
+	return paste
 }
 
 func (i *Input) ProtectInlinePastesOnKey(msg tea.KeyMsg) bool {
@@ -138,7 +137,7 @@ func (i *Input) ProtectInlinePastesOnKey(msg tea.KeyMsg) bool {
 			}
 		default:
 			if msg.Key().Text != "" {
-				if cursor >= paste.Start && cursor <= paste.End {
+				if cursor > paste.Start && cursor < paste.End {
 					i.rebuildDisplay(i.DisplayValue(), paste.Start)
 					return true
 				}
@@ -148,12 +147,10 @@ func (i *Input) ProtectInlinePastesOnKey(msg tea.KeyMsg) bool {
 	return false
 }
 
-func (i *Input) InsertLargePaste(content string) bool {
-	paste := newInlineLargePaste(content, i.nextPasteSeq+1)
+func (i *Input) insertInlinePaste(paste *inlineLargePaste) bool {
 	if paste == nil {
 		return false
 	}
-	i.nextPasteSeq++
 	display := i.DisplayValue()
 	cursor := runeOffsetFromRowCol(display, i.Line(), i.Column())
 	displayRunes := []rune(display)
@@ -183,6 +180,57 @@ func (i *Input) InsertLargePaste(content string) bool {
 	i.rebuildDisplay(string(newRunes), paste.End)
 	i.ClearSelection()
 	return true
+}
+
+func (i *Input) InsertLargePaste(content string) bool {
+	paste := newInlineLargePaste(content, i.nextPasteSeq+1)
+	if paste == nil {
+		return false
+	}
+	i.nextPasteSeq++
+	return i.insertInlinePaste(paste)
+}
+
+func (i *Input) InsertImagePlaceholder(index int) bool {
+	return i.insertInlinePaste(newInlineImagePlaceholder(index))
+}
+
+func (i *Input) InsertStringPreserveInlinePastes(s string) bool {
+	if len(i.inlinePastes) == 0 {
+		i.InsertString(s)
+		return true
+	}
+	cursor := runeOffsetFromRowCol(i.DisplayValue(), i.Line(), i.Column())
+	return i.ReplaceRuneRangePreserveInlinePastes(cursor, cursor, s)
+}
+
+func (i *Input) RemoveInlineImagePlaceholderByRaw(raw string) bool {
+	if raw == "" || len(i.inlinePastes) == 0 {
+		return false
+	}
+	for idx, paste := range i.inlinePastes {
+		if paste.Kind == inlineTokenImage && paste.RawContent == raw {
+			i.removeInlinePaste(idx)
+			return true
+		}
+	}
+	return false
+}
+
+func (i *Input) ReindexInlineImagePlaceholdersAfterRemoval(removedIndex int) {
+	if removedIndex < 1 || len(i.inlinePastes) == 0 {
+		return
+	}
+	for idx := range i.inlinePastes {
+		if i.inlinePastes[idx].Kind != inlineTokenImage {
+			continue
+		}
+		imageIndex, ok := inlineImagePlaceholderIndex(i.inlinePastes[idx].RawContent)
+		if !ok || imageIndex <= removedIndex {
+			continue
+		}
+		i.inlinePastes[idx].RawContent = imagePlaceholder(imageIndex - 1)
+	}
 }
 
 func (i *Input) SetDisplayValueAndPastes(display string, pastes []inlineLargePaste, nextSeq int) {

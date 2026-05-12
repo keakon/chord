@@ -143,7 +143,8 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.recalcViewportSize()
 			return nil
 		}
-		if m.input.RemoveInlinePasteAtCursor() {
+		if paste, ok := m.input.RemoveInlinePasteAtCursor(); ok {
+			m.removeAttachmentForInlinePaste(paste)
 			m.input.syncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
@@ -160,7 +161,8 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case key == "delete" || key == "ctrl+d":
-		if m.input.RemoveInlinePasteForwardAtCursor() {
+		if paste, ok := m.input.RemoveInlinePasteForwardAtCursor(); ok {
+			m.removeAttachmentForInlinePaste(paste)
 			m.input.syncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
@@ -328,16 +330,20 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			} else if value != "" {
 				parts = []message.ContentPart{{Type: "text", Text: value}}
 			}
-			for _, a := range m.attachments {
-				data := a.Data
-				if len(data) == 0 && strings.TrimSpace(a.ImagePath) != "" {
-					var err error
-					data, err = os.ReadFile(a.ImagePath)
-					if err != nil {
-						return m.enqueueToast(fmt.Sprintf("Failed to read image %s: %v", a.FileName, err), "error")
+
+			if len(m.attachments) > 0 {
+				loaded := make([]Attachment, len(m.attachments))
+				for i, a := range m.attachments {
+					loaded[i] = a
+					if len(loaded[i].Data) == 0 && strings.TrimSpace(loaded[i].ImagePath) != "" {
+						data, err := os.ReadFile(loaded[i].ImagePath)
+						if err != nil {
+							return m.enqueueToast(fmt.Sprintf("Failed to read image %s: %v", loaded[i].FileName, err), "error")
+						}
+						loaded[i].Data = data
 					}
 				}
-				parts = append(parts, message.ContentPart{Type: "image", MimeType: a.MimeType, Data: data, ImagePath: a.ImagePath, FileName: a.FileName})
+				parts = interleaveImageAttachments(parts, loaded)
 			}
 			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now()}
 			m.attachments = nil
@@ -404,6 +410,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case keyMatches(key, m.keyMap.InsertAttachClipboard):
+		if cmd := m.tryPasteImageIntoComposer(""); cmd != nil {
+			return cmd
+		}
 		return m.pasteFromClipboard()
 
 	case keyMatches(key, m.keyMap.InsertAttachFile):
