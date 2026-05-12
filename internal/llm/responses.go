@@ -412,12 +412,17 @@ func (r *ResponsesProvider) sendAndParse(
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		if r.dumpWriter != nil {
 			dumpWriter := r.dumpWriter
+			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
+			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
 				dump := &LLMDump{
 					Timestamp:   start.Format(time.RFC3339Nano),
 					Provider:    "responses",
 					Model:       model,
 					RequestBody: dumpRequestBody,
+					HTTPStatus:  statusCode,
+					HTTPHeaders: headers,
+					HTTPBody:    bodyCopy,
 					Error:       apiErr.Error(),
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
@@ -484,12 +489,15 @@ func (r *ResponsesProvider) sendAndParse(
 	// Write dump asynchronously.
 	if r.dumpWriter != nil {
 		dumpWriter := r.dumpWriter
+		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),
 				Provider:    "responses",
 				Model:       model,
 				RequestBody: dumpRequestBody,
+				HTTPStatus:  statusCode,
+				HTTPHeaders: headers,
 				SSEChunks:   collector.Chunks(),
 				Response:    DumpResponseFromResponse(resp),
 				DurationMS:  time.Since(start).Milliseconds(),

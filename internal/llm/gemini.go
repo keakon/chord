@@ -198,8 +198,10 @@ func (g *GeminiProvider) CompleteStream(
 		apiErr := parseGeminiHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		if g.dumpWriter != nil {
 			dumpWriter := g.dumpWriter
+			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
+			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
-				dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, Error: apiErr.Error(), DurationMS: time.Since(start).Milliseconds()}
+				dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, HTTPStatus: statusCode, HTTPHeaders: headers, HTTPBody: bodyCopy, Error: apiErr.Error(), DurationMS: time.Since(start).Milliseconds()}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
 					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
@@ -218,8 +220,9 @@ func (g *GeminiProvider) CompleteStream(
 
 	if g.dumpWriter != nil {
 		dumpWriter := g.dumpWriter
+		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
-			dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, SSEChunks: collector.Chunks(), Response: DumpResponseFromResponse(resp), DurationMS: time.Since(start).Milliseconds()}
+			dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, HTTPStatus: statusCode, HTTPHeaders: headers, SSEChunks: collector.Chunks(), Response: DumpResponseFromResponse(resp), DurationMS: time.Since(start).Milliseconds()}
 			if parseErr != nil {
 				dump.Error = parseErr.Error()
 			}

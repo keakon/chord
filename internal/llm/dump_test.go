@@ -3,10 +3,12 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSanitizeDumpNamePart(t *testing.T) {
@@ -215,4 +217,69 @@ func TestDumpWriterWriteDecodesCompressedRequestBody(t *testing.T) {
 	if !bytes.Equal(gotJSON, wantJSON) {
 		t.Fatalf("request_body = %s, want %s", gotJSON, wantJSON)
 	}
+}
+func TestDumpWriterWritePersistsHTTPErrorMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewDumpWriter(dir)
+
+	err := writer.Write(&LLMDump{
+		Provider:    "responses",
+		Model:       "gpt-5.5",
+		RequestBody: json.RawMessage(`{"input":"hello"}`),
+		HTTPStatus:  http.StatusTooManyRequests,
+		HTTPHeaders: http.Header{"Retry-After": []string{"120"}, "X-Test-Header": []string{"abc"}},
+		HTTPBody:    `{"error":{"message":"rate limited"}}`,
+		Error:       "API error 429: rate limited",
+	})
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	entries := waitForDumpEntries(t, dir, 1)
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var dump struct {
+		HTTPStatus  int         `json:"http_status"`
+		HTTPHeaders http.Header `json:"http_headers"`
+		HTTPBody    string      `json:"http_body"`
+		Error       string      `json:"error"`
+	}
+	if err := json.Unmarshal(data, &dump); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if dump.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("http_status = %d, want %d", dump.HTTPStatus, http.StatusTooManyRequests)
+	}
+	if dump.HTTPBody != `{"error":{"message":"rate limited"}}` {
+		t.Fatalf("http_body = %q, want raw body", dump.HTTPBody)
+	}
+	if got := dump.HTTPHeaders.Get("Retry-After"); got != "120" {
+		t.Fatalf("retry-after = %q, want 120", got)
+	}
+	if got := dump.HTTPHeaders.Get("X-Test-Header"); got != "abc" {
+		t.Fatalf("x-test-header = %q, want abc", got)
+	}
+	if dump.Error != "API error 429: rate limited" {
+		t.Fatalf("error = %q, want API error 429: rate limited", dump.Error)
+	}
+}
+
+func waitForDumpEntries(t *testing.T, dir string, want int) []os.DirEntry {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(dir)
+		if err == nil && len(entries) >= want {
+			return entries
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	t.Fatalf("len(entries) = %d, want at least %d", len(entries), want)
+	return entries
 }

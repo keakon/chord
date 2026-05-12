@@ -299,12 +299,17 @@ func (o *OpenAIProvider) CompleteStream(
 		// Dump error response if enabled.
 		if o.dumpWriter != nil {
 			dumpWriter := o.dumpWriter
+			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
+			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
 				dump := &LLMDump{
 					Timestamp:   start.Format(time.RFC3339Nano),
 					Provider:    "openai",
 					Model:       model,
 					RequestBody: dumpRequestBody,
+					HTTPStatus:  statusCode,
+					HTTPHeaders: headers,
+					HTTPBody:    bodyCopy,
 					Error:       apiErr.Error(),
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
@@ -328,12 +333,15 @@ func (o *OpenAIProvider) CompleteStream(
 	// Write dump asynchronously (whether success or failure).
 	if o.dumpWriter != nil {
 		dumpWriter := o.dumpWriter
+		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),
 				Provider:    "openai",
 				Model:       model,
 				RequestBody: dumpRequestBody,
+				HTTPStatus:  statusCode,
+				HTTPHeaders: headers,
 				SSEChunks:   collector.Chunks(),
 				Response:    DumpResponseFromResponse(resp),
 				DurationMS:  time.Since(start).Milliseconds(),

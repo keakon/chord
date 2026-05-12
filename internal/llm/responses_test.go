@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1117,7 +1119,9 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 	}, []string{"oauth-key"})
 	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
 
-	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	dumpDir := t.TempDir()
+
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client(), dumpWriter: NewDumpWriter(dumpDir)}
 	var deltas []message.StreamDelta
 	_, err := r.CompleteStream(
 		context.Background(), "oauth-key", "gpt-5", "system",
@@ -1146,6 +1150,33 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 	}
 	if snap := providerCfg.KeySnapshot("oauth-key"); snap == nil || snap.Primary == nil || snap.Primary.UsedPercent() != 91 {
 		t.Fatalf("stored snapshot = %#v, want primary used percent 91", snap)
+	}
+
+	entries := waitForDumpEntries(t, dumpDir, 1)
+	data, err := os.ReadFile(filepath.Join(dumpDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var dump struct {
+		HTTPStatus  int         `json:"http_status"`
+		HTTPHeaders http.Header `json:"http_headers"`
+		HTTPBody    string      `json:"http_body"`
+		Error       string      `json:"error"`
+	}
+	if err := json.Unmarshal(data, &dump); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if dump.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("http_status = %d, want %d", dump.HTTPStatus, http.StatusTooManyRequests)
+	}
+	if dump.HTTPBody != `{"error":{"message":"rate limited"}}` {
+		t.Fatalf("http_body = %q, want raw body", dump.HTTPBody)
+	}
+	if got := dump.HTTPHeaders.Get("x-codex-primary-used-percent"); got != "91" {
+		t.Fatalf("dump header x-codex-primary-used-percent = %q, want 91", got)
+	}
+	if dump.Error == "" {
+		t.Fatal("expected non-empty error in dump")
 	}
 }
 

@@ -248,16 +248,23 @@ func (a *AnthropicProvider) CompleteStream(
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
-		apiErr := parseHTTPError(httpResp)
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		io.Copy(io.Discard, httpResp.Body)
+		apiErr := parseHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		// Dump error response if enabled.
 		if a.dumpWriter != nil {
 			dumpWriter := a.dumpWriter
+			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
+			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
 				dump := &LLMDump{
 					Timestamp:   start.Format(time.RFC3339Nano),
 					Provider:    "anthropic",
 					Model:       model,
 					RequestBody: dumpRequestBody,
+					HTTPStatus:  statusCode,
+					HTTPHeaders: headers,
+					HTTPBody:    bodyCopy,
 					Error:       apiErr.Error(),
 					DurationMS:  time.Since(start).Milliseconds(),
 				}
@@ -281,12 +288,15 @@ func (a *AnthropicProvider) CompleteStream(
 	// Write dump asynchronously.
 	if a.dumpWriter != nil {
 		dumpWriter := a.dumpWriter
+		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),
 				Provider:    "anthropic",
 				Model:       model,
 				RequestBody: dumpRequestBody,
+				HTTPStatus:  statusCode,
+				HTTPHeaders: headers,
 				SSEChunks:   collector.Chunks(),
 				Response:    DumpResponseFromResponse(resp),
 				DurationMS:  time.Since(start).Milliseconds(),
@@ -304,13 +314,13 @@ func (a *AnthropicProvider) CompleteStream(
 }
 
 // parseHTTPError converts a non-200 HTTP response into an APIError.
-func parseHTTPError(resp *http.Response) *APIError {
+func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
 	apiErr := &APIError{
-		StatusCode: resp.StatusCode,
+		StatusCode: statusCode,
 	}
 
 	// Parse Retry-After header if present.
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
+	if ra := header.Get("Retry-After"); ra != "" {
 		if seconds, err := strconv.Atoi(ra); err == nil {
 			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)
 		} else if t, err := http.ParseTime(ra); err == nil {
@@ -321,17 +331,11 @@ func parseHTTPError(resp *http.Response) *APIError {
 		}
 	}
 
-	// Try to parse JSON error body. Read up to 4KB to avoid memory issues
-	// with large error responses, then discard the rest to ensure the body
-	// is fully consumed before Close().
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		apiErr.Message = fmt.Sprintf("HTTP %d (failed to read body: %v)", resp.StatusCode, err)
+	// Try to parse JSON error body.
+	if len(body) == 0 {
+		apiErr.Message = fmt.Sprintf("HTTP %d (empty error body)", statusCode)
 		return apiErr
 	}
-	// Discard any remaining body content to ensure clean connection reuse.
-	io.Copy(io.Discard, resp.Body)
-
 	var errResp anthropicErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
 		apiErr.Message = errResp.Error.Message

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,9 @@ type LLMDump struct {
 	Provider    string          `json:"provider"`
 	Model       string          `json:"model"`
 	RequestBody json.RawMessage `json:"request_body"`
+	HTTPStatus  int             `json:"http_status,omitempty"`
+	HTTPHeaders http.Header     `json:"http_headers,omitempty"`
+	HTTPBody    string          `json:"http_body,omitempty"`
 	SSEChunks   []string        `json:"sse_chunks"`
 	Response    *DumpResponse   `json:"response,omitempty"`
 	Recovery    *DumpRecovery   `json:"recovery,omitempty"`
@@ -190,6 +194,13 @@ func tryGunzip(body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("close gzip reader: %w", err)
 	}
 	return decoded, nil
+}
+
+func dumpHTTPResponseMetadata(resp *http.Response) (int, http.Header) {
+	if resp == nil {
+		return 0, nil
+	}
+	return resp.StatusCode, resp.Header.Clone()
 }
 
 // DumpResponseFromResponse converts a message.Response to a DumpResponse.
