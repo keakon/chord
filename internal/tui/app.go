@@ -331,10 +331,11 @@ type Model struct {
 	activeToast     *toastItem
 	toastGeneration uint64
 
-	// OSC 9 desktop notification (local TUI): emit when idle and terminal unfocused.
-	terminalAppFocused bool
-	desktopOSC9Enabled bool
-	oscNotifyOut       io.Writer
+	// OSC terminal notifications (local TUI): emit when idle and terminal unfocused.
+	terminalAppFocused           bool
+	desktopNotificationsEnabled  bool
+	oscNotifyOut                 io.Writer
+	terminalNotificationProtocol terminalNotificationProtocol
 
 	// -- Visibility / idle background throttling ----------------------------------
 	// displayState tracks whether the terminal is considered focused (foreground)
@@ -523,24 +524,25 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 			turnBusyStartedAt:   make(map[string]time.Time),
 			streamLastDeltaAt:   make(map[string]time.Time),
 		},
-		toolArgRenderState:         make(map[string]toolArgRenderState),
-		focusedBlockID:             -1,
-		zone:                       z,
-		selStartBlockID:            -1,
-		selEndBlockID:              -1,
-		workingDir:                 wd,
-		homeDir:                    homeDir,
-		imageCaps:                  caps,
-		kittyImageCache:            make(map[int]struct{}),
-		kittyPlacementCache:        make(map[int]struct{}),
-		statusPath:                 statusPathState{},
-		statusSession:              statusBarCopyRegionState{},
-		terminalAppFocused:         true,
-		displayState:               stateForeground,
-		lastForegroundAt:           time.Now(),
-		infoPanelCollapsedSections: make(map[infoPanelSectionID]bool),
-		runtimeCacheMgr:            newRuntimeCacheManager(),
-		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
+		toolArgRenderState:           make(map[string]toolArgRenderState),
+		focusedBlockID:               -1,
+		zone:                         z,
+		selStartBlockID:              -1,
+		selEndBlockID:                -1,
+		workingDir:                   wd,
+		homeDir:                      homeDir,
+		imageCaps:                    caps,
+		kittyImageCache:              make(map[int]struct{}),
+		kittyPlacementCache:          make(map[int]struct{}),
+		statusPath:                   statusPathState{},
+		statusSession:                statusBarCopyRegionState{},
+		terminalAppFocused:           true,
+		terminalNotificationProtocol: detectTerminalNotificationProtocolFromProcessEnv(),
+		displayState:                 stateForeground,
+		lastForegroundAt:             time.Now(),
+		infoPanelCollapsedSections:   make(map[infoPanelSectionID]bool),
+		runtimeCacheMgr:              newRuntimeCacheManager(),
+		renderCacheState:             renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
 	if a != nil {
@@ -607,10 +609,11 @@ func (m *Model) SetInstanceID(id string) {
 	m.instanceID = strings.TrimSpace(id)
 }
 
-// SetDesktopNotification configures OSC 9 idle notifications when the terminal
-// loses focus. Pass nil out to disable writes (e.g. non-TTY). Local TUI only.
+// SetDesktopNotification configures terminal idle notifications when the
+// terminal loses focus. Pass nil out to disable writes (e.g. non-TTY). Local
+// TUI only.
 func (m *Model) SetDesktopNotification(enabled bool, out io.Writer) {
-	m.desktopOSC9Enabled = enabled
+	m.desktopNotificationsEnabled = enabled
 	m.oscNotifyOut = out
 }
 
@@ -743,6 +746,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		caps := detectTerminalImageCapabilitiesFromMap(env)
 		setCurrentTerminalImageCapabilities(caps)
 		m.imageCaps = caps
+		m.terminalNotificationProtocol = detectTerminalNotificationProtocolFromMap(env)
 		m.useFocusResizeFreeze = detectFocusResizeFreezeFromMap(env)
 		return m, m.imageProtocolCmd()
 
@@ -762,10 +766,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.enqueueToast(msg.err.Error(), "error")
 		}
-		const maxAttachments = 5
 		const maxBytes = 5 * 1024 * 1024
-		if len(m.attachments) >= maxAttachments {
-			return m, m.enqueueToast(fmt.Sprintf("max %d images supported", maxAttachments), "warn")
+		if len(m.attachments) >= maxInlineImageAttachments {
+			return m, m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn")
 		}
 		if len(msg.attachment.Data) > maxBytes {
 			return m, m.enqueueToast("Image exceeds 5 MB limit", "warn")

@@ -23,7 +23,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+J`           | Insert a newline (alternative when terminal does not deliver `Shift+Enter`)                    |
 | `Up`               | Recall the previous user message into the composer (or move history up if composer non-empty)  |
 | `Down` / `Ctrl+N`  | Move history down                                                                              |
-| `Ctrl+V` / `Cmd+V` | Smart paste: image first if clipboard has one, otherwise text                                  |
+| `Ctrl+V` / `Cmd+V` | Smart paste: prefer an image attachment when the clipboard exposes image data; otherwise paste text |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 
 ### Normal mode — leaving and meta
@@ -111,7 +111,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`      |
 | `insert_history_up`        | `["up"]`                          |
 | `insert_history_down`      | `["down", "ctrl+n"]`             |
-| `insert_attach_clipboard`  | `["ctrl+v"]`                     |
+| `insert_attach_clipboard`  | `["ctrl+v"]` (`Cmd+V` follows the same smart-paste behavior in terminals that forward it) |
 | `insert_attach_file`       | `[]`                              |
 | `insert_clear_input`       | `["ctrl+u"]`                     |
 | `enter_insert`             | `["i"]`                          |

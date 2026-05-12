@@ -24,6 +24,11 @@ func TestDetectTerminalImageCapabilities(t *testing.T) {
 			want: TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsInline: true, SupportsFullscreen: true, Reason: "ghostty kitty graphics protocol detected"},
 		},
 		{
+			name: "wezterm term program",
+			env:  map[string]string{"TERM_PROGRAM": "WezTerm"},
+			want: TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true, SupportsFullscreen: true, Reason: "WezTerm iTerm2 inline image protocol detected"},
+		},
+		{
 			name: "iterm2",
 			env:  map[string]string{"TERM_PROGRAM": "iTerm.app"},
 			want: TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true, SupportsFullscreen: true, Reason: "iTerm2 inline image protocol detected"},
@@ -61,5 +66,25 @@ func TestMapFromEnvMsg(t *testing.T) {
 	got := mapFromEnvMsg(msg)
 	if got["TERM"] != "xterm-kitty" || got["TERM_PROGRAM"] != "ghostty" {
 		t.Fatalf("mapFromEnvMsg() = %#v", got)
+	}
+}
+
+func TestDetectTerminalNotificationProtocol(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want terminalNotificationProtocol
+	}{
+		{name: "ghostty uses osc777", env: map[string]string{"TERM_PROGRAM": "ghostty"}, want: terminalNotificationOSC777},
+		{name: "wezterm uses osc777", env: map[string]string{"TERM_PROGRAM": "WezTerm"}, want: terminalNotificationOSC777},
+		{name: "windows terminal uses osc777", env: map[string]string{"WT_SESSION": "1"}, want: terminalNotificationOSC777},
+		{name: "iterm2 stays on osc9", env: map[string]string{"TERM_PROGRAM": "iTerm.app"}, want: terminalNotificationOSC9},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectTerminalNotificationProtocolFromMap(tt.env); got != tt.want {
+				t.Fatalf("detectTerminalNotificationProtocolFromMap() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

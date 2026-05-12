@@ -414,7 +414,7 @@ ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
-- `desktop_notification`：启用 OSC 9 终端通知（主要用于终端失焦场景），在权限确认、等待回答、agent 回到 idle 时发送通知。
+- `desktop_notification`: 启用本地 TUI 的终端通知，主要用于终端失焦场景。Chord 会按终端自动选择通知转义序列（OSC 9 或 OSC 777），并在权限确认、等待回答、agent 回到 idle 时发送通知；不支持的终端通常会忽略该序列。
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。
 
@@ -604,7 +604,7 @@ chord doctor models --pool thinking
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
-| `desktop_notification`  | bool                  | `false`                         | global / project         | 终端非聚焦时启用 OSC 9 idle 通知（仅本地 TUI）。                                                                    |
+| `desktop_notification`  | bool                  | `false`                         | global / project         | 终端非聚焦时启用本地 TUI 终端通知；Chord 会按终端自动选择 OSC 9 或 OSC 777（不支持的终端通常会忽略该序列）。                                            |
 | `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
 | `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。 |

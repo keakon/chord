@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -62,15 +60,6 @@ func (m *Model) pickImageFile() tea.Cmd {
 		return m.enqueueToast("Enter an image path in the input box, then use a custom insert_attach_file binding", "info")
 	}
 	return func() tea.Msg {
-		data, mimeType, err := readImageFile(path)
-		if err != nil {
-			return attachmentReadyMsg{err: fmt.Errorf("failed to read image: %w", err)}
-		}
-		return attachmentReadyMsg{attachment: Attachment{
-			FileName:  filepath.Base(path),
-			MimeType:  mimeType,
-			Data:      data,
-			ImagePath: path,
-		}}
+		return pasteAttachmentFromPath(path, len(m.attachments)+1)
 	}
 }

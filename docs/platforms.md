@@ -11,9 +11,9 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 | Worktrees (`chord --worktree`, `chord worktree …`)  | ✅     | ✅            | ✅              | ✅               |
 | `prevent_sleep` (idle-sleep prevention)             | ✅     | ❌ (no-op)   | ❌ (no-op)      | ❌ (no-op)       |
 | `ime_switch_target` (auto IM switch on mode change) | ✅[^im]| ⚠️[^im-linux]| ✅[^im-win]    | ⚠️[^im-wsl]     |
-| `desktop_notification` (OSC 9)                      | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]    | ⚠️[^osc]      |
+| `desktop_notification` (terminal notifications)       | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]    | ⚠️[^osc]      |
 | Clipboard image paste (`Ctrl+V` / `Cmd+V`)          | ✅     | ⚠️[^clip]   | ⚠️[^clip]      | ⚠️[^clip]       |
-| Terminal-rendered images (iTerm2/Kitty/Sixel)       | ⚠️[^img]| ⚠️[^img]  | ⚠️[^img]      | ⚠️[^img]        |
+| Terminal-rendered images (Kitty / iTerm2)           | ⚠️[^img]| ⚠️[^img]  | ⚠️[^img]      | ⚠️[^img]        |
 | LSP — gopls / typescript / rust-analyzer            | ✅[^lsp]| ✅[^lsp]   | ✅[^lsp]      | ✅[^lsp]        |
 | LSP — Pyright with project venv auto-discovery      | ✅[^py-unix] | ✅[^py-unix] | ✅[^py-win] | ✅[^py-unix] (WSL Linux venvs only — see below) |
 | MCP servers (stdio / HTTP)                          | ✅     | ✅            | ✅              | ✅               |
@@ -23,9 +23,9 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 [^im-linux]: `im-select` is a macOS-first tool; on Linux you need a compatible build or a wrapper script with the same CLI.
 [^im-win]: Use `im-select.exe` (e.g. from <https://github.com/daipeihust/im-select#-windows>).
 [^im-wsl]: Inside WSL, IM switching usually targets the host (Windows) IM. You typically run `im-select.exe` over interop and may need PATH or wrapper setup.
-[^osc]: OSC 9 is a terminal-side feature, not an OS feature. It works in iTerm2 and many modern terminals; in others (older `xterm`, some bare ttys, certain `tmux` setups), the escape sequence is silently ignored. See [Terminal compatibility](#terminal-compatibility) below.
-[^clip]: Clipboard image paste depends on the terminal forwarding the image bytes; not all terminal emulators do. iTerm2 and modern WezTerm/Ghostty work; some tmux/Linux setups deliver only a path or nothing.
-[^img]: Image rendering depends on the terminal's image protocol (iTerm2 inline-images, Kitty graphics, Sixel, …). When the terminal does not support any, image attachments are still sent to the model but are not previewed in the TUI.
+[^osc]: Notification support is a terminal capability, not an OS capability. Chord auto-selects a notification escape sequence by terminal (OSC 9 or OSC 777). Some terminals may ignore unsupported sequences; see [Terminal compatibility](#terminal-compatibility) below.
+[^clip]: Clipboard image paste depends on whether the terminal forwards raw image bytes, emits an empty paste event and expects the app to read the system clipboard, or pastes only text. Chord attaches real clipboard image data when available; text remains text.
+[^img]: Image rendering currently auto-detects Kitty graphics and iTerm2 inline images (Ghostty uses Kitty; WezTerm uses iTerm2). When the terminal does not support those, image attachments are still sent to the model but are not previewed in the TUI. `tmux` / `zellij` are disabled by default for safety.
 [^lsp]: Requires the relevant language server installed locally (e.g. `gopls`, `typescript-language-server`, `rust-analyzer`). Chord does not bundle them.
 [^py-unix]: On Unix-like systems Chord probes `.venv/bin/python`, `venv/bin/python`, `env/bin/python` under the LSP root.
 [^py-win]: On Windows Chord probes `.venv\Scripts\python.exe`, `venv\Scripts\python.exe`, `env\Scripts\python.exe`.
@@ -50,27 +50,52 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS example
 
 Install `im-select` separately. The variable name is just a string — Chord passes it verbatim to `im-select`, so the format depends on the platform-specific tool.
 
-### `desktop_notification` (OSC 9)
+### `desktop_notification` (terminal notifications)
 
-When enabled, Chord emits OSC 9 escape sequences for events such as permission confirmations, questions waiting for input, and agents returning to idle. There is no Chord-side notifier daemon; the terminal is responsible for surfacing the notification (iTerm2, WezTerm, Ghostty, kitty, and others do).
+When enabled, Chord emits terminal notification escape sequences for events such as permission confirmations, questions waiting for input, and agents returning to idle. There is no Chord-side notifier daemon; the terminal is responsible for surfacing the notification.
 
-Inside `tmux` you may need `set -g allow-passthrough on` for OSC 9 to reach the host terminal.
+Chord auto-selects the protocol by terminal. Unsupported terminals usually ignore the sequence.
+
+In practice:
+
+- **Ghostty / WezTerm / Windows Terminal**: Chord attempts **OSC 777**
+- **iTerm2**: Chord uses **OSC 9**
+- **Other terminals**: Chord conservatively falls back to **OSC 9**
+
+Inside `tmux` you may need `set -g allow-passthrough on` for notifications to reach the host terminal.
 
 ### Clipboard image paste
 
-`Ctrl+V` (`Cmd+V` on macOS) prefers clipboard images over text. The actual delivery depends on the terminal:
+`Ctrl+V` (`Cmd+V` on macOS) is a smart paste: it prefers an image attachment, then falls back to text. Different terminals hand clipboard images to applications differently: some forward raw image bytes, some emit an empty paste event and expect the app to read the system clipboard, and some can only paste plain text.
 
-- **macOS + iTerm2 / WezTerm / Ghostty**: works.
-- **Linux Wayland**: depends on terminal support; some only deliver `text/uri-list`.
-- **Linux X11**: terminal-dependent.
-- **Windows Terminal**: works for many cases.
-- **Inside tmux**: image bytes may not pass through.
+Chord currently handles these cases conservatively:
 
-When clipboard image paste is unavailable, you can still bind `insert_attach_file` yourself and attach images by path from the composer.
+- **Raw image bytes available**: attach as an image
+- **Anything else**: paste as ordinary text
+
+Common cases:
+
+- **macOS + iTerm2 / WezTerm / Ghostty**: usually paste images directly
+- **Linux Wayland / X11**: terminal-dependent; some terminals only paste plain text for clipboard images
+- **Windows Terminal**: text paste is fine; image behavior depends more on the terminal / host chain
+- **Inside tmux**: raw image bytes often do not pass through
+
+When clipboard image paste is unavailable, you can still bind `insert_attach_file` and attach images by path from the composer.
 
 ### Terminal-rendered images
 
-Chord auto-detects iTerm2 inline-images, Kitty graphics protocol, and Sixel. If none is available, image attachments are still sent to the model — they just are not previewed in the TUI.
+Chord currently auto-detects and enables:
+
+- **Kitty graphics** (kitty, Ghostty)
+- **iTerm2 inline images** (iTerm2, WezTerm)
+
+If neither protocol is available, image attachments are still sent to the model — they just are not previewed in the TUI.
+
+Notes:
+
+- **Sixel is not currently implemented as a Chord backend**
+- **Inside `tmux` / `zellij`, image preview is conservatively disabled by default** to avoid common passthrough / placeholder issues
+- Advanced users can override auto-detection with `CHORD_IMAGE_BACKEND=kitty|iterm2|none`, plus `CHORD_IMAGE_INLINE=0|1` and `CHORD_IMAGE_FULLSCREEN=0|1`
 
 ### Pyright venv auto-discovery
 
@@ -87,13 +112,13 @@ For more, see [Customization — LSP](./customization.md#lsp).
 
 Most "this works on macOS but not on my Linux box" reports really come down to the terminal emulator, not the OS. Recommended terminals where Chord behaves best:
 
-- **iTerm2** (macOS) — image preview, OSC 9, clipboard image paste
-- **Ghostty** (cross-platform) — image preview, OSC 9
-- **WezTerm** (cross-platform) — image preview, OSC 9, clipboard image paste
-- **kitty** (Linux/macOS) — Kitty graphics protocol, OSC 9
-- **Windows Terminal** — works as a general TUI; image protocol limited
+- **iTerm2** (macOS) — image preview, terminal notifications, clipboard image paste
+- **Ghostty** (cross-platform) — image preview, terminal notifications (tries OSC 777)
+- **WezTerm** (cross-platform) — image preview, terminal notifications (tries OSC 777), clipboard image paste
+- **kitty** (Linux/macOS) — image preview, terminal notifications
+- **Windows Terminal** — works as a general TUI; image and notification behavior depends more on the host chain and version
 
-`tmux` and `screen` add a layer between Chord and your terminal; some features (OSC 9, certain image flows) require explicit pass-through configuration.
+`tmux` and `screen` add a layer between Chord and your terminal; some features (terminal notifications, certain image flows) require explicit pass-through configuration, and Chord currently disables image preview by default inside `tmux` / `zellij`.
 
 ## What Windows users should expect
 

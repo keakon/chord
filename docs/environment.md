@@ -79,12 +79,27 @@ These are standard variables Chord inspects; you typically never set them yourse
 | Variable                | Purpose                                                                                       |
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | `TERM`                  | Identify the terminal type for capability negotiation                                         |
-| `TERM_PROGRAM`          | Identify the terminal emulator (iTerm2, WezTerm, Ghostty, …) for image protocol selection     |
+| `TERM_PROGRAM`          | Identify the terminal emulator (iTerm2, WezTerm, Ghostty, …) for image and notification protocol selection |
 | `TERM_PROGRAM_VERSION`  | Used together with `TERM_PROGRAM`                                                             |
 | `TMUX`                  | Detect that Chord is running inside tmux                                                      |
 | `CMUX_SOCKET` / `CMUX_SOCKET_PATH` | Detect that Chord is running inside cmux; influences the image protocol pipeline      |
 | `NO_COLOR`              | When set to any non-empty value, disables ANSI color in startup log output to stderr           |
 | `USER` / `USERNAME`     | Used in some diagnostic output                                                                |
+
+## Terminal capability overrides (images)
+
+Use these only when diagnosing or intentionally overriding auto-detection:
+
+| Variable                 | Purpose                                                                  |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `CHORD_IMAGE_BACKEND`    | Force image backend: `kitty` / `iterm2` / `none` / `auto` (default auto) |
+| `CHORD_IMAGE_INLINE`     | Force inline image support on/off: `1` / `0`                             |
+| `CHORD_IMAGE_FULLSCREEN` | Force fullscreen image viewer support on/off: `1` / `0`                  |
+
+Notes:
+
+- Inside `tmux` / `zellij`, Chord conservatively disables image preview by default; these overrides are mainly for debugging or known-good setups.
+- WezTerm currently auto-selects the iTerm2 image protocol; Ghostty / kitty auto-select Kitty graphics.
 
 ## Development and debugging
 

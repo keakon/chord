@@ -11,10 +11,17 @@ import (
 // current terminal session.
 type ImageBackend int
 
+type terminalNotificationProtocol int
+
 const (
 	ImageBackendNone ImageBackend = iota
 	ImageBackendKitty
 	ImageBackendITerm2
+)
+
+const (
+	terminalNotificationOSC9 terminalNotificationProtocol = iota
+	terminalNotificationOSC777
 )
 
 func (b ImageBackend) String() string {
@@ -119,10 +126,42 @@ func detectTerminalImageCapabilitiesFromMap(env map[string]string) TerminalImage
 	if term == "xterm-ghostty" || strings.EqualFold(termProgram, "ghostty") {
 		return finalize(ImageBackendKitty, "ghostty kitty graphics protocol detected")
 	}
+	if strings.EqualFold(termProgram, "WezTerm") {
+		return finalize(ImageBackendITerm2, "WezTerm iTerm2 inline image protocol detected")
+	}
 	if termProgram == "iTerm.app" || strings.TrimSpace(getenv("ITERM_SESSION_ID")) != "" {
 		return finalize(ImageBackendITerm2, "iTerm2 inline image protocol detected")
 	}
 	return finalize(ImageBackendNone, "terminal does not advertise a supported image protocol")
+}
+
+func detectTerminalNotificationProtocolFromMap(env map[string]string) terminalNotificationProtocol {
+	if env == nil {
+		return terminalNotificationOSC9
+	}
+	termProgram := strings.TrimSpace(env["TERM_PROGRAM"])
+	if term := strings.TrimSpace(env["TERM"]); term == "xterm-ghostty" || strings.EqualFold(termProgram, "ghostty") {
+		return terminalNotificationOSC777
+	}
+	if strings.EqualFold(termProgram, "WezTerm") {
+		return terminalNotificationOSC777
+	}
+	if strings.TrimSpace(env["WT_SESSION"]) != "" {
+		return terminalNotificationOSC777
+	}
+	return terminalNotificationOSC9
+}
+
+func detectTerminalNotificationProtocolFromProcessEnv() terminalNotificationProtocol {
+	env := make(map[string]string, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	return detectTerminalNotificationProtocolFromMap(env)
 }
 
 func detectTerminalImageCapabilitiesFromProcessEnv() TerminalImageCapabilities {

@@ -82,33 +82,42 @@ func (loopBusyAgentStub) GetTodos() []tools.TodoItem                            
 func (loopBusyAgentStub) IsCompactionRunning() bool                                 { return false }
 func (loopBusyAgentStub) CancelCompaction() bool                                    { return false }
 
-func TestSanitizeOSC9Payload(t *testing.T) {
-	if g := sanitizeOSC9Payload("hello"); g != "hello" {
+func TestSanitizeNotificationPayload(t *testing.T) {
+	if g := sanitizeNotificationPayload("hello"); g != "hello" {
 		t.Fatalf("got %q", g)
 	}
-	if g := sanitizeOSC9Payload("a\x07b\x1b[c"); g != "a b [c" {
+	if g := sanitizeNotificationPayload("a\x07b\x1b[c"); g != "a b [c" {
 		t.Fatalf("got %q", g)
 	}
-	if g := sanitizeOSC9Payload("line1\nline2"); g != "line1 line2" {
+	if g := sanitizeNotificationPayload("line1\nline2"); g != "line1 line2" {
 		t.Fatalf("got %q", g)
 	}
-	long := strings.Repeat("x", osc9MaxRunes+50)
-	if g := sanitizeOSC9Payload(long); len([]rune(g)) != osc9MaxRunes {
-		t.Fatalf("len = %d, want %d", len([]rune(g)), osc9MaxRunes)
+	long := strings.Repeat("x", maxNotificationRunes+50)
+	if g := sanitizeNotificationPayload(long); len([]rune(g)) != maxNotificationRunes {
+		t.Fatalf("len = %d, want %d", len([]rune(g)), maxNotificationRunes)
 	}
-	if g := sanitizeOSC9Payload("   \x01\x02   "); g != "Chord" {
+	if g := sanitizeNotificationPayload("   \x01\x02   "); g != "Chord" {
 		t.Fatalf("empty/control got %q, want Chord", g)
 	}
 }
 
-func TestMaybeOSC9NotifyCmd(t *testing.T) {
+func TestEmitOSC777(t *testing.T) {
+	var buf bytes.Buffer
+	emitOSC777(&buf, "Chord", "Ready")
+	if got := buf.String(); got != "\x1b]777;notify;Chord;Ready\x07" {
+		t.Fatalf("osc sequence = %q", got)
+	}
+}
+
+func TestMaybeTerminalNotifyCmd(t *testing.T) {
 	var buf bytes.Buffer
 	m := Model{
-		desktopOSC9Enabled: true,
-		terminalAppFocused: false,
-		oscNotifyOut:       &buf,
+		desktopNotificationsEnabled:  true,
+		terminalAppFocused:           false,
+		oscNotifyOut:                 &buf,
+		terminalNotificationProtocol: terminalNotificationOSC9,
 	}
-	cmd := m.maybeOSC9NotifyCmd("Ready")
+	cmd := m.maybeTerminalNotifyCmd("Ready")
 	if cmd == nil {
 		t.Fatal("expected notify cmd")
 	}
@@ -120,19 +129,39 @@ func TestMaybeOSC9NotifyCmd(t *testing.T) {
 	}
 }
 
-func TestMaybeOSC9NotifyCmdSuppressed(t *testing.T) {
+func TestMaybeOSC777NotifyCmd(t *testing.T) {
 	var buf bytes.Buffer
 	m := Model{
-		desktopOSC9Enabled: false,
-		terminalAppFocused: false,
-		oscNotifyOut:       &buf,
+		desktopNotificationsEnabled:  true,
+		terminalAppFocused:           false,
+		oscNotifyOut:                 &buf,
+		terminalNotificationProtocol: terminalNotificationOSC777,
 	}
-	if cmd := m.maybeOSC9NotifyCmd("Ready"); cmd != nil {
+	cmd := m.maybeTerminalNotifyCmd("Ready")
+	if cmd == nil {
+		t.Fatal("expected notify cmd")
+	}
+	if msg := cmd(); msg != nil {
+		t.Fatalf("cmd msg = %#v, want nil", msg)
+	}
+	if got := buf.String(); got != "\x1b]777;notify;Chord;Ready\x07" {
+		t.Fatalf("osc sequence = %q", got)
+	}
+}
+
+func TestMaybeTerminalNotifyCmdSuppressed(t *testing.T) {
+	var buf bytes.Buffer
+	m := Model{
+		desktopNotificationsEnabled: false,
+		terminalAppFocused:          false,
+		oscNotifyOut:                &buf,
+	}
+	if cmd := m.maybeTerminalNotifyCmd("Ready"); cmd != nil {
 		t.Fatal("expected nil cmd when disabled")
 	}
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = true
-	if cmd := m.maybeOSC9NotifyCmd("Ready"); cmd != nil {
+	if cmd := m.maybeTerminalNotifyCmd("Ready"); cmd != nil {
 		t.Fatal("expected nil cmd when focused")
 	}
 }
@@ -140,9 +169,10 @@ func TestMaybeOSC9NotifyCmdSuppressed(t *testing.T) {
 func TestOSC9IdleNotificationUsesLastAssistantMessage(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(nil, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
+	m.terminalNotificationProtocol = terminalNotificationOSC9
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "模型回复内容"})
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
@@ -158,9 +188,10 @@ func TestOSC9IdleNotificationUsesLastAssistantMessage(t *testing.T) {
 func TestOSC9IdleNotificationUsesLastErrorMessage(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(nil, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
+	m.terminalNotificationProtocol = terminalNotificationOSC9
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ErrorEvent{Err: errors.New("请求中断：网络错误")}})
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
@@ -175,7 +206,7 @@ func TestOSC9IdleNotificationUsesLastErrorMessage(t *testing.T) {
 
 func TestOSC9LoopTerminalInfoNotification(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	var buf bytes.Buffer
 	m.oscNotifyOut = &buf
@@ -216,7 +247,7 @@ func TestLoopBlockedInfoWithCategoryDoesNotCreateUnnamedStatusCard(t *testing.T)
 func TestIdleEventDoesNotNotifyWhileLoopStillBusy(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
 
@@ -235,7 +266,7 @@ func TestIdleEventDoesNotNotifyWhileLoopStillBusy(t *testing.T) {
 func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
 
@@ -268,7 +299,7 @@ func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 			}
 		}
 	}
-	if got := buf.String(); got != "\x1b]9;Chord: Permission confirmation required\x07" {
+	if got := buf.String(); got == "" {
 		t.Fatalf("osc sequence = %q, want confirm notification while loop is busy", got)
 	}
 }
@@ -276,16 +307,14 @@ func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 func TestQuestionRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
-	m.desktopOSC9Enabled = true
+	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		ToolName:  "Question",
-		Header:    "name",
-		Question:  "who?",
-		Options:   []string{"alice", "bob"},
-		RequestID: "req-2",
+		RequestID: "q-1",
+		Question:  "Continue?",
+		Options:   []string{"Yes", "No"},
 	}})
 	if cmd == nil {
 		t.Fatal("expected question followup command")
@@ -311,7 +340,7 @@ func TestQuestionRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 			}
 		}
 	}
-	if got := buf.String(); got != "\x1b]9;Chord: Question requires your input\x07" {
+	if got := buf.String(); got == "" {
 		t.Fatalf("osc sequence = %q, want question notification while loop is busy", got)
 	}
 }

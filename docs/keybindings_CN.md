@@ -23,7 +23,7 @@ TUI 有两种模式：
 | `Ctrl+J`           | 输入换行（终端不传 `Shift+Enter` 时的备选）                                                         |
 | `Up`               | 输入框为空时载入上一条用户消息；非空时历史上翻                                                       |
 | `Down` / `Ctrl+N`  | 历史下翻                                                                                            |
-| `Ctrl+V` / `Cmd+V` | 智能粘贴：剪贴板有图先粘图，否则粘文本                                                              |
+| `Ctrl+V` / `Cmd+V` | 智能粘贴：剪贴板能提供图片数据时优先粘图；否则按文本粘贴                      |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
 
 ### Normal 模式 — 退出与元操作
@@ -111,7 +111,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`       |
 | `insert_history_up`        | `["up"]`                           |
 | `insert_history_down`      | `["down", "ctrl+n"]`              |
-| `insert_attach_clipboard`  | `["ctrl+v"]`                      |
+| `insert_attach_clipboard`  | `["ctrl+v"]`（`Cmd+V` 在支持的终端里也会按同样的智能粘贴逻辑处理） |
 | `insert_attach_file`       | `[]`                               |
 | `insert_clear_input`       | `["ctrl+u"]`                      |
 | `enter_insert`             | `["i"]`                           |

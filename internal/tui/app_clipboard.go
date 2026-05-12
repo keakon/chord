@@ -28,6 +28,35 @@ func writeClipboardCmd(text, success string) tea.Cmd {
 	)
 }
 
+func attachmentFromImagePath(path string, index int) (Attachment, error) {
+	cleanPath := strings.TrimSpace(path)
+	if cleanPath == "" {
+		return Attachment{}, fmt.Errorf("empty image path")
+	}
+	data, mimeType, err := readImageFile(cleanPath)
+	if err != nil {
+		return Attachment{}, err
+	}
+	fileName := filepath.Base(cleanPath)
+	if fileName == "." || fileName == string(filepath.Separator) || strings.TrimSpace(fileName) == "" {
+		fileName = fmt.Sprintf("image%d%s", index, attachmentExtForMimeType(mimeType))
+	}
+	return Attachment{
+		FileName:  fileName,
+		MimeType:  mimeType,
+		Data:      data,
+		ImagePath: cleanPath,
+	}, nil
+}
+
+func pasteAttachmentFromPath(path string, index int) tea.Msg {
+	attachment, err := attachmentFromImagePath(path, index)
+	if err != nil {
+		return attachmentReadyMsg{err: fmt.Errorf("failed to read image: %w", err)}
+	}
+	return attachmentReadyMsg{attachment: attachment}
+}
+
 func (m *Model) pasteFromClipboard() tea.Cmd {
 	return func() tea.Msg {
 		data, mimeType, err := readImageFromClipboard()

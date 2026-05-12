@@ -25,7 +25,9 @@ type Config struct {
 	Skills         SkillsConfig              `json:"skills" yaml:"skills"`                               // additional skill paths
 	ConfirmTimeout int                       `json:"confirm_timeout" yaml:"confirm_timeout"`             // confirmation timeout in seconds (0 = infinite, default)
 	Diff           DiffConfig                `json:"diff" yaml:"diff"`                                   // TUI diff rendering options
-	// DesktopNotification, when true, enables OSC 9 idle notifications in local TUI (terminal unfocused). YAML: desktop_notification: true
+	// DesktopNotification, when true, enables terminal idle notifications in local TUI (terminal unfocused).
+	// Chord auto-selects the terminal OSC protocol by environment (for example, OSC 777 vs OSC 9).
+	// YAML: desktop_notification: true
 	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.

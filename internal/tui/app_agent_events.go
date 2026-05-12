@@ -353,7 +353,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			effects.addFollowup(m.drainQueuedDrafts())
 		}
 		if !pendingAutoContinue && !mainLoopBusy {
-			effects.addFollowup(m.maybeOSC9NotifyCmd(m.osc9IdleNotificationText()))
+			effects.addFollowup(m.maybeTerminalNotifyCmd(m.idleNotificationText()))
 		}
 		return true, effects
 	case agent.PendingDraftConsumedEvent:
@@ -656,11 +656,11 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		}
 		req := ConfirmRequest{ToolName: evt.ToolName, ArgsJSON: evt.ArgsJSON, RequestID: evt.RequestID, Timeout: evt.Timeout, NeedsApproval: append([]string(nil), evt.NeedsApproval...), AlreadyAllowed: append([]string(nil), evt.AlreadyAllowed...)}
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
-		effects.addFollowup(m.maybeOSC9NotifyCmd("Chord: Permission confirmation required"))
+		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Permission confirmation required"))
 		return true, effects
 	case agent.QuestionRequestEvent:
 		effects.addFollowup(injectQuestionRequestFromEvent(evt))
-		effects.addFollowup(m.maybeOSC9NotifyCmd("Chord: Question requires your input"))
+		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Question requires your input"))
 		return true, effects
 	default:
 		return false, effects

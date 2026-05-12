@@ -9,17 +9,18 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const osc9MaxRunes = 256
+const maxNotificationRunes = 256
 
-// sanitizeOSC9Payload strips bytes that would break OSC 9 or annoy the terminal.
-func sanitizeOSC9Payload(s string) string {
+// sanitizeNotificationPayload strips bytes that would break terminal notification OSC
+// sequences or annoy the terminal.
+func sanitizeNotificationPayload(s string) string {
 	s = strings.ReplaceAll(s, "\x07", " ")
 	s = strings.ReplaceAll(s, "\x1b", " ")
 	var b strings.Builder
 	b.Grow(len(s))
 	n := 0
 	for _, r := range s {
-		if n >= osc9MaxRunes {
+		if n >= maxNotificationRunes {
 			break
 		}
 		if r == '\n' || r == '\r' {
@@ -40,39 +41,64 @@ func sanitizeOSC9Payload(s string) string {
 	return out
 }
 
-func emitOSC9(w io.Writer, msg string) {
+func emitTerminalNotificationOSC9(w io.Writer, msg string) {
 	if w == nil {
 		return
 	}
-	msg = sanitizeOSC9Payload(msg)
+	msg = sanitizeNotificationPayload(msg)
 	if msg == "" {
 		return
 	}
 	_, _ = fmt.Fprintf(w, "\x1b]9;%s\x07", msg)
 }
 
-func (m *Model) maybeOSC9NotifyCmd(msg string) tea.Cmd {
-	if !m.desktopOSC9Enabled || m.oscNotifyOut == nil {
+func emitOSC777(w io.Writer, title, body string) {
+	if w == nil {
+		return
+	}
+	title = sanitizeNotificationPayload(title)
+	body = sanitizeNotificationPayload(body)
+	if title == "" {
+		title = "Chord"
+	}
+	if body == "" {
+		body = "Chord"
+	}
+	_, _ = fmt.Fprintf(w, "\x1b]777;notify;%s;%s\x07", title, body)
+}
+
+func emitTerminalNotification(w io.Writer, protocol terminalNotificationProtocol, msg string) {
+	switch protocol {
+	case terminalNotificationOSC777:
+		emitOSC777(w, "Chord", msg)
+	default:
+		emitTerminalNotificationOSC9(w, msg)
+	}
+}
+
+func (m *Model) maybeTerminalNotifyCmd(msg string) tea.Cmd {
+	if !m.desktopNotificationsEnabled || m.oscNotifyOut == nil {
 		return nil
 	}
 	if m.terminalAppFocused {
 		return nil
 	}
 	w := m.oscNotifyOut
+	protocol := m.terminalNotificationProtocol
 	return func() tea.Msg {
-		emitOSC9(w, msg)
+		emitTerminalNotification(w, protocol, msg)
 		return nil
 	}
 }
 
-func (m *Model) osc9IdleNotificationText() string {
-	if msg, ok := m.lastOSC9AssistantOrErrorText(); ok {
+func (m *Model) idleNotificationText() string {
+	if msg, ok := m.lastAssistantOrErrorTextForNotification(); ok {
 		return msg
 	}
 	return "Chord: Ready for input"
 }
 
-func (m *Model) lastOSC9AssistantOrErrorText() (string, bool) {
+func (m *Model) lastAssistantOrErrorTextForNotification() (string, bool) {
 	if m == nil || m.viewport == nil {
 		return "", false
 	}
