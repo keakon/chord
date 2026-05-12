@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -436,40 +435,14 @@ func resolveModelRef(
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	var provName string
-	ref = config.NormalizeModelRef(ref)
-
-	parts := strings.SplitN(ref, "/", 2)
-	if len(parts) == 2 {
-		provName = parts[0]
-		resolvedModelID = parts[1]
-	} else {
-		// No provider prefix: search all providers for this model.
-		resolvedModelID = ref
-		provNames := make([]string, 0, len(allProviders))
-		for name := range allProviders {
-			provNames = append(provNames, name)
-		}
-		sort.Strings(provNames)
-		for _, name := range provNames {
-			if _, ok := allProviders[name].Models[resolvedModelID]; ok {
-				provName = name
-				break
-			}
-		}
-		if provName == "" {
-			return nil, nil, "", 0, 0, fmt.Errorf("model %q not found in any provider", ref)
-		}
-	}
-
-	providerCfg, ok := allProviders[provName]
-	if !ok {
-		return nil, nil, "", 0, 0, fmt.Errorf("provider %q not found in config", provName)
-	}
-
-	mc, ok := providerCfg.Models[resolvedModelID]
-	if !ok {
-		return nil, nil, "", 0, 0, fmt.Errorf("model %q not found in provider %q", resolvedModelID, provName)
+	var (
+		provName    string
+		providerCfg config.ProviderConfig
+		mc          config.ModelConfig
+	)
+	provName, resolvedModelID, _, providerCfg, mc, err = config.ResolveConfiguredModelRef(allProviders, ref)
+	if err != nil {
+		return nil, nil, "", 0, 0, err
 	}
 
 	creds := auth[provName]

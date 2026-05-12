@@ -370,19 +370,30 @@ func baseModelRef(ref string) string {
 	return ref
 }
 
-func modelRefInPool(current string, refs []string) bool {
-	current = strings.TrimSpace(current)
-	if current == "" {
+func canonicalPoolMembershipRef(ref string, cfg *config.AgentConfig) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	baseRef, variant := config.ParseModelRef(ref)
+	baseRef = strings.TrimSpace(baseRef)
+	variant = strings.TrimSpace(variant)
+	if variant == "" && cfg != nil {
+		variant = strings.TrimSpace(cfg.Variant)
+	}
+	if variant == "" {
+		return baseRef
+	}
+	return baseRef + "@" + variant
+}
+
+func modelRefInPool(current string, refs []string, cfg *config.AgentConfig) bool {
+	currentCanonical := canonicalPoolMembershipRef(current, cfg)
+	if currentCanonical == "" {
 		return false
 	}
-	currentBase := baseModelRef(current)
 	for _, ref := range refs {
-		ref = strings.TrimSpace(ref)
-		if ref == "" {
-			continue
-		}
-		refBase := baseModelRef(ref)
-		if ref == current || (currentBase != "" && currentBase == refBase) {
+		if canonicalPoolMembershipRef(ref, cfg) == currentCanonical {
 			return true
 		}
 	}
@@ -398,10 +409,10 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 		return nil
 	}
 	current := a.ProviderModelRef()
-	if pool == oldPool && modelRefInPool(current, refs) {
+	if pool == oldPool && modelRefInPool(current, refs, cfg) {
 		return nil
 	}
-	if modelRefInPool(current, refs) {
+	if modelRefInPool(current, refs, cfg) {
 		if a.modelSwitchFactory == nil {
 			a.modelPoolPolicy.SetLastPicked(cfg.Name, pool, current)
 			a.mainModelPolicyDirty.Store(true)
@@ -477,7 +488,7 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 		if sub.llmClient != nil {
 			current = sub.llmClient.PrimaryModelRef()
 		}
-		if modelRefInPool(current, refs) {
+		if modelRefInPool(current, refs, cfg) {
 			a.modelPoolPolicy.SetLastPicked(agentName, pool, current)
 			continue
 		}

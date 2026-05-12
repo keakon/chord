@@ -309,6 +309,50 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 	}
 }
 
+func TestBuildModelPoolSelectsMatchingVariantForDuplicateBaseModel(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"o3-pro": {
+						Limit: config.ModelLimit{Context: 200000, Output: 100000},
+						Variants: map[string]config.ModelVariant{
+							"balanced": {},
+							"high":     {},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pool, selectedIdx := buildModelPool(
+		context.Background(),
+		[]string{"openai/o3-pro@balanced", "openai/o3-pro@high"},
+		"",
+		"openai/o3-pro@high",
+		cfg.Providers,
+		nil,
+		"",
+		0,
+		nil,
+		nil,
+		"test",
+	)
+	if len(pool) != 2 {
+		t.Fatalf("pool len = %d, want 2", len(pool))
+	}
+	if selectedIdx != 1 {
+		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
+	}
+	if got := pool[selectedIdx].Variant; got != "high" {
+		t.Fatalf("selected variant = %q, want high", got)
+	}
+}
+
 func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 	t.Parallel()
 
@@ -325,7 +369,10 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 						Limit:    config.ModelLimit{Context: 200000, Output: 4096},
 						Variants: map[string]config.ModelVariant{"high": {}},
 					},
-					"o3-pro": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"o3-pro": {
+						Limit:    config.ModelLimit{Context: 200000, Output: 100000},
+						Variants: map[string]config.ModelVariant{"high": {}},
+					},
 				},
 			},
 		},

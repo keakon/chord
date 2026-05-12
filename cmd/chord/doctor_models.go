@@ -514,7 +514,7 @@ func explicitModelPlanEntry(cfg *config.Config, providerFlag, rawRef string) (do
 		ProviderName: provider,
 		ModelName:    model,
 		VariantName:  variant,
-		CanonicalRef: canonicalDoctorModelRef(provider, model, variant),
+		CanonicalRef: config.CanonicalModelRef(provider, model, variant),
 	}
 	return validatedTargetPlanEntry(cfg, target), nil
 }
@@ -532,7 +532,7 @@ func parseExplicitDoctorModelRef(cfg *config.Config, providerFlag, rawRef string
 			}
 		}
 		if strings.Contains(base, "/") {
-			refProvider, refModel := splitProviderModelRef(base)
+			refProvider, refModel := config.SplitProviderModelRef(base)
 			if refProvider != providerFlag {
 				return refProvider, refModel, variant, fmt.Errorf("--provider %q does not match model reference provider %q", providerFlag, refProvider)
 			}
@@ -543,7 +543,7 @@ func parseExplicitDoctorModelRef(cfg *config.Config, providerFlag, rawRef string
 	if !strings.Contains(base, "/") {
 		return "", base, variant, fmt.Errorf("model reference %q does not include a provider.\n\nUse a full model reference:\n  chord doctor models --model openai/%s\n\nOr specify the provider separately:\n  chord doctor models --provider openai --model %s", strings.TrimSpace(rawRef), strings.TrimSpace(rawRef), strings.TrimSpace(rawRef))
 	}
-	provider, model = splitProviderModelRef(base)
+	provider, model = config.SplitProviderModelRef(base)
 	return provider, model, variant, nil
 }
 
@@ -568,29 +568,40 @@ func providerRepresentativePlanEntries(cfg *config.Config, poolOrder []string, p
 }
 
 func representativePlanEntryForProvider(cfg *config.Config, poolOrder []string, providerName string) doctorModelPlanEntry {
+	providerCfg, ok := cfg.Providers[providerName]
+	if !ok {
+		return resultPlanEntry(configErrorResult(doctorModelTarget{Source: doctorModelSourceProviderRepresentative, ProviderName: providerName, CanonicalRef: providerName}, fmt.Sprintf("provider %q not found in config", providerName)))
+	}
+
+	// Prefer the first model_pools entry that belongs to this provider AND is actually
+	// valid according to provider config. We reuse validateDoctorModelTarget here as
+	// the single source of truth to avoid drifting validation rules.
 	for _, poolName := range poolOrder {
 		for _, rawRef := range cfg.ModelPools[poolName] {
 			base, variant := parseDoctorModelRef(rawRef)
 			if !strings.Contains(base, "/") {
 				continue
 			}
-			refProvider, refModel := splitProviderModelRef(base)
+			refProvider, refModel := config.SplitProviderModelRef(base)
 			if refProvider != providerName {
 				continue
 			}
-			target := doctorModelTarget{
+			candidate := doctorModelTarget{
 				Source:       doctorModelSourceProviderRepresentative,
 				PoolIndex:    -1,
 				ProviderName: refProvider,
 				ModelName:    refModel,
 				VariantName:  variant,
-				CanonicalRef: canonicalDoctorModelRef(refProvider, refModel, variant),
+				CanonicalRef: config.CanonicalModelRef(refProvider, refModel, variant),
 			}
-			return validatedTargetPlanEntry(cfg, target)
+			if err := validateDoctorModelTarget(cfg, candidate); err != nil {
+				// Stale pool entry: skip invalid refs and fall back to a provider-defined model.
+				continue
+			}
+			return validatedTargetPlanEntry(cfg, candidate)
 		}
 	}
 
-	providerCfg := cfg.Providers[providerName]
 	modelNames := sortedModelNames(providerCfg.Models)
 	if len(modelNames) == 0 {
 		return resultPlanEntry(configErrorResult(doctorModelTarget{Source: doctorModelSourceProviderRepresentative, ProviderName: providerName, CanonicalRef: providerName}, fmt.Sprintf("provider %q has no models configured", providerName)))
@@ -600,7 +611,7 @@ func representativePlanEntryForProvider(cfg *config.Config, poolOrder []string, 
 		PoolIndex:    -1,
 		ProviderName: providerName,
 		ModelName:    modelNames[0],
-		CanonicalRef: canonicalDoctorModelRef(providerName, modelNames[0], ""),
+		CanonicalRef: config.CanonicalModelRef(providerName, modelNames[0], ""),
 	}
 	return validatedTargetPlanEntry(cfg, target)
 }
@@ -621,7 +632,7 @@ func providerAllModelsPlanEntries(cfg *config.Config, providerName string) []doc
 			PoolIndex:    -1,
 			ProviderName: providerName,
 			ModelName:    modelName,
-			CanonicalRef: canonicalDoctorModelRef(providerName, modelName, ""),
+			CanonicalRef: config.CanonicalModelRef(providerName, modelName, ""),
 		}
 		entries = append(entries, validatedTargetPlanEntry(cfg, target))
 	}
@@ -652,11 +663,11 @@ func modelPoolRefPlanEntry(cfg *config.Config, poolName string, poolIndex int, r
 	if !strings.Contains(base, "/") {
 		return resultPlanEntry(configErrorResult(target, fmt.Sprintf("model_pool %q entry %d model reference %q does not include a provider; use provider/model[@variant]", poolName, poolIndex+1, strings.TrimSpace(rawRef))))
 	}
-	provider, model := splitProviderModelRef(base)
+	provider, model := config.SplitProviderModelRef(base)
 	target.ProviderName = provider
 	target.ModelName = model
 	target.VariantName = variant
-	target.CanonicalRef = canonicalDoctorModelRef(provider, model, variant)
+	target.CanonicalRef = config.CanonicalModelRef(provider, model, variant)
 	return validatedTargetPlanEntry(cfg, target)
 }
 
@@ -680,23 +691,14 @@ func validateDoctorModelTarget(cfg *config.Config, target doctorModelTarget) err
 	if strings.TrimSpace(target.ProviderName) == "" {
 		return fmt.Errorf("provider is empty for model reference %q", target.CanonicalRef)
 	}
-	providerCfg, ok := cfg.Providers[target.ProviderName]
-	if !ok {
-		return fmt.Errorf("provider %q not found in config", target.ProviderName)
-	}
 	if strings.TrimSpace(target.ModelName) == "" {
 		return fmt.Errorf("model is empty for provider %q", target.ProviderName)
 	}
-	modelCfg, ok := providerCfg.Models[target.ModelName]
-	if !ok {
-		return fmt.Errorf("model %q not found in provider %q", target.ModelName, target.ProviderName)
+	_, modelCfg, err := config.LookupConfiguredModel(cfg.Providers, target.ProviderName, target.ModelName)
+	if err != nil {
+		return err
 	}
-	if target.VariantName != "" {
-		if _, ok := modelCfg.Variants[target.VariantName]; !ok {
-			return fmt.Errorf("variant %q not found for model %q in provider %q", target.VariantName, target.ModelName, target.ProviderName)
-		}
-	}
-	return nil
+	return config.ValidateConfiguredVariant(modelCfg, target.ProviderName, target.ModelName, target.VariantName)
 }
 
 func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModelsRuntimeConfig, plan doctorModelsPlan, opts doctorModelsOptions, renderEach func(int, int, doctorModelResult)) doctorModelsReport {
@@ -777,24 +779,11 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		return result
 	}
 	cfg := runtimeCfg.Cfg
-	providerCfg, ok := cfg.Providers[target.ProviderName]
-	if !ok {
+	providerCfg, modelCfg, err := config.LookupConfiguredModelVariant(cfg.Providers, target.ProviderName, target.ModelName, target.VariantName)
+	if err != nil {
 		result.Status = doctorModelResultConfigError
-		result.Error = fmt.Sprintf("provider %q not found in config", target.ProviderName)
+		result.Error = err.Error()
 		return result
-	}
-	modelCfg, ok := providerCfg.Models[target.ModelName]
-	if !ok {
-		result.Status = doctorModelResultConfigError
-		result.Error = fmt.Sprintf("model %q not found in provider %q", target.ModelName, target.ProviderName)
-		return result
-	}
-	if target.VariantName != "" {
-		if _, ok := modelCfg.Variants[target.VariantName]; !ok {
-			result.Status = doctorModelResultConfigError
-			result.Error = fmt.Sprintf("variant %q not found for model %q in provider %q", target.VariantName, target.ModelName, target.ProviderName)
-			return result
-		}
 	}
 
 	creds := runtimeCfg.providerCredentials(target.ProviderName)
@@ -1071,7 +1060,7 @@ func displayDoctorModelRef(result doctorModelResult) string {
 		return result.CanonicalRef
 	}
 	if result.ProviderName != "" && result.ModelName != "" {
-		return canonicalDoctorModelRef(result.ProviderName, result.ModelName, result.VariantName)
+		return config.CanonicalModelRef(result.ProviderName, result.ModelName, result.VariantName)
 	}
 	if result.ProviderName != "" {
 		return result.ProviderName
@@ -1085,22 +1074,6 @@ func displayDoctorModelRef(result doctorModelResult) string {
 func parseDoctorModelRef(raw string) (base, variant string) {
 	base, variant = config.ParseModelRef(strings.TrimSpace(raw))
 	return strings.TrimSpace(base), strings.TrimSpace(variant)
-}
-
-func splitProviderModelRef(base string) (provider, model string) {
-	parts := strings.SplitN(strings.TrimSpace(base), "/", 2)
-	if len(parts) != 2 {
-		return strings.TrimSpace(base), ""
-	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-}
-
-func canonicalDoctorModelRef(provider, model, variant string) string {
-	ref := strings.TrimSpace(provider) + "/" + strings.TrimSpace(model)
-	if strings.TrimSpace(variant) != "" {
-		ref += "@" + strings.TrimSpace(variant)
-	}
-	return ref
 }
 
 func sortedProviderNames(providers map[string]config.ProviderConfig) []string {

@@ -252,9 +252,8 @@ func setupInitialLLMClient(
 			providerName = parts[0]
 		}
 	}
-	cfgProvider, ok := cfg.Providers[providerName]
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found in config", providerName)
+	if providerName == "" {
+		return nil, fmt.Errorf("no initial provider resolved from builder agent config")
 	}
 	modelID := ""
 	initialVariant := ""
@@ -268,9 +267,9 @@ func setupInitialLLMClient(
 	if modelID == "" {
 		return nil, fmt.Errorf("no initial model ID resolved from builder agent config")
 	}
-	modelCfg, ok := cfgProvider.Models[modelID]
-	if !ok {
-		return nil, fmt.Errorf("model %q not found in provider %q", modelID, providerName)
+	cfgProvider, modelCfg, err := config.LookupConfiguredModel(cfg.Providers, providerName, modelID)
+	if err != nil {
+		return nil, err
 	}
 
 	ac.ProviderCache = &providerCache{

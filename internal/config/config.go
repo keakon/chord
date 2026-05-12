@@ -267,6 +267,89 @@ func EffectiveStore(providerStore, modelStore *bool) bool {
 	return false
 }
 
+// SplitProviderModelRef splits a model reference base into provider and model parts.
+// The input should be in the form "provider/model" without any @variant suffix.
+func SplitProviderModelRef(base string) (provider, model string) {
+	parts := strings.SplitN(strings.TrimSpace(base), "/", 2)
+	if len(parts) != 2 {
+		return strings.TrimSpace(base), ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+// CanonicalModelRef formats a provider/model reference with an optional @variant suffix.
+func CanonicalModelRef(provider, model, variant string) string {
+	ref := strings.TrimSpace(provider) + "/" + strings.TrimSpace(model)
+	if strings.TrimSpace(variant) != "" {
+		ref += "@" + strings.TrimSpace(variant)
+	}
+	return ref
+}
+
+// LookupConfiguredModel validates that provider/model exists in the configured providers.
+func LookupConfiguredModel(providers map[string]ProviderConfig, providerName, modelName string) (ProviderConfig, ModelConfig, error) {
+	providerName = strings.TrimSpace(providerName)
+	modelName = strings.TrimSpace(modelName)
+	providerCfg, ok := providers[providerName]
+	if !ok {
+		return ProviderConfig{}, ModelConfig{}, fmt.Errorf("provider %q not found in config", providerName)
+	}
+	modelCfg, ok := providerCfg.Models[modelName]
+	if !ok {
+		return ProviderConfig{}, ModelConfig{}, fmt.Errorf("model %q not found in provider %q", modelName, providerName)
+	}
+	return providerCfg, modelCfg, nil
+}
+
+// ValidateConfiguredVariant validates that the named variant exists for the model.
+// An empty variant is always accepted.
+func ValidateConfiguredVariant(modelCfg ModelConfig, providerName, modelName, variantName string) error {
+	variantName = strings.TrimSpace(variantName)
+	if variantName == "" {
+		return nil
+	}
+	if _, ok := modelCfg.Variants[variantName]; !ok {
+		return fmt.Errorf("variant %q not found for model %q in provider %q", variantName, modelName, providerName)
+	}
+	return nil
+}
+
+// LookupConfiguredModelVariant validates that provider/model[/@variant] exists in the configured providers.
+func LookupConfiguredModelVariant(providers map[string]ProviderConfig, providerName, modelName, variantName string) (ProviderConfig, ModelConfig, error) {
+	providerCfg, modelCfg, err := LookupConfiguredModel(providers, providerName, modelName)
+	if err != nil {
+		return ProviderConfig{}, ModelConfig{}, err
+	}
+	if err := ValidateConfiguredVariant(modelCfg, providerName, modelName, variantName); err != nil {
+		return ProviderConfig{}, ModelConfig{}, err
+	}
+	return providerCfg, modelCfg, nil
+}
+
+// ResolveConfiguredModelRef parses and validates a configured model reference.
+// It requires the ref to be in the form "provider/model[@variant]".
+// The returned variant is parsed from the ref but intentionally not validated;
+// callers that need strict variant checking should call ValidateConfiguredVariant
+// or LookupConfiguredModelVariant on the returned model.
+func ResolveConfiguredModelRef(providers map[string]ProviderConfig, rawRef string) (providerName, modelName, variantName string, providerCfg ProviderConfig, modelCfg ModelConfig, err error) {
+	baseRef, variantName := ParseModelRef(strings.TrimSpace(rawRef))
+	baseRef = strings.TrimSpace(baseRef)
+	variantName = strings.TrimSpace(variantName)
+	if baseRef == "" {
+		return "", "", "", ProviderConfig{}, ModelConfig{}, fmt.Errorf("model reference must not be empty")
+	}
+	if !strings.Contains(baseRef, "/") {
+		return "", "", variantName, ProviderConfig{}, ModelConfig{}, fmt.Errorf("model reference %q must include a provider; use provider/model[@variant]", rawRef)
+	}
+
+	providerName, modelName = SplitProviderModelRef(baseRef)
+	providerCfg, modelCfg, err = LookupConfiguredModel(providers, providerName, modelName)
+	if err != nil {
+		return providerName, modelName, variantName, ProviderConfig{}, ModelConfig{}, err
+	}
+	return providerName, modelName, variantName, providerCfg, modelCfg, nil
+}
+
 // SupportsInput reports whether the model accepts the given input modality.
 // When Modalities is unset, defaults to ["text", "image"].
 func (m *ModelConfig) SupportsInput(modality string) bool {

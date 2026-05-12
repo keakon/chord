@@ -740,6 +740,60 @@ func TestSwitchRoleAppliesMainRoleModelImmediately(t *testing.T) {
 	}
 }
 
+func TestSetCurrentModelPoolRebuildsClientWhenSelectedVariantNotInNewPool(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	cfg := &config.AgentConfig{
+		Name:    "builder",
+		Mode:    config.AgentModeMain,
+		Variant: "high",
+		Models: map[string][]string{
+			"default": {"provider-x/model-x"},
+			"alt":     {"provider-x/model-x@balanced"},
+		},
+	}
+	a.SetAgentConfigs(map[string]*config.AgentConfig{"builder": cfg})
+	policy := NewRuntimeModelPoolPolicy()
+	policy.SetCurrentModelPool("default")
+	a.SetModelPoolPolicy(policy, "")
+	a.SetProviderModelRef("provider-x/model-x@high")
+
+	providerCfg := llm.NewProviderConfig("provider-x", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-x": {
+				Limit: config.ModelLimit{Context: 8192, Output: 1024},
+				Variants: map[string]config.ModelVariant{
+					"balanced": {Reasoning: &config.ReasoningConfig{Effort: "medium"}},
+				},
+			},
+		},
+	}, []string{"key-x"})
+	client := llm.NewClient(providerCfg, stubProvider{}, "model-x", 1024, "")
+	var factoryCalls []string
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		factoryCalls = append(factoryCalls, providerModel)
+		if providerModel != "provider-x/model-x@balanced" {
+			t.Fatalf("providerModel = %q, want provider-x/model-x@balanced", providerModel)
+		}
+		client.SetVariant("balanced")
+		return client, "model-x", 8192, nil
+	})
+
+	if err := a.setCurrentModelPool("alt", false); err != nil {
+		t.Fatalf("setCurrentModelPool: %v", err)
+	}
+	if len(factoryCalls) != 1 {
+		t.Fatalf("factory calls = %d, want 1", len(factoryCalls))
+	}
+	if got := a.ProviderModelRef(); got != "provider-x/model-x@balanced" {
+		t.Fatalf("ProviderModelRef = %q, want provider-x/model-x@balanced", got)
+	}
+	if got := a.RunningVariant(); got != "balanced" {
+		t.Fatalf("RunningVariant = %q, want balanced", got)
+	}
+}
+
 func TestSetCurrentModelPoolRebuildsClientWhenSelectedModelExistsInNewPool(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

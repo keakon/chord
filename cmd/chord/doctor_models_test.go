@@ -108,6 +108,33 @@ func TestDoctorModelsPlanRepresentativeSelection(t *testing.T) {
 	}
 }
 
+func TestDoctorModelsPlanRepresentativeSkipsUnknownPoolModels(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"sinohealth": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"glm-5": {Limit: config.ModelLimit{Context: 1000, Output: 128}},
+				},
+			},
+		},
+		ModelPools: map[string][]string{
+			"default": {"sinohealth/mimo-v2.5-pro"},
+		},
+	}
+
+	plan, err := buildDoctorModelsPlan(cfg, []string{"default"}, doctorModelsOptions{Provider: "sinohealth"})
+	if err != nil {
+		t.Fatalf("buildDoctorModelsPlan: %v", err)
+	}
+	if len(plan.Entries) != 1 || plan.Entries[0].Target == nil {
+		t.Fatalf("entries = %+v, want 1 target", plan.Entries)
+	}
+	if got := plan.Entries[0].Target.CanonicalRef; got != "sinohealth/glm-5" {
+		t.Fatalf("canonical ref = %q, want sinohealth/glm-5", got)
+	}
+}
+
 func TestDoctorModelsPlanNoProvidersIsConfigError(t *testing.T) {
 	plan, err := buildDoctorModelsPlan(&config.Config{}, nil, doctorModelsOptions{})
 	if err != nil {

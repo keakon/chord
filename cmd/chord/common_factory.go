@@ -50,20 +50,30 @@ func buildModelPool(
 		return nil, -1
 	}
 
-	selectedBaseRef := config.NormalizeModelRef(selectedRef)
+	selectedCanonicalRef := ""
+	if strings.TrimSpace(selectedRef) != "" {
+		selectedBaseRef, selectedVariant := parseRoleModelRef(selectedRef, defaultVariant)
+		if selectedProvider, selectedModelID, _, _, _, err := config.ResolveConfiguredModelRef(allProviders, selectedBaseRef); err == nil {
+			selectedCanonicalRef = config.CanonicalModelRef(selectedProvider, selectedModelID, selectedVariant)
+		}
+	}
 	pool := make([]llm.FallbackModel, 0, len(modelRefs))
 	selectedIdx := -1
 	for _, ref := range modelRefs {
 		fbBaseRef, fbVariant := parseRoleModelRef(ref, defaultVariant)
+		fbRef := strings.TrimSpace(fbBaseRef)
+		if fbVariant != "" {
+			fbRef += "@" + fbVariant
+		}
 		fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
 			parentCtx,
-			fbBaseRef, allProviders, auth, globalProxy, getProvider, getProviderImpl,
+			fbRef, allProviders, auth, globalProxy, getProvider, getProviderImpl,
 		)
 		if fbErr != nil {
 			log.Warnf("failed to resolve %s model, skipping model_ref=%v error=%v", logLabel, ref, fbErr)
 			continue
 		}
-		if config.NormalizeModelRef(ref) == selectedBaseRef && selectedIdx < 0 {
+		if selectedCanonicalRef != "" && config.CanonicalModelRef(fbProvCfg.Name(), fbModelID, fbVariant) == selectedCanonicalRef && selectedIdx < 0 {
 			selectedIdx = len(pool)
 		}
 		inputLimit, deriveInputLimit := fallbackInputLimitConfig(fbProvCfg, fbModelID, fbCtxLimit, outputTokenMax)
@@ -126,9 +136,13 @@ func buildSubAgentLLMFactory(
 			firstVariant = variant
 		}
 
+		pRef := strings.TrimSpace(firstRef)
+		if firstVariant != "" {
+			pRef += "@" + firstVariant
+		}
 		pProvCfg, pImpl, pModelID, pMaxTokens, _, pErr := resolveModelRef(
 			parentCtx,
-			firstRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
+			pRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
 			log.Warnf("failed to resolve agent first model-pool entry, falling back to default model_ref=%v error=%v", agentModels[0], pErr)
@@ -153,9 +167,13 @@ func buildSubAgentLLMFactory(
 				if fbVariant == "" {
 					fbVariant = variant
 				}
+				fbRef := strings.TrimSpace(fbBaseRef)
+				if fbVariant != "" {
+					fbRef += "@" + fbVariant
+				}
 				fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
 					parentCtx,
-					fbBaseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
+					fbRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 				)
 				if fbErr != nil {
 					log.Warnf("failed to resolve agent fallback model, skipping model_ref=%v error=%v", ref, fbErr)
@@ -195,10 +213,10 @@ func buildMainClientFactory(
 		if parentCtx == nil {
 			parentCtx = context.Background()
 		}
-		baseRef, selectedVariant := config.ParseModelRef(providerModel)
+		_, selectedVariant := config.ParseModelRef(providerModel)
 		pProvCfg, pImpl, pModelID, pMaxTokens, pCtxLimit, pErr := resolveModelRef(
 			parentCtx,
-			baseRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
+			providerModel, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
 			return nil, "", 0, pErr

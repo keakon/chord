@@ -158,6 +158,9 @@ func TestResolveModelRefStripsInlineVariant(t *testing.T) {
 			Models: map[string]config.ModelConfig{
 				"test-model": {
 					Limit: config.ModelLimit{Context: 8192, Output: 1024},
+					Variants: map[string]config.ModelVariant{
+						"high": {},
+					},
 				},
 			},
 		},
