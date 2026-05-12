@@ -1,6 +1,9 @@
 package llm
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"testing"
 	"time"
 )
@@ -51,10 +54,52 @@ func TestIsConcurrentRequestLimit429(t *testing.T) {
 	}
 }
 
-func TestProviderSkipReasonTimeoutBeforeVisibleOutput(t *testing.T) {
+func TestProviderSkipReason(t *testing.T) {
 	t.Parallel()
-	if got := providerSkipReason(&ChunkTimeoutError{d: time.Second}); got != providerSkipReasonTimeoutBeforeVisibleOutput {
-		t.Fatalf("providerSkipReason(chunk timeout) = %q, want %q", got, providerSkipReasonTimeoutBeforeVisibleOutput)
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "no usable keys wins",
+			err:  fmt.Errorf("wrapped: %w", &NoUsableKeysError{Provider: "demo"}),
+			want: providerSkipReasonNoUsableKeys,
+		},
+		{
+			name: "dial timeout is connection establishment",
+			err:  &net.OpError{Op: "dial", Err: &net.DNSError{IsTimeout: true}},
+			want: providerSkipReasonConnectionEstablishment,
+		},
+		{
+			name: "tls handshake timeout is connection establishment",
+			err:  fmt.Errorf("wrapped: %w", errors.New("TLS handshake timeout")),
+			want: providerSkipReasonConnectionEstablishment,
+		},
+		{
+			name: "connect failure is provider unreachable",
+			err:  &net.OpError{Op: "connect", Err: errors.New("connection refused")},
+			want: providerSkipReasonProviderUnreachable,
+		},
+		{
+			name: "chunk timeout is timeout before visible output",
+			err:  &ChunkTimeoutError{d: time.Second},
+			want: providerSkipReasonTimeoutBeforeVisibleOutput,
+		},
+		{
+			name: "generic non-timeout error",
+			err:  errors.New("boom"),
+			want: providerSkipReasonGeneric,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := providerSkipReason(tt.err); got != tt.want {
+				t.Fatalf("providerSkipReason(%T: %v) = %q, want %q", tt.err, tt.err, got, tt.want)
+			}
+		})
 	}
 }
 
