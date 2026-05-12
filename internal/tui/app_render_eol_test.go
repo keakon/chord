@@ -147,6 +147,31 @@ func TestRenderScreenBufferFullFrameRoundTripsWideCells(t *testing.T) {
 	}
 }
 
+func TestModelViewUsesSafeRightGutterWhenFocusResizeFreezeEnabled(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 10, 4)
+	m.useFocusResizeFreeze = true
+
+	v := m.View()
+	lines := strings.Split(v.Content, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4", len(lines))
+	}
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w != 9 {
+			t.Fatalf("line %d width = %d, want 9; raw=%q", i, w, line)
+		}
+	}
+}
+
+func TestModelHostSafeFullFrameWidthKeepsSingleColumnWidth(t *testing.T) {
+	m := NewModelWithSize(nil, 1, 4)
+	m.useFocusResizeFreeze = true
+	if got := m.hostSafeFullFrameWidth(); got != 1 {
+		t.Fatalf("hostSafeFullFrameWidth() = %d, want 1", got)
+	}
+}
+
 func TestModelViewDoesNotInjectUnsupportedControlSequencesWhenFocusResizeFreezeEnabled(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	m := NewModelWithSize(nil, 60, 12)

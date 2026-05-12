@@ -406,12 +406,19 @@ func (m *Model) View() tea.View {
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	if m.useFocusResizeFreeze {
-		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims
-		// trailing spaces from a row during string rendering. Avoid injecting
-		// terminal control sequences into View content; instead, serialize the
-		// already-drawn screen buffer as a full frame so Bubble Tea/UV recreate
-		// the exact cells, including trailing spaces, on every row.
-		v.Content = renderScreenBufferFullFrame(canvas, m.width, m.height)
+		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims trailing
+		// spaces from a row during string rendering. Avoid injecting terminal
+		// control sequences into View content; instead, serialize the already-drawn
+		// screen buffer as a full frame so Bubble Tea/UV recreate the exact cells,
+		// including trailing spaces, on every row.
+		//
+		// Keep one safety column unrendered on this host-recovery path. The
+		// diagnostics bundles show the physical rightmost column is almost always a
+		// blank gutter cell, but emitting a completely full-width frame still drives
+		// UV's fullscreen renderer through its phantom-wrap path on every touched
+		// row. Ghostty is especially prone to displaying stale/misaligned cells
+		// after focus restore when those right-edge wraps race with ClearScreen.
+		v.Content = renderScreenBufferFullFrame(canvas, m.hostSafeFullFrameWidth(), m.height)
 	} else {
 		v.Content = canvas.Render()
 	}
@@ -452,6 +459,20 @@ func (m *Model) hostRedrawReplaySuffix() string {
 		return ansiNoopSGRAlt
 	}
 	return ansiNoopSGR
+}
+
+func (m *Model) hostSafeFullFrameWidth() int {
+	if m == nil {
+		return 0
+	}
+	width := m.width
+	if width <= 1 {
+		return width
+	}
+	if m.useFocusResizeFreeze {
+		return width - 1
+	}
+	return width
 }
 
 func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string {
