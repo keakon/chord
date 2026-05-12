@@ -10,7 +10,7 @@ import (
 
 // newResumeCmd resolves a session id back to the worktree (or main repo)
 // it belongs to, chdirs into the right project, and runs the TUI with
-// the resume flag set. Cross-worktree complement to `chord -r <sid>`,
+// the resume flag set. Cross-worktree complement to `chord --resume <sid>`,
 // which only works when the cwd already matches the session's project.
 func newResumeCmd() *cobra.Command {
 	return &cobra.Command{

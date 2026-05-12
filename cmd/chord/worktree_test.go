@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/keakon/chord/internal/worktree"
 )
 
 // captureStdout swaps os.Stdout for the duration of fn and returns the
@@ -132,5 +136,63 @@ func TestWorktreeFinishCmd_CheckReportsCleanPreview(t *testing.T) {
 	afterHead := strings.TrimSpace(string(mustRunStartupGit(t, info.Path, "rev-parse", "HEAD")))
 	if beforeHead != afterHead {
 		t.Fatalf("worktree HEAD changed during check: before=%s after=%s", beforeHead, afterHead)
+	}
+}
+
+func TestRunWorktreeSessionEntry_SetsWorktreeAndResumeFlags(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	prevContinue := flagContinueSession
+	prevResume := flagResumeSession
+	prevInfo := flagWorktreeStartupInfo
+	prevMeta := flagWorktreeStartupMeta
+	defer func() {
+		flagContinueSession = prevContinue
+		flagResumeSession = prevResume
+		flagWorktreeStartupInfo = prevInfo
+		flagWorktreeStartupMeta = prevMeta
+	}()
+
+	var gotContinue bool
+	var gotResume string
+	var gotInfo *worktree.Info
+	var gotMetaName string
+	var gotCwd string
+	err := runWorktreeSessionEntry(&cobra.Command{}, "alpha", false, "sid-123", func(*cobra.Command, []string) error {
+		gotContinue = flagContinueSession
+		gotResume = flagResumeSession
+		gotInfo = flagWorktreeStartupInfo
+		if flagWorktreeStartupMeta != nil {
+			gotMetaName = flagWorktreeStartupMeta.WorktreeName
+		}
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		gotCwd = cwd
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("runWorktreeSessionEntry: %v", err)
+	}
+	if gotContinue {
+		t.Fatal("flagContinueSession = true, want false")
+	}
+	if gotResume != "sid-123" {
+		t.Fatalf("flagResumeSession = %q, want sid-123", gotResume)
+	}
+	if gotInfo == nil || gotInfo.Name != "alpha" {
+		t.Fatalf("flagWorktreeStartupInfo = %+v, want worktree alpha", gotInfo)
+	}
+	if gotMetaName != "alpha" {
+		t.Fatalf("flagWorktreeStartupMeta.WorktreeName = %q, want alpha", gotMetaName)
+	}
+	if !samePath(gotCwd, gotInfo.Path) {
+		t.Fatalf("cwd = %q, want worktree path %q", gotCwd, gotInfo.Path)
+	}
+	if flagResumeSession != prevResume || flagContinueSession != prevContinue || flagWorktreeStartupInfo != prevInfo || flagWorktreeStartupMeta != prevMeta {
+		t.Fatal("global startup flags were not restored after worktree entry run")
 	}
 }

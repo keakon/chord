@@ -31,6 +31,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tui"
+	"github.com/keakon/chord/internal/worktree"
 )
 
 // CLI flags (bound in main; consumed by initApp).
@@ -165,7 +166,7 @@ func main() {
 		"Continue the latest non-empty session in the current project")
 	rootCmd.Flags().StringVarP(&flagResumeSession, "resume", "r", "",
 		"Resume a specific session ID in the current project")
-	rootCmd.Flags().StringVar(&flagWorktree, "worktree", "",
+	rootCmd.Flags().StringVarP(&flagWorktree, "worktree", "w", "",
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
@@ -315,7 +316,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	rtClosed = true
 	acClosed = true
 	if summary := ac.MainAgent.GetSessionSummary(); summary != nil && sessionDirHasMessages(ac.SessionDir) {
-		printResumeHint(summary.ID)
+		printResumeHint(ac, summary.ID)
 	}
 
 	if tuiErr != nil && !errors.Is(tuiErr, context.Canceled) {
@@ -371,15 +372,89 @@ func shutdownLocalRuntimeForTest(
 	}
 }
 
-func printResumeHint(sessionID string) {
-	if sessionID == "" {
+func printResumeHint(ac *AppContext, sessionID string) {
+	cmd := resumeHintCommand(ac, sessionID)
+	if cmd == "" {
 		return
 	}
 	if term.IsTerminal(os.Stderr.Fd()) && os.Getenv("NO_COLOR") == "" {
-		fmt.Fprintf(os.Stderr, "\n\x1b[90mResume this session with:\x1b[0m\n\x1b[90mchord -r %s\x1b[0m\n", sessionID)
+		fmt.Fprintf(os.Stderr, "\n\x1b[90mResume this session with:\x1b[0m\n\x1b[90m%s\x1b[0m\n", cmd)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "\nResume this session with:\nchord -r %s\n", sessionID)
+	fmt.Fprintf(os.Stderr, "\nResume this session with:\n%s\n", cmd)
+}
+
+func resumeHintCommand(ac *AppContext, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	if wt := activeWorktreeInfo(ac); wt != nil && wt.Name != "" {
+		return worktreeResumeCommand(wt.Name, sessionID)
+	}
+	return fmt.Sprintf("chord --resume %s", sessionID)
+}
+
+func worktreeResumeCommand(worktreeName, sessionID string) string {
+	worktreeName = strings.TrimSpace(worktreeName)
+	sessionID = strings.TrimSpace(sessionID)
+	if worktreeName == "" || sessionID == "" {
+		return ""
+	}
+	switch worktreeName {
+	case "list", "remove", "finish":
+		return fmt.Sprintf("chord --worktree %s --resume %s", worktreeName, sessionID)
+	default:
+		return fmt.Sprintf("chord worktree %s --resume %s", worktreeName, sessionID)
+	}
+}
+
+func activeWorktreeInfo(ac *AppContext) *worktree.Info {
+	if flagWorktreeStartupInfo != nil {
+		return flagWorktreeStartupInfo
+	}
+	if ac == nil || ac.PathLocator == nil || ac.ProjectLocator == nil || strings.TrimSpace(ac.ProjectRoot) == "" {
+		return nil
+	}
+	ctx := ac.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mainRoot, err := worktree.GitMainRoot(ctx, ac.ProjectRoot)
+	if err != nil {
+		return nil
+	}
+	if samePath(mainRoot, ac.ProjectRoot) {
+		return nil
+	}
+	repoID := worktree.RepoIDFor(mainRoot)
+	idx, err := worktree.LoadRepoIndex(ac.PathLocator.StateDir, repoID)
+	if err != nil || idx == nil {
+		return nil
+	}
+	for i := range idx.Worktrees {
+		entry := &idx.Worktrees[i]
+		if samePath(entry.Path, ac.ProjectRoot) {
+			return &worktree.Info{
+				Name:     entry.Name,
+				Slug:     entry.Slug,
+				Branch:   entry.Branch,
+				Path:     entry.Path,
+				RepoRoot: mainRoot,
+				RepoID:   repoID,
+			}
+		}
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	a = filepath.Clean(strings.TrimSpace(a))
+	b = filepath.Clean(strings.TrimSpace(b))
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b
 }
 
 func sessionDirHasMessages(sessionDir string) bool {

@@ -379,7 +379,7 @@ Model pool control commands:
 	cmd.Flags().StringVarP(&flagHeadlessDir, "session-dir", "d", "", "Project directory (session directory)")
 	cmd.Flags().BoolVarP(&flagHeadlessContinue, "continue", "c", false, "Continue the latest session")
 	cmd.Flags().StringVarP(&flagHeadlessResume, "resume", "r", "", "Resume a specific session ID")
-	cmd.Flags().StringVar(&flagHeadlessWorktree, "worktree", "", "Create or enter a chord-managed git worktree by name (auto-named when empty)")
+	cmd.Flags().StringVarP(&flagHeadlessWorktree, "worktree", "w", "", "Create or enter a chord-managed git worktree by name (auto-named when empty)")
 	cmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
 	return cmd

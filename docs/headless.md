@@ -19,7 +19,7 @@ chord headless
 go run ./cmd/chord/ headless
 ```
 
-CLI flags: `-d/--session-dir`, `-c/--continue`, `-r/--resume`, `--worktree`. See [CLI — `chord headless`](./cli.md#chord-headless).
+CLI flags: `-d/--session-dir`, `-c/--continue`, `-r/--resume`, `-w/--worktree`. See [CLI — `chord headless`](./cli.md#chord-headless).
 
 ## Wire format
 

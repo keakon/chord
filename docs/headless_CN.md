@@ -19,7 +19,7 @@ chord headless
 go run ./cmd/chord/ headless
 ```
 
-CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`--worktree`。详见 [CLI — `chord headless`](./cli_CN.md#chord-headless)。
+CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree`。详见 [CLI — `chord headless`](./cli_CN.md#chord-headless)。
 
 ## 协议格式
 

@@ -55,7 +55,7 @@ Runs the local TUI in the current directory. The first run creates `.chord/` in 
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`          | Resume the most recent non-empty session for this project                                                                                                                                    |
 | `-r`, `--resume <id>`       | Resume a specific session ID for this project                                                                                                                                                |
-| `--worktree [name]`         | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
+| `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
 
 `--continue` and `--resume` are mutually exclusive.
 
@@ -112,7 +112,7 @@ Run Chord without a TUI. Input is JSON commands on stdin, output is JSON envelop
 | `-d`, `--session-dir <dir>` | Project directory the headless session targets (default: current dir)  |
 | `-c`, `--continue`          | Continue the latest session in the target directory                    |
 | `-r`, `--resume <id>`       | Resume a specific session ID in the target directory                   |
-| `--worktree [name]`         | Create or enter a chord-managed worktree before starting               |
+| `-w`, `--worktree [name]`   | Create or enter a chord-managed worktree before starting               |
 
 ### Examples
 
@@ -225,7 +225,7 @@ dry-run: pass --yes to delete
 
 ## `chord worktree`
 
-Manage chord-owned git worktrees. Note that creating or entering a worktree is a startup-level action — it lives on the `chord --worktree` flag rather than under this subcommand. `chord worktree` only owns pure management operations.
+Manage chord-owned git worktrees. Use `chord worktree <name>` (or `chord --worktree <name>`) to create or enter a worktree and start a session there; use this command's subcommands for management operations such as `list`, `remove`, and `finish`.
 
 Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` (outside the repository) and each gets its own project key, so sessions and caches are isolated automatically.
 

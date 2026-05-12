@@ -48,7 +48,7 @@ provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord
 
 ## Worktree
 
-Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`），拥有独立的 project key、sessions、cache、exports。通过 `chord --worktree <name>` 创建；通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径 — Worktree](./paths_CN.md#worktree)。
+Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`），拥有独立的 project key、sessions、cache、exports。可通过 `chord --worktree <name>` 或 `chord worktree <name>` 创建或进入；已有 worktree 通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径 — Worktree](./paths_CN.md#worktree)。
 
 ## Skill
 

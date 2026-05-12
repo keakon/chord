@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -26,17 +27,66 @@ var (
 )
 
 // newWorktreeCmd builds the `chord worktree …` parent command and its
-// list/remove subcommands. Runs against the cwd's git repo and the same
-// PathLocator chord uses elsewhere. Creating/entering a worktree uses
-// `chord --worktree [name]` (combinable with --continue/--resume), not
-// a subcommand, since it is part of chord's session-startup flow.
+// list/remove/finish subcommands. In addition to management subcommands,
+// `chord worktree <name>` creates or enters that chord-managed worktree
+// and starts a session there; combine with `--continue` / `--resume` to
+// act on the worktree's own session history.
 func newWorktreeCmd() *cobra.Command {
+	var continueLatest bool
+	var resumeID string
+
 	cmd := &cobra.Command{
-		Use:   "worktree",
-		Short: "Manage chord-owned git worktrees (create/enter via `chord --worktree`)",
+		Use:           "worktree [name]",
+		Short:         "Manage chord-owned git worktrees, or enter one and start/resume a session",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			resumeID = strings.TrimSpace(resumeID)
+			if continueLatest && resumeID != "" {
+				return fmt.Errorf("--continue and --resume are mutually exclusive")
+			}
+			return runWorktreeSessionEntry(cmd, args[0], continueLatest, resumeID, runRoot)
+		},
 	}
+	cmd.Flags().BoolVarP(&continueLatest, "continue", "c", false, "Continue the latest non-empty session in this worktree")
+	cmd.Flags().StringVarP(&resumeID, "resume", "r", "", "Resume a specific session ID in this worktree")
 	cmd.AddCommand(newWorktreeListCmd(), newWorktreeRemoveCmd(), newWorktreeFinishCmd())
 	return cmd
+}
+
+func runWorktreeSessionEntry(cmd *cobra.Command, name string, continueLatest bool, resumeID string, runner func(*cobra.Command, []string) error) error {
+	ctx := context.Background()
+	if cmd != nil && cmd.Context() != nil {
+		ctx = cmd.Context()
+	}
+	info, err := prepareStartupWorktree(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	prevContinue := flagContinueSession
+	prevResume := flagResumeSession
+	prevInfo := flagWorktreeStartupInfo
+	prevMeta := flagWorktreeStartupMeta
+	flagContinueSession = continueLatest
+	flagResumeSession = resumeID
+	flagWorktreeStartupInfo = info
+	flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+	defer func() {
+		flagContinueSession = prevContinue
+		flagResumeSession = prevResume
+		flagWorktreeStartupInfo = prevInfo
+		flagWorktreeStartupMeta = prevMeta
+	}()
+
+	if runner == nil {
+		runner = runRoot
+	}
+	return runner(cmd, nil)
 }
 
 // newWorktreeListCmd lists chord-managed worktrees of the current repo,

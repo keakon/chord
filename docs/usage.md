@@ -108,13 +108,13 @@ Common flags:
 For working on multiple tasks in parallel without crosstalk, Chord can create and run inside dedicated git worktrees:
 
 - `chord --worktree`: create or enter a chord-managed worktree (auto-named when no name is given)
-- `chord --worktree feat-auth`: create or enter the worktree named `feat-auth` (branch `chord/feat-auth`); combine with `--continue` or `--resume` to act on the worktree's own session history
+- `chord --worktree feat-auth` / `chord worktree feat-auth`: create or enter the worktree named `feat-auth` (branch `chord/feat-auth`); combine with `--continue` or `--resume` to act on the worktree's own session history
 - `chord headless -d <repo> --worktree feat-auth`: same in headless mode; the `ready` event payload includes the worktree's `name`, `branch`, `path`, and `repo_root`
 - `chord worktree list`: list chord-managed worktrees of the current repository
 - `chord worktree remove <name>`: delete the worktree and its sessions/cache/exports; the branch is preserved by default. Pass `--delete-branch` to delete only-if-merged or `--force` to force-remove a dirty worktree and its branch.
 - `chord worktree finish <name>`: rebase the worktree branch onto the main line (default: the main worktree's current branch), fast-forward that main branch to include it, then remove the worktree and delete its branch. Use `--onto <branch>` to pick the target branch, `--force` to relax clean-tree checks, and `--check` to preview whether the rebase would succeed cleanly in a temporary worktree without mutating the real one. If rebase hits conflicts, the command now prints guided recovery steps (`git status`, `git rebase --show-current-patch`, then choose `--skip` / `--continue` / `--abort`) and keeps the worktree/branch so you can resolve and rerun. If a rebase is already in progress in that worktree, `finish` exits early with an explicit "complete that rebase first" hint instead of attempting another rebase.
 
-Creating/entering a worktree is a startup-level action (it changes the project chord runs in), so it lives on the `chord` flag rather than under `chord worktree`. The `worktree` subcommand only owns pure management operations (`list`, `remove`, `finish`).
+Creating or entering a worktree changes the project Chord runs in. You can do that either with `chord --worktree <name>` or with `chord worktree <name>`. The `worktree` subcommand also owns management operations such as `list`, `remove`, and `finish`.
 
 Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` (outside the repository) and each gets its own project key, so sessions and caches are isolated automatically. Worktrees contain only tracked files; uncommitted changes in the main repository are not copied across.
 

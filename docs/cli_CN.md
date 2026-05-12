@@ -55,7 +55,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`           | 恢复本项目最近一个非空会话                                                                                                                                  |
 | `-r`, `--resume <id>`        | 恢复指定 session id 的会话                                                                                                                                  |
-| `--worktree [name]`          | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
+| `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
 
 `--continue` 与 `--resume` 互斥。
 
@@ -112,7 +112,7 @@ chord auth codex --device-code
 | `-d`, `--session-dir <dir>`  | headless 会话目标项目目录（默认当前目录）                       |
 | `-c`, `--continue`           | 恢复目标目录下最近一个会话                                      |
 | `-r`, `--resume <id>`        | 恢复目标目录下指定 session id 的会话                            |
-| `--worktree [name]`          | 启动前创建或进入 chord 管理的 worktree                          |
+| `-w`, `--worktree [name]`    | 启动前创建或进入 chord 管理的 worktree                          |
 
 ### 示例
 
@@ -225,7 +225,7 @@ dry-run: pass --yes to delete
 
 ## `chord worktree`
 
-管理 chord 管理的 git worktree。注意：**创建/进入** worktree 是启动时动作，走 `chord --worktree`，不归属本子命令；`chord worktree` 只负责纯管理操作。
+管理 chord 管理的 git worktree。可使用 `chord worktree <name>`（或 `chord --worktree <name>`）创建或进入一个 worktree 并在其中启动会话；本命令的子命令用于 `list`、`remove`、`finish` 等管理操作。
 
 Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），每个 worktree 拥有独立 project key，sessions 与 cache 自动隔离。
 

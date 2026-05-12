@@ -48,7 +48,7 @@ The retry path Chord uses after a provider rejects a request as too large. Chord
 
 ## Worktree
 
-A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) with its own project key, sessions, cache, and exports. Created via `chord --worktree <name>`; managed via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths — Worktrees](./paths.md#worktrees).
+A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) with its own project key, sessions, cache, and exports. Create or enter one via `chord --worktree <name>` or `chord worktree <name>`; manage existing ones via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths — Worktrees](./paths.md#worktrees).
 
 ## Skill
 
