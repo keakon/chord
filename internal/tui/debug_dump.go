@@ -217,6 +217,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "last_image_protocol_reason: %q\n", safe(m.lastImageProtocolReason))
 	fmt.Fprintf(&sb, "last_image_protocol_summary: %q\n", safe(m.lastImageProtocolSummary))
 	fmt.Fprintf(&sb, "last_host_redraw: %s\n", safe(m.hostRedrawSummary()))
+	fmt.Fprintf(&sb, "host_redraw_generation: %d replay_nonce=%d\n", m.hostRedrawGeneration, m.hostRedrawFrameNonce)
 	fmt.Fprintf(&sb, "kitty_image_cache_len: %d\n", len(m.kittyImageCache))
 	fmt.Fprintf(&sb, "kitty_placement_cache_len: %d\n", len(m.kittyPlacementCache))
 	fmt.Fprintf(&sb, "cached_main_key: %q\n", safe(m.cachedMainKey))

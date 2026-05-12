@@ -25,12 +25,12 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	m := NewModelWithSize(nil, 60, 12)
 	m.terminalTitleView = "CachedTitle"
 
-	// Frozen path.
+	// Frozen path keeps replay suffix durable across repeated View() calls but
+	// does not mutate the cached frozen view itself.
 	m.renderFreezeActive = true
 	m.cachedFrozenView = tea.View{Content: "frozen"}
 	m.cachedFrozenViewValid = true
 	m.hostRedrawFrameNonce = 1
-	m.hostRedrawFrameApplied = 0
 	frozen := m.View()
 	if frozen.Content != "frozen"+ansiNoopSGR {
 		t.Fatalf("frozen View.Content = %q, want %q", frozen.Content, "frozen"+ansiNoopSGR)
@@ -38,11 +38,16 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	if frozen.WindowTitle != "CachedTitle" {
 		t.Fatalf("frozen View.WindowTitle = %q, want %q", frozen.WindowTitle, "CachedTitle")
 	}
-	if m.hostRedrawFrameApplied != 1 {
-		t.Fatalf("hostRedrawFrameApplied = %d, want 1", m.hostRedrawFrameApplied)
+	frozenAgain := m.View()
+	if frozenAgain.Content != "frozen"+ansiNoopSGR {
+		t.Fatalf("second frozen View.Content = %q, want durable suffix", frozenAgain.Content)
+	}
+	if m.cachedFrozenView.Content != "frozen" {
+		t.Fatalf("cachedFrozenView.Content = %q, want unsuffixed cache", m.cachedFrozenView.Content)
 	}
 
-	// Deferred path.
+	// Deferred path uses a generation-specific no-op suffix so a later host
+	// redraw still differs byte-for-byte even when the cached logical view matches.
 	m.renderFreezeActive = false
 	m.streamRenderDeferred = true
 	m.streamRenderForceView = false
@@ -52,14 +57,18 @@ func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
 	m.cachedFullViewValid = true
 	m.hostRedrawFrameNonce = 2
 	deferred := m.View()
-	if deferred.Content != "cached"+ansiNoopSGR {
-		t.Fatalf("deferred View.Content = %q, want %q", deferred.Content, "cached"+ansiNoopSGR)
+	if deferred.Content != "cached"+ansiNoopSGRAlt {
+		t.Fatalf("deferred View.Content = %q, want %q", deferred.Content, "cached"+ansiNoopSGRAlt)
 	}
 	if deferred.WindowTitle != "CachedTitle" {
 		t.Fatalf("deferred View.WindowTitle = %q, want %q", deferred.WindowTitle, "CachedTitle")
 	}
-	if m.hostRedrawFrameApplied != 2 {
-		t.Fatalf("hostRedrawFrameApplied = %d, want 2", m.hostRedrawFrameApplied)
+	deferredAgain := m.View()
+	if deferredAgain.Content != "cached"+ansiNoopSGRAlt {
+		t.Fatalf("second deferred View.Content = %q, want durable suffix", deferredAgain.Content)
+	}
+	if m.cachedFullView.Content != "cached" {
+		t.Fatalf("cachedFullView.Content = %q, want unsuffixed cache", m.cachedFullView.Content)
 	}
 }
 

@@ -378,20 +378,12 @@ func (m *Model) View() tea.View {
 	if m.shouldFreezeRender() {
 		v := m.cachedFrozenView
 		v.WindowTitle = m.terminalTitleView
-		if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
-			v.Content += ansiNoopSGR
-			m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
-		}
-		return v
+		return m.applyHostRedrawReplaySuffix(v)
 	}
 	if m.shouldDeferStreamRender() {
 		v := m.cachedFullView
 		v.WindowTitle = m.terminalTitleView
-		if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
-			v.Content += ansiNoopSGR
-			m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
-		}
-		return v
+		return m.applyHostRedrawReplaySuffix(v)
 	}
 
 	var v tea.View
@@ -424,15 +416,6 @@ func (m *Model) View() tea.View {
 		v.Content = canvas.Render()
 	}
 	v.WindowTitle = m.terminalTitleView
-	if m.hostRedrawFrameApplied != m.hostRedrawFrameNonce {
-		// Bubble Tea's renderer short-circuits when the next View is byte-for-byte
-		// identical to the previous one. After a host-side ClearScreen, Ghostty/cmux
-		// still need the frame to be replayed even if the logical UI state did not
-		// change. Appending a no-op SGR sequence keeps the frame visually identical
-		// while forcing Bubble Tea to treat it as a fresh view and redraw the canvas.
-		v.Content += ansiNoopSGR
-		m.hostRedrawFrameApplied = m.hostRedrawFrameNonce
-	}
 	m.cachedFullView = v
 	m.cachedFullViewValid = true
 	if m.renderFreezeActive {
@@ -442,10 +425,34 @@ func (m *Model) View() tea.View {
 	m.streamRenderForceView = false
 	m.streamRenderDeferred = m.streamRenderDeferNext
 	m.streamRenderDeferNext = false
-	return v
+	return m.applyHostRedrawReplaySuffix(v)
 }
 
 const ansiNoopSGR = "\x1b[m"
+const ansiNoopSGRAlt = "\x1b[0m"
+
+// applyHostRedrawReplaySuffix keeps host-redraw frames byte-distinct without
+// changing visible cells. The suffix is intentionally applied at return time and
+// not stored in cached views, so cached/deferred paths do not accumulate duplicate
+// no-op sequences.
+func (m *Model) applyHostRedrawReplaySuffix(v tea.View) tea.View {
+	if suffix := m.hostRedrawReplaySuffix(); suffix != "" {
+		v.Content += suffix
+	}
+	return v
+}
+
+func (m *Model) hostRedrawReplaySuffix() string {
+	if m == nil || m.hostRedrawFrameNonce == 0 {
+		return ""
+	}
+	// Alternate no-op SGR spellings so consecutive host redraw generations still
+	// differ byte-for-byte even when the logical UI frame is unchanged.
+	if m.hostRedrawFrameNonce%2 == 0 {
+		return ansiNoopSGRAlt
+	}
+	return ansiNoopSGR
+}
 
 func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string {
 	if width <= 0 || height <= 0 {

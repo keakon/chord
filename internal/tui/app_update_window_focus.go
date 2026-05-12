@@ -74,7 +74,7 @@ func (m *Model) handleFocusResizeSettle(msg focusResizeSettleMsg) tea.Cmd {
 	// Ghostty/cmux can still show stale cells until a subsequent substantial redraw;
 	// this makes the repair proactive without adding another ClearScreen cycle.
 	flushCmd := m.scheduleStreamFlush(1 * time.Millisecond)
-	m.markNextViewReplay()
+	m.markHostRedrawReplay()
 	m.recordTUIDiagnostic("post-focus-settle-fallback-arm", "generation=%d delay=%s mode=%s", gen, postFocusSettleFallbackDelay, debugModeString(m.mode))
 	if m.mode == ModeImageViewer {
 		return tea.Batch(

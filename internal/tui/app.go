@@ -406,15 +406,18 @@ type Model struct {
 	lastImageProtocolReason  string
 	lastImageProtocolSummary string
 	hostRedrawGeneration     uint64
-	hostRedrawFrameNonce     uint64
-	hostRedrawFrameApplied   uint64
-	lastHostRedrawAt         time.Time
-	lastHostRedrawReason     string
-	backgroundDirty          bool
-	backgroundDirtyReason    string
-	backgroundDirtyAt        time.Time
-	backgroundDirtyCount     int
-	screenBuf                uv.ScreenBuffer
+	// hostRedrawFrameNonce selects the active no-op replay suffix used after a
+	// host-side ClearScreen/focus recovery redraw. The suffix is intentionally not
+	// consumed by View(): Bubble Tea only flushes on its renderer ticker, so several
+	// View() calls can happen before the frame that actually reaches the terminal.
+	hostRedrawFrameNonce  uint64
+	lastHostRedrawAt      time.Time
+	lastHostRedrawReason  string
+	backgroundDirty       bool
+	backgroundDirtyReason string
+	backgroundDirtyAt     time.Time
+	backgroundDirtyCount  int
+	screenBuf             uv.ScreenBuffer
 	// screenBlankLine caches one EmptyCell-filled row matching the current
 	// screen buffer width, so Draw can clear the reused buffer with row copies
 	// instead of per-cell loops.

@@ -255,7 +255,11 @@ func (m *Model) maybePostThrottledScrollRedrawFallbackCmd(reason string, generat
 	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
 }
 
-func (m *Model) markNextViewReplay() {
+// markHostRedrawReplay advances the durable no-op replay suffix generation.
+// View() must not consume this marker: Bubble Tea batches View updates and only
+// flushes on its renderer ticker, so a one-shot marker can disappear before the
+// ClearScreen repair frame actually reaches the terminal.
+func (m *Model) markHostRedrawReplay() {
 	if m == nil {
 		return
 	}
@@ -293,7 +297,7 @@ func (m *Model) hostRedrawCmdWithOptions(reason string, bypassMinInterval bool) 
 		}
 	}
 	m.hostRedrawGeneration++
-	m.markNextViewReplay()
+	m.markHostRedrawReplay()
 	m.lastHostRedrawAt = now
 	m.lastHostRedrawReason = reason
 	m.recordTUIDiagnostic("host-redraw", "reason=%s mode=%s offset=%d layout_main=%dx%d viewport=%dx%d", reason, debugModeString(m.mode), debugViewportOffset(m.viewport), m.layout.main.Dx(), m.layout.main.Dy(), debugViewportWidth(m.viewport), debugViewportHeight(m.viewport))

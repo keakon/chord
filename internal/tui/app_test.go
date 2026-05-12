@@ -513,6 +513,8 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"hello",
 		"last_image_protocol_reason",
 		"last_host_redraw",
+		"host_redraw_generation",
+		"replay_nonce",
 		"kitty_placement_cache_len",
 		"display_state",
 		"background_idle_since",
@@ -3620,7 +3622,7 @@ func TestFocusResizeSettleIgnoresStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestFocusSettleMarksNextFrameForForcedReplay(t *testing.T) {
+func TestFocusSettleMarksReplayGenerationForForcedReplay(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.focusResizeFrozen = true
@@ -3636,7 +3638,7 @@ func TestFocusSettleMarksNextFrameForForcedReplay(t *testing.T) {
 	}
 }
 
-func TestHostRedrawCmdMarksNextFrameForForcedReplay(t *testing.T) {
+func TestHostRedrawCmdMarksReplayGenerationForForcedReplay(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.lastHostRedrawAt = time.Now().Add(-time.Second)
@@ -3651,7 +3653,7 @@ func TestHostRedrawCmdMarksNextFrameForForcedReplay(t *testing.T) {
 	}
 }
 
-func TestViewForcesFreshRawFrameAfterHostRedrawWithoutVisualChange(t *testing.T) {
+func TestViewKeepsFreshRawFrameMarkerDurableAfterHostRedraw(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.SetFocusResizeFreezeEnabled(true)
 	m.mode = ModeNormal
@@ -3682,8 +3684,24 @@ func TestViewForcesFreshRawFrameAfterHostRedrawWithoutVisualChange(t *testing.T)
 	if againPlain != initialPlain {
 		t.Fatalf("visual content changed on subsequent frame:\ninitial=%q\nagain=%q", initialPlain, againPlain)
 	}
-	if strings.HasSuffix(againRaw, ansiNoopSGR) {
-		t.Fatalf("forced replay marker should only be applied once per host redraw, got %q", againRaw)
+	if !strings.HasSuffix(againRaw, ansiNoopSGR) {
+		t.Fatalf("forced replay marker should remain durable until the next redraw generation, got %q", againRaw)
+	}
+
+	m.lastHostRedrawAt = time.Now().Add(-time.Second)
+	if cmd := m.hostRedrawCmd("scroll-flush"); cmd == nil {
+		t.Fatal("second host redraw should schedule command")
+	}
+	nextRaw := m.View().Content
+	nextPlain := stripANSI(nextRaw)
+	if nextPlain != initialPlain {
+		t.Fatalf("visual content changed after second forced replay:\ninitial=%q\nnext=%q", initialPlain, nextPlain)
+	}
+	if !strings.HasSuffix(nextRaw, ansiNoopSGRAlt) {
+		t.Fatalf("second replay raw content should end with %q, got %q", ansiNoopSGRAlt, nextRaw)
+	}
+	if nextRaw == againRaw {
+		t.Fatal("new host redraw generation should use a distinct no-op suffix to bypass viewEquals")
 	}
 }
 
