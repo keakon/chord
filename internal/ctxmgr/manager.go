@@ -189,8 +189,9 @@ func (m *Manager) Snapshot() []message.Message {
 
 // RestoreMessages replaces the entire message history with msgs.
 // When msgs is nil or empty (e.g. plan execution or role switch with clear history),
-// lastInputTokens and lastTotalContextTokens are reset to 0 so context indicators
-// stay empty until the next LLM call refreshes the tracked usage.
+// or orphan-tool repair removes every message, lastInputTokens and
+// lastTotalContextTokens are reset to 0 so context indicators stay empty until
+// the next LLM call refreshes the tracked usage.
 //
 // Orphan tool results (tool_call_id not declared by any preceding assistant message)
 // are dropped so resumed sessions and compaction commits stay valid for strict APIs.
@@ -204,7 +205,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	replaced := make([]message.Message, len(repaired))
 	copy(replaced, repaired)
 	m.messages = replaced
-	if len(msgs) == 0 {
+	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
 	}
@@ -220,6 +221,10 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 		return 0
 	}
 	m.messages = repaired
+	if len(repaired) == 0 {
+		m.lastInputTokens = 0
+		m.lastTotalContextTokens = 0
+	}
 	return n
 }
 

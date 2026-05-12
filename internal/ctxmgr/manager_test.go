@@ -27,6 +27,25 @@ func TestRepairOrphanToolMessagesInPlace(t *testing.T) {
 	}
 }
 
+func TestRepairOrphanToolMessagesInPlaceClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T) {
+	m := NewManager(1000, false, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 123, CacheWriteTokens: 11})
+	m.Append(message.Message{Role: "tool", ToolCallID: "ghost", Content: "orphan"})
+
+	if got := m.RepairOrphanToolMessagesInPlace(); got != 1 {
+		t.Fatalf("RepairOrphanToolMessagesInPlace = %d, want 1", got)
+	}
+	if got := m.MessageCount(); got != 0 {
+		t.Fatalf("MessageCount() = %d, want 0", got)
+	}
+	if got := m.LastInputTokens(); got != 0 {
+		t.Fatalf("LastInputTokens() = %d, want 0", got)
+	}
+	if got := m.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 0", got)
+	}
+}
+
 func TestAnyAssistantDeclaresToolCallID(t *testing.T) {
 	m := NewManager(1000, false, 0.8)
 	m.Append(message.Message{Role: "user", Content: "hello"})
@@ -183,6 +202,23 @@ func TestRestoreMessagesDropsOrphanToolResults(t *testing.T) {
 	}
 	if snap[1].ToolCallID != "a" {
 		t.Fatalf("last message tool id = %q", snap[1].ToolCallID)
+	}
+}
+
+func TestRestoreMessagesClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T) {
+	m := NewManager(1000, false, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 123, CacheWriteTokens: 11})
+
+	m.RestoreMessages([]message.Message{{Role: "tool", ToolCallID: "ghost", Content: "orphan"}})
+
+	if got := m.MessageCount(); got != 0 {
+		t.Fatalf("MessageCount() = %d, want 0", got)
+	}
+	if got := m.LastInputTokens(); got != 0 {
+		t.Fatalf("LastInputTokens() = %d, want 0", got)
+	}
+	if got := m.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 0", got)
 	}
 }
 

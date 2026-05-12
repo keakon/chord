@@ -37,3 +37,28 @@ func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.
 		t.Fatalf("GetContextStats current = %d, want loaded input tokens 11", current)
 	}
 }
+
+func TestActivateLoadedSessionKeepsRepairedEmptyHistoryCleared(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	loaded := &loadedSessionState{
+		SessionPath:            "/tmp/session-456",
+		Messages:               []message.Message{{Role: "tool", ToolCallID: "ghost", Content: "orphan"}},
+		LastInputTokens:        11,
+		LastTotalContextTokens: 29,
+	}
+
+	result := a.activateLoadedSession(loaded)
+	if result.MessageCount != 0 {
+		t.Fatalf("activateLoadedSession result.MessageCount = %d, want 0 after orphan repair", result.MessageCount)
+	}
+	if got := len(a.GetMessages()); got != 0 {
+		t.Fatalf("len(GetMessages()) = %d, want 0 after orphan repair", got)
+	}
+	current, _ := a.GetContextStats()
+	if current != 0 {
+		t.Fatalf("GetContextStats current = %d, want 0 after orphan repair", current)
+	}
+	if got := a.ctxMgr.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 0 after orphan repair", got)
+	}
+}

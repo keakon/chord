@@ -490,12 +490,15 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
-	a.resetRuntimeEvidenceFromMessages(loaded.Messages)
+	restoredMessages := a.ctxMgr.Snapshot()
+	a.resetRuntimeEvidenceFromMessages(restoredMessages)
 	a.fileTrack = filelock.NewFileTracker()
-	a.restoreMainTrackedFileState(loaded.Messages)
+	a.restoreMainTrackedFileState(restoredMessages)
 	a.ctxMgr.RestoreStats(loaded.ContextUsage)
-	a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
-	a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
+	if len(restoredMessages) > 0 {
+		a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
+		a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
+	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(loaded.UsageStats)
@@ -504,11 +507,11 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.todoItems = append([]tools.TodoItem(nil), loaded.TodoItems...)
 	a.todoMu.Unlock()
 	if a.lspSessionLoadFn != nil {
-		a.lspSessionLoadFn(loaded.Messages)
+		a.lspSessionLoadFn(restoredMessages)
 	}
 	var invokedSkills []*skill.Meta
-	if len(loaded.Messages) > 0 {
-		invokedSkills = rebuildInvokedSkillsFromMessages(loaded.Messages, a.visibleSkillsSnapshot())
+	if len(restoredMessages) > 0 {
+		invokedSkills = rebuildInvokedSkillsFromMessages(restoredMessages, a.visibleSkillsSnapshot())
 	}
 	a.skillsMu.Lock()
 	a.invokedSkills = make(map[string]*skill.Meta)
@@ -576,7 +579,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	agentCount := a.restoreLoadedSubAgents(loaded.SubAgentStates)
 	return sessionRestoreResult{
 		SessionPath:  loaded.SessionPath,
-		MessageCount: len(loaded.Messages),
+		MessageCount: len(restoredMessages),
 		TodoCount:    len(loaded.TodoItems),
 		AgentCount:   agentCount,
 	}
