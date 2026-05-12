@@ -107,6 +107,13 @@ func mergeRoundWait(current, candidate time.Duration) time.Duration {
 	return current
 }
 
+func mergePendingRoundWait(current, candidate time.Duration) time.Duration {
+	if candidate <= 0 {
+		return current
+	}
+	return mergeRoundWait(current, candidate)
+}
+
 func roundRetryDelay(backoffDelay, pendingRoundWait time.Duration) time.Duration {
 	if backoffDelay <= 0 {
 		return pendingRoundWait
@@ -699,7 +706,7 @@ func (c *Client) completeStreamWithRetry(
 			} else {
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
-				pendingRoundWait = mergeRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
+				pendingRoundWait = mergePendingRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
 				if targetResult.roundHadUsableReply {
 					roundHadUsableReply = true
 				}

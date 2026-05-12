@@ -1320,6 +1320,15 @@ func TestMergeRoundWaitPrefersShortestCoolingWindow(t *testing.T) {
 	if got != time.Minute {
 		t.Fatalf("mergeRoundWait(0, 2m) = %v, want 1m cap", got)
 	}
+
+	got = mergePendingRoundWait(0, 0)
+	if got != 0 {
+		t.Fatalf("mergePendingRoundWait(0, 0) = %v, want 0 (no synthetic wait)", got)
+	}
+	got = mergePendingRoundWait(2*time.Second, 0)
+	if got != 2*time.Second {
+		t.Fatalf("mergePendingRoundWait(2s, 0) = %v, want 2s", got)
+	}
 }
 
 func TestClampEffectiveMaxTokensUsesCurrentRequestEstimate(t *testing.T) {
