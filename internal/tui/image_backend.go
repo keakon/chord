@@ -158,7 +158,7 @@ func detectFocusResizeFreezeFromMap(env map[string]string) bool {
 	}
 	term := strings.TrimSpace(env["TERM"])
 	termProgram := strings.TrimSpace(env["TERM_PROGRAM"])
-	return term == "xterm-ghostty" || strings.EqualFold(termProgram, "ghostty")
+	return term == "xterm-ghostty" || strings.EqualFold(termProgram, "ghostty") || strings.EqualFold(termProgram, "iTerm.app")
 }
 
 func mapFromEnvMsg(msg tea.EnvMsg) map[string]string {

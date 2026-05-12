@@ -119,7 +119,7 @@ curl -I https://api.openai.com/v1
 - 画面已错乱时，轻微调整终端窗口尺寸或切走再切回，通常可强制触发一次完整重绘
 - 最新版仍能复现时，同时保留 diagnostics bundle 和截图
 
-最近构建覆盖了两类焦点恢复 redraw 场景：一类是获焦后立即到达的更新，另一类是终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，先触发一次强制 host redraw，并为同一轮焦点周期挂上一轮更晚的 fallback redraw。即使较早的 `post-focus-settle-redraw` 已执行，这轮更晚的 fallback 也不会被取消，因此 Ghostty/cmux 在宿主 surface invalidation 持续更久时仍能再获得一次恢复机会。diagnostics bundle 也会记录 background-dirty 状态和 fallback 已 arm 的事件，便于把残留的 stale-display 现象与内部最终 screen buffer 对照。
+最近构建覆盖了两类焦点恢复 redraw 场景：一类是获焦后立即到达的更新，另一类是终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，先触发一次强制 host redraw，并为同一轮焦点周期挂上一轮更晚的 fallback redraw。即使较早的 `post-focus-settle-redraw` 已执行，这轮更晚的 fallback 也不会被取消，因此 Ghostty/cmux/iTerm2 在宿主 surface invalidation 持续更久时仍能再获得一次恢复机会。diagnostics bundle 也会记录 background-dirty 状态和 fallback 已 arm 的事件，便于把残留的 stale-display 现象与内部最终 screen buffer 对照。
 
 如果现象主要发生在**获焦后的流式输出过程中**，请确认使用的版本同时覆盖了“返回缓存 View 时也要强制重放一帧”的修复（stream-defer/freeze）。否则在 host-side `ClearScreen` 之后，Bubble Tea 可能因为 View 字节完全一致而 short-circuit，导致 stale cells 没被覆盖干净。
 

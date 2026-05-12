@@ -5,6 +5,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## Unreleased
 
 - CLI: `chord cleanup` now reports state/cache/log sizes with human-readable 1024-based units (`B`, `KB`, `MB`, `GB`, ...) in both `status` and cleanup preview/delete output instead of raw byte counts.
+- TUI: extended the focus-restore stale-display workaround to iTerm2. iTerm2 now opts into the same focus-resize freeze/full-frame replay recovery path previously used for Ghostty/cmux, reducing cases where stale thinking/tool-card content visually bleeds into later assistant output after refocus.
 
 ## 0.5.3 - 2026-05-11
 

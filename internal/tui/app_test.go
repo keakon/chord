@@ -3711,8 +3711,8 @@ func TestDetectFocusResizeFreezeFromMap(t *testing.T) {
 	if !detectFocusResizeFreezeFromMap(map[string]string{"TERM": "xterm-ghostty"}) {
 		t.Fatal("xterm-ghostty should enable focus resize freeze workaround")
 	}
-	if detectFocusResizeFreezeFromMap(map[string]string{"TERM_PROGRAM": "iTerm.app"}) {
-		t.Fatal("plain iTerm2 should not enable focus resize freeze workaround")
+	if !detectFocusResizeFreezeFromMap(map[string]string{"TERM_PROGRAM": "iTerm.app"}) {
+		t.Fatal("iTerm2 should enable focus resize freeze workaround")
 	}
 }
 
