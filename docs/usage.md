@@ -226,7 +226,10 @@ Currently supported:
 
 Common actions:
 
-- `Ctrl+V` / `Cmd+V`: prefer clipboard image input; otherwise paste text (works in the composer and in confirmation-dialog text fields)
+- `Ctrl+V` / `Cmd+V` in the main composer: prefer clipboard image input; otherwise paste text
+- `Ctrl+V` / `Cmd+V` in confirmation-dialog text fields: always paste text, never attach images
+- Inline image attachments are capped at 5 per composer message
+- Typing literal placeholder text such as `[image1]` does not attach an image by itself; only Chord-inserted inline image placeholders are attachment-backed
 - To attach an image by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
 - `Enter` / `o` / `Space`: open the image in the current message in Normal mode
 

@@ -7,6 +7,8 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const maxInlineImageAttachments = 5
+
 const largePasteInlineMaxLines = 10
 
 // userBlockTextFromParts builds the full user message text for transcript USER

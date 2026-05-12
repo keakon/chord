@@ -73,6 +73,8 @@ Chord currently handles these cases conservatively:
 - **Raw image bytes available**: attach as an image
 - **Anything else**: paste as ordinary text
 
+Inline image attachments are capped at 5 per composer message. Literal placeholder text like `[image1]` is not special by itself; only Chord-inserted inline placeholders are backed by real attachments.
+
 Common cases:
 
 - **macOS + iTerm2 / WezTerm / Ghostty**: usually paste images directly
