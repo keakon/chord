@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
 - CLI：`chord cleanup` 现在在 `status` 和实际清理/预览输出中，都用人类可读的 1024 进制短单位（`B`、`KB`、`MB`、`GB` 等）显示体积，不再只输出原始 byte 数。
 - TUI：将焦点恢复后的 stale-display 保护扩展到 iTerm2。iTerm2 现在会启用与 Ghostty/cmux 相同的 `focus-resize freeze` / 整帧重放恢复路径，减少重新获焦后旧的 thinking 或工具卡内容视觉上残留到后续 assistant 正文里的情况。
 

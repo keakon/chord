@@ -120,7 +120,7 @@ Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` (outside the repos
 
 ## Local slash commands
 
-These commands are handled by the local runtime and are not sent to the model as-is:
+These commands are handled by the local runtime and are not sent to the model as-is. In the TUI, type `/` to open completion; while the completion list is visible, `Tab` or `Enter` completes the selected command, and a later `Enter` runs or sends the completed command:
 
 - `/new`: create a new session
 - `/resume`: resume a session

@@ -22,6 +22,25 @@ func localShellCommandFromParts(display string, parts []message.ContentPart) str
 	return userBlockTextFromParts(parts, display)
 }
 
+func (m *Model) applySelectedSlashCompletion(matches []slashCommand) bool {
+	if len(matches) == 0 {
+		return false
+	}
+	if m.slashCompleteSelected >= len(matches) {
+		m.slashCompleteSelected = len(matches) - 1
+	}
+	if m.slashCompleteSelected < 0 {
+		m.slashCompleteSelected = 0
+	}
+	sel := matches[m.slashCompleteSelected]
+	m.input.SetDisplayValueAndPastes(sel.Cmd+" ", nil, 0)
+	m.input.CursorEnd()
+	m.input.syncHeight()
+	m.slashCompleteSelected = 0
+	m.recalcViewportSize()
+	return true
+}
+
 func (m *Model) maybeExportDiagnosticsShortcut(key string) tea.Cmd {
 	if !keyMatches(key, m.keyMap.Diagnostics) {
 		return nil
@@ -176,6 +195,10 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case keyMatches(key, m.keyMap.InsertSubmit):
+		matches := m.getSlashCompletions(m.input.Value())
+		if m.applySelectedSlashCompletion(matches) {
+			return nil
+		}
 		raw := strings.TrimSpace(m.input.Value())
 		var value string
 		if m.input.BangMode() {
@@ -397,7 +420,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	default:
 		value := m.input.Value()
 		matches := m.getSlashCompletions(value)
-		if len(matches) > 0 && (key == "tab" || key == "down" || key == "up" || key == "j" || key == "k") {
+		if len(matches) > 0 && (key == "tab" || key == "enter" || key == "down" || key == "up" || key == "j" || key == "k") {
 			if m.slashCompleteSelected >= len(matches) {
 				m.slashCompleteSelected = len(matches) - 1
 			}
@@ -405,14 +428,10 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				m.slashCompleteSelected = 0
 			}
 			switch key {
-			case "tab":
-				sel := matches[m.slashCompleteSelected]
-				m.input.SetDisplayValueAndPastes(sel.Cmd+" ", nil, 0)
-				m.input.CursorEnd()
-				m.input.syncHeight()
-				m.slashCompleteSelected = 0
-				m.recalcViewportSize()
-				return nil
+			case "tab", "enter":
+				if m.applySelectedSlashCompletion(matches) {
+					return nil
+				}
 			case "down", "j":
 				m.slashCompleteSelected++
 				if m.slashCompleteSelected >= len(matches) {

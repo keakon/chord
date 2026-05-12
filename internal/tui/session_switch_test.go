@@ -940,6 +940,7 @@ func TestHandleInsertKeyRoutesNewSessionCommandViaControlAPI(t *testing.T) {
 	m.input.SetValue("/new")
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if backend.newSessionCalls != 1 {
 		t.Fatalf("NewSession() calls = %d, want 1", backend.newSessionCalls)
@@ -982,6 +983,7 @@ func TestHandleInsertKeyRoutesResumeIDViaControlAPI(t *testing.T) {
 	m.mode = ModeInsert
 	m.input.SetValue("/resume 123")
 
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if len(backend.resumeIDs) != 1 || backend.resumeIDs[0] != "123" {
@@ -1078,7 +1080,9 @@ func TestHandleInsertKeyRoutesLoopCommandsViaControlAPI(t *testing.T) {
 
 	m.input.SetValue("/loop on finish current task")
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m.input.SetValue("/loop off")
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if got := len(backend.sentMessages); got != 2 || backend.sentMessages[0] != "/loop on finish current task" || backend.sentMessages[1] != "/loop off" {
@@ -1093,6 +1097,7 @@ func TestHandleInsertKeyStartsLoopTargetImmediatelyWhenIdle(t *testing.T) {
 	m.input.SetValue("/loop on finish current task")
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if got := len(backend.sentMessages); got != 1 || backend.sentMessages[0] != "/loop on finish current task" {
 		t.Fatalf("sentMessages = %#v, want forwarded loop-on command", backend.sentMessages)
@@ -1103,16 +1108,22 @@ func TestHandleInsertKeyStartsLoopTargetImmediatelyWhenIdle(t *testing.T) {
 	}
 }
 
-func TestHandleInsertKeyShowsLoopUsageForBareLoopCommand(t *testing.T) {
+func TestHandleInsertKeyBareLoopEnterCompletesToLoopOnThenForwards(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
 	m.input.SetValue("/loop")
 
+	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
+		t.Fatal("first Enter should only accept slash completion")
+	}
+	if got := m.input.Value(); got != "/loop on " {
+		t.Fatalf("input value after first Enter = %q, want /loop on<space>", got)
+	}
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMessages); got != 1 || backend.sentMessages[0] != "/loop" {
-		t.Fatalf("sentMessages = %#v, want bare /loop forwarded to agent", backend.sentMessages)
+	if got := len(backend.sentMessages); got != 1 || backend.sentMessages[0] != "/loop on" {
+		t.Fatalf("sentMessages = %#v, want completed /loop on forwarded to agent", backend.sentMessages)
 	}
 	if m.activeToast != nil {
 		t.Fatalf("active toast = %#v, want none; usage should come from agent/runtime", m.activeToast)
@@ -1125,6 +1136,7 @@ func TestHandleInsertKeyShowsLoopUsageForBareLoopOnWhenIdle(t *testing.T) {
 	m.mode = ModeInsert
 	m.input.SetValue("/loop on")
 
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/loop on" {
@@ -1755,6 +1767,13 @@ func TestHandleInsertDiagnosticsCommandStaysLocal(t *testing.T) {
 	m := NewModel(backend)
 	m.mode = ModeInsert
 	m.input.SetValue("/diagnostics")
+
+	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
+		t.Fatal("first Enter should only accept slash completion")
+	}
+	if got := m.input.Value(); got != "/diagnostics " {
+		t.Fatalf("input value after first Enter = %q, want /diagnostics<space>", got)
+	}
 
 	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 

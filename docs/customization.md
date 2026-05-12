@@ -155,7 +155,7 @@ commands:
   /commit: "Please generate a concise commit message based on the current staged changes."
 ```
 
-Type `/review` and press `Enter`; Chord sends the corresponding text as a user message to the model. Custom commands also appear in the `/` autocomplete list.
+Type `/review`, accept the autocomplete with `Tab` or `Enter` if it is shown, then press `Enter`; Chord sends the corresponding text as a user message to the model. Custom commands also appear in the `/` autocomplete list.
 
 Suitable uses:
 

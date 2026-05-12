@@ -243,6 +243,7 @@ func TestHandleInsertKeyBusyMainAgentSlashBypassesLocalQueue(t *testing.T) {
 	m.input.SetValue("/models")
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if got := len(m.queuedDrafts); got != 0 {
 		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
@@ -263,6 +264,7 @@ func TestHandleInsertKeyBusyMainAgentCompactBypassesLocalQueue(t *testing.T) {
 	m.input.SetValue("/compact")
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if got := len(m.queuedDrafts); got != 0 {
 		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
@@ -282,6 +284,7 @@ func TestHandleInsertKeyStatsOpensLocalPanelWhenBusy(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming}
 	m.input.SetValue("/stats")
 
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if got := len(m.queuedDrafts); got != 0 {

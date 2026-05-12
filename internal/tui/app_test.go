@@ -564,9 +564,16 @@ func TestHandleInsertDiagnosticsCommandReturnsCmd(t *testing.T) {
 	m.mode = ModeInsert
 	m.input.SetValue("/diagnostics")
 
+	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
+		t.Fatal("first Enter should only accept slash completion")
+	}
+	if got := m.input.Value(); got != "/diagnostics " {
+		t.Fatalf("input value after first Enter = %q, want /diagnostics<space>", got)
+	}
+
 	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if cmd == nil {
-		t.Fatal("expected diagnostics export command")
+		t.Fatal("second Enter should run diagnostics export command")
 	}
 }
 
@@ -1106,6 +1113,24 @@ func TestRenderStatusBarLoopPillNotSqueezedByEscHint(t *testing.T) {
 	}
 	if strings.Contains(plain, "disable loop") {
 		t.Fatalf("status bar = %q, should not contain esc hint 'disable loop' that would squeeze LOOP pill", plain)
+	}
+}
+
+func TestSlashCompletionEnterCompletesWithoutSubmitting(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.SetValue("/diag")
+
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil {
+		t.Fatal("Enter should not submit while slash completion is visible")
+	}
+	if got := m.input.Value(); got != "/diagnostics " {
+		t.Fatalf("input value after Enter = %q, want /diagnostics<space>", got)
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
 	}
 }
 

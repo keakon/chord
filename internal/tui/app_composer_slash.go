@@ -252,10 +252,10 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 		return m.slashCache.text
 	}
 
-	help := DimStyle.Render("Tab complete  ↑/↓ select  Esc close")
+	help := DimStyle.Render("Tab/Enter complete  ↑/↓ select  Esc close")
 
 	// Calculate dynamic width based on content
-	contentWidth := runewidth.StringWidth("Tab complete  ↑/↓ select  Esc close")
+	contentWidth := runewidth.StringWidth("Tab/Enter complete  ↑/↓ select  Esc close")
 	for i := start; i < end; i++ {
 		c := matches[i]
 		w := runewidth.StringWidth(fmt.Sprintf(" ▸ %s  %s", c.Cmd, c.Desc))
