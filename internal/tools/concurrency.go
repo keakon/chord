@@ -2,7 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 )
 
@@ -89,11 +88,14 @@ func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyP
 	if strings.TrimSpace(parsed.Path) == "" {
 		return policy
 	}
-	clean := filepath.Clean(parsed.Path)
-	if clean == "." || clean == "" {
+	resolved, err := resolveToolPath(parsed.Path)
+	if err != nil {
 		return policy
 	}
-	policy.Resource = "file:" + clean
+	if resolved == "." || resolved == "" {
+		return policy
+	}
+	policy.Resource = "file:" + resolved
 	if readOnly {
 		policy.Mode = ConcurrencyModeRead
 	} else {
@@ -129,11 +131,14 @@ func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPo
 	if value == "" {
 		value = "."
 	}
-	clean := filepath.Clean(value)
-	if clean == "" {
-		clean = "."
+	resolved, err := resolveToolPath(value)
+	if err != nil {
+		return ConcurrencyPolicy{}
 	}
-	return ConcurrencyPolicy{Resource: "path:" + clean, Mode: ConcurrencyModeRead}
+	if resolved == "" {
+		resolved = "."
+	}
+	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
 }
 
 func urlToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {

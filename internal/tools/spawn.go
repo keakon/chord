@@ -71,7 +71,7 @@ func (SpawnTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command. Defaults to current directory.",
+				"description": "Working directory for the command. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 		},
 		"required":             []string{"command", "description"},
@@ -119,11 +119,20 @@ func (t SpawnTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 	exposeLogToModel := kind == spawnKindService
 
+	var resolvedWorkdir string
+	var err error
+	if strings.TrimSpace(a.Workdir) != "" {
+		resolvedWorkdir, err = resolveToolPath(a.Workdir)
+		if err != nil {
+			return "", fmt.Errorf("resolve workdir: %w", err)
+		}
+	}
+
 	obj, err := globalSpawnRegistry.start(ctx, spawnedProcessStartRequest{
 		Kind:             kind,
 		Command:          a.Command,
 		Description:      strings.TrimSpace(a.Description),
-		Workdir:          a.Workdir,
+		Workdir:          resolvedWorkdir,
 		TimeoutInfo:      timeoutInfo,
 		ShellType:        t.shellType,
 		LogDir:           logDir,

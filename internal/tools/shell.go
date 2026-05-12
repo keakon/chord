@@ -214,7 +214,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command. Defaults to current directory.",
+				"description": "Working directory for the command. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
@@ -255,7 +255,11 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	cmd := exec.Command(binary, args...)
 	_, _ = configureCommandProcessGroup(cmd)
 	if a.Workdir != "" {
-		cmd.Dir = a.Workdir
+		resolvedWorkdir, err := resolveToolPath(a.Workdir)
+		if err != nil {
+			return "", fmt.Errorf("resolve workdir: %w", err)
+		}
+		cmd.Dir = resolvedWorkdir
 	}
 	buf := &cappedWriter{maxBytes: maxOutputBytes}
 	cmd.Stdout = buf

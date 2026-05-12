@@ -133,8 +133,11 @@ func hashKey(hash [32]byte) string {
 }
 
 func normalizeCachePath(path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
+	if abs, err := resolveToolPathAbs(path); err == nil {
 		return filepath.Clean(abs)
+	}
+	if resolved, err := resolveToolPath(path); err == nil {
+		return resolved
 	}
 	return filepath.Clean(path)
 }

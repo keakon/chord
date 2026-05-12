@@ -37,7 +37,7 @@ func (t WriteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to write.",
+				"description": "Absolute or relative path to the file to write. Supports ~ for the current user's home directory.",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -72,13 +72,17 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	resolvedPath, err := resolveToolPath(a.Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 
 	content, err := decodeToolStringArg(a.Content)
 	if err != nil {
 		return "", fmt.Errorf("content encoding unsupported: %w", err)
 	}
 
-	dir := filepath.Dir(a.Path)
+	dir := filepath.Dir(resolvedPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("creating directories: %w", err)
 	}
@@ -93,17 +97,19 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if len(data) == 1 {
 		byteLabel = "byte"
 	}
-	invalidatePathCache(a.Path)
-	if err := os.WriteFile(a.Path, data, 0644); err != nil {
+	invalidatePathCache(resolvedPath)
+	if err := os.WriteFile(resolvedPath, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
-	warmDecodedFileCacheAsync(a.Path, data, decodedText{Text: content, Encoding: utf8Encoding})
+	warmDecodedFileCacheAsync(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if t.LSP != nil {
-		absPath, _ := filepath.Abs(a.Path)
-		t.LSP.MarkTouched(absPath)
-		out = t.LSP.AfterWriteToolResult(ctx, absPath, content, out, true)
+		absPath, absErr := resolveToolPathAbs(a.Path)
+		if absErr == nil {
+			t.LSP.MarkTouched(absPath)
+			out = t.LSP.AfterWriteToolResult(ctx, absPath, content, out, true)
+		}
 	}
 	return out, nil
 }

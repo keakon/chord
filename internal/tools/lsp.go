@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
@@ -60,7 +59,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file.",
+				"description": "Absolute or relative path to the file. Supports ~ for the current user's home directory.",
 			},
 			"line": map[string]any{
 				"type":        "integer",
@@ -93,7 +92,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	absPath, err := filepath.Abs(a.Path)
+	absPath, err := resolveToolPathAbs(a.Path)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}

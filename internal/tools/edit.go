@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
@@ -41,7 +40,7 @@ func (t EditTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to edit.",
+				"description": "Absolute or relative path to the file to edit. Supports ~ for the current user's home directory.",
 			},
 			"old_string": map[string]any{
 				"type":        "string",
@@ -71,6 +70,10 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	resolvedPath, err := resolveToolPath(a.Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 	if a.OldString == "" {
 		return "", fmt.Errorf("old_string is required")
 	}
@@ -85,7 +88,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	// Read the file.
-	decodedFile, data, err := ReadAndDecodeTextFile(a.Path)
+	decodedFile, data, err := ReadAndDecodeTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -138,11 +141,11 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	// Write back.
-	invalidatePathCache(a.Path)
-	if err := os.WriteFile(a.Path, encodedBytes, 0644); err != nil {
+	invalidatePathCache(resolvedPath)
+	if err := os.WriteFile(resolvedPath, encodedBytes, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
-	warmDecodedFileCacheAsync(a.Path, encodedBytes, decodedText{Text: newContent, Encoding: decodedFile.Encoding})
+	warmDecodedFileCacheAsync(resolvedPath, encodedBytes, decodedText{Text: newContent, Encoding: decodedFile.Encoding})
 
 	oldBytes := len(data)
 	newBytes := len(encodedBytes)
@@ -157,9 +160,11 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		out = fmt.Sprintf("Replaced 1 occurrence (%d bytes -> %d bytes)%s", oldBytes, newBytes, encSuffix)
 	}
 	if t.LSP != nil {
-		absPath, _ := filepath.Abs(a.Path)
-		t.LSP.MarkTouched(absPath)
-		out = t.LSP.AfterWriteToolResult(ctx, absPath, newContent, out, false)
+		absPath, absErr := resolveToolPathAbs(a.Path)
+		if absErr == nil {
+			t.LSP.MarkTouched(absPath)
+			out = t.LSP.AfterWriteToolResult(ctx, absPath, newContent, out, false)
+		}
 	}
 	return out, nil
 }

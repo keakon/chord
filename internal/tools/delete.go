@@ -62,7 +62,7 @@ func (t DeleteTool) Parameters() map[string]any {
 					"type": "string",
 				},
 				"minItems":    1,
-				"description": "Absolute or relative paths to files or symlinks to delete. Does not delete directories.",
+				"description": "Absolute or relative paths to files or symlinks to delete. Supports ~ for the current user's home directory. Does not delete directories.",
 			},
 			"reason": map[string]any{
 				"type":        "string",
@@ -100,8 +100,8 @@ func DecodeDeleteRequest(raw json.RawMessage) (DeleteRequest, error) {
 	return req, nil
 }
 
-// NormalizeDeletePaths applies trimming, filepath.Clean, de-duplication, and a
-// stable lexical sort. Empty path entries are discarded.
+// NormalizeDeletePaths applies trimming, resolveToolPath when possible,
+// de-duplication, and a stable lexical sort. Empty path entries are discarded.
 func NormalizeDeletePaths(paths []string) []string {
 	if len(paths) == 0 {
 		return nil
@@ -113,12 +113,15 @@ func NormalizeDeletePaths(paths []string) []string {
 		if path == "" {
 			continue
 		}
-		clean := filepath.Clean(path)
-		if _, ok := seen[clean]; ok {
+		resolved, err := resolveToolPath(path)
+		if err != nil {
+			resolved = filepath.Clean(path)
+		}
+		if _, ok := seen[resolved]; ok {
 			continue
 		}
-		seen[clean] = struct{}{}
-		out = append(out, clean)
+		seen[resolved] = struct{}{}
+		out = append(out, resolved)
 	}
 	sort.Strings(out)
 	return out
@@ -285,7 +288,7 @@ func (t DeleteTool) clearLSPDeleteState(ctx context.Context, path string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if absPath, err := filepath.Abs(path); err == nil {
+	if absPath, err := resolveToolPathAbs(path); err == nil {
 		t.LSP.UnmarkTouched(absPath)
 		_ = t.LSP.DidCloseErr(ctx, absPath)
 	}

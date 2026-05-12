@@ -42,7 +42,7 @@ func (GlobTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Base directory to search in. Defaults to current directory.",
+				"description": "Base directory to search in. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 		},
 		"required":             []string{"pattern"},
@@ -66,15 +66,19 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	if baseDir == "" {
 		baseDir = "."
 	}
+	resolvedBaseDir, err := resolveToolPath(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 
-	fsys := os.DirFS(baseDir)
+	fsys := os.DirFS(resolvedBaseDir)
 	matches, err := doublestar.Glob(fsys, a.Pattern)
 	if err != nil {
 		return "", fmt.Errorf("glob error: %w", err)
 	}
 
 	// Filter out excluded directory entries and .gitignore matches.
-	ignore := newGitIgnoreMatcher(baseDir)
+	ignore := newGitIgnoreMatcher(resolvedBaseDir)
 	filtered := make([]string, 0, len(matches))
 	truncated := false
 	for _, m := range matches {
@@ -96,7 +100,7 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	}
 
 	if len(filtered) == 0 {
-		logSlowSearch("Glob", baseDir, a.Pattern, "", startedAt, "candidate_count", len(matches), 0, truncated)
+		logSlowSearch("Glob", resolvedBaseDir, a.Pattern, "", startedAt, "candidate_count", len(matches), 0, truncated)
 		return "No files matched the pattern.", nil
 	}
 
@@ -104,7 +108,7 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	if len(filtered) == maxGlobResults {
 		result += fmt.Sprintf("\n\n(showing first %d results)", maxGlobResults)
 	}
-	logSlowSearch("Glob", baseDir, a.Pattern, "", startedAt, "candidate_count", len(matches), len(filtered), truncated)
+	logSlowSearch("Glob", resolvedBaseDir, a.Pattern, "", startedAt, "candidate_count", len(matches), len(filtered), truncated)
 	return result, nil
 }
 

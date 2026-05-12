@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -42,7 +41,7 @@ func (ReadTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to read.",
+				"description": "Absolute or relative path to the file to read. Supports ~ for the current user's home directory.",
 			},
 			"offset": map[string]any{
 				"type":        "integer",
@@ -181,8 +180,12 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	resolvedPath, err := resolveToolPath(a.Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 
-	info, err := os.Stat(a.Path)
+	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -196,7 +199,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or Grep to search", info.Size(), MaxReadFileBytes)
 	}
 
-	decoded, err := ReadDecodedTextFile(a.Path)
+	decoded, err := ReadDecodedTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -269,7 +272,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	if t.LSP != nil {
-		if absPath, absErr := filepath.Abs(a.Path); absErr == nil {
+		if absPath, absErr := resolveToolPathAbs(a.Path); absErr == nil {
 			t.LSP.Start(ctx, absPath)
 		}
 	}

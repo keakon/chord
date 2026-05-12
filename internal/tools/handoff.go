@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // HandoffTool signals that plan generation is complete and hands off control
@@ -34,7 +33,7 @@ func (HandoffTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"plan_path": map[string]any{
 				"type":        "string",
-				"description": "Path to the plan document (e.g. .chord/plans/plan-001.md). The file must exist before calling this tool.",
+				"description": "Path to the plan document (e.g. .chord/plans/plan-001.md). Supports ~ for the current user's home directory. The file must exist before calling this tool.",
 			},
 		},
 		"required":             []string{"plan_path"},
@@ -49,7 +48,11 @@ func (HandoffTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	planPath := filepath.Clean(a.PlanPath)
+	var err error
+	planPath, err := resolveToolPath(a.PlanPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve plan_path: %w", err)
+	}
 	if planPath == "" || planPath == "." {
 		return "", fmt.Errorf("plan_path is required")
 	}

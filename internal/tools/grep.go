@@ -51,7 +51,7 @@ func (GrepTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Directory or file path to search in. Defaults to current directory.",
+				"description": "Directory or file path to search in. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 			"glob": map[string]any{
 				"type":        "string",
@@ -84,9 +84,13 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	if searchPath == "" {
 		searchPath = "."
 	}
+	resolvedSearchPath, err := resolveToolPath(searchPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 
 	// Check if searchPath is a file or directory.
-	info, err := os.Stat(searchPath)
+	info, err := os.Stat(resolvedSearchPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("path not found: %s", searchPath)
@@ -101,10 +105,10 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	if !info.IsDir() {
 		// Search a single file. Honor the binary-extension fast-path so that
 		// e.g. `Grep pattern path=foo.pyc` never returns mojibake.
-		if IsBinaryExtension(filepath.Base(searchPath)) {
+		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
 			return "No matches found.", nil
 		}
-		fileMatches, err := searchFile(searchPath, re)
+		fileMatches, err := searchFile(resolvedSearchPath, re)
 		if err != nil {
 			return "", err
 		}
@@ -114,9 +118,9 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	} else {
 		// Walk the directory tree.
 		// Load .gitignore rules from the search root (if any).
-		ignore := newGitIgnoreMatcher(searchPath)
+		ignore := newGitIgnoreMatcher(resolvedSearchPath)
 
-		err = filepath.WalkDir(searchPath, func(path string, d fs.DirEntry, walkErr error) error {
+		err = filepath.WalkDir(resolvedSearchPath, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil // skip errors
 			}
@@ -128,7 +132,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 
 			// Skip directories matched by .gitignore.
 			if d.IsDir() {
-				if rel, err := filepath.Rel(searchPath, path); err == nil {
+				if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
 					rel = filepath.ToSlash(rel)
 					if ignore.Match(rel, true) {
 						return filepath.SkipDir
@@ -138,7 +142,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 			}
 
 			// Skip files matched by .gitignore.
-			if rel, err := filepath.Rel(searchPath, path); err == nil {
+			if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
 				rel = filepath.ToSlash(rel)
 				if ignore.Match(rel, false) {
 					return nil
@@ -193,7 +197,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 
 	if len(matches) == 0 {
-		logSlowSearch("Grep", searchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
+		logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
 		return "No matches found.", nil
 	}
 
@@ -205,7 +209,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	if len(matches) == maxGrepMatches {
 		result += fmt.Sprintf("\n\n(showing first %d matches)", maxGrepMatches)
 	}
-	logSlowSearch("Grep", searchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
+	logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
 	return result, nil
 }
 
