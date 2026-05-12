@@ -16,7 +16,10 @@ func (v *Viewport) enforceHotBudget() {
 	if v.hotBytesDirty {
 		v.recomputeHotBytes()
 	}
-	visible := v.visibleWindowBlockIDs()
+	visible, ok := v.visibleWindowBlockIDsCachedOnly()
+	if !ok {
+		visible = v.visibleWindowBlockIDs()
+	}
 	for v.hotBytes > v.maxHotBytes {
 		var candidate *Block
 		for _, block := range v.blocks {

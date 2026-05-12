@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
@@ -598,28 +599,42 @@ func wrapText(text string, width int) []string {
 			continue
 		}
 
-		// Preserve leading whitespace (indentation).
 		trimmed := strings.TrimLeft(para, " \t")
 		indent := para[:len(para)-len(trimmed)]
 		indentWidth := tuiStringWidth(indent)
-
-		words := strings.Fields(trimmed)
-		if len(words) == 0 {
+		if trimmed == "" {
 			result = append(result, "")
 			continue
 		}
 
 		var cur strings.Builder
 		cur.WriteString(indent)
-		curWidth := indentWidth // current line width in display columns
+		curWidth := indentWidth
+		for i := 0; i < len(trimmed); {
+			for i < len(trimmed) {
+				r, size := utf8.DecodeRuneInString(trimmed[i:])
+				if !unicode.IsSpace(r) {
+					break
+				}
+				i += size
+			}
+			if i >= len(trimmed) {
+				break
+			}
 
-		for _, word := range words {
+			wordStart := i
+			for i < len(trimmed) {
+				r, size := utf8.DecodeRuneInString(trimmed[i:])
+				if unicode.IsSpace(r) {
+					break
+				}
+				i += size
+			}
+			word := trimmed[wordStart:i]
 			wordWidth := tuiStringWidth(word)
 			if curWidth == indentWidth {
-				// First word on the line.
 				appendWord(&result, &cur, &curWidth, word, wordWidth, width)
 			} else if curWidth+1+wordWidth > width {
-				// Word doesn't fit – flush current line.
 				result = append(result, cur.String())
 				cur.Reset()
 				cur.WriteString(indent)

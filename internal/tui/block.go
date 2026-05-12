@@ -203,6 +203,11 @@ type Block struct {
 	streamSettledSyntheticPrefixWidths []int
 	streamSettledSoftWrapContinuations []bool
 	streamSettledLineCount             int // lines from settled prefix in mdCache (rest are tail cheap-path)
+	streamTailRaw                      string
+	streamTailWidth                    int
+	streamTailLines                    []string
+	streamTailSyntheticPrefixWidths    []int
+	streamTailSoftWrapContinuations    []bool
 	lineCache                          []string
 	lineCacheWidth                     int
 	lineCountCache                     int

@@ -64,6 +64,74 @@ func TestViewportSpillStoreDoesNotUseWorkingDirRuntimeRoot(t *testing.T) {
 	}
 }
 
+func TestViewportSpillClearsStreamingRenderCaches(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	store, err := newViewportSpillStore()
+	if err != nil {
+		t.Fatalf("newViewportSpillStore(): %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	v := &Viewport{width: 80, spill: store}
+	block := &Block{
+		Type:      BlockAssistant,
+		Content:   "First paragraph.\n\nSecond still streaming",
+		Streaming: true,
+	}
+	block.Render(80, "")
+	if len(block.streamSettledLines) == 0 {
+		t.Fatal("expected settled streaming cache before spill")
+	}
+	if len(block.streamTailLines) == 0 {
+		t.Fatal("expected tail streaming cache before spill")
+	}
+
+	if !v.spillBlock(block) {
+		t.Fatal("expected spillBlock to succeed")
+	}
+	if !block.spillCold {
+		t.Fatal("expected block to be marked cold after spill")
+	}
+	if block.streamSettledRaw != "" || block.streamTailRaw != "" {
+		t.Fatalf("spill left streaming raw caches behind: settled=%q tail=%q", block.streamSettledRaw, block.streamTailRaw)
+	}
+	if len(block.streamSettledLines) != 0 || len(block.streamTailLines) != 0 {
+		t.Fatalf("spill left streaming line caches behind: settled=%d tail=%d", len(block.streamSettledLines), len(block.streamTailLines))
+	}
+	if len(block.streamSettledSyntheticPrefixWidths) != 0 || len(block.streamTailSyntheticPrefixWidths) != 0 {
+		t.Fatalf("spill left streaming synthetic-width caches behind: settled=%d tail=%d", len(block.streamSettledSyntheticPrefixWidths), len(block.streamTailSyntheticPrefixWidths))
+	}
+	if len(block.streamSettledSoftWrapContinuations) != 0 || len(block.streamTailSoftWrapContinuations) != 0 {
+		t.Fatalf("spill left streaming soft-wrap caches behind: settled=%d tail=%d", len(block.streamSettledSoftWrapContinuations), len(block.streamTailSoftWrapContinuations))
+	}
+	if block.streamSettledFrontier != 0 || block.streamSettledWidth != 0 || block.streamTailWidth != 0 || block.streamSettledLineCount != 0 {
+		t.Fatalf("spill left streaming bookkeeping behind: frontier=%d settledWidth=%d tailWidth=%d settledLineCount=%d", block.streamSettledFrontier, block.streamSettledWidth, block.streamTailWidth, block.streamSettledLineCount)
+	}
+}
+
+func TestEstimatedHotBytesIncludesStreamingTailCache(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockAssistant,
+		Content:   "First paragraph.\n\nSecond still streaming",
+		Streaming: true,
+	}
+	block.Render(80, "")
+	if len(block.streamTailLines) == 0 {
+		t.Fatal("expected tail streaming cache before hot-byte check")
+	}
+
+	withTail := block.estimatedHotBytes()
+	savedTail := block.streamTailLines
+	block.streamTailLines = nil
+	withoutTail := block.estimatedHotBytes()
+	block.streamTailLines = savedTail
+
+	if withTail <= withoutTail {
+		t.Fatalf("estimatedHotBytes with tail = %d, without tail = %d; expected tail cache to contribute", withTail, withoutTail)
+	}
+}
+
 func TestViewportSpillPreservesSearchAndHydration(t *testing.T) {
 	v := NewViewport(40, 4)
 	v.maxHotBytes = 1024

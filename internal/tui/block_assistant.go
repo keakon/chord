@@ -140,10 +140,13 @@ type assistantMarkdownSegment struct {
 }
 
 type thinkingStreamSettledCache struct {
-	raw      string
-	frontier int
-	width    int
-	lines    []string
+	raw       string
+	frontier  int
+	width     int
+	lines     []string
+	tailRaw   string
+	tailWidth int
+	tailLines []string
 }
 
 func splitAssistantMarkdownSegments(content string) []assistantMarkdownSegment {
@@ -542,6 +545,12 @@ func (b *Block) renderAssistant(width int) []string {
 		var contentSynthetic []int
 		var contentSoftWraps []bool
 		if b.mdCache == nil || b.mdCacheWidth != width {
+			var settledLines []string
+			var settledSynthetic []int
+			var settledSoftWraps []bool
+			var tailLines []string
+			var tailSynthetic []int
+			var tailSoftWraps []bool
 			if b.Streaming {
 				// Incremental markdown rendering for streaming content:
 				// split into a stable prefix (settled, rendered via glamour once per
@@ -562,41 +571,47 @@ func (b *Block) renderAssistant(width int) []string {
 						b.streamSettledFrontier = frontier
 						b.streamSettledWidth = contentWidth
 					}
+					settledLines = b.streamSettledLines
+					settledSynthetic = b.streamSettledSyntheticPrefixWidths
+					settledSoftWraps = b.streamSettledSoftWrapContinuations
 				} else {
-					b.InvalidateStreamingSettledCache()
+					b.streamSettledRaw = ""
+					b.streamSettledFrontier = 0
+					b.streamSettledWidth = 0
+					b.streamSettledLines = nil
+					b.streamSettledSyntheticPrefixWidths = nil
+					b.streamSettledSoftWrapContinuations = nil
 				}
 
 				// tail: content after the settled frontier, always cheap path.
 				tailRaw := rawContent[frontier:]
-				var tailLines []string
-				var tailSynthetic []int
-				var tailSoftWraps []bool
 				if tailRaw != "" {
-					tailLines = wrapText(tailRaw, contentWidth)
-					tailSynthetic = make([]int, len(tailLines))
-					tailSoftWraps = make([]bool, len(tailLines))
+					if b.streamTailRaw == tailRaw && b.streamTailWidth == contentWidth {
+						tailLines = b.streamTailLines
+						tailSynthetic = b.streamTailSyntheticPrefixWidths
+						tailSoftWraps = b.streamTailSoftWrapContinuations
+					} else {
+						tailLines = wrapText(tailRaw, contentWidth)
+						tailSynthetic = make([]int, len(tailLines))
+						tailSoftWraps = make([]bool, len(tailLines))
+						b.streamTailRaw = tailRaw
+						b.streamTailWidth = contentWidth
+						b.streamTailLines = tailLines
+						b.streamTailSyntheticPrefixWidths = tailSynthetic
+						b.streamTailSoftWrapContinuations = tailSoftWraps
+					}
+				} else {
+					b.streamTailRaw = ""
+					b.streamTailWidth = 0
+					b.streamTailLines = nil
+					b.streamTailSyntheticPrefixWidths = nil
+					b.streamTailSoftWrapContinuations = nil
 				}
 
-				if frontier > 0 {
-					// Merge settled (markdown-rendered) + tail (cheap path) without
-					// collapsing seam blank lines: they can represent real paragraph
-					// boundaries from the original markdown content.
-					mergedLines := make([]string, len(b.streamSettledLines))
-					copy(mergedLines, b.streamSettledLines)
-					mergedSynthetic := make([]int, len(b.streamSettledSyntheticPrefixWidths))
-					copy(mergedSynthetic, b.streamSettledSyntheticPrefixWidths)
-					mergedSoftWraps := make([]bool, len(b.streamSettledSoftWrapContinuations))
-					copy(mergedSoftWraps, b.streamSettledSoftWrapContinuations)
-					b.mdCache = append(mergedLines, tailLines...)
-					b.mdCacheSyntheticPrefixWidths = append(mergedSynthetic, tailSynthetic...)
-					b.mdCacheSoftWrapContinuations = append(mergedSoftWraps, tailSoftWraps...)
-					b.streamSettledLineCount = len(mergedLines)
-				} else {
-					b.mdCache = tailLines
-					b.mdCacheSyntheticPrefixWidths = tailSynthetic
-					b.mdCacheSoftWrapContinuations = tailSoftWraps
-					b.streamSettledLineCount = 0
-				}
+				b.mdCache = settledLines
+				b.mdCacheSyntheticPrefixWidths = settledSynthetic
+				b.mdCacheSoftWrapContinuations = settledSoftWraps
+				b.streamSettledLineCount = len(settledLines)
 			} else {
 				b.InvalidateStreamingSettledCache()
 				b.mdCache, b.mdCacheSyntheticPrefixWidths, b.mdCacheSoftWrapContinuations = renderAssistantMarkdownContent(bodyContent, bodyContent, contentWidth, continuationExtra, &b.codeHL)
@@ -633,24 +648,43 @@ func (b *Block) renderAssistant(width int) []string {
 			assistantSoftWraps = append(assistantSoftWraps, false)
 		}
 
-		for i, cl := range contentLines {
-			line := cl
-			if b.Streaming && i >= b.streamSettledLineCount {
-				// Only apply cheap-path style to tail lines; settled lines already
-				// carry full markdown ANSI styling from renderAssistantMarkdownContent.
-				line = MessageContentStyle.Render(cl)
+		appendAssistantSegment := func(lines []string, synthetic []int, softWraps []bool, styleTail bool) {
+			for i, cl := range lines {
+				line := cl
+				if styleTail {
+					line = MessageContentStyle.Render(cl)
+				}
+				assistantLines = append(assistantLines, assistantContentPrefix+line)
+				syntheticWidth := 0
+				if i < len(synthetic) {
+					syntheticWidth = synthetic[i]
+				}
+				assistantSynthetic = append(assistantSynthetic, syntheticWidth)
+				softWrap := false
+				if i < len(softWraps) {
+					softWrap = softWraps[i]
+				}
+				assistantSoftWraps = append(assistantSoftWraps, softWrap)
 			}
-			assistantLines = append(assistantLines, assistantContentPrefix+line)
-			synthetic := 0
-			if i < len(contentSynthetic) {
-				synthetic = contentSynthetic[i]
+		}
+		if b.Streaming {
+			appendAssistantSegment(b.streamSettledLines, b.streamSettledSyntheticPrefixWidths, b.streamSettledSoftWrapContinuations, false)
+			appendAssistantSegment(b.streamTailLines, b.streamTailSyntheticPrefixWidths, b.streamTailSoftWrapContinuations, true)
+		} else {
+			for i, cl := range contentLines {
+				line := cl
+				assistantLines = append(assistantLines, assistantContentPrefix+line)
+				synthetic := 0
+				if i < len(contentSynthetic) {
+					synthetic = contentSynthetic[i]
+				}
+				assistantSynthetic = append(assistantSynthetic, synthetic)
+				softWrap := false
+				if i < len(contentSoftWraps) {
+					softWrap = contentSoftWraps[i]
+				}
+				assistantSoftWraps = append(assistantSoftWraps, softWrap)
 			}
-			assistantSynthetic = append(assistantSynthetic, synthetic)
-			softWrap := false
-			if i < len(contentSoftWraps) {
-				softWrap = contentSoftWraps[i]
-			}
-			assistantSoftWraps = append(assistantSoftWraps, softWrap)
 		}
 
 		// Re-insert card background after inner ANSI resets.
@@ -698,12 +732,12 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 	for len(b.thinkingStreamSettled) <= partIndex {
 		b.thinkingStreamSettled = append(b.thinkingStreamSettled, thinkingStreamSettledCache{})
 	}
+	cache := &b.thinkingStreamSettled[partIndex]
 
 	var out []string
 	settledLineCount := 0
 	if frontier > 0 {
 		settledRaw := part[:frontier]
-		cache := &b.thinkingStreamSettled[partIndex]
 		if cache.frontier != frontier || cache.width != contentWidth || cache.raw != settledRaw {
 			cache.raw = settledRaw
 			cache.frontier = frontier
@@ -714,10 +748,21 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 		settledLineCount = len(out)
 	} else if partIndex < len(b.thinkingStreamSettled) {
 		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{}
+		cache = &b.thinkingStreamSettled[partIndex]
 	}
 
 	if tail := part[frontier:]; tail != "" {
-		out = append(out, wrapText(tail, contentWidth)...)
+		if cache.tailRaw == tail && cache.tailWidth == contentWidth {
+			out = append(out, cache.tailLines...)
+			settledLineCount = len(out) - len(cache.tailLines)
+		} else {
+			tailLines := wrapText(tail, contentWidth)
+			out = append(out, tailLines...)
+			cache.tailRaw = tail
+			cache.tailWidth = contentWidth
+			cache.tailLines = tailLines
+			settledLineCount = len(out) - len(tailLines)
+		}
 	}
 	if len(out) == 0 {
 		out = []string{""}

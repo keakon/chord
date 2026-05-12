@@ -173,10 +173,10 @@ If this persists on the latest build, capture the session JSONL and current file
 If scrolling, streaming output, or large message rendering feels noticeably slow:
 
 - reduce the current session context size
-- check for unusually long outputs
+- streaming assistant/thinking output keeps only stable structure (blank-line-separated paragraphs and closed fences) on the markdown path; long single paragraphs stay on the cheaper plain-text path until they settle
 - compare behavior in different terminals
 
-If you are maintaining Chord itself, you can also use repository performance scripts and pprof.
+- for render hotspot analysis, maintainers can profile `go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingLongTextCardProfile' -cpuprofile cpu.out -memprofile mem.out` and inspect the remaining cost in block rendering vs viewport slicing
 
 ## When to check logs
 

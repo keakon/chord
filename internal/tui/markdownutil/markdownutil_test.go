@@ -1,11 +1,14 @@
 package markdownutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeNewlines(t *testing.T) {
 	got := NormalizeNewlines("a\r\nb\rc")
 	if got != "a\nb\nc" {
-		t.Fatalf("NormalizeNewlines = %q", got)
+		t.Fatalf("NormalizeNewlines = %q, want %q", got, "a\nb\nc")
 	}
 }
 
@@ -99,5 +102,36 @@ func TestRepairForDisplayClosesOpenFence(t *testing.T) {
 				t.Fatalf("RepairForDisplay() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func buildStreamingFrontierBenchmarkContent() string {
+	var b strings.Builder
+	for i := 0; i < 1024; i++ {
+		b.WriteString("streaming paragraph line that should stay cheap until a blank line arrives\n")
+		if i%8 == 7 {
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("tail without a structural boundary")
+	return b.String()
+}
+
+func BenchmarkFindStreamingSettledFrontierLongContent(b *testing.B) {
+	content := buildStreamingFrontierBenchmarkContent()
+	b.SetBytes(int64(len(content)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = FindStreamingSettledFrontier(content)
+	}
+}
+
+func TestFindStreamingSettledFrontierLongContentAllocsGuard(t *testing.T) {
+	content := buildStreamingFrontierBenchmarkContent()
+	allocs := testing.AllocsPerRun(50, func() {
+		_ = FindStreamingSettledFrontier(content)
+	})
+	if allocs > 0 {
+		t.Fatalf("FindStreamingSettledFrontier allocs = %.0f, want 0", allocs)
 	}
 }

@@ -678,10 +678,10 @@ func TestStreamingAssistantUsesCheapWrapPath(t *testing.T) {
 	if block.mdCacheWidth != 50 {
 		t.Fatalf("mdCacheWidth = %d, want 50", block.mdCacheWidth)
 	}
-	if len(block.mdCacheSoftWrapContinuations) != len(block.mdCache) {
-		t.Fatalf("soft wrap metadata len = %d, want %d", len(block.mdCacheSoftWrapContinuations), len(block.mdCache))
+	if len(block.streamTailSoftWrapContinuations) != len(block.streamTailLines) {
+		t.Fatalf("tail soft wrap metadata len = %d, want %d", len(block.streamTailSoftWrapContinuations), len(block.streamTailLines))
 	}
-	for _, wrapped := range block.mdCacheSoftWrapContinuations {
+	for _, wrapped := range block.streamTailSoftWrapContinuations {
 		if wrapped {
 			t.Fatal("streaming cheap path should not mark synthetic markdown soft-wrap continuations")
 		}

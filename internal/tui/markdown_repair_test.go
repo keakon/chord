@@ -308,18 +308,30 @@ func TestStreamingAssistantBlock_PreservesParagraphSeamBlankLine(t *testing.T) {
 		Content:   "First paragraph.\n\nSecond still streaming",
 		Streaming: true,
 	}
-	block.Render(80, "")
-	if len(block.mdCache) < 3 {
-		t.Fatalf("expected at least 3 content lines, got %d: %#v", len(block.mdCache), block.mdCache)
+	lines := block.Render(80, "")
+	plainLines := strings.Split(stripANSI(strings.Join(lines, "\n")), "\n")
+	first := -1
+	second := -1
+	blankBetween := false
+	for i, line := range plainLines {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(line, "│"))
+		if trimmed == "First paragraph." {
+			first = i
+			continue
+		}
+		if trimmed == "Second still streaming" {
+			second = i
+			continue
+		}
+		if first >= 0 && second < 0 && trimmed == "" {
+			blankBetween = true
+		}
 	}
-	if !strings.Contains(stripANSI(block.mdCache[0]), "First paragraph.") {
-		t.Fatalf("first content line = %q, want first paragraph", stripANSI(block.mdCache[0]))
+	if first < 0 || second < 0 {
+		t.Fatalf("expected both paragraphs in render output, got %#v", plainLines)
 	}
-	if block.mdCache[1] != "" {
-		t.Fatalf("expected preserved blank seam line, got %q", block.mdCache[1])
-	}
-	if !strings.Contains(stripANSI(block.mdCache[2]), "Second still streaming") {
-		t.Fatalf("third content line = %q, want second paragraph", stripANSI(block.mdCache[2]))
+	if !blankBetween {
+		t.Fatalf("expected blank seam line between paragraphs, got %#v", plainLines)
 	}
 }
 
@@ -407,8 +419,11 @@ func TestStreamingAssistantBlock_NoExtraEmptyTailLineWhenAllContentSettled(t *te
 	if block.streamSettledLineCount == 0 {
 		t.Fatal("expected settled prefix to be rendered")
 	}
-	if got, want := len(block.mdCache), block.streamSettledLineCount; got != want {
-		t.Fatalf("mdCache lines=%d want %d (no extra tail lines when fully settled)", got, want)
+	if got, want := len(block.streamSettledLines), block.streamSettledLineCount; got != want {
+		t.Fatalf("settled lines=%d want %d (no extra tail lines when fully settled)", got, want)
+	}
+	if len(block.streamTailLines) != 0 {
+		t.Fatalf("streamTailLines=%d want 0 when fully settled", len(block.streamTailLines))
 	}
 }
 

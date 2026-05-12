@@ -109,6 +109,14 @@ func benchmarkAssistantStreamingTextBlock() *Block {
 	return b
 }
 
+func benchmarkAssistantStreamingLongTextBlock() *Block {
+	b := benchmarkAssistantStreamingBlock()
+	b.Content = strings.Repeat("streaming cheap path line with no markdown fences or bullets ", 160)
+	b.Streaming = true
+	b.InvalidateStreamingSettledCache()
+	return b
+}
+
 // BenchmarkRenderInfoPanelCacheHit measures the cost when the fingerprint is
 // unchanged (the common case during scrolling). Should be O(1) — just a string
 // compare and a return of the cached string, with zero lipgloss work.
@@ -356,6 +364,39 @@ func BenchmarkRenderAssistantStreamingTextCard(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	block := benchmarkAssistantStreamingTextBlock()
 	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+func BenchmarkRenderAssistantStreamingLongTextCard(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkAssistantStreamingLongTextBlock()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+func BenchmarkRenderAssistantStreamingLongTextCardCachedWarm(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkAssistantStreamingLongTextBlock()
+	_ = block.Render(100, "")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+func BenchmarkRenderAssistantStreamingLongTextCardProfile(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkAssistantStreamingLongTextBlock()
 	b.ReportAllocs()
 	for b.Loop() {
 		block.InvalidateCache()

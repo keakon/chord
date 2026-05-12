@@ -89,9 +89,11 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.lineCache = nil
 	payloadBlock.lineCacheWidth = 0
 	payloadBlock.lineCountCache = 0
-	payloadBlock.viewportCache = nil
-	payloadBlock.viewportCacheWidth = 0
-	payloadBlock.codeHL = nil
+	payloadBlock.streamTailRaw = ""
+	payloadBlock.streamTailWidth = 0
+	payloadBlock.streamTailLines = nil
+	payloadBlock.streamTailSyntheticPrefixWidths = nil
+	payloadBlock.streamTailSoftWrapContinuations = nil
 
 	payload, err := json.Marshal(&payloadBlock)
 	if err != nil {
@@ -255,6 +257,9 @@ func (b *Block) estimatedHotBytes() int64 {
 	for _, line := range b.mdCache {
 		total += len(line)
 	}
+	for _, line := range b.streamTailLines {
+		total += len(line)
+	}
 	for _, line := range b.lineCache {
 		total += len(line)
 	}
@@ -318,6 +323,7 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.Diff = ""
 	block.UserLocalShellResult = ""
 	block.ThinkingParts = nil
+	block.InvalidateStreamingSettledCache()
 	block.mdCache = nil
 	block.mdCacheWidth = 0
 	block.lineCache = nil

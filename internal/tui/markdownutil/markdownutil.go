@@ -86,24 +86,35 @@ func fenceString(delim byte, length int, info string) string {
 
 // FindStreamingSettledFrontier returns the byte offset in content up to
 // which the markdown structure is stable enough to render during streaming.
+// It scans line-by-line without allocating intermediate slices so long
+// append-only responses stay cheap to re-evaluate.
 func FindStreamingSettledFrontier(content string) int {
-	content = NormalizeNewlines(content)
 	if content == "" {
 		return 0
 	}
 
-	lines := strings.SplitAfter(content, "\n")
 	frontier := 0
 	offset := 0
 	inFence := false
 	prevBlank := false
 	var currentFence Fence
 
-	for _, line := range lines {
-		lineLen := len(line)
-		trimmed := strings.TrimRight(line, "\n")
-		isBlank := strings.TrimSpace(trimmed) == ""
+	for i := 0; i < len(content); {
+		lineStart := i
+		for i < len(content) && content[i] != '\n' && content[i] != '\r' {
+			i++
+		}
+		line := content[lineStart:i]
+		newlineLen := 0
+		if i < len(content) {
+			if content[i] == '\r' && i+1 < len(content) && content[i+1] == '\n' {
+				newlineLen = 2
+			} else {
+				newlineLen = 1
+			}
+		}
 
+		isBlank := strings.TrimSpace(line) == ""
 		if !inFence {
 			if fence, ok := ParseFenceLine(line); ok {
 				currentFence = fence
@@ -117,14 +128,14 @@ func FindStreamingSettledFrontier(content string) int {
 			} else {
 				prevBlank = false
 			}
-		} else {
-			if IsFenceClose(line, currentFence) {
-				inFence = false
-				currentFence = Fence{}
-				frontier = offset + lineLen
-			}
+		} else if IsFenceClose(line, currentFence) {
+			inFence = false
+			currentFence = Fence{}
+			frontier = offset + len(line) + newlineLen
 		}
-		offset += lineLen
+
+		offset += len(line) + newlineLen
+		i += newlineLen
 	}
 
 	return frontier

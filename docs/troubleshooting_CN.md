@@ -175,10 +175,10 @@ curl -I https://api.openai.com/v1
 感觉滚屏、流式输出或大消息渲染明显变慢：
 
 - 先缩小当前会话上下文规模
-- 检查是否存在异常长输出
+- 检查是否存在异常长输出；流式 assistant / thinking 输出会先把稳定结构（空行分段、已闭合代码围栏）走 markdown，长单段文本会先留在更便宜的纯文本路径上，直到结构稳定
 - 尝试在不同终端中对比
 
-维护项目本身时，还可进一步使用仓库内的性能检查脚本与 pprof。
+维护项目本身时，还可进一步使用仓库内的性能检查脚本与 pprof。例如可运行 `go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingLongTextCardProfile' -cpuprofile cpu.out -memprofile mem.out`，继续区分剩余热点是在 block 渲染还是 viewport 切片。
 
 ## 何时检查日志
 

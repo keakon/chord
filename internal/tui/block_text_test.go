@@ -363,6 +363,25 @@ func TestWrapTextKeepsOversizeGraphemeWithoutLeadingBlank(t *testing.T) {
 	}
 }
 
+func BenchmarkWrapTextLongParagraph(b *testing.B) {
+	text := strings.Repeat("streaming cheap path line with no markdown fences or bullets ", 160)
+	b.SetBytes(int64(len(text)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = wrapText(text, 100)
+	}
+}
+
+func TestWrapTextLongParagraphAllocsGuard(t *testing.T) {
+	text := strings.Repeat("streaming cheap path line with no markdown fences or bullets ", 160)
+	allocs := testing.AllocsPerRun(50, func() {
+		_ = wrapText(text, 100)
+	})
+	if allocs > 600 {
+		t.Fatalf("wrapText allocs = %.0f, want <= 600", allocs)
+	}
+}
+
 func TestTruncateLineToDisplayWidthDropsOversizeFirstGraphemeStrictly(t *testing.T) {
 	got := truncateLineToDisplayWidth("⚠️x", 1)
 	if got != "" {

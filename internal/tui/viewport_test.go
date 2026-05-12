@@ -158,6 +158,41 @@ func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	}
 }
 
+func TestRenderRangeUsesLineCacheSlice(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("slice me ", 40)}
+	full := block.Render(60, "")
+	block.lineCache = full
+	block.lineCacheWidth = 60
+	block.lineCountCache = len(full)
+	part := block.RenderRange(60, "", 1, min(3, len(full)))
+	if len(full) > 1 && len(part) == 0 {
+		t.Fatal("expected non-empty render range from cached lines")
+	}
+	for i := range part {
+		if part[i] != full[1+i] {
+			t.Fatalf("RenderRange line %d = %q, want %q", i, part[i], full[1+i])
+		}
+	}
+}
+
+func TestAssistantRenderUsesMarkdownCacheHit(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "cached assistant body"}
+	first := strings.Join(stripANSILines(block.Render(80, "")), "\n")
+	if !strings.Contains(first, "cached assistant body") {
+		t.Fatalf("first render missing assistant body: %q", first)
+	}
+	if block.mdCache == nil {
+		t.Fatal("expected first render to populate markdown cache")
+	}
+
+	second := strings.Join(stripANSILines(block.Render(80, "")), "\n")
+	if !strings.Contains(second, "cached assistant body") {
+		t.Fatalf("cache-hit render missing assistant body: %q", second)
+	}
+}
+
 func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	v := benchmarkViewportWithSpill()
@@ -185,6 +220,18 @@ func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 		if block.spillCold && block.lineCache != nil {
 			t.Fatalf("spilled block %d should not be re-rendered for visibleWindowBlockIDs", block.ID)
 		}
+	}
+}
+
+func BenchmarkViewportVisibleWindowBlockIDsCachedOnly(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	v := benchmarkViewportWithSpill()
+	v.ScrollToBottom()
+	_ = v.Render("", nil, -1)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = v.visibleWindowBlockIDsCachedOnly()
 	}
 }
 

@@ -77,7 +77,6 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			}
 		}
 		block = v.materialize(block)
-		var finalLines []string
 		sFrame := ""
 		if block.Type == BlockToolCall && block.toolExecutionIsRunning() {
 			sFrame = spinnerFrame
@@ -86,20 +85,11 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			sFrame = spinnerFrame
 		}
 
-		finalLines = block.GetViewportCache(v.width, sFrame)
-		if finalLines == nil {
-			blockLines := block.Render(v.width, sFrame)
-			finalLines = make([]string, len(blockLines))
-			for i, l := range blockLines {
-				line := expandTabsForDisplayANSI(l, preformattedTabWidth)
-				line = truncateLineToDisplayWidth(line, v.width)
-				line = padLineToDisplayWidth(line, v.width)
-				finalLines[i] = lineBg.Render(line)
-			}
-			block.SetViewportCache(v.width, finalLines)
+		fullCached := block.GetViewportCache(v.width, sFrame)
+		blockCount := len(fullCached)
+		if blockCount == 0 {
+			blockCount = v.lineCount(block, v.width)
 		}
-
-		blockCount := len(finalLines)
 		blockStart := currentLine
 		blockEnd := currentLine + blockCount
 
@@ -120,13 +110,31 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			hi = windowEnd - blockStart
 		}
 
-		for i := lo; i < hi && len(visible) < v.height; i++ {
+		var finalLines []string
+		if fullCached != nil {
+			finalLines = fullCached[lo:hi]
+		} else {
+			blockLines := block.RenderRange(v.width, sFrame, lo, hi)
+			finalLines = make([]string, len(blockLines))
+			for i, l := range blockLines {
+				line := expandTabsForDisplayANSI(l, preformattedTabWidth)
+				line = truncateLineToDisplayWidth(line, v.width)
+				line = padLineToDisplayWidth(line, v.width)
+				finalLines[i] = lineBg.Render(line)
+			}
+			if lo == 0 && hi == blockCount {
+				block.SetViewportCache(v.width, finalLines)
+			}
+		}
+
+		for i := 0; i < len(finalLines) && len(visible) < v.height; i++ {
 			line := finalLines[i]
+			lineIndex := lo + i
 			if searchBlockIndex == blockIndex && sel == nil && !block.Focused {
 				line = applySearchMatchToLine(line, 0, selectionStyledTextWidth(line))
 			}
 			if sel != nil && sel.StartBlockID >= 0 && sel.EndBlockID >= 0 {
-				if colStart, colEnd, ok := selectionColRange(block.ID, i, sel); ok && colStart < colEnd {
+				if colStart, colEnd, ok := selectionColRange(block.ID, lineIndex, sel); ok && colStart < colEnd {
 					lineWidth := selectionStyledTextWidth(line)
 					if colStart > lineWidth {
 						colStart = lineWidth

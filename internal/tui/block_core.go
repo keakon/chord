@@ -38,6 +38,12 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.streamSettledLines = append([]string(nil), src.streamSettledLines...)
 	clone.streamSettledSyntheticPrefixWidths = append([]int(nil), src.streamSettledSyntheticPrefixWidths...)
 	clone.streamSettledSoftWrapContinuations = append([]bool(nil), src.streamSettledSoftWrapContinuations...)
+	clone.streamSettledLineCount = src.streamSettledLineCount
+	clone.streamTailRaw = src.streamTailRaw
+	clone.streamTailWidth = src.streamTailWidth
+	clone.streamTailLines = append([]string(nil), src.streamTailLines...)
+	clone.streamTailSyntheticPrefixWidths = append([]int(nil), src.streamTailSyntheticPrefixWidths...)
+	clone.streamTailSoftWrapContinuations = append([]bool(nil), src.streamTailSoftWrapContinuations...)
 	clone.lineCache = append([]string(nil), src.lineCache...)
 	clone.viewportCache = append([]string(nil), src.viewportCache...)
 	clone.renderSyntheticPrefixWidths = append([]int(nil), src.renderSyntheticPrefixWidths...)
@@ -143,6 +149,48 @@ func (b *Block) LineCount(width int) int {
 		b.lineCountCache = len(b.lineCache)
 	}
 	return b.lineCountCache
+}
+
+// RenderRange returns the rendered block lines in [start,end). It prefers
+// cached full-render results and slices them when available.
+func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []string {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if cached := b.GetViewportCache(width, spinnerFrame); cached != nil {
+		if start >= len(cached) {
+			return nil
+		}
+		if end > len(cached) {
+			end = len(cached)
+		}
+		return cached[start:end]
+	}
+	if b.lineCache != nil && b.lineCacheWidth == width && spinnerFrame == "" {
+		if start >= len(b.lineCache) {
+			return nil
+		}
+		if end > len(b.lineCache) {
+			end = len(b.lineCache)
+		}
+		return b.lineCache[start:end]
+	}
+	lines := b.Render(width, spinnerFrame)
+	if spinnerFrame == "" {
+		b.lineCache = lines
+		b.lineCacheWidth = width
+		b.lineCountCache = len(lines)
+	}
+	if start >= len(lines) {
+		return nil
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return lines[start:end]
 }
 
 // MeasureLineCount returns the block's rendered line count without populating
@@ -258,6 +306,11 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamSettledLines = nil
 	b.streamSettledSyntheticPrefixWidths = nil
 	b.streamSettledSoftWrapContinuations = nil
+	b.streamTailRaw = ""
+	b.streamTailWidth = 0
+	b.streamTailLines = nil
+	b.streamTailSyntheticPrefixWidths = nil
+	b.streamTailSoftWrapContinuations = nil
 	b.streamSettledLineCount = 0
 }
 
