@@ -321,9 +321,8 @@ func BuiltinAgentConfigs() map[string]*AgentConfig {
 
 // DefaultPlannerAgent returns the built-in planner agent configuration.
 // The planner agent is specialised for codebase exploration and plan generation.
-// It is read-heavy by default: Read/Grep/Glob are allowed, plan-file writes ask,
-// and Shell also asks so the prompt/runtime boundary stays conservative.
-// It has access to Handoff to signal plan completion.
+// It is read-heavy by default: Read/Grep/Glob/Shell are allowed, plan-file writes ask,
+// and it can use Handoff to signal plan completion.
 func DefaultPlannerAgent() *AgentConfig {
 	// Build permission node: read-heavy, free exploration.
 	permYAML := `
@@ -331,7 +330,7 @@ func DefaultPlannerAgent() *AgentConfig {
 Read: allow
 Grep: allow
 Glob: allow
-Shell: ask
+Shell: allow
 Write: ask
 Edit: ask
 Handoff: allow
@@ -360,6 +359,8 @@ Question: allow
 // The builder agent is the MainAgent's default role — the main agent the user
 // interacts with for coding tasks. Its permissions are from the MainAgent's
 // perspective (Delegate, TodoWrite) not SubAgent's (Complete, Escalate, Notify).
+// It defaults to an allow-all baseline, with Handoff and Delegate denied and Delete
+// requiring confirmation.
 //
 // When this config is used to create SubAgents via the Delegate tool, the system
 // automatically adapts: MainAgent-only tools are removed and SubAgent-specific
@@ -367,17 +368,9 @@ Question: allow
 func DefaultBuilderAgent() *AgentConfig {
 	permYAML := `
 "*": allow
-Read: allow
-Write: ask
-Edit: ask
-Grep: allow
-Glob: allow
-Shell: ask
-Task: allow
-TodoWrite: allow
-Skill: allow
-Question: allow
 Handoff: deny
+Delegate: deny
+Delete: ask
 `
 	var permNode yaml.Node
 	_ = yaml.Unmarshal([]byte(permYAML), &permNode)
