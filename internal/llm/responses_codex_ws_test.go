@@ -27,6 +27,7 @@ import (
 func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 	r := &ResponsesProvider{}
 	r.codexWSLastKey = "k1"
+	r.codexWSLastAPIURL = "https://example.com/v1/responses"
 	r.codexWSLastModel = "m1"
 	r.codexWSLastRespID = "resp-1"
 	r.codexWSLastInpLen = 3
@@ -37,7 +38,7 @@ func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 
 	r.resetCodexWebSocketChain("test")
 
-	if r.codexWSLastKey != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
+	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
 		t.Fatalf("chain state not fully cleared: %+v", r)
 	}
 	if !r.codexWSStickyDisabled.Load() {
@@ -73,6 +74,7 @@ func TestResetCodexWebSocketChainLogsChainResetWithoutConnectionClosed(t *testin
 func TestInvalidateRoutingResetsCodexWebSocketChain(t *testing.T) {
 	r := &ResponsesProvider{}
 	r.codexWSLastKey = "k1"
+	r.codexWSLastAPIURL = "https://example.com/v1/responses"
 	r.codexWSLastModel = "m1"
 	r.codexWSLastRespID = "resp-1"
 	r.codexWSLastInpLen = 3
@@ -82,7 +84,7 @@ func TestInvalidateRoutingResetsCodexWebSocketChain(t *testing.T) {
 
 	r.InvalidateRouting("model_pool_changed")
 
-	if r.codexWSLastKey != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
+	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
 		t.Fatalf("routing invalidation did not fully clear websocket chain: %+v", r)
 	}
 }
@@ -91,6 +93,7 @@ func TestCodexWSCanUseIncrementalLockedRequiresMatchingRequestSignature(t *testi
 	r := &ResponsesProvider{
 		codexWSConn:       &websocket.Conn{},
 		codexWSLastKey:    "k1",
+		codexWSLastAPIURL: "https://example.com/v1/responses",
 		codexWSLastModel:  "m1",
 		codexWSLastRespID: "resp-1",
 		codexWSLastReqSig: "sig-a",
@@ -102,10 +105,10 @@ func TestCodexWSCanUseIncrementalLockedRequiresMatchingRequestSignature(t *testi
 	r.codexWSLastInpLen = 1
 	r.codexWSLastInpSig = responsesInputPrefixSignature(fullInput, 1)
 
-	if ok, n, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-a", fullInput, false); !ok || n != 1 || reason != "ok" {
+	if ok, n, reason := r.codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m1", "sig-a", fullInput, false); !ok || n != 1 || reason != "ok" {
 		t.Fatalf("expected incremental allowed with matching req signature, got ok=%v n=%d reason=%q", ok, n, reason)
 	}
-	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-b", fullInput, false); ok || reason != "request_signature_changed" {
+	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m1", "sig-b", fullInput, false); ok || reason != "request_signature_changed" {
 		t.Fatal("expected incremental denied when request signature changes")
 	}
 }
@@ -117,16 +120,17 @@ func TestCodexWSCanUseIncrementalLockedAllowEmptyDelta(t *testing.T) {
 	r := &ResponsesProvider{
 		codexWSConn:       &websocket.Conn{},
 		codexWSLastKey:    "k1",
+		codexWSLastAPIURL: "https://example.com/v1/responses",
 		codexWSLastModel:  "m1",
 		codexWSLastRespID: "resp-1",
 		codexWSLastReqSig: "sig-a",
 		codexWSLastInpLen: len(fullInput),
 		codexWSLastInpSig: responsesInputSignature(fullInput),
 	}
-	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-a", fullInput, false); ok || reason != "empty_delta_not_allowed" {
+	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m1", "sig-a", fullInput, false); ok || reason != "empty_delta_not_allowed" {
 		t.Fatalf("expected no incremental when delta is empty and allowEmptyDelta=false, got ok=%v reason=%q", ok, reason)
 	}
-	if ok, n, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-a", fullInput, true); !ok || n != len(fullInput) || reason != "ok" {
+	if ok, n, reason := r.codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m1", "sig-a", fullInput, true); !ok || n != len(fullInput) || reason != "ok" {
 		t.Fatalf("expected incremental with empty delta allowed, got ok=%v n=%d reason=%q", ok, n, reason)
 	}
 }
@@ -140,6 +144,7 @@ func TestCodexWSState_KeyOrModelChangeRequiresFull(t *testing.T) {
 		r := &ResponsesProvider{
 			codexWSConn:       &websocket.Conn{},
 			codexWSLastKey:    "k1",
+			codexWSLastAPIURL: "https://example.com/v1/responses",
 			codexWSLastModel:  "m1",
 			codexWSLastRespID: "resp-1",
 			codexWSLastInpLen: 1,
@@ -149,11 +154,32 @@ func TestCodexWSState_KeyOrModelChangeRequiresFull(t *testing.T) {
 		return r
 	}
 
-	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k2", "m1", "", fullInput, false); ok || reason != "key_or_model_changed" {
+	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k2", "https://example.com/v1/responses", "m1", "", fullInput, false); ok || reason != "key_model_or_endpoint_changed" {
 		t.Fatalf("key change should prevent incremental reuse, got ok=%v reason=%q", ok, reason)
 	}
-	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k1", "m2", "", fullInput, false); ok || reason != "key_or_model_changed" {
+	if ok, _, reason := newProvider().codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m2", "", fullInput, false); ok || reason != "key_model_or_endpoint_changed" {
 		t.Fatalf("model change should prevent incremental reuse, got ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestCodexWSState_EndpointChangeRequiresFull(t *testing.T) {
+	fullInput := []responsesInputItem{
+		{Type: "message", Role: "user", Content: "hello"},
+		{Type: "message", Role: "user", Content: "next"},
+	}
+	r := &ResponsesProvider{
+		codexWSConn:       &websocket.Conn{},
+		codexWSLastKey:    "k1",
+		codexWSLastAPIURL: "https://example.com/v1/responses",
+		codexWSLastModel:  "m1",
+		codexWSLastRespID: "resp-1",
+		codexWSLastInpLen: 1,
+		codexWSLastReqSig: "sig-a",
+	}
+	r.codexWSLastInpSig = responsesInputPrefixSignature(fullInput, r.codexWSLastInpLen)
+
+	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "https://other.example.com/v1/responses", "m1", "sig-a", fullInput, false); ok || reason != "key_model_or_endpoint_changed" {
+		t.Fatalf("endpoint change should prevent incremental reuse, got ok=%v reason=%q", ok, reason)
 	}
 }
 
@@ -161,6 +187,7 @@ func TestCodexWSState_PrefixMismatchRequiresFull(t *testing.T) {
 	r := &ResponsesProvider{
 		codexWSConn:       &websocket.Conn{},
 		codexWSLastKey:    "k1",
+		codexWSLastAPIURL: "https://example.com/v1/responses",
 		codexWSLastModel:  "m1",
 		codexWSLastRespID: "resp-1",
 		codexWSLastInpLen: 1,
@@ -173,7 +200,7 @@ func TestCodexWSState_PrefixMismatchRequiresFull(t *testing.T) {
 		{Type: "message", Role: "user", Content: "different"},
 		{Type: "message", Role: "user", Content: "next"},
 	}
-	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "m1", "sig-a", fullInput, false); ok || reason != "input_prefix_mismatch" {
+	if ok, _, reason := r.codexWSCanUseIncrementalLocked("k1", "https://example.com/v1/responses", "m1", "sig-a", fullInput, false); ok || reason != "input_prefix_mismatch" {
 		t.Fatalf("prefix mismatch should force full request, got ok=%v reason=%q", ok, reason)
 	}
 }

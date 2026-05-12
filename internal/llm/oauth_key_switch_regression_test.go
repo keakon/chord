@@ -65,6 +65,7 @@ func TestResponsesProvider_SetSessionIDClearsCodexChainState(t *testing.T) {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
 	o.responsesProvider.codexWSLastKey = "k1"
+	o.responsesProvider.codexWSLastAPIURL = "https://example.com/v1/responses"
 	o.responsesProvider.codexWSLastModel = "gpt-5.5"
 	o.responsesProvider.codexWSLastRespID = "resp-123"
 	o.responsesProvider.codexWSLastInpLen = 2
@@ -75,11 +76,17 @@ func TestResponsesProvider_SetSessionIDClearsCodexChainState(t *testing.T) {
 	client := &Client{provider: providerCfg, providerImpl: o}
 	client.SetSessionID("new-session")
 
-	if o.responsesProvider.codexWSLastRespID != "" {
-		t.Fatalf("expected codexWSLastRespID reset, got %q", o.responsesProvider.codexWSLastRespID)
-	}
 	if o.responsesProvider.codexWSLastKey != "" {
 		t.Fatalf("expected codexWSLastKey reset, got %q", o.responsesProvider.codexWSLastKey)
+	}
+	if o.responsesProvider.codexWSLastAPIURL != "" {
+		t.Fatalf("expected codexWSLastAPIURL reset, got %q", o.responsesProvider.codexWSLastAPIURL)
+	}
+	if o.responsesProvider.codexWSLastModel != "" {
+		t.Fatalf("expected codexWSLastModel reset, got %q", o.responsesProvider.codexWSLastModel)
+	}
+	if o.responsesProvider.codexWSLastRespID != "" {
+		t.Fatalf("expected codexWSLastRespID reset, got %q", o.responsesProvider.codexWSLastRespID)
 	}
 	if o.responsesProvider.codexWSPromptCacheKey != "" {
 		t.Fatalf("expected prompt cache key reset, got %q", o.responsesProvider.codexWSPromptCacheKey)

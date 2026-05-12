@@ -203,12 +203,7 @@ func (r *ResponsesProvider) resetCodexWebSocketChain(reason string) {
 	hadConn := r.codexWSCloseConnUnlocked(reason)
 	hadPrevRespID := r.codexWSLastRespID != ""
 	hadReqSig := r.codexWSLastReqSig != ""
-	r.codexWSLastKey = ""
-	r.codexWSLastModel = ""
-	r.codexWSLastRespID = ""
-	r.codexWSLastInpLen = 0
-	r.codexWSLastInpSig = ""
-	r.codexWSLastReqSig = ""
+	r.codexWSClearChainStateLocked()
 	if hadConn || hadPrevRespID || hadReqSig {
 		log.Debugf("responses codex ws: chain reset reason=%v had_conn=%v had_previous_response_id=%v had_request_signature=%v", reason, hadConn, hadPrevRespID, hadReqSig)
 	}
@@ -287,8 +282,33 @@ func codexWSBuildBaseline(fullInput []responsesInputItem, outputItems []response
 	return baseline, len(baseline), responsesInputSignature(baseline)
 }
 
+func (r *ResponsesProvider) codexWSClearChainStateLocked() {
+	r.codexWSLastKey = ""
+	r.codexWSLastAPIURL = ""
+	r.codexWSLastModel = ""
+	r.codexWSLastRespID = ""
+	r.codexWSLastInpLen = 0
+	r.codexWSLastInpSig = ""
+	r.codexWSLastReqSig = ""
+}
+
+func (r *ResponsesProvider) codexWSStoreChainStateLocked(apiKey, apiURL, model, reqSig string, baselineLen int, baselineSig, respID string) {
+	r.codexWSLastKey = apiKey
+	r.codexWSLastAPIURL = apiURL
+	r.codexWSLastModel = model
+	r.codexWSLastRespID = respID
+	r.codexWSLastInpLen = baselineLen
+	r.codexWSLastInpSig = baselineSig
+	r.codexWSLastReqSig = reqSig
+}
+
+func (r *ResponsesProvider) codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model string) bool {
+	return r.codexWSLastKey == apiKey && r.codexWSLastAPIURL == apiURL && r.codexWSLastModel == model
+}
+
 func (r *ResponsesProvider) codexWSCanUseIncrementalLocked(
 	apiKey string,
+	apiURL string,
 	model string,
 	reqSig string,
 	fullInput []responsesInputItem,
@@ -303,8 +323,8 @@ func (r *ResponsesProvider) codexWSCanUseIncrementalLocked(
 	if r.codexWSLastReqSig == "" {
 		return false, 0, "no_previous_request_signature"
 	}
-	if apiKey != r.codexWSLastKey || model != r.codexWSLastModel {
-		return false, 0, "key_or_model_changed"
+	if !r.codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model) {
+		return false, 0, "key_model_or_endpoint_changed"
 	}
 	if reqSig == "" || reqSig != r.codexWSLastReqSig {
 		return false, 0, "request_signature_changed"
@@ -604,12 +624,9 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		return nil, false, err
 	}
 
-	if r.codexWSConn != nil && (apiKey != r.codexWSLastKey || model != r.codexWSLastModel) {
-		r.codexWSCloseConnUnlocked("key_or_model_changed")
-		r.codexWSLastRespID = ""
-		r.codexWSLastInpLen = 0
-		r.codexWSLastInpSig = ""
-		r.codexWSLastReqSig = ""
+	if r.codexWSConn != nil && !r.codexWSRouteIdentityMatchesLocked(apiKey, httpsURL, model) {
+		r.codexWSCloseConnUnlocked("key_model_or_endpoint_changed")
+		r.codexWSClearChainStateLocked()
 	}
 
 	reqSig := responsesRequestSignature(req)
@@ -685,22 +702,17 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			return nil, false, prewarmErr
 		}
 		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, prewarmOutputItems)
-		r.codexWSLastKey = apiKey
-		r.codexWSLastModel = model
-		r.codexWSLastReqSig = reqSig
-		r.codexWSLastInpLen = baselineLen
-		r.codexWSLastInpSig = baselineSig
+		prewarmRespID := ""
 		if prewarmResp != nil {
-			r.codexWSLastRespID = prewarmResp.ProviderResponseID
-		} else {
-			r.codexWSLastRespID = ""
+			prewarmRespID = prewarmResp.ProviderResponseID
 		}
+		r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, reqSig, baselineLen, baselineSig, prewarmRespID)
 	}
 
 	useIncremental := false
 	var wireInput []responsesInputItem
 	var prevID string
-	if ok, baselineLen, reason := r.codexWSCanUseIncrementalLocked(apiKey, model, reqSig, fullInput, true); ok {
+	if ok, baselineLen, reason := r.codexWSCanUseIncrementalLocked(apiKey, httpsURL, model, reqSig, fullInput, true); ok {
 		useIncremental = true
 		wireInput = fullInput[baselineLen:]
 		prevID = r.codexWSLastRespID
@@ -738,18 +750,15 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	}
 
 	_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, outputItems)
-	r.codexWSLastKey = apiKey
-	r.codexWSLastModel = model
-	r.codexWSLastReqSig = reqSig
-	r.codexWSLastInpLen = baselineLen
-	r.codexWSLastInpSig = baselineSig
-	if resp != nil && resp.ProviderResponseID != "" {
-		r.codexWSLastRespID = resp.ProviderResponseID
-	} else {
-		r.codexWSLastRespID = ""
+	respID := ""
+	if resp != nil {
+		respID = resp.ProviderResponseID
+	}
+	r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, reqSig, baselineLen, baselineSig, respID)
+	if resp == nil || resp.ProviderResponseID == "" {
 		log.Debugf("responses: codex ws completed without response id; incremental chain not advanced model=%v", model)
 	}
-	log.Debugf("responses codex ws baseline updated model=%v baseline_len=%v output_items=%v request_signature_set=%v", model, baselineLen, len(outputItems), r.codexWSLastReqSig != "")
+	log.Debugf("responses codex ws baseline updated model=%v baseline_len=%v output_items=%v request_signature_set=%v", model, baselineLen, len(outputItems), reqSig != "")
 
 	return resp, useIncremental, nil
 }

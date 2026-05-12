@@ -42,6 +42,7 @@ type ResponsesProvider struct {
 	codexWSConn           *websocket.Conn
 	codexWSStickyDisabled atomic.Bool
 	codexWSLastKey        string
+	codexWSLastAPIURL     string
 	codexWSLastModel      string
 	codexWSLastRespID     string
 	codexWSLastInpLen     int
