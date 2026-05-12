@@ -93,19 +93,6 @@ func newAuthCmd() *cobra.Command {
 		RunE:  runAuthLogin,
 	}
 	bindAuthLoginFlags(cmd)
-	cmd.AddCommand(newAuthLoginCmd())
-	return cmd
-}
-
-func newAuthLoginCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:    "login [provider]",
-		Short:  "Sign in with a preset: codex provider",
-		Hidden: true,
-		Args:   cobra.MaximumNArgs(1),
-		RunE:   runAuthLogin,
-	}
-	bindAuthLoginFlags(cmd)
 	return cmd
 }
 

@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 )
@@ -257,21 +255,6 @@ func TestDoctorModelsCommandHelp(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help output missing %q:\n%s", want, text)
 		}
-	}
-}
-
-func TestTestProvidersCommandHiddenDeprecatedAlias(t *testing.T) {
-	root := &cobra.Command{Use: "chord"}
-	root.AddCommand(newDoctorCmd(), newTestProvidersCmd())
-	cmd, _, err := root.Find([]string{"test-providers"})
-	if err != nil {
-		t.Fatalf("find test-providers: %v", err)
-	}
-	if cmd == nil || cmd.Use != "test-providers" {
-		t.Fatalf("cmd = %#v, want test-providers", cmd)
-	}
-	if !cmd.Hidden || cmd.Deprecated == "" {
-		t.Fatalf("hidden/deprecated = %v/%q, want hidden deprecated alias", cmd.Hidden, cmd.Deprecated)
 	}
 }
 

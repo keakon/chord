@@ -101,8 +101,6 @@ chord auth codex
 chord auth codex --device-code
 ```
 
-`chord auth login [provider]` 是同一流程的隐藏子命令别名。
-
 ## `chord headless`
 
 无 TUI 启动 Chord。stdin 接收 JSON 命令，stdout 输出 JSON envelope。完整协议见 [Headless](./headless_CN.md)。

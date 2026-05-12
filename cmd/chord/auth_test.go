@@ -655,15 +655,10 @@ func TestNewAuthCmd_DefaultsToDirectLogin(t *testing.T) {
 		t.Fatal("did not expect removed --no-browser alias")
 	}
 
-	loginCmd, _, err := cmd.Find([]string{"login"})
-	if err != nil {
-		t.Fatalf("Find login: %v", err)
-	}
-	if loginCmd == nil || loginCmd.Name() != "login" {
-		t.Fatalf("expected hidden login subcommand, got %#v", loginCmd)
-	}
-	if !loginCmd.Hidden {
-		t.Fatal("expected login subcommand to be hidden")
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "login" {
+			t.Fatalf("expected removed login subcommand, got %#v", sub)
+		}
 	}
 }
 

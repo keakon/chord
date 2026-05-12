@@ -1082,28 +1082,6 @@ func displayDoctorModelRef(result doctorModelResult) string {
 	return "unknown"
 }
 
-func newTestProvidersCmd() *cobra.Command {
-	var providerFilter string
-	cmd := &cobra.Command{
-		Use:        "test-providers",
-		Short:      "Deprecated alias for doctor models",
-		Deprecated: "use 'chord doctor models' instead",
-		Hidden:     true,
-		Args:       cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runDoctorModels(cmd.Context(), doctorModelsOptions{
-				Provider: strings.TrimSpace(providerFilter),
-				Timeout:  doctorModelsDefaultTimeout,
-				Retry:    doctorModelsDefaultRetry,
-				Out:      cmd.OutOrStdout(),
-				APIBase:  strings.TrimSpace(flagAPIBase),
-			})
-		},
-	}
-	cmd.Flags().StringVar(&providerFilter, "provider", "", "Provider name to test")
-	return cmd
-}
-
 func parseDoctorModelRef(raw string) (base, variant string) {
 	base, variant = config.ParseModelRef(strings.TrimSpace(raw))
 	return strings.TrimSpace(base), strings.TrimSpace(variant)

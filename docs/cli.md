@@ -101,8 +101,6 @@ chord auth codex
 chord auth codex --device-code
 ```
 
-`chord auth login [provider]` is a hidden subcommand kept as an explicit alias for the same flow.
-
 ## `chord headless`
 
 Run Chord without a TUI. Input is JSON commands on stdin, output is JSON envelopes on stdout. See [Headless](./headless.md) for the full protocol.
