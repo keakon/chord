@@ -362,14 +362,6 @@ func (a *MainAgent) handleModelsSetAgent(rest string) {
 	}
 }
 
-func baseModelRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if idx := strings.LastIndex(ref, "@"); idx >= 0 {
-		return strings.TrimSpace(ref[:idx])
-	}
-	return ref
-}
-
 func canonicalPoolMembershipRef(ref string, cfg *config.AgentConfig) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
