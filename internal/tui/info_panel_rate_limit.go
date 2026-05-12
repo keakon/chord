@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -49,19 +50,44 @@ func nextRoundedDisplayTransition(d, unit time.Duration) time.Duration {
 	}
 }
 
+func rateLimitWindowHasFutureReset(w *ratelimit.RateLimitWindow) bool {
+	return w != nil && !w.ResetsAt.IsZero() && time.Until(w.ResetsAt) > 0
+}
+
+func validRateLimitUsedPercent(pct float64) bool {
+	return pct >= 0 && !math.IsNaN(pct) && !math.IsInf(pct, 0)
+}
+
+func shouldShowRateLimitWindow(w *ratelimit.RateLimitWindow, includeZeroWithReset bool) bool {
+	if w == nil {
+		return false
+	}
+	pct := w.UsedPercent()
+	if !validRateLimitUsedPercent(pct) {
+		return false
+	}
+	if pct > 0 {
+		return true
+	}
+	return includeZeroWithReset && rateLimitWindowHasFutureReset(w)
+}
+
 // renderRateLimitBlock renders the RATE LIMIT info-panel section from a snapshot.
 func (m *Model) renderRateLimitBlock(snap *ratelimit.KeyRateLimitSnapshot, lineW int) string {
 	formatWindow := func(label string, w ratelimit.RateLimitWindow) string {
 		pct := w.UsedPercent()
-		valueParts := make([]string, 0, 2)
-		if pct >= 0 {
-			valueParts = append(valueParts, fmt.Sprintf("%.0f%%", pct))
-		}
-		if resetStr := formatRateLimitResetTime(w); resetStr != "" {
-			valueParts = append(valueParts, resetStr)
-		}
-		if len(valueParts) == 0 {
+		if !validRateLimitUsedPercent(pct) {
 			return ""
+		}
+		resetStr := formatRateLimitResetTime(w)
+		if pct == 0 && resetStr == "" {
+			return ""
+		}
+
+		valueParts := make([]string, 0, 2)
+		valueParts = append(valueParts, fmt.Sprintf("%.0f%%", pct))
+		if resetStr != "" {
+			valueParts = append(valueParts, resetStr)
 		}
 
 		var valueStyle lipgloss.Style
@@ -81,15 +107,15 @@ func (m *Model) renderRateLimitBlock(snap *ratelimit.KeyRateLimitSnapshot, lineW
 		return InfoPanelLineBg.Width(lineW).Render(valueStyle.Render(truncateOneLine(text, lineW-2)))
 	}
 
-	showPrimary := snap.Primary != nil
-	showSecondary := snap.Secondary != nil && snap.Secondary.UsedPercent() != 0
+	showPrimary := shouldShowRateLimitWindow(snap.Primary, true)
+	showSecondary := shouldShowRateLimitWindow(snap.Secondary, false)
 	if !showPrimary && !showSecondary {
 		return ""
 	}
 	showLabels := showPrimary && showSecondary
 
 	lines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("RATE LIMIT"))}
-	if snap.Primary != nil {
+	if showPrimary {
 		label := ""
 		if showLabels {
 			label = formatRateLimitWindowLabel(snap.Primary.WindowMinutes, "Primary")

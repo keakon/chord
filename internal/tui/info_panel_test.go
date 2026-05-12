@@ -1110,6 +1110,36 @@ func TestToolResultStatusFromRestoredContent(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelRateLimitHidesPrimaryWithNoMeaningfulData(t *testing.T) {
+	cases := []struct {
+		name   string
+		window ratelimit.RateLimitWindow
+	}{
+		{
+			name:   "zero without reset",
+			window: ratelimit.RateLimitWindow{UsedPct: 0, WindowMinutes: 5 * 60},
+		},
+		{
+			name:   "unknown with reset",
+			window: ratelimit.RateLimitWindow{UsedPct: -1, WindowMinutes: 5 * 60, ResetsAt: time.Now().Add(time.Hour)},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newInfoPanelAgent()
+			window := tc.window
+			backend.rateLimitSnapshot = &ratelimit.KeyRateLimitSnapshot{Primary: &window}
+
+			m := NewModel(backend)
+			section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "RATE LIMIT")
+			if len(section) != 0 {
+				t.Fatalf("rate limit section = %#v, want hidden", section)
+			}
+		})
+	}
+}
+
 func TestRenderInfoPanelRateLimitHidesSecondaryWhenZeroAndDropsPrimaryLabel(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.rateLimitSnapshot = &ratelimit.KeyRateLimitSnapshot{
