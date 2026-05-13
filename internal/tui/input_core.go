@@ -322,6 +322,15 @@ func (i *Input) CursorEnd() {
 }
 
 // SetCursorPosition moves the cursor to the given 0-based row and column.
+//
+// Note: bubbles/textarea.CursorDown() moves by *visual* (soft-wrapped) rows.
+// This helper intentionally restores by logical \n-delimited line first by
+// jumping to the beginning and then repeating CursorDown(). This is safe only
+// when there is no soft-wrapping before the target row.
+//
+// Callers that rebuild content (e.g. paste placeholder insertion) should avoid
+// using this helper and instead restore the cursor by replaying edits or using
+// the textarea model's own movement APIs.
 func (i *Input) SetCursorPosition(row, col int) {
 	if row < 0 {
 		row = 0

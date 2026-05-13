@@ -225,7 +225,7 @@ Currently supported:
 
 Common actions:
 
-- `Ctrl+V` / `Cmd+V` in the main composer: prefer clipboard image input. If an image is found, Chord adds it as an attachment and inserts a placeholder like `[image1]` at the cursor; any pasted text provided by the terminal is inserted after the placeholder. If no image is found, Chord pastes text.
+- `Ctrl+V` / `Cmd+V` in the main composer: prefer clipboard image input. If an image is found, Chord adds it as an attachment and inserts a placeholder like `[image1]` at the cursor; any pasted text provided by the terminal is inserted after the placeholder. If no image is found, Chord pastes text. After paste completes, the cursor is kept immediately after the inserted placeholder/text.
 - `Ctrl+V` / `Cmd+V` in confirmation-dialog text fields: always paste text, never attach images
 - Inline image attachments are capped at 5 per composer message
 - Typing literal placeholder text such as `[image1]` does not attach an image by itself; only Chord-inserted inline image placeholders are attachment-backed
