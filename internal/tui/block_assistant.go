@@ -548,9 +548,6 @@ func (b *Block) renderAssistant(width int) []string {
 			var settledLines []string
 			var settledSynthetic []int
 			var settledSoftWraps []bool
-			var tailLines []string
-			var tailSynthetic []int
-			var tailSoftWraps []bool
 			if b.Streaming {
 				// Incremental markdown rendering for streaming content:
 				// split into a stable prefix (settled, rendered via glamour once per
@@ -586,19 +583,12 @@ func (b *Block) renderAssistant(width int) []string {
 				// tail: content after the settled frontier, always cheap path.
 				tailRaw := rawContent[frontier:]
 				if tailRaw != "" {
-					if b.streamTailRaw == tailRaw && b.streamTailWidth == contentWidth {
-						tailLines = b.streamTailLines
-						tailSynthetic = b.streamTailSyntheticPrefixWidths
-						tailSoftWraps = b.streamTailSoftWrapContinuations
-					} else {
-						tailLines = wrapText(tailRaw, contentWidth)
-						tailSynthetic = make([]int, len(tailLines))
-						tailSoftWraps = make([]bool, len(tailLines))
+					if b.streamTailRaw != tailRaw || b.streamTailWidth != contentWidth {
+						b.streamTailLines = wrapText(tailRaw, contentWidth)
+						b.streamTailSyntheticPrefixWidths = make([]int, len(b.streamTailLines))
+						b.streamTailSoftWrapContinuations = make([]bool, len(b.streamTailLines))
 						b.streamTailRaw = tailRaw
 						b.streamTailWidth = contentWidth
-						b.streamTailLines = tailLines
-						b.streamTailSyntheticPrefixWidths = tailSynthetic
-						b.streamTailSoftWrapContinuations = tailSoftWraps
 					}
 				} else {
 					b.streamTailRaw = ""

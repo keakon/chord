@@ -54,3 +54,58 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	p.maybeReloadAuthStateLocked()
 	p.mu.Unlock()
 }
+
+func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1", Status: config.OAuthStatusDeactivated}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusDeactivated},
+	}, "")
+
+	p.mu.Lock()
+	p.keyStates[0].Invalid = true
+	p.mu.Unlock()
+
+	snap := &ratelimit.KeyRateLimitSnapshot{Primary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: time.Now().Add(time.Hour)}}
+	p.persistAuthStateForKey("key-a", snap, time.Time{})
+
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"})
+	if !ok {
+		t.Fatal("expected auth.state record for key-a")
+	}
+	if record.Status != config.OAuthStatusDeactivated {
+		t.Fatalf("expected deactivated status preserved, got %q", record.Status)
+	}
+}
+
+func TestPersistAuthStateForKeyPreservesRuntimeDeactivatedStatus(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusNormal},
+	}, "")
+
+	p.MarkDeactivated("key-a")
+	snap := &ratelimit.KeyRateLimitSnapshot{Primary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: time.Now().Add(time.Hour)}}
+	p.persistAuthStateForKey("key-a", snap, time.Time{})
+
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"})
+	if !ok {
+		t.Fatal("expected auth.state record for key-a")
+	}
+	if record.Status != config.OAuthStatusDeactivated {
+		t.Fatalf("expected runtime deactivated status preserved, got %q", record.Status)
+	}
+}

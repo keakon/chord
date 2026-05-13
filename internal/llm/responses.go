@@ -339,7 +339,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, parseErr, httpStatus := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -357,16 +357,16 @@ func (r *ResponsesProvider) sendAndParse(
 	apiKey string,
 	useOpenAIOAuth bool,
 	cb StreamCallback,
-) (*message.Response, error, int) {
+) (*message.Response, int, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("responses request aborted: %w", err), 0
+		return nil, 0, fmt.Errorf("responses request aborted: %w", err)
 	}
 	// Build HTTP request with a derived context for per-chunk timeout enforcement.
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err), 0
+		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -390,7 +390,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	httpResp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err), 0
+		return nil, 0, fmt.Errorf("send request: %w", err)
 	}
 	defer httpResp.Body.Close()
 
@@ -398,7 +398,7 @@ func (r *ResponsesProvider) sendAndParse(
 	if httpResp.Header.Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("create gzip reader: %w", err), 0
+			return nil, 0, fmt.Errorf("create gzip reader: %w", err)
 		}
 		httpResp.Body = gr
 	}
@@ -455,7 +455,7 @@ func (r *ResponsesProvider) sendAndParse(
 				}
 			}()
 		}
-		return nil, apiErr, httpResp.StatusCode
+		return nil, httpResp.StatusCode, apiErr
 	}
 
 	// Parse OpenAI Codex OAuth rate-limit headers from the 200 response and notify via callback.
@@ -535,5 +535,5 @@ func (r *ResponsesProvider) sendAndParse(
 		}()
 	}
 
-	return resp, parseErr, httpResp.StatusCode
+	return resp, httpResp.StatusCode, parseErr
 }

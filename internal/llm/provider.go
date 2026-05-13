@@ -97,6 +97,7 @@ type OAuthKeyInfo struct {
 	AccountID             string
 	Email                 string
 	Access                string
+	Status                config.OAuthCredentialStatus
 	CodexPrimaryResetAt   int64
 	CodexSecondaryResetAt int64
 	StateUpdatedAt        int64
@@ -472,6 +473,7 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		ks.OAuthInfo.LastWarmupAt = record.LastWarmupAt
 		if record.Status != "" {
 			ks.Invalid = !record.Status.IsValid()
+			ks.OAuthInfo.Status = record.Status
 		}
 		ks.OAuthInfo.CodexPrimaryResetAt = record.CodexPrimaryResetAt
 		ks.OAuthInfo.CodexSecondaryResetAt = record.CodexSecondaryResetAt
@@ -530,7 +532,10 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 	stateKey := p.authStateKeyLocked(ks)
 	status := config.OAuthStatusNormal
 	if ks.Invalid {
-		status = config.OAuthStatusExpired
+		status = ks.OAuthInfo.Status
+		if status.IsValid() {
+			status = config.OAuthStatusExpired
+		}
 	}
 	p.mu.Unlock()
 	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
@@ -1128,6 +1133,7 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath st
 			AccountID:             setup.AccountID,
 			Email:                 setup.Email,
 			Access:                firstNonEmptyOAuthAccess(setup.Access, ks.Key),
+			Status:                setup.Status,
 			CodexPrimaryResetAt:   setup.CodexPrimaryResetAt,
 			CodexSecondaryResetAt: setup.CodexSecondaryResetAt,
 			StateUpdatedAt:        setup.StateUpdatedAt,
@@ -1738,6 +1744,7 @@ func (p *ProviderConfig) markInvalidKeyStateLocked(ks *KeyState, status config.O
 	ks.ExhaustedUntil = time.Time{}
 	match := config.OAuthCredentialMatch{Access: ks.Key}
 	if ks.OAuthInfo != nil {
+		ks.OAuthInfo.Status = status
 		credentialIndex := ks.OAuthInfo.CredentialIndex
 		match.AccountID = ks.OAuthInfo.AccountID
 		match.CredentialIndex = &credentialIndex
