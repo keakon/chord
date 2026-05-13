@@ -80,7 +80,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-用 `preset: codex` provider 登录 OAuth，凭据存入 `~/.config/chord/auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。
+用 `preset: codex` provider 登录 OAuth，凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.yaml`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。
 
 ### Flag
 
@@ -99,6 +99,20 @@ chord auth codex
 
 # Headless / SSH 环境
 chord auth codex --device-code
+```
+
+### `chord auth state clean`
+
+清理 `~/.config/chord/auth.state.yaml` 中已失效的 OAuth 运行时状态条目，不会动 `auth.yaml` 中的真实凭据。
+
+典型用途：
+
+- 清理过期 / 已停用账号残留的共享缓存状态；
+- 在轮换或下线账号后收缩 `auth.state.yaml`；
+- 保留凭据的前提下重置缓存的 OAuth 状态。
+
+```bash
+chord auth state clean
 ```
 
 ## `chord headless`

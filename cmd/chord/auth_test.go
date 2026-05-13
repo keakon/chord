@@ -662,6 +662,60 @@ func TestNewAuthCmd_DefaultsToDirectLogin(t *testing.T) {
 	}
 }
 
+func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
+	configHome := t.TempDir()
+	oldXDG := os.Getenv("XDG_CONFIG_HOME")
+	if err := os.Setenv("XDG_CONFIG_HOME", configHome); err != nil {
+		t.Fatalf("Setenv(XDG_CONFIG_HOME): %v", err)
+	}
+	defer func() {
+		if oldXDG == "" {
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			_ = os.Setenv("XDG_CONFIG_HOME", oldXDG)
+		}
+	}()
+
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusExpired
+		record.Email = "expired@example.com"
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	defer r.Close()
+	if err := cmd.Execute(); err != nil {
+		_ = w.Close()
+		t.Fatalf("Execute: %v", err)
+	}
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout): %v", err)
+	}
+	if !strings.Contains(string(output), "expired@example.com") {
+		t.Fatalf("expected output to contain removed email, got %q", string(output))
+	}
+}
+
 func TestParseAuthBrowserPromptByte(t *testing.T) {
 	tests := []struct {
 		name  string

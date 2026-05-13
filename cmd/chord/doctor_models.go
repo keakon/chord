@@ -762,7 +762,8 @@ func configureDoctorModelsOAuthRefresher(runtimeCfg *doctorModelsRuntimeConfig, 
 		return nil
 	}
 	oauthMap, backfills := oauthCredentialMap(creds)
-	llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, effectiveProxy)
+	authStatePath := strings.TrimSuffix(runtimeCfg.AuthPath, ".yaml") + ".state.yaml"
+	llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, authStatePath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, effectiveProxy)
 	if len(backfills) > 0 {
 		if saveErr := persistOAuthMetadataBackfills(runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, providerName, backfills); saveErr != nil {
 			log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", providerName, saveErr)

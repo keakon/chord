@@ -1095,7 +1095,7 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	creds := runtimeCfg.providerCredentials("openai")
 	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
 	oauthMap, _ := oauthCredentialMap(creds)
-	llmProviderCfg.SetOAuthRefresher(refreshServer.URL, "client-id", runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, "")
+	llmProviderCfg.SetOAuthRefresher(refreshServer.URL, "client-id", runtimeCfg.AuthPath, "", &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, "")
 
 	refreshedKey, ok, err := llmProviderCfg.TryRefreshOAuthKey(context.Background(), "old-access")
 	if err != nil {

@@ -47,6 +47,7 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			CredentialIndex:       credIdx,
 			AccountID:             accountID,
 			Email:                 email,
+			Access:                cred.OAuth.Access,
 			Expires:               cred.OAuth.Expires,
 			Status:                cred.OAuth.Status,
 			CodexPrimaryResetAt:   cred.OAuth.CodexPrimaryResetAt,

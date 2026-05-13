@@ -538,12 +538,14 @@ func resolveModelRef(
 			if pathErr == nil {
 				authCopy := auth
 				var authMu sync.Mutex
+				authStatePath := strings.TrimSuffix(authConfigPath, ".yaml") + ".state.yaml"
 				effectiveProxy := llm.ResolveEffectiveProxy(normalizedProviderCfg.Proxy, globalProxy)
 				oauthMap, backfills := oauthCredentialMap(creds)
 				provCfg.SetOAuthRefresher(
 					tokenURL,
 					clientID,
 					authConfigPath,
+					authStatePath,
 					&authCopy,
 					&authMu,
 					oauthMap,

@@ -93,6 +93,32 @@ func newAuthCmd() *cobra.Command {
 		RunE:  runAuthLogin,
 	}
 	bindAuthLoginFlags(cmd)
+	cmd.AddCommand(newAuthStateCmd())
+	return cmd
+}
+
+func newAuthStateCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "state", Short: "Manage shared OAuth runtime state"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "clean",
+		Short: "Remove invalid OAuth state entries from auth.state.yaml",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			statePath, err := config.AuthStatePath()
+			if err != nil {
+				return fmt.Errorf("resolve auth state path: %w", err)
+			}
+			_, removed, err := config.RemoveInvalidOAuthStateRecords(statePath)
+			if err != nil {
+				return fmt.Errorf("clean auth state: %w", err)
+			}
+			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth state entries from %s\n", len(removed), statePath)
+			for _, entry := range removed {
+				fmt.Fprintf(os.Stdout, "- %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+			}
+			return nil
+		},
+	})
 	return cmd
 }
 

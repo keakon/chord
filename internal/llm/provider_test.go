@@ -65,7 +65,7 @@ func TestSelectKey_NoKeys(t *testing.T) {
 
 func TestSelectKey_DeactivatedOnlyOAuthKeysReturnsNoUsableKeys(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-deactivated"})
-	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{
 		"oauth-deactivated": {CredentialIndex: 0, AccountID: "acc-deactivated", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusDeactivated},
 	}, "")
 
@@ -113,7 +113,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	}))
 	defer refreshServer.Close()
 
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"old-access": {
 			CredentialIndex:       0,
 			AccountID:             "acc-1",
@@ -203,7 +203,7 @@ func TestSelectKeyOnDemandInvalidRefreshMarksExpiredWithoutAccountID(t *testing.
 		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
 	}))
 	defer refreshServer.Close()
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"old-access": {CredentialIndex: 0, Expires: expires},
 	}, "")
 
@@ -250,7 +250,7 @@ func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
 	}))
 	defer refreshServer.Close()
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"old-access":   {CredentialIndex: 0, Expires: expired},
 		"valid-access": {CredentialIndex: 1, Expires: valid},
 	}, "")
@@ -540,7 +540,7 @@ func TestMarkKeySuccess_ClearsPersistedCodexResetHints(t *testing.T) {
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
-	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-key": {
 			CredentialIndex:       0,
 			AccountID:             "acc-1",

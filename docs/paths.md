@@ -20,12 +20,15 @@ You edit these files. Treat them as source.
 ~/.config/chord/
 ├── config.yaml            # global chord config
 ├── auth.yaml              # API keys / OAuth tokens (chmod 600 recommended)
+├── auth.state.yaml        # machine-managed shared OAuth runtime state / quota cache
 ├── agents/                # global agent definitions (.md or .yaml)
 ├── commands/              # global custom slash commands (.md per command)
 └── skills/                # global skills, each as <name>/SKILL.md
 ```
 
 For the `config.yaml` schema, see [Configuration & Auth](./configuration.md). For agents, see [Customization — Agents](./customization.md#agents). For skills, see [Customization — Skills](./customization.md#skills). For custom slash commands, see [Customization — Custom slash commands](./customization.md#custom-slash-commands).
+
+`auth.state.yaml` is a shared runtime cache for OAuth status, Codex quota snapshots, reset times, and warm-up timestamps. Chord manages it automatically; users normally should not hand-edit it. Deleting it is safe, but Chord will lose restart-stable cached quota ordering until warm-up repopulates it.
 
 ## State dir — `~/.local/state/chord/`
 
@@ -140,6 +143,7 @@ All `cleanup` subcommands default to **dry-run** — without `--yes` they only l
 | `<state-dir>/sessions/<project-key>/`         | Avoid: this would lose **all** sessions for a project.                                                |
 | `<state-dir>/projects/<project-key>.json`     | Avoid: hand-editing leaves the project registry inconsistent. Use `chord cleanup project` instead.     |
 | `<state-dir>/worktrees/...`                   | Avoid: use `chord worktree remove <name>`.                                                            |
+| `~/.config/chord/auth.state.yaml`             | Yes. It is a machine-managed shared cache; deleting it only drops cached OAuth/quota state until warm-up repopulates it. |
 | `~/.config/chord/`                            | Only if you want a clean reinstall. Do not delete `auth.yaml` unless you have your keys somewhere else. |
 | `<project>/.chord/`                           | Only if you really want to drop the project's chord overrides. Often committed to git.                 |
 

@@ -149,23 +149,38 @@ openai:
 
 可配置多个 key 作为轮换或备用。
 
-对于 `preset: codex` 的 OAuth 凭据，Chord 还可能在 `auth.yaml` 中、同一个 provider key 下，持久化 provider 专用的软提示字段。例如当 `config.yaml` 中的 provider 名叫 `codex` 时：
+对于 `preset: codex` 的 OAuth provider，Chord 会把高频变化的运行时状态（额度快照、重置时间、最近 warm-up 时间、共享 OAuth 状态缓存）写入 `auth.state.yaml`，而不是继续频繁改写 `auth.yaml`。
+
+这样拆分是有意为之：
+
+- `auth.yaml` 继续作为用户手动维护的凭据真相源，保存 `refresh`、`access`、`expires`、`account_id`、`email` 等相对稳定字段；
+- `auth.state.yaml` 作为机器维护的共享运行时状态，避免额度 / reset 更新频繁改动 `auth.yaml`，与用户手工编辑发生冲突。
+
+典型的 `auth.state.yaml` 条目形态如下：
 
 ```yaml
-codex:
-  - refresh: "..."
-    access: "..."
-    expires: 1774009702606
+openai:
+  openai:account_id:acc-1:
     account_id: acc-1
+    email: user@example.com
+    access: "..."
+    status: normal
+    updated_at: 1774009702606
+    last_warmup_at: 1774009702606
+    codex_primary_used_pct: 12.5
+    codex_primary_window_minutes: 60
     codex_primary_reset_at: 1774013302000
+    codex_secondary_used_pct: 40
+    codex_secondary_window_minutes: 10080
     codex_secondary_reset_at: 1774600000000
 ```
 
-这些 `codex_*_reset_at` 字段是跨重启保留的调度提示，不是硬封禁：
+这些 Codex 缓存字段是跨重启保留的调度与展示提示，不是硬封禁：
 
-- 会影响启动后 / 首次选号时的优先级；
+- 会帮助启动后 / 首次选号时优先选择更可能仍有额度的账号；
+- 会让切 key 时先显示上次缓存的额度快照，再等待新 warm-up 覆盖；
 - **不会**仅凭字段本身就让账号绝对不可选；
-- 真正的硬封禁仍来自已确认的请求失败，并只在运行时内存中跟踪。
+- 真正的硬封禁仍来自已确认的请求失败和运行时 cooldown 状态。
 
 ## auth.yaml 中的环境变量
 
@@ -204,12 +219,19 @@ local-provider:
 
 `smart` 不改变现有 `key_rotation` 语义，但会在可选的 Codex OAuth 账号之间优先：
 
-- 绕开仍带有持久化 soft-cooling hint 的账号；
-- 优先当前进程内尚未使用过的账号；
-- 在已有 rate-limit snapshot 时优先剩余额度头寸更高的账号；
-- 当没有更优候选时，仍允许回退尝试 soft-cooled 账号。
+- 优先共享缓存里显示 **两种** 跟踪窗口都仍有剩余额度的账号；
+- 其次优先至少有一种窗口仍有剩余额度的账号；
+- 在已有 rate-limit snapshot 时再比较剩余额度头寸；
+- 候选差不多时再优先更早到达已知 reset 时间的账号；
+- 如果没有更优信息，仍会回退尝试未知或缓存较旧的账号。
 
 当 Codex client 变为活跃状态后，Chord 还可能在后台探测其他 OAuth slot，以刷新缓存的 headroom 快照。这个 warm-up 是 best-effort、低并发的，会在活跃 client 被替换时取消，并且在账号不可用时可能同步更新持久化的 OAuth 凭据状态。
+
+warm-up 本身也会参考共享状态优先级：
+
+- 从未在共享状态里 warm-up 过的账号优先；
+- 缓存较旧的账号优先于最近刚刷新的账号；
+- warm-up 或轮询拿到更新后的快照后，会写回 `auth.state.yaml`，其他进程会在下次读取选 key 或额度状态时按需吸收这些更新。
 
 ```bash
 # 自动选择已配置的 codex provider

@@ -80,7 +80,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-Sign in with a `preset: codex` OAuth provider and store credentials under `~/.config/chord/auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured.
+Sign in with a `preset: codex` OAuth provider and store credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.yaml` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured.
 
 ### Flags
 
@@ -99,6 +99,20 @@ chord auth codex
 
 # Headless / SSH environments
 chord auth codex --device-code
+```
+
+### `chord auth state clean`
+
+Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml` without touching credentials in `auth.yaml`.
+
+Typical use cases:
+
+- clear shared cached state for expired / deactivated accounts after cleanup;
+- keep `auth.state.yaml` small after rotating or retiring accounts;
+- reset cached OAuth status while preserving real credentials.
+
+```bash
+chord auth state clean
 ```
 
 ## `chord headless`

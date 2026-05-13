@@ -44,7 +44,7 @@ func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, s
 	}, config.ExtractAPIKeys(creds))
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
-	provider.SetOAuthRefresher("https://auth.openai.com/oauth/token", "app_EMoamEEZ73f0CkXaXp7hrann", "", &auth, &authMu, map[string]OAuthKeySetup{
+	provider.SetOAuthRefresher("https://auth.openai.com/oauth/token", "app_EMoamEEZ73f0CkXaXp7hrann", "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		accessToken: {
 			CredentialIndex: 0,
 			AccountID:       "acc-test",

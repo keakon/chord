@@ -80,10 +80,14 @@ type OAuthKeySetup struct {
 	CredentialIndex       int
 	AccountID             string
 	Email                 string
+	Access                string
 	Expires               int64
 	Status                config.OAuthCredentialStatus
 	CodexPrimaryResetAt   int64
 	CodexSecondaryResetAt int64
+	StateUpdatedAt        int64
+	LastWarmupAt          int64
+	RateLimit             *ratelimit.KeyRateLimitSnapshot
 }
 
 // OAuthKeyInfo holds OAuth-specific metadata for a key.
@@ -92,8 +96,11 @@ type OAuthKeyInfo struct {
 	CredentialIndex       int   // index in auth[providerName]
 	AccountID             string
 	Email                 string
+	Access                string
 	CodexPrimaryResetAt   int64
 	CodexSecondaryResetAt int64
+	StateUpdatedAt        int64
+	LastWarmupAt          int64
 }
 
 // ProviderConfig holds provider-level configuration.
@@ -131,6 +138,9 @@ type ProviderConfig struct {
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot
 	effectiveProxyURL          string
 	compress                   bool // whether gzip request compression is enabled
+	authStatePath              string
+	authState                  config.AuthStateFile
+	authStateMTime             time.Time
 }
 
 // OAuthRefresher handles on-demand OAuth token refresh.
@@ -138,6 +148,7 @@ type OAuthRefresher struct {
 	tokenURL       string
 	clientID       string
 	authConfigPath string
+	authStatePath  string
 	authConfigMu   *sync.Mutex
 	authConfig     *config.AuthConfig
 	httpClient     *http.Client // used for token refresh requests; may use proxy
@@ -148,7 +159,7 @@ func (r *OAuthRefresher) persistCredentialStatus(match config.OAuthCredentialMat
 	if r == nil || r.authConfig == nil || r.authConfigMu == nil {
 		return nil
 	}
-	_, _, err := r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {
+	updated, _, err := r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {
 		if cred.Status == status {
 			return false, nil
 		}
@@ -157,6 +168,33 @@ func (r *OAuthRefresher) persistCredentialStatus(match config.OAuthCredentialMat
 	})
 	if err != nil {
 		return fmt.Errorf("persist oauth credential status: %w", err)
+	}
+	if updated != nil {
+		if err := r.persistOAuthStateStatus(updated, status); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *OAuthRefresher) persistOAuthStateStatus(cred *config.OAuthCredential, status config.OAuthCredentialStatus) error {
+	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil {
+		return nil
+	}
+	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID, Email: cred.Email, Access: cred.Access}
+	_, _, _, err := config.UpsertOAuthStateRecord(r.authStatePath, key, func(record *config.OAuthStateRecord) (bool, error) {
+		record.AccountID = cred.AccountID
+		record.Email = cred.Email
+		record.Access = cred.Access
+		if record.Status == status {
+			return false, nil
+		}
+		record.Status = status
+		record.UpdatedAt = time.Now().UnixMilli()
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("persist oauth state status: %w", err)
 	}
 	return nil
 }
@@ -368,6 +406,157 @@ func (p *ProviderConfig) keyStateBySlotLocked(slot int) *KeyState {
 	return p.keyStates[slot]
 }
 
+func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
+	if ks == nil || ks.OAuthInfo == nil {
+		return config.OAuthStateKey{}
+	}
+	return config.OAuthStateKey{
+		Provider:  p.name,
+		AccountID: ks.OAuthInfo.AccountID,
+		Email:     ks.OAuthInfo.Email,
+		Access:    firstNonEmptyOAuthAccess(ks.OAuthInfo.Access, ks.Key),
+	}
+}
+
+func firstNonEmptyOAuthAccess(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (p *ProviderConfig) loadAuthStateLocked() {
+	if strings.TrimSpace(p.authStatePath) == "" {
+		return
+	}
+	mtime, err := config.ReadAuthStateMTime(p.authStatePath)
+	if err != nil {
+		log.Warnf("failed to stat auth state path=%v error=%v", p.authStatePath, err)
+		return
+	}
+	if !mtime.IsZero() && !p.authStateMTime.IsZero() && !mtime.After(p.authStateMTime) {
+		return
+	}
+	state, err := config.LoadAuthState(p.authStatePath)
+	if err != nil {
+		log.Warnf("failed to load auth state path=%v error=%v", p.authStatePath, err)
+		return
+	}
+	p.authState = state
+	p.authStateMTime = mtime
+	p.applyAuthStateLocked(state, true)
+}
+
+func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetPollTTL bool) {
+	for _, ks := range p.keyStates {
+		if ks == nil || ks.OAuthInfo == nil {
+			continue
+		}
+		record, ok := config.FindOAuthStateRecord(state, p.authStateKeyLocked(ks))
+		if !ok {
+			continue
+		}
+		if record.AccountID != "" {
+			ks.OAuthInfo.AccountID = record.AccountID
+		}
+		if record.Email != "" {
+			ks.OAuthInfo.Email = record.Email
+		}
+		if record.Access != "" {
+			ks.OAuthInfo.Access = record.Access
+		}
+		ks.OAuthInfo.StateUpdatedAt = record.UpdatedAt
+		ks.OAuthInfo.LastWarmupAt = record.LastWarmupAt
+		if record.Status != "" {
+			ks.Invalid = !record.Status.IsValid()
+		}
+		ks.OAuthInfo.CodexPrimaryResetAt = record.CodexPrimaryResetAt
+		ks.OAuthInfo.CodexSecondaryResetAt = record.CodexSecondaryResetAt
+		ks.SoftCooldownUntil = time.Time{}
+		if snap := codexSnapshotFromOAuthState(p.name, record); snap != nil {
+			credIdx := ks.OAuthInfo.CredentialIndex
+			if credIdx < 0 {
+				continue
+			}
+			if p.polledRateLimitByCredIdx == nil {
+				p.polledRateLimitByCredIdx = make(map[int]*ratelimit.KeyRateLimitSnapshot)
+			}
+			prev := p.polledRateLimitByCredIdx[credIdx]
+			p.polledRateLimitByCredIdx[credIdx] = snap
+			if resetPollTTL && (prev == nil || prev.CapturedAt.Before(snap.CapturedAt)) {
+				if p.polledRateLimitSucceededAt == nil {
+					p.polledRateLimitSucceededAt = make(map[int]time.Time)
+				}
+				p.polledRateLimitSucceededAt[credIdx] = time.Now()
+			}
+		}
+	}
+}
+
+func (p *ProviderConfig) maybeReloadAuthStateLocked() {
+	if strings.TrimSpace(p.authStatePath) == "" {
+		return
+	}
+	mtime, err := config.ReadAuthStateMTime(p.authStatePath)
+	if err != nil {
+		return
+	}
+	if mtime.IsZero() || (!p.authStateMTime.IsZero() && !mtime.After(p.authStateMTime)) {
+		return
+	}
+	state, err := config.LoadAuthState(p.authStatePath)
+	if err != nil {
+		log.Warnf("failed to reload auth state path=%v error=%v", p.authStatePath, err)
+		return
+	}
+	p.authState = state
+	p.authStateMTime = mtime
+	p.applyAuthStateLocked(state, true)
+}
+
+func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyRateLimitSnapshot, warmupAt time.Time) {
+	if strings.TrimSpace(p.authStatePath) == "" || snap == nil {
+		return
+	}
+	p.mu.Lock()
+	ks := p.keyStateByKeyLocked(key)
+	if ks == nil || ks.OAuthInfo == nil {
+		p.mu.Unlock()
+		return
+	}
+	stateKey := p.authStateKeyLocked(ks)
+	status := config.OAuthStatusNormal
+	if ks.Invalid {
+		status = config.OAuthStatusExpired
+	}
+	p.mu.Unlock()
+	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
+		before := *record
+		record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
+		record.Email = firstNonEmptyOAuthAccess(stateKey.Email, record.Email)
+		record.Access = firstNonEmptyOAuthAccess(stateKey.Access, record.Access)
+		record.Status = status
+		codexSnapshotToOAuthStateRecord(record, snap, warmupAt)
+		return !config.EqualOAuthStateRecord(before, *record), nil
+	})
+	if err != nil {
+		log.Warnf("failed to persist auth state provider=%v key_suffix=%v error=%v", p.name, keySuffix(key), err)
+		return
+	}
+	if !changed || updated == nil {
+		return
+	}
+	mtime, _ := config.ReadAuthStateMTime(p.authStatePath)
+	p.mu.Lock()
+	p.authState = state
+	p.authStateMTime = mtime
+	p.applyAuthStateLocked(state, false)
+	p.mu.Unlock()
+}
+
 func (p *ProviderConfig) keyStateByKeyLocked(key string) *KeyState {
 	for _, ks := range p.keyStates {
 		if ks.Key == key {
@@ -480,12 +669,6 @@ func (p *ProviderConfig) codexSoftCooldownUntilLocked(now time.Time, ks *KeyStat
 	if ks.SoftCooldownUntil.After(now) {
 		return ks.SoftCooldownUntil
 	}
-	if ks.OAuthInfo != nil {
-		until := codexSoftCooldownUntilFromMillis(ks.OAuthInfo.CodexPrimaryResetAt, ks.OAuthInfo.CodexSecondaryResetAt, now)
-		ks.SoftCooldownUntil = until
-		return until
-	}
-	ks.SoftCooldownUntil = time.Time{}
 	return time.Time{}
 }
 
@@ -540,6 +723,120 @@ func codexHeadroomScore(snap *ratelimit.KeyRateLimitSnapshot) (float64, bool) {
 	}
 }
 
+func codexKnownWindowRank(snap *ratelimit.KeyRateLimitSnapshot) int {
+	if snap == nil {
+		return 0
+	}
+	pRem, pOK := codexWindowRemainingPct(snap.Primary)
+	sRem, sOK := codexWindowRemainingPct(snap.Secondary)
+	hasPrimary := pOK && pRem > 0
+	hasSecondary := sOK && sRem > 0
+	switch {
+	case hasPrimary && hasSecondary:
+		return 3
+	case hasPrimary || hasSecondary:
+		return 2
+	case pOK || sOK:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func codexSoonestResetAt(snap *ratelimit.KeyRateLimitSnapshot, now time.Time) time.Time {
+	if snap == nil {
+		return time.Time{}
+	}
+	var reset time.Time
+	consider := func(w *ratelimit.RateLimitWindow) {
+		if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) {
+			return
+		}
+		if reset.IsZero() || w.ResetsAt.Before(reset) {
+			reset = w.ResetsAt
+		}
+	}
+	consider(snap.Primary)
+	consider(snap.Secondary)
+	return reset
+}
+
+func codexSnapshotFromOAuthState(provider string, record config.OAuthStateRecord) *ratelimit.KeyRateLimitSnapshot {
+	if record.CodexPrimaryWindowMin == 0 && record.CodexPrimaryResetAt == 0 && record.CodexSecondaryWindowMin == 0 && record.CodexSecondaryResetAt == 0 && record.CodexHasCredits == nil && record.CodexUnlimited == nil && strings.TrimSpace(record.CodexBalance) == "" && record.CodexPrimaryUsedPct == 0 && record.CodexSecondaryUsedPct == 0 {
+		return nil
+	}
+	snap := &ratelimit.KeyRateLimitSnapshot{
+		Provider:   provider,
+		CapturedAt: time.UnixMilli(record.UpdatedAt),
+		Source:     ratelimit.SnapshotSourcePolledUsage,
+	}
+	if record.CodexPrimaryWindowMin != 0 || record.CodexPrimaryResetAt != 0 || record.CodexPrimaryUsedPct != 0 {
+		snap.Primary = &ratelimit.RateLimitWindow{UsedPct: record.CodexPrimaryUsedPct, WindowMinutes: record.CodexPrimaryWindowMin}
+		if record.CodexPrimaryResetAt > 0 {
+			snap.Primary.ResetsAt = time.UnixMilli(record.CodexPrimaryResetAt)
+		}
+	}
+	if record.CodexSecondaryWindowMin != 0 || record.CodexSecondaryResetAt != 0 || record.CodexSecondaryUsedPct != 0 {
+		snap.Secondary = &ratelimit.RateLimitWindow{UsedPct: record.CodexSecondaryUsedPct, WindowMinutes: record.CodexSecondaryWindowMin}
+		if record.CodexSecondaryResetAt > 0 {
+			snap.Secondary.ResetsAt = time.UnixMilli(record.CodexSecondaryResetAt)
+		}
+	}
+	if record.CodexHasCredits != nil || record.CodexUnlimited != nil || strings.TrimSpace(record.CodexBalance) != "" {
+		credits := &ratelimit.CreditsSnapshot{Balance: strings.TrimSpace(record.CodexBalance)}
+		if record.CodexHasCredits != nil {
+			credits.HasCredits = *record.CodexHasCredits
+		}
+		if record.CodexUnlimited != nil {
+			credits.Unlimited = *record.CodexUnlimited
+		}
+		snap.Credits = credits
+	}
+	if snap.CapturedAt.IsZero() {
+		snap.CapturedAt = time.Now()
+	}
+	return snap
+}
+
+func codexSnapshotToOAuthStateRecord(record *config.OAuthStateRecord, snap *ratelimit.KeyRateLimitSnapshot, warmupAt time.Time) {
+	if record == nil || snap == nil {
+		return
+	}
+	if !snap.CapturedAt.IsZero() {
+		record.UpdatedAt = snap.CapturedAt.UnixMilli()
+	} else {
+		record.UpdatedAt = time.Now().UnixMilli()
+	}
+	if !warmupAt.IsZero() {
+		record.LastWarmupAt = warmupAt.UnixMilli()
+	}
+	if snap.Primary != nil {
+		record.CodexPrimaryUsedPct = snap.Primary.UsedPercent()
+		record.CodexPrimaryWindowMin = snap.Primary.WindowMinutes
+		if !snap.Primary.ResetsAt.IsZero() {
+			record.CodexPrimaryResetAt = snap.Primary.ResetsAt.UnixMilli()
+		} else {
+			record.CodexPrimaryResetAt = 0
+		}
+	}
+	if snap.Secondary != nil {
+		record.CodexSecondaryUsedPct = snap.Secondary.UsedPercent()
+		record.CodexSecondaryWindowMin = snap.Secondary.WindowMinutes
+		if !snap.Secondary.ResetsAt.IsZero() {
+			record.CodexSecondaryResetAt = snap.Secondary.ResetsAt.UnixMilli()
+		} else {
+			record.CodexSecondaryResetAt = 0
+		}
+	}
+	if snap.Credits != nil {
+		hasCredits := snap.Credits.HasCredits
+		unlimited := snap.Credits.Unlimited
+		record.CodexHasCredits = &hasCredits
+		record.CodexUnlimited = &unlimited
+		record.CodexBalance = strings.TrimSpace(snap.Credits.Balance)
+	}
+}
+
 func codexCreditsPenalty(snap *ratelimit.KeyRateLimitSnapshot) bool {
 	if snap == nil || snap.Credits == nil {
 		return false
@@ -570,6 +867,11 @@ func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) boo
 	}
 	aSnap := p.codexSnapshotForKeyStateLocked(a)
 	bSnap := p.codexSnapshotForKeyStateLocked(b)
+	aRank := codexKnownWindowRank(aSnap)
+	bRank := codexKnownWindowRank(bSnap)
+	if aRank != bRank {
+		return aRank > bRank
+	}
 	aHeadroom, aKnown := codexHeadroomScore(aSnap)
 	bHeadroom, bKnown := codexHeadroomScore(bSnap)
 	if aKnown != bKnown {
@@ -577,6 +879,17 @@ func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) boo
 	}
 	if aKnown && bKnown && aHeadroom != bHeadroom {
 		return aHeadroom > bHeadroom
+	}
+	aReset := codexSoonestResetAt(aSnap, now)
+	bReset := codexSoonestResetAt(bSnap, now)
+	if !aReset.Equal(bReset) {
+		if aReset.IsZero() {
+			return false
+		}
+		if bReset.IsZero() {
+			return true
+		}
+		return aReset.Before(bReset)
 	}
 	aPenalty := codexCreditsPenalty(aSnap)
 	bPenalty := codexCreditsPenalty(bSnap)
@@ -740,15 +1053,47 @@ func (p *ProviderConfig) selectOnFailureKeyLocked(now time.Time) (*KeyState, int
 // SetOAuthRefresher configures OAuth credential refresh support.
 // oauthKeys must map the current access token string to the auth.yaml slot metadata
 // for each OAuth credential that should participate in selection.
-func (p *ProviderConfig) SetOAuthRefresher(
-	tokenURL string,
-	clientID string,
-	authConfigPath string,
-	authConfig *config.AuthConfig,
-	authConfigMu *sync.Mutex,
-	oauthKeys map[string]OAuthKeySetup,
-	proxyURL string,
-) {
+func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath string, args ...any) {
+	var (
+		authStatePath string
+		authConfig    *config.AuthConfig
+		authConfigMu  *sync.Mutex
+		oauthKeys     map[string]OAuthKeySetup
+		proxyURL      string
+	)
+	switch len(args) {
+	case 4:
+		if v, ok := args[0].(*config.AuthConfig); ok {
+			authConfig = v
+		}
+		if v, ok := args[1].(*sync.Mutex); ok {
+			authConfigMu = v
+		}
+		if v, ok := args[2].(map[string]OAuthKeySetup); ok {
+			oauthKeys = v
+		}
+		if v, ok := args[3].(string); ok {
+			proxyURL = v
+		}
+	case 5:
+		if v, ok := args[0].(string); ok {
+			authStatePath = v
+		}
+		if v, ok := args[1].(*config.AuthConfig); ok {
+			authConfig = v
+		}
+		if v, ok := args[2].(*sync.Mutex); ok {
+			authConfigMu = v
+		}
+		if v, ok := args[3].(map[string]OAuthKeySetup); ok {
+			oauthKeys = v
+		}
+		if v, ok := args[4].(string); ok {
+			proxyURL = v
+		}
+	default:
+		return
+	}
 	if tokenURL == "" {
 		return
 	}
@@ -764,11 +1109,13 @@ func (p *ProviderConfig) SetOAuthRefresher(
 		tokenURL:       tokenURL,
 		clientID:       clientID,
 		authConfigPath: authConfigPath,
+		authStatePath:  authStatePath,
 		authConfig:     authConfig,
 		authConfigMu:   authConfigMu,
 		httpClient:     httpClient,
 		providerName:   p.name,
 	}
+	p.authStatePath = authStatePath
 	p.effectiveProxyURL = proxyURL
 	for _, ks := range p.keyStates {
 		setup, ok := oauthKeys[ks.Key]
@@ -780,8 +1127,21 @@ func (p *ProviderConfig) SetOAuthRefresher(
 			CredentialIndex:       setup.CredentialIndex,
 			AccountID:             setup.AccountID,
 			Email:                 setup.Email,
+			Access:                firstNonEmptyOAuthAccess(setup.Access, ks.Key),
 			CodexPrimaryResetAt:   setup.CodexPrimaryResetAt,
 			CodexSecondaryResetAt: setup.CodexSecondaryResetAt,
+			StateUpdatedAt:        setup.StateUpdatedAt,
+			LastWarmupAt:          setup.LastWarmupAt,
+		}
+		if setup.RateLimit != nil {
+			if p.polledRateLimitByCredIdx == nil {
+				p.polledRateLimitByCredIdx = make(map[int]*ratelimit.KeyRateLimitSnapshot)
+			}
+			p.polledRateLimitByCredIdx[setup.CredentialIndex] = setup.RateLimit
+			if p.polledRateLimitSucceededAt == nil {
+				p.polledRateLimitSucceededAt = make(map[int]time.Time)
+			}
+			p.polledRateLimitSucceededAt[setup.CredentialIndex] = time.Now()
 		}
 		if until := codexSoftCooldownUntilFromMillis(setup.CodexPrimaryResetAt, setup.CodexSecondaryResetAt, time.Now()); !until.IsZero() {
 			ks.SoftCooldownUntil = until
@@ -793,6 +1153,7 @@ func (p *ProviderConfig) SetOAuthRefresher(
 			ks.ExhaustedUntil = time.Time{}
 		}
 	}
+	p.loadAuthStateLocked()
 }
 
 func (p *ProviderConfig) persistCodexResetHintsForKey(key string, primaryResetAt, secondaryResetAt int64) bool {
@@ -894,6 +1255,7 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 	}
 
 	p.mu.Lock()
+	p.maybeReloadAuthStateLocked()
 
 	if len(p.keyStates) == 0 {
 		// No keys configured — return empty string for providers that don't require auth
@@ -1087,6 +1449,7 @@ func (p *ProviderConfig) UpdateKeySnapshot(key string, snap *ratelimit.KeyRateLi
 func (p *ProviderConfig) KeySnapshot(key string) *ratelimit.KeyRateLimitSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	for _, ks := range p.keyStates {
 		if ks.Key == key {
 			return ks.RateLimit
@@ -1104,6 +1467,7 @@ func (p *ProviderConfig) CurrentInlineRateLimitSnapshot() *ratelimit.KeyRateLimi
 func (p *ProviderConfig) CurrentPolledRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	key, _, credIdx, ok := p.codexUsagePollAuthLocked()
 	_ = key
 	if !ok {
@@ -1152,6 +1516,7 @@ func (p *ProviderConfig) ClearInlineDisplayRateLimitSnapshot() {
 func (p *ProviderConfig) CurrentKeySnapshot() *ratelimit.KeyRateLimitSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	if p.lastSelectedKey == "" {
 		if p.inlineDisplaySnap != nil {
 			return p.inlineDisplaySnap
@@ -1281,6 +1646,7 @@ func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 func (p *ProviderConfig) KeyCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	count := 0
 	for _, ks := range p.keyStates {
 		if !ks.Invalid {
@@ -1296,6 +1662,7 @@ func (p *ProviderConfig) KeyCount() int {
 func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {
@@ -1315,6 +1682,7 @@ func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 func (p *ProviderConfig) HealthyKeyCount() (healthy, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {
@@ -1524,7 +1892,26 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 		return false
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return p.codexSmartLessLocked(now, p.keyStates[candidates[i]], p.keyStates[candidates[j]])
+		a := p.keyStates[candidates[i]]
+		b := p.keyStates[candidates[j]]
+		aWarmupAt := int64(0)
+		bWarmupAt := int64(0)
+		if a != nil && a.OAuthInfo != nil {
+			aWarmupAt = a.OAuthInfo.LastWarmupAt
+		}
+		if b != nil && b.OAuthInfo != nil {
+			bWarmupAt = b.OAuthInfo.LastWarmupAt
+		}
+		if aWarmupAt != bWarmupAt {
+			if aWarmupAt == 0 {
+				return true
+			}
+			if bWarmupAt == 0 {
+				return false
+			}
+			return aWarmupAt < bWarmupAt
+		}
+		return p.codexSmartLessLocked(now, a, b)
 	})
 	if p.polledRateLimitInFlight == nil {
 		p.polledRateLimitInFlight = make(map[int]bool)
@@ -1593,6 +1980,12 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 				}
 				if snap.LimitID == "" || snap.LimitID == "codex" {
 					p.UpdatePolledRateLimitSnapshotForCredentialIndex(credIdx, snap)
+					p.persistAuthStateForKey(key, snap, time.Now())
+					p.mu.Lock()
+					if ks := p.keyStateBySlotLocked(slot); ks != nil && ks.OAuthInfo != nil {
+						ks.OAuthInfo.LastWarmupAt = time.Now().UnixMilli()
+					}
+					p.mu.Unlock()
 					break
 				}
 			}
@@ -1699,6 +2092,7 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 			snap.Provider = providerName
 			if snap.LimitID == "" || snap.LimitID == "codex" {
 				p.UpdatePolledRateLimitSnapshotForCredentialIndex(credIdx, snap)
+				p.persistAuthStateForKey(key, snap, time.Time{})
 				break
 			}
 		}

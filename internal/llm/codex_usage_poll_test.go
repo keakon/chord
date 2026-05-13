@@ -122,7 +122,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		Preset:   config.ProviderPresetCodex,
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
-	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
@@ -209,7 +209,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 		Preset:   config.ProviderPresetCodex,
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
-	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
@@ -277,6 +277,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
 		"",
+		"",
 		&authCfg,
 		&authMu,
 		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
@@ -336,6 +337,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
 		"",
+		"",
 		&authCfg,
 		&authMu,
 		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
@@ -377,6 +379,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 	prov.SetOAuthRefresher(
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
+		"",
 		"",
 		&authCfg,
 		&authMu,

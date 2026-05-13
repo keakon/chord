@@ -256,7 +256,7 @@ func TestTestProvidersWiresOAuthMetadataForCodexPreset(t *testing.T) {
 	if _, found := oauthMap[apiKeys[0]]; !found {
 		t.Fatal("expected oauthCredentialMap to contain OAuth access token")
 	}
-	providerConfig.SetOAuthRefresher(tokenURL, clientID, "", &auth, &authMu, oauthMap, "")
+	providerConfig.SetOAuthRefresher(tokenURL, clientID, "", "", &auth, &authMu, oauthMap, "")
 	if providerConfig.EffectiveProxyURL() != "" {
 		t.Fatalf("unexpected effective proxy URL = %q", providerConfig.EffectiveProxyURL())
 	}

@@ -166,23 +166,38 @@ openai:
 
 You can list multiple keys for rotation or backup.
 
-For OAuth credentials under `preset: codex`, Chord may also persist provider-specific soft hints in `auth.yaml` under the same provider key. For example, if the provider is named `codex` in `config.yaml`:
+For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime status (quota snapshots, reset times, last warm-up timestamps, shared OAuth status cache) in `auth.state.yaml`, not in `auth.yaml`.
+
+That split is intentional:
+
+- `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`;
+- `auth.state.yaml` is machine-managed shared runtime state, so quota / reset updates do not constantly rewrite `auth.yaml` while the user may also be editing it.
+
+A typical `auth.state.yaml` entry looks like:
 
 ```yaml
-codex:
-  - refresh: "..."
-    access: "..."
-    expires: 1774009702606
+openai:
+  openai:account_id:acc-1:
     account_id: acc-1
+    email: user@example.com
+    access: "..."
+    status: normal
+    updated_at: 1774009702606
+    last_warmup_at: 1774009702606
+    codex_primary_used_pct: 12.5
+    codex_primary_window_minutes: 60
     codex_primary_reset_at: 1774013302000
+    codex_secondary_used_pct: 40
+    codex_secondary_window_minutes: 10080
     codex_secondary_reset_at: 1774600000000
 ```
 
-These `codex_*_reset_at` fields are restart-stable scheduling hints, not hard blocks:
+These cached Codex quota/reset fields are restart-stable scheduling and display hints, not hard blocks by themselves:
 
-- they lower priority for startup / first-pick ordering;
+- they help startup / first-pick ordering choose accounts that are more likely to still have quota;
+- they let key switches immediately show the last cached snapshot before a fresh warm-up completes;
 - they do **not** by themselves make the account absolutely unselectable;
-- real hard blocking still comes from confirmed request failures and is tracked in memory.
+- real hard blocking still comes from confirmed request failures and runtime cooldown state.
 
 ## Environment variables in auth.yaml
 
@@ -221,12 +236,19 @@ For Codex providers, `key_order` supports an additional value:
 
 `smart` keeps existing `key_rotation` behavior, but ranks selectable Codex OAuth accounts by:
 
-- avoiding persisted soft-cooled accounts when a better candidate exists;
-- preferring never-used accounts in the current process;
-- preferring higher remaining headroom when rate-limit snapshots are available;
-- falling back to soft-cooled accounts when no better candidate exists.
+- preferring accounts whose shared cached snapshot shows **both** tracked windows still have remaining quota;
+- then preferring accounts where at least one tracked window still has remaining quota;
+- then preferring higher remaining headroom when rate-limit snapshots are available;
+- then preferring the nearer known reset time when candidates are otherwise similar;
+- still falling back to unknown / stale candidates when no better option exists.
 
 When a Codex client becomes active, Chord may also background-probe additional OAuth slots to refresh cached headroom snapshots. That warm-up is best-effort, low-concurrency, cancels when the active client is replaced, and may update persisted OAuth credential status when an account becomes unusable.
+
+Warm-up priority is also state-aware:
+
+- OAuth slots that have never been warmed up in shared state are probed first;
+- older cached entries are refreshed before recently refreshed ones;
+- after warm-up or polling returns a newer snapshot, Chord writes it to `auth.state.yaml` and other processes adopt it lazily when they next read key-selection or rate-limit state.
 
 ```bash
 # auto-select a configured codex provider

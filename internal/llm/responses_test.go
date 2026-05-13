@@ -1117,7 +1117,7 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 			"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
 	}, []string{"oauth-key"})
-	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
 
 	dumpDir := t.TempDir()
 
@@ -1198,7 +1198,7 @@ func TestResponsesProvider_CodexWSIncrementalFailureRetriesWSFullThenHTTPFallbac
 		ResponsesWebsocket: &responsesWSOn,
 		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
 	}, []string{"oauth-key"})
-	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
 
 	var wsCalls []bool
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
@@ -1250,7 +1250,7 @@ func TestResponsesProvider_CodexWSCancelDoesNotRetryOrFallback(t *testing.T) {
 		ResponsesWebsocket: &responsesWSOn,
 		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
 	}, []string{"oauth-key"})
-	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

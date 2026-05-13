@@ -535,7 +535,7 @@ func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 
 	result := markKeyCooldown(ctx, p, "old-access-token", &APIError{StatusCode: 401, Message: "account deactivated"})
 	if !result.oauthRefreshed {
@@ -575,7 +575,7 @@ func TestMarkKeyCooldown403OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 
 	result := markKeyCooldown(ctx, p, "old-access-token-403", &APIError{StatusCode: 403, Message: "forbidden"})
 	if !result.oauthRefreshed {
@@ -599,7 +599,7 @@ func TestMarkKeyCooldown401OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
-	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
@@ -648,7 +648,7 @@ func TestMarkKeyCooldown403OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
-	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
@@ -705,7 +705,7 @@ func TestCompleteStreamTerminal401MarksExpiredOAuthBeforeReturning(t *testing.T)
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Email: "user@example.com", Expires: expires},
 	}, "")
 	impl := &constantErrProvider{err: &APIError{StatusCode: 401, Message: "unauthorized"}}
@@ -790,7 +790,7 @@ func TestClientComplete401OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -1467,7 +1467,7 @@ func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -1513,7 +1513,7 @@ func TestClientComplete403OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -1555,7 +1555,7 @@ func TestClientCompleteStreamDeactivatedOnlyOAuthKeyReturnsNoUsableKeys(t *testi
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, []string{"deactivated-oauth-key"})
-	primaryCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	primaryCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"deactivated-oauth-key": {CredentialIndex: 0, AccountID: "acc-deactivated", Expires: auth["openai"][0].OAuth.Expires, Status: config.OAuthStatusDeactivated},
 	}, "")
 
@@ -1609,7 +1609,7 @@ func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
 			"gpt-5.5": {Limit: config.ModelLimit{Context: 128000, Output: 1024}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
 		"oauth-b": {CredentialIndex: 2, AccountID: "acc-b", Expires: expires},
 	}, "")
@@ -1669,7 +1669,7 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 			"gpt-5.5": {Limit: config.ModelLimit{Context: 128000, Output: 1024}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		"oauth-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
 		"oauth-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
 	}, "")
@@ -1713,7 +1713,7 @@ func TestClientCompleteStream401OAuthRefreshThenFallback(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, Expires: creds[0].OAuth.Expires}}, "")
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
 
 	primaryImpl := &recordingProvider{}
