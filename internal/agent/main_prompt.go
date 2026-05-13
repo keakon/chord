@@ -41,6 +41,9 @@ func (a *MainAgent) buildSystemPrompt() string {
   Today's date: %s%s
 </env>`, workDir, platform, date, venvLine))
 	parts = append(parts, sharedCodingGuidelinesPrompt)
+	if block := a.lspDiagnosticPromptBlock(); block != "" {
+		parts = append(parts, block)
+	}
 	parts = append(parts, mainAgentCommunicationPrompt)
 	parts = append(parts, mainAgentResponseClosurePrompt)
 	if block := a.userConfirmationPromptBlock(); block != "" {
@@ -130,6 +133,51 @@ func (a *MainAgent) userDecisionActionPhrase() string {
 		return "call the `Question` tool instead of only asking in plain assistant text"
 	}
 	return "ask in plain assistant text with enough context for a non-implementer to answer, including the main options, their tradeoffs/risks, and your recommended default"
+}
+
+func (a *MainAgent) lspDiagnosticPromptBlock() string {
+	if !a.shouldInjectLSPDiagnosticPrompt() {
+		return ""
+	}
+	return strings.TrimSpace(`## LSP diagnostic follow-up
+- When LSP diagnostics are available after your ` + "`Edit`" + ` or ` + "`Write`" + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+- If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
+}
+
+func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
+	visible := a.mainLLMVisibleToolNames()
+	if len(visible) == 0 {
+		return false
+	}
+	if _, ok := visible["Edit"]; !ok {
+		if _, ok := visible["Write"]; !ok {
+			return false
+		}
+	}
+	return hasEnabledLSPServers(a.globalConfig, a.projectConfig)
+}
+
+func hasEnabledLSPServers(globalCfg, projectCfg *config.Config) bool {
+	seen := make(map[string]struct{})
+	if projectCfg != nil {
+		for name, srv := range projectCfg.LSP {
+			seen[name] = struct{}{}
+			if !srv.Disabled {
+				return true
+			}
+		}
+	}
+	if globalCfg != nil {
+		for name, srv := range globalCfg.LSP {
+			if _, overridden := seen[name]; overridden {
+				continue
+			}
+			if !srv.Disabled {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *MainAgent) loopUserConfirmationInstructionLine() string {

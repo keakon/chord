@@ -407,6 +407,12 @@ type MainAgent struct {
 	// pendingLoopContinuation is a request-scoped continuation notice shown to
 	// the user and injected into the next continued LLM request only.
 	pendingLoopContinuation *LoopContinuationNote
+	// pendingLSPDiagnosticOverlay is a one-shot generic reminder injected into the next
+	// LLM request after a write/edit changes LSP diagnostics on a directly
+	// modified file. The concrete diagnostics stay attached to each tool result's
+	// LSPReviews; this overlay only reminds the model to check them. It is
+	// request-scoped and never persisted to durable context.
+	pendingLSPDiagnosticOverlay string
 
 	// pendingRecoveryPrompt is a request-scoped recovery prompt injected after
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot

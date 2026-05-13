@@ -183,6 +183,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	})
 
 	// Record the tool result in the conversation.
+	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
 	toolMsg := message.Message{
 		Role:            "tool",
 		Content:         contextResult,
