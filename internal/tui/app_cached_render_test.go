@@ -66,6 +66,15 @@ func TestInvalidateDrawCachesPreservesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestMainRenderKeyIncludesSearchQuery(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	base := m.mainRenderKey(m.mode, 80)
+	m.search.State.Query = "needle"
+	if got := m.mainRenderKey(m.mode, 80); got == base {
+		t.Fatalf("mainRenderKey() did not change when search query changed; base=%q", base)
+	}
+}
+
 func TestSetThemePreservesDeferredStartupTranscriptRuntimeState(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 24)
 	deferred := &startupDeferredTranscriptState{

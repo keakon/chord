@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockIndex int) string {
+func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockIndex int, searchInnerOffset int, searchQuery string) string {
 	if v.width <= 0 || v.height <= 0 {
 		return ""
 	}
@@ -127,11 +127,15 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			}
 		}
 
+		searchHighlighted := false
 		for i := 0; i < len(finalLines) && len(visible) < v.height; i++ {
 			line := finalLines[i]
 			lineIndex := lo + i
-			if searchBlockIndex == blockIndex && sel == nil && !block.Focused {
-				line = applySearchMatchToLine(line, 0, selectionStyledTextWidth(line))
+			if searchBlockIndex == blockIndex && !searchHighlighted && sel == nil && lineIndex >= searchInnerOffset {
+				if colStart, colEnd, ok := searchMatchColumnRangeInLine(line, searchQuery); ok {
+					line = applySearchMatchToLine(line, colStart, colEnd)
+					searchHighlighted = true
+				}
 			}
 			if sel != nil && sel.StartBlockID >= 0 && sel.EndBlockID >= 0 {
 				if colStart, colEnd, ok := selectionColRange(block.ID, lineIndex, sel); ok && colStart < colEnd {

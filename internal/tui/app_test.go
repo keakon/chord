@@ -102,6 +102,48 @@ func TestScheduleStreamFlushCoalescesUntilConsumed(t *testing.T) {
 	}
 }
 
+func TestScheduleStreamFlushUrgentDelayBypassesCadenceFloor(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	if cmd := m.scheduleStreamFlush(1 * time.Millisecond); cmd == nil {
+		t.Fatal("urgent scheduleStreamFlush should return a tick command")
+	}
+	if !m.streamFlushScheduled {
+		t.Fatal("urgent scheduleStreamFlush should mark flush as scheduled")
+	}
+	if m.streamFlushDelay != 1*time.Millisecond {
+		t.Fatalf("streamFlushDelay = %s, want 1ms", m.streamFlushDelay)
+	}
+}
+
+func TestScheduleStreamFlushUrgentDelayPreemptsSlowerPendingFlush(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	if cmd := m.scheduleStreamFlush(0); cmd == nil {
+		t.Fatal("default scheduleStreamFlush should return a tick command")
+	}
+	firstGen := m.streamFlushGeneration
+	if m.streamFlushDelay != foregroundCadence.contentFlushDelay {
+		t.Fatalf("streamFlushDelay = %s, want %s", m.streamFlushDelay, foregroundCadence.contentFlushDelay)
+	}
+	if cmd := m.scheduleStreamFlush(1 * time.Millisecond); cmd == nil {
+		t.Fatal("urgent scheduleStreamFlush should preempt slower pending flush")
+	}
+	if !m.streamFlushScheduled {
+		t.Fatal("preempted stream flush should remain scheduled")
+	}
+	if m.streamFlushDelay != 1*time.Millisecond {
+		t.Fatalf("streamFlushDelay = %s, want 1ms", m.streamFlushDelay)
+	}
+	if m.streamFlushGeneration <= firstGen {
+		t.Fatalf("streamFlushGeneration = %d, want > %d after preemption", m.streamFlushGeneration, firstGen)
+	}
+	if m.consumeStreamFlush(streamFlushTickMsg{generation: firstGen}) {
+		t.Fatal("stale preempted generation should be rejected")
+	}
+	if !m.streamFlushScheduled {
+		t.Fatal("stale preempted generation should keep urgent flush scheduled")
+	}
+}
+
 func TestScheduleStreamFlushRejectsStaleGeneration(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	_ = m.scheduleStreamFlush(0)
@@ -1691,7 +1733,7 @@ func TestMouseWheelScrollTriggersInlineImageRefresh(t *testing.T) {
 
 	m.layout = m.generateLayout(m.width, m.height)
 	m.viewport.ScrollToTop()
-	_ = m.viewport.Render("", nil, -1)
+	_ = m.viewport.Render("", nil, -1, -1, "")
 	m.viewport.ScrollDown(1)
 	if m.viewport.offset == 0 {
 		t.Fatal("expected setup to produce a non-zero scroll offset")

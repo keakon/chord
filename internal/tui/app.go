@@ -198,6 +198,7 @@ type Model struct {
 	thinkingStartTime      time.Time // when the current thinking started
 	streamFlushGeneration  uint64
 	streamFlushScheduled   bool
+	streamFlushDelay       time.Duration
 	scrollFlushGeneration  uint64
 	scrollFlushScheduled   bool
 	pendingScrollDelta     int
