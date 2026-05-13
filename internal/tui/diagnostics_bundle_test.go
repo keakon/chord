@@ -150,7 +150,7 @@ func TestIsRuntimeLogFile(t *testing.T) {
 func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 	m := NewModel(nil)
 	m.SetInstanceID("111-222")
-	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "/diagnostics", "/tmp/proj", "/tmp/proj/out.zip", "chord.log", llm.LLMTraceFileName())
+	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "shortcut:ctrl+g", "/tmp/proj", "/tmp/proj/out.zip", "chord.log", llm.LLMTraceFileName())
 	if !strings.Contains(meta, "process_instance_id: 111-222") {
 		t.Fatalf("metadata = %q, want process_instance_id", meta)
 	}

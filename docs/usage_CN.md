@@ -129,7 +129,6 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可在空闲时切换手动 server
 - `/compact`：手动触发上下文压缩
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
-- `/diagnostics`：导出用于排障的诊断包
 
 下面几个命令有更多交互细节，单独展开说明。
 

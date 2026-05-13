@@ -182,7 +182,6 @@ type CustomCommand struct {
 // slashCommands is the list of available slash commands (alphabetical by Cmd).
 var slashCommands = []slashCommand{
 	{Cmd: "/compact", Desc: "compact old context"},
-	{Cmd: "/diagnostics", Desc: "export a diagnostics bundle"},
 	{Cmd: "/export", Desc: "export session (Markdown/JSON)"},
 	{Cmd: "/help", Desc: "show keyboard help"},
 	{Cmd: "/models", Desc: "switch current view pool"},

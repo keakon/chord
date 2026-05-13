@@ -131,7 +131,7 @@ Chord runs on Windows but is not the primary platform. Concretely:
 - `ime_switch_target` works with `im-select.exe`.
 - File paths in tool calls follow Windows conventions; backslashes are preserved verbatim.
 - `Shell` and `Spawn` remain non-interactive on Windows too, but timeout/cancellation cleanup uses direct process termination instead of Unix-style session/process-group control; descendant process cleanup may therefore be less complete than on Unix.
-- If you hit a Windows-specific bug, it is more likely to be undiscovered than a deliberate limitation. Capture a diagnostics bundle (`Ctrl+G` or `/diagnostics`) and report it.
+- If you hit a Windows-specific bug, it is more likely to be undiscovered than a deliberate limitation. Capture a diagnostics bundle with `Ctrl+G` and report it.
 
 ## What WSL users should expect
 
@@ -150,7 +150,7 @@ When reporting a bug that you suspect is platform-related, include:
 - OS and version
 - Terminal emulator and version
 - Whether you are inside `tmux` / `screen` / WSL
-- A diagnostics bundle (`Ctrl+G` or `/diagnostics`)
+- A diagnostics bundle (`Ctrl+G`)
 
 See [Troubleshooting — When to check logs](./troubleshooting.md#when-to-check-logs) for log location and bundle layout.
 

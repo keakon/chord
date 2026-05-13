@@ -52,7 +52,7 @@ Chord writes here. Lose it and you lose history.
     ├── chord.log                       # current log
     ├── chord.log.1                     # rotated
     ├── chord.log.2                     # rotated
-    └── tui-dumps/                      # `Ctrl+G` / `/diagnostics` outputs
+    └── tui-dumps/                      # `Ctrl+G` outputs
 ```
 
 ### `<project-key>` — what is it?
@@ -102,7 +102,7 @@ Project-level files have higher priority than global ones (same-name keys overri
 | `<state-dir>/logs/chord.log`          | Current run log (golog plain text)                           |
 | `<state-dir>/logs/chord.log.1`        | Previous rotation                                            |
 | `<state-dir>/logs/chord.log.2`        | Older rotation                                               |
-| `<state-dir>/logs/tui-dumps/`         | `Ctrl+G` / `/diagnostics` snapshots for bug reports          |
+| `<state-dir>/logs/tui-dumps/`         | `Ctrl+G` snapshots for bug reports                           |
 
 Override the directory with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`.
 

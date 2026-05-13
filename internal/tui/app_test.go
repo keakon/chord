@@ -298,26 +298,6 @@ func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
 	}
 }
 
-func TestParseDiagnosticsBundleCommand(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-		ok    bool
-	}{
-		{input: "/diagnostics", want: "/diagnostics", ok: true},
-		{input: " /diagnostics ", want: "/diagnostics", ok: true},
-		{input: "/DIAGNOSTICS", want: "/DIAGNOSTICS", ok: true},
-		{input: "/diagnostics extra", want: "/diagnostics extra", ok: true},
-		{input: "/stats", want: "", ok: false},
-	}
-	for _, tt := range tests {
-		got, ok := parseDiagnosticsBundleCommand(tt.input)
-		if got != tt.want || ok != tt.ok {
-			t.Fatalf("parseDiagnosticsBundleCommand(%q) = (%q, %t), want (%q, %t)", tt.input, got, ok, tt.want, tt.ok)
-		}
-	}
-}
-
 func TestAppendLocalStatusCardDefersWhileAssistantStreamIsActive(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "streaming", Streaming: true}
@@ -561,21 +541,16 @@ func TestBuildTUIDiagnosticDumpTruncatesHugeRenderedSectionsInMiddle(t *testing.
 	}
 }
 
-func TestHandleInsertDiagnosticsCommandReturnsCmd(t *testing.T) {
+func TestSlashCompletionNoLongerOffersDiagnosticsCommand(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
-	m.input.SetValue("/diagnostics")
+	m.input.SetValue("/diag")
 
-	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
-		t.Fatal("first Enter should only accept slash completion")
+	if got := m.getSlashCompletions(m.input.Value()); len(got) != 0 {
+		t.Fatalf("slash completions = %#v, want none for /diag", got)
 	}
-	if got := m.input.Value(); got != "/diagnostics " {
-		t.Fatalf("input value after first Enter = %q, want /diagnostics<space>", got)
-	}
-
-	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if cmd == nil {
-		t.Fatal("second Enter should run diagnostics export command")
+	if got := m.renderSlashCompletionDropdown(m.input.Value()); got != "" {
+		t.Fatalf("renderSlashCompletionDropdown(/diag) = %q, want empty", got)
 	}
 }
 
@@ -1122,14 +1097,14 @@ func TestSlashCompletionEnterCompletesWithoutSubmitting(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
-	m.input.SetValue("/diag")
+	m.input.SetValue("/exp")
 
 	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if cmd != nil {
 		t.Fatal("Enter should not submit while slash completion is visible")
 	}
-	if got := m.input.Value(); got != "/diagnostics " {
-		t.Fatalf("input value after Enter = %q, want /diagnostics<space>", got)
+	if got := m.input.Value(); got != "/export " {
+		t.Fatalf("input value after Enter = %q, want /export<space>", got)
 	}
 	if got := len(backend.sentMessages); got != 0 {
 		t.Fatalf("SendUserMessage() calls = %d, want 0", got)

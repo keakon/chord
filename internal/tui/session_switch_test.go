@@ -1762,38 +1762,6 @@ func TestPendingDraftConsumedEventAppendsUserBlockWithInvalidMsgIndex(t *testing
 	}
 }
 
-func TestHandleInsertDiagnosticsCommandStaysLocal(t *testing.T) {
-	backend := &sessionControlAgent{}
-	m := NewModel(backend)
-	m.mode = ModeInsert
-	m.input.SetValue("/diagnostics")
-
-	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
-		t.Fatal("first Enter should only accept slash completion")
-	}
-	if got := m.input.Value(); got != "/diagnostics " {
-		t.Fatalf("input value after first Enter = %q, want /diagnostics<space>", got)
-	}
-
-	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-
-	if cmd == nil {
-		t.Fatal("expected diagnostics command")
-	}
-	if got := len(backend.sentMessages); got != 0 {
-		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
-	}
-	if got := len(backend.resumeIDs); got != 0 {
-		t.Fatalf("ResumeSessionID() calls = %d, want 0", got)
-	}
-	if got := len(m.viewport.visibleBlocks()); got != 0 {
-		t.Fatalf("viewport should remain unchanged, got %d blocks", got)
-	}
-	if got := m.input.Value(); got != "" {
-		t.Fatalf("input value = %q, want empty", got)
-	}
-}
-
 func TestHandleInsertDiagnosticsShortcutStaysLocal(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)

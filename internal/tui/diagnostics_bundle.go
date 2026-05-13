@@ -49,18 +49,6 @@ var (
 	diagSessionIDRE  = regexp.MustCompile(`\b\d{3,}\b`)
 )
 
-func parseDiagnosticsBundleCommand(input string) (string, bool) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return "", false
-	}
-	lower := strings.ToLower(trimmed)
-	if lower == "/diagnostics" || strings.HasPrefix(lower, "/diagnostics ") {
-		return trimmed, true
-	}
-	return "", false
-}
-
 func writeDiagnosticsBundleCmd(data diagnosticsBundleData) tea.Cmd {
 	return func() tea.Msg {
 		if err := os.MkdirAll(filepath.Dir(data.bundlePath), 0o700); err != nil {

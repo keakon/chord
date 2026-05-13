@@ -192,7 +192,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 为方便接入只有单一文本输入的聊天表面，headless 也支持通过 `send` 发送这些 slash 命令：
 
 - `/models status`、`/models <pool>`、`/models --agent <name> <pool>`
-- `/help`、`/stats`、`/diagnostics`、`/compact`、`/loop on`、`/loop off`
+- `/help`、`/stats`、`/compact`、`/loop on`、`/loop off`
 
 裸 `/models` 会被当作 `/models status`。部分 slash 命令是 TUI 专用的（例如 `/new`、`/resume` 需要交互式 picker）；在 headless 模式下尝试调用时，会返回 `error` envelope，说明“X 仅在本地 TUI 模式可用”。
 

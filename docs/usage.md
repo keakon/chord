@@ -129,7 +129,6 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
 - `/compact`: manually trigger context compaction
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
-- `/diagnostics`: export a diagnostics bundle for troubleshooting
 
 The following commands have more interactive detail, expanded below.
 

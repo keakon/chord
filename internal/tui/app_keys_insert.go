@@ -226,16 +226,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.openUsageStats()
 			return nil
 		}
-		cmdText, isDiagnostics := parseDiagnosticsBundleCommand(value)
-		if len(m.attachments) == 0 && isDiagnostics {
-			m.recordTUIDiagnostic("local-command", "%s", cmdText)
-			m.input.AddCurrentToHistory()
-			m.input.Reset()
-			m.slashCompleteSelected = 0
-			m.closeAtMention()
-			m.recalcViewportSize()
-			return m.exportDiagnosticsBundleNow(cmdText)
-		}
 		if m.input.BangMode() {
 			if len(m.attachments) > 0 {
 				return m.enqueueToast("Remove images before running !shell", "warn")

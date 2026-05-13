@@ -90,7 +90,7 @@ Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/c
 
 ## Diagnostics bundle（诊断包）
 
-`Ctrl+G` 或 `/diagnostics` 导出的快照，含最近日志、运行时状态、TUI 调试信息，以及当前 session 最近的轻量 LLM 请求 trace。完整 raw request / SSE dump 仍需 `log_level: debug`。报 bug 时附上。详见 [常见问题排查 — 何时检查日志](./troubleshooting_CN.md#何时检查日志)。
+`Ctrl+G` 导出的快照，含最近日志、运行时状态、TUI 调试信息，以及当前 session 最近的轻量 LLM 请求 trace。完整 raw request / SSE dump 仍需 `log_level: debug`。报 bug 时附上。详见 [常见问题排查 — 何时检查日志](./troubleshooting_CN.md#何时检查日志)。
 
 ## Insert / Normal 模式
 

@@ -140,7 +140,11 @@ func TestSlashCompletionDropdownDoesNotWrapModelsCommand(t *testing.T) {
 func TestSlashCompletionDropdownScrollsSelectedCommandIntoView(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.mode = ModeInsert
-	m.slashCompleteSelected = 9
+	m.SetCustomCommands([]CustomCommand{
+		{Cmd: "/zz-one", Desc: "custom one"},
+		{Cmd: "/zz-two", Desc: "custom two"},
+	})
+	m.slashCompleteSelected = len(m.getSlashCompletions("/")) - 1
 
 	drop := m.renderSlashCompletionDropdown("/")
 	if drop == "" {
@@ -150,8 +154,8 @@ func TestSlashCompletionDropdownScrollsSelectedCommandIntoView(t *testing.T) {
 	if strings.Contains(plain, "/compact") {
 		t.Fatalf("expected dropdown to scroll past first command, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "▸ /stats") {
-		t.Fatalf("expected selected /stats command to be visible, got:\n%s", plain)
+	if !strings.Contains(plain, "▸ /zz-two") {
+		t.Fatalf("expected selected /zz-two command to be visible, got:\n%s", plain)
 	}
 }
 
