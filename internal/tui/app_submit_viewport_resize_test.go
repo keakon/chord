@@ -54,7 +54,7 @@ func TestSendDraftRecalcsViewportBeforeAppend(t *testing.T) {
 	if blockLines > m.viewport.height {
 		t.Fatalf("USER block has %d lines but viewport only has %d rows: card would be clipped", blockLines, m.viewport.height)
 	}
-	rendered := stripANSI(m.viewport.Render("", nil, -1))
+	rendered := stripANSI(m.viewport.Render("", nil, -1, -1, ""))
 	if !strings.Contains(rendered, "hello from test") {
 		t.Fatalf("rendered viewport missing body text. Rendered:\n%s", rendered)
 	}

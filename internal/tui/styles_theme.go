@@ -369,6 +369,8 @@ func applyAliasStyles() {
 	// search.go: same init-order trap as Question* (copy before ApplyTheme).
 	SearchMatchStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(currentTheme.SearchMatchFg)).
-		Background(lipgloss.Color(currentTheme.SearchMatchBg))
+		Background(lipgloss.Color(currentTheme.SearchMatchBg)).
+		Bold(true).
+		Underline(true)
 	SearchPromptStyle = DimStyle.Bold(true)
 }

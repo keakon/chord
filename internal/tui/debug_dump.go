@@ -137,7 +137,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	var spansPositive bool
 	var spanChainMatch bool
 	if m.viewport != nil {
-		viewportRender = m.viewport.Render(m.activityFrame(), m.viewportSelectionPtr(), m.searchCurrentBlockIndex())
+		viewportRender = m.viewport.Render(m.activityFrame(), m.viewportSelectionPtr(), m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query)
 		visible = m.viewport.visibleBlocks()
 		cacheLenMatch = len(m.viewport.blockStartsCache) == len(visible) && len(m.viewport.blockSpansCache) == len(visible)
 		startsMonotonic = true

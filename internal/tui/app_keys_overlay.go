@@ -162,6 +162,35 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
+func (m Model) searchCurrentInnerOffset() int {
+	if !m.search.State.Active || m.viewport == nil {
+		return -1
+	}
+	match, ok := m.search.State.CurrentMatch()
+	if !ok {
+		return -1
+	}
+	query := strings.TrimSpace(m.search.State.Query)
+	if query == "" {
+		query = strings.TrimSpace(match.Query)
+	}
+	if query == "" || m.viewport.width <= 0 {
+		return match.InnerOffset
+	}
+	if match.BlockID > 0 {
+		for _, block := range m.viewport.visibleBlocks() {
+			if block != nil && block.ID == match.BlockID {
+				return renderedSearchMatchInnerOffset(block, query, m.viewport.width)
+			}
+		}
+	}
+	blocks := m.viewport.visibleBlocks()
+	if match.BlockIndex >= 0 && match.BlockIndex < len(blocks) && blocks[match.BlockIndex] != nil {
+		return renderedSearchMatchInnerOffset(blocks[match.BlockIndex], query, m.viewport.width)
+	}
+	return match.InnerOffset
+}
+
 func (m Model) searchCurrentBlockIndex() int {
 	if !m.search.State.Active || m.viewport == nil {
 		return -1

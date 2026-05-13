@@ -132,14 +132,42 @@ func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
 	m.streamRenderDeferNext = false
 	m.streamRenderForceView = true
 	m.streamRenderDeferred = false
-	if m.streamFlushScheduled {
-		m.streamFlushGeneration++
-		m.streamFlushScheduled = false
-	}
 	return tea.Batch(
 		m.scheduleStreamFlush(1*time.Millisecond),
 		m.hostRedrawForContentBoundaryCmd("content-boundary"),
 	)
+}
+
+func (m *Model) scheduleStreamFlush(delay time.Duration) tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if delay <= 0 {
+		delay = m.currentCadence().contentFlushDelay
+	}
+	if delay <= 0 {
+		return nil
+	}
+	if m.streamFlushScheduled {
+		if m.streamFlushDelay <= 0 || m.streamFlushDelay <= delay {
+			return nil
+		}
+		m.streamFlushGeneration++
+		m.streamFlushScheduled = false
+	}
+	m.streamFlushScheduled = true
+	m.streamFlushDelay = delay
+	m.streamFlushGeneration++
+	return streamFlushTick(m.streamFlushGeneration, delay)
+}
+
+func (m *Model) consumeStreamFlush(msg streamFlushTickMsg) bool {
+	if msg.generation != m.streamFlushGeneration {
+		return false
+	}
+	m.streamFlushScheduled = false
+	m.streamFlushDelay = 0
+	return true
 }
 
 func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rectangle, cache *cachedRenderable) {
@@ -297,34 +325,8 @@ func (m *Model) toastFingerprint() string {
 }
 
 func (m *Model) mainRenderKey(mode Mode, viewportWidth int) string {
-	return fmt.Sprintf("%d|%d|%d|%d|%t|%t|%d|%d|%d|%t|%d|%s", mode, viewportWidth, m.viewport.height, m.viewport.offset,
-		m.animRunning, m.rightPanelVisible, len(m.viewport.blocks), m.focusedBlockID, m.search.State.Current, m.startupRestorePending, m.viewport.RenderVersion(), m.focusedAgentID)
-}
-
-func (m *Model) scheduleStreamFlush(delay time.Duration) tea.Cmd {
-	if m.streamFlushScheduled {
-		return nil
-	}
-	profileDelay := m.currentCadence().contentFlushDelay
-	if delay <= 0 {
-		delay = profileDelay
-	} else if profileDelay > 0 && profileDelay > delay {
-		delay = profileDelay
-	}
-	if delay <= 0 {
-		return nil
-	}
-	m.streamFlushScheduled = true
-	m.streamFlushGeneration++
-	return streamFlushTick(m.streamFlushGeneration, delay)
-}
-
-func (m *Model) consumeStreamFlush(msg streamFlushTickMsg) bool {
-	if msg.generation != m.streamFlushGeneration {
-		return false
-	}
-	m.streamFlushScheduled = false
-	return true
+	return fmt.Sprintf("%d|%d|%d|%d|%t|%t|%d|%d|%d|%q|%t|%d|%s", mode, viewportWidth, m.viewport.height, m.viewport.offset,
+		m.animRunning, m.rightPanelVisible, len(m.viewport.blocks), m.focusedBlockID, m.search.State.Current, m.search.State.Query, m.startupRestorePending, m.viewport.RenderVersion(), m.focusedAgentID)
 }
 
 func (m *Model) scheduleScrollFlush(delay time.Duration) tea.Cmd {

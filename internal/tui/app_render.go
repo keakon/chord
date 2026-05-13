@@ -78,7 +78,7 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			needMainRender = needMainRender || !m.cachedMainSelActive || m.cachedMainSel != *selection
 		}
 		if needMainRender {
-			mainContent = m.viewport.Render(spinnerFrame, selection, searchBlockIndex)
+			mainContent = m.viewport.Render(spinnerFrame, selection, searchBlockIndex, m.searchCurrentInnerOffset(), m.search.State.Query)
 		} else {
 			mainContent = m.cachedMainRender.text
 		}

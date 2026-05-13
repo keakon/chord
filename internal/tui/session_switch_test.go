@@ -425,7 +425,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	if !strings.Contains(plain, "needle line") {
 		t.Fatalf("rendered search match = %q, want visible needle line", plain)
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex()))
+	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle line") {
 		t.Fatalf("viewport render should include revealed search content, got %q", viewportPlain)
 	}
@@ -643,7 +643,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	if block.spillCold {
 		t.Fatal("search reveal should materialize cold matched block")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex()))
+	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle output") {
 		t.Fatalf("viewport render should include materialized cold compact tool output, got %q", viewportPlain)
 	}
@@ -731,7 +731,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 	if block.ToolID != "call-real-search-1" {
 		t.Fatalf("focused block tool id = %q, want %q", block.ToolID, "call-real-search-1")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex()))
+	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "real find result") {
 		t.Fatalf("viewport render should include non-diagnostic search content, got %q", viewportPlain)
 	}
@@ -771,7 +771,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	if !m.maybeScrollToSearchMatch(match, "search_enter") {
 		t.Fatal("maybeScrollToSearchMatch should succeed for compact tool match")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex()))
+	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle output") {
 		t.Fatalf("viewport render should include compact tool output, got %q", viewportPlain)
 	}

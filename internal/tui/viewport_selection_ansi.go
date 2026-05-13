@@ -1,8 +1,49 @@
 package tui
 
 import (
-	"charm.land/lipgloss/v2"
+	"strings"
 )
+
+func searchMatchHighlightTokens() (hiOn, hiOff string, ok bool) {
+	const marker = "x"
+	sample := SearchMatchStyle.Render(marker)
+	idx := strings.Index(sample, marker)
+	if idx < 0 {
+		return "", "", false
+	}
+	hiOn = sample[:idx]
+	hiOff = sample[idx+len(marker):]
+	if hiOn == "" || hiOff == "" {
+		return "", "", false
+	}
+	return hiOn, hiOff, true
+}
+
+func searchMatchColumnRangeInLine(line, query string) (colStart, colEnd int, ok bool) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return 0, 0, false
+	}
+	plain := stripANSI(line)
+	if plain == "" {
+		return 0, 0, false
+	}
+	plainRunes := []rune(plain)
+	queryRunes := []rune(query)
+	if len(queryRunes) == 0 || len(queryRunes) > len(plainRunes) {
+		return 0, 0, false
+	}
+	prefixCols := make([]int, len(plainRunes)+1)
+	for i, r := range plainRunes {
+		prefixCols[i+1] = prefixCols[i] + selectionRuneWidthAtCol(r, prefixCols[i])
+	}
+	for i := 0; i+len(queryRunes) <= len(plainRunes); i++ {
+		if strings.EqualFold(string(plainRunes[i:i+len(queryRunes)]), query) {
+			return prefixCols[i], prefixCols[i+len(queryRunes)], true
+		}
+	}
+	return 0, 0, false
+}
 
 func WordBoundsAtCol(plain string, col int) (startCol, endCol int) {
 	width := selectionPlainTextWidth(plain)
@@ -44,7 +85,6 @@ func WordBoundsAtCol(plain string, col int) (startCol, endCol int) {
 	return 0, 0
 }
 
-// ExtractSelectionText returns the plain text of the given selection.
 func applySearchMatchToLine(line string, colStart, colEnd int) string {
 	if colStart >= colEnd {
 		return line
@@ -59,17 +99,10 @@ func applySearchMatchToLine(line string, colStart, colEnd int) string {
 	if startByte >= endByte {
 		return line
 	}
-	hiOn := lipgloss.NewStyle().
-		Foreground(SearchMatchStyle.GetForeground()).
-		Background(SearchMatchStyle.GetBackground()).
-		Bold(SearchMatchStyle.GetBold()).
-		Underline(SearchMatchStyle.GetUnderline()).
-		Reverse(SearchMatchStyle.GetReverse()).
-		Render("")
-	if hiOn == "" {
+	hiOn, hiOff, ok := searchMatchHighlightTokens()
+	if !ok {
 		return line
 	}
-	hiOff := "\x1b[0m"
 	highlighted := line[startByte:endByte]
 	highlighted = ansiSGRRegex.ReplaceAllString(highlighted, "$0"+hiOn)
 	return line[:startByte] + hiOn + highlighted + hiOff + line[endByte:]

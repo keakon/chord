@@ -95,7 +95,7 @@ func TestUpdateLastBlockDoesNotPopulateLineCache(t *testing.T) {
 	block.InvalidateCache()
 	v.InvalidateLastBlock()
 
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 
 	// lineCache may be populated as a side effect of enforceHotBudget →
 	// visibleWindowBlockIDs → blockSpanLines during Render. That is correct:
@@ -115,7 +115,7 @@ func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
 		t.Fatalf("lineCount = %d, want > viewport height %d for partial render", total, v.height)
 	}
 
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 
 	if got := len(block.viewportCache); got != 0 {
 		t.Fatalf("viewport cache len = %d, want 0 after partial render", got)
@@ -197,7 +197,7 @@ func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
 		t.Fatal("expected render to populate block position caches")
 	}
@@ -227,7 +227,7 @@ func BenchmarkViewportVisibleWindowBlockIDsCachedOnly(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -286,6 +286,92 @@ func TestApplySearchMatchToLineUsesThemeStyleInsteadOfReverseVideo(t *testing.T)
 	}
 	if stripANSI(out) != line {
 		t.Fatalf("stripANSI(applySearchMatchToLine()) = %q, want %q", stripANSI(out), line)
+	}
+}
+
+func TestViewportRenderHighlightsSearchQueryOnFocusedMatchBlock(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 80, 12)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "prefix needle suffix"}
+	m.viewport.AppendBlock(block)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	baseline := m.viewport.Render("", nil, -1, -1, "")
+	m.search.State = SearchState{
+		Query:   "needle",
+		Active:  true,
+		Matches: []MatchPosition{{BlockID: 1, BlockIndex: 0, LineOffset: 0, InnerOffset: searchMatchInnerOffset(block, "needle", m.viewport.width)}},
+		Current: 0,
+	}
+	innerOffset := m.search.State.Matches[m.search.State.Current].InnerOffset
+	rendered := m.viewport.Render("", nil, m.searchCurrentBlockIndex(), innerOffset, m.search.State.Query)
+
+	baseLines := strings.Split(baseline, "\n")
+	renderedLines := strings.Split(rendered, "\n")
+	if len(baseLines) != len(renderedLines) {
+		t.Fatalf("rendered line count = %d, want %d", len(renderedLines), len(baseLines))
+	}
+	matched := false
+	for i, baseLine := range baseLines {
+		if !strings.Contains(stripANSI(baseLine), "needle") {
+			continue
+		}
+		colStart, colEnd, ok := searchMatchColumnRangeInLine(baseLine, "needle")
+		if !ok {
+			t.Fatalf("expected baseline line to contain search query, got %q", stripANSI(baseLine))
+		}
+		expected := applySearchMatchToLine(baseLine, colStart, colEnd)
+		if renderedLines[i] != expected {
+			t.Fatalf("highlighted line mismatch\nexpected: %q\nactual:   %q", expected, renderedLines[i])
+		}
+		matched = true
+	}
+	if !matched {
+		t.Fatalf("baseline render missing query text, got %q", stripANSI(baseline))
+	}
+}
+
+func TestViewportRenderHighlightsOnlyCurrentSearchOccurrence(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 80, 12)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "needle first\n\nneedle second"}
+	m.viewport.AppendBlock(block)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	baseline := m.viewport.Render("", nil, -1, -1, "")
+	m.search.State = SearchState{
+		Query:   "needle",
+		Active:  true,
+		Matches: []MatchPosition{{BlockID: 1, BlockIndex: 0, LineOffset: 0, InnerOffset: searchMatchInnerOffset(block, "needle", m.viewport.width)}},
+		Current: 0,
+	}
+	innerOffset := m.search.State.Matches[m.search.State.Current].InnerOffset
+	rendered := m.viewport.Render("", nil, m.searchCurrentBlockIndex(), innerOffset, m.search.State.Query)
+
+	baseLines := strings.Split(baseline, "\n")
+	renderedLines := strings.Split(rendered, "\n")
+	if len(baseLines) != len(renderedLines) {
+		t.Fatalf("rendered line count = %d, want %d", len(renderedLines), len(baseLines))
+	}
+	diffCount := 0
+	for i, baseLine := range baseLines {
+		if renderedLines[i] == baseLine {
+			continue
+		}
+		diffCount++
+		colStart, colEnd, ok := searchMatchColumnRangeInLine(baseLine, "needle")
+		if !ok {
+			t.Fatalf("changed line should contain search query, got %q", stripANSI(baseLine))
+		}
+		expected := applySearchMatchToLine(baseLine, colStart, colEnd)
+		if renderedLines[i] != expected {
+			t.Fatalf("highlighted line mismatch\nexpected: %q\nactual:   %q", expected, renderedLines[i])
+		}
+	}
+	if diffCount != 1 {
+		t.Fatalf("diff line count = %d, want 1", diffCount)
 	}
 }
 

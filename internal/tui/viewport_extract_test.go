@@ -50,7 +50,7 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 	v.AppendBlock(block)
 
 	// Force viewport render path to materialize and expand tabs.
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 	cached := block.GetViewportCache(v.width, "")
 	if cached == nil {
 		t.Fatal("expected viewport cache after render")
