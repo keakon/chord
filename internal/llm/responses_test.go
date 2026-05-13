@@ -18,6 +18,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -117,6 +118,56 @@ func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
 	}
 	if blocks[1].Detail != "auto" {
 		t.Fatalf("image block detail = %q, want auto", blocks[1].Detail)
+	}
+}
+
+func TestConvertMessagesToResponses_ReplaysReasoningContent(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{
+		{Role: "user", Content: "do something"},
+		{
+			Role:             "assistant",
+			ReasoningContent: "I will call a tool now.",
+			Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIResponses},
+			ToolCalls: []message.ToolCall{
+				{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)},
+			},
+		},
+	})
+
+	// Expect: user message, assistant reasoning message, function_call item.
+	if len(items) != 3 {
+		t.Fatalf("got %d items, want 3", len(items))
+	}
+	if items[1].Type != "message" || items[1].Role != "assistant" {
+		t.Fatalf("items[1]=%#v", items[1])
+	}
+	blocks, ok := items[1].Content.([]responsesContentBlock)
+	if !ok {
+		t.Fatalf("items[1].Content type=%T", items[1].Content)
+	}
+	if len(blocks) != 1 || blocks[0].Type != "output_text" || blocks[0].Text != "I will call a tool now." {
+		t.Fatalf("unexpected reasoning replay content: %#v", items[1].Content)
+	}
+	if items[2].Type != "function_call" || items[2].CallID != "c1" || items[2].Name != "Shell" {
+		t.Fatalf("unexpected function_call: %#v", items[2])
+	}
+}
+
+func TestConvertMessagesToResponses_DoesNotReplayReasoningWithoutProvenance(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{{
+		Role:             "assistant",
+		ReasoningContent: "hidden reasoning",
+		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
+	}})
+	for _, it := range items {
+		if it.Type == "message" && it.Role == "assistant" {
+			blocks, _ := it.Content.([]responsesContentBlock)
+			for _, block := range blocks {
+				if block.Type == "output_text" && block.Text == "hidden reasoning" {
+					t.Fatalf("unexpected reasoning replay: %#v", it)
+				}
+			}
+		}
 	}
 }
 

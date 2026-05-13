@@ -116,11 +116,12 @@ type openAIRequest struct {
 
 // openAIMessage is a single message in the OpenAI API format.
 type openAIMessage struct {
-	Role       string           `json:"role"`
-	Content    any              `json:"content"` // string or []openAIContentBlock
-	Name       string           `json:"name,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"`                     // string or []openAIContentBlock
+	ReasoningContent string           `json:"reasoning_content,omitempty"` // OpenAI-compatible reasoning/thinking replay
+	Name             string           `json:"name,omitempty"`
+	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
 }
 
 // openAIContentBlock is a content block (text, image_url, or tool result).
@@ -434,6 +435,14 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 			}
 
 		case "assistant":
+			// OpenAI-compatible providers (e.g. DeepSeek/GLM) may require that the
+			// reasoning_content chain is replayed verbatim across tool rounds.
+			// When present in persisted history, include it as a separate assistant
+			// message before the visible assistant message/tool_calls.
+			if messageAllowsReasoningReplay(msg) {
+				result = append(result, openAIMessage{Role: "assistant", ReasoningContent: msg.ReasoningContent})
+			}
+
 			omi := openAIMessage{
 				Role: "assistant",
 			}

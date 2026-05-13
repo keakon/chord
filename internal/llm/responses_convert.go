@@ -53,6 +53,17 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 			})
 
 		case "assistant":
+			// Replay OpenAI-compatible reasoning/thinking content when present.
+			// Some providers validate chain-of-thought continuity across tool rounds.
+			if messageAllowsReasoningReplay(msg) {
+				result = append(result, responsesInputItem{
+					Type: "message",
+					Role: "assistant",
+					Content: []responsesContentBlock{
+						{Type: "output_text", Text: msg.ReasoningContent},
+					},
+				})
+			}
 			// Output text content.
 			if msg.Content != "" {
 				result = append(result, responsesInputItem{
