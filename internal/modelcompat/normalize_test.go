@@ -23,6 +23,37 @@ func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) 
 	}
 }
 
+func TestNormalizeForTarget_DropsAnthropicThinkingWithoutReplayEnable(t *testing.T) {
+	msgs := []message.Message{{
+		Role:           "assistant",
+		Content:        "hello",
+		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
+		Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", WireFamily: WireFamilyAnthropic},
+	}}
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{})
+	if len(out) != 1 || len(out[0].ThinkingBlocks) != 0 {
+		t.Fatalf("thinking should be stripped when replay is not enabled: %+v", out)
+	}
+	if rep.DroppedThinkingBlocks != 1 {
+		t.Fatalf("DroppedThinkingBlocks=%d, want 1", rep.DroppedThinkingBlocks)
+	}
+}
+
+func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             "assistant",
+		ReasoningContent: "hidden reasoning",
+		Provenance:       &message.MessageProvenance{WireFamily: WireFamilyOpenAIChat},
+	}}
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	if len(out) != 1 || out[0].ReasoningContent != "" {
+		t.Fatalf("reasoning should be dropped for anthropic target: %+v", out)
+	}
+	if rep.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
+	}
+}
+
 func TestNormalizeForTarget_DropsAnthropicThinkingForOpenAI(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           "assistant",

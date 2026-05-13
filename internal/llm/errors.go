@@ -464,13 +464,17 @@ func isPermanentFailure(err error) bool {
 }
 
 // isRequestOrParamError returns true if the API message indicates a client/request
-// error (e.g. missing parameter, invalid request). Such errors are not retriable.
+// error (e.g. missing parameter, invalid request, or missing required replayed
+// thinking/reasoning content). Such errors are not retriable.
 func isRequestOrParamError(message string) bool {
 	msg := strings.ToLower(message)
 	return strings.Contains(msg, "missing required parameter") ||
 		strings.Contains(msg, "invalid_request_error") ||
 		strings.Contains(msg, "invalid parameter") ||
-		strings.Contains(msg, "invalid request")
+		strings.Contains(msg, "invalid request") ||
+		strings.Contains(msg, "content or tool_calls must be set") ||
+		strings.Contains(msg, "reasoning_content") && strings.Contains(msg, "must be passed back") ||
+		strings.Contains(msg, "content[].thinking") && strings.Contains(msg, "must be passed back")
 }
 
 // isModelIncompatible400 reports 400-class errors that indicate the current

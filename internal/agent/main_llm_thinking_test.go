@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *testing.T) {
@@ -126,6 +127,52 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 		t.Fatalf("text = %q, want answer", text.Text)
 	}
 }
+func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenance(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	providerCfg := llm.NewProviderConfig("deepseek", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	client := llm.NewClient(providerCfg, stubProvider{}, "deepseek-v4-pro", 4096, "sys")
+	a.swapLLMClientWithRef(client, "deepseek-v4-pro", 128000, "deepseek/deepseek-v4-pro")
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+
+	payload := &LLMResponsePayload{
+		ReasoningContent: "I need to inspect the repo before reading files.",
+		ToolCalls: []message.ToolCall{{
+			ID:   "call-1",
+			Name: "Read",
+			Args: []byte(`{"path":"README.md"}`),
+		}},
+		StopReason: "tool_calls",
+	}
+
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: payload})
+
+	msgs := a.GetMessages()
+	if len(msgs) == 0 {
+		t.Fatal("expected assistant message appended to context")
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("last role = %q, want assistant", last.Role)
+	}
+	if last.ReasoningContent != "I need to inspect the repo before reading files." {
+		t.Fatalf("ReasoningContent = %q", last.ReasoningContent)
+	}
+	if last.Provenance == nil {
+		t.Fatal("expected assistant provenance")
+	}
+	if last.Provenance.WireFamily != modelcompat.WireFamilyOpenAIChat {
+		t.Fatalf("WireFamily = %q, want %q", last.Provenance.WireFamily, modelcompat.WireFamilyOpenAIChat)
+	}
+}
+
 func TestCallLLMOnlyEmitsOneStreamingActivityWhenStatusAlsoArrives(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 

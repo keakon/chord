@@ -65,3 +65,5 @@ proxy: socks5://127.0.0.1:1080
 ```
 
 The main point of this example is the provider / key / pool failover chain, not custom agents.
+
+If your OpenAI-compatible backend supports provider-side thinking / reasoning (for example DeepSeek in thinking mode), some providers require the previous tool round's thinking/reasoning content to be included again in the next request. If that requirement is not met, the provider may reject the request with a 400 error. When you switch to a model with a different protocol family, Chord normalizes that hidden state for the target provider instead of replaying incompatible thinking/reasoning fields unchanged.

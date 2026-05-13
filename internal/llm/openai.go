@@ -186,9 +186,11 @@ type openAIStreamChunk struct {
 	Model   string               `json:"model"`
 	Choices []openAIStreamChoice `json:"choices"`
 	Usage   *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens          int `json:"prompt_tokens"`
+		CompletionTokens      int `json:"completion_tokens"`
+		TotalTokens           int `json:"total_tokens"`
+		PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
+		PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
 	} `json:"usage,omitempty"`
 }
 
@@ -220,7 +222,7 @@ func (o *OpenAIProvider) CompleteStream(
 
 	ot := tuning.OpenAI
 	// Convert messages to OpenAI format.
-	apiMessages := convertMessagesToOpenAI(systemPrompt, messages)
+	apiMessages := convertMessagesToOpenAI(systemPrompt, providerWireFamily(o.provider), messages)
 
 	// Convert tools.
 	apiTools := convertToolsToOpenAI(tools)
@@ -396,7 +398,7 @@ func responseHeaderBytes(resp *http.Response) int64 {
 }
 
 // convertMessagesToOpenAI converts internal messages to OpenAI API format.
-func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []openAIMessage {
+func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []message.Message) []openAIMessage {
 	var result []openAIMessage
 
 	// Add system prompt as first message.
@@ -435,16 +437,16 @@ func convertMessagesToOpenAI(systemPrompt string, msgs []message.Message) []open
 			}
 
 		case "assistant":
-			// OpenAI-compatible providers (e.g. DeepSeek/GLM) may require that the
-			// reasoning_content chain is replayed verbatim across tool rounds.
-			// When present in persisted history, include it as a separate assistant
-			// message before the visible assistant message/tool_calls.
-			if messageAllowsReasoningReplay(msg) {
-				result = append(result, openAIMessage{Role: "assistant", ReasoningContent: msg.ReasoningContent})
-			}
-
 			omi := openAIMessage{
 				Role: "assistant",
+			}
+			// OpenAI-compatible providers (e.g. DeepSeek/GLM) may require that the
+			// reasoning_content chain is replayed verbatim across tool rounds.
+			// Attach replayed reasoning to the same assistant message instead of
+			// emitting a standalone assistant frame, because some providers reject
+			// assistant messages that contain only reasoning_content.
+			if wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg) {
+				omi.ReasoningContent = msg.ReasoningContent
 			}
 			// OpenAI requires content to be null (not empty string) when
 			// tool_calls are present; set it only when there is actual text.
@@ -670,7 +672,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			// finalized on finish_reason).
 			finalizeToolCalls(toolCalls, &resp, cb, truncated)
 			resp.ThinkingToolcallMarkerHit = thinkingToolcallMarkerHit
-			if thinkingToolcallMarkerHit {
+			if reasoningBuf.Len() > 0 {
 				resp.ReasoningContent = reasoningBuf.String()
 			}
 			flushContent()
@@ -828,7 +830,12 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			if resp.Usage == nil {
 				resp.Usage = &message.TokenUsage{}
 			}
-			resp.Usage.InputTokens = chunk.Usage.PromptTokens
+			promptTokens := chunk.Usage.PromptTokens
+			if promptTokens <= 0 {
+				promptTokens = chunk.Usage.PromptCacheHitTokens + chunk.Usage.PromptCacheMissTokens
+			}
+			resp.Usage.InputTokens = promptTokens
+			resp.Usage.CacheReadTokens = chunk.Usage.PromptCacheHitTokens
 			resp.Usage.OutputTokens = chunk.Usage.CompletionTokens
 		}
 	}
@@ -848,7 +855,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	// Finalize any remaining tool calls if stream ended without [DONE].
 	finalizeToolCalls(toolCalls, &resp, cb, truncated)
 	resp.ThinkingToolcallMarkerHit = thinkingToolcallMarkerHit
-	if thinkingToolcallMarkerHit {
+	if reasoningBuf.Len() > 0 {
 		resp.ReasoningContent = reasoningBuf.String()
 	}
 	flushContent()

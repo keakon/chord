@@ -184,7 +184,7 @@ func (r *ResponsesProvider) CompleteStream(
 	if useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport()) {
 		conversionSystemPrompt = ""
 	}
-	apiInput := convertMessagesToResponses(conversionSystemPrompt, messages)
+	apiInput := convertMessagesToResponses(conversionSystemPrompt, providerWireFamily(r.provider), messages)
 
 	// Validate that we have at least one input item.
 	if len(apiInput) == 0 {

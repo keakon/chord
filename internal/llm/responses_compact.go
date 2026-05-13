@@ -86,7 +86,7 @@ func (r *ResponsesProvider) Compact(
 		return nil, err
 	}
 	ot := tuning.OpenAI
-	apiInput := convertMessagesToResponses("", messages)
+	apiInput := convertMessagesToResponses("", providerWireFamily(r.provider), messages)
 	if len(apiInput) == 0 {
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}

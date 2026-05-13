@@ -129,7 +129,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Append assistant message to context with valid calls only.
 	// Sanitize remaining calls as a safety net (no-op for valid calls).
 	sanitizedCalls := sanitizeToolCallArgs(validCalls)
-	if strings.TrimSpace(resp.Content) != "" || len(sanitizedCalls) > 0 || len(resp.ThinkingBlocks) > 0 {
+	if strings.TrimSpace(resp.Content) != "" || len(sanitizedCalls) > 0 || len(resp.ThinkingBlocks) > 0 || strings.TrimSpace(resp.ReasoningContent) != "" {
 		log.Debugf("subagent finalize assistant payload agent=%v turn_id=%v final_content_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", s.instanceID, s.turn.ID, len(resp.Content), len(sanitizedCalls), len(resp.ThinkingBlocks), resp.StopReason)
 	}
 	if strings.TrimSpace(resp.Content) == "" && len(sanitizedCalls) > 0 {

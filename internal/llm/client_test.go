@@ -2526,6 +2526,42 @@ func TestClientCompleteEmptyResponseMarksKeyRecovering(t *testing.T) {
 	}
 }
 
+func TestClientCompleteStopsAfterAnthropicThinkingReplay400WithoutExtraRounds(t *testing.T) {
+	primaryCfg := testProviderConfig("primary-prov", "primary-model")
+	impl := &constantErrProvider{err: &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}}
+
+	c := NewClient(primaryCfg, impl, "primary-model", 4096, "sys")
+	_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("err = %v, want APIError 400", err)
+	}
+	if impl.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", impl.calls)
+	}
+}
+
+func TestClientCompleteStopsAfterPermanentRequestShape400WithoutExtraRounds(t *testing.T) {
+	primaryCfg := testProviderConfig("primary-prov", "primary-model")
+	impl := &constantErrProvider{err: &APIError{StatusCode: 400, Message: "Invalid assistant message: content or tool_calls must be set"}}
+
+	c := NewClient(primaryCfg, impl, "primary-model", 4096, "sys")
+	_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("err = %v, want APIError 400", err)
+	}
+	if impl.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", impl.calls)
+	}
+}
+
 func TestClientCompleteStopsAfterModelIncompatible400WithoutFallback(t *testing.T) {
 	primaryCfg := testProviderConfig("primary-prov", "primary-model")
 	impl := &constantErrProvider{err: &APIError{StatusCode: 400, Message: `{"detail":"Stream must be set to true"}`}}

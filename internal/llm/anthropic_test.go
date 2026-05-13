@@ -301,6 +301,70 @@ func TestAnthropicCompleteStreamLeavesTransportDefaultsUnchanged(t *testing.T) {
 	}
 }
 
+func TestAnthropicCompleteStreamReplaysThinkingBlocksInAssistantHistory(t *testing.T) {
+	type capturedMessage struct {
+		Role    string             `json:"role"`
+		Content []anthropicContent `json:"content"`
+	}
+
+	var captured struct {
+		Messages []capturedMessage `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("deepseek", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"deepseek-v4-pro",
+		"base system prompt",
+		[]message.Message{
+			{Role: "user", Content: "hi"},
+			{
+				Role:           "assistant",
+				ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analyzing", Signature: "sig-1"}},
+				ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
+			},
+			{Role: "tool", ToolCallID: "toolu_1", Content: "/tmp\n"},
+		},
+		nil,
+		2048,
+		RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if len(captured.Messages) < 2 {
+		t.Fatalf("captured messages = %#v, want assistant history present", captured.Messages)
+	}
+	assistant := captured.Messages[1]
+	blocks := assistant.Content
+	if len(blocks) < 2 {
+		t.Fatalf("assistant content blocks = %#v, want thinking + tool_use", blocks)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "analyzing" || blocks[0].Signature != "sig-1" {
+		t.Fatalf("first assistant block = %#v, want replayed thinking block", blocks[0])
+	}
+	if blocks[1].Type != "tool_use" || blocks[1].ID != "toolu_1" {
+		t.Fatalf("second assistant block = %#v, want tool_use", blocks[1])
+	}
+}
+
 func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: message_start",
@@ -330,8 +394,8 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	if resp == nil || resp.Usage == nil {
 		t.Fatalf("resp/usage = %#v, want non-nil", resp)
 	}
-	if got := resp.Usage.InputTokens; got != 100 {
-		t.Fatalf("InputTokens = %d, want 100", got)
+	if got := resp.Usage.InputTokens; got != 107 {
+		t.Fatalf("InputTokens = %d, want 107", got)
 	}
 	if got := resp.Usage.OutputTokens; got != 23 {
 		t.Fatalf("OutputTokens = %d, want 23", got)

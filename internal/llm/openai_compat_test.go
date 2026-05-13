@@ -59,7 +59,7 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerSplitAcrossChunks(t *testing
 	}
 }
 
-func TestParseOpenAISSEStream_NormalToolCalls_NoThinkingMarker(t *testing.T) {
+func TestParseOpenAISSEStream_NormalToolCallsWithoutReasoning_LeavesReasoningContentEmpty(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read"}}]}}]}`,
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"README.md\"}"}}]}}]}`,
@@ -79,7 +79,7 @@ func TestParseOpenAISSEStream_NormalToolCalls_NoThinkingMarker(t *testing.T) {
 		t.Fatal("expected ThinkingToolcallMarkerHit=false")
 	}
 	if resp.ReasoningContent != "" {
-		t.Fatalf("expected empty ReasoningContent when no marker hit, got %q", resp.ReasoningContent)
+		t.Fatalf("expected empty ReasoningContent when the stream contains no reasoning deltas, got %q", resp.ReasoningContent)
 	}
 	if got := len(resp.ToolCalls); got != 1 {
 		t.Fatalf("expected one tool call, got %d", got)

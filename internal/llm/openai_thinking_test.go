@@ -130,6 +130,58 @@ func TestParseOpenAISSEStream_ThinkingEndNotDoubleEmittedWithToolAndContent(t *t
 	}
 }
 
+func TestParseOpenAISSEStream_PreservesReasoningContentWithoutMarkers(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"reasoning_content":"I need to inspect the file"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"reasoning_content":" before calling a tool."}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"README.md\"}"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.ReasoningContent != "I need to inspect the file before calling a tool." {
+		t.Fatalf("ReasoningContent = %q", resp.ReasoningContent)
+	}
+	if resp.ThinkingToolcallMarkerHit {
+		t.Fatal("ThinkingToolcallMarkerHit should remain false for plain reasoning text")
+	}
+}
+
+func TestParseOpenAISSEStream_AggregatesPromptCacheUsage(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":10855,"completion_tokens":42,"total_tokens":10897,"prompt_cache_hit_tokens":10752,"prompt_cache_miss_tokens":103}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatal("expected non-nil response usage")
+	}
+	if got := resp.Usage.InputTokens; got != 10855 {
+		t.Fatalf("InputTokens = %d, want 10855", got)
+	}
+	if got := resp.Usage.CacheReadTokens; got != 10752 {
+		t.Fatalf("CacheReadTokens = %d, want 10752", got)
+	}
+	if got := resp.Usage.OutputTokens; got != 42 {
+		t.Fatalf("OutputTokens = %d, want 42", got)
+	}
+}
+
 func TestParseOpenAISSEStream_NoThinkingEndWithoutReasoning(t *testing.T) {
 	// When there is no reasoning_content at all, thinking_end should never
 	// be emitted, even with tool_calls.

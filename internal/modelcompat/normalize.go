@@ -81,6 +81,11 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			msg.ThinkingBlocks = kept
 		}
 
+		if !targetAllowsReasoningReplay(target) && strings.TrimSpace(msg.ReasoningContent) != "" {
+			msg.ReasoningContent = ""
+			report.DowngradedReasoning++
+		}
+
 		if len(msg.ToolCalls) > 0 && !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools) {
 			downgraded := downgradeAssistantToolCallsToText(*msg)
 			if downgraded.Content != msg.Content || len(msg.ToolCalls) > 0 {
@@ -111,6 +116,15 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	}
 
 	return compactAdjacentAssistantMessages(out), report
+}
+
+func targetAllowsReasoningReplay(target TargetModel) bool {
+	switch strings.TrimSpace(target.WireFamily) {
+	case WireFamilyOpenAIChat, WireFamilyOpenAIResponses:
+		return true
+	default:
+		return false
+	}
 }
 
 func messageAllowsAnthropicThinkingReplay(msg message.Message) bool {
@@ -175,12 +189,13 @@ func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 		blocks = append(blocks, joinNonEmpty(marker, payload))
 	}
 	return message.Message{
-		Role:           "assistant",
-		Content:        strings.TrimSpace(strings.Join(blocks, "\n\n")),
-		ThinkingBlocks: msg.ThinkingBlocks,
-		StopReason:     msg.StopReason,
-		Usage:          cloneUsage(msg.Usage),
-		Provenance:     cloneProvenance(msg.Provenance),
+		Role:             "assistant",
+		Content:          strings.TrimSpace(strings.Join(blocks, "\n\n")),
+		ThinkingBlocks:   msg.ThinkingBlocks,
+		ReasoningContent: msg.ReasoningContent,
+		StopReason:       msg.StopReason,
+		Usage:            cloneUsage(msg.Usage),
+		Provenance:       cloneProvenance(msg.Provenance),
 	}
 }
 
@@ -195,7 +210,7 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 			continue
 		}
 		last := &out[len(out)-1]
-		if last.Role == "assistant" && msg.Role == "assistant" && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 {
+		if last.Role == "assistant" && msg.Role == "assistant" && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
 			last.Content = joinNonEmpty(last.Content, msg.Content)
 			continue
 		}

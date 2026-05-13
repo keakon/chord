@@ -73,7 +73,7 @@ func TestConvertMessagesToResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			items := convertMessagesToResponses(tt.systemPrompt, tt.messages)
+			items := convertMessagesToResponses(tt.systemPrompt, modelcompat.WireFamilyOpenAIResponses, tt.messages)
 			if len(items) != tt.wantLen {
 				t.Errorf("convertMessagesToResponses() returned %d items, want %d", len(items), tt.wantLen)
 			}
@@ -87,7 +87,7 @@ func TestConvertMessagesToResponses(t *testing.T) {
 }
 
 func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
-	items := convertMessagesToResponses("", []message.Message{{
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{
 		Role: "user",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "what is in this image?"},
@@ -122,7 +122,7 @@ func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
 }
 
 func TestConvertMessagesToResponses_ReplaysReasoningContent(t *testing.T) {
-	items := convertMessagesToResponses("", []message.Message{
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{
 		{Role: "user", Content: "do something"},
 		{
 			Role:             "assistant",
@@ -153,8 +153,27 @@ func TestConvertMessagesToResponses_ReplaysReasoningContent(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToResponses_DoesNotReplayReasoningForNonOpenAITarget(t *testing.T) {
+	items := convertMessagesToResponses("", modelcompat.WireFamilyAnthropic, []message.Message{{
+		Role:             "assistant",
+		ReasoningContent: "hidden reasoning",
+		Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIResponses},
+		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
+	}})
+	for _, it := range items {
+		if it.Type == "message" && it.Role == "assistant" {
+			blocks, _ := it.Content.([]responsesContentBlock)
+			for _, block := range blocks {
+				if block.Type == "output_text" && block.Text == "hidden reasoning" {
+					t.Fatalf("unexpected reasoning replay for non-openai target: %#v", it)
+				}
+			}
+		}
+	}
+}
+
 func TestConvertMessagesToResponses_DoesNotReplayReasoningWithoutProvenance(t *testing.T) {
-	items := convertMessagesToResponses("", []message.Message{{
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{
 		Role:             "assistant",
 		ReasoningContent: "hidden reasoning",
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
@@ -285,7 +304,7 @@ func TestRecoverResponsesToolCallsFromOutput(t *testing.T) {
 // TestConvertMessagesToResponses_ArgumentsAsString ensures function_call items serialize
 // with "arguments" as a JSON string (per Responses API), not an object.
 func TestConvertMessagesToResponses_ArgumentsAsString(t *testing.T) {
-	items := convertMessagesToResponses("", []message.Message{
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{
 		{Role: "user", Content: "run ls"},
 		{
 			Role: "assistant",
@@ -316,7 +335,7 @@ func TestConvertMessagesToResponses_ArgumentsAsString(t *testing.T) {
 
 func TestConvertMessagesToResponses_EmptyInput(t *testing.T) {
 	// Empty system prompt and empty messages should return empty non-nil slice.
-	items := convertMessagesToResponses("", []message.Message{})
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{})
 	if items == nil {
 		t.Error("convertMessagesToResponses() returned nil, want empty non-nil slice")
 	}
@@ -339,7 +358,7 @@ func TestConvertMessagesToResponses_NonNilSlice(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			items := convertMessagesToResponses(tt.systemPrompt, tt.messages)
+			items := convertMessagesToResponses(tt.systemPrompt, modelcompat.WireFamilyOpenAIResponses, tt.messages)
 			if items == nil {
 				t.Error("convertMessagesToResponses() returned nil slice, want non-nil")
 			}
@@ -348,7 +367,7 @@ func TestConvertMessagesToResponses_NonNilSlice(t *testing.T) {
 }
 
 func TestConvertMessagesToResponses_WhitespaceOnlyToolOutputPreserved(t *testing.T) {
-	items := convertMessagesToResponses("system", []message.Message{
+	items := convertMessagesToResponses("system", modelcompat.WireFamilyOpenAIResponses, []message.Message{
 		{Role: "user", Content: "run something"},
 		{
 			Role: "assistant",
@@ -378,7 +397,7 @@ func TestConvertMessagesToResponses_WhitespaceOnlyToolOutputPreserved(t *testing
 // with empty content still include the "output" field in JSON (not omitted by omitempty).
 // This prevents API error 400: Missing required parameter: 'input[N].output'.
 func TestConvertMessagesToResponses_EmptyToolOutput(t *testing.T) {
-	items := convertMessagesToResponses("system", []message.Message{
+	items := convertMessagesToResponses("system", modelcompat.WireFamilyOpenAIResponses, []message.Message{
 		{Role: "user", Content: "run something"},
 		{
 			Role: "assistant",

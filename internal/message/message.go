@@ -211,8 +211,9 @@ type Response struct {
 	// structured ToolCalls.
 	ThinkingToolcallMarkerHit bool
 	// ReasoningContent holds the full accumulated reasoning/thinking text from
-	// OpenAI-compatible providers. Populated only when ThinkingToolcallMarkerHit
-	// is true, so the agent layer can parse pseudo tool calls from it.
+	// OpenAI-compatible providers. It is populated whenever the transport emits
+	// reasoning/thinking text, and marker hits only add observational metadata so
+	// the agent layer can decide whether pseudo tool-call parsing is applicable.
 	ReasoningContent string
 	// ProviderResponseID is the server-assigned response ID from the Responses API
 	// (response.completed / response.incomplete). Used by the Codex WebSocket

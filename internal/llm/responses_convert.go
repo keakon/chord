@@ -9,7 +9,7 @@ import (
 )
 
 // convertMessagesToResponses converts internal messages to Responses API input format.
-func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
+func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []message.Message) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
 
@@ -55,7 +55,7 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 		case "assistant":
 			// Replay OpenAI-compatible reasoning/thinking content when present.
 			// Some providers validate chain-of-thought continuity across tool rounds.
-			if messageAllowsReasoningReplay(msg) {
+			if wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg) {
 				result = append(result, responsesInputItem{
 					Type: "message",
 					Role: "assistant",

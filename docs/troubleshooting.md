@@ -73,6 +73,15 @@ curl -I https://api.anthropic.com
 curl -I https://api.openai.com/v1
 ```
 
+### DeepSeek / OpenAI-compatible thinking-mode 400s
+
+If you use a `chat-completions` provider such as DeepSeek and see errors like:
+
+- `The reasoning_content in the thinking mode must be passed back to the API.`
+- `Invalid assistant message: content or tool_calls must be set`
+
+this usually means the provider requires thinking/reasoning content from the previous tool round to be included again in the follow-up request, with a strict assistant message shape. If the same error keeps repeating, keep the corresponding session dump / trace for diagnosis.
+
 ## MCP never becomes ready
 
 Check first:
@@ -101,10 +110,11 @@ If `--continue` or `--resume` does not appear to work as expected:
 
 ## Session resume / restore behavior notes
 
-Recent internal cleanup removed an unused legacy LLM responses-session reset path and consolidated session-boundary handling onto the active provider/session identifiers. This should be user-transparent, but if you are diagnosing session resume, plan execution, or model/key-switch behavior:
+For `--continue`, `--resume`, new-session, fork-session, and plan-execution flows:
 
-- make sure you are testing on the latest build rather than comparing against older pre-1.0 behavior
-- after `--continue`, `--resume`, new-session, fork-session, or plan-execution flows, rely on current behavior rather than older assumptions about a separate manual responses-session reset step
+- make sure the current directory belongs to the same project as the original session
+- prefer `--resume <session-id>` when you need an exact target
+- if model/provider state looks wrong after restore, keep the relevant session logs and traces for diagnosis
 - if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
 
 This change does not remove session resume support; it only deletes obsolete internal reset plumbing that no longer affected HTTP request behavior and keeps the active WebSocket/session lifecycle tied to the current session identifier.

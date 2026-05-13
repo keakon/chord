@@ -156,8 +156,12 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if resp.Usage == nil {
 					resp.Usage = &message.TokenUsage{}
 				}
-				resp.Usage.InputTokens = ev.Message.Usage.InputTokens
-				resp.Usage.CacheReadTokens = ev.Message.Usage.CacheReadInputTokens
+				cacheRead := ev.Message.Usage.CacheReadInputTokens
+				// Chord tracks InputTokens as the full prompt-side token burden
+				// excluding cache writes but including cache reads. Anthropic-style
+				// transports report cache reads separately, so normalize here.
+				resp.Usage.InputTokens = ev.Message.Usage.InputTokens + cacheRead
+				resp.Usage.CacheReadTokens = cacheRead
 				cacheWrite := ev.Message.Usage.CacheCreationInputTokens
 				if ev.Message.Usage.CacheCreation != nil {
 					cacheWrite = ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + ev.Message.Usage.CacheCreation.Ephemeral1hInputTokens

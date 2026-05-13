@@ -65,3 +65,5 @@ proxy: socks5://127.0.0.1:1080
 ```
 
 这个示例的重点不是 agent，而是 provider / key / pool 的故障转移链。
+
+如果你的 OpenAI 兼容后端支持 provider 侧 thinking / reasoning（例如 thinking 模式下的 DeepSeek），部分 provider 会要求把上一轮工具调用中的 thinking/reasoning 内容再次带到下一次请求里；如果这个要求没有满足，provider 可能会直接返回 400 错误。切换到不同协议家族的模型时，Chord 会按目标 provider 规范化这部分隐藏状态，而不会原样回放不兼容的 thinking/reasoning 字段。

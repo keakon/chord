@@ -157,4 +157,49 @@ func TestShouldNotFallback400RequestShapeError(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("request-shape 400 should not be retriable")
 	}
+	if !isPermanentFailure(err) {
+		t.Fatal("request-shape 400 should be permanent")
+	}
+}
+
+func TestReasoningReplay400IsPermanentRequestShapeError(t *testing.T) {
+	t.Parallel()
+	err := &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."}
+	if shouldFallback(err) {
+		t.Fatal("reasoning replay 400 should not be fallback-eligible")
+	}
+	if isRetriable(err) {
+		t.Fatal("reasoning replay 400 should not be retriable")
+	}
+	if !isPermanentFailure(err) {
+		t.Fatal("reasoning replay 400 should be permanent")
+	}
+}
+
+func TestAnthropicThinkingReplay400IsPermanentRequestShapeError(t *testing.T) {
+	t.Parallel()
+	err := &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}
+	if shouldFallback(err) {
+		t.Fatal("anthropic thinking replay 400 should not be fallback-eligible")
+	}
+	if isRetriable(err) {
+		t.Fatal("anthropic thinking replay 400 should not be retriable")
+	}
+	if !isPermanentFailure(err) {
+		t.Fatal("anthropic thinking replay 400 should be permanent")
+	}
+}
+
+func TestAssistantMessageShape400IsPermanentRequestShapeError(t *testing.T) {
+	t.Parallel()
+	err := &APIError{StatusCode: 400, Message: "Invalid assistant message: content or tool_calls must be set"}
+	if shouldFallback(err) {
+		t.Fatal("assistant-message-shape 400 should not be fallback-eligible")
+	}
+	if isRetriable(err) {
+		t.Fatal("assistant-message-shape 400 should not be retriable")
+	}
+	if !isPermanentFailure(err) {
+		t.Fatal("assistant-message-shape 400 should be permanent")
+	}
 }

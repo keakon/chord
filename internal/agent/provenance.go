@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -24,7 +25,7 @@ func mainAssistantProvenance(a *MainAgent) *message.MessageProvenance {
 	if selectedRef == "" {
 		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
 	}
-	return provenanceFromModelRefs("chord", selectedRef, runningRef)
+	return provenanceFromClient("chord", client, selectedRef, runningRef)
 }
 
 func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
@@ -40,7 +41,7 @@ func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
 	if runningRef == "" {
 		runningRef = selectedRef
 	}
-	return provenanceFromModelRefs("chord", selectedRef, runningRef)
+	return provenanceFromClient("chord", client, selectedRef, runningRef)
 }
 
 func toolProvenanceForCall(msgs []message.Message, callID string) *message.MessageProvenance {
@@ -60,6 +61,17 @@ func toolProvenanceForCall(msgs []message.Message, callID string) *message.Messa
 		}
 	}
 	return nil
+}
+
+func provenanceFromClient(source string, client *llm.Client, selectedRef, runningRef string) *message.MessageProvenance {
+	prov := provenanceFromModelRefs(source, selectedRef, runningRef)
+	if prov == nil || client == nil {
+		return prov
+	}
+	if providerCfg := client.ProviderConfig(); providerCfg != nil {
+		prov.WireFamily = wireFamilyFromProviderType(providerCfg.Type())
+	}
+	return prov
 }
 
 func provenanceFromModelRefs(source, selectedRef, runningRef string) *message.MessageProvenance {
@@ -98,6 +110,21 @@ func splitModelRef(ref string) (providerID, modelID, variant string) {
 		modelID = base
 	}
 	return providerID, modelID, variant
+}
+
+func wireFamilyFromProviderType(providerType string) string {
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case "messages":
+		return "anthropic"
+	case "chat-completions":
+		return "openai-chat"
+	case "responses":
+		return "openai-responses"
+	case "generate-content":
+		return "gemini"
+	default:
+		return "unknown"
+	}
 }
 
 func wireFamilyFromProviderID(providerID string) string {

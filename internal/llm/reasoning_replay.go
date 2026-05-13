@@ -11,7 +11,11 @@ func messageAllowsReasoningReplay(msg message.Message) bool {
 	if strings.TrimSpace(msg.ReasoningContent) == "" || msg.Provenance == nil {
 		return false
 	}
-	switch strings.TrimSpace(msg.Provenance.WireFamily) {
+	return wireFamilyAllowsReasoningReplay(strings.TrimSpace(msg.Provenance.WireFamily))
+}
+
+func wireFamilyAllowsReasoningReplay(wireFamily string) bool {
+	switch strings.TrimSpace(wireFamily) {
 	case modelcompat.WireFamilyOpenAIChat, modelcompat.WireFamilyOpenAIResponses:
 		return true
 	default:

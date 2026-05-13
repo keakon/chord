@@ -65,6 +65,15 @@ curl -I https://api.anthropic.com
 curl -I https://api.openai.com/v1
 ```
 
+### DeepSeek / OpenAI 兼容 thinking 模式 400
+
+如果你使用的是 DeepSeek 这类 `chat-completions` provider，并看到下面这类报错：
+
+- `The reasoning_content in the thinking mode must be passed back to the API.`
+- `Invalid assistant message: content or tool_calls must be set`
+
+通常说明这个 provider 要求把上一轮工具调用里的 thinking/reasoning 内容按严格的 assistant message 形状一并带回后续请求。如果同一类报错持续重复，请保留对应的 session dump / trace 供排查。
+
 ## MCP 一直未就绪
 
 先确认：
@@ -93,11 +102,11 @@ curl -I https://api.openai.com/v1
 
 ## 会话恢复 / restore 行为说明
 
-最近一轮内部清理删除了一个已失效的旧 LLM responses-session reset 路径，将会话边界处理统一收口到当前 provider / session identifier。对普通使用者来说这应当无感；但如果你在排查会话恢复、plan execution 或 key/model 切换行为，建议：
+对于 `--continue`、`--resume`、新建会话、fork 会话和 plan execution：
 
-- 先确认使用的是最新构建，不要拿 1.0 前旧版本行为做对照
-- 在 `--continue`、`--resume`、新建会话、fork 会话或 plan execution 之后，以当前行为为准，不要再假设存在一个额外的手动 responses-session reset 步骤
-- 怀疑 Codex/OpenAI 的会话边界有回归时，使用最新构建采集日志，确保日志反映的是清理后的传输层生命周期
+- 先确认当前目录与原会话属于同一项目
+- 需要精确恢复目标时，优先使用 `--resume <session-id>`
+- 如果恢复后的 model/provider 状态异常，请保留相关 session 日志和 trace 供排查
 
 这次改动并没有删除会话恢复能力；删除的是已不再影响 HTTP 请求行为的旧内部 reset 管线，同时保留并收敛了当前仍有效的 WebSocket / session 生命周期处理。
 
