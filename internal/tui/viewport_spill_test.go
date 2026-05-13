@@ -227,7 +227,7 @@ func TestViewportRenderSkipsHydratingOffscreenSpilledBlocks(t *testing.T) {
 	}
 
 	before := v.blocks[0].spillCold
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 	if v.blocks[0].spillCold != before {
 		t.Fatalf("expected off-screen spilled block to remain cold after render, got spillCold=%v", v.blocks[0].spillCold)
 	}

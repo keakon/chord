@@ -435,7 +435,7 @@ func BenchmarkViewportVisibleWindowBlockIDs(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
-	_ = v.Render("", nil, -1) // warm line-count caches
+	_ = v.Render("", nil, -1, -1, "") // warm line-count caches
 	v.hotBudgetDirty = true
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -555,7 +555,7 @@ func TestViewportVisibleWindowBlockIDsAllocsGuard(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
-	_ = v.Render("", nil, -1)
+	_ = v.Render("", nil, -1, -1, "")
 	allocs := testing.AllocsPerRun(30, func() {
 		v.hotBudgetDirty = true
 		_ = v.visibleWindowBlockIDs()
