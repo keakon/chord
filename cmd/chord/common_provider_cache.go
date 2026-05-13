@@ -33,6 +33,7 @@ type providerCache struct {
 	authMu          sync.Mutex
 	cfg             *config.Config
 	dumpWriter      *llm.DumpWriter
+	traceWriter     *llm.TraceWriter
 	fetchCodexUsage func(context.Context, *llm.ProviderConfig, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 }
 
@@ -194,6 +195,9 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 	}
 	if c.dumpWriter != nil {
 		llm.SetProviderDumpWriter(impl, c.dumpWriter)
+	}
+	if c.traceWriter != nil {
+		llm.SetProviderTraceWriter(impl, c.traceWriter)
 	}
 	c.impls[provName] = impl
 	return impl, nil

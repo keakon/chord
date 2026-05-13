@@ -24,6 +24,7 @@ type GeminiProvider struct {
 	provider    *ProviderConfig
 	client      *http.Client
 	dumpWriter  *DumpWriter
+	traceWriter *TraceWriter
 	proxyScheme string
 }
 
@@ -56,6 +57,10 @@ func validateGeminiAPIURL(apiURL string) error {
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (g *GeminiProvider) SetDumpWriter(w *DumpWriter) {
 	g.dumpWriter = w
+}
+
+func (g *GeminiProvider) SetTraceWriter(w *TraceWriter) {
+	g.traceWriter = w
 }
 
 type geminiRequest struct {
@@ -139,6 +144,8 @@ func (g *GeminiProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	traceCollector := newLLMTraceCollector("gemini", model, cb)
+	traceCB := traceCollector.Callback
 	_ = tuning
 	contents := convertMessagesToGemini(messages)
 	reqBody := geminiRequest{
@@ -175,10 +182,12 @@ func (g *GeminiProvider) CompleteStream(
 	if g.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "gemini", g.proxyScheme)
 	}
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		callErr := fmt.Errorf("send request: %w", err)
+		persistLLMTrace(g.traceWriter, traceCollector, 0, "http", start, nil, callErr)
+		return nil, callErr
 	}
 	defer httpResp.Body.Close()
 
@@ -190,7 +199,7 @@ func (g *GeminiProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
@@ -207,6 +216,7 @@ func (g *GeminiProvider) CompleteStream(
 				}
 			}()
 		}
+		persistLLMTrace(g.traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
 		return nil, apiErr
 	}
 
@@ -216,7 +226,7 @@ func (g *GeminiProvider) CompleteStream(
 	}
 	cr := NewChunkTimeoutReader(httpResp.Body, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseGeminiSSEStream(cr, cb, collector)
+	resp, parseErr := parseGeminiSSEStream(cr, traceCB, collector)
 
 	if g.dumpWriter != nil {
 		dumpWriter := g.dumpWriter
@@ -231,6 +241,7 @@ func (g *GeminiProvider) CompleteStream(
 			}
 		}()
 	}
+	persistLLMTrace(g.traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 

@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 )
 
 func TestCollectDiagnosticLogTailSelectsCurrentProcessFromSharedLog(t *testing.T) {
@@ -146,7 +150,7 @@ func TestIsRuntimeLogFile(t *testing.T) {
 func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 	m := NewModel(nil)
 	m.SetInstanceID("111-222")
-	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "/diagnostics", "/tmp/proj", "/tmp/proj/out.zip", "chord.log")
+	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "/diagnostics", "/tmp/proj", "/tmp/proj/out.zip", "chord.log", llm.LLMTraceFileName())
 	if !strings.Contains(meta, "process_instance_id: 111-222") {
 		t.Fatalf("metadata = %q, want process_instance_id", meta)
 	}
@@ -165,5 +169,46 @@ func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 		if !strings.Contains(meta, want) {
 			t.Fatalf("metadata missing %q\n%s", want, meta)
 		}
+	}
+}
+
+func TestCollectDiagnosticLLMTraceCurrentSession(t *testing.T) {
+	root := t.TempDir()
+	projectRoot := filepath.Join(root, "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(project): %v", err)
+	}
+	cfg := config.DefaultConfig()
+	locator, err := config.ResolvePathLocator(cfg, config.PathOptions{
+		StateDir:    filepath.Join(root, "state"),
+		CacheDir:    filepath.Join(root, "cache"),
+		SessionsDir: filepath.Join(root, "sessions"),
+		LogsDir:     filepath.Join(root, "logs"),
+	})
+	if err != nil {
+		t.Fatalf("ResolvePathLocator() error = %v", err)
+	}
+	projectLocator, err := locator.EnsureProject(projectRoot)
+	if err != nil {
+		t.Fatalf("EnsureProject() error = %v", err)
+	}
+	sessionID := "sess-1"
+	tracePath := filepath.Join(projectLocator.ProjectSessionsDir, sessionID, "traces", llm.LLMTraceFileName())
+	if err := os.MkdirAll(filepath.Dir(tracePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(trace dir): %v", err)
+	}
+	content := strings.Join([]string{`{"seq":1}`, `{"seq":2}`}, "\n") + "\n"
+	if err := os.WriteFile(tracePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(trace): %v", err)
+	}
+	backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: sessionID}}
+	m := NewModel(backend)
+	m.workingDir = projectRoot
+	name, tail := m.collectDiagnosticLLMTrace(projectLocator)
+	if name != llm.LLMTraceFileName() {
+		t.Fatalf("name = %q, want %q", name, llm.LLMTraceFileName())
+	}
+	if !strings.Contains(tail, `{"seq":1}`) || !strings.Contains(tail, `{"seq":2}`) {
+		t.Fatalf("tail = %q, want trace lines", tail)
 	}
 }

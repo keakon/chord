@@ -38,6 +38,8 @@ Chord writes here. Lose it and you lose history.
 │       ├── project.json                # canonical-root, display-name, timestamps
 │       └── <session-id>/               # one session
 │           ├── messages.jsonl
+│           ├── traces/
+│           │   └── llm-trace.jsonl     # lightweight per-request LLM trace (always on)
 │           └── …                       # additional session artifacts
 ├── projects/
 │   └── <project-key>.json              # registry pointer for cross-project lookup

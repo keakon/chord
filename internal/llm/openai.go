@@ -27,7 +27,8 @@ type OpenAIProvider struct {
 	provider          *ProviderConfig
 	client            *http.Client
 	dumpWriter        *DumpWriter // optional: when non-nil, each request/response is dumped to disk
-	proxyScheme       string      // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
+	traceWriter       *TraceWriter
+	proxyScheme       string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 	responsesProvider *ResponsesProvider
 }
 
@@ -70,6 +71,13 @@ func (o *OpenAIProvider) SetDumpWriter(w *DumpWriter) {
 	o.dumpWriter = w
 	if o.responsesProvider != nil {
 		o.responsesProvider.SetDumpWriter(w)
+	}
+}
+
+func (o *OpenAIProvider) SetTraceWriter(w *TraceWriter) {
+	o.traceWriter = w
+	if o.responsesProvider != nil {
+		o.responsesProvider.SetTraceWriter(w)
 	}
 }
 
@@ -206,6 +214,8 @@ func (o *OpenAIProvider) CompleteStream(
 	if o.provider != nil && o.provider.isOpenAIOAuthKey(apiKey) {
 		return o.responsesProvider.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, cb)
 	}
+	traceCollector := newLLMTraceCollector("openai", model, cb)
+	traceCB := traceCollector.Callback
 
 	ot := tuning.OpenAI
 	// Convert messages to OpenAI format.
@@ -270,10 +280,12 @@ func (o *OpenAIProvider) CompleteStream(
 	if o.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "openai", o.proxyScheme)
 	}
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := o.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		callErr := fmt.Errorf("send request: %w", err)
+		persistLLMTrace(o.traceWriter, traceCollector, 0, "http", start, nil, callErr)
+		return nil, callErr
 	}
 	defer httpResp.Body.Close()
 
@@ -286,7 +298,7 @@ func (o *OpenAIProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
@@ -318,6 +330,7 @@ func (o *OpenAIProvider) CompleteStream(
 				}
 			}()
 		}
+		persistLLMTrace(o.traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
 		return nil, apiErr
 	}
 
@@ -328,7 +341,7 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 	cr := NewChunkTimeoutReader(httpResp.Body, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseOpenAISSEStream(cr, cb, collector)
+	resp, parseErr := parseOpenAISSEStream(cr, traceCB, collector)
 
 	// Write dump asynchronously (whether success or failure).
 	if o.dumpWriter != nil {
@@ -355,6 +368,7 @@ func (o *OpenAIProvider) CompleteStream(
 		}()
 	}
 
+	persistLLMTrace(o.traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 

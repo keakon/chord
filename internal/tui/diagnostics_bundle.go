@@ -17,10 +17,13 @@ import (
 
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 )
 
 const diagnosticLogTailLines = 240
 const diagnosticLogTailBytes = 256 << 10
+const diagnosticLLMTraceTailLines = 200
+const diagnosticLLMTraceTailBytes = 256 << 10
 
 type diagnosticsBundleMsg struct {
 	path string
@@ -28,11 +31,13 @@ type diagnosticsBundleMsg struct {
 }
 
 type diagnosticsBundleData struct {
-	bundlePath string
-	metadata   string
-	tuiDump    string
-	logName    string
-	logTail    string
+	bundlePath   string
+	metadata     string
+	tuiDump      string
+	logName      string
+	logTail      string
+	llmTraceName string
+	llmTraceTail string
 }
 
 var (
@@ -82,6 +87,16 @@ func writeDiagnosticsBundleCmd(data diagnosticsBundleData) tea.Cmd {
 				name = "runtime-log-tail.txt"
 			}
 			if err := writeDiagnosticsZipFile(zw, name, data.logTail); err != nil {
+				_ = zw.Close()
+				return diagnosticsBundleMsg{err: err}
+			}
+		}
+		if strings.TrimSpace(data.llmTraceTail) != "" {
+			name := data.llmTraceName
+			if strings.TrimSpace(name) == "" {
+				name = llm.LLMTraceFileName()
+			}
+			if err := writeDiagnosticsZipFile(zw, name, data.llmTraceTail); err != nil {
 				_ = zw.Close()
 				return diagnosticsBundleMsg{err: err}
 			}
@@ -139,17 +154,20 @@ func (m *Model) buildDiagnosticsBundle(now time.Time, trigger string) (diagnosti
 		return diagnosticsBundleData{}, err
 	}
 	logName, logTail := collectDiagnosticLogTail(locator.LogsDir, baseDir, os.Getpid())
-	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, bundlePath, logName)
+	llmTraceName, llmTraceTail := m.collectDiagnosticLLMTrace(projectLocator)
+	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, bundlePath, logName, llmTraceName)
 	return diagnosticsBundleData{
-		bundlePath: bundlePath,
-		metadata:   meta,
-		tuiDump:    tuiDump,
-		logName:    logName,
-		logTail:    logTail,
+		bundlePath:   bundlePath,
+		metadata:     meta,
+		tuiDump:      tuiDump,
+		logName:      logName,
+		logTail:      logTail,
+		llmTraceName: llmTraceName,
+		llmTraceTail: llmTraceTail,
 	}, nil
 }
 
-func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundlePath, logName string) string {
+func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundlePath, logName, llmTraceName string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Chord diagnostics bundle\n")
 	fmt.Fprintf(&sb, "generated_at: %s\n", now.Format(time.RFC3339Nano))
@@ -196,6 +214,43 @@ func (m *Model) sessionSummaryString() string {
 	}
 	parts = append(parts, fmt.Sprintf("locked=%t", summary.Locked))
 	return strings.Join(parts, " ")
+}
+
+func (m *Model) collectDiagnosticLLMTrace(projectLocator *config.ProjectLocator) (string, string) {
+	if m == nil || m.agent == nil || projectLocator == nil {
+		return "", ""
+	}
+	summary := m.agent.GetSessionSummary()
+	if summary == nil || strings.TrimSpace(summary.ID) == "" {
+		return "", ""
+	}
+	path := filepath.Join(projectLocator.ProjectSessionsDir, summary.ID, "traces", llm.LLMTraceFileName())
+	tail, ok := readTextTail(path, diagnosticLLMTraceTailBytes, diagnosticLLMTraceTailLines)
+	if !ok || strings.TrimSpace(tail) == "" {
+		return "", ""
+	}
+	return llm.LLMTraceFileName(), tail
+}
+
+func readTextTail(path string, maxBytes int, maxLines int) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return "", false
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
+			data = data[idx+1:]
+		}
+	}
+	if maxLines > 0 {
+		lines := bytes.Split(data, []byte("\n"))
+		if len(lines) > maxLines+1 {
+			lines = lines[len(lines)-(maxLines+1):]
+		}
+		data = bytes.Join(lines, []byte("\n"))
+	}
+	return string(data), true
 }
 
 func collectDiagnosticLogTail(logsDir, baseDir string, pid int) (string, string) {

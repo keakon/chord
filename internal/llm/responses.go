@@ -32,6 +32,7 @@ type ResponsesProvider struct {
 	provider     *ProviderConfig
 	client       *http.Client
 	dumpWriter   *DumpWriter
+	traceWriter  *TraceWriter
 	proxyScheme  string
 	dialProxyURL string
 	// codexWSCompleteFn is a test seam for the Codex WebSocket path. Production
@@ -79,6 +80,10 @@ func NewResponsesProvider(provider *ProviderConfig, proxyURL string) (*Responses
 
 func (r *ResponsesProvider) SetDumpWriter(w *DumpWriter) {
 	r.dumpWriter = w
+}
+
+func (r *ResponsesProvider) SetTraceWriter(w *TraceWriter) {
+	r.traceWriter = w
 }
 
 func (r *ResponsesProvider) LastTransportUsed() string {
@@ -159,6 +164,8 @@ func (r *ResponsesProvider) CompleteStream(
 	cb StreamCallback,
 ) (*message.Response, error) {
 	ot := tuning.OpenAI
+	traceCollector := newLLMTraceCollector("responses", model, cb)
+	traceCB := traceCollector.Callback
 	useOpenAIOAuth := r.provider != nil && r.provider.isOpenAIOAuthKey(apiKey)
 	url := r.provider.APIURL()
 	if useOpenAIOAuth {
@@ -286,32 +293,40 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
 		}
-		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, cb, start)
+		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start)
 		if wsErr == nil {
 			r.lastTransportUsed.Store("websocket")
+			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
 			return wsResp, nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			r.resetCodexWebSocketChain("context_cancel")
-			return nil, fmt.Errorf("responses websocket aborted: %w", ctxErr)
+			callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
+			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+			return nil, callErr
 		}
 		if wsUsedIncremental {
 			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
-			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, cb, start)
+			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start)
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
+				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
 				return wsResp, nil
 			}
 			wsErr = retryErr
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				r.resetCodexWebSocketChain("context_cancel")
-				return nil, fmt.Errorf("responses websocket aborted: %w", ctxErr)
+				callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
+				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+				return nil, callErr
 			}
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			r.resetCodexWebSocketChain("context_cancel")
-			return nil, fmt.Errorf("responses websocket aborted: %w", ctxErr)
+			callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
+			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+			return nil, callErr
 		}
 		if isCodexWSProtocolStickyError(wsErr) {
 			r.codexWSStickyDisabled.Store(true)
@@ -324,10 +339,11 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, cb)
+	resp, parseErr, httpStatus := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
+	persistLLMTrace(r.traceWriter, traceCollector, httpStatus, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 
@@ -341,16 +357,16 @@ func (r *ResponsesProvider) sendAndParse(
 	apiKey string,
 	useOpenAIOAuth bool,
 	cb StreamCallback,
-) (*message.Response, error) {
+) (*message.Response, error, int) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("responses request aborted: %w", err)
+		return nil, fmt.Errorf("responses request aborted: %w", err), 0
 	}
 	// Build HTTP request with a derived context for per-chunk timeout enforcement.
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err), 0
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -374,7 +390,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	httpResp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("send request: %w", err), 0
 	}
 	defer httpResp.Body.Close()
 
@@ -382,7 +398,7 @@ func (r *ResponsesProvider) sendAndParse(
 	if httpResp.Header.Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("create gzip reader: %w", err)
+			return nil, fmt.Errorf("create gzip reader: %w", err), 0
 		}
 		httpResp.Body = gr
 	}
@@ -439,7 +455,7 @@ func (r *ResponsesProvider) sendAndParse(
 				}
 			}()
 		}
-		return nil, apiErr
+		return nil, apiErr, httpResp.StatusCode
 	}
 
 	// Parse OpenAI Codex OAuth rate-limit headers from the 200 response and notify via callback.
@@ -519,5 +535,5 @@ func (r *ResponsesProvider) sendAndParse(
 		}()
 	}
 
-	return resp, parseErr
+	return resp, parseErr, httpResp.StatusCode
 }

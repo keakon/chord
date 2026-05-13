@@ -90,7 +90,7 @@ Permissions are agent-level and combine with project / global configuration. The
 
 ## Diagnostics bundle
 
-A snapshot exported by `Ctrl+G` or `/diagnostics`: includes recent log lines, runtime state, and TUI-specific debug info. Use it when reporting bugs. See [Troubleshooting — When to check logs](./troubleshooting.md#when-to-check-logs).
+A snapshot exported by `Ctrl+G` or `/diagnostics`: includes recent log lines, runtime state, TUI-specific debug info, and a recent lightweight LLM request trace from the current session. Full raw request / SSE dumps still require `log_level: debug`. Use it when reporting bugs. See [Troubleshooting — When to check logs](./troubleshooting.md#when-to-check-logs).
 
 ## Insert / Normal mode
 

@@ -38,6 +38,8 @@ Chord 写在这里。删了就丢历史。
 │       ├── project.json                # canonical-root、display-name、时间戳
 │       └── <session-id>/               # 单个会话
 │           ├── messages.jsonl
+│           ├── traces/
+│           │   └── llm-trace.jsonl     # 轻量 LLM 请求 trace（默认开启）
 │           └── …                       # 该会话的其他产物
 ├── projects/
 │   └── <project-key>.json              # 注册表指针，用于跨项目查找

@@ -27,7 +27,8 @@ type AnthropicProvider struct {
 	provider    *ProviderConfig
 	client      *http.Client
 	dumpWriter  *DumpWriter // optional: when non-nil, each request/response is dumped to disk
-	proxyScheme string      // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
+	traceWriter *TraceWriter
+	proxyScheme string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 }
 
 // NewAnthropicProviderWithClient creates an Anthropic provider using a caller-supplied HTTP client.
@@ -52,6 +53,10 @@ func NewAnthropicProvider(provider *ProviderConfig, proxyURL string) (*Anthropic
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (a *AnthropicProvider) SetDumpWriter(w *DumpWriter) {
 	a.dumpWriter = w
+}
+
+func (a *AnthropicProvider) SetTraceWriter(w *TraceWriter) {
+	a.traceWriter = w
 }
 
 // --- Anthropic API request/response structures ---
@@ -148,6 +153,8 @@ func (a *AnthropicProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	traceCollector := newLLMTraceCollector("anthropic", model, cb)
+	traceCB := traceCollector.Callback
 	at := tuning.Anthropic
 	at, err := validateAnthropicTuning(at)
 	if err != nil {
@@ -228,10 +235,12 @@ func (a *AnthropicProvider) CompleteStream(
 	if a.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "anthropic", a.proxyScheme)
 	}
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := a.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		callErr := fmt.Errorf("send request: %w", err)
+		persistLLMTrace(a.traceWriter, traceCollector, 0, "http", start, nil, callErr)
+		return nil, callErr
 	}
 	defer httpResp.Body.Close()
 
@@ -244,7 +253,7 @@ func (a *AnthropicProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
@@ -273,6 +282,7 @@ func (a *AnthropicProvider) CompleteStream(
 				}
 			}()
 		}
+		persistLLMTrace(a.traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
 		return nil, apiErr
 	}
 
@@ -283,7 +293,7 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 	cr := NewChunkTimeoutReader(httpResp.Body, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseSSEStream(cr, cb, collector)
+	resp, parseErr := parseSSEStream(cr, traceCB, collector)
 
 	// Write dump asynchronously.
 	if a.dumpWriter != nil {
@@ -310,6 +320,7 @@ func (a *AnthropicProvider) CompleteStream(
 		}()
 	}
 
+	persistLLMTrace(a.traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 
