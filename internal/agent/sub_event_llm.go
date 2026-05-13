@@ -136,11 +136,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		log.Warnf("subagent finalized without assistant text agent=%v turn_id=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", s.instanceID, s.turn.ID, len(sanitizedCalls), len(resp.ThinkingBlocks), resp.StopReason)
 	}
 	s.ctxMgr.Append(message.Message{
-		Role:       "assistant",
-		Content:    resp.Content,
-		ToolCalls:  sanitizedCalls,
-		StopReason: resp.StopReason,
-		Provenance: subAssistantProvenance(s),
+		Role:             "assistant",
+		Content:          resp.Content,
+		ReasoningContent: resp.ReasoningContent,
+		ToolCalls:        sanitizedCalls,
+		StopReason:       resp.StopReason,
+		Provenance:       subAssistantProvenance(s),
 	})
 
 	// Emit finalized assistant message event for control-plane consumers.
@@ -152,11 +153,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Persist assistant message (with usage for session resume).
 	persistMsg := message.Message{
-		Role:       "assistant",
-		Content:    resp.Content,
-		ToolCalls:  sanitizedCalls,
-		StopReason: resp.StopReason,
-		Provenance: subAssistantProvenance(s),
+		Role:             "assistant",
+		Content:          resp.Content,
+		ReasoningContent: resp.ReasoningContent,
+		ToolCalls:        sanitizedCalls,
+		StopReason:       resp.StopReason,
+		Provenance:       subAssistantProvenance(s),
 	}
 	persistMsg.Usage = resp.Usage
 	go func() {

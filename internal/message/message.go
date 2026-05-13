@@ -81,6 +81,7 @@ type Message struct {
 	Content             string             `json:"content"`
 	Parts               []ContentPart      `json:"parts,omitempty"`                 // multi-part content (text + images); when set, supersedes Content
 	ThinkingBlocks      []ThinkingBlock    `json:"thinking_blocks,omitempty"`       // assistant only; must be replayed verbatim
+	ReasoningContent    string             `json:"reasoning_content,omitempty"`     // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
 	ToolCalls           []ToolCall         `json:"tool_calls,omitempty"`            // non-nil for assistant tool_use
 	ToolCallID          string             `json:"tool_call_id,omitempty"`          // non-empty for tool results
 	ToolDiff            string             `json:"tool_diff,omitempty"`             // unified diff for Write/Edit tool results

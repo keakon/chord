@@ -248,12 +248,13 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// calls as a safety net (no-op for valid calls, but defensive).
 	sanitizedToolCalls := sanitizeToolCallArgs(validCalls)
 	assistantMsg := message.Message{
-		Role:           "assistant",
-		Content:        payload.Content,
-		ThinkingBlocks: payload.ThinkingBlocks,
-		ToolCalls:      sanitizedToolCalls,
-		StopReason:     payload.StopReason,
-		Provenance:     mainAssistantProvenance(a),
+		Role:             "assistant",
+		Content:          payload.Content,
+		ThinkingBlocks:   payload.ThinkingBlocks,
+		ReasoningContent: payload.ReasoningContent,
+		ToolCalls:        sanitizedToolCalls,
+		StopReason:       payload.StopReason,
+		Provenance:       mainAssistantProvenance(a),
 	}
 	assistantMsg.Usage = payload.Usage
 	a.ctxMgr.Append(assistantMsg)
