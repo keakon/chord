@@ -15,7 +15,7 @@ func (m *Model) renderConfirmDialog() string {
 	if m.confirm.request == nil {
 		return ""
 	}
-	if !m.confirm.editing && !m.confirm.denyingWithReason && m.confirm.deadline.IsZero() && m.confirm.renderCacheText != "" &&
+	if !m.confirm.editing && !m.confirm.pickingRule && !m.confirm.denyingWithReason && m.confirm.deadline.IsZero() && m.confirm.renderCacheText != "" &&
 		m.confirm.renderCacheWidth == m.width &&
 		m.confirm.renderCacheHeight == m.height &&
 		m.confirm.renderCacheTheme == m.theme.Name &&

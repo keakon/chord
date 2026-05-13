@@ -17,6 +17,8 @@ Typical permission states:
 - `ask`: require confirmation before execution
 - `deny`: reject directly
 
+In the TUI confirmation dialog, `A` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call.
+
 Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
 
 ```yaml

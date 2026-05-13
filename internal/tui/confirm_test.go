@@ -244,6 +244,37 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.workingDir = "/tmp/project"
+	m.confirm.request = &ConfirmRequest{ToolName: "Edit", ArgsJSON: `{"path":"internal/tui/confirm_render.go","old_string":"old","new_string":"new"}`}
+
+	summary := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(summary, "[A] Add rule…") {
+		t.Fatalf("expected add-rule option in summary dialog, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "⚠ Confirmation Required") {
+		t.Fatalf("expected summary confirmation title before entering picker, got:\n%s", summary)
+	}
+
+	_ = m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
+
+	if !m.confirm.pickingRule {
+		t.Fatal("expected add-rule key to enter rule picker mode")
+	}
+
+	picker := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(picker, "⚠ Add rule — Edit") {
+		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
+	}
+	if !strings.Contains(picker, "Pattern:") {
+		t.Fatalf("expected rule picker pattern section, got:\n%s", picker)
+	}
+	if !strings.Contains(picker, "[Enter] add rule + allow") {
+		t.Fatalf("expected rule picker enter hint, got:\n%s", picker)
+	}
+}
+
 func TestConfirmEditAcceptsClipboardTextMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
