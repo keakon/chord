@@ -402,6 +402,59 @@ func (c *Client) SetNextRequestTuningOverride(tuning RequestTuning) {
 	c.nextTuning = &copy
 }
 
+// MergeNextRequestTuningOverride merges a one-shot tuning override into the
+// next request override instead of replacing it. Non-zero/non-empty fields in
+// tuning win over the existing pending override.
+func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nextTuning == nil {
+		copy := tuning
+		copy.OpenAI.ParallelToolCalls = cloneBoolPtr(tuning.OpenAI.ParallelToolCalls)
+		c.nextTuning = &copy
+		return
+	}
+	merged := *c.nextTuning
+	merged.OpenAI.ParallelToolCalls = cloneBoolPtr(c.nextTuning.OpenAI.ParallelToolCalls)
+	if tuning.Anthropic.ThinkingType != "" {
+		merged.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
+	}
+	if tuning.Anthropic.ThinkingBudget != 0 {
+		merged.Anthropic.ThinkingBudget = tuning.Anthropic.ThinkingBudget
+	}
+	if tuning.Anthropic.ThinkingEffort != "" {
+		merged.Anthropic.ThinkingEffort = tuning.Anthropic.ThinkingEffort
+	}
+	if tuning.Anthropic.ThinkingDisplay != "" {
+		merged.Anthropic.ThinkingDisplay = tuning.Anthropic.ThinkingDisplay
+	}
+	if tuning.Anthropic.PromptCacheMode != "" {
+		merged.Anthropic.PromptCacheMode = tuning.Anthropic.PromptCacheMode
+	}
+	if tuning.Anthropic.PromptCacheTTL != "" {
+		merged.Anthropic.PromptCacheTTL = tuning.Anthropic.PromptCacheTTL
+	}
+	if tuning.Anthropic.CacheTools {
+		merged.Anthropic.CacheTools = true
+	}
+	if tuning.OpenAI.ReasoningEffort != "" {
+		merged.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
+	}
+	if tuning.OpenAI.ReasoningSummary != "" {
+		merged.OpenAI.ReasoningSummary = tuning.OpenAI.ReasoningSummary
+	}
+	if tuning.OpenAI.TextVerbosity != "" {
+		merged.OpenAI.TextVerbosity = tuning.OpenAI.TextVerbosity
+	}
+	if tuning.OpenAI.ParallelToolCalls != nil {
+		merged.OpenAI.ParallelToolCalls = cloneBoolPtr(tuning.OpenAI.ParallelToolCalls)
+	}
+	if tuning.OpenAI.ToolChoice != "" {
+		merged.OpenAI.ToolChoice = tuning.OpenAI.ToolChoice
+	}
+	c.nextTuning = &merged
+}
+
 // consumeRequestTuningOverrideLocked must be called with c.mu held.
 func (c *Client) consumeRequestTuningOverrideLocked() (RequestTuning, bool) {
 	if c.nextTuning == nil {

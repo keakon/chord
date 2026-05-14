@@ -172,6 +172,29 @@ func TestPrepareStartupWorktree_InvalidSlug(t *testing.T) {
 	}
 }
 
+func TestPrepareStartupWorktree_BadGlobalConfigFailsBeforeCreatingWorktree(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+	t.Setenv("CHORD_CONFIG_HOME", flagConfigHome)
+	if err := os.WriteFile(filepath.Join(flagConfigHome, "config.yaml"), []byte("providers: [broken\n"), 0o644); err != nil {
+		t.Fatalf("write malformed config: %v", err)
+	}
+
+	_, err := prepareStartupWorktree(context.Background(), "feat-bad-config")
+	if err == nil || !strings.Contains(err.Error(), "parse config") {
+		t.Fatalf("expected malformed config error, got %v", err)
+	}
+	branches := string(mustRunStartupGit(t, repo, "branch", "--list", "chord/feat-bad-config"))
+	if strings.Contains(branches, "chord/feat-bad-config") {
+		t.Fatalf("worktree branch unexpectedly created despite malformed config: %s", branches)
+	}
+	list := string(mustRunStartupGit(t, repo, "worktree", "list", "--porcelain"))
+	if strings.Contains(list, "feat-bad-config") {
+		t.Fatalf("git worktree unexpectedly created despite malformed config: %s", list)
+	}
+}
+
 func TestWorktreeMetaForInfo_NilInputReturnsNil(t *testing.T) {
 	if got := worktreeMetaForInfo(nil); got != nil {
 		t.Errorf("nil input: got %+v, want nil", got)

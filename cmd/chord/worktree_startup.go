@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,8 +33,9 @@ func startupPathOptions() config.PathOptions {
 func startupPathLocator() (*config.PathLocator, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// Fall back to defaults when config is missing; malformed config still degrades here
-		// so worktree path resolution can proceed before the main startup path reports the real error.
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
 		cfg = nil
 	}
 	return config.ResolvePathLocator(cfg, startupPathOptions())
@@ -46,10 +48,10 @@ func startupPathLocator() (*config.PathLocator, error) {
 func startupBranchPrefix() (string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// Same rationale as startupPathLocator: only truly broken disk
-		// state fails LoadConfig; degrade to default rather than abort
-		// the whole startup.
-		return worktree.DefaultBranchPrefix, nil
+		if errors.Is(err, os.ErrNotExist) {
+			return worktree.DefaultBranchPrefix, nil
+		}
+		return "", err
 	}
 	if cfg == nil {
 		return worktree.DefaultBranchPrefix, nil

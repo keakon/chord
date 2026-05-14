@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -224,6 +225,14 @@ func compactionFailureMatchesPending(payload *compactionFailure, pending *pendin
 // (async worker) and eventually spawns the main LLM goroutine. Call only from
 // the event-loop goroutine after any context mutations for this round
 // (e.g. processPendingUserMessagesBeforeLLMInTurn).
+func (a *MainAgent) applyMainLLMRequestTuningOverride(tuning llm.RequestTuning) {
+	if a == nil || a.llmClient == nil {
+		return
+	}
+	tuning = a.applyLoopToolChoiceRequirement(tuning)
+	a.llmClient.MergeNextRequestTuningOverride(tuning)
+}
+
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
@@ -245,14 +254,13 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 
 	snapshot := a.ctxMgr.Snapshot()
 	if a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
 	trigger := a.compactionTriggerForMainLLM()
 	if !trigger.needed() {
-		if a.loopState.Enabled {
-			a.applyLoopToolChoiceRequirement()
-		}
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
@@ -270,6 +278,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// any context_length_exceeded error that may arise.
 	if a.IsCompactionRunning() {
 		log.Debugf("beginMainLLMAfterPreparation: compaction already running, spawning LLM in parallel turn_id=%v", turnID)
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
@@ -292,6 +301,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// Spawn LLM call in parallel with background compaction.
 	// If the call hits oversize, handleCompactionOversizeSuspend will pause
 	// the turn until the compaction draft is applied.
+	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 	a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 }
 
@@ -682,6 +692,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 	}
 	// If compaction itself failed for a regular main continuation, do not
 	// immediately retry the same gate; resume the pending continuation directly.
+	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, a.ctxMgr.Snapshot(), pending.agentErrSourceID)
 	return true
 }

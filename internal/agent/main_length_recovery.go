@@ -43,7 +43,7 @@ func (a *MainAgent) beginLengthRecoveryRetry(toolName string, turnID uint64, tur
 	a.turn.InLengthRecovery = true
 	recoveryPrompt := lengthRecoveryPrompt(toolName)
 	parallelFalse := false
-	a.llmClient.SetNextRequestTuningOverride(llm.RequestTuning{
+	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{
 		OpenAI: llm.OpenAITuning{ParallelToolCalls: &parallelFalse},
 	})
 	// Use request-scoped overlay instead of durable ctxMgr append so the

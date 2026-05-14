@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,41 @@ import (
 
 type recordingLengthRecoveryProvider struct {
 	lastTuning llm.RequestTuning
+}
+
+type recordingLoopTuningProvider struct {
+	mu    sync.Mutex
+	tunes []llm.RequestTuning
+}
+
+func (p *recordingLoopTuningProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	tuning llm.RequestTuning,
+	_ llm.StreamCallback,
+) (*message.Response, error) {
+	p.mu.Lock()
+	p.tunes = append(p.tunes, tuning)
+	p.mu.Unlock()
+	return &message.Response{Content: "ok", StopReason: "stop"}, nil
+}
+
+func (p *recordingLoopTuningProvider) Complete(
+	ctx context.Context,
+	apiKey string,
+	model string,
+	systemPrompt string,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	maxTokens int,
+	tuning llm.RequestTuning,
+) (*message.Response, error) {
+	return p.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, nil)
 }
 
 func (p *recordingLengthRecoveryProvider) CompleteStream(
@@ -203,6 +239,93 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 	}
 	if !foundQueued {
 		t.Fatal("expected queued user message to be merged before length-recovery resume")
+	}
+}
+
+func TestBeginMainLLMAfterPreparationLoopToolChoiceMergesWithExistingOverride(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.loopState.Enabled = true
+	provider := &recordingLoopTuningProvider{}
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
+	parallelFalse := false
+	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{
+		OpenAI: llm.OpenAITuning{ParallelToolCalls: &parallelFalse},
+	})
+
+	a.beginMainLLMAfterPreparation(context.Background(), 1, "")
+	deadline := time.After(2 * time.Second)
+	for {
+		provider.mu.Lock()
+		gotCount := len(provider.tunes)
+		provider.mu.Unlock()
+		if gotCount == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for main LLM call")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.tunes) != 1 {
+		t.Fatalf("len(tunes) = %d, want 1", len(provider.tunes))
+	}
+	got := provider.tunes[0]
+	if got.OpenAI.ParallelToolCalls == nil || *got.OpenAI.ParallelToolCalls {
+		t.Fatalf("parallel_tool_calls = %#v, want false", got.OpenAI.ParallelToolCalls)
+	}
+	if got.OpenAI.ToolChoice != "required" {
+		t.Fatalf("tool_choice = %q, want required", got.OpenAI.ToolChoice)
+	}
+}
+
+func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyRunning(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.loopState.Enabled = true
+	a.newTurn()
+	provider := &recordingLoopTuningProvider{}
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
+	a.startCompactionState(1, compactionTarget{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: a.turn.ID, turnEpoch: a.turn.Epoch})
+
+	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
+	deadline := time.After(2 * time.Second)
+	for {
+		provider.mu.Lock()
+		gotCount := len(provider.tunes)
+		provider.mu.Unlock()
+		if gotCount == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for main LLM call while compaction running")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	got := provider.tunes[0]
+	if got.OpenAI.ParallelToolCalls == nil || *got.OpenAI.ParallelToolCalls {
+		t.Fatalf("parallel_tool_calls = %#v, want false", got.OpenAI.ParallelToolCalls)
+	}
+	if got.OpenAI.ToolChoice != "required" {
+		t.Fatalf("tool_choice = %q, want required", got.OpenAI.ToolChoice)
 	}
 }
 

@@ -67,11 +67,11 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		return checkFinish(ctx, mainRoot, info, name, onto)
 	}
 
-	hasDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
+	hadPreMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
 	if err != nil {
 		return err
 	}
-	if hasDiff {
+	if hadPreMergeDiff {
 		if err := ensureCommitIdentity(ctx, mainRoot); err != nil {
 			return err
 		}
@@ -81,7 +81,11 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		return formatConflictError(err, info.Path, name, onto, finishConflictHelp(name, info.Path), "finish worktree")
 	}
 
-	if hasDiff {
+	hasPostMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
+	if err != nil {
+		return err
+	}
+	if hasPostMergeDiff {
 		tmpPath, tmpBranch, cleanup, err := createFinishScratch(ctx, mainRoot, name, onto)
 		if err != nil {
 			return err

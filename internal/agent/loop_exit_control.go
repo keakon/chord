@@ -71,22 +71,19 @@ func (a *MainAgent) shouldRequireToolCallInLoop() bool {
 	// Conservative gate: only enable request-level tool_choice on OpenAI-compatible
 	// provider families that are known to carry tool_choice in this codebase.
 	switch provider.Type() {
-	case "chat_completions", "responses":
+	case "chat-completions", "chat_completions", "responses":
 		return true
 	default:
 		return false
 	}
 }
 
-func (a *MainAgent) applyLoopToolChoiceRequirement() {
-	if !a.shouldRequireToolCallInLoop() || a.llmClient == nil {
-		return
+func (a *MainAgent) applyLoopToolChoiceRequirement(tuning llm.RequestTuning) llm.RequestTuning {
+	if !a.shouldRequireToolCallInLoop() {
+		return tuning
 	}
 	parallelFalse := false
-	a.llmClient.SetNextRequestTuningOverride(llm.RequestTuning{
-		OpenAI: llm.OpenAITuning{
-			ParallelToolCalls: &parallelFalse,
-			ToolChoice:        "required",
-		},
-	})
+	tuning.OpenAI.ParallelToolCalls = &parallelFalse
+	tuning.OpenAI.ToolChoice = "required"
+	return tuning
 }

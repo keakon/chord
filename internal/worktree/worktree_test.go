@@ -419,6 +419,51 @@ func TestFinish_Basic_MergesOntoThenSquashesAndReclaims(t *testing.T) {
 	}
 }
 
+func TestFinish_WhenWorktreeOnlyBehindMain_ReclaimsWithoutSquashCommit(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	beforeBranch := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+	if beforeMain != beforeBranch {
+		t.Fatalf("expected freshly created worktree branch to match main HEAD: main=%s branch=%s", beforeMain, beforeBranch)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("from main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "shared.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main adds shared")
+	afterMainAdvance := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if afterMainAdvance == beforeMain {
+		t.Fatal("expected main HEAD to advance")
+	}
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{}, pl); err != nil {
+		t.Fatalf("Finish behind-only branch: %v", err)
+	}
+	if _, err := os.Stat(info.Path); err == nil {
+		t.Errorf("worktree dir still exists after Finish")
+	}
+	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
+	if strings.Contains(string(branches), "chord/feat") {
+		t.Errorf("branch chord/feat still present after Finish: %s", branches)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "shared.txt")); err != nil {
+		t.Errorf("expected shared.txt in main repo after Finish: %v", err)
+	}
+
+	afterMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if afterMain != afterMainAdvance {
+		t.Fatalf("main HEAD changed unexpectedly: got %s want %s", afterMain, afterMainAdvance)
+	}
+}
+
 func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
