@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -115,6 +116,66 @@ func TestStreamToolDeltaReducerRejectsSpeculativeExecutionWhenPolicyBlocks(t *te
 	}
 }
 
+func TestStreamToolDeltaReducerReadOnlyShellWaitsForPriorMutatingShell(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	started := make(chan message.ToolCall, 2)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		started <- tc
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "ok"}, nil
+	})
+	reducer := streamToolDeltaReducer{
+		turn:     turn,
+		registry: registry,
+		emit:     func(AgentEvent) {},
+		ruleset: func() permission.Ruleset {
+			return permission.Ruleset{{Permission: tools.NameShell, Pattern: "git commit *", Action: permission.ActionAsk}, {Permission: tools.NameShell, Pattern: "git status *", Action: permission.ActionAllow}}
+		},
+	}
+
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git commit -m fix"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+
+	select {
+	case got := <-started:
+		t.Fatalf("unexpected speculative start: %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestStreamToolDeltaReducerAllowsReadOnlyShellPrefix(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	started := make(chan message.ToolCall, 2)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		started <- tc
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "ok"}, nil
+	})
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
+
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git diff HEAD"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+
+	seen := map[string]bool{}
+	deadline := time.After(time.Second)
+	for len(seen) < 2 {
+		select {
+		case got := <-started:
+			seen[got.ID] = true
+		case <-deadline:
+			t.Fatalf("speculative starts = %d, want 2", len(seen))
+		}
+	}
+	if !seen["call-1"] || !seen["call-2"] {
+		t.Fatalf("started calls missing expected ids: %#v", seen)
+	}
+}
 func TestStreamToolDeltaReducerRollbackDrainsPartialTextAndEmitsEvent(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	turn.appendPartialText("visible text")
@@ -180,5 +241,25 @@ func TestStreamToolDeltaReducerDeltaCanCreateMissingStartMetadata(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("speculative execution did not start from delta-created metadata")
+	}
+
+	snapshot := turn.snapshotStreamingToolCalls()
+	if len(snapshot) != 1 {
+		t.Fatalf("snapshot len = %d, want 1", len(snapshot))
+	}
+	if snapshot[0].CallID != "call-4" || snapshot[0].ArgsJSON != `{"path":"README.md"}` {
+		t.Fatalf("snapshot[0] = %#v", snapshot[0])
+	}
+	before := turn.streamingToolCallsBefore("call-4")
+	if len(before) != 0 {
+		t.Fatalf("streamingToolCallsBefore(call-4) len = %d, want 0", len(before))
+	}
+
+	drained := turn.drainStreamingToolCalls()
+	if len(drained) != 1 {
+		t.Fatalf("drain len = %d, want 1", len(drained))
+	}
+	if drained[0].CallID != "call-4" || drained[0].ArgsJSON != `{"path":"README.md"}` {
+		t.Fatalf("drained[0] = %#v", drained[0])
 	}
 }

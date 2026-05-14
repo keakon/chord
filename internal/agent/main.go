@@ -65,6 +65,7 @@ type Turn struct {
 	// it must never be persisted until merged into PendingToolMeta.
 	streamingToolMu    sync.Mutex
 	streamingToolCalls map[string]PendingToolCall
+	streamingToolOrder []string
 	// partialText accumulates assistant text streamed during the current LLM
 	// round so it can be saved to history if the stream is interrupted before
 	// a normal DeltaStop. Protected by partialTextMu because the stream

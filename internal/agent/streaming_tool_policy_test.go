@@ -125,3 +125,42 @@ func TestSpeculativeExecutionPolicyRejectsAskPermission(t *testing.T) {
 		t.Fatalf("reason = %q, want permission_ask", decision.Reason)
 	}
 }
+
+func TestSpeculativeExecutionPolicyRejectsReadOnlyWhenPriorCallNeedsApproval(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	ruleset := permission.Ruleset{{Permission: tools.NameShell, Pattern: "git commit *", Action: permission.ActionAsk}, {Permission: tools.NameShell, Pattern: "git status *", Action: permission.ActionAllow}}
+	prior := []PendingToolCall{{CallID: "call-1", Name: tools.NameShell, ArgsJSON: `{"command":"git commit -m fix"}`}}
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, ruleset, tools.NameShell, json.RawMessage(`{"command":"git status --short"}`), prior)
+	if decision.Allowed {
+		t.Fatal("git status allowed for speculative execution behind prior ask-gated commit, want reject")
+	}
+	if decision.Reason != "prior_pending_non_read_only:Shell" {
+		t.Fatalf("reason = %q, want prior_pending_non_read_only:Shell", decision.Reason)
+	}
+}
+
+func TestSpeculativeExecutionPolicyRejectsReadOnlyWhenPriorCallIsMutating(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.WriteTool{})
+	prior := []PendingToolCall{{CallID: "call-1", Name: tools.NameWrite, ArgsJSON: `{"path":"x.txt","content":"x"}`}}
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameRead, json.RawMessage(`{"path":"x.txt"}`), prior)
+	if decision.Allowed {
+		t.Fatal("Read allowed for speculative execution behind prior mutating tool, want reject")
+	}
+	if decision.Reason != "prior_pending_non_read_only:Write" {
+		t.Fatalf("reason = %q, want prior_pending_non_read_only:Write", decision.Reason)
+	}
+}
+
+func TestSpeculativeExecutionPolicyAllowsReadOnlyPrefix(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.GrepTool{})
+	prior := []PendingToolCall{{CallID: "call-1", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}}
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameGrep, json.RawMessage(`{"pattern":"TODO","path":"internal"}`), prior)
+	if !decision.Allowed {
+		t.Fatalf("Grep behind prior read-only call rejected: %s", decision.Reason)
+	}
+}

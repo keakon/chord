@@ -104,7 +104,7 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	if r.ruleset != nil {
 		ruleset = r.ruleset()
 	}
-	decision := evaluateSpeculativeExecutionPolicy(r.registry, ruleset, callName, json.RawMessage(argsJSON))
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID))
 	logSpeculativeExecutionDecision(callID, callName, decision)
 	if decision.Allowed && r.turn.streamingToolExec != nil {
 		r.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})

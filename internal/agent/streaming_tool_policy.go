@@ -17,6 +17,14 @@ type speculativeExecutionDecision struct {
 	Reason  string
 }
 
+type speculativeToolClass int
+
+const (
+	speculativeToolClassUnknown speculativeToolClass = iota
+	speculativeToolClassReadOnly
+	speculativeToolClassMutation
+)
+
 func allowSpeculativeExecution() speculativeExecutionDecision {
 	return speculativeExecutionDecision{Allowed: true, Reason: "safe_read_only"}
 }
@@ -29,6 +37,10 @@ func rejectSpeculativeExecution(reason string) speculativeExecutionDecision {
 // Side-effecting and interactive tools stay out of speculative execution
 // until each tool has an audited rollback / interrupt protocol.
 func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage) speculativeExecutionDecision {
+	return evaluateSpeculativeExecutionPolicyWithPrefix(registry, ruleset, toolName, args, nil)
+}
+
+func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage, priorCalls []PendingToolCall) speculativeExecutionDecision {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
 		return rejectSpeculativeExecution("missing_tool_name")
@@ -48,25 +60,27 @@ func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permis
 		}
 	}
 
-	switch toolName {
-	case tools.NameRead, tools.NameGrep, tools.NameGlob:
-		return allowSpeculativeExecution()
-	case tools.NameShell:
-		if shellReadOnlySpeculativeAllowed(args) {
+	class := speculativeToolClassification(toolName, args)
+	if class != speculativeToolClassReadOnly {
+		switch toolName {
+		case tools.NameWrite, tools.NameEdit, tools.NameDelete:
 			return allowSpeculativeExecution()
+		case tools.NameSpawn, tools.NameSpawnStop:
+			return rejectSpeculativeExecution("process_side_effect")
+		case tools.NameQuestion:
+			return rejectSpeculativeExecution("interactive_tool")
+		case tools.NameTodoWrite, tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
+			return rejectSpeculativeExecution("stateful_or_control_tool")
+		case tools.NameShell:
+			return rejectSpeculativeExecution("shell_not_static_read_only")
+		default:
+			return rejectSpeculativeExecution("not_in_speculative_allowlist")
 		}
-		return rejectSpeculativeExecution("shell_not_static_read_only")
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
-		return allowSpeculativeExecution()
-	case tools.NameSpawn, tools.NameSpawnStop:
-		return rejectSpeculativeExecution("process_side_effect")
-	case tools.NameQuestion:
-		return rejectSpeculativeExecution("interactive_tool")
-	case tools.NameTodoWrite, tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
-		return rejectSpeculativeExecution("stateful_or_control_tool")
-	default:
-		return rejectSpeculativeExecution("not_in_speculative_allowlist")
 	}
+	if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls); ok {
+		return rejectSpeculativeExecution("prior_pending_non_read_only:" + blocking)
+	}
+	return allowSpeculativeExecution()
 }
 
 func shellReadOnlySpeculativeAllowed(args json.RawMessage) bool {
@@ -101,6 +115,47 @@ func shellReadOnlySpeculativeAllowed(args json.RawMessage) bool {
 	default:
 		return false
 	}
+}
+
+func speculativeToolClassification(toolName string, args json.RawMessage) speculativeToolClass {
+	switch strings.TrimSpace(toolName) {
+	case tools.NameRead, tools.NameGrep, tools.NameGlob:
+		return speculativeToolClassReadOnly
+	case tools.NameShell:
+		if shellReadOnlySpeculativeAllowed(args) {
+			return speculativeToolClassReadOnly
+		}
+		return speculativeToolClassMutation
+	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+		return speculativeToolClassMutation
+	default:
+		return speculativeToolClassUnknown
+	}
+}
+
+func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permission.Ruleset, priorCalls []PendingToolCall) (string, bool) {
+	for _, call := range priorCalls {
+		name := strings.TrimSpace(call.Name)
+		if name == "" {
+			continue
+		}
+		args := json.RawMessage(call.ArgsJSON)
+		if len(ruleset) > 0 && !isInternalControlTool(name) {
+			decision := evaluateToolPermission(ruleset, name, args)
+			if decision.Action != permission.ActionAllow {
+				return name, true
+			}
+		}
+		if registry != nil {
+			if _, ok := registry.Get(name); !ok {
+				return name, true
+			}
+		}
+		if speculativeToolClassification(name, args) != speculativeToolClassReadOnly {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func containsShellMetachar(command string) bool {

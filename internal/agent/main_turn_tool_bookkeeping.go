@@ -82,7 +82,17 @@ func (t *Turn) recordStreamingToolCall(call PendingToolCall) {
 	if t.streamingToolCalls == nil {
 		t.streamingToolCalls = make(map[string]PendingToolCall)
 	}
+	t.recordStreamingToolCallLocked(call.CallID)
 	t.streamingToolCalls[call.CallID] = call
+}
+
+func (t *Turn) recordStreamingToolCallLocked(callID string) {
+	if t == nil || callID == "" {
+		return
+	}
+	if _, exists := t.streamingToolCalls[callID]; !exists {
+		t.streamingToolOrder = append(t.streamingToolOrder, callID)
+	}
 }
 
 // appendStreamingToolCallInput appends one streamed tool-argument fragment to the
@@ -96,6 +106,7 @@ func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID stri
 	if t.streamingToolCalls == nil {
 		t.streamingToolCalls = make(map[string]PendingToolCall)
 	}
+	t.recordStreamingToolCallLocked(callID)
 	call := t.streamingToolCalls[callID]
 	call.CallID = callID
 	if call.Name == "" {
@@ -129,10 +140,13 @@ func (t *Turn) drainStreamingToolCalls() []PendingToolCall {
 		return nil
 	}
 	out := make([]PendingToolCall, 0, len(t.streamingToolCalls))
-	for _, c := range t.streamingToolCalls {
-		out = append(out, c)
+	for _, callID := range t.streamingToolOrder {
+		if c, ok := t.streamingToolCalls[callID]; ok {
+			out = append(out, c)
+		}
 	}
 	t.streamingToolCalls = nil
+	t.streamingToolOrder = nil
 	return out
 }
 
@@ -146,6 +160,15 @@ func (t *Turn) removeStreamingToolCall(callID string) {
 		return
 	}
 	delete(t.streamingToolCalls, callID)
+	for i, id := range t.streamingToolOrder {
+		if id == callID {
+			t.streamingToolOrder = append(t.streamingToolOrder[:i], t.streamingToolOrder[i+1:]...)
+			break
+		}
+	}
+	if len(t.streamingToolCalls) == 0 {
+		t.streamingToolOrder = nil
+	}
 }
 
 func (t *Turn) getStreamingToolCall(callID string) (PendingToolCall, bool) {
@@ -174,8 +197,31 @@ func (t *Turn) snapshotStreamingToolCalls() []PendingToolCall {
 		return nil
 	}
 	out := make([]PendingToolCall, 0, len(t.streamingToolCalls))
-	for _, c := range t.streamingToolCalls {
-		out = append(out, c)
+	for _, callID := range t.streamingToolOrder {
+		if c, ok := t.streamingToolCalls[callID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (t *Turn) streamingToolCallsBefore(callID string) []PendingToolCall {
+	if t == nil || callID == "" {
+		return nil
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	if len(t.streamingToolCalls) == 0 || len(t.streamingToolOrder) == 0 {
+		return nil
+	}
+	out := make([]PendingToolCall, 0, len(t.streamingToolOrder))
+	for _, id := range t.streamingToolOrder {
+		if id == callID {
+			break
+		}
+		if c, ok := t.streamingToolCalls[id]; ok {
+			out = append(out, c)
+		}
 	}
 	return out
 }
