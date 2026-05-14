@@ -142,11 +142,16 @@ func (a *MainAgent) completionFollowUpPromptBlock() string {
 		return ""
 	}
 	return strings.TrimSpace(`## Completion Follow-Up
-- This mode must be satisfied inside the current request: when the current task is complete and you are ready to end the turn, you must proactively call the ` + "`Question`" + ` tool before finishing.
+- A turn is not complete unless either (1) the user has already explicitly said they are done, want to end, do not want further help, or have no more tasks, or (2) you have already called the ` + "`Question`" + ` tool in the current turn.
+- Do not treat a written completion summary as the end of the turn. The ` + "`Question`" + ` tool call is a required completion step unless the user explicitly opted out as above.
+- Before ending a completed task, verify in order: the work is complete or clearly blocked, the verification status is reported, the todo state is synced when applicable, and then call the ` + "`Question`" + ` tool.
+- Ordering requirement: do NOT call ` + "`Question`" + ` until after you have written the completion summary (conclusion) for the current task.
+- When this rule requires ` + "`Question`" + `, you must make a real ` + "`Question`" + ` tool call. Do not print JSON, code fences, XML tags, pseudo-tool syntax, or tool arguments in normal assistant text as a substitute.
+- After calling ` + "`Question`" + `, do not output any additional assistant text or run additional tools in this turn.
 - Keep the completion summary concise, then make that ` + "`Question`" + ` call as your last action before ending the turn.
 - Use the ` + "`Question`" + ` tool to ask whether the user wants another task. When you have clear, directly relevant follow-up suggestions, offer a small set of concrete next-step / improvement options plus free-text follow-up. When you do not have meaningful suggestions, only ask whether the user wants you to do anything else.
 - If the user gives a new goal, continue with that work in the same ongoing session and use the same completion follow-up behavior again after that work is complete.
-- Only skip that final ` + "`Question`" + ` call when the user has already explicitly said they are done, want to end, do not want further help, or have no more tasks.
+- The mandatory ` + "`Question`" + ` tool follow-up overrides normal preferences against routine closing questions.
 - Do not use a plain-text closing question and do not rely on a later follow-up request to satisfy this rule; use the ` + "`Question`" + ` tool in the current turn instead.`)
 }
 
@@ -229,7 +234,8 @@ func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	base := "- If user permission, confirmation, or a real decision is still needed, "
 	if a.questionToolAvailable() {
 		if a.questionFollowUpAtEndEnabled() {
-			return "- Do not use <done>...</done> unless the task is actually complete and the user has already explicitly said they are done, want to end, or do not want further help\n" +
+			return "- Do not use <done>...</done> unless the task is actually complete and either the user has already explicitly said they are done, want to end, or do not want further help, or you have already called the `Question` tool in the current turn\n" +
+				"- Do not treat a written completion summary as enough to end as completed; calling the `Question` tool is the required final completion step unless the user explicitly opted out\n" +
 				"- When the task is complete and you are ready to end as completed, call the `Question` tool before ending as completed so the user can provide another task, choose a follow-up option, or explicitly end the session\n" +
 				base + "call the `Question` tool instead of ending as completed"
 		}

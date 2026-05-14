@@ -358,8 +358,13 @@ Read: allow
 	got := a.completionFollowUpPromptBlock()
 	for _, want := range []string{
 		"## Completion Follow-Up",
-		"call the `Question` tool before finishing",
-		"as your last action before ending the turn",
+		"A turn is not complete unless either",
+		"Do not treat a written completion summary as the end of the turn",
+		"Ordering requirement: do NOT call `Question` until after you have written the completion summary (conclusion)",
+		"make a real `Question` tool call",
+		"Do not print JSON, code fences, XML tags, pseudo-tool syntax",
+		"After calling `Question`, do not output any additional assistant text",
+		"overrides normal preferences against routine closing questions",
 		"Do not use a plain-text closing question",
 	} {
 		if !strings.Contains(got, want) {
@@ -392,8 +397,14 @@ Read: allow
 	}
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if !strings.Contains(joined, "call the `Question` tool before ending as completed") {
-		t.Fatalf("loop completion requirements should require Question follow-up when feature enabled, got %q", joined)
+	for _, want := range []string{
+		"call the `Question` tool before ending as completed",
+		"either the user has already explicitly said they are done, want to end, or do not want further help, or you have already called the `Question` tool in the current turn",
+		"Do not treat a written completion summary as enough to end as completed",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("loop completion requirements should include %q when Question follow-up is enabled, got %q", want, joined)
+		}
 	}
 
 	a.activeConfig = &config.AgentConfig{

@@ -555,7 +555,7 @@ prompt: |
 - `model_pools`：该 agent 的可用池名列表（有序）。池定义位于 `config.yaml` 顶层 `model_pools`。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。
-- `question_follow_up_at_end`：当 MainAgent 角色将它设为 `true` 时，模型在当前任务完成、准备结束当前 turn 前，必须在当前请求内主动调用 `Question` 工具，除非用户已经明确表示结束/没有更多任务。若 `permission` 中未显式配置 `Question`，Chord 会在该角色的 base rules 层自动补一个 `Question: allow`，让模型能看到该工具。若显式配置了 `Question: deny`，该功能完全失效（不会注入对应提示词）。`Question: ask` 会按 `allow` 处理，避免在用户回答问题前再多一层确认。
+- `question_follow_up_at_end`：当 MainAgent 角色将它设为 `true` 时，Chord 会注入一段“完成后跟进”的提示要求，指示模型在结束一个已完成的 turn 前做二选一：要么确认用户已经明确表示结束 / 不需要更多帮助 / 没有更多任务，要么在当前 turn 中调用 `Question`。对应提示词还会明确要求模型不要把书面的完成总结当作 turn 结束；应先确认工作已完成（或明确阻塞）、报告验证状态、在适用时同步 todo 状态，然后再把 `Question` 调用作为最终收尾步骤。它也会明确要求这里必须是真实的 `Question` 工具调用，不能在 assistant 正文里打印类似工具参数的 JSON 或伪工具语法来代替。这里描述的是对模型的提示约束，不是对模型输出结果的硬性运行时保证。若 `permission` 中未显式配置 `Question`，Chord 会在该角色的 base rules 层自动补一个 `Question: allow`，让模型能看到该工具。若显式配置了 `Question: deny`，该功能完全失效（不会注入对应提示词）。`Question: ask` 会按 `allow` 处理，避免在用户回答问题前再多一层确认。
 - `mcp`：作用域限定在该 agent 的 MCP 配置。
 - `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。
