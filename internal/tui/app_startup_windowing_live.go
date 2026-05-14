@@ -283,7 +283,16 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportAppend() {
 				m.rebindLiveViewportBlocks()
 				m.recalcViewportSize()
 				m.viewport.ScrollToBottom()
+				m.viewport.sticky = true
 			}
+		} else if forceTailWindow && wasShowingTail {
+			// User was already at tail and sent a new message. The viewport already
+			// has the new block appended, but we need to ensure it's scrolled to bottom
+			// in case sticky was false (user scrolled up slightly within the tail window).
+			if !m.viewport.atBottom() {
+				m.viewport.ScrollToBottom()
+			}
+			m.viewport.sticky = true
 		}
 		m.syncStartupDeferredTranscriptWindowToViewport()
 	} else {

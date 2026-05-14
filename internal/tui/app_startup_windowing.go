@@ -236,7 +236,12 @@ func (m *Model) maybeSwitchStartupDeferredTranscriptWindow(targetWindow, trigger
 		return true
 	case startupTranscriptWindowTail:
 		start := max(0, total-startupTranscriptTailBlocks)
-		if !m.applyStartupDeferredTranscriptWindow(start, total, trigger) {
+		windowChanged := m.applyStartupDeferredTranscriptWindow(start, total, trigger)
+		// Even if the window boundaries didn't change, we still need to ensure
+		// the viewport is scrolled to the bottom when explicitly requesting tail.
+		// This handles cases where content arrived during blur or the viewport
+		// offset drifted while the window state remained at tail.
+		if !windowChanged && (state.windowStart != start || state.windowEnd != total) {
 			return false
 		}
 		m.viewport.ScrollToBottom()

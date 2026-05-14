@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- TUI：修复 deferred startup transcript 在长会话中切换标签页和发送新消息时的滚动位置错误。现在当标签页失焦时会记录是否钉在尾窗，重新获焦时会正确恢复到尾部，避免画面看似已在底部但向下滚动还能翻出旧卡片；同时，当用户在尾窗发送新消息时，会确保 viewport 滚动到底部并设置 sticky 模式，即使之前 sticky 为 false 也能正确显示新消息。
 - Runtime / 工具：修复 turn 取消或替换时工具结果被错误标记为失败的问题。此前，若工具在推测模式下已完成执行，但 turn 在 LLM 消费结果前被中断，结果会被覆盖为"Model stopped before completing this tool call: context canceled"。现在已完成的工具结果会被正确保留和持久化，即使 turn 被取消也不会丢失。
 - TUI：修复 deferred startup transcript 在长会话恢复后的多类滚动/导航错误。现在如果标签页失焦前确实跟随最新内容，重新获焦时会先恢复真实尾窗，避免画面看似已在底部但鼠标滚轮向下还能翻出旧卡片；同时，`[count]j/k` 与 `[count]up/down` 在 deferred 窗口间会逐步按全文逻辑位置推进，超过剩余范围时稳定饱和到第一张/最后一张卡片，不再因跨窗口而少走、跳错或放大滚动范围。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
