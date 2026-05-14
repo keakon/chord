@@ -25,6 +25,25 @@ func TestResolveImportInputPath_CodexByID(t *testing.T) {
 	}
 }
 
+func TestResolveImportInputPath_CodexByID_NewPayloadSchema(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "2026", "05", "09", "rollout-1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	data := `{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"019e0955-00ce-73a2-bc23-213802de80d6"}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lookup, err := resolveImportInputPath("codex", "", "019e0955-00ce-73a2-bc23-213802de80d6", root)
+	if err != nil {
+		t.Fatalf("resolveImportInputPath: %v", err)
+	}
+	if lookup.Path != path {
+		t.Fatalf("lookup.Path=%q, want %q", lookup.Path, path)
+	}
+}
+
 func TestResolveImportInputPath_ClaudeByID(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "proj", "sess-1.jsonl")

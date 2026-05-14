@@ -117,12 +117,10 @@ func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
 		if err := json.Unmarshal([]byte(line), &obj); err != nil {
 			continue
 		}
-		if itemRaw, ok := obj["item"]; ok {
-			var item map[string]json.RawMessage
-			if err := json.Unmarshal(itemRaw, &item); err == nil {
-				if sid, ok := pickFirstStringRaw(item, "session_id", "sessionId", "sessionID", "id"); ok && sid == sourceID {
-					return true, nil
-				}
+		itemObj, err := normalizeCodexLine(obj)
+		if err == nil {
+			if sid, ok := extractCodexSessionID(itemObj); ok && sid == sourceID {
+				return true, nil
 			}
 		}
 		if sid, ok := pickFirstStringRaw(obj, "session_id", "sessionId", "sessionID", "id"); ok && sid == sourceID {
