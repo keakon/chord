@@ -155,6 +155,12 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 	m.maybeEnforceStartupDeferredTranscriptRetention()
 	state.windowStart = start
 	state.windowEnd = end
+	for _, block := range windowed {
+		if block != nil {
+			state.anchorBlockID = block.ID
+			break
+		}
+	}
 	state.windowSwitchCount++
 	m.restartStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay)
 	hiddenBefore := start
@@ -268,6 +274,29 @@ func (m *Model) maybeJumpDeferredStartupTranscriptOrdinal(ordinal int, trigger s
 	}
 	m.viewport.sticky = m.viewport.atBottom()
 	return true
+}
+
+func (m *Model) deferredFocusedBlockAtWindowEdge(dir int) bool {
+	state := m.startupDeferredTranscript
+	if state == nil || m.viewport == nil || m.focusedBlockID < 0 {
+		return false
+	}
+	visible := m.viewport.visibleBlocks()
+	if len(visible) == 0 {
+		return false
+	}
+	idx := indexOfBlockID(visible, m.focusedBlockID)
+	if idx < 0 {
+		return false
+	}
+	switch {
+	case dir < 0:
+		return idx == 0 && state.windowStart > 0
+	case dir > 0:
+		return idx == len(visible)-1 && state.windowEnd < len(state.allBlocks)
+	default:
+		return false
+	}
 }
 
 func (m *Model) maybeStepStartupDeferredTranscriptWindow(dir int, trigger string) bool {

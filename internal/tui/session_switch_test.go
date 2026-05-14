@@ -2160,6 +2160,84 @@ func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *test
 	}
 }
 
+func TestDeferredStartupTranscriptPrevBlockAtTopDoesNotJumpToStaleAnchor(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for top hydration test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	focused := m.viewport.GetBlockAtOffset()
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after gg = %#v, want message-000", focused)
+	}
+
+	cmd = m.handleNormalKey(modelSelectKey("k"))
+	applyTestCmd(t, &m, cmd)
+	focused = m.viewport.GetBlockAtOffset()
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after k at top = %#v, want message-000", focused)
+	}
+	if m.hasDeferredStartupTranscript() {
+		t.Fatal("k at the top deferred window should hydrate full transcript")
+	}
+}
+
+func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for monotonic next-block test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if m.focusedBlockID < 0 {
+		t.Fatal("gg should focus the first deferred block")
+	}
+	focused := m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after gg = %#v, want message-000", focused)
+	}
+
+	prev := -1
+	for step := 0; step < 140; step++ {
+		cmd = m.handleNormalKey(modelSelectKey("j"))
+		applyTestCmd(t, &m, cmd)
+		if m.focusedBlockID < 0 {
+			t.Fatalf("focusedBlockID after step %d < 0", step+1)
+		}
+		focused = m.viewport.GetFocusedBlock(m.focusedBlockID)
+		if focused == nil {
+			t.Fatalf("focused block after step %d = nil", step+1)
+		}
+		var cur int
+		if _, err := fmt.Sscanf(focused.Content, "message-%03d", &cur); err != nil {
+			t.Fatalf("parse focused content %q: %v", focused.Content, err)
+		}
+		if cur <= prev {
+			t.Fatalf("focused block sequence regressed at step %d: got %d after %d", step+1, cur, prev)
+		}
+		prev = cur
+	}
+}
+
 func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {

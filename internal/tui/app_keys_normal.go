@@ -374,16 +374,27 @@ func (m *Model) repeatNormalBoundary(dir, count int) tea.Cmd {
 		count = 1
 	}
 	prevOffset := m.viewport.offset
-	if dir < 0 && m.hasDeferredStartupTranscript() && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
+	if dir < 0 && m.hasDeferredStartupTranscript() && (m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) || m.deferredFocusedBlockAtWindowEdge(-1)) {
 		if m.maybeStepStartupDeferredTranscriptWindow(-1, "prev_boundary") {
+			m.setFocusedBlockFromViewport()
 			return m.refreshInlineImagesIfViewportMoved(prevOffset)
 		}
-		m.maybeHydrateStartupDeferredTranscript("prev_boundary")
+		if m.maybeHydrateStartupDeferredTranscript("prev_boundary") {
+			m.setFocusedBlockFromViewport()
+			return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		}
 	}
-	if dir > 0 && m.hasDeferredStartupTranscript() && m.viewport.atBottom() {
+	if dir > 0 && m.hasDeferredStartupTranscript() && (m.viewport.atBottom() || m.deferredFocusedBlockAtWindowEdge(1)) {
 		if m.maybeStepStartupDeferredTranscriptWindow(1, "next_boundary") {
+			m.setFocusedBlockFromViewport()
 			return m.refreshInlineImagesIfViewportMoved(prevOffset)
 		}
+	}
+	if m.focusedBlockID >= 0 {
+		for range count {
+			m.navigateFocusedBlock(dir)
+		}
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
 	}
 	for range count {
 		if dir > 0 {
