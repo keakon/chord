@@ -344,18 +344,34 @@ func (m *Model) repeatNormalVertical(dir, count int) tea.Cmd {
 		count = 1
 	}
 	prevOffset := m.viewport.offset
-	if dir < 0 && m.hasDeferredStartupTranscript() && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
-		if m.maybeStepStartupDeferredTranscriptWindow(-1, "scroll_up") {
+	if m.hasDeferredStartupTranscript() {
+		if count == 1 {
+			if dir < 0 && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
+				if m.maybeStepStartupDeferredTranscriptWindow(-1, "scroll_up") {
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+				m.maybeHydrateStartupDeferredTranscript("scroll_up")
+			}
+			if dir > 0 && m.viewport.atBottom() {
+				if m.startupDeferredTranscriptAtTail() {
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+				if m.maybeStepStartupDeferredTranscriptWindow(1, "scroll_down") {
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+			}
+		} else {
+			trigger := "scroll_up"
+			if dir > 0 {
+				trigger = "scroll_down"
+			}
+			for range count {
+				m.deferredScrollOneLine(dir, trigger)
+			}
 			return m.refreshInlineImagesIfViewportMoved(prevOffset)
 		}
-		m.maybeHydrateStartupDeferredTranscript("scroll_up")
 	}
-	if dir > 0 && m.hasDeferredStartupTranscript() && m.viewport.atBottom() {
-		if m.maybeStepStartupDeferredTranscriptWindow(1, "scroll_down") {
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
-		}
-	}
-	if m.focusedBlockID >= 0 {
+	if m.focusedBlockID >= 0 && !m.hasDeferredStartupTranscript() {
 		for range count {
 			m.navigateFocusedBlock(dir)
 		}
@@ -374,25 +390,41 @@ func (m *Model) repeatNormalBoundary(dir, count int) tea.Cmd {
 		count = 1
 	}
 	prevOffset := m.viewport.offset
-	if dir < 0 && m.hasDeferredStartupTranscript() && (m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) || m.deferredFocusedBlockAtWindowEdge(-1)) {
-		if m.maybeStepStartupDeferredTranscriptWindow(-1, "prev_boundary") {
-			m.setFocusedBlockFromViewport()
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	if m.hasDeferredStartupTranscript() {
+		if count == 1 && m.focusedBlockID < 0 {
+			if dir < 0 && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
+				if m.maybeStepStartupDeferredTranscriptWindow(-1, "prev_boundary") {
+					m.setFocusedBlockFromViewport()
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+				if m.maybeHydrateStartupDeferredTranscript("prev_boundary") {
+					m.setFocusedBlockFromViewport()
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+			}
+			if dir > 0 && m.viewport.atBottom() {
+				if !m.startupDeferredTranscriptAtTail() && m.maybeStepStartupDeferredTranscriptWindow(1, "next_boundary") {
+					m.setFocusedBlockFromViewport()
+					return m.refreshInlineImagesIfViewportMoved(prevOffset)
+				}
+			}
 		}
-		if m.maybeHydrateStartupDeferredTranscript("prev_boundary") {
-			m.setFocusedBlockFromViewport()
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		for range count {
+			if !m.deferredMoveFocusedBlock(dir) {
+				break
+			}
 		}
-	}
-	if dir > 0 && m.hasDeferredStartupTranscript() && (m.viewport.atBottom() || m.deferredFocusedBlockAtWindowEdge(1)) {
-		if m.maybeStepStartupDeferredTranscriptWindow(1, "next_boundary") {
-			m.setFocusedBlockFromViewport()
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
-		}
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
 	}
 	if m.focusedBlockID >= 0 {
 		for range count {
+			before := m.focusedBlockID
 			m.navigateFocusedBlock(dir)
+			if m.focusedBlockID < 0 {
+				m.focusedBlockID = before
+				m.refreshBlockFocus()
+				break
+			}
 		}
 		return m.refreshInlineImagesIfViewportMoved(prevOffset)
 	}
@@ -420,6 +452,9 @@ func (m *Model) repeatNormalBoundary(dir, count int) tea.Cmd {
 			current = blocks[len(blocks)-1].ID
 		}
 		nextID := focusNextSelectableBlockID(blocks, current, dir)
+		if nextID < 0 {
+			nextID = current
+		}
 		m.focusedBlockID = nextID
 		m.refreshBlockFocus()
 	}

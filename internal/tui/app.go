@@ -356,6 +356,10 @@ type Model struct {
 	// backgroundIdleSince tracks when the currently focused view last became idle
 	// while the terminal was in background mode. Zero means no active idle window.
 	backgroundIdleSince time.Time
+	// deferredResumeTailOnFocus records whether the focused deferred transcript was
+	// logically pinned to the tail when the terminal blurred, so focus recovery can
+	// restore the true tail window instead of leaving the user at a stale page bottom.
+	deferredResumeTailOnFocus bool
 
 	infoPanelCollapsedSections map[infoPanelSectionID]bool
 	infoPanelHitBoxes          []infoPanelSectionHitBox

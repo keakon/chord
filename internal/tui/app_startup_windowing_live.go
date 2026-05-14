@@ -1,5 +1,20 @@
 package tui
 
+func (m *Model) startupDeferredTranscriptAtTail() bool {
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 || m.viewport == nil {
+		return false
+	}
+	return state.windowEnd >= len(state.allBlocks)
+}
+
+func (m *Model) startupDeferredTranscriptPinnedToTail() bool {
+	if m == nil || m.viewport == nil || !m.hasDeferredStartupTranscript() {
+		return false
+	}
+	return m.startupDeferredTranscriptAtTail() && (m.viewport.sticky || m.viewport.atBottom())
+}
+
 func (m *Model) appendViewportBlock(block *Block) {
 	if m == nil || m.viewport == nil || block == nil {
 		return

@@ -277,27 +277,122 @@ func (m *Model) maybeJumpDeferredStartupTranscriptOrdinal(ordinal int, trigger s
 	return true
 }
 
-func (m *Model) deferredFocusedBlockAtWindowEdge(dir int) bool {
+func (m *Model) deferredSelectableBlockIndex(id int) int {
 	state := m.startupDeferredTranscript
-	if state == nil || m.viewport == nil || m.focusedBlockID < 0 {
+	if state == nil || len(state.allBlocks) == 0 {
+		return -1
+	}
+	for i, block := range state.allBlocks {
+		if block == nil || block.ID != id || !isSelectableBlockType(block.Type) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func (m *Model) deferredCurrentSelectableBlockIndex() int {
+	if m == nil || m.viewport == nil {
+		return -1
+	}
+	if m.focusedBlockID >= 0 {
+		if idx := m.deferredSelectableBlockIndex(m.focusedBlockID); idx >= 0 {
+			return idx
+		}
+	}
+	block := m.viewport.GetBlockAtOffset()
+	if block == nil {
+		return -1
+	}
+	return m.deferredSelectableBlockIndex(block.ID)
+}
+
+func (m *Model) deferredSeekSelectableBlock(startIndex, dir int) int {
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 {
+		return -1
+	}
+	if dir == 0 {
+		dir = 1
+	}
+	for i := startIndex; i >= 0 && i < len(state.allBlocks); i += dir {
+		block := state.allBlocks[i]
+		if block == nil || !isSelectableBlockType(block.Type) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func (m *Model) deferredMoveFocusedBlock(dir int) bool {
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 || m.viewport == nil || dir == 0 {
 		return false
 	}
-	visible := m.viewport.visibleBlocks()
-	if len(visible) == 0 {
+	currentIndex := m.deferredCurrentSelectableBlockIndex()
+	startIndex := 0
+	if dir < 0 {
+		startIndex = len(state.allBlocks) - 1
+	}
+	if currentIndex >= 0 {
+		startIndex = currentIndex + dir
+	}
+	targetIndex := m.deferredSeekSelectableBlock(startIndex, dir)
+	if targetIndex < 0 {
+		if dir < 0 && m.maybeHydrateStartupDeferredTranscript("count_boundary_top") {
+			firstIndex := m.deferredSeekSelectableBlock(0, 1)
+			if firstIndex >= 0 {
+				targetID := state.allBlocks[firstIndex].ID
+				m.focusedBlockID = targetID
+				m.refreshBlockFocus()
+				if lineOffset, ok := m.viewport.LineOffsetForBlockID(targetID); ok {
+					m.viewport.offset = lineOffset
+					m.viewport.clampOffset()
+				}
+			}
+		}
 		return false
 	}
-	idx := indexOfBlockID(visible, m.focusedBlockID)
-	if idx < 0 {
+	start, end := startupDeferredWindowRange(len(state.allBlocks), targetIndex)
+	m.applyStartupDeferredTranscriptWindow(start, end, "count_boundary")
+	targetID := state.allBlocks[targetIndex].ID
+	m.focusedBlockID = targetID
+	m.refreshBlockFocus()
+	if lineOffset, ok := m.viewport.LineOffsetForBlockID(targetID); ok {
+		m.viewport.offset = lineOffset
+		m.viewport.clampOffset()
+	}
+	m.viewport.sticky = m.startupDeferredTranscriptAtTail() && m.viewport.atBottom()
+	return true
+}
+
+func (m *Model) deferredScrollOneLine(dir int, trigger string) bool {
+	if m == nil || m.viewport == nil || dir == 0 || !m.hasDeferredStartupTranscript() {
 		return false
 	}
-	switch {
-	case dir < 0:
-		return idx == 0 && state.windowStart > 0
-	case dir > 0:
-		return idx == len(visible)-1 && state.windowEnd < len(state.allBlocks)
-	default:
-		return false
+	if dir < 0 {
+		if m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
+			if m.maybeStepStartupDeferredTranscriptWindow(-1, trigger) {
+				return true
+			}
+			if m.maybeHydrateStartupDeferredTranscript(trigger) {
+				return true
+			}
+		}
+		m.viewport.ScrollUp(1)
+		return true
 	}
+	if m.viewport.atBottom() {
+		if m.startupDeferredTranscriptAtTail() {
+			return true
+		}
+		if m.maybeStepStartupDeferredTranscriptWindow(1, trigger) {
+			return true
+		}
+	}
+	m.viewport.ScrollDown(1)
+	return true
 }
 
 func (m *Model) maybeStepStartupDeferredTranscriptWindow(dir int, trigger string) bool {

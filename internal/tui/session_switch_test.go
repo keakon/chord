@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,53 @@ func modelSelectKey(text string) tea.KeyPressMsg {
 
 func ctrlKeyPress(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: r, Mod: tea.ModCtrl})
+}
+
+func sendNormalCountPrefix(m *Model, count int) {
+	if count < 0 {
+		count = -count
+	}
+	for _, ch := range fmt.Sprintf("%d", count) {
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: string(ch), Code: ch}))
+	}
+}
+
+func assertDeferredWindowInvariant(t *testing.T, m *Model) {
+	t.Helper()
+	state := m.startupDeferredTranscript
+	if state == nil {
+		return
+	}
+	if state.windowStart < 0 || state.windowEnd < state.windowStart || state.windowEnd > len(state.allBlocks) {
+		t.Fatalf("invalid deferred window bounds [%d,%d) for total %d", state.windowStart, state.windowEnd, len(state.allBlocks))
+	}
+	visible := m.viewport.visibleBlocks()
+	want := state.windowEnd - state.windowStart
+	if len(visible) != want {
+		t.Fatalf("len(visibleBlocks()) = %d, want %d from window [%d,%d)", len(visible), want, state.windowStart, state.windowEnd)
+	}
+	seen := make(map[int]struct{}, len(visible))
+	for i, block := range visible {
+		if block == nil {
+			t.Fatalf("visible block %d is nil in deferred window [%d,%d)", i, state.windowStart, state.windowEnd)
+		}
+		if _, ok := seen[block.ID]; ok {
+			t.Fatalf("duplicate visible block id %d in deferred window [%d,%d)", block.ID, state.windowStart, state.windowEnd)
+		}
+		seen[block.ID] = struct{}{}
+		expected := state.allBlocks[state.windowStart+i]
+		if expected == nil {
+			t.Fatalf("source deferred block %d is nil", state.windowStart+i)
+		}
+		if block.ID != expected.ID {
+			t.Fatalf("visible block[%d] id = %d, want source id %d at absolute index %d", i, block.ID, expected.ID, state.windowStart+i)
+		}
+	}
+	if m.focusedBlockID >= 0 {
+		if _, ok := seen[m.focusedBlockID]; !ok {
+			t.Fatalf("focusedBlockID %d not present in visible deferred window [%d,%d)", m.focusedBlockID, state.windowStart, state.windowEnd)
+		}
+	}
 }
 
 func TestIdleEventFinalizesStreamingAssistantWithoutDuplicateCommittedBlock(t *testing.T) {
@@ -2430,6 +2478,343 @@ func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *test
 			t.Fatalf("focused block sequence regressed at step %d: got %d after %d", step+1, cur, prev)
 		}
 		prev = cur
+	}
+}
+
+func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBottom(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
+	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for focus-restore tail test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if state := m.startupDeferredTranscript; state == nil || state.windowStart != 0 {
+		t.Fatalf("deferred state after gg = %#v, want top window", state)
+	}
+	m.handleNormalKey(modelSelectKey("G"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	wantTailStart := len(messages) - startupTranscriptTailBlocks
+	if state.windowStart != wantTailStart || state.windowEnd != len(messages) {
+		t.Fatalf("tail window after G = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantTailStart, len(messages))
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should be at bottom before blur")
+	}
+
+	_ = m.handleBlurMsg()
+	if !m.deferredResumeTailOnFocus {
+		t.Fatal("blur should remember deferred tail-follow state")
+	}
+
+	if !m.applyStartupDeferredTranscriptWindow(0, startupTranscriptTailBlocks, "test_stale_window") {
+		t.Fatal("expected manual switch to stale historical window for focus restore test")
+	}
+	m.viewport.ScrollToBottom()
+	if state := m.startupDeferredTranscript; state == nil || state.windowEnd == len(state.allBlocks) {
+		t.Fatalf("test setup should leave deferred state away from tail, got %#v", state)
+	}
+
+	cmd = m.handleFocusMsg()
+	applyTestCmd(t, &m, cmd)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after focus restore")
+	}
+	if state.windowStart != wantTailStart || state.windowEnd != len(messages) {
+		t.Fatalf("tail window after focus restore = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantTailStart, len(messages))
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should remain at bottom after focus restore")
+	}
+
+	beforeStart, beforeEnd := state.windowStart, state.windowEnd
+	m.applyWheelScrollDelta(1)
+	state = m.startupDeferredTranscript
+	if state.windowStart != beforeStart || state.windowEnd != beforeEnd {
+		t.Fatalf("mouse wheel down at restored tail changed window to [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, beforeStart, beforeEnd)
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) == 0 {
+		t.Fatal("visibleBlocks after wheel down at tail should remain non-empty")
+	}
+	if blocks[len(blocks)-1].Content != fmt.Sprintf("message-%03d", len(messages)-1) {
+		t.Fatalf("last visible block after wheel down at tail = %q, want newest message", blocks[len(blocks)-1].Content)
+	}
+}
+
+func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
+	for i := 0; i < startupTranscriptWindowMinBlocks+40; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for counted next-block saturation test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if m.focusedBlockID < 0 {
+		t.Fatal("gg should focus first block")
+	}
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "0", Code: '0'}))
+	cmd = m.handleNormalKey(modelSelectKey("j"))
+	applyTestCmd(t, &m, cmd)
+
+	if m.focusedBlockID < 0 {
+		t.Fatal("focusedBlockID after 20j should remain valid")
+	}
+	focused := m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil {
+		t.Fatal("focused block after 20j should remain visible")
+	}
+	if focused.Content != "message-020" {
+		t.Fatalf("focused block after 20j = %q, want message-020", focused.Content)
+	}
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	cmd = m.handleNormalKey(modelSelectKey("j"))
+	applyTestCmd(t, &m, cmd)
+
+	focused = m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil {
+		t.Fatal("focused block after saturating 99j should remain visible")
+	}
+	if focused.Content != "message-119" {
+		t.Fatalf("focused block after 20j + 99j = %q, want message-119", focused.Content)
+	}
+	state := m.startupDeferredTranscript
+	if state == nil || state.windowStart > 119 || state.windowEnd <= 119 {
+		t.Fatalf("deferred state after 20j + 99j = %#v, want window containing index 119", state)
+	}
+}
+
+func TestDeferredStartupTranscriptCountedPrevNextRemainContiguousAcrossWindows(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for counted cross-window navigation test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if m.focusedBlockID < 0 {
+		t.Fatal("gg should focus first block")
+	}
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "1", Code: '1'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "0", Code: '0'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "0", Code: '0'}))
+	cmd = m.handleNormalKey(modelSelectKey("j"))
+	applyTestCmd(t, &m, cmd)
+
+	focused := m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil || focused.Content != "message-100" {
+		t.Fatalf("focused block after 100j = %#v, want message-100", focused)
+	}
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("deferred state missing after 100j")
+	}
+	if state.windowStart > 100 || state.windowEnd <= 100 {
+		t.Fatalf("window after 100j = [%d,%d), want to contain index 100", state.windowStart, state.windowEnd)
+	}
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "1", Code: '1'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "0", Code: '0'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "0", Code: '0'}))
+	cmd = m.handleNormalKey(modelSelectKey("k"))
+	applyTestCmd(t, &m, cmd)
+
+	focused = m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after 100k = %#v, want message-000", focused)
+	}
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("reaching the first block exactly should keep deferred mode active until the next upward move")
+	}
+	cmd = m.handleNormalKey(modelSelectKey("k"))
+	applyTestCmd(t, &m, cmd)
+	focused = m.viewport.GetBlockAtOffset()
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after extra k at top = %#v, want message-000", focused)
+	}
+	if m.hasDeferredStartupTranscript() {
+		t.Fatal("extra k beyond the first block should hydrate and exit deferred mode")
+	}
+}
+
+func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
+	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for counted line scroll test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "9", Code: '9'}))
+	cmd = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	applyTestCmd(t, &m, cmd)
+
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("deferred state missing after counted down scroll")
+	}
+	if state.windowEnd != len(messages) {
+		t.Fatalf("window end after counted down scroll = %d, want %d tail end", state.windowEnd, len(messages))
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should saturate at bottom after counted down scroll")
+	}
+}
+
+func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
+	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for random counted navigation test")
+	}
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if m.focusedBlockID < 0 {
+		t.Fatal("gg should focus first block")
+	}
+	assertDeferredWindowInvariant(t, &m)
+
+	theoretical := 0
+	rng := rand.New(rand.NewSource(42))
+	for step := 0; step < 200; step++ {
+		count := rng.Intn(180) + 1
+		dir := 1
+		key := "j"
+		if rng.Intn(2) == 0 {
+			dir = -1
+			key = "k"
+		}
+		sendNormalCountPrefix(&m, count)
+		cmd = m.handleNormalKey(modelSelectKey(key))
+		applyTestCmd(t, &m, cmd)
+		theoretical += dir * count
+		if theoretical < 0 {
+			theoretical = 0
+		}
+		if theoretical >= len(messages) {
+			theoretical = len(messages) - 1
+		}
+		focused := m.viewport.GetFocusedBlock(m.focusedBlockID)
+		if focused == nil {
+			t.Fatalf("step %d: focused block missing after %d%s", step, count, key)
+		}
+		want := fmt.Sprintf("message-%03d", theoretical)
+		if focused.Content != want {
+			t.Fatalf("step %d after %d%s: focused block = %q, want %q", step, count, key, focused.Content, want)
+		}
+		assertDeferredWindowInvariant(t, &m)
+	}
+}
+
+func TestDeferredStartupTranscriptCountedNavigationMaintainsWindowInvariant(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+260)
+	for i := 0; i < startupTranscriptWindowMinBlocks+260; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for window invariant test")
+	}
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	assertDeferredWindowInvariant(t, &m)
+
+	ops := []struct {
+		count int
+		key   string
+	}{
+		{1, "j"}, {47, "j"}, {48, "j"}, {49, "j"}, {120, "j"},
+		{1, "k"}, {47, "k"}, {48, "k"}, {49, "k"}, {120, "k"},
+	}
+	for _, op := range ops {
+		sendNormalCountPrefix(&m, op.count)
+		cmd = m.handleNormalKey(modelSelectKey(op.key))
+		applyTestCmd(t, &m, cmd)
+		assertDeferredWindowInvariant(t, &m)
+	}
+}
+
+func TestNormalModeCountedBoundaryNavigationSaturatesAtEdges(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	m.mode = ModeNormal
+	for i := 0; i < 10; i++ {
+		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: fmt.Sprintf("message-%03d", i)})
+	}
+	m.viewport.offset = 0
+	m.setFocusedBlockFromViewport()
+	if m.focusedBlockID < 0 {
+		t.Fatal("expected first block to be focused in normal mode")
+	}
+
+	sendNormalCountPrefix(&m, 20)
+	cmd := m.handleNormalKey(modelSelectKey("j"))
+	applyTestCmd(t, &m, cmd)
+	focused := m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil || focused.Content != "message-009" {
+		t.Fatalf("focused block after 20j in normal mode = %#v, want message-009", focused)
+	}
+
+	sendNormalCountPrefix(&m, 20)
+	cmd = m.handleNormalKey(modelSelectKey("k"))
+	applyTestCmd(t, &m, cmd)
+	focused = m.viewport.GetFocusedBlock(m.focusedBlockID)
+	if focused == nil || focused.Content != "message-000" {
+		t.Fatalf("focused block after 20k in normal mode = %#v, want message-000", focused)
 	}
 }
 

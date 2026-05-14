@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- TUI：修复 deferred startup transcript 在长会话恢复后的多类滚动/导航错误。现在如果标签页失焦前确实跟随最新内容，重新获焦时会先恢复真实尾窗，避免画面看似已在底部但鼠标滚轮向下还能翻出旧卡片；同时，`[count]j/k` 与 `[count]up/down` 在 deferred 窗口间会逐步按全文逻辑位置推进，超过剩余范围时稳定饱和到第一张/最后一张卡片，不再因跨窗口而少走、跳错或放大滚动范围。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
 - Config：更新内置 `planner` / `builder` 默认权限。`builder` 现在采用放行基线，因此大多数工具调用不再询问权限；仅 `Delete` 仍需确认，`Handoff` / `Delegate` 继续拒绝。`planner` 现在可直接使用 `Shell`。
 - TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
