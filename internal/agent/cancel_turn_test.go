@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -184,6 +185,61 @@ func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(
 	}
 	if !sawCancelled {
 		t.Fatal("expected speculative Write tool card to be closed with cancelled result")
+	}
+}
+
+func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	call := message.ToolCall{
+		ID:   "spec-read-1",
+		Name: "Read",
+		Args: []byte(`{"path":"README.md"}`),
+	}
+	a.ctxMgr.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{call}})
+	a.persistAsync("main", message.Message{Role: "assistant", ToolCalls: []message.ToolCall{call}})
+	a.flushPersist()
+	a.appendCompletedInterruptedToolResult(&ToolResultPayload{
+		CallID:   call.ID,
+		Name:     call.Name,
+		ArgsJSON: string(call.Args),
+		Result:   "     1\thello",
+		TurnID:   1,
+	})
+	a.flushPersist()
+
+	msgs := a.GetMessages()
+	foundTool := false
+	for _, msg := range msgs {
+		if msg.Role == "tool" && msg.ToolCallID == call.ID {
+			foundTool = true
+			if msg.ToolStatus != string(ToolResultStatusSuccess) {
+				t.Fatalf("tool status=%q, want success", msg.ToolStatus)
+			}
+			if !strings.Contains(msg.Content, "hello") {
+				t.Fatalf("tool content=%q, want completed read result payload", msg.Content)
+			}
+		}
+	}
+	if !foundTool {
+		t.Fatal("expected completed speculative tool result to be persisted immediately")
+	}
+
+	restored, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	restoredTool := false
+	for _, msg := range restored {
+		if msg.Role == "tool" && msg.ToolCallID == call.ID {
+			restoredTool = true
+			if msg.ToolStatus != string(ToolResultStatusSuccess) {
+				t.Fatalf("restored tool status=%q, want success", msg.ToolStatus)
+			}
+		}
+	}
+	if !restoredTool {
+		t.Fatal("expected completed speculative tool result in persisted recovery log")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -48,8 +49,9 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	completedCount := 0
 	for _, call := range merged {
 		if payload, ok := completedResults[call.CallID]; ok {
-			// Tool completed execution - persist and emit the actual result
-			a.sendEvent(Event{Type: EventToolResult, TurnID: turn.ID, Payload: payload})
+			// Tool completed execution: persist and emit immediately so the
+			// result survives terminal turn failure and can be reused on resume.
+			a.appendCompletedInterruptedToolResult(payload)
 			completedCount++
 		} else {
 			// Tool truly failed
@@ -121,6 +123,53 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 		persisted++
 	}
 	return persisted
+}
+
+// appendCompletedInterruptedToolResult persists a fully completed tool result
+// during turn interruption paths (cancel/replace/terminal error), without
+// driving normal turn continuation.
+func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayload) {
+	if a == nil || payload == nil {
+		return
+	}
+	rawResult := payload.Result
+	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
+	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+
+	a.emitToTUI(ToolResultEvent{
+		CallID:      payload.CallID,
+		Name:        payload.Name,
+		ArgsJSON:    payload.ArgsJSON,
+		Audit:       payload.Audit.Clone(),
+		Result:      displayResult,
+		Status:      toolResultStatusFromError(isError),
+		Diff:        payload.Diff,
+		DiffAdded:   payload.DiffAdded,
+		DiffRemoved: payload.DiffRemoved,
+		FileCreated: payload.FileCreated,
+	})
+
+	snapshot := a.ctxMgr.Snapshot()
+	a.queueLSPDiagnosticOverlay(snapshot, payload)
+	toolMsg := message.Message{
+		Role:            "tool",
+		Content:         contextResult,
+		ToolCallID:      payload.CallID,
+		ToolDiff:        payload.Diff,
+		ToolDiffAdded:   payload.DiffAdded,
+		ToolDiffRemoved: payload.DiffRemoved,
+		ToolDurationMs:  payload.Duration.Milliseconds(),
+		ToolStatus:      string(toolResultStatusFromError(isError)),
+		Audit:           payload.Audit.Clone(),
+		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
+		FileState:       payload.FileState.Clone(),
+		Provenance:      toolProvenanceForCall(snapshot, payload.CallID),
+	}
+	a.ctxMgr.Append(toolMsg)
+	if a.recovery != nil {
+		a.persistAsync("main", toolMsg)
+	}
+	a.recordEvidenceFromMessage(toolMsg)
 }
 
 // handleToolResult processes a single tool execution result. When all pending
@@ -209,7 +258,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	rawResult := payload.Result
-	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
+	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
 
 	hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(
@@ -284,14 +333,38 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		ToolDiff:        payload.Diff,
 		ToolDiffAdded:   payload.DiffAdded,
 		ToolDiffRemoved: payload.DiffRemoved,
+		ToolDurationMs:  payload.Duration.Milliseconds(),
 		ToolStatus:      string(toolResultStatusFromError(isError)),
 		Audit:           payload.Audit.Clone(),
 		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
 		FileState:       payload.FileState.Clone(),
+		Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
 	}
 	a.ctxMgr.Append(toolMsg)
 	if a.recovery != nil {
 		a.persistAsync("main", toolMsg)
+	}
+	a.recordEvidenceFromMessage(toolMsg)
+
+	a.turn.CompletedToolCalls = append(a.turn.CompletedToolCalls, toolResultSummary(payload, contextResult, errorText))
+	if changed := changedFileSummary(payload); changed != nil {
+		a.loopState.markProgress()
+		a.turn.ChangedFiles = append(a.turn.ChangedFiles, changed)
+	}
+	if isVerificationLikeToolResult(payload, contextResult) {
+		a.loopState.markVerificationProgress()
+	}
+
+	// Track malformed and empty-args calls. Both malformed sentinel args and
+	// empty "{}" args for tools with required parameters count as abnormal.
+	if llm.IsMalformedArgs(json.RawMessage(payload.ArgsJSON)) {
+		a.turn.malformedInBatch++
+	} else if llm.IsEmptyArgs(json.RawMessage(payload.ArgsJSON)) {
+		if tool, ok := a.tools.Get(payload.Name); ok {
+			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
+				a.turn.malformedInBatch++
+			}
+		}
 	}
 
 	remaining := a.turn.PendingToolCalls.Add(-1)
@@ -301,8 +374,58 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		remaining = 0
 	}
 	if remaining == 0 {
+		log.Debugf("tool result processed name=%v call_id=%v is_error=%v pending=%v malformed_in_batch=%v", payload.Name, payload.CallID, isError, a.turn.PendingToolCalls.Load(), a.turn.malformedInBatch)
 		a.turn.TotalToolCalls.Store(0)
 		a.turn.activeToolBatchCancel = nil
+		if a.turn.nextToolBatch < len(a.turn.toolExecutionBatches) {
+			a.startNextToolBatch(a.turn)
+			return
+		}
+		abnormalInBatch := a.turn.malformedInBatch
+		a.turn.toolExecutionBatches = nil
+		a.turn.nextToolBatch = 0
+		if abnormalInBatch > 0 {
+			a.turn.MalformedCount++
+			log.Warnf("batch contained abnormal tool call arguments abnormal_count=%v consecutive_rounds=%v", abnormalInBatch, a.turn.MalformedCount)
+		} else {
+			a.turn.MalformedCount = 0
+		}
+		a.turn.malformedInBatch = 0
+		if a.turn.MalformedCount >= maxMalformedToolCalls {
+			log.Warnf("aborting turn: too many consecutive malformed tool call rounds count=%v threshold=%v", a.turn.MalformedCount, maxMalformedToolCalls)
+			a.emitToTUI(ErrorEvent{
+				Err: fmt.Errorf(
+					"turn aborted: the model produced malformed tool call arguments "+
+						"%d times in a row. This usually indicates a model capability "+
+						"issue or context overflow. Please start a new conversation. "+
+						"You can also increase max_output_tokens in config to allow longer outputs",
+					a.turn.MalformedCount,
+				),
+			})
+			a.setIdleAndDrainPending()
+			return
+		}
+		if results, err := a.runToolBatchHooks(a.turn.Ctx, a.turn); err != nil {
+			log.Warnf("on_tool_batch_complete hook error error=%v", err)
+		} else {
+			for _, job := range results {
+				if shouldAppendAutomationResult(job.Hook, job.Result) {
+					a.appendHookFeedback(formatAutomationFeedback(job.Hook, job.Result))
+				}
+				if job.Result.Notify || job.Hook.Result == hook.ResultNotifyOnly {
+					msg := job.Result.Summary
+					if msg == "" {
+						msg = fmt.Sprintf("Hook %s finished with status %s", job.Hook.Name, job.Result.Status)
+					}
+					a.emitToTUI(ToastEvent{
+						Message: msg,
+						Level:   hookToastLevel(job.Result),
+					})
+				}
+			}
+		}
+		a.turn.CompletedToolCalls = nil
+		a.turn.ChangedFiles = nil
 		if a.pendingHandoff != nil {
 			pc := a.pendingHandoff
 			a.pendingHandoff = nil
