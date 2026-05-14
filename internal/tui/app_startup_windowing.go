@@ -151,6 +151,7 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 	}
 	m.viewport.sticky = false
 	m.viewport.ReplaceBlocks(windowed)
+	m.rebindLiveViewportBlocks()
 	m.recalcViewportSize()
 	m.maybeEnforceStartupDeferredTranscriptRetention()
 	state.windowStart = start
@@ -337,6 +338,7 @@ func (m *Model) maybeHydrateStartupDeferredTranscript(trigger string) bool {
 	started := time.Now()
 	m.viewport.sticky = false
 	m.viewport.ReplaceBlocks(state.allBlocks)
+	m.rebindLiveViewportBlocks()
 	m.restoreStartupDeferredTranscriptRetention(state)
 	if state.anchorBlockID >= 0 {
 		if lineOffset, ok := m.viewport.LineOffsetForBlockID(state.anchorBlockID); ok {

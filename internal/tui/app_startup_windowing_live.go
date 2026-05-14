@@ -103,8 +103,11 @@ func (m *Model) syncStartupDeferredTranscriptWindowToViewport() {
 		}
 	}
 	if start >= 0 && end >= start {
-		state.windowStart = start
-		state.windowEnd = end
+		visibleCount := len(m.viewport.blocks)
+		if end-start == visibleCount {
+			state.windowStart = start
+			state.windowEnd = end
+		}
 	}
 	if m.startupDeferredTranscriptBlockIndex(state.anchorBlockID) < 0 {
 		state.anchorBlockID = firstID
@@ -125,6 +128,22 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 	metaIdx := m.startupDeferredTranscriptMetaIndex(block.ID)
 	if metaIdx >= 0 {
 		state.blockMeta[metaIdx] = startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth())
+	}
+}
+
+func (m *Model) rebindLiveViewportBlocks() {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	if m.currentAssistantBlock != nil {
+		if rebound := m.viewport.GetFocusedBlock(m.currentAssistantBlock.ID); rebound != nil {
+			m.currentAssistantBlock = rebound
+		}
+	}
+	if m.currentThinkingBlock != nil {
+		if rebound := m.viewport.GetFocusedBlock(m.currentThinkingBlock.ID); rebound != nil {
+			m.currentThinkingBlock = rebound
+		}
 	}
 }
 
@@ -160,6 +179,24 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportAppend() {
 	state.allBlocks = append(state.allBlocks, clone)
 	state.blockMeta = append(state.blockMeta, startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth()))
 	state.anchorBlockID = block.ID
-	m.syncStartupDeferredTranscriptWindowToViewport()
-	m.recordTUIDiagnostic("startup-deferred-live-append", "block=%d type=%s total=%d visible=%d window=[%d,%d)", block.ID, debugBlockTypeString(block.Type), len(state.allBlocks), len(m.viewport.blocks), state.windowStart, state.windowEnd)
+	wasShowingTail := state.windowEnd >= len(state.allBlocks)-1
+	forceTailWindow := block.Type == BlockUser
+	if wasShowingTail || forceTailWindow {
+		state.windowEnd = len(state.allBlocks)
+		state.windowStart = max(0, state.windowEnd-len(m.viewport.blocks))
+		if forceTailWindow && !wasShowingTail {
+			windowed := m.startupDeferredWindowBlocks(state, state.windowStart, state.windowEnd)
+			if len(windowed) > 0 {
+				m.viewport.sticky = false
+				m.viewport.ReplaceBlocks(windowed)
+				m.rebindLiveViewportBlocks()
+				m.recalcViewportSize()
+				m.viewport.ScrollToBottom()
+			}
+		}
+		m.syncStartupDeferredTranscriptWindowToViewport()
+	} else {
+		state.hiddenBlocks = max(0, len(state.allBlocks)-startupTranscriptTailBlocks)
+	}
+	m.recordTUIDiagnostic("startup-deferred-live-append", "block=%d type=%s total=%d visible=%d window=[%d,%d) tail=%t force_tail=%t", block.ID, debugBlockTypeString(block.Type), len(state.allBlocks), len(m.viewport.blocks), state.windowStart, state.windowEnd, wasShowingTail, forceTailWindow)
 }

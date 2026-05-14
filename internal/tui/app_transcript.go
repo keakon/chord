@@ -138,6 +138,7 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	m.viewport.sticky = true // show latest messages after restore
 	replaceStarted := time.Now()
 	m.viewport.ReplaceBlocks(blocks)
+	m.rebindLiveViewportBlocks()
 	m.revalidateFocusedBlock()
 	recalcStarted := time.Now()
 	m.recalcViewportSize() // ensure viewport uses current layout width so background blocks align

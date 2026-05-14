@@ -1892,6 +1892,114 @@ func TestStartupRestoredLargeTranscriptUsesWindowedTailUntilHistoryNeeded(t *tes
 	}
 }
 
+func TestDeferredStartupTranscriptLiveAppendOutsideTailKeepsPagingContiguous(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
+	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for live append paging test")
+	}
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript state missing after gg")
+	}
+	startBefore, endBefore := state.windowStart, state.windowEnd
+	visibleBefore := len(m.viewport.visibleBlocks())
+
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "live tail reply"}})
+	applyTestCmd(t, &m, cmd)
+
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript state missing after live append")
+	}
+	if state.windowStart != startBefore || state.windowEnd != endBefore {
+		t.Fatalf("deferred window changed after live append outside tail: got [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, startBefore, endBefore)
+	}
+	if got := len(m.viewport.visibleBlocks()); got != visibleBefore+1 {
+		t.Fatalf("len(visibleBlocks()) after live append = %d, want %d", got, visibleBefore+1)
+	}
+
+	m.viewport.ScrollToBottom()
+	m.maybePageStartupDeferredTranscriptWindow(1, "page_down_after_live_append")
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript state missing after page down")
+	}
+	wantStart := endBefore
+	wantEnd := min(len(state.allBlocks), endBefore+startupTranscriptTailBlocks)
+	if state.windowStart != wantStart || state.windowEnd != wantEnd {
+		t.Fatalf("deferred window after page down = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, wantEnd)
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != wantEnd-wantStart {
+		t.Fatalf("len(visibleBlocks()) after page down = %d, want %d", len(blocks), wantEnd-wantStart)
+	}
+	if blocks[0].Content != fmt.Sprintf("message-%03d", wantStart) {
+		t.Fatalf("first block after page down = %q, want message-%03d", blocks[0].Content, wantStart)
+	}
+	if blocks[len(blocks)-1].ID == m.currentAssistantBlock.ID {
+		t.Fatalf("last block after page down = current live assistant block %d, want contiguous historical page", m.currentAssistantBlock.ID)
+	}
+}
+
+func TestDeferredStartupTranscriptWindowSwitchKeepsStreamingAssistantContent(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
+	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for streaming assistant window switch test")
+	}
+
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "partial "}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "reply"}})
+	applyTestCmd(t, &m, cmd)
+	if m.currentAssistantBlock == nil {
+		t.Fatal("expected streaming assistant block before window switch")
+	}
+	streamID := m.currentAssistantBlock.ID
+
+	m.handleNormalKey(modelSelectKey("g"))
+	m.handleNormalKey(modelSelectKey("g"))
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("gg should keep deferred startup transcript active")
+	}
+	m.handleNormalKey(modelSelectKey("G"))
+
+	if m.currentAssistantBlock == nil {
+		t.Fatal("expected streaming assistant block after switching back to tail")
+	}
+	if m.currentAssistantBlock.ID != streamID {
+		t.Fatalf("streaming assistant block id after gg/G = %d, want %d", m.currentAssistantBlock.ID, streamID)
+	}
+	if got := m.currentAssistantBlock.Content; got != "partial reply" {
+		t.Fatalf("streaming assistant content after gg/G = %q, want %q", got, "partial reply")
+	}
+	block := m.viewport.GetFocusedBlock(streamID)
+	if block == nil {
+		t.Fatal("expected streaming assistant block in viewport after gg/G")
+	}
+	if got := block.Content; got != "partial reply" {
+		t.Fatalf("viewport streaming assistant content after gg/G = %q, want %q", got, "partial reply")
+	}
+}
+
 func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {

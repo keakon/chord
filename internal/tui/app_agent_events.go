@@ -193,6 +193,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.assistantBlockAppended {
 			m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
 		}
+		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
@@ -236,6 +237,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.thinkingBlockAppended {
 			m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
 		}
+		m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
@@ -263,6 +265,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			if m.thinkingBlockAppended {
 				m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
 			}
+			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 			m.exitRenderFreeze()
 			m.markStreamRenderDirty()
 			if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
