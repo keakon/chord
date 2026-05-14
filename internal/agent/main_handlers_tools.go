@@ -19,6 +19,13 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	if turn == nil {
 		return
 	}
+
+	// Extract completed speculative tool results before draining
+	var completedResults map[string]*ToolResultPayload
+	if turn.streamingToolExec != nil {
+		completedResults = turn.streamingToolExec.DrainCompletedResults()
+	}
+
 	streaming := turn.drainStreamingToolCalls()
 	failedExec := turn.cancelPendingToolCalls()
 	merged := mergePendingToolCalls(streaming, failedExec)
@@ -35,12 +42,30 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	turn.TotalToolCalls.Store(0)
 	turn.toolExecutionBatches = nil
 	turn.nextToolBatch = 0
-	log.Warnf("failing pending tool calls after terminal turn error turn_id=%v pending_tools=%v failed_tools=%v error=%v", turn.ID, pending, len(merged), err)
-	persistedResults := a.persistInterruptedToolResults(failedExec, ToolResultStatusError, err)
-	if persistedResults > 0 {
-		log.Infof("persisted failed tool-call results after terminal turn error turn_id=%v count=%v", turn.ID, persistedResults)
+
+	// Separate tools into completed vs truly failed
+	var reallyFailed []PendingToolCall
+	completedCount := 0
+	for _, call := range merged {
+		if payload, ok := completedResults[call.CallID]; ok {
+			// Tool completed execution - persist and emit the actual result
+			a.sendEvent(Event{Type: EventToolResult, TurnID: turn.ID, Payload: payload})
+			completedCount++
+		} else {
+			// Tool truly failed
+			reallyFailed = append(reallyFailed, call)
+		}
 	}
-	emitFailedToolResults(a.emitToTUI, merged, err)
+
+	log.Warnf("failing pending tool calls after terminal turn error turn_id=%v pending_tools=%v failed_tools=%v completed_tools=%v error=%v", turn.ID, pending, len(reallyFailed), completedCount, err)
+
+	if len(reallyFailed) > 0 {
+		persistedResults := a.persistInterruptedToolResults(reallyFailed, ToolResultStatusError, err)
+		if persistedResults > 0 {
+			log.Infof("persisted failed tool-call results after terminal turn error turn_id=%v count=%v", turn.ID, persistedResults)
+		}
+		emitFailedToolResults(a.emitToTUI, reallyFailed, err)
+	}
 }
 
 // filterPendingCallsForDeclaredTools drops pending tool metadata whose CallID is

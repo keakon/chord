@@ -408,6 +408,70 @@ func (e *StreamingToolExecutor) DiscardAll(reason string) []PendingToolCall {
 	return e.DiscardExcept(map[string]struct{}{}, reason)
 }
 
+// DrainCompletedResults extracts tool results for calls that have finished
+// execution (state == completed or yielded) without waiting for promotion.
+// Returns a map of callID -> ToolResultPayload for completed tools.
+// This allows turn cancellation to preserve results from speculative execution
+// that finished before the turn was interrupted.
+func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPayload {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	results := make(map[string]*ToolResultPayload)
+	for callID, entry := range e.entries {
+		if entry == nil || entry.discarded {
+			continue
+		}
+		// Only extract results from entries that completed execution
+		if entry.state != streamingToolCompleted && entry.state != streamingToolYielded {
+			continue
+		}
+		// Wait for execution to finish if it's still running
+		if entry.done != nil {
+			select {
+			case <-entry.done:
+			default:
+				continue
+			}
+		}
+
+		startedAt := entry.startedAt
+		if startedAt.IsZero() {
+			startedAt = entry.completedAt
+		}
+
+		var diff agentdiff.Summary
+		if entry.err == nil && entry.result.EffectiveArgsJSON != "" {
+			effective := entry.call
+			effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
+			diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath)
+		}
+
+		payload := &ToolResultPayload{
+			CallID:      callID,
+			Name:        entry.call.Name,
+			ArgsJSON:    entry.result.EffectiveArgsJSON,
+			Audit:       entry.result.Audit,
+			Result:      entry.result.Result,
+			Error:       entry.err,
+			TurnID:      e.turnID,
+			Duration:    entry.completedAt.Sub(startedAt),
+			Diff:        diff.Text,
+			DiffAdded:   diff.Added,
+			DiffRemoved: diff.Removed,
+			FileCreated: entry.call.Name == tools.NameWrite && !entry.result.PreExisted,
+			LSPReviews:  append([]message.LSPReview(nil), entry.result.LSPReviews...),
+			FileState:   entry.result.FileState.Clone(),
+		}
+		results[callID] = payload
+	}
+
+	return results
+}
+
 func (e *StreamingToolExecutor) releaseConflictKeysLocked(entry *streamingToolEntry) {
 	if e == nil || entry == nil || len(entry.conflictKeys) == 0 {
 		return

@@ -304,16 +304,41 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	turn := a.turn
 	pending := turn.PendingToolCalls.Load()
 	a.savePartialAssistantMsgForTurn(turn)
+
+	// Extract completed speculative tool results before draining
+	var completedResults map[string]*ToolResultPayload
+	if turn.streamingToolExec != nil {
+		completedResults = turn.streamingToolExec.DrainCompletedResults()
+	}
+
 	cancelledExec := turn.cancelPendingToolCalls()
 	cancelledStream := turn.drainStreamingToolCalls()
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
-	if len(merged) > 0 {
-		persistedResults := a.persistInterruptedToolResults(merged, ToolResultStatusError, context.Canceled)
-		if persistedResults > 0 {
-			log.Infof("persisted interrupted tool-call results before starting replacement turn turn_id=%v count=%v pending_tools=%v", turn.ID, persistedResults, pending)
+
+	// Separate tools into completed vs truly interrupted
+	var reallyInterrupted []PendingToolCall
+	completedCount := 0
+	for _, call := range merged {
+		if payload, ok := completedResults[call.CallID]; ok {
+			// Tool completed execution - persist and emit the actual result
+			a.sendEvent(Event{Type: EventToolResult, TurnID: turn.ID, Payload: payload})
+			completedCount++
+		} else {
+			// Tool was truly interrupted - mark as failed
+			reallyInterrupted = append(reallyInterrupted, call)
 		}
-		emitFailedToolResults(a.emitToTUI, merged, context.Canceled)
 	}
+
+	if len(reallyInterrupted) > 0 {
+		persistedResults := a.persistInterruptedToolResults(reallyInterrupted, ToolResultStatusError, context.Canceled)
+		if persistedResults > 0 {
+			log.Infof("persisted interrupted tool-call results before starting replacement turn turn_id=%v interrupted=%v completed=%v pending_tools=%v", turn.ID, persistedResults, completedCount, pending)
+		}
+		emitFailedToolResults(a.emitToTUI, reallyInterrupted, context.Canceled)
+	} else if completedCount > 0 {
+		log.Infof("preserved completed tool results before starting replacement turn turn_id=%v completed=%v pending_tools=%v", turn.ID, completedCount, pending)
+	}
+
 	turn.PendingToolCalls.Store(0)
 	turn.TotalToolCalls.Store(0)
 	turn.toolExecutionBatches = nil

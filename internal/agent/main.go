@@ -1452,19 +1452,46 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	if payload.KeepPendingUserMessagesQueued {
 		a.pausePendingUserDrainOnce = true
 	}
+
+	// Extract completed speculative tool results before marking as failed
+	var completedResults map[string]*ToolResultPayload
+	if a.turn != nil && a.turn.streamingToolExec != nil {
+		completedResults = a.turn.streamingToolExec.DrainCompletedResults()
+	}
+
+	// Separate tools into completed vs truly cancelled
+	var reallyCancelled []PendingToolCall
+	completedCount := 0
+	for _, call := range payload.Calls {
+		if result, ok := completedResults[call.CallID]; ok {
+			// Tool completed execution - persist and emit the actual result
+			a.sendEvent(Event{Type: EventToolResult, TurnID: evt.TurnID, Payload: result})
+			completedCount++
+		} else {
+			// Tool was truly cancelled
+			reallyCancelled = append(reallyCancelled, call)
+		}
+	}
+
 	status := ToolResultStatusCancelled
 	if payload.MarkToolCallsFailed {
 		status = ToolResultStatusError
 	}
-	persistedResults := a.persistInterruptedToolResults(payload.Calls, status, context.Canceled)
-	if persistedResults > 0 {
-		log.Infof("persisted interrupted tool-call results after cancellation turn_id=%v count=%v", evt.TurnID, persistedResults)
+
+	if len(reallyCancelled) > 0 {
+		persistedResults := a.persistInterruptedToolResults(reallyCancelled, status, context.Canceled)
+		if persistedResults > 0 {
+			log.Infof("persisted interrupted tool-call results after cancellation turn_id=%v interrupted=%v completed=%v", evt.TurnID, persistedResults, completedCount)
+		}
+		if payload.MarkToolCallsFailed {
+			emitFailedToolResults(a.emitToTUI, reallyCancelled, context.Canceled)
+		} else {
+			emitCancelledToolResults(a.emitToTUI, reallyCancelled)
+		}
+	} else if completedCount > 0 {
+		log.Infof("preserved completed tool results after cancellation turn_id=%v completed=%v", evt.TurnID, completedCount)
 	}
-	if payload.MarkToolCallsFailed {
-		emitFailedToolResults(a.emitToTUI, payload.Calls, context.Canceled)
-	} else {
-		emitCancelledToolResults(a.emitToTUI, payload.Calls)
-	}
+
 	if payload.CommitPendingUserMessagesWithoutTurn {
 		a.commitPendingUserMessagesWithoutTurn()
 	}
