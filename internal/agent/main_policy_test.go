@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1359,7 +1358,8 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 		t.Fatalf("assessment.Reasons = %v, want subagents_active", assessment.Reasons)
 	}
 
-	// Once the worker is no longer active, a Done tool request can complete.
+	// Once the worker is no longer active, the assistant still needs to end the
+	// round normally; runtime completion is handled through the actual Done tool result path.
 	a.mu.Lock()
 	delete(a.subAgents, sub.instanceID)
 	a.mu.Unlock()
@@ -1367,20 +1367,18 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.loopState.markProgress()
 	a.loopState.markVerificationProgress()
 	assessment = a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:    "assistant",
-		Content: "all delegated work finished",
-		ToolCalls: []message.ToolCall{{
-			ID:   "done-1",
-			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"all tasks done"}`),
-		}},
-		StopReason: "tool_calls",
+		Role:       "assistant",
+		Content:    "all delegated work finished",
+		StopReason: "stop",
 	})
 	if assessment == nil {
-		t.Fatal("assessment = nil, want completed assessment after worker finishes")
+		t.Fatal("assessment = nil, want continue assessment after worker finishes")
 	}
-	if assessment.Action != LoopAssessmentActionCompleted {
-		t.Fatalf("assessment.Action = %q, want %q after worker completion", assessment.Action, LoopAssessmentActionCompleted)
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q after worker completion", assessment.Action, LoopAssessmentActionContinue)
+	}
+	if !strings.Contains(assessment.Message, "Done") {
+		t.Fatalf("assessment.Message = %q, want missing-Done guidance after worker completion", assessment.Message)
 	}
 }
 

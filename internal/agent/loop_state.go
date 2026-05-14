@@ -20,6 +20,7 @@ const (
 
 var loopBlockedTagRE = regexp.MustCompile(`(?is)<blocked>\s*(.*?)\s*</blocked>`)
 var loopVerifyNotRunTagRE = regexp.MustCompile(`(?is)<verify-not-run>\s*(.*?)\s*</verify-not-run>`)
+var verificationWordTokenRE = regexp.MustCompile(`(^|[^a-z0-9_])(tox|nox|ava)([^a-z0-9_]|$)`)
 
 type LoopAssessmentAction string
 
@@ -175,7 +176,7 @@ func isVerificationLikeToolResult(payload *ToolResultPayload, result string) boo
 		}
 	}
 
-	verificationPatterns := []string{
+	commandPatterns := []string{
 		"go test", "gotestsum", "go vet", "staticcheck", "golangci-lint", "gofmt -w", "gofmt -d",
 		"pytest", "python -m pytest", "uv run pytest", "tox", "nox",
 		"npm test", "pnpm test", "yarn test", "bun test", "vitest", "jest", "mocha", "ava",
@@ -184,10 +185,34 @@ func isVerificationLikeToolResult(payload *ToolResultPayload, result string) boo
 		"dotnet test", "rspec", "bundle exec rspec", "mix test", "rebar3 eunit",
 		"validation", "replay",
 	}
-	for _, pat := range verificationPatterns {
-		if strings.Contains(command, pat) || strings.Contains(result, pat) {
+	resultPatterns := []string{
+		"go test", "gotestsum", "go vet", "staticcheck", "golangci-lint", "gofmt -w", "gofmt -d",
+		"pytest", "python -m pytest", "uv run pytest",
+		"npm test", "pnpm test", "yarn test", "bun test", "vitest", "jest", "mocha",
+		"cargo test", "cargo clippy", "cargo fmt", "cargo check",
+		"mvn test", "gradle test", "./gradlew test",
+		"dotnet test", "rspec", "bundle exec rspec", "mix test", "rebar3 eunit",
+		"validation", "replay",
+	}
+	for _, pat := range commandPatterns {
+		if isVerificationCommandMatch(command, pat) {
+			return true
+		}
+	}
+	for _, pat := range resultPatterns {
+		if strings.Contains(result, pat) {
 			return true
 		}
 	}
 	return false
+}
+
+func isVerificationCommandMatch(command, pattern string) bool {
+	if command == "" || pattern == "" {
+		return false
+	}
+	if pattern == "tox" || pattern == "nox" || pattern == "ava" {
+		return verificationWordTokenRE.MatchString(command)
+	}
+	return strings.Contains(command, pattern)
 }

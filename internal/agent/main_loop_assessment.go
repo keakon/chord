@@ -8,7 +8,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // handleLoopAssessment processes the loop assessment result after an LLM round.
@@ -221,25 +220,6 @@ func (a *MainAgent) stopLoopAsBlocked(rawReason string) {
 	a.loopState.disable()
 }
 
-type loopDoneToolRequest struct {
-	CallID string
-	Reason string
-}
-
-func extractLoopDoneToolRequest(msg message.Message) (loopDoneToolRequest, bool) {
-	if len(msg.ToolCalls) == 0 {
-		return loopDoneToolRequest{}, false
-	}
-	for i := len(msg.ToolCalls) - 1; i >= 0; i-- {
-		tc := msg.ToolCalls[i]
-		if tc.Name != tools.NameDone {
-			continue
-		}
-		return loopDoneToolRequest{CallID: tc.ID, Reason: strings.TrimSpace(msg.Content)}, true
-	}
-	return loopDoneToolRequest{}, false
-}
-
 func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall bool) *LoopAssessment {
 	if blockedReason := extractLoopBlockedReason(msg.Content); blockedReason != "" {
 		return a.loopBlockedAssessment(blockedReason)
@@ -251,27 +231,23 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 		return append([]string{"suspected_stall"}, reasons...)
 	}
 	if a.hasOpenTodos() {
-		reasons := addSuspected(a.currentLoopContinuationReasons("open_todos", "terminal_reply"))
+		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "open_todos", "terminal_reply"))
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: sync unfinished todos before finishing.", Reasons: reasons}
 	}
 	if a.hasActiveSubAgents() {
-		reasons := addSuspected(a.currentLoopContinuationReasons("subagents_active", "terminal_reply"))
+		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "subagents_active", "terminal_reply"))
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: active subagents must finish before completion.", Reasons: reasons}
 	}
 	if !a.loopVerificationSatisfied(msg.Content) {
-		reasons := addSuspected(a.currentLoopContinuationReasons("missing_verification_status", "terminal_reply"))
+		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_verification_status", "terminal_reply"))
 		return &LoopAssessment{
 			Action:  LoopAssessmentActionContinue,
 			Message: "Loop continuing: report verification status or include <verify-not-run>reason</verify-not-run> before finishing.",
 			Reasons: reasons,
 		}
 	}
-	req, ok := extractLoopDoneToolRequest(msg)
-	if !ok {
-		reasons := addSuspected(a.currentLoopContinuationReasons("missing_done_tool", "terminal_reply"))
-		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons}
-	}
-	return &LoopAssessment{Action: LoopAssessmentActionCompleted, Message: "Loop exit requested: " + req.Reason}
+	reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_done_tool", "terminal_reply"))
+	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons}
 }
 
 // nextLoopAssessmentFromAssistant evaluates the loop state after an assistant message
@@ -323,6 +299,10 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 
 // currentLoopContinuationReasons builds a deduplicated list of reasons for loop continuation.
 func (a *MainAgent) currentLoopContinuationReasons(extra ...string) []string {
+	return a.currentLoopContinuationReasonsForContent("", extra...)
+}
+
+func (a *MainAgent) currentLoopContinuationReasonsForContent(content string, extra ...string) []string {
 	reasons := make([]string, 0, 6)
 	seen := map[string]struct{}{}
 	add := func(reason string) {
@@ -345,7 +325,7 @@ func (a *MainAgent) currentLoopContinuationReasons(extra ...string) []string {
 	if a.hasActiveSubAgents() {
 		add("subagents_active")
 	}
-	if a.loopState.VerificationVersion == 0 {
+	if a.loopState.VerificationVersion == 0 && extractLoopVerifyNotRunReason(content) == "" {
 		add("verification_required")
 	}
 	return reasons

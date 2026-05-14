@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -33,11 +34,17 @@ func (a *MainAgent) awaitLoopExitConfirmation(ctx context.Context, pending *loop
 	if pending == nil {
 		return ConfirmResponse{Approved: false}, nil
 	}
-	args := `{"reason":"` + strings.ReplaceAll(strings.TrimSpace(pending.Reason), `"`, `'`) + `"}`
-	return a.AwaitConfirm(ctx, "Done", args, 0, nil, nil)
+	payload := struct {
+		Reason string `json:"reason,omitempty"`
+	}{Reason: strings.TrimSpace(pending.Reason)}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ConfirmResponse{}, err
+	}
+	return a.AwaitConfirm(ctx, "Done", string(encoded), 0, nil, nil)
 }
 
-func (a *MainAgent) appendToolResultAndContinue(result string) {
+func (a *MainAgent) appendLoopContinuationAndContinue(result string) {
 	if a.turn == nil {
 		return
 	}
@@ -46,15 +53,10 @@ func (a *MainAgent) appendToolResultAndContinue(result string) {
 		result = "Continue the loop."
 	}
 	a.emitToTUI(InfoEvent{Message: result})
-	toolMsg := message.Message{
-		Role:       "tool",
-		ToolCallID: "loop-exit-control",
-		Content:    result,
-		ToolStatus: string(ToolResultStatusSuccess),
-	}
-	a.ctxMgr.Append(toolMsg)
+	msg := message.Message{Role: "user", Content: result, Kind: "loop_notice"}
+	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
-		a.persistAsync("main", toolMsg)
+		a.persistAsync("main", msg)
 	}
 }
 

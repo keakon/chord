@@ -21,26 +21,31 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	a.loopState.markVerificationProgress()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:    "assistant",
-		Content: "implemented and verified",
-		ToolCalls: []message.ToolCall{{
-			ID:   "done-1",
-			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"implemented and verified"}`),
-		}},
-		StopReason: "tool_calls",
+		Role:       "assistant",
+		Content:    "implemented and verified",
+		StopReason: "stop",
 	})
 	if assessment == nil {
-		t.Fatal("assessment = nil, want completed assessment")
+		t.Fatal("assessment = nil, want continue assessment")
 	}
-	if assessment.Action != LoopAssessmentActionCompleted {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if assessment.Message != "Loop exit requested: implemented and verified" {
-		t.Fatalf("assessment.Message = %q, want done-request message", assessment.Message)
+	if assessment.Message != "Loop continuing: end this round with a `Done` tool call to request loop exit." {
+		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
 	}
 	if a.loopState.State != LoopStateAssessing {
 		t.Fatalf("loopState.State = %q, want %q", a.loopState.State, LoopStateAssessing)
+	}
+	found := false
+	for _, reason := range assessment.Reasons {
+		if reason == "missing_done_tool" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("assessment.Reasons = %v, want missing_done_tool", assessment.Reasons)
 	}
 }
 
@@ -98,23 +103,18 @@ Done: allow
 	a.rebuildRuleset()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:    "assistant",
-		Content: "all good",
-		ToolCalls: []message.ToolCall{{
-			ID:   "done-1",
-			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"implemented and verified"}`),
-		}},
-		StopReason: "tool_calls",
+		Role:       "assistant",
+		Content:    "all good",
+		StopReason: "stop",
 	})
 	if assessment == nil {
-		t.Fatal("assessment = nil, want completed assessment")
+		t.Fatal("assessment = nil, want continue assessment")
 	}
-	if assessment.Action != LoopAssessmentActionCompleted {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if assessment.Message != "Loop exit requested: all good" {
-		t.Fatalf("assessment.Message = %q, want exit-request message", assessment.Message)
+	if !strings.Contains(assessment.Message, "Done") {
+		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
 	}
 }
 
@@ -245,11 +245,83 @@ Done: allow
 				case <-time.After(2 * time.Second):
 					t.Fatal("timed out waiting for Done rejection handling to finish")
 				}
+				msgs := a.ctxMgr.Snapshot()
+				last := msgs[len(msgs)-1]
+				if last.Role != "user" || last.Kind != "loop_notice" {
+					t.Fatalf("last rejection message = %#v, want user loop_notice", last)
+				}
+				if last.Content != payload.Message {
+					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Message)
+				}
+				for _, msg := range msgs {
+					if msg.Role == "tool" && msg.ToolCallID == "loop-exit-control" {
+						t.Fatalf("found orphan loop-exit-control tool message in context: %#v", msg)
+					}
+				}
 				return
 			}
 		case <-deadline:
 			t.Fatal("timed out waiting for visible Done rejection message")
 		}
+	}
+}
+
+func TestAwaitLoopExitConfirmationEscapesReasonJSON(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: ask
+`),
+	}
+	a.rebuildRuleset()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reason := "line 1\npath C:\\\\temp\\\"quoted\\\""
+	respCh := make(chan ConfirmResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := a.awaitLoopExitConfirmation(ctx, &loopExitResult{Reason: reason})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	select {
+	case evt := <-a.outputCh:
+		req, ok := evt.(ConfirmRequestEvent)
+		if !ok {
+			t.Fatalf("event = %T, want ConfirmRequestEvent", evt)
+		}
+		var args struct {
+			Reason string `json:"reason"`
+		}
+		if !json.Valid([]byte(req.ArgsJSON)) {
+			t.Fatalf("ArgsJSON is invalid JSON: %q", req.ArgsJSON)
+		}
+		if err := json.Unmarshal([]byte(req.ArgsJSON), &args); err != nil {
+			t.Fatalf("Unmarshal(ArgsJSON): %v", err)
+		}
+		if args.Reason != reason {
+			t.Fatalf("reason = %q, want %q", args.Reason, reason)
+		}
+		a.ResolveConfirm("deny", req.ArgsJSON, "", "", req.RequestID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Done confirmation request")
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("awaitLoopExitConfirmation: %v", err)
+	case resp := <-respCh:
+		if resp.Approved {
+			t.Fatal("confirmation unexpectedly approved")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Done confirmation response")
 	}
 }
 
@@ -324,23 +396,18 @@ func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *
 	a.loopState.markVerificationProgress()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:    "assistant",
-		Content: "done",
-		ToolCalls: []message.ToolCall{{
-			ID:   "done-1",
-			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"second"}`),
-		}},
-		StopReason: "tool_calls",
+		Role:       "assistant",
+		Content:    "done",
+		StopReason: "stop",
 	})
 	if assessment == nil {
-		t.Fatal("assessment = nil, want completed assessment")
+		t.Fatal("assessment = nil, want continue assessment")
 	}
-	if assessment.Action != LoopAssessmentActionCompleted {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if assessment.Message != "Loop exit requested: done" {
-		t.Fatalf("assessment.Message = %q, want %q", assessment.Message, "Loop exit requested: done")
+	if assessment.Message != "Loop continuing: end this round with a `Done` tool call to request loop exit." {
+		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
 	}
 }
 
@@ -689,6 +756,57 @@ func TestIsVerificationLikeToolResultDetectsVerificationFromShellCommand(t *test
 		if !isVerificationLikeToolResult(payload, tc.result) {
 			t.Fatalf("%s should be treated as verification-like progress", tc.name)
 		}
+	}
+}
+
+func TestIsVerificationLikeToolResultDoesNotMisclassifyShortPatternSubstrings(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		result  string
+	}{
+		{name: "ava substring in java result", command: "echo hello", result: "java is available"},
+		{name: "tox substring in available result", command: "echo hello", result: "environment available"},
+		{name: "nox substring in innocuous result", command: "echo hello", result: "knoxville"},
+		{name: "ava substring in command token", command: "java -version", result: "ok"},
+	}
+	for _, tc := range cases {
+		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
+		if isVerificationLikeToolResult(payload, tc.result) {
+			t.Fatalf("%s should not be treated as verification-like progress", tc.name)
+		}
+	}
+}
+
+func TestIsVerificationLikeToolResultMatchesShortVerificationCommandsWithWordBoundaries(t *testing.T) {
+	for _, command := range []string{"tox -q", "nox -s tests", "npx ava"} {
+		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + command + `"}`}
+		if !isVerificationLikeToolResult(payload, "ok") {
+			t.Fatalf("command %q should be treated as verification-like progress", command)
+		}
+	}
+}
+
+func TestCurrentLoopContinuationReasonsOmitVerificationRequiredForVerifyNotRunTag(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	reasons := a.currentLoopContinuationReasonsForContent("<verify-not-run>network sandbox blocked tests</verify-not-run>")
+	for _, reason := range reasons {
+		if reason == "verification_required" {
+			t.Fatalf("reasons = %v, should omit verification_required when verify-not-run tag is present", reasons)
+		}
+	}
+}
+
+func TestBuildLoopContinuationNoteOmitsVerificationRequiredForVerifyNotRunTag(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: a.currentLoopContinuationReasonsForContent("<verify-not-run>network sandbox blocked tests</verify-not-run>", "missing_done_tool")})
+	if note == nil {
+		t.Fatal("expected continuation note")
+	}
+	if strings.Contains(note.Text, "verification is required before completion") {
+		t.Fatalf("continuation note should omit verification_required when verify-not-run tag is present, got: %q", note.Text)
 	}
 }
 

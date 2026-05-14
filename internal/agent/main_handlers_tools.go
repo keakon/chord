@@ -246,11 +246,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	if isVerificationLikeToolResult(payload, contextResult) {
 		a.loopState.markVerificationProgress()
 	}
-	if payload.Name == tools.NameDone && a.loopState.Enabled {
-		// Done requests are handled after the current tool batch settles so the
-		// runtime can decide whether exit conditions are actually satisfied.
-		// The pendingLoopExitResult gate below performs the confirm/reject flow.
-	}
 
 	// Decrement pending counter and track malformed args across rounds
 	// (improvement 3: abort turn if the model repeatedly produces malformed args).
@@ -365,7 +360,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				resp, err := a.awaitLoopExitConfirmation(a.turn.Ctx, pending)
 				if err != nil {
 					log.Warnf("loop exit confirmation failed error=%v", err)
-					a.appendToolResultAndContinue("Done rejected: exit confirmation failed, continue the loop and keep working.")
+					a.appendLoopContinuationAndContinue("Done rejected: exit confirmation failed, continue the loop and keep working.")
 				} else if resp.Approved {
 					a.loopState.State = LoopStateCompleted
 					a.emitLoopStateChanged()
@@ -376,10 +371,10 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					a.setIdleAndDrainPending()
 					return
 				} else {
-					a.appendToolResultAndContinue("Done rejected: user chose to keep the loop running. Continue working toward the current loop target.")
+					a.appendLoopContinuationAndContinue("Done rejected: user chose to keep the loop running. Continue working toward the current loop target.")
 				}
 			} else {
-				a.appendToolResultAndContinue(a.loopExitRejectionToolResult())
+				a.appendLoopContinuationAndContinue(a.loopExitRejectionToolResult())
 			}
 		}
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -41,10 +42,19 @@ type existingSetupCredentialState struct {
 	HasCredentials bool
 }
 
+type setupAuthRollback struct {
+	path      string
+	before    []byte
+	existed   bool
+	enabled   bool
+	committed bool
+}
+
 var (
 	runInitialSetupWizardFunc   = RunInitialSetupWizard
 	defaultIMEPromptEnabledFunc = defaultIMEPromptEnabled
 	runSetupCodexOAuthLoginFunc = runSetupCodexOAuthLogin
+	writeInitialConfigFileFunc  = writeInitialConfigFile
 )
 
 func maybeRunInitialSetupWizard(cmd *cobra.Command) error {
@@ -320,18 +330,28 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 	if err != nil {
 		return err
 	}
+	var authRollback setupAuthRollback
 	if authProviderName != "" && authValue != "" {
 		authPath, err := config.AuthPath()
 		if err != nil {
 			return err
 		}
+		authRollback, err = snapshotSetupAuthFile(authPath)
+		if err != nil {
+			return fmt.Errorf("prepare auth.yaml rollback: %w", err)
+		}
+		defer func() {
+			if authRollback.enabled && !authRollback.committed {
+				_ = authRollback.restore()
+			}
+		}()
 		if changed, err := config.UpsertAPIKeyCredentialInFile(authPath, authProviderName, authValue); err != nil {
 			return fmt.Errorf("write auth.yaml: %w", err)
 		} else if changed {
 			authPathShown = true
 		}
 	}
-	if err := writeInitialConfigFile(configPath, configData); err != nil {
+	if err := writeInitialConfigFileFunc(configPath, configData); err != nil {
 		return err
 	}
 	configWritten := true
@@ -351,6 +371,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		}
 		authPathShown = true
 	}
+	authRollback.committed = true
 
 	configHome, err := config.ConfigHomeDir()
 	if err != nil {
@@ -536,6 +557,41 @@ func promptChoice(termIO *setupTerminal, prompt string, allowed []string, defaul
 		}
 		fmt.Fprintln(termIO.out, "Please choose one of the listed options.")
 	}
+}
+
+func snapshotSetupAuthFile(path string) (setupAuthRollback, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return setupAuthRollback{}, fmt.Errorf("auth path is empty")
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return setupAuthRollback{path: path, enabled: true}, nil
+	case err != nil:
+		return setupAuthRollback{}, err
+	default:
+		return setupAuthRollback{path: path, before: data, existed: true, enabled: true}, nil
+	}
+}
+
+func (r setupAuthRollback) restore() error {
+	if !r.enabled {
+		return nil
+	}
+	if r.existed {
+		if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
+			return fmt.Errorf("restore auth config dir: %w", err)
+		}
+		if err := os.WriteFile(r.path, r.before, 0o600); err != nil {
+			return fmt.Errorf("restore auth config: %w", err)
+		}
+		return nil
+	}
+	if err := os.Remove(r.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove auth config: %w", err)
+	}
+	return nil
 }
 
 func promptText(termIO *setupTerminal, label, defaultValue string) (string, error) {

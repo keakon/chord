@@ -432,13 +432,109 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	}
 }
 
-func TestRunInitialSetupWizardRequiresInteractiveTTY(t *testing.T) {
-	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
-	err := RunInitialSetupWizard(context.Background(), SetupWizardOptions{OpenTTY: func() (*os.File, *os.File, error) {
-		return nil, nil, errors.New("no tty")
-	}})
-	if err == nil || err.Error() != initialSetupRequiredMessage {
-		t.Fatalf("RunInitialSetupWizard error = %v, want %q", err, initialSetupRequiredMessage)
+func TestRunInitialSetupWizardRollsBackNewAuthWhenConfigWriteFails(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	origWrite := writeInitialConfigFileFunc
+	defer func() { writeInitialConfigFileFunc = origWrite }()
+	writeInitialConfigFileFunc = func(string, []byte) error { return errors.New("config write failed") }
+
+	inputPath := filepath.Join(t.TempDir(), "wizard-input.txt")
+	inputs := []string{
+		"1",
+		"",
+		"",
+		"",
+		"1",
+		"n",
+	}
+	if defaultShouldPromptIME() {
+		inputs = append(inputs, "n")
+	}
+	if defaultShouldPromptPreventSleep() {
+		inputs = append(inputs, "")
+	}
+	if err := os.WriteFile(inputPath, []byte(strings.Join(inputs, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write wizard input: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "wizard-output.txt")
+	openTTY := func() (*os.File, *os.File, error) {
+		in, err := os.Open(inputPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		out, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o600)
+		if err != nil {
+			_ = in.Close()
+			return nil, nil, err
+		}
+		return in, out, nil
+	}
+
+	err := RunInitialSetupWizard(context.Background(), SetupWizardOptions{OpenTTY: openTTY, ReadPassword: func(int) ([]byte, error) { return []byte("sk-test-secret"), nil }})
+	if err == nil || !strings.Contains(err.Error(), "config write failed") {
+		t.Fatalf("RunInitialSetupWizard error = %v, want config write failure", err)
+	}
+	authPath := filepath.Join(configHome, "auth.yaml")
+	if _, statErr := os.Stat(authPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("auth.yaml should be rolled back on config failure, stat err=%v", statErr)
+	}
+}
+
+func TestRunInitialSetupWizardRestoresExistingAuthWhenConfigWriteFails(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	origWrite := writeInitialConfigFileFunc
+	defer func() { writeInitialConfigFileFunc = origWrite }()
+	writeInitialConfigFileFunc = func(string, []byte) error { return errors.New("config write failed") }
+	authPath := filepath.Join(configHome, "auth.yaml")
+	origAuth := []byte("openai:\n  - old-openai-key\n")
+	if err := os.WriteFile(authPath, origAuth, 0o600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+
+	inputPath := filepath.Join(t.TempDir(), "wizard-input.txt")
+	inputs := []string{
+		"1",
+		"",
+		"",
+		"",
+		"2",
+		"n",
+	}
+	if defaultShouldPromptIME() {
+		inputs = append(inputs, "n")
+	}
+	if defaultShouldPromptPreventSleep() {
+		inputs = append(inputs, "")
+	}
+	if err := os.WriteFile(inputPath, []byte(strings.Join(inputs, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write wizard input: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "wizard-output.txt")
+	openTTY := func() (*os.File, *os.File, error) {
+		in, err := os.Open(inputPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		out, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o600)
+		if err != nil {
+			_ = in.Close()
+			return nil, nil, err
+		}
+		return in, out, nil
+	}
+
+	err := RunInitialSetupWizard(context.Background(), SetupWizardOptions{OpenTTY: openTTY, ReadPassword: func(int) ([]byte, error) { return []byte("sk-replacement-secret"), nil }})
+	if err == nil || !strings.Contains(err.Error(), "config write failed") {
+		t.Fatalf("RunInitialSetupWizard error = %v, want config write failure", err)
+	}
+	got, readErr := os.ReadFile(authPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(auth.yaml): %v", readErr)
+	}
+	if string(got) != string(origAuth) {
+		t.Fatalf("auth.yaml = %q, want original %q", got, origAuth)
 	}
 }
 
