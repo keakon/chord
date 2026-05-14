@@ -92,6 +92,49 @@ func startupDeferredWindowRange(total, targetIndex int) (start, end int) {
 	return start, end
 }
 
+func startupDeferredPageWindowRange(total, start, dir int) (nextStart, nextEnd int, ok bool) {
+	windowCount := startupTranscriptTailBlocks
+	if total <= 0 || windowCount <= 0 {
+		return 0, 0, false
+	}
+	if total <= windowCount {
+		return 0, total, false
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start > total-windowCount {
+		start = max(0, total-windowCount)
+	}
+	switch {
+	case dir < 0:
+		if start <= 0 {
+			return 0, 0, false
+		}
+		nextStart = max(0, start-windowCount)
+		nextEnd = nextStart + windowCount
+		if nextEnd > total {
+			nextEnd = total
+		}
+		return nextStart, nextEnd, true
+	case dir > 0:
+		if start+windowCount >= total {
+			return 0, 0, false
+		}
+		nextStart = start + windowCount
+		if nextStart > total-windowCount {
+			nextStart = max(0, total-windowCount)
+		}
+		nextEnd = nextStart + windowCount
+		if nextEnd > total {
+			nextEnd = total
+		}
+		return nextStart, nextEnd, true
+	default:
+		return 0, 0, false
+	}
+}
+
 func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger string) bool {
 	state := m.startupDeferredTranscript
 	if state == nil || len(state.allBlocks) == 0 || m.viewport == nil {
@@ -229,54 +272,32 @@ func (m *Model) maybeJumpDeferredStartupTranscriptOrdinal(ordinal int, trigger s
 
 func (m *Model) maybeStepStartupDeferredTranscriptWindow(dir int, trigger string) bool {
 	state := m.startupDeferredTranscript
-	if state == nil || len(state.allBlocks) == 0 {
+	if state == nil || len(state.allBlocks) == 0 || m.viewport == nil {
 		return false
 	}
-	total := len(state.allBlocks)
+	start, end, ok := startupDeferredPageWindowRange(len(state.allBlocks), state.windowStart, dir)
+	if !ok {
+		return false
+	}
+	if !m.applyStartupDeferredTranscriptWindow(start, end, trigger) {
+		return false
+	}
 	switch {
 	case dir < 0:
-		if state.windowStart <= 0 {
-			return false
-		}
-		return m.maybeJumpDeferredStartupTranscriptOrdinal(state.windowStart, trigger)
+		m.viewport.ScrollToBottom()
+		m.viewport.sticky = false
 	case dir > 0:
-		if state.windowEnd >= total {
-			return false
-		}
-		return m.maybeJumpDeferredStartupTranscriptOrdinal(state.windowEnd+1, trigger)
-	default:
-		return false
+		m.viewport.offset = 0
+		m.viewport.clampOffset()
+		m.viewport.sticky = m.viewport.atBottom()
 	}
+	m.focusedBlockID = -1
+	m.refreshBlockFocus()
+	return true
 }
 
 func (m *Model) maybePageStartupDeferredTranscriptWindow(dir int, trigger string) bool {
-	state := m.startupDeferredTranscript
-	if state == nil || len(state.allBlocks) == 0 {
-		return false
-	}
-	total := len(state.allBlocks)
-	switch {
-	case dir < 0:
-		if state.windowStart <= 0 {
-			return false
-		}
-		target := state.windowStart - startupTranscriptTailBlocks + 1
-		if target < 1 {
-			target = 1
-		}
-		return m.maybeJumpDeferredStartupTranscriptOrdinal(target, trigger)
-	case dir > 0:
-		if state.windowEnd >= total {
-			return false
-		}
-		target := state.windowEnd + startupTranscriptTailBlocks
-		if target > total {
-			target = total
-		}
-		return m.maybeJumpDeferredStartupTranscriptOrdinal(target, trigger)
-	default:
-		return false
-	}
+	return m.maybeStepStartupDeferredTranscriptWindow(dir, trigger)
 }
 
 func (m *Model) maybeHydrateStartupDeferredTranscript(trigger string) bool {

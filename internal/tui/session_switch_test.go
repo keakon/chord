@@ -2092,15 +2092,71 @@ func TestDeferredStartupTranscriptScrollAndPageMoveBetweenWindows(t *testing.T) 
 	start := state.windowStart
 	m.viewport.offset = 0
 	m.repeatNormalVertical(-1, 1)
-	if m.startupDeferredTranscript.windowStart >= start {
-		t.Fatalf("scrolling above top of deferred window should move earlier, got start=%d want < %d", m.startupDeferredTranscript.windowStart, start)
+	if got := m.startupDeferredTranscript.windowStart; got != max(0, start-startupTranscriptTailBlocks) {
+		t.Fatalf("scrolling above top of deferred window should page to previous window, got start=%d want %d", got, max(0, start-startupTranscriptTailBlocks))
+	}
+	if got := m.startupDeferredTranscript.windowEnd; got != start {
+		t.Fatalf("previous deferred window end = %d, want %d", got, start)
 	}
 
 	midStart := m.startupDeferredTranscript.windowStart
+	midEnd := m.startupDeferredTranscript.windowEnd
 	m.viewport.ScrollToBottom()
 	m.maybePageStartupDeferredTranscriptWindow(1, "page_down_test")
-	if m.startupDeferredTranscript.windowStart <= midStart {
-		t.Fatalf("page down at bottom of deferred window should move later, got start=%d want > %d", m.startupDeferredTranscript.windowStart, midStart)
+	if got := m.startupDeferredTranscript.windowStart; got != midEnd {
+		t.Fatalf("page down at bottom of deferred window should page to next window, got start=%d want %d", got, midEnd)
+	}
+	if got := m.startupDeferredTranscript.windowEnd; got != min(len(messages), midStart+2*startupTranscriptTailBlocks) {
+		t.Fatalf("next deferred window end = %d, want %d", got, min(len(messages), midStart+2*startupTranscriptTailBlocks))
+	}
+}
+
+func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup transcript should remain deferred for contiguous paging test")
+	}
+	if got, want := state.windowStart, len(messages)-startupTranscriptTailBlocks; got != want {
+		t.Fatalf("initial deferred window start = %d, want %d", got, want)
+	}
+
+	m.viewport.offset = startupDeferredPageUpSwitchThreshold(m.viewport.height)
+	cmd = m.handleNormalKey(modelSelectKey("k"))
+	applyTestCmd(t, &m, cmd)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup transcript should remain deferred after scroll-up switch")
+	}
+	wantStart := len(messages) - 2*startupTranscriptTailBlocks
+	wantEnd := len(messages) - startupTranscriptTailBlocks
+	if state.windowStart != wantStart || state.windowEnd != wantEnd {
+		t.Fatalf("deferred window after scroll-up = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, wantEnd)
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != startupTranscriptTailBlocks {
+		t.Fatalf("len(visibleBlocks()) after scroll-up switch = %d, want %d", len(blocks), startupTranscriptTailBlocks)
+	}
+	if blocks[0].Content != fmt.Sprintf("message-%03d", wantStart) {
+		t.Fatalf("first block after contiguous page-up = %q, want message-%03d", blocks[0].Content, wantStart)
+	}
+	if blocks[len(blocks)-1].Content != fmt.Sprintf("message-%03d", wantEnd-1) {
+		t.Fatalf("last block after contiguous page-up = %q, want message-%03d", blocks[len(blocks)-1].Content, wantEnd-1)
+	}
+	focused := m.viewport.GetBlockAtOffset()
+	if focused == nil {
+		t.Fatal("expected block at current viewport offset after contiguous page-up")
+	}
+	if focused.Content == fmt.Sprintf("message-%03d", wantStart-1) || focused.Content == fmt.Sprintf("message-%03d", wantEnd) {
+		t.Fatalf("focused block after contiguous page-up = %#v, want block from new window range [%03d,%03d)", focused, wantStart, wantEnd)
 	}
 }
 
