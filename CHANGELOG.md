@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Runtime/Tools: fixed tool results being incorrectly marked as failed when turn is cancelled or replaced. Previously, tools that completed execution in speculative mode would be overwritten with "Model stopped before completing this tool call: context canceled" if the turn was interrupted before the LLM consumed the result. Now completed tool results are preserved and persisted correctly, even when the turn is cancelled.
 - Worktree: `chord worktree finish` now first merges the target branch into the real worktree branch to surface conflicts there, then squashes the finished worktree state back onto the target branch as a single commit. `--check` now preflights that merge in a temporary worktree without mutating the real worktree or target branch, and `finish` now refuses to start when the real worktree already has an in-progress rebase or merge.
 - Config: updated the built-in planner/builder permission defaults. Builder now uses an allow-all baseline, so most tool calls no longer prompt for permission; only Delete still asks and Handoff/Delegate remain denied. Planner now allows Shell directly.
 - TUI: slash-command completion now accepts the selected suggestion with `Enter` as well as `Tab`, so pressing `Enter` while the `/` completion list is visible completes the command instead of immediately sending the draft.
