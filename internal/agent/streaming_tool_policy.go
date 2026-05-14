@@ -54,14 +54,14 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 	class := tools.ConcurrencyClassForTool(registry, toolName, args)
 	if class != tools.ToolConcurrencyClassReadOnly {
 		switch toolName {
-		case tools.NameWrite, tools.NameEdit, tools.NameDelete:
-			return allowSpeculativeExecution()
 		case tools.NameSpawn, tools.NameSpawnStop:
 			return rejectSpeculativeExecution("process_side_effect")
 		case tools.NameQuestion:
 			return rejectSpeculativeExecution("interactive_tool")
 		case tools.NameTodoWrite, tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
 			return rejectSpeculativeExecution("stateful_or_control_tool")
+		case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+			return rejectSpeculativeExecution("mutation_tool")
 		case tools.NameShell:
 			return rejectSpeculativeExecution("shell_not_static_read_only")
 		default:

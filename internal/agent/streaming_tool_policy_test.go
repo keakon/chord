@@ -69,7 +69,7 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 	}
 }
 
-func TestSpeculativeExecutionPolicyAllowsRollbackFileMutationTools(t *testing.T) {
+func TestSpeculativeExecutionPolicyRejectsMutationTools(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteTool{})
 	registry.Register(tools.EditTool{})
@@ -85,8 +85,11 @@ func TestSpeculativeExecutionPolicyAllowsRollbackFileMutationTools(t *testing.T)
 	}
 	for _, tc := range cases {
 		decision := evaluateSpeculativeExecutionPolicy(registry, nil, tc.name, json.RawMessage(tc.args))
-		if !decision.Allowed {
-			t.Fatalf("%s rejected for speculative execution: %s", tc.name, decision.Reason)
+		if decision.Allowed {
+			t.Fatalf("%s allowed for speculative execution, want reject", tc.name)
+		}
+		if decision.Reason != "mutation_tool" {
+			t.Fatalf("%s reject reason = %q, want mutation_tool", tc.name, decision.Reason)
 		}
 	}
 }

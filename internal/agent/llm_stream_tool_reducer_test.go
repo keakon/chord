@@ -116,6 +116,27 @@ func TestStreamToolDeltaReducerRejectsSpeculativeExecutionWhenPolicyBlocks(t *te
 	}
 }
 
+func TestStreamToolDeltaReducerRejectsMutationToolSpeculativeExecution(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	started := make(chan message.ToolCall, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		started <- tc
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "ok"}, nil
+	})
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
+
+	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-w", Name: tools.NameWrite, Input: `{"path":"README.md","content":"x"}`}})
+	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-w"}})
+
+	select {
+	case got := <-started:
+		t.Fatalf("unexpected speculative start for mutation tool: %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestStreamToolDeltaReducerReadOnlyShellWaitsForPriorMutatingShell(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	registry := tools.NewRegistry()

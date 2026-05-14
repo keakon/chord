@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"testing"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestCallLLMShowsKeySwitchToastOnFirstToolCallToken(t *testing.T) {
@@ -131,6 +134,69 @@ func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 		t.Fatal("expected tool arg completion update on tool_use_end")
 	}
 }
+func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NameShell, Pattern: "git commit *", Action: permission.ActionAsk},
+		{Permission: tools.NameShell, Pattern: "git status *", Action: permission.ActionAllow},
+	}
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+	turn := a.turn
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "call-1", Name: tools.NameShell, ArgsJSON: `{"command":"git commit -m fix"}`})
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "call-2", Name: tools.NameShell, ArgsJSON: `{"command":"git status --short"}`})
+
+	statusStarted := make(chan struct{}, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, turn.Ctx, nil, func(_ context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		if tc.ID == "call-2" {
+			statusStarted <- struct{}{}
+			return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "stale status"}, nil
+		}
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: "commit"}, nil
+	})
+	if !turn.streamingToolExec.Start(message.ToolCall{ID: "call-2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git status --short"}`)}) {
+		t.Fatal("expected speculative status shell start")
+	}
+	select {
+	case <-statusStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for speculative status shell start")
+	}
+
+	confirmEntered := make(chan struct{})
+	releaseConfirm := make(chan struct{})
+	a.confirmFn = func(ctx context.Context, toolName, argsJSON string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
+		close(confirmEntered)
+		<-releaseConfirm
+		return ConfirmResponse{Approved: true}, nil
+	}
+
+	payload := &LLMResponsePayload{
+		ToolCalls: []message.ToolCall{
+			{ID: "call-1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git commit -m fix"}`)},
+			{ID: "call-2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git status --short"}`)},
+		},
+		StopReason: "tool_use",
+	}
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: turn.ID, Payload: payload})
+
+	select {
+	case <-confirmEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for commit confirmation path")
+	}
+
+	for _, raw := range drainAgentEvents(a.Events()) {
+		if evt, ok := raw.(ToolResultEvent); ok && evt.Name == tools.NameShell && evt.CallID == "call-2" {
+			t.Fatalf("unexpected status promotion while commit approval pending: %+v", evt)
+		}
+	}
+	close(releaseConfirm)
+}
+
 func TestModelNameFromRef(t *testing.T) {
 	tests := []struct {
 		input string
