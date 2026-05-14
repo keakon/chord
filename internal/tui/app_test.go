@@ -2607,6 +2607,95 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 	}
 }
 
+func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	questionArgs := `{"purpose":"completion_follow_up","questions":[{"header":"Provider兼容性确认","question":"continue?","options":[{"label":"yes"}]}]}`
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-question-stream-1",
+		Name:     "Question",
+		AgentID:  "",
+		ArgsJSON: questionArgs,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-question-stream-1")
+	if !ok {
+		t.Fatal("expected pending Question block")
+	}
+	block.ToolID = ""
+	block.InvalidateCache()
+	m.updateViewportBlock(block)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-question-final-1",
+		Name:     "Question",
+		AgentID:  "",
+		ArgsJSON: questionArgs,
+		Result:   `[{"header":"Provider兼容性确认","selected":["yes"]}]`,
+		Status:   agent.ToolResultStatusSuccess,
+	}})
+
+	blocks := m.viewport.visibleBlocks()
+	questionBlocks := 0
+	for _, b := range blocks {
+		if b != nil && b.Type == BlockToolCall && b.ToolName == "Question" {
+			questionBlocks++
+			block = b
+		}
+	}
+	if questionBlocks != 1 {
+		t.Fatalf("Question tool blocks = %d, want 1", questionBlocks)
+	}
+	if block.ToolID != "call-question-final-1" {
+		t.Fatalf("Question ToolID = %q, want call-question-final-1", block.ToolID)
+	}
+	if !block.ResultDone {
+		t.Fatal("expected Question block ResultDone after tool result")
+	}
+	if m.viewport.HasPendingToolWork() {
+		t.Fatal("expected no pending tool work after Question result")
+	}
+}
+
+func TestDuplicateToolResultEventIsIgnoredAfterCompletion(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-read-dedupe-1",
+		Name:     "Read",
+		AgentID:  "",
+		ArgsJSON: `{"path":"internal/tui/app_agent_events.go","limit":1}`,
+	}})
+	resultEvt := agent.ToolResultEvent{
+		CallID:   "call-read-dedupe-1",
+		Name:     "Read",
+		AgentID:  "",
+		ArgsJSON: `{"path":"internal/tui/app_agent_events.go","limit":1}`,
+		Result:   "ok",
+		Status:   agent.ToolResultStatusSuccess,
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: resultEvt})
+	_ = m.handleAgentEvent(agentEventMsg{event: resultEvt})
+
+	blocks := m.viewport.visibleBlocks()
+	toolBlocks := 0
+	for _, b := range blocks {
+		if b != nil && b.ToolID == "call-read-dedupe-1" {
+			toolBlocks++
+		}
+	}
+	if toolBlocks != 1 {
+		t.Fatalf("tool blocks for call-read-dedupe-1 = %d, want 1", toolBlocks)
+	}
+	block, ok := m.viewport.FindBlockByToolID("call-read-dedupe-1")
+	if !ok {
+		t.Fatal("expected read tool block")
+	}
+	if !block.ResultDone {
+		t.Fatal("expected read tool block to stay completed")
+	}
+}
+
 func TestSingleHiddenLineCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -6621,6 +6710,42 @@ func TestNormalModeJKNavigatesBlocksByDefault(t *testing.T) {
 	}
 	if m.viewport.offset != entries[2].LineOffset {
 		t.Fatalf("viewport offset after 2j = %d, want %d", m.viewport.offset, entries[2].LineOffset)
+	}
+}
+
+func TestNormalModeJCanTraverseLastScreenWithoutFurtherScroll(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeNormal
+	for i := 1; i <= 10; i++ {
+		m.viewport.AppendBlock(&Block{ID: i, Type: BlockAssistant, Content: fmt.Sprintf("card-%02d", i)})
+	}
+	m.viewport.ScrollToBottom()
+	entries := m.viewport.MessageDirectory()
+	visible := m.viewport.visibleBlocks()
+	if len(visible) < 4 {
+		t.Fatalf("visible blocks at bottom = %d, want at least 4", len(visible))
+	}
+	firstVisible := visible[0]
+	secondVisible := visible[1]
+	lastVisible := visible[len(visible)-1]
+	if entries[len(entries)-1].BlockID != lastVisible.ID {
+		t.Fatalf("last visible block id = %d, want last entry block id %d", lastVisible.ID, entries[len(entries)-1].BlockID)
+	}
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'})); cmd != nil {
+		t.Fatalf("j should move synchronously without extra cmd, got %#v", cmd)
+	}
+	if m.focusedBlockID != secondVisible.ID {
+		t.Fatalf("focusedBlockID after j at bottom = %d, want second visible block %d (first visible %d)", m.focusedBlockID, secondVisible.ID, firstVisible.ID)
+	}
+
+	for m.focusedBlockID != lastVisible.ID {
+		if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'})); cmd != nil {
+			t.Fatalf("j should move synchronously without extra cmd, got %#v", cmd)
+		}
+	}
+	if m.focusedBlockID != lastVisible.ID {
+		t.Fatalf("focusedBlockID at bottom traversal end = %d, want last visible block %d", m.focusedBlockID, lastVisible.ID)
 	}
 }
 

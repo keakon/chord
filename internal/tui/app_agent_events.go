@@ -667,6 +667,110 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	}
 }
 
+func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
+	if m == nil || m.viewport == nil {
+		return nil
+	}
+	if block, ok := m.viewport.FindBlockByToolID(evt.CallID); ok {
+		return block
+	}
+	if block, ok := m.viewport.FindLastPendingToolBlockByName(evt.Name); ok {
+		if strings.TrimSpace(block.ToolID) == "" {
+			block.ToolID = evt.CallID
+			block.InvalidateCache()
+			m.updateViewportBlock(block)
+		}
+		return block
+	}
+	return nil
+}
+
+func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
+	var effects agentEventEffects
+	if evt.Name == "Delegate" && evt.AgentID == "" {
+		m.sidebar.ResolvePendingTask()
+		effects.refreshSidebar = true
+		m.recalcViewportSize()
+	}
+	if block := m.ensureToolResultBlock(evt); block != nil {
+		delete(m.toolArgRenderState, evt.CallID)
+		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) {
+			return effects
+		}
+		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
+		block.ResultContent = evt.Result
+		block.Audit = evt.Audit.Clone()
+		if displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
+			block.Content = displayArgs
+		}
+		block.ResultStatus = evt.Status
+		block.ResultDone = true
+		block.ToolExecutionState = ""
+		block.ToolQueuedByExecutionEvent = false
+		block.ToolProgress = nil
+		if evt.Diff != "" {
+			block.Diff = evt.Diff
+		}
+		if shouldExpandToolResult(evt.Name) {
+			block.Collapsed = false
+		}
+		if shouldTrackSidebarFileEdit(evt.Name) && evt.Status != agent.ToolResultStatusError {
+			if evt.Name == tools.NameDelete {
+				groups := tools.ParseDeleteResult(evt.Result)
+				for _, path := range groups.Deleted {
+					m.sidebar.AddFileDelete(evt.AgentID, path)
+					effects.refreshSidebar = true
+					effects.invalidateUsage = true
+				}
+			} else {
+				var args struct {
+					Path string `json:"path"`
+				}
+				if err := json.Unmarshal([]byte(evt.ArgsJSON), &args); err == nil && args.Path != "" {
+					m.sidebar.AddFileEdit(evt.AgentID, args.Path, evt.DiffAdded, evt.DiffRemoved)
+					effects.refreshSidebar = true
+					effects.invalidateUsage = true
+				}
+			}
+		}
+		if evt.Name == "Delegate" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
+			if handle, ok := parseTaskToolHandle(evt.Result); ok {
+				if handle.AgentID != "" {
+					block.LinkedAgentID = handle.AgentID
+				}
+				if handle.TaskID != "" {
+					block.LinkedTaskID = handle.TaskID
+				}
+			} else if id := parseTaskResultInstanceID(evt.Result); id != "" {
+				block.LinkedAgentID = id
+			}
+		}
+		if evt.Name == "Notify" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
+			if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
+				if taskBlock, ok := m.viewport.FindBlockByLinkedTask(handle.TaskID); ok {
+					taskBlock.LinkedAgentID = handle.AgentID
+					taskBlock.LinkedTaskID = handle.TaskID
+					taskBlock.InvalidateCache()
+					m.updateViewportBlock(taskBlock)
+				}
+			}
+		}
+		block.InvalidateCache()
+		m.updateViewportBlock(block)
+		m.markBlockSettled(block)
+	} else {
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), ToolName: evt.Name, ToolID: evt.CallID, ResultStatus: evt.Status, Collapsed: true, AgentID: evt.AgentID}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
+	}
+	m.streamRenderForceView = true
+	m.streamRenderDeferred = false
+	m.streamRenderDeferNext = false
+	effects.addFollowup(m.requestStreamBoundaryFlush())
+	return effects
+}
+
 func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -825,84 +929,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToolResultEvent:
-		if evt.Name == "Delegate" && evt.AgentID == "" {
-			m.sidebar.ResolvePendingTask()
-			effects.refreshSidebar = true
-			m.recalcViewportSize()
-		}
-		if block, ok := m.viewport.FindBlockByToolID(evt.CallID); ok {
-			delete(m.toolArgRenderState, evt.CallID)
-			m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
-			block.ResultContent = evt.Result
-			block.Audit = evt.Audit.Clone()
-			if displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
-				block.Content = displayArgs
-			}
-			block.ResultStatus = evt.Status
-			block.ResultDone = true
-			block.ToolExecutionState = ""
-			block.ToolQueuedByExecutionEvent = false
-			block.ToolProgress = nil
-			if evt.Diff != "" {
-				block.Diff = evt.Diff
-			}
-			if shouldExpandToolResult(evt.Name) {
-				block.Collapsed = false
-			}
-			if shouldTrackSidebarFileEdit(evt.Name) && evt.Status != agent.ToolResultStatusError {
-				if evt.Name == tools.NameDelete {
-					groups := tools.ParseDeleteResult(evt.Result)
-					for _, path := range groups.Deleted {
-						m.sidebar.AddFileDelete(evt.AgentID, path)
-						effects.refreshSidebar = true
-						effects.invalidateUsage = true
-					}
-				} else {
-					var args struct {
-						Path string `json:"path"`
-					}
-					if err := json.Unmarshal([]byte(evt.ArgsJSON), &args); err == nil && args.Path != "" {
-						m.sidebar.AddFileEdit(evt.AgentID, args.Path, evt.DiffAdded, evt.DiffRemoved)
-						effects.refreshSidebar = true
-						effects.invalidateUsage = true
-					}
-				}
-			}
-			if evt.Name == "Delegate" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
-				if handle, ok := parseTaskToolHandle(evt.Result); ok {
-					if handle.AgentID != "" {
-						block.LinkedAgentID = handle.AgentID
-					}
-					if handle.TaskID != "" {
-						block.LinkedTaskID = handle.TaskID
-					}
-				} else if id := parseTaskResultInstanceID(evt.Result); id != "" {
-					block.LinkedAgentID = id
-				}
-			}
-			if evt.Name == "Notify" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
-				if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
-					if taskBlock, ok := m.viewport.FindBlockByLinkedTask(handle.TaskID); ok {
-						taskBlock.LinkedAgentID = handle.AgentID
-						taskBlock.LinkedTaskID = handle.TaskID
-						taskBlock.InvalidateCache()
-						m.updateViewportBlock(taskBlock)
-					}
-				}
-			}
-			block.InvalidateCache()
-			m.updateViewportBlock(block)
-			m.markBlockSettled(block)
-		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), ToolName: evt.Name, ToolID: evt.CallID, ResultStatus: evt.Status, Collapsed: true, AgentID: evt.AgentID}
-			m.nextBlockID++
-			m.appendViewportBlock(block)
-			m.markBlockSettled(block)
-		}
-		m.streamRenderForceView = true
-		m.streamRenderDeferred = false
-		m.streamRenderDeferNext = false
-		effects.addFollowup(m.requestStreamBoundaryFlush())
+		effects = m.handleToolResultEvent(evt)
 		return true, effects
 	default:
 		return false, effects

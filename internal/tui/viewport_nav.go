@@ -182,7 +182,7 @@ func (v *Viewport) FindBlockByToolID(toolID string) (*Block, bool) {
 func (v *Viewport) FindLastPendingToolBlockByName(toolName string) (*Block, bool) {
 	for i := len(v.blocks) - 1; i >= 0; i-- {
 		b := v.blocks[i]
-		if b.Type == BlockToolCall && b.ToolName == toolName && b.ResultContent == "" {
+		if b.Type == BlockToolCall && b.ToolName == toolName && !b.ResultDone {
 			return v.materialize(b), true
 		}
 	}
