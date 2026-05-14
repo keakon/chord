@@ -2624,7 +2624,7 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
-	questionArgs := `{"purpose":"completion_follow_up","questions":[{"header":"Provider兼容性确认","question":"continue?","options":[{"label":"yes"}]}]}`
+	questionArgs := `{"questions":[{"header":"Provider兼容性确认","question":"continue?","options":[{"label":"yes"}]}]}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-question-stream-1",
 		Name:     "Question",

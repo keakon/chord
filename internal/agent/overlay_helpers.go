@@ -7,9 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // initOverlay initializes the overlay and sets the base ruleset.
@@ -31,13 +29,6 @@ func (a *MainAgent) initOverlay() {
 		if cfg.Permission.Kind != 0 {
 			base = permission.ParsePermission(&cfg.Permission)
 		}
-		if shouldAutoAllowQuestionFollowUp(cfg, base) {
-			base = append(append(permission.Ruleset(nil), base...), permission.Rule{
-				Permission: tools.NameQuestion,
-				Pattern:    "*",
-				Action:     permission.ActionAllow,
-			})
-		}
 	}
 
 	projectPath, userGlobalPath := overlayPersistentRulePaths(projectRoot, roleName)
@@ -53,22 +44,6 @@ func (a *MainAgent) initOverlay() {
 	a.ruleset = a.overlay.MergedRuleset()
 	a.stateMu.Unlock()
 	a.syncSubAgentOverlay()
-}
-
-func shouldAutoAllowQuestionFollowUp(cfg *config.AgentConfig, base permission.Ruleset) bool {
-	if cfg == nil || !cfg.QuestionFollowUpAtEnd {
-		return false
-	}
-	for _, rule := range base {
-		if rule.Permission != tools.NameQuestion {
-			continue
-		}
-		if rule.Action == permission.ActionDeny {
-			return false
-		}
-		return false
-	}
-	return true
 }
 
 // Overlay returns the overlay for external access (e.g., from TUI).

@@ -45,6 +45,7 @@ func (a *MainAgent) appendToolResultAndContinue(result string) {
 	if result == "" {
 		result = "Continue the loop."
 	}
+	a.emitToTUI(InfoEvent{Message: result})
 	toolMsg := message.Message{
 		Role:       "tool",
 		ToolCallID: "loop-exit-control",

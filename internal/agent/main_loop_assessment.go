@@ -345,6 +345,9 @@ func (a *MainAgent) currentLoopContinuationReasons(extra ...string) []string {
 	if a.hasActiveSubAgents() {
 		add("subagents_active")
 	}
+	if a.loopState.VerificationVersion == 0 {
+		add("verification_required")
+	}
 	return reasons
 }
 
@@ -462,10 +465,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		switch reason {
 		case "terminal_reply":
 			addGap("latest assistant reply stopped before loop completion criteria were met")
-		case "missing_done_tag":
-			addGap("the final assistant reply must include <done>single-line reason</done>")
-		case "missing_completion_follow_up_question":
-			addGap("when completion follow-up is enabled, finish with a final `Question` tool call whose `purpose` is `completion_follow_up`")
+		case "missing_done_tool":
+			addGap("end the round with a final `Done` tool call after writing the completion response")
 		case "missing_verification_status":
 			addGap("verification status is missing; run verification or include <verify-not-run>reason</verify-not-run>")
 		case "progress_continuation":

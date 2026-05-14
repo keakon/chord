@@ -1336,7 +1336,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.loopState.markProgress()
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
-		Content:    "delegated implementation is done\n<done>all tasks done</done>",
+		Content:    "delegated implementation is done",
 		StopReason: "stop",
 	})
 	if assessment == nil {

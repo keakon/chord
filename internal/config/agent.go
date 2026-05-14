@@ -31,22 +31,21 @@ type AgentConfig struct {
 	Models map[string][]string `json:"models,omitempty" yaml:"models,omitempty"`
 	// ModelPools is the user-facing agent configuration: an ordered list of pool names
 	// to look up in config.yaml's top-level model_pools.
-	ModelPools            []string         `json:"model_pools,omitempty" yaml:"model_pools,omitempty"`
-	Temperature           float64          `json:"temperature" yaml:"temperature"`
-	MaxTokens             int              `json:"max_tokens" yaml:"max_tokens"`
-	Variant               string           `json:"variant,omitempty" yaml:"variant,omitempty"`
-	Color                 string           `json:"color,omitempty" yaml:"color,omitempty"`
-	Capabilities          []string         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
-	PreferredTasks        []string         `json:"preferred_tasks,omitempty" yaml:"preferred_tasks,omitempty"`
-	WriteMode             string           `json:"write_mode,omitempty" yaml:"write_mode,omitempty"`
-	DelegationPolicy      string           `json:"delegation_policy,omitempty" yaml:"delegation_policy,omitempty"`
-	QuestionFollowUpAtEnd bool             `json:"question_follow_up_at_end,omitempty" yaml:"question_follow_up_at_end,omitempty"`
-	Permission            yaml.Node        `json:"-" yaml:"permission"`
-	MCP                   MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
-	Delegation            DelegationConfig `json:"delegation,omitempty" yaml:"delegation,omitempty"`
-	Prompt                string           `json:"-" yaml:"prompt,omitempty"`
-	PromptAlt             string           `json:"-" yaml:"system_prompt,omitempty"`
-	SystemPrompt          string           `json:"-" yaml:"-"`
+	ModelPools       []string         `json:"model_pools,omitempty" yaml:"model_pools,omitempty"`
+	Temperature      float64          `json:"temperature" yaml:"temperature"`
+	MaxTokens        int              `json:"max_tokens" yaml:"max_tokens"`
+	Variant          string           `json:"variant,omitempty" yaml:"variant,omitempty"`
+	Color            string           `json:"color,omitempty" yaml:"color,omitempty"`
+	Capabilities     []string         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	PreferredTasks   []string         `json:"preferred_tasks,omitempty" yaml:"preferred_tasks,omitempty"`
+	WriteMode        string           `json:"write_mode,omitempty" yaml:"write_mode,omitempty"`
+	DelegationPolicy string           `json:"delegation_policy,omitempty" yaml:"delegation_policy,omitempty"`
+	Permission       yaml.Node        `json:"-" yaml:"permission"`
+	MCP              MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Delegation       DelegationConfig `json:"delegation,omitempty" yaml:"delegation,omitempty"`
+	Prompt           string           `json:"-" yaml:"prompt,omitempty"`
+	PromptAlt        string           `json:"-" yaml:"system_prompt,omitempty"`
+	SystemPrompt     string           `json:"-" yaml:"-"`
 }
 
 type DelegationConfig struct {
@@ -348,12 +347,11 @@ Question: allow
 	}
 
 	return &AgentConfig{
-		Name:                  "planner",
-		Description:           "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
-		Mode:                  AgentModeMain,
-		ModelPools:            []string{"default"},
-		QuestionFollowUpAtEnd: false,
-		Permission:            inner,
+		Name:        "planner",
+		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
+		Mode:        AgentModeMain,
+		ModelPools:  []string{"default"},
+		Permission:  inner,
 	}
 }
 
@@ -383,12 +381,11 @@ Delete: ask
 	}
 
 	return &AgentConfig{
-		Name:                  "builder",
-		Description:           "General-purpose coding agent — the default MainAgent role for implementing features, fixing bugs, writing tests, and refactoring code.",
-		Mode:                  AgentModeMain,
-		ModelPools:            []string{"default"},
-		QuestionFollowUpAtEnd: false,
-		Permission:            inner,
+		Name:        "builder",
+		Description: "General-purpose coding agent — the default MainAgent role for implementing features, fixing bugs, writing tests, and refactoring code.",
+		Mode:        AgentModeMain,
+		ModelPools:  []string{"default"},
+		Permission:  inner,
 	}
 }
 

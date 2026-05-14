@@ -14,21 +14,6 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestExtractLoopDoneReason(t *testing.T) {
-	if got := extractLoopDoneReason("summary\n<done>finished verification</done>"); got != "finished verification" {
-		t.Fatalf("extractLoopDoneReason() = %q, want %q", got, "finished verification")
-	}
-	if got := extractLoopDoneReason("<done>line one\nline two</done>"); got != "line one line two" {
-		t.Fatalf("extractLoopDoneReason() = %q, want normalized multi-line reason %q", got, "line one line two")
-	}
-	if got := extractLoopDoneReason("finished without tag"); got != "" {
-		t.Fatalf("extractLoopDoneReason() = %q, want empty when tag missing", got)
-	}
-	if got := extractLoopDoneReason("<done>first</done>\n<done>second</done>"); got != "second" {
-		t.Fatalf("extractLoopDoneReason() = %q, want last done reason %q", got, "second")
-	}
-}
-
 func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
@@ -133,7 +118,206 @@ Done: allow
 	}
 }
 
-func TestNextLoopAssessmentFromAssistantAllowsMultipleDoneTagsBeforeCompleted(t *testing.T) {
+func TestHandleToolResult_DoneInLoopRequestsConfirmationAndDisablesLoopOnApproval(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markVerificationProgress()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-confirm-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"completed and verified"}`,
+			Result:   "Done requested: completed and verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	confirmed := false
+	for !confirmed {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				if payload.ToolName != tools.NameDone {
+					t.Fatalf("ConfirmRequestEvent.ToolName = %q, want %q", payload.ToolName, tools.NameDone)
+				}
+				confirmed = true
+				a.ResolveConfirm("allow", payload.ArgsJSON, "", "", payload.RequestID)
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for Done confirmation request")
+		}
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Done tool result handling to finish")
+	}
+	if a.loopState.Enabled {
+		t.Fatal("loop should be disabled after approving Done confirmation")
+	}
+	if a.turn != nil {
+		t.Fatal("turn should be cleared after approving Done confirmation")
+	}
+}
+
+func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenExitConditionsFail(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markVerificationProgress()
+	a.todoItems = []tools.TodoItem{{ID: "1", Content: "unfinished cleanup", Status: "pending"}}
+	a.newTurn()
+	turn := a.turn
+	callID := "done-reject-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "everything looks done",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"everything looks done"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"everything looks done"}`,
+			Result:   "Done requested: everything looks done",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				t.Fatal("unexpected Done confirmation request when loop exit conditions are not satisfied")
+			case InfoEvent:
+				if !strings.Contains(payload.Message, "Done rejected: loop exit conditions are not satisfied yet") {
+					continue
+				}
+				if !strings.Contains(payload.Message, "open_todos") {
+					t.Fatalf("InfoEvent.Message = %q, want rejection reason to mention open_todos", payload.Message)
+				}
+				select {
+				case <-handled:
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for Done rejection handling to finish")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for visible Done rejection message")
+		}
+	}
+}
+
+func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenVerificationMissing(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.newTurn()
+	turn := a.turn
+	callID := "done-no-verify-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "implemented but not verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"implemented but not verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"implemented but not verified"}`,
+			Result:   "Done requested: implemented but not verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				t.Fatal("unexpected Done confirmation request when verification is still required")
+			case InfoEvent:
+				if !strings.Contains(payload.Message, "Done rejected: loop exit conditions are not satisfied yet") {
+					continue
+				}
+				if !strings.Contains(payload.Message, "verification_required") {
+					t.Fatalf("InfoEvent.Message = %q, want rejection reason to mention verification_required", payload.Message)
+				}
+				select {
+				case <-handled:
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for verification-missing rejection handling to finish")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for visible Done rejection message")
+		}
+	}
+}
+
+func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
@@ -180,9 +364,14 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 	a.mu.Unlock()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:       "assistant",
-		Content:    "finished\n<done>implemented and verified</done>",
-		StopReason: "stop",
+		Role:    "assistant",
+		Content: "finished",
+		ToolCalls: []message.ToolCall{{
+			ID:   "done-subagent-guard-1",
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"implemented and verified"}`),
+		}},
+		StopReason: "tool_calls",
 	})
 	if assessment == nil {
 		t.Fatal("assessment = nil, want continue assessment")
@@ -400,7 +589,7 @@ func TestNextLoopAssessmentFromAssistantRequiresTodoSyncBeforeCompleted(t *testi
 	}
 }
 
-func TestNextLoopAssessmentFromAssistantRequiresDoneTagBeforeCompleted(t *testing.T) {
+func TestNextLoopAssessmentFromAssistantRequiresDoneToolBeforeCompleted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
@@ -437,7 +626,7 @@ func TestNextLoopAssessmentFromAssistantRequiresVerificationStatusBeforeComplete
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
-		Content:    "done\n<done>implemented the requested change</done>",
+		Content:    "done",
 		StopReason: "stop",
 	})
 	if assessment == nil {
@@ -473,12 +662,112 @@ func TestNextLoopAssessmentFromAssistantReturnsBlockedForBlockedTag(t *testing.T
 }
 
 func TestIsVerificationLikeToolResultDetectsShellValidationOutput(t *testing.T) {
-	payload := &ToolResultPayload{Name: "Shell"}
+	payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"go test ./..."}`}
 	if !isVerificationLikeToolResult(payload, "go test ./...\nok") {
 		t.Fatal("expected go test output to be treated as verification-like progress")
 	}
-	if isVerificationLikeToolResult(payload, "echo hello") {
+}
+
+func TestIsVerificationLikeToolResultRejectsNonValidationShellOutput(t *testing.T) {
+	payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"echo hello"}`}
+	if isVerificationLikeToolResult(payload, "hello") {
 		t.Fatal("unexpected verification classification for non-validation shell output")
+	}
+}
+
+func TestIsVerificationLikeToolResultDetectsVerificationFromShellCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		result  string
+	}{
+		{name: "pytest command", command: "pytest -q", result: "2 passed in 0.10s"},
+		{name: "npm test command", command: "npm test -- --runInBand", result: "PASS src/app.test.ts"},
+		{name: "cargo test command", command: "cargo test", result: "Finished test profile"},
+	} {
+		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
+		if !isVerificationLikeToolResult(payload, tc.result) {
+			t.Fatalf("%s should be treated as verification-like progress", tc.name)
+		}
+	}
+}
+
+func TestHandleToolResult_DoneInLoopAllowsExitAfterPytestVerification(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.newTurn()
+	turn := a.turn
+
+	verifyCallID := "verify-pytest-1"
+	a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+		CallID:   verifyCallID,
+		Name:     "Shell",
+		ArgsJSON: `{"command":"pytest -q"}`,
+		Result:   "2 passed in 0.10s",
+		TurnID:   turn.ID,
+	}})
+	if a.loopState.VerificationVersion == 0 {
+		t.Fatal("pytest verification should mark loop verification progress")
+	}
+
+	a.newTurn()
+	turn = a.turn
+	callID := "done-after-pytest-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"completed and verified"}`,
+			Result:   "Done requested: completed and verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				a.ResolveConfirm("allow", payload.ArgsJSON, "", "", payload.RequestID)
+				select {
+				case <-handled:
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for Done approval handling after pytest verification")
+				}
+				if a.loopState.Enabled {
+					t.Fatal("loop should be disabled after approving Done confirmation")
+				}
+				return
+			case InfoEvent:
+				if strings.Contains(payload.Message, "Done rejected") {
+					t.Fatalf("unexpected Done rejection after pytest verification: %q", payload.Message)
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for Done confirmation request after pytest verification")
+		}
 	}
 }
 

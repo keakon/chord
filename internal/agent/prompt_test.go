@@ -339,73 +339,7 @@ Question: allow
 	}
 }
 
-func TestCompletionFollowUpPromptBlock_RequiresQuestionToolOnlyWhenFeatureEnabled(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.NewQuestionTool(nil))
-
-	if got := a.completionFollowUpPromptBlock(); got != "" {
-		t.Fatalf("completionFollowUpPromptBlock() without feature = %q, want empty", got)
-	}
-
-	a.activeConfig = &config.AgentConfig{
-		QuestionFollowUpAtEnd: true,
-		Permission: parsePermissionNode(t, `
-"*": deny
-Read: allow
-`),
-	}
-	a.rebuildRuleset()
-	got := a.completionFollowUpPromptBlock()
-	for _, want := range []string{
-		"## Completion Follow-Up",
-		"A turn is not complete unless either",
-		"Default completion shape when the current task is finished",
-		"then immediately call the `Question` tool as the last action in the turn",
-		"set `purpose` to `completion_follow_up` on that final `Question` tool call",
-		"Ordering requirement: do NOT call `Question` until after you have written the completion summary (conclusion)",
-		"make a real `Question` tool call",
-		"Do not print JSON, code fences, XML tags, pseudo-tool syntax",
-		"After calling `Question`, do not output any additional assistant text",
-		"overrides normal preferences against routine closing questions",
-		"Do not use a plain-text closing question",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("completionFollowUpPromptBlock missing %q in %q", want, got)
-		}
-	}
-
-	a.activeConfig = &config.AgentConfig{
-		QuestionFollowUpAtEnd: true,
-		Permission: parsePermissionNode(t, `
-"*": allow
-Question: deny
-`),
-	}
-	a.rebuildRuleset()
-	if got := a.completionFollowUpPromptBlock(); got != "" {
-		t.Fatalf("completionFollowUpPromptBlock() with Question denied = %q, want empty", got)
-	}
-}
-
-func TestCompletionFollowUpPromptBlock_DisabledDuringLoopMode(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.NewQuestionTool(nil))
-	a.activeConfig = &config.AgentConfig{
-		QuestionFollowUpAtEnd: true,
-		Permission: parsePermissionNode(t, `
-"*": deny
-Read: allow
-`),
-	}
-	a.rebuildRuleset()
-	a.loopState.enableWithTarget("finish current task")
-
-	if got := a.completionFollowUpPromptBlock(); got != "" {
-		t.Fatalf("completionFollowUpPromptBlock() in loop mode = %q, want empty", got)
-	}
-}
-
-func TestLoopCompletionRequirementLines_KeepDoneTagContractEvenWhenQuestionFollowUpEnabled(t *testing.T) {
+func TestLoopCompletionRequirementLines_KeepDoneToolContractEvenWhenQuestionAvailable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -418,6 +352,7 @@ Done: allow
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
 		"To request loop exit, call the `Done` tool; do not stop with only assistant text",
+		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains",
 		"ask in plain assistant text with enough context for a non-implementer to answer",
 	} {
 		if !strings.Contains(joined, want) {
@@ -425,8 +360,8 @@ Done: allow
 		}
 	}
 	for _, unwanted := range []string{
-		"<done>reason</done>",
 		"completion follow-up `Question` call",
+		"unless the current task is already complete and you are making the final completion follow-up `Question` call",
 	} {
 		if strings.Contains(joined, unwanted) {
 			t.Fatalf("loop completion requirements should not include legacy completion rule %q, got %q", unwanted, joined)
@@ -434,7 +369,7 @@ Done: allow
 	}
 }
 
-func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneTagInLoop(t *testing.T) {
+func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneToolInLoop(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -453,7 +388,6 @@ Done: allow
 		}
 	}
 	for _, unwanted := range []string{
-		"<done>reason</done>",
 		"Question",
 	} {
 		if strings.Contains(joined, unwanted) {
@@ -470,22 +404,6 @@ func TestEvaluateToolPermission_TreatsQuestionAskAsAllow(t *testing.T) {
 	}
 	if len(decision.NeedsApprovalPaths) != 0 {
 		t.Fatalf("Question ask should not require approval paths, got %v", decision.NeedsApprovalPaths)
-	}
-}
-
-func TestShouldAutoAllowQuestionFollowUp(t *testing.T) {
-	cfg := &config.AgentConfig{QuestionFollowUpAtEnd: true}
-	if !shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow}}) {
-		t.Fatal("expected auto allow when feature enabled and Question not explicitly configured")
-	}
-	if shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionAllow}}) {
-		t.Fatal("should not auto allow when Question already explicitly configured")
-	}
-	if shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionDeny}}) {
-		t.Fatal("should not auto allow when Question is explicitly denied")
-	}
-	if shouldAutoAllowQuestionFollowUp(&config.AgentConfig{}, nil) {
-		t.Fatal("feature disabled should not auto allow Question")
 	}
 }
 
@@ -1281,7 +1199,7 @@ Delegate: allow
 	}
 }
 
-func TestLoopCompletionRequirementLinesIncludeDoneTagContract(t *testing.T) {
+func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	if !strings.Contains(joined, "To request loop exit, call the `Done` tool; do not stop with only assistant text") {
@@ -1307,6 +1225,9 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 	if strings.Contains(joined, "Question tool") {
 		t.Fatalf("loop completion requirements without Question should not require Question tool, got %q", joined)
 	}
+	if strings.Contains(joined, "completion follow-up `Question` call") {
+		t.Fatalf("loop completion requirements without Question should not mention completion follow-up Question, got %q", joined)
+	}
 
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
@@ -1317,6 +1238,9 @@ Question: allow
 	joined = strings.Join(a.loopCompletionRequirementLines(), "\n")
 	if !strings.Contains(joined, "call the `Question` tool") {
 		t.Fatalf("loop completion requirements with Question should require Question tool, got %q", joined)
+	}
+	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `Question` call") {
+		t.Fatalf("loop completion requirements should not mention completion follow-up exception, got %q", joined)
 	}
 }
 

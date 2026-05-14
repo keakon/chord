@@ -618,7 +618,6 @@ Common fields include:
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
 - `permission`: per-tool permission policy for this agent.
-- `question_follow_up_at_end`: when `true` on a MainAgent role, Chord injects a completion follow-up prompt requirement only when that feature is enabled and the `Question` tool is available. Purpose: keep the post-completion handoff structured so the user can continue directly from the follow-up prompt instead of relying on a plain-text stop. Typical scenarios: long-lived coding sessions where one task often rolls directly into the next in normal non-loop conversation. In those non-loop turns, the model is guided to finish the current task, write a concise completion summary, and then call `Question` as the final action in the turn so the user can continue with another task or explicitly end the session. This setting does not control loop-mode exit behavior. When the feature is disabled, or `Question` is unavailable, Chord does not add this extra prompt guidance and existing completion behavior is unchanged. If `Question` is not explicitly configured in `permission`, Chord auto-adds `Question: allow` at the role base layer so the tool is visible to the model. Explicit `Question: deny` disables this feature entirely (no follow-up prompt injection). `Question: ask` is treated as `allow` to avoid a redundant second confirmation step before the user can answer the question.
 - `mcp`: MCP config scoped to this agent.
 - `delegation`: limits such as `max_children`, `max_depth`, and `child_join`.
 - `prompt` / `system_prompt`: system prompt for plain YAML files.
@@ -629,7 +628,6 @@ Example:
 name: builder
 mode: main
 model_pools: [default]
-question_follow_up_at_end: true
 permission:
   "*": deny
   Read: allow

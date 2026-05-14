@@ -46,9 +46,6 @@ func (a *MainAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, mainAgentCommunicationPrompt)
 	parts = append(parts, mainAgentResponseClosurePrompt)
-	if block := a.completionFollowUpPromptBlock(); block != "" {
-		parts = append(parts, block)
-	}
 	if block := a.userConfirmationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
@@ -101,14 +98,6 @@ func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
 	return "## " + a.pendingLoopContinuation.Title + "\n\n" + a.pendingLoopContinuation.Text
 }
 
-func (a *MainAgent) questionFollowUpAtEndEnabled() bool {
-	cfg := a.currentActiveConfig()
-	if cfg == nil {
-		return false
-	}
-	return cfg.QuestionFollowUpAtEnd
-}
-
 func (a *MainAgent) questionToolAvailable() bool {
 	visible := a.mainLLMVisibleToolNames()
 	if len(visible) == 0 {
@@ -137,30 +126,6 @@ func (a *MainAgent) doneToolAvailable() bool {
 		return false
 	}
 	return true
-}
-
-func (a *MainAgent) completionFollowUpPromptBlock() string {
-	if a.loopState.Enabled {
-		return ""
-	}
-	if !a.questionFollowUpAtEndEnabled() || !a.questionToolAvailable() {
-		return ""
-	}
-	return strings.TrimSpace(`## Completion Follow-Up
-- A turn is not complete unless either (1) the user has already explicitly said they are done, want to end, do not want further help, or have no more tasks, or (2) you have already called the ` + "`Question`" + ` tool in the current turn.
-- Do not treat a written completion summary as the end of the turn. The ` + "`Question`" + ` tool call is a required completion step unless the user explicitly opted out as above.
-- Default completion shape when the current task is finished: write a concise completion summary in assistant text, then immediately call the ` + "`Question`" + ` tool as the last action in the turn so the user can continue with another task or explicitly end the session.
-- When this completion follow-up rule is active, set ` + "`purpose`" + ` to ` + "`completion_follow_up`" + ` on that final ` + "`Question`" + ` tool call.
-- Do not end a completed task with only plain assistant text when ` + "`Question`" + ` is available unless the user already explicitly opted out.
-- Before ending a completed task, verify in order: the work is complete or clearly blocked, the verification status is reported, the todo state is synced when applicable, and then call the ` + "`Question`" + ` tool.
-- Ordering requirement: do NOT call ` + "`Question`" + ` until after you have written the completion summary (conclusion) for the current task.
-- When this rule requires ` + "`Question`" + `, you must make a real ` + "`Question`" + ` tool call. Do not print JSON, code fences, XML tags, pseudo-tool syntax, or tool arguments in normal assistant text as a substitute.
-- After calling ` + "`Question`" + `, do not output any additional assistant text or run additional tools in this turn.
-- Keep the completion summary concise, then make that ` + "`Question`" + ` call as your last action before ending the turn.
-- Use the ` + "`Question`" + ` tool to ask whether the user wants another task. When you have clear, directly relevant follow-up suggestions, offer a small set of concrete next-step / improvement options plus free-text follow-up. When you do not have meaningful suggestions, only ask whether you want you to do anything else.
-- If the user gives a new goal, continue with that work in the same ongoing session and use the same completion follow-up behavior again after that work is complete.
-- The mandatory ` + "`Question`" + ` tool follow-up overrides normal preferences against routine closing questions.
-- Do not use a plain-text closing question and do not rely on a later follow-up request to satisfy this rule; use the ` + "`Question`" + ` tool in the current turn instead.`)
 }
 
 func (a *MainAgent) userConfirmationPromptBlock() string {
@@ -241,13 +206,10 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	base := "- If user permission, confirmation, or a real decision is still needed, "
 	if a.questionToolAvailable() {
-		questionLine := base + "call the `Question` tool instead of ending as completed"
-		if a.questionFollowUpAtEndEnabled() {
-			questionLine += " unless the current task is already complete and you are making the final completion follow-up `Question` call"
-		}
-		return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" + questionLine
+		return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains\n" +
+			base + "call the `Question` tool instead of ending as completed"
 	}
-	return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" +
+	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains\n" +
 		base + "ask in plain assistant text with enough context for a non-implementer to answer instead of ending as completed"
 }
 

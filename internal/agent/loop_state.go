@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -17,7 +18,6 @@ const (
 	LoopStateBudgetExhausted LoopState = "budget_exhausted"
 )
 
-var loopDoneTagRE = regexp.MustCompile(`(?is)<done>\s*(.*?)\s*</done>`)
 var loopBlockedTagRE = regexp.MustCompile(`(?is)<blocked>\s*(.*?)\s*</blocked>`)
 var loopVerifyNotRunTagRE = regexp.MustCompile(`(?is)<verify-not-run>\s*(.*?)\s*</verify-not-run>`)
 
@@ -119,26 +119,6 @@ func normalizeLoopProgressSignature(parts ...string) string {
 	return strings.Join(trimmed, "|")
 }
 
-func extractLoopDoneReason(content string) string {
-	matches := loopDoneTagRE.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	// Allow multiple <done> tags and use the last non-empty reason as the
-	// completion signal.
-	for i := len(matches) - 1; i >= 0; i-- {
-		if len(matches[i]) < 2 {
-			continue
-		}
-		reason := strings.Join(strings.Fields(matches[i][1]), " ")
-		if reason == "" {
-			continue
-		}
-		return reason
-	}
-	return ""
-}
-
 func extractLoopBlockedReason(content string) string {
 	matches := loopBlockedTagRE.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
@@ -181,12 +161,33 @@ func isVerificationLikeToolResult(payload *ToolResultPayload, result string) boo
 	}
 	name := strings.ToLower(strings.TrimSpace(payload.Name))
 	result = strings.ToLower(strings.TrimSpace(result))
-	if name == "shell" {
-		return strings.Contains(result, "go test") ||
-			strings.Contains(result, "staticcheck") ||
-			strings.Contains(result, "go vet") ||
-			strings.Contains(result, "validation") ||
-			strings.Contains(result, "replay")
+	if name != "shell" {
+		return false
+	}
+
+	command := ""
+	if strings.TrimSpace(payload.ArgsJSON) != "" {
+		var args struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal([]byte(payload.ArgsJSON), &args); err == nil {
+			command = strings.ToLower(strings.TrimSpace(args.Command))
+		}
+	}
+
+	verificationPatterns := []string{
+		"go test", "gotestsum", "go vet", "staticcheck", "golangci-lint", "gofmt -w", "gofmt -d",
+		"pytest", "python -m pytest", "uv run pytest", "tox", "nox",
+		"npm test", "pnpm test", "yarn test", "bun test", "vitest", "jest", "mocha", "ava",
+		"cargo test", "cargo clippy", "cargo fmt", "cargo check",
+		"mvn test", "gradle test", "./gradlew test",
+		"dotnet test", "rspec", "bundle exec rspec", "mix test", "rebar3 eunit",
+		"validation", "replay",
+	}
+	for _, pat := range verificationPatterns {
+		if strings.Contains(command, pat) || strings.Contains(result, pat) {
+			return true
+		}
 	}
 	return false
 }

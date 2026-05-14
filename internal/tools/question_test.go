@@ -19,9 +19,6 @@ func TestQuestionToolParametersMentionUserLanguage(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties has unexpected type %T", params["properties"])
 	}
-	if _, ok := properties["purpose"]; !ok {
-		t.Fatalf("expected purpose property")
-	}
 	questions, ok := properties["questions"].(map[string]any)
 	if !ok {
 		t.Fatalf("questions has unexpected type %T", properties["questions"])
