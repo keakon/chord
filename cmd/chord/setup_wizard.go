@@ -278,8 +278,6 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 				authValue = "$" + envName
 				authPathShown = true
 				envVarReminder = envName
-			} else {
-				// Skip for now.
 			}
 		case "4":
 			// Skip for now.
@@ -524,7 +522,7 @@ func openSetupTerminal(opts SetupWizardOptions) (*setupTerminal, error) {
 		closer: func() error {
 			var firstErr error
 			if ttyIn != nil {
-				if err := ttyIn.Close(); err != nil && firstErr == nil {
+				if err := ttyIn.Close(); err != nil {
 					firstErr = err
 				}
 			}

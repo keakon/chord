@@ -664,6 +664,95 @@ func TestFinish_ReportsMissingCommitIdentity(t *testing.T) {
 	}
 }
 
+func TestFinish_ReportsMissingCommitIdentity_WhenMergeCommitRequiredWithoutTreeDiff(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Make both branches end up with the same tree while keeping divergent history,
+	// so finish still needs a merge commit before the squash phase.
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("main-updated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "shared.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main updates shared")
+	if err := os.WriteFile(filepath.Join(info.Path, "shared.txt"), []byte("feat-updated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "shared.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "feat updates shared differently")
+	if err := os.WriteFile(filepath.Join(info.Path, "shared.txt"), []byte("main-updated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "shared.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "feat aligns tree with main")
+	mainTree := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main^{tree}")))
+	featTree := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "chord/feat^{tree}")))
+	if mainTree != featTree {
+		t.Fatalf("expected same trees before finish, got main=%s feat=%s", mainTree, featTree)
+	}
+
+	oldEnv := map[string]struct {
+		value string
+		ok    bool
+	}{}
+	for _, key := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+		"HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+		"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+	} {
+		value, ok := os.LookupEnv(key)
+		oldEnv[key] = struct {
+			value string
+			ok    bool
+		}{value: value, ok: ok}
+	}
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
+	if err := os.Setenv("HOME", t.TempDir()); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull); err != nil {
+		t.Fatalf("set GIT_CONFIG_GLOBAL: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull); err != nil {
+		t.Fatalf("set GIT_CONFIG_SYSTEM: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_COUNT", "1"); err != nil {
+		t.Fatalf("set GIT_CONFIG_COUNT: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly"); err != nil {
+		t.Fatalf("set GIT_CONFIG_KEY_0: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_VALUE_0", "true"); err != nil {
+		t.Fatalf("set GIT_CONFIG_VALUE_0: %v", err)
+	}
+	defer func() {
+		for key, prev := range oldEnv {
+			if prev.ok {
+				_ = os.Setenv(key, prev.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil {
+		t.Fatal("expected missing identity error, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires git author/committer identity") {
+		t.Fatalf("unexpected missing identity error: %v", err)
+	}
+}
+
 func TestFinish_NoNetTreeDiff_ReclaimsWithoutChangingMain(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)

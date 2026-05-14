@@ -67,11 +67,15 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		return checkFinish(ctx, mainRoot, info, name, onto)
 	}
 
+	needsMergeCommit, err := mergeRequiresCommit(ctx, mainRoot, onto, info.Branch)
+	if err != nil {
+		return err
+	}
 	hadPreMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
 	if err != nil {
 		return err
 	}
-	if hadPreMergeDiff {
+	if needsMergeCommit || hadPreMergeDiff {
 		if err := ensureCommitIdentity(ctx, mainRoot); err != nil {
 			return err
 		}
@@ -204,6 +208,16 @@ func branchesDiffer(ctx context.Context, cwd, onto, branch string) (bool, error)
 		return false, fmt.Errorf("resolve tree for %q: %w", branch, err)
 	}
 	return baseTree != branchTree, nil
+}
+
+func mergeRequiresCommit(ctx context.Context, cwd, onto, branch string) (bool, error) {
+	if _, err := runGit(ctx, cwd, "merge-base", "--is-ancestor", onto, branch); err == nil {
+		return false, nil
+	}
+	if _, err := runGit(ctx, cwd, "merge-base", "--is-ancestor", branch, onto); err == nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 func createFinishScratch(ctx context.Context, mainRoot, name, startRef string) (tmpPath, tmpBranch string, cleanup func(), err error) {
