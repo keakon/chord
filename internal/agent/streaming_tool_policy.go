@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"strings"
-	"unicode"
 
 	"github.com/keakon/golog/log"
 
@@ -16,14 +15,6 @@ type speculativeExecutionDecision struct {
 	Allowed bool
 	Reason  string
 }
-
-type speculativeToolClass int
-
-const (
-	speculativeToolClassUnknown speculativeToolClass = iota
-	speculativeToolClassReadOnly
-	speculativeToolClassMutation
-)
 
 func allowSpeculativeExecution() speculativeExecutionDecision {
 	return speculativeExecutionDecision{Allowed: true, Reason: "safe_read_only"}
@@ -60,8 +51,8 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 		}
 	}
 
-	class := speculativeToolClassification(toolName, args)
-	if class != speculativeToolClassReadOnly {
+	class := tools.ConcurrencyClassForTool(registry, toolName, args)
+	if class != tools.ToolConcurrencyClassReadOnly {
 		switch toolName {
 		case tools.NameWrite, tools.NameEdit, tools.NameDelete:
 			return allowSpeculativeExecution()
@@ -83,56 +74,6 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 	return allowSpeculativeExecution()
 }
 
-func shellReadOnlySpeculativeAllowed(args json.RawMessage) bool {
-	var parsed struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal(llm.UnwrapToolArgs(args), &parsed); err != nil {
-		return false
-	}
-	command := strings.TrimSpace(parsed.Command)
-	if command == "" || containsShellMetachar(command) {
-		return false
-	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
-	}
-	cmd := fields[0]
-	switch cmd {
-	case "pwd", "ls", "cat", "which":
-		return true
-	case "git":
-		if len(fields) < 2 {
-			return false
-		}
-		switch fields[1] {
-		case "status", "log", "diff", "show", "branch", "rev-parse":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
-}
-
-func speculativeToolClassification(toolName string, args json.RawMessage) speculativeToolClass {
-	switch strings.TrimSpace(toolName) {
-	case tools.NameRead, tools.NameGrep, tools.NameGlob:
-		return speculativeToolClassReadOnly
-	case tools.NameShell:
-		if shellReadOnlySpeculativeAllowed(args) {
-			return speculativeToolClassReadOnly
-		}
-		return speculativeToolClassMutation
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
-		return speculativeToolClassMutation
-	default:
-		return speculativeToolClassUnknown
-	}
-}
-
 func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permission.Ruleset, priorCalls []PendingToolCall) (string, bool) {
 	for _, call := range priorCalls {
 		name := strings.TrimSpace(call.Name)
@@ -151,26 +92,12 @@ func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permiss
 				return name, true
 			}
 		}
-		if speculativeToolClassification(name, args) != speculativeToolClassReadOnly {
+		if tools.ConcurrencyClassForTool(registry, name, args) != tools.ToolConcurrencyClassReadOnly {
 			return name, true
 		}
 	}
 	return "", false
 }
-
-func containsShellMetachar(command string) bool {
-	for _, r := range command {
-		switch r {
-		case '|', '&', ';', '<', '>', '(', ')', '$', '`', '\\', '*', '?', '[', ']', '{', '}', '\n', '\r':
-			return true
-		}
-		if unicode.IsControl(r) {
-			return true
-		}
-	}
-	return false
-}
-
 func logSpeculativeExecutionDecision(callID, toolName string, decision speculativeExecutionDecision) {
 	if strings.TrimSpace(callID) == "" || decision.Allowed {
 		return

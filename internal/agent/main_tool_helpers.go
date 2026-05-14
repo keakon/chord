@@ -244,35 +244,46 @@ func buildToolExecutionBatches(registry *tools.Registry, calls []message.ToolCal
 	if len(calls) == 0 {
 		return nil
 	}
-	pending := append([]message.ToolCall(nil), calls...)
 	batches := make([]toolExecutionBatch, 0, len(calls))
-	for len(pending) > 0 {
-		batch := toolExecutionBatch{Calls: []message.ToolCall{pending[0]}}
-		policy0 := tools.PolicyForTool(registry, pending[0].Name, llm.UnwrapToolArgs(pending[0].Args))
-		batch.AbortSiblingsOnError = policy0.AbortSiblingsOnError
-		remaining := make([]message.ToolCall, 0, len(pending)-1)
-		usedPolicies := []tools.ConcurrencyPolicy{policy0}
-		for _, tc := range pending[1:] {
-			policy := tools.PolicyForTool(registry, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	for i := 0; i < len(calls); {
+		call := calls[i]
+		args := llm.UnwrapToolArgs(call.Args)
+		class := tools.ConcurrencyClassForTool(registry, call.Name, args)
+		policy := tools.PolicyForTool(registry, call.Name, args)
+		batch := toolExecutionBatch{Calls: []message.ToolCall{call}, AbortSiblingsOnError: policy.AbortSiblingsOnError}
+		if class != tools.ToolConcurrencyClassReadOnly {
+			batches = append(batches, batch)
+			i++
+			continue
+		}
+		usedPolicies := []tools.ConcurrencyPolicy{policy}
+		j := i + 1
+		for j < len(calls) {
+			next := calls[j]
+			nextArgs := llm.UnwrapToolArgs(next.Args)
+			if tools.ConcurrencyClassForTool(registry, next.Name, nextArgs) != tools.ToolConcurrencyClassReadOnly {
+				break
+			}
+			nextPolicy := tools.PolicyForTool(registry, next.Name, nextArgs)
 			conflict := false
 			for _, existing := range usedPolicies {
-				if tools.ConcurrencyConflict(existing, policy) {
+				if tools.ConcurrencyConflict(existing, nextPolicy) {
 					conflict = true
 					break
 				}
 			}
 			if conflict {
-				remaining = append(remaining, tc)
-				continue
+				break
 			}
-			batch.Calls = append(batch.Calls, tc)
-			usedPolicies = append(usedPolicies, policy)
-			if policy.AbortSiblingsOnError {
+			batch.Calls = append(batch.Calls, next)
+			usedPolicies = append(usedPolicies, nextPolicy)
+			if nextPolicy.AbortSiblingsOnError {
 				batch.AbortSiblingsOnError = true
 			}
+			j++
 		}
 		batches = append(batches, batch)
-		pending = remaining
+		i = j
 	}
 	return batches
 }

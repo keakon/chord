@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,121 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// IsReadOnly returns true if the tool does not modify any state (files, processes, etc.).
 	IsReadOnly() bool
+}
+
+type ToolConcurrencyClass int
+
+const (
+	ToolConcurrencyClassUnknown ToolConcurrencyClass = iota
+	ToolConcurrencyClassReadOnly
+	ToolConcurrencyClassMutating
+	ToolConcurrencyClassExclusive
+)
+
+// ConcurrencyClassForTool returns a conservative high-level batching class.
+// This is shared by speculative and finalized orchestration so both layers
+// preserve the same core rule: only consecutive concurrency-safe read-only
+// tools may run together; everything else becomes a serialization boundary.
+func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawMessage) ToolConcurrencyClass {
+	name := strings.TrimSpace(toolName)
+	if name == "" {
+		return ToolConcurrencyClassExclusive
+	}
+	if registry == nil {
+		return ToolConcurrencyClassExclusive
+	}
+	tool, ok := registry.Get(name)
+	if !ok {
+		return ToolConcurrencyClassExclusive
+	}
+	policy := PolicyForTool(registry, name, args)
+	policy = normalizeConcurrencyPolicy(name, policy)
+	if policy.Mode == ConcurrencyModeExclusive && !isReadOnlyConcurrencySafeTool(name, args) {
+		return ToolConcurrencyClassExclusive
+	}
+	if isReadOnlyConcurrencySafeTool(name, args) {
+		return ToolConcurrencyClassReadOnly
+	}
+	if !tool.IsReadOnly() {
+		return ToolConcurrencyClassMutating
+	}
+	if policy.Mode == ConcurrencyModeExclusive {
+		return ToolConcurrencyClassExclusive
+	}
+	return ToolConcurrencyClassExclusive
+}
+
+func isReadOnlyConcurrencySafeTool(toolName string, args json.RawMessage) bool {
+	switch strings.TrimSpace(toolName) {
+	case NameRead, NameGrep, NameGlob, NameLsp, NameWebFetch, NameReadArtifact, NameSkill, NameSpawnStatus:
+		return true
+	case NameShell:
+		return shellReadOnlyCommandAllowed(args)
+	default:
+		return false
+	}
+}
+
+func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
+	var parsed struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return false
+	}
+	command := strings.TrimSpace(parsed.Command)
+	if command == "" || containsShellMetachar(command) {
+		return false
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "pwd", "ls", "cat", "which":
+		return true
+	case "git":
+		if len(fields) < 2 {
+			return false
+		}
+		switch fields[1] {
+		case "status", "log", "diff", "show", "branch", "rev-parse":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func containsShellMetachar(command string) bool {
+	for _, r := range command {
+		switch r {
+		case '|', '&', ';', '>', '<', '$', '`', '\n', '\r':
+			return true
+		}
+	}
+	return false
+}
+
+func pathContainsResourcePath(basePath, targetPath string) bool {
+	basePath = filepath.Clean(strings.TrimSpace(basePath))
+	targetPath = filepath.Clean(strings.TrimSpace(targetPath))
+	if basePath == "" || targetPath == "" {
+		return false
+	}
+	if basePath == "." {
+		return true
+	}
+	if basePath == targetPath {
+		return true
+	}
+	rel, err := filepath.Rel(basePath, targetPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // ConcurrencyAwareTool can classify a finalized tool call for safe batching.

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 )
 
@@ -71,10 +72,53 @@ func ConcurrencyConflict(a, b ConcurrencyPolicy) bool {
 	if a.Mode == ConcurrencyModeExclusive || b.Mode == ConcurrencyModeExclusive {
 		return true
 	}
-	if a.Resource != b.Resource {
+	if !resourceOverlap(a.Resource, b.Resource) {
 		return false
 	}
 	return a.Mode == ConcurrencyModeWrite || b.Mode == ConcurrencyModeWrite
+}
+
+func resourceOverlap(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	if a == "workspace" || b == "workspace" {
+		return true
+	}
+	kindA, pathA, okA := splitConcurrencyResource(a)
+	kindB, pathB, okB := splitConcurrencyResource(b)
+	if !okA || !okB {
+		return false
+	}
+	switch {
+	case kindA == "file" && kindB == "file":
+		return pathA == pathB
+	case kindA == "path" && kindB == "path":
+		return pathContainsResourcePath(pathA, pathB) || pathContainsResourcePath(pathB, pathA)
+	case kindA == "path" && kindB == "file":
+		return pathContainsResourcePath(pathA, pathB)
+	case kindA == "file" && kindB == "path":
+		return pathContainsResourcePath(pathB, pathA)
+	default:
+		return false
+	}
+}
+
+func splitConcurrencyResource(resource string) (kind, path string, ok bool) {
+	resource = strings.TrimSpace(resource)
+	if resource == "" {
+		return "", "", false
+	}
+	idx := strings.IndexByte(resource, ':')
+	if idx <= 0 || idx >= len(resource)-1 {
+		return "", "", false
+	}
+	return resource[:idx], filepath.Clean(resource[idx+1:]), true
 }
 
 func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyPolicy {
