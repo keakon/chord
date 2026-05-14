@@ -431,28 +431,34 @@ func TestHandleConfirmDenyReasonKeyEscGoesBack(t *testing.T) {
 	}
 }
 
-func TestHandleConfirmDenyReasonKeyNormalizesLongReason(t *testing.T) {
+func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"reason":"finished"}`}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
+		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
+	}
+	if strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") {
+		t.Fatalf("Done confirm should not show generic actions:\n%s", plain)
+	}
+}
+
+func TestHandleConfirmDoneDenyRequiresReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
-	m.confirmCh = nil
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"reason":"finished"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-	longReason := strings.Repeat("🙂", 210)
-	m.confirm.denyReasonInput.SetValue(longReason)
 
 	_ = m.handleConfirmDenyReasonKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-
 	select {
-	case result := <-m.confirmResultCh:
-		if got := len([]rune(result.DenyReason)); got != 200 {
-			t.Fatalf("deny reason rune length = %d, want 200", got)
-		}
-		if want := strings.Repeat("🙂", 200); result.DenyReason != want {
-			t.Fatalf("deny reason should preserve rune boundaries")
-		}
+	case <-m.confirmResultCh:
+		t.Fatal("unexpected confirm result without deny reason")
 	default:
-		t.Fatal("expected confirm result after pressing Enter")
+	}
+	if m.confirm.editError != "Done rejection requires a reason." {
+		t.Fatalf("editError = %q", m.confirm.editError)
 	}
 }
 

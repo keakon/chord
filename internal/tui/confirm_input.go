@@ -119,6 +119,18 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleConfirmDenyReasonKey(msg)
 	}
 
+	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		switch msg.String() {
+		case "y", "Y":
+			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+		case "n", "N", "r", "R", "esc":
+			m.confirm.denyingWithReason = true
+			m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+			m.recalcViewportSize()
+			return textareaBlinkCmd()
+		}
+	}
+
 	switch msg.String() {
 	case "y", "Y":
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
@@ -242,6 +254,11 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		reason := normalizeConfirmDenyReason(m.confirm.denyReasonInput.Value())
+		if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") && reason == "" {
+			m.confirm.editError = "Done rejection requires a reason."
+			m.recalcViewportSize()
+			return nil
+		}
 		return m.resolveConfirm(ConfirmResult{
 			Action:     ConfirmDeny,
 			DenyReason: reason,
@@ -256,6 +273,9 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	default:
+		if m.confirm.editError != "" {
+			m.confirm.editError = ""
+		}
 		var cmd tea.Cmd
 		m.confirm.denyReasonInput, cmd = m.confirm.denyReasonInput.Update(msg)
 		return cmd

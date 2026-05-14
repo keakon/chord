@@ -459,6 +459,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("open TODO items remain")
 		case "subagents_active":
 			addGap("active subagents are still running")
+		case "done_rejected":
+			addGap("the previous Done request was rejected; address the rejection reason before trying Done again")
 		case "suspected_stall":
 			addGap("no hard progress detected for the last two rounds — take concrete action instead of summarizing")
 		default:

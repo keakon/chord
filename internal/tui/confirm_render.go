@@ -140,6 +140,13 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 }
 
 func (m Model) renderConfirmOptions() string {
+	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		parts := []string{
+			ConfirmAllowStyle.Render("[Y] Allow"),
+			ConfirmDenyStyle.Render("[R] Deny+Reason"),
+		}
+		return strings.Join(parts, "  ")
+	}
 	parts := []string{
 		ConfirmAllowStyle.Render("[Y] Allow"),
 		ConfirmDenyStyle.Render("[N] Deny"),

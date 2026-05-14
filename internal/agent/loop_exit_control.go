@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
@@ -44,7 +45,7 @@ func (a *MainAgent) awaitLoopExitConfirmation(ctx context.Context, pending *loop
 	return a.AwaitConfirm(ctx, "Done", string(encoded), 0, nil, nil)
 }
 
-func (a *MainAgent) appendLoopContinuationAndContinue(result string) {
+func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result string) {
 	if a.turn == nil {
 		return
 	}
@@ -52,7 +53,19 @@ func (a *MainAgent) appendLoopContinuationAndContinue(result string) {
 	if result == "" {
 		result = "Continue the loop."
 	}
-	a.emitToTUI(InfoEvent{Message: result})
+	assessment := &LoopAssessment{
+		Action:  LoopAssessmentActionContinue,
+		Message: result,
+		Reasons: []string{"done_rejected", "context_continue"},
+	}
+	note := a.buildLoopContinuationNote(assessment)
+	if note != nil {
+		a.pendingLoopContinuation = note
+		a.appendLoopNoticeMessage(note.Title, note.Text)
+		a.emitToTUI(LoopNoticeEvent{Title: note.Title, Text: note.Text, DedupKey: note.DedupKey})
+	}
+	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
+	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})
 	msg := message.Message{Role: "user", Content: result, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {

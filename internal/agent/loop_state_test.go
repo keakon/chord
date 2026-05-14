@@ -233,25 +233,35 @@ Done: allow
 			switch payload := evt.(type) {
 			case ConfirmRequestEvent:
 				t.Fatal("unexpected Done confirmation request when loop exit conditions are not satisfied")
-			case InfoEvent:
-				if !strings.Contains(payload.Message, "Done rejected: loop exit conditions are not satisfied yet") {
+			case LoopNoticeEvent:
+				if payload.Title != "LOOP CONTINUE" {
 					continue
 				}
-				if !strings.Contains(payload.Message, "open_todos") {
-					t.Fatalf("InfoEvent.Message = %q, want rejection reason to mention open_todos", payload.Message)
+				if !strings.Contains(payload.Text, "the previous Done request was rejected") || !strings.Contains(payload.Text, "Open TODO items:") {
+					t.Fatalf("LoopNoticeEvent.Text = %q, want done-rejected continuation with open TODOs", payload.Text)
+				}
+			case ToolResultEvent:
+				if payload.CallID != callID || payload.Name != tools.NameDone {
+					continue
+				}
+				if !strings.Contains(payload.Result, "Done rejected: loop exit conditions are not satisfied yet") {
+					continue
 				}
 				select {
 				case <-handled:
 				case <-time.After(2 * time.Second):
 					t.Fatal("timed out waiting for Done rejection handling to finish")
 				}
+				if a.loopState.Iteration != 1 {
+					t.Fatalf("loop iteration = %d, want 1 after Done attempt", a.loopState.Iteration)
+				}
 				msgs := a.ctxMgr.Snapshot()
 				last := msgs[len(msgs)-1]
 				if last.Role != "user" || last.Kind != "loop_notice" {
 					t.Fatalf("last rejection message = %#v, want user loop_notice", last)
 				}
-				if last.Content != payload.Message {
-					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Message)
+				if last.Content != payload.Result {
+					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Result)
 				}
 				for _, msg := range msgs {
 					if msg.Role == "tool" && msg.ToolCallID == "loop-exit-control" {
@@ -261,7 +271,7 @@ Done: allow
 				return
 			}
 		case <-deadline:
-			t.Fatal("timed out waiting for visible Done rejection message")
+			t.Fatal("timed out waiting for Done rejection events")
 		}
 	}
 }
@@ -369,22 +379,32 @@ Done: allow
 			switch payload := evt.(type) {
 			case ConfirmRequestEvent:
 				t.Fatal("unexpected Done confirmation request when verification is still required")
-			case InfoEvent:
-				if !strings.Contains(payload.Message, "Done rejected: loop exit conditions are not satisfied yet") {
+			case LoopNoticeEvent:
+				if payload.Title != "LOOP CONTINUE" {
 					continue
 				}
-				if !strings.Contains(payload.Message, "verification_required") {
-					t.Fatalf("InfoEvent.Message = %q, want rejection reason to mention verification_required", payload.Message)
+				if !strings.Contains(payload.Text, "the previous Done request was rejected") || !strings.Contains(payload.Text, "Required verification is completed") {
+					t.Fatalf("LoopNoticeEvent.Text = %q, want done-rejected continuation with verification requirements", payload.Text)
+				}
+			case ToolResultEvent:
+				if payload.CallID != callID || payload.Name != tools.NameDone {
+					continue
+				}
+				if !strings.Contains(payload.Result, "Done rejected: loop exit conditions are not satisfied yet") {
+					continue
 				}
 				select {
 				case <-handled:
 				case <-time.After(2 * time.Second):
 					t.Fatal("timed out waiting for verification-missing rejection handling to finish")
 				}
+				if a.loopState.Iteration != 1 {
+					t.Fatalf("loop iteration = %d, want 1 after Done attempt", a.loopState.Iteration)
+				}
 				return
 			}
 		case <-deadline:
-			t.Fatal("timed out waiting for visible Done rejection message")
+			t.Fatal("timed out waiting for Done rejection events")
 		}
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -121,8 +120,46 @@ func findAssistantMessageForToolCall(msgs []message.Message, callID string) (mes
 	return message.Message{}, false
 }
 
+func rawToolResultForVerification(payload *ToolResultPayload) string {
+	if payload == nil {
+		return ""
+	}
+	return payload.Result
+}
+
+func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) string {
+	callID = strings.TrimSpace(callID)
+	parse := func(args []byte) string {
+		if len(args) == 0 {
+			return ""
+		}
+		var parsed struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(args, &parsed); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(parsed.Name)
+	}
+	if callID != "" {
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg := msgs[i]
+			if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+				continue
+			}
+			for _, tc := range msg.ToolCalls {
+				if tc.ID == callID && strings.EqualFold(tc.Name, "Skill") {
+					if name := parse(tc.Args); name != "" {
+						return name
+					}
+				}
+			}
+		}
+	}
+	return parse([]byte(fallbackArgsJSON))
+}
+
 func (a *MainAgent) handleToolResult(evt Event) {
-	// Turn isolation.
 	if a.turn == nil || evt.TurnID != a.turn.ID {
 		log.Debugf("discarding stale tool result event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 		return
@@ -135,9 +172,19 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 	a.turn.resolvePendingToolCall(payload.CallID)
 	a.loopState.markProgress()
+	if payload.Error == nil {
+		if isVerificationLikeToolResult(payload, rawToolResultForVerification(payload)) {
+			a.loopState.markVerificationProgress()
+		}
+		if payload.Name == "Skill" {
+			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {
+				a.MarkSkillInvokedByName(skillName)
+			}
+		}
+	}
 
 	rawResult := payload.Result
-	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, payload.Error)
+	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
 
 	hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(
@@ -169,10 +216,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		payload.Audit,
 	))
 
-	// Detect Handoff tool result during plan generation.
-	// Defer the role switch + confirm flow until all sibling tool calls in this
-	// batch have completed. This prevents switchRole from clearing conversation
-	// state while other tools are still running (e.g. a co-returned Write call).
 	if payload.Name == "Handoff" && payload.Error == nil {
 		var pcData struct {
 			PlanPath string `json:"plan_path"`
@@ -181,14 +224,12 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			log.Errorf("handleToolResult: failed to parse Handoff result error=%v", err)
 		} else {
 			log.Infof("Handoff result received; deferring until sibling tools complete plan_path=%v pending=%v", pcData.PlanPath, a.turn.PendingToolCalls.Load()-1)
-			a.pendingHandoff = &HandoffResult{
-				PlanPath: pcData.PlanPath,
-			}
+			a.pendingHandoff = &HandoffResult{PlanPath: pcData.PlanPath}
 		}
-		// Fall through: record the tool result, decrement counter, and check
-		// completion below — do NOT return early.
 	}
 	if payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled {
+		a.loopState.advanceIteration()
+		a.emitLoopStateChanged()
 		assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID)
 		assistantContent := ""
 		if ok {
@@ -197,7 +238,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.pendingLoopExitResult = &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON}
 	}
 
-	// Emit to TUI.
 	a.emitToTUI(ToolResultEvent{
 		CallID:      payload.CallID,
 		Name:        payload.Name,
@@ -211,7 +251,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		FileCreated: payload.FileCreated,
 	})
 
-	// Record the tool result in the conversation.
 	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
 	toolMsg := message.Message{
 		Role:            "tool",
@@ -220,137 +259,31 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		ToolDiff:        payload.Diff,
 		ToolDiffAdded:   payload.DiffAdded,
 		ToolDiffRemoved: payload.DiffRemoved,
-		ToolDurationMs:  payload.Duration.Milliseconds(),
 		ToolStatus:      string(toolResultStatusFromError(isError)),
-		FileState:       payload.FileState.Clone(),
-		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
 		Audit:           payload.Audit.Clone(),
-		Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
+		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
+		FileState:       payload.FileState.Clone(),
 	}
 	a.ctxMgr.Append(toolMsg)
-	if payload.Name == "Skill" && !isError {
-		a.MarkSkillInvokedByName(extractToolArgument(payload.Name, json.RawMessage(payload.ArgsJSON)))
-	}
-	a.recordEvidenceFromMessage(toolMsg)
-
-	// Persist tool result for crash recovery.
 	if a.recovery != nil {
 		a.persistAsync("main", toolMsg)
 	}
 
-	a.turn.CompletedToolCalls = append(a.turn.CompletedToolCalls, toolResultSummary(payload, contextResult, errorText))
-	if changed := changedFileSummary(payload); changed != nil {
-		a.loopState.markProgress()
-		a.turn.ChangedFiles = append(a.turn.ChangedFiles, changed)
+	remaining := a.turn.PendingToolCalls.Add(-1)
+	if remaining < 0 {
+		log.Warnf("PendingToolCalls went negative after tool result turn_id=%v call_id=%v", a.turn.ID, payload.CallID)
+		a.turn.PendingToolCalls.Store(0)
+		remaining = 0
 	}
-	if isVerificationLikeToolResult(payload, contextResult) {
-		a.loopState.markVerificationProgress()
-	}
-
-	// Decrement pending counter and track malformed args across rounds
-	// (improvement 3: abort turn if the model repeatedly produces malformed args).
-	a.turn.PendingToolCalls.Add(-1)
-	// Track malformed and empty-args calls (improvement 3 + 4).
-	// Both sentinel malformed args and empty "{}" args for tools with
-	// required parameters count toward the consecutive-malformed threshold.
-	if llm.IsMalformedArgs(json.RawMessage(payload.ArgsJSON)) {
-		a.turn.malformedInBatch++
-	} else if llm.IsEmptyArgs(json.RawMessage(payload.ArgsJSON)) {
-		if tool, ok := a.tools.Get(payload.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				a.turn.malformedInBatch++
-			}
-		}
-	}
-
-	log.Debugf("tool result processed name=%v call_id=%v is_error=%v pending=%v malformed_in_batch=%v", payload.Name, payload.CallID, isError, a.turn.PendingToolCalls.Load(), a.turn.malformedInBatch)
-
-	// When all tool results are in, either start the next finalize-time batch or continue.
-	if a.turn.PendingToolCalls.Load() <= 0 {
-		if a.turn.activeToolBatchCancel != nil {
-			a.turn.activeToolBatchCancel()
-			a.turn.activeToolBatchCancel = nil
-		}
-		if a.turn.nextToolBatch < len(a.turn.toolExecutionBatches) {
-			a.startNextToolBatch(a.turn)
-			return
-		}
-		abnormalInBatch := a.turn.malformedInBatch
-		a.turn.toolExecutionBatches = nil
-		a.turn.nextToolBatch = 0
-
-		// Update the consecutive-malformed-round counter.
-		if abnormalInBatch > 0 {
-			a.turn.MalformedCount++
-			// Partial batch degradation warning: some tool calls in this
-			// batch had empty or malformed arguments. This often indicates
-			// the model's output was truncated near max_tokens.
-			log.Warnf("batch contained abnormal tool call arguments abnormal_count=%v consecutive_rounds=%v", abnormalInBatch, a.turn.MalformedCount)
-		} else {
-			a.turn.MalformedCount = 0
-		}
-		a.turn.malformedInBatch = 0
-
-		// Abort the turn when the model has produced malformed args for too
-		// many consecutive LLM rounds. This prevents an infinite loop where
-		// the model keeps calling tools with unparseable JSON arguments.
-		if a.turn.MalformedCount >= maxMalformedToolCalls {
-			log.Warnf("aborting turn: too many consecutive malformed tool call rounds count=%v threshold=%v", a.turn.MalformedCount, maxMalformedToolCalls)
-			a.emitToTUI(ErrorEvent{
-				Err: fmt.Errorf(
-					"turn aborted: the model produced malformed tool call arguments "+
-						"%d times in a row. This usually indicates a model capability "+
-						"issue or context overflow. Please start a new conversation. "+
-						"You can also increase max_output_tokens in config to allow longer outputs",
-					a.turn.MalformedCount,
-				),
-			})
-			a.setIdleAndDrainPending()
-			return
-		}
-
-		if results, err := a.runToolBatchHooks(a.turn.Ctx, a.turn); err != nil {
-			log.Warnf("on_tool_batch_complete hook error error=%v", err)
-		} else {
-			for _, job := range results {
-				if shouldAppendAutomationResult(job.Hook, job.Result) {
-					a.appendHookFeedback(formatAutomationFeedback(job.Hook, job.Result))
-				}
-				if job.Result.Notify || job.Hook.Result == hook.ResultNotifyOnly {
-					msg := job.Result.Summary
-					if msg == "" {
-						msg = fmt.Sprintf("Hook %s finished with status %s", job.Hook.Name, job.Result.Status)
-					}
-					a.emitToTUI(ToastEvent{
-						Message: msg,
-						Level:   hookToastLevel(job.Result),
-					})
-				}
-			}
-		}
-		if a.turn.activeToolBatchCancel != nil {
-			a.turn.activeToolBatchCancel()
-			a.turn.activeToolBatchCancel = nil
-		}
-		a.turn.CompletedToolCalls = nil
-		a.turn.ChangedFiles = nil
-
-		// If PlanComplete was deferred, finalize it now that all sibling
-		// tools have finished.
+	if remaining == 0 {
+		a.turn.TotalToolCalls.Store(0)
+		a.turn.activeToolBatchCancel = nil
 		if a.pendingHandoff != nil {
 			pc := a.pendingHandoff
 			a.pendingHandoff = nil
-
 			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v", pc.PlanPath)
-
 			a.lastPlanPath = pc.PlanPath
-
-			// Notify TUI to prompt the user to select a target agent.
-			// The TUI will call ExecutePlan(planPath, agentName) with the chosen agent,
-			// or do nothing if the user cancels.
-			a.emitToTUI(HandoffEvent{
-				PlanPath: pc.PlanPath,
-			})
+			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath})
 			return
 		}
 		if a.pendingLoopExitResult != nil {
@@ -360,7 +293,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				resp, err := a.awaitLoopExitConfirmation(a.turn.Ctx, pending)
 				if err != nil {
 					log.Warnf("loop exit confirmation failed error=%v", err)
-					a.appendLoopContinuationAndContinue("Done rejected: exit confirmation failed, continue the loop and keep working.")
+					a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, "Done rejected: exit confirmation failed. Continue the loop and keep working.")
 				} else if resp.Approved {
 					a.loopState.State = LoopStateCompleted
 					a.emitLoopStateChanged()
@@ -371,26 +304,22 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					a.setIdleAndDrainPending()
 					return
 				} else {
-					a.appendLoopContinuationAndContinue("Done rejected: user chose to keep the loop running. Continue working toward the current loop target.")
+					reason := normalizeDenyReason(resp.DenyReason)
+					if reason == "" {
+						reason = "User rejected loop exit and requires more work before Done."
+					}
+					a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, "Done rejected: "+reason)
 				}
 			} else {
-				a.appendLoopContinuationAndContinue(a.loopExitRejectionToolResult())
+				a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult())
 			}
 		}
 
 		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)
-
-		// Let urgent/decision mailbox updates join the next automatic main-agent
-		// continuation once the current tool batch has fully settled.
 		a.prepareSubAgentMailboxBatchForTurnContinuation()
-
-		// Merge any user messages queued while tools were running into this round
-		// so the model sees tool results and new user input in one request.
 		a.processPendingUserMessagesBeforeLLMInTurn()
-
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx
-		// Pre-request gate (durable compaction) runs inside beginMainLLMAfterPreparation.
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 	}
 }
