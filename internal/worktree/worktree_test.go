@@ -356,7 +356,7 @@ func TestRemove_RefusesCwdSelf(t *testing.T) {
 	}
 }
 
-func TestFinish_Basic_RebaseMergeAndReclaim(t *testing.T) {
+func TestFinish_Basic_MergesOntoThenSquashesAndReclaims(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -364,12 +364,26 @@ func TestFinish_Basic_RebaseMergeAndReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Create a commit on the worktree branch.
+
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("from main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "shared.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main adds shared")
+
 	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runTestGit(t, info.Path, "add", "extra.txt")
-	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit 1")
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit 2")
+
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	branchHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
 
 	if err := Finish(ctx, repo, "feat", FinishOptions{}, pl); err != nil {
 		t.Fatalf("Finish: %v", err)
@@ -377,18 +391,256 @@ func TestFinish_Basic_RebaseMergeAndReclaim(t *testing.T) {
 	if _, err := os.Stat(info.Path); err == nil {
 		t.Errorf("worktree dir still exists after Finish")
 	}
-	// Worktree branch should be deleted after successful finish.
 	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
 	if strings.Contains(string(branches), "chord/feat") {
 		t.Errorf("branch chord/feat still present after Finish: %s", branches)
 	}
-	// Main branch must contain the committed file.
 	if _, err := os.Stat(filepath.Join(repo, "extra.txt")); err != nil {
 		t.Errorf("expected extra.txt in main repo after Finish: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(repo, "shared.txt")); err != nil {
+		t.Errorf("expected shared.txt in main repo after Finish: %v", err)
+	}
+
+	afterMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if afterMain == branchHead {
+		t.Fatalf("main HEAD unexpectedly equals original worktree HEAD; wanted a new squashed commit")
+	}
+	parents := strings.Fields(strings.TrimSpace(string(mustRunGit(t, repo, "rev-list", "--parents", "-n", "1", afterMain))))
+	if len(parents) != 2 {
+		t.Fatalf("squashed commit should have exactly one parent, got %v", parents)
+	}
+	if parents[1] != beforeMain {
+		t.Fatalf("squashed commit parent = %s, want previous main HEAD %s", parents[1], beforeMain)
+	}
+	body := string(mustRunGit(t, repo, "show", "-s", "--format=%B", afterMain))
+	if !strings.Contains(body, "worktree commit 1") || !strings.Contains(body, "worktree commit 2") {
+		t.Fatalf("squashed commit message did not preserve squash message contents:\n%s", body)
+	}
 }
 
-func TestFinish_RefusesDirtyWorktreeWithoutForce(t *testing.T) {
+func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit 1")
+	runTestGit(t, info.Path, "commit", "--allow-empty", "-q", "-m", "worktree commit 2")
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{Message: "feat: custom finish"}, pl); err != nil {
+		t.Fatalf("Finish with custom message: %v", err)
+	}
+	body := string(mustRunGit(t, repo, "show", "-s", "--format=%B", "HEAD"))
+	if strings.TrimSpace(body) != "feat: custom finish" {
+		t.Fatalf("unexpected finish commit message: %q", body)
+	}
+}
+
+func TestFinish_RefusesExistingRebaseInProgress(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rebaseDir, err := runGitText(ctx, info.Path, "rev-parse", "--git-path", "rebase-merge")
+	if err != nil {
+		t.Fatalf("rev-parse rebase-merge: %v", err)
+	}
+	if err := os.MkdirAll(resolveGitPath(info.Path, rebaseDir), 0o755); err != nil {
+		t.Fatalf("mkdir rebase-merge: %v", err)
+	}
+
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil || !strings.Contains(err.Error(), "already has a rebase in progress") {
+		t.Fatalf("expected rebase-in-progress refusal, got %v", err)
+	}
+}
+
+func TestFinish_RefusesExistingMergeInProgress(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mergeHead, err := runGitText(ctx, info.Path, "rev-parse", "--git-path", "MERGE_HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse MERGE_HEAD: %v", err)
+	}
+	if err := os.WriteFile(resolveGitPath(info.Path, mergeHead), []byte("deadbeef\n"), 0o644); err != nil {
+		t.Fatalf("write MERGE_HEAD: %v", err)
+	}
+
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil || !strings.Contains(err.Error(), "already has a merge in progress") {
+		t.Fatalf("expected merge-in-progress refusal, got %v", err)
+	}
+}
+
+func TestFinish_CheckDoesNotRequireCommitIdentity(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	oldAuthorName, hadAuthorName := os.LookupEnv("GIT_AUTHOR_NAME")
+	oldAuthorEmail, hadAuthorEmail := os.LookupEnv("GIT_AUTHOR_EMAIL")
+	oldCommitterName, hadCommitterName := os.LookupEnv("GIT_COMMITTER_NAME")
+	oldCommitterEmail, hadCommitterEmail := os.LookupEnv("GIT_COMMITTER_EMAIL")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
+	defer func() {
+		if hadAuthorName {
+			_ = os.Setenv("GIT_AUTHOR_NAME", oldAuthorName)
+		}
+		if hadAuthorEmail {
+			_ = os.Setenv("GIT_AUTHOR_EMAIL", oldAuthorEmail)
+		}
+		if hadCommitterName {
+			_ = os.Setenv("GIT_COMMITTER_NAME", oldCommitterName)
+		}
+		if hadCommitterEmail {
+			_ = os.Setenv("GIT_COMMITTER_EMAIL", oldCommitterEmail)
+		}
+	}()
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{Check: true}, pl); err != nil {
+		t.Fatalf("Finish --check without identity: %v", err)
+	}
+}
+
+func TestFinish_ReportsMissingCommitIdentity(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+	beforeHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+
+	oldEnv := map[string]struct {
+		value string
+		ok    bool
+	}{}
+	for _, key := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+		"HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+		"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+	} {
+		value, ok := os.LookupEnv(key)
+		oldEnv[key] = struct {
+			value string
+			ok    bool
+		}{value: value, ok: ok}
+	}
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
+	if err := os.Setenv("HOME", t.TempDir()); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull); err != nil {
+		t.Fatalf("set GIT_CONFIG_GLOBAL: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull); err != nil {
+		t.Fatalf("set GIT_CONFIG_SYSTEM: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_COUNT", "1"); err != nil {
+		t.Fatalf("set GIT_CONFIG_COUNT: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly"); err != nil {
+		t.Fatalf("set GIT_CONFIG_KEY_0: %v", err)
+	}
+	if err := os.Setenv("GIT_CONFIG_VALUE_0", "true"); err != nil {
+		t.Fatalf("set GIT_CONFIG_VALUE_0: %v", err)
+	}
+	defer func() {
+		for key, prev := range oldEnv {
+			if prev.ok {
+				_ = os.Setenv(key, prev.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+
+	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil {
+		t.Fatal("expected missing identity error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "requires git author/committer identity") || !strings.Contains(msg, "user.name") || !strings.Contains(msg, "user.email") {
+		t.Fatalf("unexpected missing identity error: %v", err)
+	}
+	afterHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+	if beforeHead != afterHead {
+		t.Fatalf("worktree HEAD changed despite missing identity: before=%s after=%s", beforeHead, afterHead)
+	}
+	if _, ok, merr := detectMergeInProgress(ctx, info.Path); merr != nil {
+		t.Fatalf("detectMergeInProgress: %v", merr)
+	} else if ok {
+		t.Fatal("real worktree left in merge state despite missing identity")
+	}
+	status := strings.TrimSpace(string(mustRunGit(t, info.Path, "status", "--short")))
+	if status != "" {
+		t.Fatalf("real worktree became dirty despite missing identity: %s", status)
+	}
+}
+
+func TestFinish_NoNetTreeDiff_ReclaimsWithoutChangingMain(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	runTestGit(t, info.Path, "commit", "--allow-empty", "-q", "-m", "empty history-only commit")
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{}, pl); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	afterMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if beforeMain != afterMain {
+		t.Fatalf("main HEAD changed for same-tree finish: before=%s after=%s", beforeMain, afterMain)
+	}
+}
+
+func TestFinish_RefusesDirtyWorktree(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -405,6 +657,22 @@ func TestFinish_RefusesDirtyWorktreeWithoutForce(t *testing.T) {
 	}
 	if _, err := os.Stat(info.Path); err != nil {
 		t.Errorf("worktree dir missing after refused Finish: %v", err)
+	}
+}
+
+func TestFinish_RefusesDirtyMainRepo(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	if _, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "dirty-main.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Finish(ctx, repo, "feat", FinishOptions{}, pl)
+	if err == nil || !strings.Contains(err.Error(), "main repository has uncommitted changes") {
+		t.Fatalf("expected dirty main refusal, got %v", err)
 	}
 }
 
@@ -432,7 +700,7 @@ func TestFinish_CheckAllowsNilPathLocator(t *testing.T) {
 	}
 }
 
-func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
+func TestFinish_MergeConflictError_LeavesWorktreeForResolution(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -441,8 +709,6 @@ func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create an add/add conflict: the worktree will add a file that the main
-	// branch also adds independently.
 	if err := os.WriteFile(filepath.Join(repo, "clash.txt"), []byte("main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -457,23 +723,39 @@ func TestFinish_RebaseConflictError_IncludesResolutionHints(t *testing.T) {
 
 	err = Finish(ctx, repo, "feat", FinishOptions{}, pl)
 	if err == nil {
-		t.Fatalf("expected rebase conflict error, got nil")
+		t.Fatalf("expected merge conflict error, got nil")
 	}
 	msg := err.Error()
 	for _, want := range []string{
-		"git rebase --show-current-patch",
-		"git rebase --skip",
-		"git rebase --continue",
-		"git rebase --abort",
+		"would conflict",
+		"Conflicted files:",
+		"clash.txt",
+		"The target branch was left unchanged.",
+		"git status",
 		"chord worktree finish feat",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error message missing %q:\n%s", want, msg)
 		}
 	}
+	if _, ok, merr := detectMergeInProgress(ctx, info.Path); merr != nil {
+		t.Fatalf("detectMergeInProgress: %v", merr)
+	} else if !ok {
+		t.Fatalf("real worktree should be left in merge state for resolution")
+	}
+	if dir, ok, derr := detectRebaseInProgress(ctx, info.Path); derr != nil {
+		t.Fatalf("detectRebaseInProgress: %v", derr)
+	} else if ok {
+		t.Fatalf("real worktree unexpectedly left in rebase state: %s", dir)
+	}
+	mainHead := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	mergeHead := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "HEAD")))
+	if mainHead != mergeHead {
+		t.Fatalf("target branch moved despite conflict: main=%s head=%s", mainHead, mergeHead)
+	}
 }
 
-func TestFinish_Check_SucceedsWithoutMutatingWorktree(t *testing.T) {
+func TestFinish_Check_SucceedsWithoutMutatingRealWorktree(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -481,6 +763,11 @@ func TestFinish_Check_SucceedsWithoutMutatingWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("from main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "shared.txt")
+	runTestGit(t, repo, "commit", "-q", "-m", "main adds shared")
 	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -488,12 +775,17 @@ func TestFinish_Check_SucceedsWithoutMutatingWorktree(t *testing.T) {
 	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
 
 	beforeHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
 	if err := Finish(ctx, repo, "feat", FinishOptions{Check: true}, pl); err != nil {
 		t.Fatalf("Finish --check: %v", err)
 	}
 	afterHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD")))
 	if beforeHead != afterHead {
 		t.Fatalf("worktree HEAD changed during check: before=%s after=%s", beforeHead, afterHead)
+	}
+	afterMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if beforeMain != afterMain {
+		t.Fatalf("target branch HEAD changed during check: before=%s after=%s", beforeMain, afterMain)
 	}
 	if _, err := os.Stat(info.Path); err != nil {
 		t.Fatalf("worktree missing after check: %v", err)
@@ -502,13 +794,55 @@ func TestFinish_Check_SucceedsWithoutMutatingWorktree(t *testing.T) {
 	if status != "" {
 		t.Fatalf("worktree became dirty after check: %s", status)
 	}
+	if _, ok, merr := detectMergeInProgress(ctx, info.Path); merr != nil {
+		t.Fatalf("detectMergeInProgress: %v", merr)
+	} else if ok {
+		t.Fatalf("real worktree left in merge state after check")
+	}
 	branches := string(mustRunGit(t, repo, "branch", "--list", "chord/feat"))
 	if !strings.Contains(branches, "chord/feat") {
 		t.Fatalf("worktree branch missing after check: %s", branches)
 	}
 }
 
-func TestFinish_Check_ReportsConflictsWithoutLeavingRebaseState(t *testing.T) {
+func TestFinish_NoNetDiff_ReclaimsWithoutChangingMain(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree adds extra")
+	if err := os.Remove(filepath.Join(info.Path, "extra.txt")); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "-A")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree removes extra")
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{}, pl); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if _, err := os.Stat(info.Path); err == nil {
+		t.Fatalf("worktree dir still exists after Finish")
+	}
+	branches := string(mustRunGit(t, repo, "branch", "--list", "chord/feat"))
+	if strings.Contains(branches, "chord/feat") {
+		t.Fatalf("branch chord/feat still present after Finish: %s", branches)
+	}
+	afterMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if beforeMain != afterMain {
+		t.Fatalf("main HEAD changed for no-net-diff finish: before=%s after=%s", beforeMain, afterMain)
+	}
+}
+
+func TestFinish_Check_ReportsConflictsWithoutLeavingRealWorktreeDirty(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -538,7 +872,8 @@ func TestFinish_Check_ReportsConflictsWithoutLeavingRebaseState(t *testing.T) {
 		"would conflict",
 		"Conflicted files:",
 		"clash.txt",
-		"No changes were made to the real worktree or branch.",
+		"No changes were made to the real worktree, branch, or target branch.",
+		"git merge main",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("check error missing %q:\n%s", want, msg)
@@ -548,6 +883,11 @@ func TestFinish_Check_ReportsConflictsWithoutLeavingRebaseState(t *testing.T) {
 		t.Fatalf("detectRebaseInProgress: %v", derr)
 	} else if ok {
 		t.Fatalf("real worktree left in rebase state: %s", dir)
+	}
+	if _, ok, merr := detectMergeInProgress(ctx, info.Path); merr != nil {
+		t.Fatalf("detectMergeInProgress: %v", merr)
+	} else if ok {
+		t.Fatalf("real worktree left in merge state after failed check")
 	}
 	status := strings.TrimSpace(string(mustRunGit(t, info.Path, "status", "--short")))
 	if status != "" {

@@ -24,7 +24,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
 | `chord worktree remove <name>`   | Remove a chord-managed worktree                                  |
-| `chord worktree finish <name>`   | Rebase a worktree branch onto main, fast-forward, then remove    |
+| `chord worktree finish <name>`   | Squash a worktree branch into the target branch, fast-forward, then remove |
 | `chord resume <session-id>`      | Resume a session by ID, auto-locating its worktree               |
 | `chord import <source> [file]`   | Import an external session into Chord's session store            |
 
@@ -258,19 +258,23 @@ Delete the worktree directory and its sessions, cache, and exports. The branch i
 
 ### `chord worktree finish <name>`
 
-Rebase the worktree branch onto the main line, fast-forward that main branch to include it, then remove the worktree and delete its branch.
+Merge the target branch into the real worktree branch first, then squash the finished worktree state back onto that target branch as a single commit, fast-forward that target branch to include the squashed result, and finally remove the worktree and delete its branch.
 
-| Flag             | Description                                                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--onto <branch>`| Target main branch to rebase onto and fast-forward (default: the main worktree's current branch)                            |
-| `--force`        | Relax clean-tree checks; pass `--autostash` to git rebase; force-delete the branch when reclaiming                          |
-| `--check`        | Preview whether the rebase would succeed cleanly in a temporary worktree without mutating the real worktree or branch       |
+| Flag               | Description                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--onto <branch>`  | Target branch to merge into the worktree and squash back onto (default: the main worktree's current branch)                      |
+| `--check`          | Preview whether the target branch can merge cleanly into the worktree in a temporary worktree without mutating the real worktree or target branch |
+| `-m, --message <message>` | Override the generated squash commit message for the final finish commit                                                     |
 
-If a rebase hits conflicts, `finish` exits with explicit recovery hints (`git status`, `git rebase --show-current-patch`, then choose `--skip` / `--continue` / `--abort`) and keeps the worktree and branch so you can resolve and re-run.
+If merging the target branch into the worktree would hit conflicts, `finish` exits with conflict details, keeps the target branch unchanged, and leaves the real worktree in that merge for you to resolve and re-run.
 
-If a rebase is already in progress in the worktree, `finish` exits early instead of starting another rebase.
+If a rebase or merge is already in progress in the worktree, `finish` exits early instead of starting another merge on top of it.
 
-Use `--check` when you want a conflict preflight without leaving the real worktree in a half-rebased state.
+Use `--check` when you want a conflict preflight without mutating the real worktree, branch, or target branch.
+
+Pass `-m/--message` when you want to override the generated squash message with a final commit message you wrote yourself.
+
+A real `finish` that needs to create the squashed commit also requires git commit identity (`user.name` / `user.email`, or `GIT_AUTHOR_*` / `GIT_COMMITTER_*`). `--check` does not require commit identity because it stops after the merge preflight.
 
 ### Examples
 
@@ -278,6 +282,7 @@ Use `--check` when you want a conflict preflight without leaving the real worktr
 chord worktree list
 chord worktree remove feat-old --delete-branch
 chord worktree finish feat-auth --onto main
+chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 ```
 
 ## `chord resume <session-id>`

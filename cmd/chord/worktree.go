@@ -220,16 +220,16 @@ func newWorktreeRemoveCmd() *cobra.Command {
 	return cmd
 }
 
-// newWorktreeFinishCmd rebases a worktree branch onto the main line,
-// fast-forwards the main line to include it, then reclaims the worktree
-// and deletes its branch.
+// newWorktreeFinishCmd merges the target branch into the worktree, squashes the
+// finished worktree back onto the target branch as one commit, then reclaims the
+// worktree and deletes its branch.
 func newWorktreeFinishCmd() *cobra.Command {
 	var onto string
-	var force bool
 	var check bool
+	var message string
 	cmd := &cobra.Command{
 		Use:           "finish <name>",
-		Short:         "Rebase a worktree back onto the main line, then remove the worktree and its branch",
+		Short:         "Merge the target branch into the worktree, squash it back as one commit, then remove the worktree and its branch",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -263,14 +263,14 @@ func newWorktreeFinishCmd() *cobra.Command {
 					}
 				}
 			}
-			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Force: force, Check: check, BranchPrefix: branchPrefix}, pl); err != nil {
+			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Check: check, Message: message, BranchPrefix: branchPrefix}, pl); err != nil {
 				return err
 			}
 			if check {
 				if ontoUsed != "" {
-					fmt.Fprintf(os.Stdout, "Worktree %s can finish cleanly into %s\n", name, ontoUsed)
+					fmt.Fprintf(os.Stdout, "Worktree %s can merge %s cleanly and finish cleanly\n", name, ontoUsed)
 				} else {
-					fmt.Fprintf(os.Stdout, "Worktree %s can finish cleanly\n", name)
+					fmt.Fprintf(os.Stdout, "Worktree %s can merge its target branch cleanly and finish cleanly\n", name)
 				}
 				return nil
 			}
@@ -282,8 +282,8 @@ func newWorktreeFinishCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&onto, "onto", "", "target main branch to rebase onto and fast-forward (default: main worktree's current branch)")
-	cmd.Flags().BoolVar(&force, "force", false, "relax clean-tree checks; use git rebase --autostash; force-delete branch when reclaiming")
-	cmd.Flags().BoolVar(&check, "check", false, "preview whether finish can rebase cleanly without mutating the real worktree")
+	cmd.Flags().StringVar(&onto, "onto", "", "target branch to merge into the worktree and squash back onto (default: main worktree's current branch)")
+	cmd.Flags().BoolVar(&check, "check", false, "preview whether the target branch can merge cleanly into the worktree in a temporary worktree without mutating the real worktree or target branch")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "override the generated squash commit message")
 	return cmd
 }

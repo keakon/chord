@@ -24,7 +24,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
 | `chord worktree remove <name>`    | 移除 chord 管理的 worktree                                        |
-| `chord worktree finish <name>`    | 把 worktree 分支 rebase 回主线、fast-forward，然后删除 worktree   |
+| `chord worktree finish <name>`    | 先将 worktree 状态 squash 回目标分支，再 fast-forward 并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord                                       |
 
@@ -258,19 +258,23 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 
 ### `chord worktree finish <name>`
 
-将 worktree 分支 rebase 到主线、fast-forward 主分支，然后删除 worktree 与分支。
+先把目标分支合并进真实 worktree 分支，再将完成后的 worktree 状态以单个 squash commit 合回该目标分支，随后 fast-forward 该目标分支，并删除 worktree 与分支。
 
-| Flag             | 说明                                                                                                                  |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `--onto <分支>`  | 目标主分支（默认主 worktree 当前分支）                                                                                |
-| `--force`        | 放宽 clean-tree 检查；用 `git rebase --autostash`；回收时强删分支                                                     |
-| `--check`        | 在临时 worktree 里预检 rebase 是否能干净通过，不改动真实 worktree 和分支                                              |
+| Flag                     | 说明                                                                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--onto <分支>`          | 要先合入 worktree、再 squash 回去的目标分支（默认主 worktree 当前分支）                                                           |
+| `--check`                | 在临时 worktree 中预检“目标分支能否干净合入 worktree”，不改动真实 worktree 或目标分支                                             |
+| `-m, --message <message>` | 覆盖自动生成的 squash commit message，手动指定最终 finish commit 的说明                                                           |
 
-rebase 出现冲突时，`finish` 会打印恢复指引（`git status`、`git rebase --show-current-patch`，再根据情况选择 `--skip` / `--continue` / `--abort`），同时保留 worktree 与分支，让你解决冲突后重跑。
+如果把目标分支合并进 worktree 时会冲突，`finish` 会打印冲突详情，保持目标分支不变，并把真实 worktree 保留在这次 merge 中，供你解决后重跑。
 
-worktree 内已有进行中的 rebase 时，`finish` 直接退出，提示先完成已有 rebase。
+如果 worktree 内已经有进行中的 rebase 或 merge，`finish` 会直接退出，避免叠加新的合并流程。
 
-只想提前判断会不会冲突、又不想把真实 worktree 留在半个 rebase 状态时，用 `--check`。
+只想提前判断会不会冲突、又不想改动真实 worktree / 分支 / 目标分支时，用 `--check`。
+
+想手动控制最终 squash commit 的说明时，用 `-m/--message` 覆盖自动生成的 message。
+
+真正执行 `finish` 且需要生成 squash commit 时，还要求本地 git commit identity 可用（`user.name` / `user.email`，或 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`）。`--check` 只做到 merge 预检，因此不依赖 commit identity。
 
 ### 示例
 
@@ -278,6 +282,7 @@ worktree 内已有进行中的 rebase 时，`finish` 直接退出，提示先完
 chord worktree list
 chord worktree remove feat-old --delete-branch
 chord worktree finish feat-auth --onto main
+chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 ```
 
 ## `chord resume <session-id>`

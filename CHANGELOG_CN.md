@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
 - Config：更新内置 `planner` / `builder` 默认权限。`builder` 现在采用放行基线，因此大多数工具调用不再询问权限；仅 `Delete` 仍需确认，`Handoff` / `Delegate` 继续拒绝。`planner` 现在可直接使用 `Shell`。
 - TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
 - CLI：`chord cleanup` 现在在 `status` 和实际清理/预览输出中，都用人类可读的 1024 进制短单位（`B`、`KB`、`MB`、`GB` 等）显示体积，不再只输出原始 byte 数。
