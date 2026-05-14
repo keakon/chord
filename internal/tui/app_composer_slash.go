@@ -201,7 +201,7 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 	prefix := strings.ToLower(input)
 	var out []slashCommand
 	loopCommands := []slashCommand{}
-	if m.focusedAgentID == "" && strings.HasPrefix("/loop", prefix) {
+	if m.focusedAgentID == "" && strings.HasPrefix("/loop", prefix) && (m.agent == nil || m.agent.CanUseLoopMode()) {
 		if m.agent == nil || m.agent.CurrentLoopState() == "" {
 			loopCommands = append(loopCommands, slashCommand{Cmd: "/loop on", Desc: "enable loop mode"})
 		} else {

@@ -1167,6 +1167,20 @@ func TestSlashCompletionHidesLoopCommandsWhenSubAgentFocused(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionHidesLoopCommandsWhenLoopUnavailable(t *testing.T) {
+	backend := &sessionControlAgent{canUseLoopSet: true, canUseLoop: false}
+	m := NewModel(backend)
+	matches := m.getSlashCompletions("/l")
+	joined := make([]string, 0, len(matches))
+	for _, item := range matches {
+		joined = append(joined, item.Cmd)
+	}
+	got := strings.Join(joined, "\n")
+	if strings.Contains(got, "/loop on") || strings.Contains(got, "/loop off") {
+		t.Fatalf("slash completions = %q, should hide /loop commands when Done is unavailable", got)
+	}
+}
+
 func TestSlashCompletionShowsLoopCommandsForPrefixL(t *testing.T) {
 	m := NewModel(nil)
 	matches := m.getSlashCompletions("/l")

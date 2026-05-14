@@ -188,6 +188,14 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		// Fall through: record the tool result, decrement counter, and check
 		// completion below — do NOT return early.
 	}
+	if payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled {
+		assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID)
+		assistantContent := ""
+		if ok {
+			assistantContent = assistantMsg.Content
+		}
+		a.pendingLoopExitResult = &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON}
+	}
 
 	// Emit to TUI.
 	a.emitToTUI(ToolResultEvent{
@@ -238,17 +246,10 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	if isVerificationLikeToolResult(payload, contextResult) {
 		a.loopState.markVerificationProgress()
 	}
-	if payload.Name == tools.NameQuestion && a.loopState.Enabled {
-		if assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID); ok {
-			if spec, ok := a.loopCompletionFollowUpQuestion(assistantMsg); ok && spec.QuestionCallID == payload.CallID {
-				a.loopState.State = LoopStateCompleted
-				a.emitLoopStateChanged()
-				a.emitToTUI(InfoEvent{Message: "Loop completed: " + spec.DoneReason})
-				a.loopState.disable()
-				a.emitLoopStateChanged()
-				a.refreshSystemPrompt()
-			}
-		}
+	if payload.Name == tools.NameDone && a.loopState.Enabled {
+		// Done requests are handled after the current tool batch settles so the
+		// runtime can decide whether exit conditions are actually satisfied.
+		// The pendingLoopExitResult gate below performs the confirm/reject flow.
 	}
 
 	// Decrement pending counter and track malformed args across rounds
@@ -356,6 +357,30 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				PlanPath: pc.PlanPath,
 			})
 			return
+		}
+		if a.pendingLoopExitResult != nil {
+			pending := a.pendingLoopExitResult
+			a.pendingLoopExitResult = nil
+			if a.loopExitConditionsSatisfied(pending.AssistantContent) {
+				resp, err := a.awaitLoopExitConfirmation(a.turn.Ctx, pending)
+				if err != nil {
+					log.Warnf("loop exit confirmation failed error=%v", err)
+					a.appendToolResultAndContinue("Done rejected: exit confirmation failed, continue the loop and keep working.")
+				} else if resp.Approved {
+					a.loopState.State = LoopStateCompleted
+					a.emitLoopStateChanged()
+					a.loopState.disable()
+					a.refreshSystemPrompt()
+					a.emitLoopStateChanged()
+					a.emitActivity("main", ActivityIdle, "")
+					a.setIdleAndDrainPending()
+					return
+				} else {
+					a.appendToolResultAndContinue("Done rejected: user chose to keep the loop running. Continue working toward the current loop target.")
+				}
+			} else {
+				a.appendToolResultAndContinue(a.loopExitRejectionToolResult())
+			}
 		}
 
 		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)

@@ -105,6 +105,7 @@ type openAIRequest struct {
 	Model               string               `json:"model"`
 	Messages            []openAIMessage      `json:"messages"`
 	Tools               []openAITool         `json:"tools,omitempty"`
+	ToolChoice          string               `json:"tool_choice,omitempty"`
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	Stream              bool                 `json:"stream"`
@@ -234,6 +235,9 @@ func (o *OpenAIProvider) CompleteStream(
 		Messages: apiMessages,
 		Tools:    apiTools,
 		Stream:   true,
+	}
+	if ot.ToolChoice != "" {
+		reqBody.ToolChoice = ot.ToolChoice
 	}
 	// Request usage stats in the final streaming chunk.
 	// Without this, OpenAI-compatible APIs never populate chunk.Usage

@@ -397,12 +397,31 @@ func (m *Model) repeatNormalBoundary(dir, count int) tea.Cmd {
 		return m.refreshInlineImagesIfViewportMoved(prevOffset)
 	}
 	for range count {
+		before := m.viewport.offset
 		if dir > 0 {
 			m.viewport.NextMessageBoundary()
 		} else {
 			m.viewport.PrevMessageBoundary()
 		}
-		m.setFocusedBlockFromViewport()
+		if m.viewport.offset != before {
+			m.setFocusedBlockFromViewport()
+			continue
+		}
+		blocks := m.viewport.visibleBlocks()
+		if len(blocks) == 0 {
+			m.focusedBlockID = -1
+			m.refreshBlockFocus()
+			continue
+		}
+		current := -1
+		if dir > 0 {
+			current = blocks[0].ID
+		} else {
+			current = blocks[len(blocks)-1].ID
+		}
+		nextID := focusNextSelectableBlockID(blocks, current, dir)
+		m.focusedBlockID = nextID
+		m.refreshBlockFocus()
 	}
 	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }

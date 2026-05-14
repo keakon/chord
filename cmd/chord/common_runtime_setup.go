@@ -62,6 +62,7 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 	reg.Register(tools.NewQuestionTool(func(ctx context.Context, questions []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
 		return mainAgent.AskQuestions(ctx, questions, confirmTimeout)
 	}))
+	reg.Register(tools.NewDoneTool())
 
 	go mainAgent.Run(ctx)
 }

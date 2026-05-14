@@ -177,7 +177,9 @@ Each rule shows its scope (`session` / `project` / `global`) and on-disk file pa
 
 ### `/loop` — continuous execution mode
 
-Continuous execution mode keeps the agent working after each task completes without you having to nudge it. Suitable for one-shot instructions like "implement feature X" — you send one message and the agent iterates, verifies, and pushes through until the work is done or genuinely blocked.
+Continuous execution mode keeps the agent working after each round without you having to nudge it. Suitable for one-shot instructions like "implement feature X" — you send one message and the agent iterates, verifies, and pushes through until the work is done, genuinely blocked, or you explicitly confirm exit.
+
+`/loop` is available only when the current MainAgent role can use the `Done` tool. If `Done` is denied or hidden for that role, `/loop` is unavailable.
 
 Enabling:
 
@@ -195,9 +197,11 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 1. **executing**: carrying out the task, calling tools to do real work
 2. **assessing**: evaluating current progress, deciding the next step
 3. **verifying**: running checks (tests, lint, etc.)
-4. **continue or stop**: based on the assessment, choose `continue`, `verify`, `completed`, or `blocked`
+4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `Done` tool
 
-The agent reports completion via `<done>` tags and blocking reasons via `<blocked>` tags. You can always press `Esc` to cancel the current iteration.
+When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
+
+If the task is genuinely blocked, the agent can still report `<blocked>category: reason</blocked>`. You can always press `Esc` to cancel the current iteration.
 
 **Status bar:** when enabled, the TUI status bar shows a `[↻]` marker.
 

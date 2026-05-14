@@ -63,6 +63,7 @@ func (loopBusyAgentStub) CurrentLoopState() agent.LoopState                     
 func (loopBusyAgentStub) CurrentLoopTarget() string                                 { return "current task" }
 func (loopBusyAgentStub) CurrentLoopIteration() int                                 { return 1 }
 func (loopBusyAgentStub) CurrentLoopMaxIterations() int                             { return 10 }
+func (loopBusyAgentStub) CanUseLoopMode() bool                                      { return true }
 func (loopBusyAgentStub) EnableLoopMode(string)                                     {}
 func (loopBusyAgentStub) DisableLoopMode()                                          {}
 func (loopBusyAgentStub) ListSessionSummaries() ([]agent.SessionSummary, error)     { return nil, nil }

@@ -728,7 +728,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Instructions:       req.Instructions,
 		Input:              wireInput,
 		Tools:              req.Tools,
-		ToolChoice:         "auto",
+		ToolChoice:         req.ToolChoice,
 		ParallelToolCalls:  cloneBoolPtr(req.ParallelToolCalls),
 		Stream:             true,
 		Include:            []any{},

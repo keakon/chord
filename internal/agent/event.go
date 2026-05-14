@@ -114,6 +114,14 @@ type HandoffResult struct {
 	PlanPath string
 }
 
+type loopExitResult struct {
+	CallID           string
+	Reason           string
+	AssistantContent string
+	TurnID           uint64
+	ArgsJSON         string
+}
+
 type SubAgentStateChangedPayload struct {
 	State   SubAgentState
 	Summary string

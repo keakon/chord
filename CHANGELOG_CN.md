@@ -9,7 +9,7 @@
 - TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
 - CLI：`chord cleanup` 现在在 `status` 和实际清理/预览输出中，都用人类可读的 1024 进制短单位（`B`、`KB`、`MB`、`GB` 等）显示体积，不再只输出原始 byte 数。
 - TUI：将焦点恢复后的 stale-display 保护扩展到 iTerm2。iTerm2 现在会启用与 Ghostty/cmux 相同的 `focus-resize freeze` / 整帧重放恢复路径，减少重新获焦后旧的 thinking 或工具卡内容视觉上残留到后续 assistant 正文里的情况。
-- TUI：修复恢复长会话后使用鼠标滚轮切到历史窗口时偶发的重复卡片。deferred transcript 模式下，隐藏尾部窗口中的工具/任务/状态卡现在会被原位更新，而不是在当前历史窗口里误追加一张重复卡片。
+- Runtime / Loop：loop 模式现在依赖新的 `Done` 工具作为唯一退出请求入口。开启 loop 时，如果当前角色无法使用 `Done`（例如被 `deny` 或不在可见工具表中），`/loop` 将不会补全也不会被接受；若 `Done` 配置为 `ask`，运行时会按 `allow` 处理，避免退出时再出现一层工具权限确认。支持的 OpenAI/Responses/Codex WS 请求在 loop 模式下会优先使用 request-level `tool_choice=required`，让模型尽量保持在 tool-call continuation 链上；当模型调用 `Done` 时，若退出条件未满足，runtime 会把拒绝结果作为 tool result 回给模型继续运行；若条件满足，则弹出本地确认框，由用户决定退出还是继续。
 ## 0.5.3 - 2026-05-11
 
 - Runtime / 文件安全：恢复或继续会话时，现在会重建持久化的 `Read` 文件状态；之后的 `Edit` / `Write` 仍保留“先读后写”保护，但不会再误要求所有文件都重新读取一遍。

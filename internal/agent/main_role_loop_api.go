@@ -129,6 +129,10 @@ func (a *MainAgent) CurrentLoopMaxIterations() int {
 	return a.loopState.MaxIterations
 }
 
+func (a *MainAgent) CanUseLoopMode() bool {
+	return a.doneToolAvailable()
+}
+
 func (a *MainAgent) emitLoopStateChanged() {
 	a.emitToTUI(LoopStateChangedEvent{})
 }
@@ -143,26 +147,15 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	a.persistAsync("main", msg)
 }
 
-func (a *MainAgent) loopCompletionQuestionRequired() bool {
-	return a.questionFollowUpAtEndEnabled() && a.questionToolAvailable()
-}
-
 func (a *MainAgent) loopCompletionRequirementLines() []string {
 	lines := []string{
 		"- All requested work is finished",
 		"- Required verification is completed, or explicitly reported as not run",
 		"- If verification is not run, include <verify-not-run>single-line reason</verify-not-run> in the terminal response",
-		"- If the task is blocked, use <blocked>category: reason</blocked> instead of <done>...</done>",
+		"- If the task is blocked, use <blocked>category: reason</blocked> instead of stopping the loop",
+		"- To request loop exit, call the `Done` tool; do not stop with only assistant text",
+		a.loopCompletionDecisionRequirementLine(),
 	}
-	if a.loopCompletionQuestionRequired() {
-		lines = append(lines,
-			"- When the task is complete, the final assistant response must include a <done>reason</done> tag and end with a `Question` tool call",
-			"- That final completion follow-up `Question` call must set `purpose` to `completion_follow_up`",
-		)
-	} else {
-		lines = append(lines, "- The final assistant message should include a <done>reason</done> tag when the task is complete")
-	}
-	lines = append(lines, a.loopCompletionDecisionRequirementLine())
 	if a.hasActiveSubAgents() {
 		lines = append(lines, "- Active subagents must finish before completion:")
 		for _, line := range a.activeSubAgentContinuationLines() {
@@ -189,21 +182,14 @@ func (a *MainAgent) loopCompletionRequirementLines() []string {
 }
 
 func (a *MainAgent) loopFinalCompletionResponseLines() []string {
-	lines := []string{
+	return []string{
 		"- Clearly state that the requested task is complete",
 		"- Summarize the completed work",
 		"- Report verification status explicitly",
 		"- If verification was not run, include <verify-not-run>reason</verify-not-run>",
-		"- Include a <done>reason</done> line in the final response",
+		"- Call the `Done` tool to request loop exit once those conditions are satisfied",
 		"- List any remaining limitations or unverified areas",
 	}
-	if a.loopCompletionQuestionRequired() {
-		lines = append(lines,
-			"- After that completion summary, call the `Question` tool as the final action in the turn",
-			"- Set `purpose` to `completion_follow_up` on that final `Question` call",
-		)
-	}
-	return lines
 }
 
 func (a *MainAgent) sendLoopAnchorFromCommand(target string) {

@@ -36,6 +36,7 @@ type OpenAITuning struct {
 	ReasoningSummary  string // "auto"|"concise"|"detailed" ("" = disabled)
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
 	ParallelToolCalls *bool  // nil = omit from request; non-nil = send explicit Responses API hint
+	ToolChoice        string // ""|"auto"|"required"
 }
 
 // RequestTuning bundles all provider-specific tuning parameters for a single

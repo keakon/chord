@@ -192,7 +192,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 For convenience, headless also accepts these via `send` so you can drive Chord from a chat surface that only has a single text input:
 
 - `/models status`, `/models <pool>`, `/models --agent <name> <pool>`
-- `/help`, `/stats`, `/compact`, `/loop on`, `/loop off`
+- `/help`, `/stats`, `/compact`, `/loop on`, `/loop off` (only when the active MainAgent role can use the `Done` tool)
 
 Bare `/models` is treated as `/models status`. Some slash commands are TUI-only (e.g. `/new`, `/resume` — they require an interactive picker); attempting them in headless mode returns an `error` envelope explaining "X is only available in local TUI mode".
 

@@ -124,6 +124,21 @@ func (a *MainAgent) questionToolAvailable() bool {
 	return true
 }
 
+func (a *MainAgent) doneToolAvailable() bool {
+	visible := a.mainLLMVisibleToolNames()
+	if len(visible) == 0 {
+		return false
+	}
+	if _, ok := visible[tools.NameDone]; !ok {
+		return false
+	}
+	ruleset := a.effectiveRuleset()
+	if len(ruleset) > 0 && normalizeToolPermissionAction(tools.NameDone, ruleset.Evaluate(tools.NameDone, "*")) == permission.ActionDeny {
+		return false
+	}
+	return true
+}
+
 func (a *MainAgent) completionFollowUpPromptBlock() string {
 	if a.loopState.Enabled {
 		return ""
@@ -142,7 +157,7 @@ func (a *MainAgent) completionFollowUpPromptBlock() string {
 - When this rule requires ` + "`Question`" + `, you must make a real ` + "`Question`" + ` tool call. Do not print JSON, code fences, XML tags, pseudo-tool syntax, or tool arguments in normal assistant text as a substitute.
 - After calling ` + "`Question`" + `, do not output any additional assistant text or run additional tools in this turn.
 - Keep the completion summary concise, then make that ` + "`Question`" + ` call as your last action before ending the turn.
-- Use the ` + "`Question`" + ` tool to ask whether the user wants another task. When you have clear, directly relevant follow-up suggestions, offer a small set of concrete next-step / improvement options plus free-text follow-up. When you do not have meaningful suggestions, only ask whether the user wants you to do anything else.
+- Use the ` + "`Question`" + ` tool to ask whether the user wants another task. When you have clear, directly relevant follow-up suggestions, offer a small set of concrete next-step / improvement options plus free-text follow-up. When you do not have meaningful suggestions, only ask whether you want you to do anything else.
 - If the user gives a new goal, continue with that work in the same ongoing session and use the same completion follow-up behavior again after that work is complete.
 - The mandatory ` + "`Question`" + ` tool follow-up overrides normal preferences against routine closing questions.
 - Do not use a plain-text closing question and do not rely on a later follow-up request to satisfy this rule; use the ` + "`Question`" + ` tool in the current turn instead.`)

@@ -250,6 +250,9 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	}
 	trigger := a.compactionTriggerForMainLLM()
 	if !trigger.needed() {
+		if a.loopState.Enabled {
+			a.applyLoopToolChoiceRequirement()
+		}
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}

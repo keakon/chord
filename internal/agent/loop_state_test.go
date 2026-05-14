@@ -32,86 +32,16 @@ func TestExtractLoopDoneReason(t *testing.T) {
 func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
-
-	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:       "assistant",
-		Content:    "finished\n<verify-not-run>no deterministic validation target in this run</verify-not-run>\n<done>implemented and verified</done>",
-		StopReason: "stop",
-	})
-	if assessment == nil {
-		t.Fatal("assessment = nil, want completed assessment")
-	}
-	if assessment.Action != LoopAssessmentActionCompleted {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
-	}
-	if assessment.Message != "Loop completed: implemented and verified" {
-		t.Fatalf("assessment.Message = %q, want done-tag completion message", assessment.Message)
-	}
-	if a.loopState.State != LoopStateAssessing {
-		t.Fatalf("loopState.State = %q, want %q", a.loopState.State, LoopStateAssessing)
-	}
-}
-
-func TestNextLoopAssessmentFromAssistantRequiresCompletionFollowUpQuestionWhenEnabled(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enable()
-	a.tools.Register(tools.NewQuestionTool(nil))
-	a.activeConfig = &config.AgentConfig{
-		QuestionFollowUpAtEnd: true,
-		Permission: parsePermissionNode(t, `
-"*": deny
-Question: allow
-`),
-	}
-	a.rebuildRuleset()
-
-	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:       "assistant",
-		Content:    "finished\n<verify-not-run>no deterministic validation target in this run</verify-not-run>\n<done>implemented and verified</done>",
-		StopReason: "stop",
-	})
-	if assessment == nil {
-		t.Fatal("assessment = nil, want continue assessment")
-	}
-	if assessment.Action != LoopAssessmentActionContinue {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
-	}
-	if !strings.Contains(assessment.Message, "final response must end with a `Question` tool call") {
-		t.Fatalf("assessment.Message = %q, want completion-follow-up Question guard", assessment.Message)
-	}
-	found := false
-	for _, reason := range assessment.Reasons {
-		if reason == "missing_completion_follow_up_question" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("assessment.Reasons = %v, want missing_completion_follow_up_question", assessment.Reasons)
-	}
-}
-
-func TestNextLoopAssessmentFromAssistantAcceptsCompletionFollowUpQuestionWhenEnabled(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enable()
-	a.tools.Register(tools.NewQuestionTool(nil))
-	a.activeConfig = &config.AgentConfig{
-		QuestionFollowUpAtEnd: true,
-		Permission: parsePermissionNode(t, `
-"*": deny
-Question: allow
-`),
-	}
-	a.rebuildRuleset()
 	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:    "assistant",
-		Content: "finished\n<verify-not-run>no deterministic validation target in this run</verify-not-run>\n<done>implemented and verified</done>",
+		Content: "implemented and verified",
 		ToolCalls: []message.ToolCall{{
-			ID:   "q1",
-			Name: tools.NameQuestion,
-			Args: json.RawMessage(`{"purpose":"completion_follow_up","questions":[{"header":"Next","question":"What next?","options":[]}]} `),
+			ID:   "done-1",
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"implemented and verified"}`),
 		}},
 		StopReason: "tool_calls",
 	})
@@ -121,20 +51,76 @@ Question: allow
 	if assessment.Action != LoopAssessmentActionCompleted {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
 	}
-	if assessment.Message != "Loop completed: implemented and verified" {
-		t.Fatalf("assessment.Message = %q, want done-tag completion message", assessment.Message)
+	if assessment.Message != "Loop exit requested: implemented and verified" {
+		t.Fatalf("assessment.Message = %q, want done-request message", assessment.Message)
+	}
+	if a.loopState.State != LoopStateAssessing {
+		t.Fatalf("loopState.State = %q, want %q", a.loopState.State, LoopStateAssessing)
 	}
 }
 
-func TestNextLoopAssessmentFromAssistantAllowsMultipleDoneTagsBeforeCompleted(t *testing.T) {
+func TestNextLoopAssessmentFromAssistantRequiresDoneToolWhenEnabled(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	a.loopState.markProgress()
+	a.loopState.enable()
+	a.loopState.markVerificationProgress()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
-		Content:    "done\n<verify-not-run>environment does not include the required fixture</verify-not-run>\n<done>first</done>\n<done>second</done>",
+		Content:    "finished",
 		StopReason: "stop",
+	})
+	if assessment == nil {
+		t.Fatal("assessment = nil, want continue assessment")
+	}
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
+	}
+	if !strings.Contains(assessment.Message, "Done") {
+		t.Fatalf("assessment.Message = %q, want Done guard", assessment.Message)
+	}
+	found := false
+	for _, reason := range assessment.Reasons {
+		if reason == "missing_done_tool" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("assessment.Reasons = %v, want missing_done_tool", assessment.Reasons)
+	}
+}
+
+func TestNextLoopAssessmentFromAssistantAcceptsDoneToolWhenEnabled(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enable()
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+
+	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
+		Role:    "assistant",
+		Content: "all good",
+		ToolCalls: []message.ToolCall{{
+			ID:   "done-1",
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"implemented and verified"}`),
+		}},
+		StopReason: "tool_calls",
 	})
 	if assessment == nil {
 		t.Fatal("assessment = nil, want completed assessment")
@@ -142,8 +128,35 @@ func TestNextLoopAssessmentFromAssistantAllowsMultipleDoneTagsBeforeCompleted(t 
 	if assessment.Action != LoopAssessmentActionCompleted {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
 	}
-	if assessment.Message != "Loop completed: second" {
-		t.Fatalf("assessment.Message = %q, want %q", assessment.Message, "Loop completed: second")
+	if assessment.Message != "Loop exit requested: all good" {
+		t.Fatalf("assessment.Message = %q, want exit-request message", assessment.Message)
+	}
+}
+
+func TestNextLoopAssessmentFromAssistantAllowsMultipleDoneTagsBeforeCompleted(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+
+	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
+		Role:    "assistant",
+		Content: "done",
+		ToolCalls: []message.ToolCall{{
+			ID:   "done-1",
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"second"}`),
+		}},
+		StopReason: "tool_calls",
+	})
+	if assessment == nil {
+		t.Fatal("assessment = nil, want completed assessment")
+	}
+	if assessment.Action != LoopAssessmentActionCompleted {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
+	}
+	if assessment.Message != "Loop exit requested: done" {
+		t.Fatalf("assessment.Message = %q, want %q", assessment.Message, "Loop exit requested: done")
 	}
 }
 
@@ -391,10 +404,19 @@ func TestNextLoopAssessmentFromAssistantRequiresDoneTagBeforeCompleted(t *testin
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
-		Content:    "done for now\n<verify-not-run>tests skipped because fixture is unavailable in this environment</verify-not-run>",
+		Content:    "done for now",
 		StopReason: "stop",
 	})
 	if assessment == nil {
@@ -403,8 +425,8 @@ func TestNextLoopAssessmentFromAssistantRequiresDoneTagBeforeCompleted(t *testin
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "<done>single-line reason</done>") {
-		t.Fatalf("assessment.Message = %q, want missing-done-tag guidance", assessment.Message)
+	if !strings.Contains(assessment.Message, "Done") {
+		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
 	}
 }
 
@@ -508,17 +530,31 @@ func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
-	if !a.loopState.Enabled {
-		t.Fatal("loop should be enabled immediately while busy")
+	if a.loopState.Enabled {
+		t.Fatal("loop should remain disabled when Done tool is unavailable")
 	}
-	if got := a.loopState.Target; got != "finish current task" {
-		t.Fatalf("loopState.Target = %q, want %q", got, "finish current task")
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0 when /loop on is rejected", got)
 	}
-	if got := len(a.pendingUserMessages); got != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1 loop-anchor message", got)
+}
+
+func TestHandleUserMessageRejectsLoopOnWithoutDoneTool(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.tools.Register(tools.ReadTool{})
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`)}
+	a.rebuildRuleset()
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
+
+	if a.loopState.Enabled {
+		t.Fatal("loop should remain disabled when Done tool is unavailable")
 	}
-	if got := pendingUserMessageText(a.pendingUserMessages[0]); got != "finish current task" {
-		t.Fatalf("queued loop anchor = %q, want target text", got)
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
 	}
 }
 

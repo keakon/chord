@@ -18,6 +18,7 @@ type titleRestoreAgentStub struct {
 
 func (s titleRestoreAgentStub) GetSessionSummary() *agent.SessionSummary { return s.summary }
 func (s titleRestoreAgentStub) GetMessages() []message.Message           { return s.messages }
+func (s titleRestoreAgentStub) CanUseLoopMode() bool                     { return true }
 
 func TestUpdateTerminalTitleFromRestoredSession_RejectsExplicitlyPollutedSummary(t *testing.T) {
 	stub := titleRestoreAgentStub{

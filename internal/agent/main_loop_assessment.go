@@ -1,14 +1,12 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -223,46 +221,23 @@ func (a *MainAgent) stopLoopAsBlocked(rawReason string) {
 	a.loopState.disable()
 }
 
-type completionFollowUpQuestionSpec struct {
-	QuestionCallID string
-	DoneReason     string
+type loopDoneToolRequest struct {
+	CallID string
+	Reason string
 }
 
-func parseCompletionFollowUpQuestion(tc message.ToolCall) (completionFollowUpQuestionSpec, bool) {
-	if tc.Name != tools.NameQuestion {
-		return completionFollowUpQuestionSpec{}, false
+func extractLoopDoneToolRequest(msg message.Message) (loopDoneToolRequest, bool) {
+	if len(msg.ToolCalls) == 0 {
+		return loopDoneToolRequest{}, false
 	}
-	var args struct {
-		Purpose string `json:"purpose"`
+	for i := len(msg.ToolCalls) - 1; i >= 0; i-- {
+		tc := msg.ToolCalls[i]
+		if tc.Name != tools.NameDone {
+			continue
+		}
+		return loopDoneToolRequest{CallID: tc.ID, Reason: strings.TrimSpace(msg.Content)}, true
 	}
-	if err := json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &args); err != nil {
-		return completionFollowUpQuestionSpec{}, false
-	}
-	if strings.TrimSpace(args.Purpose) != "completion_follow_up" {
-		return completionFollowUpQuestionSpec{}, false
-	}
-	return completionFollowUpQuestionSpec{QuestionCallID: tc.ID}, true
-}
-
-func (a *MainAgent) loopCompletionFollowUpQuestion(msg message.Message) (completionFollowUpQuestionSpec, bool) {
-	if !a.loopCompletionQuestionRequired() {
-		return completionFollowUpQuestionSpec{}, false
-	}
-	doneReason := extractLoopDoneReason(msg.Content)
-	if doneReason == "" || len(msg.ToolCalls) == 0 {
-		return completionFollowUpQuestionSpec{}, false
-	}
-	spec, ok := parseCompletionFollowUpQuestion(msg.ToolCalls[len(msg.ToolCalls)-1])
-	if !ok {
-		return completionFollowUpQuestionSpec{}, false
-	}
-	spec.DoneReason = doneReason
-	return spec, true
-}
-
-func (a *MainAgent) loopCompletionFollowUpQuestionRequiredInMessage(msg message.Message) bool {
-	_, ok := a.loopCompletionFollowUpQuestion(msg)
-	return ok
+	return loopDoneToolRequest{}, false
 }
 
 func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall bool) *LoopAssessment {
@@ -291,18 +266,12 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 			Reasons: reasons,
 		}
 	}
-	doneReason := extractLoopDoneReason(msg.Content)
-	if doneReason == "" {
-		reasons := addSuspected(a.currentLoopContinuationReasons("missing_done_tag", "terminal_reply"))
-		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: terminal assistant reply must include a <done>single-line reason</done> tag.", Reasons: reasons}
+	req, ok := extractLoopDoneToolRequest(msg)
+	if !ok {
+		reasons := addSuspected(a.currentLoopContinuationReasons("missing_done_tool", "terminal_reply"))
+		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons}
 	}
-	if a.loopCompletionQuestionRequired() {
-		if _, ok := a.loopCompletionFollowUpQuestion(msg); !ok {
-			reasons := addSuspected(a.currentLoopContinuationReasons("missing_completion_follow_up_question", "terminal_reply"))
-			return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: when completion follow-up is enabled, the final response must end with a `Question` tool call whose `purpose` is `completion_follow_up`.", Reasons: reasons}
-		}
-	}
-	return &LoopAssessment{Action: LoopAssessmentActionCompleted, Message: "Loop completed: " + doneReason}
+	return &LoopAssessment{Action: LoopAssessmentActionCompleted, Message: "Loop exit requested: " + req.Reason}
 }
 
 // nextLoopAssessmentFromAssistant evaluates the loop state after an assistant message
@@ -318,7 +287,7 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 		a.loopState.LastProgressSignature = normalizeLoopProgressSignature(msg.Content, msg.StopReason)
 		a.loopState.ConsecutiveNoProgress = 0
 		stopReason := strings.TrimSpace(msg.StopReason)
-		if stopReason == "stop" || stopReason == "end_turn" || (stopReason == "tool_calls" && a.loopCompletionFollowUpQuestionRequiredInMessage(msg)) {
+		if stopReason == "stop" || stopReason == "end_turn" || stopReason == "tool_calls" {
 			return a.terminalLoopAssessment(msg, false)
 		}
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing after observable progress.", Reasons: a.currentLoopContinuationReasons("progress_continuation")}

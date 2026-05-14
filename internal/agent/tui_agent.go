@@ -117,6 +117,7 @@ type LoopController interface {
 	CurrentLoopMaxIterations() int
 	EnableLoopMode(target string)
 	DisableLoopMode()
+	CanUseLoopMode() bool
 }
 
 // RoleController exposes role/handoff lifecycle for the active agent.

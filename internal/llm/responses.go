@@ -104,6 +104,7 @@ type responsesRequest struct {
 	Instructions       *string              `json:"instructions,omitempty"`
 	Input              []responsesInputItem `json:"input"`
 	Tools              []responsesTool      `json:"tools,omitempty"`
+	ToolChoice         string               `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
 	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
 	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
@@ -229,6 +230,9 @@ func (r *ResponsesProvider) CompleteStream(
 		Model:  model,
 		Tools:  apiTools,
 		Stream: true,
+	}
+	if ot.ToolChoice != "" {
+		reqBody.ToolChoice = ot.ToolChoice
 	}
 	reqBody.Input = fullInput
 	if r.sessionID != "" {

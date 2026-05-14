@@ -17,6 +17,7 @@ const (
 	NameLsp          = "Lsp"
 	NameTodoWrite    = "TodoWrite"
 	NameQuestion     = "Question"
+	NameDone         = "Done"
 	NameDelegate     = "Delegate"
 	NameNotify       = "Notify"
 	NameSkill        = "Skill"

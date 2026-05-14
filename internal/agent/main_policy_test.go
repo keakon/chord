@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1358,16 +1359,22 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 		t.Fatalf("assessment.Reasons = %v, want subagents_active", assessment.Reasons)
 	}
 
-	// Once the worker is no longer active, the same done-tag signal can complete.
+	// Once the worker is no longer active, a Done tool request can complete.
 	a.mu.Lock()
 	delete(a.subAgents, sub.instanceID)
 	a.mu.Unlock()
 
 	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
 	assessment = a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:       "assistant",
-		Content:    "all delegated work finished\n<verify-not-run>validation harness is unavailable in this test</verify-not-run>\n<done>all tasks done</done>",
-		StopReason: "stop",
+		Role:    "assistant",
+		Content: "all delegated work finished",
+		ToolCalls: []message.ToolCall{{
+			ID:   "done-1",
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"all tasks done"}`),
+		}},
+		StopReason: "tool_calls",
 	})
 	if assessment == nil {
 		t.Fatal("assessment = nil, want completed assessment after worker finishes")

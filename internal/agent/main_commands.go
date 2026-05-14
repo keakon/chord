@@ -74,6 +74,10 @@ func expandCommandTemplate(tmpl, args string) string {
 	return tmpl
 }
 
+func (a *MainAgent) canUseLoopMode() bool {
+	return a.doneToolAvailable()
+}
+
 func isLoopSlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
@@ -91,13 +95,33 @@ func isLoopSlashCommand(content string) bool {
 func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 	c := strings.TrimSpace(content)
 	switch {
+	case c == "/loop off":
+		a.DisableLoopMode()
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
+		return true
 	case c == "/loop":
+		if !a.canUseLoopMode() {
+			a.emitToTUI(ToastEvent{Message: "Loop mode requires the Done tool to be available for this role.", Level: "error"})
+			if !busy {
+				a.setIdleAndDrainPending()
+			}
+			return true
+		}
 		a.emitToTUI(ToastEvent{Message: "Usage: /loop on [target] | /loop off", Level: "info"})
 		if !busy {
 			a.setIdleAndDrainPending()
 		}
 		return true
 	case c == "/loop on" || strings.HasPrefix(c, "/loop on "):
+		if !a.canUseLoopMode() {
+			a.emitToTUI(ToastEvent{Message: "Loop mode requires the Done tool to be available for this role.", Level: "error"})
+			if !busy {
+				a.setIdleAndDrainPending()
+			}
+			return true
+		}
 		target := strings.TrimSpace(strings.TrimPrefix(c, "/loop on"))
 		if target == "" {
 			target = "Continue and finish all remaining tasks in the current session."
@@ -106,12 +130,6 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 		// busy=true: turn is active, so this queues the loop anchor target for the
 		// next round without treating the slash command as transcript content.
 		a.sendLoopAnchorFromCommand(target)
-		return true
-	case c == "/loop off":
-		a.DisableLoopMode()
-		if !busy {
-			a.setIdleAndDrainPending()
-		}
 		return true
 	default:
 		return false

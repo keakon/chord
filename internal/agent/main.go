@@ -356,9 +356,10 @@ type MainAgent struct {
 	questionCh     map[string]chan QuestionResponse
 
 	// Plan execution workflow state.
-	projectRoot    string
-	lastPlanPath   string
-	pendingHandoff *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	projectRoot           string
+	lastPlanPath          string
+	pendingHandoff        *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	pendingLoopExitResult *loopExitResult
 
 	// Role system: MainAgent operates as one of several roles (builder, planner, etc.).
 	activeConfig *config.AgentConfig            // currently active role (nil = no role set yet; defaults to builder)
