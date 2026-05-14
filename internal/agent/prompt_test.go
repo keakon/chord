@@ -359,7 +359,9 @@ Read: allow
 	for _, want := range []string{
 		"## Completion Follow-Up",
 		"A turn is not complete unless either",
-		"Do not treat a written completion summary as the end of the turn",
+		"Default completion shape when the current task is finished",
+		"then immediately call the `Question` tool as the last action in the turn",
+		"set `purpose` to `completion_follow_up` on that final `Question` tool call",
 		"Ordering requirement: do NOT call `Question` until after you have written the completion summary (conclusion)",
 		"make a real `Question` tool call",
 		"Do not print JSON, code fences, XML tags, pseudo-tool syntax",
@@ -385,7 +387,25 @@ Question: deny
 	}
 }
 
-func TestLoopCompletionRequirementLines_RequireQuestionFollowUpWhenEnabled(t *testing.T) {
+func TestCompletionFollowUpPromptBlock_DisabledDuringLoopMode(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.NewQuestionTool(nil))
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+
+	if got := a.completionFollowUpPromptBlock(); got != "" {
+		t.Fatalf("completionFollowUpPromptBlock() in loop mode = %q, want empty", got)
+	}
+}
+
+func TestLoopCompletionRequirementLines_KeepDoneTagContractEvenWhenQuestionFollowUpEnabled(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{
@@ -398,12 +418,21 @@ Read: allow
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"call the `Question` tool before ending as completed",
-		"either the user has already explicitly said they are done, want to end, or do not want further help, or you have already called the `Question` tool in the current turn",
-		"Do not treat a written completion summary as enough to end as completed",
+		"When the task is complete, the final assistant response must include a <done>reason</done> tag and end with a `Question` tool call",
+		"That final completion follow-up `Question` call must set `purpose` to `completion_follow_up`",
+		"Do not use <done>...</done> unless the task is actually complete and no user decision remains",
+		"call the `Question` tool instead of ending as completed",
 	} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("loop completion requirements should include %q when Question follow-up is enabled, got %q", want, joined)
+			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
+		}
+	}
+	for _, unwanted := range []string{
+		"you have already called the `Question` tool in the current turn",
+		"Do not treat a written completion summary as enough to end as completed",
+	} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("loop completion requirements should not include legacy Question-follow-up completion rule %q, got %q", unwanted, joined)
 		}
 	}
 
@@ -416,8 +445,39 @@ Question: deny
 	}
 	a.rebuildRuleset()
 	joined = strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if strings.Contains(joined, "call the `Question` tool before ending as completed") {
-		t.Fatalf("loop completion requirements should not require Question follow-up when Question is denied, got %q", joined)
+	if strings.Contains(joined, "call the `Question` tool instead of ending as completed") {
+		t.Fatalf("loop completion requirements should not require Question when Question is denied, got %q", joined)
+	}
+}
+
+func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneTagInLoop(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewQuestionTool(nil))
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+	joined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
+	for _, want := range []string{
+		"Clearly state that the requested task is complete",
+		"Include a <done>reason</done> line in the final response",
+		"call the `Question` tool as the final action in the turn",
+		"Set `purpose` to `completion_follow_up` on that final `Question` call",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("loop final completion response requirements should include %q, got %q", want, joined)
+		}
+	}
+	for _, unwanted := range []string{
+		"Do not end a completed task with only plain assistant text when `Question` follow-up is enabled",
+	} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("loop final completion response requirements should not include Question-follow-up completion rule %q, got %q", unwanted, joined)
+		}
 	}
 }
 

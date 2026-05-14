@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // handleLoopAssessment processes the loop assessment result after an LLM round.
@@ -220,6 +223,48 @@ func (a *MainAgent) stopLoopAsBlocked(rawReason string) {
 	a.loopState.disable()
 }
 
+type completionFollowUpQuestionSpec struct {
+	QuestionCallID string
+	DoneReason     string
+}
+
+func parseCompletionFollowUpQuestion(tc message.ToolCall) (completionFollowUpQuestionSpec, bool) {
+	if tc.Name != tools.NameQuestion {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	var args struct {
+		Purpose string `json:"purpose"`
+	}
+	if err := json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &args); err != nil {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	if strings.TrimSpace(args.Purpose) != "completion_follow_up" {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	return completionFollowUpQuestionSpec{QuestionCallID: tc.ID}, true
+}
+
+func (a *MainAgent) loopCompletionFollowUpQuestion(msg message.Message) (completionFollowUpQuestionSpec, bool) {
+	if !a.loopCompletionQuestionRequired() {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	doneReason := extractLoopDoneReason(msg.Content)
+	if doneReason == "" || len(msg.ToolCalls) == 0 {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	spec, ok := parseCompletionFollowUpQuestion(msg.ToolCalls[len(msg.ToolCalls)-1])
+	if !ok {
+		return completionFollowUpQuestionSpec{}, false
+	}
+	spec.DoneReason = doneReason
+	return spec, true
+}
+
+func (a *MainAgent) loopCompletionFollowUpQuestionRequiredInMessage(msg message.Message) bool {
+	_, ok := a.loopCompletionFollowUpQuestion(msg)
+	return ok
+}
+
 func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall bool) *LoopAssessment {
 	if blockedReason := extractLoopBlockedReason(msg.Content); blockedReason != "" {
 		return a.loopBlockedAssessment(blockedReason)
@@ -251,6 +296,12 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 		reasons := addSuspected(a.currentLoopContinuationReasons("missing_done_tag", "terminal_reply"))
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: terminal assistant reply must include a <done>single-line reason</done> tag.", Reasons: reasons}
 	}
+	if a.loopCompletionQuestionRequired() {
+		if _, ok := a.loopCompletionFollowUpQuestion(msg); !ok {
+			reasons := addSuspected(a.currentLoopContinuationReasons("missing_completion_follow_up_question", "terminal_reply"))
+			return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: when completion follow-up is enabled, the final response must end with a `Question` tool call whose `purpose` is `completion_follow_up`.", Reasons: reasons}
+		}
+	}
 	return &LoopAssessment{Action: LoopAssessmentActionCompleted, Message: "Loop completed: " + doneReason}
 }
 
@@ -267,7 +318,7 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 		a.loopState.LastProgressSignature = normalizeLoopProgressSignature(msg.Content, msg.StopReason)
 		a.loopState.ConsecutiveNoProgress = 0
 		stopReason := strings.TrimSpace(msg.StopReason)
-		if stopReason == "stop" || stopReason == "end_turn" {
+		if stopReason == "stop" || stopReason == "end_turn" || (stopReason == "tool_calls" && a.loopCompletionFollowUpQuestionRequiredInMessage(msg)) {
 			return a.terminalLoopAssessment(msg, false)
 		}
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing after observable progress.", Reasons: a.currentLoopContinuationReasons("progress_continuation")}
@@ -397,9 +448,13 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		sections = append(sections, "<loop-continuation>", "Continue required.")
 	}
 
-	// Iteration budget.
+	// Iteration budget. Continue assessments are emitted after advanceIteration(),
+	// so the continuation notice is for the next run and should show one less.
 	maxIter := a.loopState.MaxIterations
 	iter := a.loopState.Iteration
+	if assessment.Action == LoopAssessmentActionContinue && iter > 0 {
+		iter--
+	}
 	if maxIter > 0 {
 		remaining := maxIter - iter
 		if remaining < 0 {
@@ -440,6 +495,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("latest assistant reply stopped before loop completion criteria were met")
 		case "missing_done_tag":
 			addGap("the final assistant reply must include <done>single-line reason</done>")
+		case "missing_completion_follow_up_question":
+			addGap("when completion follow-up is enabled, finish with a final `Question` tool call whose `purpose` is `completion_follow_up`")
 		case "missing_verification_status":
 			addGap("verification status is missing; run verification or include <verify-not-run>reason</verify-not-run>")
 		case "progress_continuation":

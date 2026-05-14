@@ -55,10 +55,14 @@ func (a *MainAgent) loopWorkflowPromptBlock() string {
 		syncClause += sb.String()
 	}
 	completionClause += ", and required verification is done or explicitly reported as not run.\n"
+	finalCompletionLine := "- When completion requirements are satisfied, explicitly mark completion in your final response: clearly state the task is complete, summarize completed work, report verification status, include <done>reason</done>, and list any remaining limitations or unverified areas.\n"
+	if a.loopCompletionQuestionRequired() {
+		finalCompletionLine = "- When completion requirements are satisfied, explicitly mark completion in your final response: clearly state the task is complete, summarize completed work, report verification status, include <done>reason</done>, list any remaining limitations or unverified areas, and then call the `Question` tool as the final action in the turn with `purpose` set to `completion_follow_up`.\n"
+	}
 	return "## Loop Mode\n" +
 		"- Loop mode is active. Keep driving toward the current loop target until it is completed, blocked, max iterations are reached, or it is explicitly disabled.\n" +
 		completionClause +
-		"- When completion requirements are satisfied, explicitly mark completion in your final response: clearly state the task is complete, summarize completed work, report verification status, and list any remaining limitations or unverified areas.\n" +
+		finalCompletionLine +
 		"- If verification is not run, include <verify-not-run>reason</verify-not-run> in the terminal response.\n" +
 		"- If the task is genuinely blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}.\n" +
 		"- Do not mark completion merely because you produced a summary or reached a natural stopping point in reasoning.\n" +

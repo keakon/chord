@@ -73,6 +73,10 @@ func (QuestionTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"purpose": map[string]any{
+				"type":        "string",
+				"description": "Optional marker for why this Question is being asked. Supported value: completion_follow_up.",
+			},
 			"questions": map[string]any{
 				"type":        "array",
 				"description": "List of questions to ask the user. Write all user-facing text in the user's current language.",
@@ -123,10 +127,14 @@ func (QuestionTool) IsReadOnly() bool { return true }
 
 func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args struct {
+		Purpose   string         `json:"purpose"`
 		Questions []QuestionItem `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if args.Purpose != "" && args.Purpose != "completion_follow_up" {
+		return "", fmt.Errorf("unsupported purpose %q", args.Purpose)
 	}
 	if len(args.Questions) == 0 {
 		return "", fmt.Errorf("at least one question is required")

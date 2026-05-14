@@ -52,6 +52,80 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	}
 }
 
+func TestNextLoopAssessmentFromAssistantRequiresCompletionFollowUpQuestionWhenEnabled(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enable()
+	a.tools.Register(tools.NewQuestionTool(nil))
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Question: allow
+`),
+	}
+	a.rebuildRuleset()
+
+	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
+		Role:       "assistant",
+		Content:    "finished\n<verify-not-run>no deterministic validation target in this run</verify-not-run>\n<done>implemented and verified</done>",
+		StopReason: "stop",
+	})
+	if assessment == nil {
+		t.Fatal("assessment = nil, want continue assessment")
+	}
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
+	}
+	if !strings.Contains(assessment.Message, "final response must end with a `Question` tool call") {
+		t.Fatalf("assessment.Message = %q, want completion-follow-up Question guard", assessment.Message)
+	}
+	found := false
+	for _, reason := range assessment.Reasons {
+		if reason == "missing_completion_follow_up_question" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("assessment.Reasons = %v, want missing_completion_follow_up_question", assessment.Reasons)
+	}
+}
+
+func TestNextLoopAssessmentFromAssistantAcceptsCompletionFollowUpQuestionWhenEnabled(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enable()
+	a.tools.Register(tools.NewQuestionTool(nil))
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Question: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.markProgress()
+
+	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
+		Role:    "assistant",
+		Content: "finished\n<verify-not-run>no deterministic validation target in this run</verify-not-run>\n<done>implemented and verified</done>",
+		ToolCalls: []message.ToolCall{{
+			ID:   "q1",
+			Name: tools.NameQuestion,
+			Args: json.RawMessage(`{"purpose":"completion_follow_up","questions":[{"header":"Next","question":"What next?","options":[]}]} `),
+		}},
+		StopReason: "tool_calls",
+	})
+	if assessment == nil {
+		t.Fatal("assessment = nil, want completed assessment")
+	}
+	if assessment.Action != LoopAssessmentActionCompleted {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionCompleted)
+	}
+	if assessment.Message != "Loop completed: implemented and verified" {
+		t.Fatalf("assessment.Message = %q, want done-tag completion message", assessment.Message)
+	}
+}
+
 func TestNextLoopAssessmentFromAssistantAllowsMultipleDoneTagsBeforeCompleted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
@@ -1016,7 +1090,7 @@ func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Iteration 7 of 10 (3 remaining)") {
+	if !strings.Contains(note.Text, "Iteration 6 of 10 (4 remaining)") {
 		t.Fatalf("LOOP CONTINUE should contain iteration budget with remaining count, got: %q", note.Text)
 	}
 }
@@ -1025,7 +1099,7 @@ func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 10
-	a.loopState.Iteration = 9
+	a.loopState.Iteration = 10
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
 	if note == nil {
 		t.Fatal("expected continuation note")
@@ -1125,6 +1199,7 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 func TestBuildLoopVerificationContinuationNote(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
+	a.loopState.Iteration = 7
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionVerify, Reasons: []string{"verification_required"}})
 	if note == nil {
 		t.Fatal("expected verification continuation note")
@@ -1134,5 +1209,8 @@ func TestBuildLoopVerificationContinuationNote(t *testing.T) {
 	}
 	if !strings.Contains(note.Text, "Verification required") || !strings.Contains(note.Text, "Run the smallest relevant verification now") {
 		t.Fatalf("verification note text missing verification instruction: %q", note.Text)
+	}
+	if !strings.Contains(note.Text, "Iteration 7 (unlimited).") {
+		t.Fatalf("verification note iteration text = %q, want verification iteration without decrement", note.Text)
 	}
 }

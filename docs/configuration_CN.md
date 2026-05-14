@@ -555,7 +555,7 @@ prompt: |
 - `model_pools`：该 agent 的可用池名列表（有序）。池定义位于 `config.yaml` 顶层 `model_pools`。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。
-- `question_follow_up_at_end`：当 MainAgent 角色将它设为 `true` 时，Chord 会注入一段“完成后跟进”的提示要求，指示模型在结束一个已完成的 turn 前做二选一：要么确认用户已经明确表示结束 / 不需要更多帮助 / 没有更多任务，要么在当前 turn 中调用 `Question`。对应提示词还会明确要求模型不要把书面的完成总结当作 turn 结束；应先确认工作已完成（或明确阻塞）、报告验证状态、在适用时同步 todo 状态，然后再把 `Question` 调用作为最终收尾步骤。它也会明确要求这里必须是真实的 `Question` 工具调用，不能在 assistant 正文里打印类似工具参数的 JSON 或伪工具语法来代替。这里描述的是对模型的提示约束，不是对模型输出结果的硬性运行时保证。若 `permission` 中未显式配置 `Question`，Chord 会在该角色的 base rules 层自动补一个 `Question: allow`，让模型能看到该工具。若显式配置了 `Question: deny`，该功能完全失效（不会注入对应提示词）。`Question: ask` 会按 `allow` 处理，避免在用户回答问题前再多一层确认。
+- `question_follow_up_at_end`：当 MainAgent 角色将它设为 `true` 时，Chord 只会在该功能启用且 `Question` 工具可用时注入额外的完成后跟进提示。目的：把“当前任务完成后的交接”保持为结构化跟进，让用户可以直接沿着这个跟进继续交代下一个任务，而不是依赖纯文本 stop 收尾。典型场景：长时间连续编码会话中，一个任务经常紧接着演化成下一个任务；以及 loop 驱动运行中，需要先完成当前任务，但完成后仍要保持随时接收下一条指令的状态。对于普通的非 loop 回合，默认行为是：完成当前任务、写一段简短的完成总结，然后在当前 turn 的最后一步调用 `Question`，让用户可以继续交代新的任务或明确结束会话。对于 loop mode，完成仍然要求 assistant 响应包含 `<done>reason</done>`；而当该跟进功能启用时，完成响应也应通过 `Question` 继续交接，而不是只停在总结文本上。若功能未启用，或 `Question` 不可用，Chord 不会为此增加额外提示词，现有完成逻辑保持不变。若 `permission` 中未显式配置 `Question`，Chord 会在该角色的 base rules 层自动补一个 `Question: allow`，让模型能看到该工具。若显式配置了 `Question: deny`，该功能完全失效（不会注入对应提示词）。`Question: ask` 会按 `allow` 处理，避免在用户回答问题前再多一层确认。
 - `mcp`：作用域限定在该 agent 的 MCP 配置。
 - `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/keakon/golog/log"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // failPendingToolCalls cancels all pending and streaming tool calls for a turn
@@ -100,6 +102,25 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 // handleToolResult processes a single tool execution result. When all pending
 // tool calls for the current turn have completed, a new LLM call is initiated
 // to let the model decide what to do next.
+func findAssistantMessageForToolCall(msgs []message.Message, callID string) (message.Message, bool) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return message.Message{}, false
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == callID {
+				return msg, true
+			}
+		}
+	}
+	return message.Message{}, false
+}
+
 func (a *MainAgent) handleToolResult(evt Event) {
 	// Turn isolation.
 	if a.turn == nil || evt.TurnID != a.turn.ID {
@@ -216,6 +237,18 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 	if isVerificationLikeToolResult(payload, contextResult) {
 		a.loopState.markVerificationProgress()
+	}
+	if payload.Name == tools.NameQuestion && a.loopState.Enabled {
+		if assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID); ok {
+			if spec, ok := a.loopCompletionFollowUpQuestion(assistantMsg); ok && spec.QuestionCallID == payload.CallID {
+				a.loopState.State = LoopStateCompleted
+				a.emitLoopStateChanged()
+				a.emitToTUI(InfoEvent{Message: "Loop completed: " + spec.DoneReason})
+				a.loopState.disable()
+				a.emitLoopStateChanged()
+				a.refreshSystemPrompt()
+			}
+		}
 	}
 
 	// Decrement pending counter and track malformed args across rounds

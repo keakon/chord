@@ -101,19 +101,6 @@ func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
 	return "## " + a.pendingLoopContinuation.Title + "\n\n" + a.pendingLoopContinuation.Text
 }
 
-func (a *MainAgent) questionToolExplicitlyConfigured() bool {
-	cfg := a.currentActiveConfig()
-	if cfg == nil || cfg.Permission.Kind == 0 {
-		return false
-	}
-	for _, rule := range permission.ParsePermission(&cfg.Permission) {
-		if rule.Permission == tools.NameQuestion {
-			return true
-		}
-	}
-	return false
-}
-
 func (a *MainAgent) questionFollowUpAtEndEnabled() bool {
 	cfg := a.currentActiveConfig()
 	if cfg == nil {
@@ -138,12 +125,18 @@ func (a *MainAgent) questionToolAvailable() bool {
 }
 
 func (a *MainAgent) completionFollowUpPromptBlock() string {
+	if a.loopState.Enabled {
+		return ""
+	}
 	if !a.questionFollowUpAtEndEnabled() || !a.questionToolAvailable() {
 		return ""
 	}
 	return strings.TrimSpace(`## Completion Follow-Up
 - A turn is not complete unless either (1) the user has already explicitly said they are done, want to end, do not want further help, or have no more tasks, or (2) you have already called the ` + "`Question`" + ` tool in the current turn.
 - Do not treat a written completion summary as the end of the turn. The ` + "`Question`" + ` tool call is a required completion step unless the user explicitly opted out as above.
+- Default completion shape when the current task is finished: write a concise completion summary in assistant text, then immediately call the ` + "`Question`" + ` tool as the last action in the turn so the user can continue with another task or explicitly end the session.
+- When this completion follow-up rule is active, set ` + "`purpose`" + ` to ` + "`completion_follow_up`" + ` on that final ` + "`Question`" + ` tool call.
+- Do not end a completed task with only plain assistant text when ` + "`Question`" + ` is available unless the user already explicitly opted out.
 - Before ending a completed task, verify in order: the work is complete or clearly blocked, the verification status is reported, the todo state is synced when applicable, and then call the ` + "`Question`" + ` tool.
 - Ordering requirement: do NOT call ` + "`Question`" + ` until after you have written the completion summary (conclusion) for the current task.
 - When this rule requires ` + "`Question`" + `, you must make a real ` + "`Question`" + ` tool call. Do not print JSON, code fences, XML tags, pseudo-tool syntax, or tool arguments in normal assistant text as a substitute.
@@ -233,14 +226,11 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	base := "- If user permission, confirmation, or a real decision is still needed, "
 	if a.questionToolAvailable() {
+		questionLine := base + "call the `Question` tool instead of ending as completed"
 		if a.questionFollowUpAtEndEnabled() {
-			return "- Do not use <done>...</done> unless the task is actually complete and either the user has already explicitly said they are done, want to end, or do not want further help, or you have already called the `Question` tool in the current turn\n" +
-				"- Do not treat a written completion summary as enough to end as completed; calling the `Question` tool is the required final completion step unless the user explicitly opted out\n" +
-				"- When the task is complete and you are ready to end as completed, call the `Question` tool before ending as completed so the user can provide another task, choose a follow-up option, or explicitly end the session\n" +
-				base + "call the `Question` tool instead of ending as completed"
+			questionLine += " unless the current task is already complete and you are making the final completion follow-up `Question` call"
 		}
-		return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" +
-			base + "call the `Question` tool instead of ending as completed"
+		return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" + questionLine
 	}
 	return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" +
 		base + "ask in plain assistant text with enough context for a non-implementer to answer instead of ending as completed"
