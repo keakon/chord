@@ -65,39 +65,23 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
     If not, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
   </Card>
-  <Card title="2. Configure model and credentials" icon="seti:lock">
+  <Card title="2. Run setup once" icon="seti:lock">
+    Run `chord` in an interactive terminal:
+
     ```bash
-    mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-    cat > ~/.config/chord/config.yaml <<'YAML'
-    providers:
-      openrouter:
-        type: chat-completions
-        api_url: https://openrouter.ai/api/v1/chat/completions
-        models:
-          openai/gpt-5.5:
-            limit:
-              context: 400000
-              input: 272000
-              output: 128000
-            modalities:
-              input: [text, image]
-    model_pools:
-      default:
-        - openrouter/openai/gpt-5.5
-    YAML
-    cat > ~/.config/chord/auth.yaml <<'YAML'
-    openrouter:
-      - "$OPENROUTER_API_KEY"
-    YAML
+    chord
     ```
-    Other OpenRouter models and provider setup: see [Quickstart](/chord/quickstart/).
+
+    If `config.yaml` is missing, Chord launches a one-time setup wizard. The wizard creates the minimal `config.yaml` and, when needed, `auth.yaml`.
+
+    Prefer to write YAML manually or need a different provider/model setup? See [Quickstart](/chord/quickstart/).
   </Card>
   <Card title="3. Run from your project" icon="rocket">
     ```bash
     cd my-project
     chord
     ```
-    On first run, Chord creates `.chord/` for project-level config.
+    On first run in a project, Chord creates `.chord/` as needed.
   </Card>
 </CardGrid>
 

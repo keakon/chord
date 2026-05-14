@@ -34,6 +34,27 @@ type authCredentialNodeRef struct {
 	normalizedIndex int
 }
 
+func UpsertAPIKeyCredentialInFile(path, provider, value string) (bool, error) {
+	if strings.TrimSpace(provider) == "" {
+		return false, fmt.Errorf("provider name is empty")
+	}
+	if strings.TrimSpace(value) == "" {
+		return false, fmt.Errorf("api key value is empty")
+	}
+	var changed bool
+	_, err := mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
+		var innerChanged bool
+		var innerErr error
+		innerChanged, innerErr = doc.upsertAPIKeyCredential(provider, value)
+		changed = innerChanged
+		return innerErr
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func UpsertOAuthCredentialInFile(path, provider string, cred *OAuthCredential) (AuthConfig, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("oauth credential is nil")
@@ -162,13 +183,8 @@ func (d *authYAMLDocument) save(path string) error {
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("finalize auth config yaml: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write auth config tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("install auth config: %w", err)
+	if err := writeAuthYAMLFile(path, buf.Bytes()); err != nil {
+		return err
 	}
 	d.dirty = false
 	return nil
@@ -264,6 +280,21 @@ func (d *authYAMLDocument) providerCredentialRefs(provider string) ([]authCreden
 	return refs, seq, nil
 }
 
+func (d *authYAMLDocument) upsertAPIKeyCredential(provider, value string) (bool, error) {
+	seq, err := d.providerSequence(provider, true)
+	if err != nil {
+		return false, err
+	}
+	for _, node := range seq.Content {
+		if node.Kind == yaml.ScalarNode && node.Value == value {
+			return false, nil
+		}
+	}
+	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+	d.dirty = true
+	return true, nil
+}
+
 func (d *authYAMLDocument) upsertOAuthCredential(provider string, cred *OAuthCredential) error {
 	seq, err := d.providerSequence(provider, true)
 	if err != nil {
@@ -284,6 +315,52 @@ func (d *authYAMLDocument) upsertOAuthCredential(provider string, cred *OAuthCre
 	return nil
 }
 
+func writeAuthYAMLFile(path string, data []byte) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("auth config path is empty")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create auth config dir: %w", err)
+	}
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create auth config tmp: %w", err)
+	}
+	tmpPath := f.Name()
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("set auth config tmp permissions: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write auth config tmp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close auth config tmp: %w", err)
+	}
+	exists := false
+	if _, err := os.Stat(path); err == nil {
+		exists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check auth config path %s: %w", path, err)
+	}
+	if exists {
+		if err := os.Rename(tmpPath, path); err != nil {
+			return fmt.Errorf("install auth config: %w", err)
+		}
+		return nil
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%s already exists; rerun chord to continue", path)
+		}
+		return fmt.Errorf("install auth config: %w", err)
+	}
+	return nil
+}
 func findOAuthCredentialUpsertTarget(refs []authCredentialNodeRef, cred *OAuthCredential) *authCredentialNodeRef {
 	if cred == nil || cred.AccountID == "" {
 		return nil

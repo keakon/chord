@@ -16,6 +16,8 @@ All three can be moved by environment variable, CLI flag, or `config.yaml` `path
 
 You edit these files. Treat them as source.
 
+On the first root `chord` run, if global `config.yaml` is missing and Chord can get a controlling TTY, it starts a one-time setup wizard and then prints the exact resolved paths for `config.yaml` and `auth.yaml`. This is especially useful when you launch with `--config-home`, `CHORD_CONFIG_HOME`, or on Windows where `~` is not the most discoverable form.
+
 ```text
 ~/.config/chord/
 ├── config.yaml            # global chord config

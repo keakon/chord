@@ -8,7 +8,10 @@
 
 - Go 版本是否满足要求
 - 是否使用了正确入口：`go run ./cmd/chord/`
-- `config.yaml` / `auth.yaml` 是否存在明显的 YAML 格式错误
+- `config.yaml` 是否缺失或已损坏
+- `auth.yaml` 是否存在明显的 YAML 格式错误
+
+如果 `config.yaml` 缺失，请在交互式终端里先运行一次 `chord` 来启动初始化向导。即使 stdin 被重定向，只要还能打开控制 TTY，向导仍会在那里运行；只有没有控制 TTY 时，Chord 才会立即返回初始化错误。若 `config.yaml` 已存在但 YAML 损坏，请先修好文件；向导只会在缺失配置时触发。
 
 排查命令：
 
@@ -108,7 +111,7 @@ curl -I https://api.openai.com/v1
 - 需要精确恢复目标时，优先使用 `--resume <session-id>`
 - 如果恢复后的 model/provider 状态异常，请保留相关 session 日志和 trace 供排查
 
-这次改动并没有删除会话恢复能力；删除的是已不再影响 HTTP 请求行为的旧内部 reset 管线，同时保留并收敛了当前仍有效的 WebSocket / session 生命周期处理。
+会话恢复本身不受影响。内部传输层的清理不会影响 `--continue` 或 `--resume` 的正常使用。如恢复后出现异常，请保留当前版本的日志供排查。
 
 ## 查看日志 / dump / shell 输出时，TUI 卡片出现异色、背景泄漏或换行错乱
 
@@ -128,13 +131,13 @@ curl -I https://api.openai.com/v1
 - 画面已错乱时，轻微调整终端窗口尺寸或切走再切回，通常可强制触发一次完整重绘
 - 最新版仍能复现时，同时保留 diagnostics bundle 和截图
 
-最近构建覆盖了两类焦点恢复 redraw 场景：一类是获焦后立即到达的更新，另一类是终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，先触发一次强制 host redraw，并为同一轮焦点周期挂上一轮更晚的 fallback redraw。即使较早的 `post-focus-settle-redraw` 已执行，这轮更晚的 fallback 也不会被取消，因此 Ghostty/cmux/iTerm2 在宿主 surface invalidation 持续更久时仍能再获得一次恢复机会。diagnostics bundle 也会记录 background-dirty 状态和 fallback 已 arm 的事件，便于把残留的 stale-display 现象与内部最终 screen buffer 对照。
+最近构建覆盖了两类焦点恢复 redraw 场景：获焦后立即到达的更新，以及终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，强制触发 host redraw 并附带 fallback 重绘，因此 Ghostty、cmux、iTerm2 等终端在宿主 surface invalidation 持续更久时仍能可靠恢复。diagnostics bundle 也会记录 background-dirty 状态，便于排查残留的 stale-display 现象。
 
-如果现象主要发生在**获焦后的流式输出过程中**，请确认使用的版本已经把 host-redraw replay marker 做成跨多次 `View()` 持续有效。Bubble Tea 可能在 renderer ticker 真正 flush 之前多次调用 `View()`；旧版本会在第一次 `View()` 就消费 no-op replay marker，导致后续 cached/deferred frame 在 host-side `ClearScreen` 后仍可能字节完全相同，从而留下 stale cells。新版本会让 generation-specific no-op replay suffix 持续到下一次 host redraw generation，同时不会把 suffix 存进 cached view。
+如果现象主要发生在**获焦后的流式输出过程中**，请确认使用的是最新版本。旧版本可能在多次 `View()` 调用后出现 stale cells，因为 cached/deferred frame 在 host-side `ClearScreen` 后字节完全相同。新版本会让 redraw replay marker 在整个 generation 周期内持续有效且不存入 cached view，使渲染器始终有机会恢复。
 
-如果 diagnostics 里 `block.Render()`、`viewport.Render()` 和内部最终 `screen_buffer` 都正常，但真实终端仍错乱，优先把它当作 host redraw/replay 问题排查。不要通过修改 tool-card padding、ANSI reset 或 card 背景 helper 来绕过；请同时保留 diagnostics bundle 和截图，便于对照 `last_host_redraw` 与 `host_redraw_generation replay_nonce`。
+如果 diagnostics 显示内部渲染正常但真实终端仍错乱，优先把它当作 host redraw/replay 问题排查。不要通过修改组件 padding 或 ANSI 处理来绕过；请同时保留 diagnostics bundle 和截图供调查。
 
-补充：画面错乱时看到类似 `;250m pyright` 的残片，通常不是 LSP 内容本身，而是终端控制序列（ANSI/OSC）被截断后露出的尾部字符。新版本已将 terminal window title 的更新改为通过 Bubble Tea 的 `View().WindowTitle` 输出，避免直接写 stdout 与渲染输出交错导致的序列串屏。
+补充：画面错乱时看到类似 `;250m pyright` 的残片，通常不是 LSP 内容，而是被截断的终端控制序列（ANSI/OSC）尾部字符。新版本已将窗口标题更新改为通过框架 `WindowTitle` API 输出，避免直接写 stdout 与渲染输出交错。
 
 ## 长会话里转录区底部内容滚不到
 
@@ -146,8 +149,8 @@ curl -I https://api.openai.com/v1
 
 最近修复解决了两类转录高度统计错误：
 
-- 长会话里较早的状态卡在后续更新时，旧版本可能让 viewport 记录的总高度小于真实转录内容，导致最后几行甚至最后几张卡片无法滚动到。
-- 后台 idle-sweep 丢弃缓存时若存在 turn-spacing 空行，旧版本可能会把这些空行漏算进偏移，从而造成滚动/鼠标选区命中逐步漂移，随着消息增加偏差越来越大。
+- 较早的状态卡后续更新时，旧版本可能让 viewport 高度小于真实转录内容。
+- 后台缓存丢弃时可能漏算空行偏移，造成滚动逐步漂移。
 
 ## Edit 报 `file ... has not been read in this conversation`
 

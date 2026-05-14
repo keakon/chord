@@ -46,32 +46,17 @@ If you do not have Go 1.26+, download a prebuilt binary from [GitHub Releases](h
 chord --version
 ```
 
-### 2. Configure provider, model pool, and credentials
+### 2. Run the setup wizard once
+
+Run `chord` in an interactive terminal:
 
 ```bash
-mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-cat > ~/.config/chord/config.yaml <<'YAML'
-providers:
-  openrouter:
-    type: chat-completions
-    api_url: https://openrouter.ai/api/v1/chat/completions
-    models:
-      openai/gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
-        modalities:
-          input: [text, image]
-model_pools:
-  default:
-    - openrouter/openai/gpt-5.5
-YAML
-cat > ~/.config/chord/auth.yaml <<'YAML'
-openrouter:
-  - "$OPENROUTER_API_KEY"
-YAML
+chord
 ```
+
+If `config.yaml` is missing, Chord launches a one-time setup wizard. The wizard creates the minimal `config.yaml` and, when needed, `auth.yaml`, then prints the exact paths it used.
+
+If you prefer to write YAML manually or need a different provider/model setup, see [Quickstart](./docs/quickstart.md).
 
 ### 3. Run from your project
 
@@ -79,7 +64,7 @@ YAML
 cd my-project && chord
 ```
 
-For other OpenRouter models or different OpenAI-compatible providers, see [Quickstart](./docs/quickstart.md). Read model limits in this order: `limit.context` is the total window; for most models, input + requested output just needs to fit there. If a provider also lists a separate input cap (some GPT models do), add `limit.input`; otherwise Chord falls back to `limit.context`. `limit.output` is the model's own output capacity. Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`; the default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it. See [Glossary](./docs/glossary.md) for the related terms.
+For manual provider/model setup and model-limit guidance, see [Quickstart](./docs/quickstart.md). Read model limits in this order: `limit.context` is the total window; for most models, input + requested output just needs to fit there. If a provider also lists a separate input cap (some GPT models do), add `limit.input`; otherwise Chord falls back to `limit.context`. `limit.output` is the model's own output capacity. Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`; the default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it. See [Glossary](./docs/glossary.md) for the related terms.
 
 ### Release download notes
 

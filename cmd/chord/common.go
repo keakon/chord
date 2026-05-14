@@ -114,7 +114,7 @@ func planInitAppStartup(projectRoot string) (*initAppStartupPlan, error) {
 	}
 	globalCfg, err := config.LoadConfig()
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, wrapConfigLoadError("load config", err)
 	}
 	projectConfigPath := config.ProjectConfigPath(projectRoot)
 	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)

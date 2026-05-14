@@ -1,0 +1,228 @@
+package main
+
+import (
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+type initialSetupProviderKind string
+
+const (
+	initialSetupProviderAPIKey initialSetupProviderKind = "api-key"
+	initialSetupProviderCodex  initialSetupProviderKind = "codex"
+)
+
+type initialSetupConfigInput struct {
+	Kind            initialSetupProviderKind
+	ProviderName    string
+	ProviderType    string
+	APIURL          string
+	ModelName       string
+	Proxy           string
+	IMESwitchTarget string
+	PreventSleep    *bool
+	ContextLimit    int
+	InputLimit      int
+	OutputLimit     int
+}
+
+type initialSetupConfigYAML struct {
+	Providers       map[string]initialSetupProviderYAML `yaml:"providers"`
+	ModelPools      map[string][]string                 `yaml:"model_pools"`
+	Proxy           string                              `yaml:"proxy,omitempty"`
+	IMESwitchTarget string                              `yaml:"ime_switch_target,omitempty"`
+	PreventSleep    *bool                               `yaml:"prevent_sleep,omitempty"`
+}
+
+type initialSetupProviderYAML struct {
+	Type   string                           `yaml:"type,omitempty"`
+	APIURL string                           `yaml:"api_url,omitempty"`
+	Preset string                           `yaml:"preset,omitempty"`
+	Models map[string]initialSetupModelYAML `yaml:"models"`
+}
+
+type initialSetupModelYAML struct {
+	Limit initialSetupLimitYAML `yaml:"limit"`
+}
+
+type initialSetupLimitYAML struct {
+	Context int `yaml:"context"`
+	Input   int `yaml:"input,omitempty"`
+	Output  int `yaml:"output"`
+}
+
+type initialSetupEndpointDefaults struct {
+	ProviderName string
+	ProviderType string
+	ModelName    string
+	ContextLimit int
+	InputLimit   int
+	OutputLimit  int
+}
+
+type initialSetupModelDefaults struct {
+	Name         string
+	ContextLimit int
+	InputLimit   int
+	OutputLimit  int
+}
+
+func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) {
+	providerName := strings.TrimSpace(input.ProviderName)
+	if providerName == "" {
+		providerName = "openai"
+	}
+	modelName := strings.TrimSpace(input.ModelName)
+	if modelName == "" {
+		modelName = "gpt-5.5"
+	}
+
+	provider := initialSetupProviderYAML{}
+	modelPool := []string{}
+	switch input.Kind {
+	case initialSetupProviderCodex:
+		provider.Preset = "codex"
+		provider.Type = "responses"
+		provider.Models = make(map[string]initialSetupModelYAML)
+		for _, model := range initialSetupCodexModels() {
+			provider.Models[model.Name] = initialSetupModelYAML{
+				Limit: initialSetupLimitYAML{Context: model.ContextLimit, Input: model.InputLimit, Output: model.OutputLimit},
+			}
+			modelPool = append(modelPool, providerName+"/"+model.Name)
+		}
+	default:
+		provider.Type = strings.TrimSpace(input.ProviderType)
+		provider.APIURL = strings.TrimSpace(input.APIURL)
+		provider.Models = map[string]initialSetupModelYAML{
+			modelName: {Limit: initialSetupLimitYAML{Context: input.ContextLimit, Input: input.InputLimit, Output: input.OutputLimit}},
+		}
+		modelPool = []string{providerName + "/" + modelName}
+	}
+
+	cfg := initialSetupConfigYAML{
+		Providers: map[string]initialSetupProviderYAML{providerName: provider},
+		ModelPools: map[string][]string{
+			"default": modelPool,
+		},
+	}
+	if strings.TrimSpace(input.Proxy) != "" {
+		cfg.Proxy = strings.TrimSpace(input.Proxy)
+	}
+	if strings.TrimSpace(input.IMESwitchTarget) != "" {
+		cfg.IMESwitchTarget = strings.TrimSpace(input.IMESwitchTarget)
+	}
+	if input.PreventSleep != nil {
+		cfg.PreventSleep = input.PreventSleep
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func initialSetupCodexModels() []initialSetupModelDefaults {
+	return []initialSetupModelDefaults{
+		{Name: "gpt-5.2", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+		{Name: "gpt-5.3-codex", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+		{Name: "gpt-5.5", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+	}
+}
+
+func inferProviderTypeFromAPIURL(apiURL string) string {
+	path := strings.TrimSuffix(strings.TrimSpace(apiURL), "/")
+	switch {
+	case strings.HasSuffix(path, "/responses"):
+		return "responses"
+	case strings.HasSuffix(path, "/chat/completions"):
+		return "chat-completions"
+	case strings.HasSuffix(path, "/messages"):
+		return "messages"
+	case strings.HasSuffix(path, "/models"):
+		return "generate-content"
+	default:
+		return ""
+	}
+}
+
+func defaultAPIKeyEnvVar(providerName string) string {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return "OPENAI_API_KEY"
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range providerName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	name := strings.Trim(b.String(), "_")
+	if name == "" {
+		name = "OPENAI"
+	}
+	return strings.ToUpper(name) + "_API_KEY"
+}
+
+func defaultAPIURLForProviderType(providerType string) string {
+	switch strings.TrimSpace(providerType) {
+	case "chat-completions":
+		return "https://api.openai.com/v1/chat/completions"
+	case "messages":
+		return "https://api.anthropic.com/v1/messages"
+	case "generate-content":
+		return "https://generativelanguage.googleapis.com/v1beta/models"
+	case "responses":
+		fallthrough
+	default:
+		return "https://api.openai.com/v1/responses"
+	}
+}
+
+func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
+	switch inferProviderTypeFromAPIURL(apiURL) {
+	case "chat-completions":
+		return initialSetupEndpointDefaults{
+			ProviderName: "openai",
+			ProviderType: "chat-completions",
+			ModelName:    "gpt-5.5",
+			ContextLimit: 128000,
+			OutputLimit:  32768,
+		}
+	case "messages":
+		return initialSetupEndpointDefaults{
+			ProviderName: "anthropic",
+			ProviderType: "messages",
+			ModelName:    "claude-opus-4.7",
+			ContextLimit: 1000000,
+			OutputLimit:  64000,
+		}
+	case "generate-content":
+		return initialSetupEndpointDefaults{
+			ProviderName: "gemini",
+			ProviderType: "generate-content",
+			ModelName:    "gemini-3.1-pro-preview",
+			ContextLimit: 1048576,
+			OutputLimit:  65536,
+		}
+	case "responses":
+		fallthrough
+	default:
+		return initialSetupEndpointDefaults{
+			ProviderName: "openai",
+			ProviderType: "responses",
+			ModelName:    "gpt-5.5",
+			ContextLimit: 400000,
+			InputLimit:   272000,
+			OutputLimit:  128000,
+		}
+	}
+}

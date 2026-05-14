@@ -46,32 +46,17 @@ go install github.com/keakon/chord/cmd/chord@latest
 chord --version
 ```
 
-### 2. 配置 provider、模型池与凭据
+### 2. 先运行一次初始化向导
+
+在交互式终端里直接运行：
 
 ```bash
-mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-cat > ~/.config/chord/config.yaml <<'YAML'
-providers:
-  modelscope:
-    type: chat-completions
-    api_url: https://api-inference.modelscope.cn/v1/chat/completions
-    models:
-      Qwen/Qwen3.5-397B-A17B:
-        limit:
-          context: 262144
-          input: 262144
-          output: 65536
-        modalities:
-          input: [text, image]
-model_pools:
-  default:
-    - modelscope/Qwen/Qwen3.5-397B-A17B
-YAML
-cat > ~/.config/chord/auth.yaml <<'YAML'
-modelscope:
-  - "$MODELSCOPE_API_KEY"
-YAML
+chord
 ```
+
+如果缺少 `config.yaml`，Chord 会启动一次性的初始化向导。向导会创建最小可用的 `config.yaml`，必要时再创建 `auth.yaml`，并在结束时展示实际路径。
+
+如果你更希望手写 YAML，或需要不同的 provider / 模型配置，见[快速开始](./docs/quickstart_CN.md)。
 
 ### 3. 在项目里启动
 
@@ -79,7 +64,7 @@ YAML
 cd my-project && chord
 ```
 
-换用其他 ModelScope 模型或 OpenAI 兼容 API 的配置方式见 [快速开始](./docs/quickstart_CN.md)。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型的最大输出能力，Chord 默认 `max_output_tokens` 仍为 `32000`，实际会取更小的值。相关术语见 [术语表](./docs/glossary_CN.md)，可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+手动配置 provider / 模型以及理解模型限制，见[快速开始](./docs/quickstart_CN.md)。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型的最大输出能力，Chord 默认 `max_output_tokens` 仍为 `32000`，实际会取更小的值。相关术语见 [术语表](./docs/glossary_CN.md)，可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
 
 ### Release 下载说明
 

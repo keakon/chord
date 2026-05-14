@@ -32,67 +32,34 @@ Replace `/path/to/chord` with the actual installed path, such as `/usr/local/bin
 
 > When running from source, use `go run ./cmd/chord/` (not `go run cmd/chord/main.go`).
 
-## 2. Configure API keys
+## 2. First run
 
-Create the config directory first:
+Run `chord` in an interactive terminal. If `config.yaml` is missing, Chord launches a one-time setup wizard.
+The wizard creates the minimal `config.yaml` and, when needed, `auth.yaml`, reuses matching existing `auth.yaml` credentials when possible, and then prints the exact paths it used.
+If stdin is redirected but Chord can still get a controlling TTY, the wizard uses that TTY. If no controlling TTY is available, Chord exits immediately with an initialization error instead of waiting for input.
 
-```bash
-mkdir -p ~/.config/chord
-chmod 700 ~/.config/chord
-```
+If you prefer to write YAML manually instead of using the wizard, see [Configuration & Auth](./configuration.md) or the copy-paste-ready [Examples](./examples/index.md).
 
-Then edit `~/.config/chord/auth.yaml`. For the default OpenRouter setup below:
+For API-key setup, the wizard provides one API-key provider path. It asks for an API URL ending in one of these suffixes, with examples in the prompt:
 
-```yaml
-openrouter:
-  - "$OPENROUTER_API_KEY"
-```
+- `/responses` — OpenAI Responses API / compatible gateways
+- `/messages` — Anthropic Messages API / compatible gateways
+- `/chat/completions` — OpenAI Chat Completions compatible gateways
+- `/models` — Gemini Generate Content base path
 
-Other providers use the same provider-name key convention, for example `anthropic`, `openai`, or any custom OpenAI-compatible provider name.
+Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-5.5`, `anthropic` / `claude-opus-4.7`, or `gemini` / `gemini-3.1-pro-preview`.
 
-For OpenAI ChatGPT / Codex OAuth, add a provider in `~/.config/chord/config.yaml` first:
+If your provider requires a proxy, the wizard can also write a proxy URL into `config.yaml`. It shows examples such as `http://127.0.0.1:1080` and `socks5://127.0.0.1:1080`.
 
-```yaml
-providers:
-  openai:
-    type: openai
-    preset: codex
-```
-
-Then run:
+If you chose the API-key provider path, verify the configured models with:
 
 ```bash
-chord auth openai
+chord doctor models
 ```
 
-## 3. Create a minimal config
+If you choose the Codex OAuth path, the wizard completes OAuth sign-in before setup finishes. It creates a `preset: codex` provider and configures these starter models automatically: `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.4`, and `gpt-5.5`.
 
-Edit `~/.config/chord/config.yaml`:
-
-```yaml
-providers:
-  openrouter:
-    type: chat-completions
-    api_url: https://openrouter.ai/api/v1/chat/completions
-    models:
-      openai/gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
-        modalities:
-          input: [text, image]
-
-model_pools:
-  default:
-    - openrouter/openai/gpt-5.5
-```
-
-`providers` defines the API endpoint and available models; `model_pools.default` defines the model pool used by the built-in `builder` / `planner` agents. Both are required. If you only configure a provider, startup will fail because the default model pool cannot be resolved. `builder` does not automatically use every global `model_pools` entry; the built-in config only references `default`. If you override the built-in `builder` agent with a custom agent config, that config must explicitly define `model_pools` or `models`.
-
-If you use another OpenRouter model or any other OpenAI-compatible API, change `api_url`, the provider name, and the model name, then update the `provider/model` reference in `model_pools.default` to match. Read model limits in this order: `limit.context` is the total window; for most models, input + requested output just needs to fit there. If a provider also lists a separate input cap (some GPT models do), add `limit.input`; otherwise Chord derives the input budget from `limit.context` minus effective requested output. `limit.output` is the model's own output capacity. Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. The default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it. See [Glossary](./glossary.md) for the related terms.
-
-## 4. Run
+## 3. Run
 
 Run Chord from your project directory:
 
@@ -115,7 +82,7 @@ go run ./cmd/chord/ headless
 
 Headless overview: [Headless](./headless.md).
 
-## 5. First interaction
+## 4. First interaction
 
 After startup:
 
@@ -130,7 +97,7 @@ Try a simple first message, for example:
 Please read the current project structure first, then summarize its main modules.
 ```
 
-## 6. Common startup commands
+## 5. Common startup commands
 
 ```bash
 # Normal startup; the active model is the first pool in the agent's model_pools list.
@@ -152,7 +119,7 @@ chord --worktree feat-auth
 
 For full worktree workflow (list/remove, cross-worktree resume, headless integration), see [Worktrees](./usage.md#worktrees).
 
-## 7. Next
+## 6. Next
 
 - [Usage](./usage.md)
 - [Configuration & Auth](./configuration.md)

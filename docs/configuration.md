@@ -32,6 +32,8 @@ rather than by searching parent directories. That means:
 - `model_pools` merge by pool name, with same-name project pools overriding the global definition;
 - append-style extension points keep global entries and add project entries: currently `skills.paths` and per-trigger hook arrays under `hooks.*` append rather than replace.
 
+On the first run, if you launch `chord` in an interactive terminal and `config.yaml` is missing, Chord starts a one-time setup wizard. It writes a minimal `config.yaml` and, when needed, `auth.yaml`, reuses matching existing credentials from `auth.yaml` when possible, then prints the resolved file locations. Redirected stdin does not by itself make startup non-interactive; if Chord can still open the controlling TTY, the wizard uses that TTY. If no controlling TTY is available, it exits instead of waiting for input.
+
 ## Streaming tool execution (early execution)
 
 Chord executes a small safe subset of tools *speculatively* while the model response
@@ -155,6 +157,8 @@ If none of these rules match, set `type` explicitly.
 ## auth.yaml
 
 Provider keys must match the provider name in `config.yaml`:
+
+The first-run wizard can create this file for you. It supports either literal API keys or `$ENV_VAR` placeholders.
 
 ```yaml
 anthropic:

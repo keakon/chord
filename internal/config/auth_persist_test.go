@@ -316,6 +316,42 @@ anthropic:
 		}
 	}
 }
+
+func TestUpsertAPIKeyCredentialInFile_PreservesOtherProvidersAndDeduplicates(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - old-openai-key
+anthropic:
+  - old-anthropic-key
+`)
+
+	changed, err := UpsertAPIKeyCredentialInFile(path, "openai", "old-openai-key")
+	if err != nil {
+		t.Fatalf("UpsertAPIKeyCredentialInFile(no-op): %v", err)
+	}
+	if changed {
+		t.Fatal("expected no-op when credential already exists")
+	}
+
+	changed, err = UpsertAPIKeyCredentialInFile(path, "openai", "new-openai-key")
+	if err != nil {
+		t.Fatalf("UpsertAPIKeyCredentialInFile(update): %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when inserting new api key")
+	}
+
+	auth, err := LoadAuthConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := auth["openai"]; len(got) != 2 || got[0].APIKey != "old-openai-key" || got[1].APIKey != "new-openai-key" {
+		t.Fatalf("auth[openai] = %#v", got)
+	}
+	if got := auth["anthropic"]; len(got) != 1 || got[0].APIKey != "old-anthropic-key" {
+		t.Fatalf("auth[anthropic] = %#v", got)
+	}
+}
+
 func writeAuthFixture(t *testing.T, body string) string {
 	t.Helper()
 	path := t.TempDir() + "/auth.yaml"

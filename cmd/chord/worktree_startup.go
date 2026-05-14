@@ -32,8 +32,8 @@ func startupPathOptions() config.PathOptions {
 func startupPathLocator() (*config.PathLocator, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// Fall back to defaults; LoadConfig only fails on truly broken
-		// disk state and the worktree path should still work.
+		// Fall back to defaults when config is missing; malformed config still degrades here
+		// so worktree path resolution can proceed before the main startup path reports the real error.
 		cfg = nil
 	}
 	return config.ResolvePathLocator(cfg, startupPathOptions())

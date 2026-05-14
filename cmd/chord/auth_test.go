@@ -236,6 +236,20 @@ providers:
 	}
 }
 
+func TestLoadAuthLoginProvidersMissingConfigReturnsInitialSetupError(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
+	providers, proxy, err := loadAuthLoginProviders()
+	if err == nil {
+		t.Fatalf("expected missing-config error")
+	}
+	if providers != nil || proxy != "" {
+		t.Fatalf("unexpected providers=%v proxy=%q on error", providers, proxy)
+	}
+	if err.Error() != initialSetupRequiredMessage {
+		t.Fatalf("error = %q, want %q", err, initialSetupRequiredMessage)
+	}
+}
+
 func TestPromptAuthLoginProvider(t *testing.T) {
 	t.Run("single provider", func(t *testing.T) {
 		var out bytes.Buffer

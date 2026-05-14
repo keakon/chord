@@ -105,10 +105,9 @@ func shouldPrintCLIError(err error) bool {
 	return true
 }
 
-func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+var initAppRunner = initApp
 
+func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "chord",
 		Short:         "AI coding assistant with multi-agent orchestration",
@@ -171,6 +170,14 @@ func main() {
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
 	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
+	return rootCmd
+}
+
+func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	rootCmd := newRootCmd()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if shouldPrintCLIError(err) {
@@ -186,6 +193,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	resumeID := strings.TrimSpace(flagResumeSession)
 	if flagContinueSession && resumeID != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
+	}
+
+	if cmd != nil && cmd.Parent() == nil {
+		if err := maybeRunInitialSetupWizard(cmd); err != nil {
+			return err
+		}
 	}
 
 	// --worktree: create/enter the worktree before initApp so the rest of
@@ -221,7 +234,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Initialize the full application context (config, auth, LLM, agent, tools, etc.).
-	ac, err := initApp(true, "local", sessionStartupOptions{
+	ac, err := initAppRunner(true, "local", sessionStartupOptions{
 		ContinueLatest: flagContinueSession,
 		ResumeID:       resumeID,
 		NewSessionMeta: flagWorktreeStartupMeta,

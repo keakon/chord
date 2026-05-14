@@ -86,6 +86,20 @@ func writeDoctorResponsesSSE(t *testing.T, w http.ResponseWriter) {
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
 }
 
+func TestLoadDoctorModelsRuntimeConfigMissingConfigReturnsInitialSetupError(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
+	cfg, err := loadDoctorModelsRuntimeConfig()
+	if err == nil {
+		t.Fatal("expected missing-config error")
+	}
+	if cfg != nil {
+		t.Fatalf("expected nil config on error, got %#v", cfg)
+	}
+	if err.Error() != initialSetupRequiredMessage {
+		t.Fatalf("error = %q, want %q", err, initialSetupRequiredMessage)
+	}
+}
+
 func TestDoctorModelsPlanRepresentativeSelection(t *testing.T) {
 	cfg := testDoctorModelsConfig()
 	plan, err := buildDoctorModelsPlan(cfg, []string{"thinking"}, doctorModelsOptions{})

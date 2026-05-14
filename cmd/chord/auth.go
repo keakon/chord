@@ -382,7 +382,7 @@ func resolveAuthLoginProviderName(commandPath string, flagValue string, args []s
 func loadAuthLoginProviders() (map[string]config.ProviderConfig, string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		return nil, "", fmt.Errorf("load global config: %w", err)
+		return nil, "", wrapConfigLoadError("load global config", err)
 	}
 	effectiveCfg := cfg
 

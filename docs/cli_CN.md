@@ -47,7 +47,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 ## `chord`（默认 — TUI）
 
-在当前目录启动本地 TUI。首次启动时按需创建项目根 `.chord/` 目录，并在 `<state-dir>/projects/<project-key>.json` 注册该项目。
+在当前目录启动本地 TUI。首次启动时，如果全局 `config.yaml` 缺失且 Chord 能取得控制 TTY，就会先启动一次性的初始化向导，再进入 TUI。向导会写入 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示实际路径。仅仅 stdin 被重定向并不会禁用向导：只要还能打开控制 TTY，初始化仍会在那里交互。只有没有控制 TTY 时，Chord 才会直接报初始化错误，不会等待输入。`help`、`version` 和非 root 子命令都不会触发这个向导。
 
 ### Flag
 
@@ -80,7 +80,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-用 `preset: codex` provider 登录 OAuth，凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.yaml`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。
+在基础配置完成后再用它登录。该命令用于 `preset: codex` 的 OAuth provider，并把凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.yaml`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。首次向导也可以在初始化过程中直接完成这条 Codex OAuth 登录链路；`chord auth codex` 仍然适合后续重新登录或补登录。
 
 ### Flag
 

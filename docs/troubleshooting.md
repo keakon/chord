@@ -8,7 +8,10 @@ Check first:
 
 - Whether your Go version meets the requirement
 - Whether you are using the correct source entry point: `go run ./cmd/chord/`
-- Whether `config.yaml` / `auth.yaml` have obvious YAML formatting errors
+- Whether `config.yaml` is missing or malformed
+- Whether `auth.yaml` has obvious YAML formatting errors
+
+If `config.yaml` is missing, run `chord` once in an interactive terminal to launch the setup wizard. If stdin is redirected but Chord can still open the controlling TTY, the wizard runs there. If there is no controlling TTY, Chord exits immediately with an initialization error. If `config.yaml` exists but is malformed, fix the file first; the wizard only runs for missing configs.
 
 You can run:
 
@@ -117,7 +120,7 @@ For `--continue`, `--resume`, new-session, fork-session, and plan-execution flow
 - if model/provider state looks wrong after restore, keep the relevant session logs and traces for diagnosis
 - if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
 
-This change does not remove session resume support; it only deletes obsolete internal reset plumbing that no longer affected HTTP request behavior and keeps the active WebSocket/session lifecycle tied to the current session identifier.
+Session resume itself is fully supported. Internal transport cleanup does not affect the ability to continue or resume sessions. If you see unexpected behavior after restore, capture logs from the current build for diagnosis.
 
 ## TUI cards show strange colors or broken layout when viewing logs / dumps / shell output
 
@@ -137,13 +140,13 @@ If the TUI occasionally shows stale rows, horizontal line artifacts, or partiall
 - if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
 - if it still reproduces on the latest build, capture a diagnostics bundle and a screenshot together
 
-Recent builds add redraw protection for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord now waits for focus-settle, forces a strong host redraw, and explicitly arms a later fallback redraw for the same focus cycle. That late `post-focus-settle-fallback` pass stays armed even if the earlier `post-focus-settle-redraw` already ran, so Ghostty/cmux/iTerm2 still get one more recovery pass when the host surface invalidation outlasts the first redraw. Diagnostics bundles also include background-dirty state and the fallback-arming event so any remaining stale-display cases can be compared against the final internal screen buffer.
+Recent builds add redraw protection for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord waits for focus to settle and forces a host redraw with a fallback pass, so terminals like Ghostty, cmux, or iTerm2 get reliable recovery even when host surface invalidation outlasts the first redraw. Diagnostics bundles now include background-dirty state so remaining cases can be compared against the final screen buffer.
 
-If you see corruption right after focus restore while the UI is streaming output, make sure you are on a build where the host-redraw replay marker is durable across multiple `View()` calls. Bubble Tea can call `View()` several times before its renderer ticker actually flushes a frame; older builds consumed the no-op replay marker on the first `View()`, so a later cached/deferred frame could still be byte-identical after a host-side `ClearScreen` and leave stale cells behind. Newer builds keep a generation-specific no-op replay suffix active until the next host redraw generation, without storing it in cached views.
+If you see corruption right after focus restore while the UI is streaming output, make sure you are on the latest build. Older builds could leave stale cells behind when a deferred frame was byte-identical after a host-side `ClearScreen`. Newer builds keep the redraw replay marker active for the full generation cycle without caching it, so the renderer always has a chance to recover.
 
-If diagnostics show normal `block.Render()`, `viewport.Render()`, and final internal `screen_buffer` output while the real terminal remains corrupted, treat it as a host redraw/replay issue first. Avoid working around it by changing tool-card padding, ANSI reset handling, or card background helpers; include the diagnostics bundle and screenshot so `last_host_redraw` and `host_redraw_generation replay_nonce` can be compared with the visible stale cells.
+If diagnostics show normal internal rendering while the real terminal remains corrupted, treat it as a host redraw/replay issue. Avoid working around it by changing component padding or ANSI handling; include the diagnostics bundle and screenshot for investigation.
 
-Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated terminal control sequence (ANSI/OSC). Newer builds route terminal window-title updates through Bubble Tea's `View().WindowTitle` instead of writing OSC sequences directly to stdout, avoiding interleaving with renderer output.
+Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated ANSI/OSC control sequence. Newer builds route window-title updates through the framework's `WindowTitle` API instead of writing directly to stdout, avoiding interleaving with renderer output.
 
 ## Bottom transcript rows are unreachable in long sessions
 
@@ -155,8 +158,8 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 
 Recent builds fix two transcript-height accounting bugs:
 
-- Late updates to older status cards in long sessions could leave the viewport shorter than the real transcript, making the last rows or even several final cards unreachable.
-- Background idle-sweep cache dropping could miscompute offscreen line offsets when turn-spacing lines were present, causing scroll/selection drift that grew over time.
+- Late updates to older status cards could leave the viewport shorter than the real transcript.
+- Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
 ## Edit reports `file ... has not been read in this conversation`
 
@@ -179,6 +182,16 @@ Common causes:
 - the provider sent tool arguments as a JSON string (wrapped arguments). Recent builds unwrap tool arguments consistently, but if you are on an older build, a wrapped `path` may not be tracked correctly and can trigger false staleness errors.
 
 If this persists on the latest build, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
+
+## Edit reports `old_string not found` even though the file already contains the expected new content
+
+When troubleshooting a dev build with streaming tool execution enabled, you may see `Edit` report `old_string not found` while the target file already contains the expected content. This usually means a speculative `Write` / `Edit` / `Delete` executed before the LLM finalized, was later discarded due to args drift, filtering, or rollback, and the finalized path then tried to re-run before the speculative file change had finished rolling back.
+
+Recent builds synchronously roll back completed speculative file changes before allowing the finalized execution path to retry. If you still see this:
+
+- look for `args_drift`, `filtered`, `rollback`, `length_recovery` in the logs as speculative discard reasons
+- confirm the finalized `Edit` did not reuse a stale `old_string` from an earlier file snapshot
+- keep the session JSONL and current file diff to inspect speculative discard/rollback ordering
 
 ## Performance issues
 

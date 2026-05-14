@@ -38,9 +38,13 @@ Legend: ✅ supported · ⚠️ supported with caveats · ❌ not supported / no
 
 macOS uses `caffeinate(1)` under the hood. On Linux / Windows / WSL this setting is a no-op — the implementation is `internal/power/power_other.go` (a `NoopBackend`). If you depend on always-on behavior elsewhere, configure your OS power settings directly.
 
+The first-run setup wizard asks about `prevent_sleep` only on macOS, and only as an explicit opt-in confirmation. It is intended for longer-running agent sessions where idle sleep would be disruptive.
+
 ### `ime_switch_target`
 
 When you switch from Insert mode to Normal mode, Chord can call `im-select` (or `im-select.exe`) to switch to a configured input method (typically the system English layout) and restore the previous one when you switch back to Insert.
+
+On supported platforms, the first-run setup wizard can also ask for this value. Skip it unless you actively use a non-Latin IME and want more reliable Normal-mode shortcuts.
 
 ```yaml
 # ~/.config/chord/config.yaml

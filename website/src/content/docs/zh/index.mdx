@@ -55,38 +55,23 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
     未安装 Go 1.26+ 时，可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制，解压后把 `chord` 放到 `PATH` 中。
   </Card>
-  <Card title="2. 配置模型与凭据" icon="seti:lock">
+  <Card title="2. 先运行一次初始化向导" icon="seti:lock">
+    在交互式终端里直接运行：
+
     ```bash
-    mkdir -p ~/.config/chord && chmod 700 ~/.config/chord
-    cat > ~/.config/chord/config.yaml <<'YAML'
-    providers:
-      modelscope:
-        type: chat-completions
-        api_url: https://api-inference.modelscope.cn/v1/chat/completions
-        models:
-          Qwen/Qwen3.5-397B-A17B:
-            limit:
-              context: 262144
-              output: 65536
-            modalities:
-              input: [text, image]
-    model_pools:
-      default:
-        - modelscope/Qwen/Qwen3.5-397B-A17B
-    YAML
-    cat > ~/.config/chord/auth.yaml <<'YAML'
-    modelscope:
-      - "$MODELSCOPE_API_KEY"
-    YAML
+    chord
     ```
-    其他 ModelScope 模型与 provider 配置见 [快速开始](/chord/zh/quickstart/)。
+
+    如果缺少 `config.yaml`，Chord 会启动一次性的初始化向导。向导会创建最小可用的 `config.yaml`，必要时再创建 `auth.yaml`。
+
+    如果你更希望手写 YAML，或需要不同的 provider / 模型配置，见[快速开始](/chord/zh/quickstart/)。
   </Card>
   <Card title="3. 在项目里启动" icon="rocket">
     ```bash
     cd my-project
     chord
     ```
-    首次启动会按需创建项目级 `.chord/`。
+    在某个项目中首次运行时，Chord 会按需创建 `.chord/`。
   </Card>
 </CardGrid>
 

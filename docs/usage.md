@@ -67,7 +67,7 @@ Example (OpenCode):
 
 ```bash
 # OpenCode
-oopencode export <sessionID> > export.json
+opencode export <sessionID> > export.json
 chord import opencode export.json
 chord resume <sid>
 

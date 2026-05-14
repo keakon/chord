@@ -16,6 +16,8 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 
 这些文件由你编辑，可以视为源文件。
 
+首次直接运行 `chord` 时，如果全局 `config.yaml` 缺失且 Chord 能拿到控制 TTY，它会启动一次性初始化向导，并在结束时输出 `config.yaml` 和 `auth.yaml` 的实际解析路径。当你通过 `--config-home`、`CHORD_CONFIG_HOME` 启动，或在 Windows 上 `~` 不易直观定位时，这个行为尤其有用。
+
 ```text
 ~/.config/chord/
 ├── config.yaml            # chord 全局配置

@@ -298,7 +298,7 @@ type orderedModelPool struct {
 func loadDoctorModelsRuntimeConfig() (*doctorModelsRuntimeConfig, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, wrapConfigLoadError("load config", err)
 	}
 	poolOrder := []string(nil)
 	if cfgPath, pathErr := config.ConfigPath(); pathErr == nil {

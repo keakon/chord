@@ -47,7 +47,7 @@ For the full directory layout, see [Paths](./paths.md). For all environment vari
 
 ## `chord` (default — TUI)
 
-Runs the local TUI in the current directory. The first run creates `.chord/` in the project as needed and registers the project under `<state-dir>/projects/<project-key>.json`.
+Runs the local TUI in the current directory. On the first run, if global `config.yaml` is missing and Chord can get a controlling TTY, it starts a one-time setup wizard before opening the TUI. The wizard writes `config.yaml` and, when needed, `auth.yaml`, reuses matching existing `auth.yaml` credentials when possible, then shows the exact paths it used. The API-key provider path accepts endpoints ending in `/responses`, `/messages`, `/chat/completions`, or `/models`, and recommends starter provider/model defaults from that suffix. Redirected stdin alone does not disable the wizard: if Chord can still open the controlling TTY, setup runs there. If no controlling TTY is available, Chord exits with a clear initialization error instead of waiting for input. `help`, `version`, and non-root subcommands do not trigger the wizard.
 
 ### Flags
 
@@ -80,7 +80,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-Sign in with a `preset: codex` OAuth provider and store credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.yaml` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured.
+Sign in after the base configuration is in place. This command is for `preset: codex` OAuth providers and stores credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.yaml` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured. The first-run wizard can complete this same Codex OAuth sign-in flow during setup; `chord auth codex` remains the direct command when you want to sign in again later.
 
 ### Flags
 
