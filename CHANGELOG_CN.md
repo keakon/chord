@@ -9,7 +9,7 @@
 - TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
 - CLI：`chord cleanup` 现在在 `status` 和实际清理/预览输出中，都用人类可读的 1024 进制短单位（`B`、`KB`、`MB`、`GB` 等）显示体积，不再只输出原始 byte 数。
 - TUI：将焦点恢复后的 stale-display 保护扩展到 iTerm2。iTerm2 现在会启用与 Ghostty/cmux 相同的 `focus-resize freeze` / 整帧重放恢复路径，减少重新获焦后旧的 thinking 或工具卡内容视觉上残留到后续 assistant 正文里的情况。
-
+- TUI：修复恢复长会话后使用鼠标滚轮切到历史窗口时偶发的重复卡片。deferred transcript 模式下，隐藏尾部窗口中的工具/任务/状态卡现在会被原位更新，而不是在当前历史窗口里误追加一张重复卡片。
 ## 0.5.3 - 2026-05-11
 
 - Runtime / 文件安全：恢复或继续会话时，现在会重建持久化的 `Read` 文件状态；之后的 `Edit` / `Write` 仍保留“先读后写”保护，但不会再误要求所有文件都重新读取一遍。

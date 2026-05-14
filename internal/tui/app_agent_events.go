@@ -64,7 +64,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if m == nil || m.viewport == nil || strings.TrimSpace(id) == "" {
 		return nil, false
 	}
-	if block, ok := m.viewport.FindBlockByToolID(id); ok {
+	if block, ok := m.findToolBlockByToolID(id); ok {
 		return block, false
 	}
 	block := &Block{
@@ -418,7 +418,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 		m.sidebar.UpdateStatus(evt.AgentID, "done")
 		effects.refreshSidebar = true
-		if taskBlock, ok := m.viewport.FindBlockByLinkedTask(evt.TaskID); ok {
+		if taskBlock, ok := m.findBlockByLinkedTask(evt.TaskID); ok {
 			m.recordTUIDiagnostic("agent-done", "task=%s agent=%s block=%d summary_len=%d", evt.TaskID, evt.AgentID, taskBlock.ID, len(evt.Summary))
 			taskBlock.LinkedAgentID = evt.AgentID
 			taskBlock.LinkedTaskID = evt.TaskID
@@ -426,7 +426,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			taskBlock.InvalidateCache()
 			m.updateViewportBlock(taskBlock)
 			m.markBlockSettled(taskBlock)
-		} else if taskBlock, ok := m.viewport.FindBlockByLinkedAgent(evt.AgentID); ok {
+		} else if taskBlock, ok := m.findBlockByLinkedAgent(evt.AgentID); ok {
 			m.recordTUIDiagnostic("agent-done", "agent=%s block=%d summary_len=%d", evt.AgentID, taskBlock.ID, len(evt.Summary))
 			taskBlock.DoneSummary = evt.Summary
 			taskBlock.InvalidateCache()
@@ -650,7 +650,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		return true, effects
 	case agent.ConfirmRequestEvent:
 		if evt.ArgsJSON != "" {
-			if block, ok := m.viewport.FindLastPendingToolBlockByName(evt.ToolName); ok {
+			if block, ok := m.findLastPendingToolBlockByName(evt.ToolName); ok {
 				m.recordTUIDiagnostic("confirm-request", "tool=%s block=%d args_len=%d", evt.ToolName, block.ID, len(evt.ArgsJSON))
 				block.Content = evt.ArgsJSON
 				block.InvalidateCache()
@@ -674,10 +674,10 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 	if m == nil || m.viewport == nil {
 		return nil
 	}
-	if block, ok := m.viewport.FindBlockByToolID(evt.CallID); ok {
+	if block, ok := m.findToolBlockByToolID(evt.CallID); ok {
 		return block
 	}
-	if block, ok := m.viewport.FindLastPendingToolBlockByName(evt.Name); ok {
+	if block, ok := m.findLastPendingToolBlockByName(evt.Name); ok {
 		if strings.TrimSpace(block.ToolID) == "" {
 			block.ToolID = evt.CallID
 			block.InvalidateCache()
@@ -750,7 +750,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		}
 		if evt.Name == "Notify" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
 			if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
-				if taskBlock, ok := m.viewport.FindBlockByLinkedTask(handle.TaskID); ok {
+				if taskBlock, ok := m.findBlockByLinkedTask(handle.TaskID); ok {
 					taskBlock.LinkedAgentID = handle.AgentID
 					taskBlock.LinkedTaskID = handle.TaskID
 					taskBlock.InvalidateCache()
@@ -783,7 +783,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.markRequestProgressBaseline(evt.AgentID)
 		_, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, true)
 		if created {
-			if block, ok := m.viewport.FindBlockByToolID(evt.ID); ok {
+			if block, ok := m.findToolBlockByToolID(evt.ID); ok {
 				block.StartedAt = time.Time{}
 			}
 			m.recordToolArgRender(evt.ID, evt.ArgsJSON, time.Now())
@@ -910,7 +910,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToolProgressEvent:
-		if block, ok := m.viewport.FindBlockByToolID(evt.CallID); ok {
+		if block, ok := m.findToolBlockByToolID(evt.CallID); ok {
 			if block.ResultDone || block.ToolExecutionState == agent.ToolCallExecutionStateQueued {
 				return true, effects
 			}
@@ -1016,7 +1016,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			label := strings.ToUpper(kind[:1]) + kind[1:]
 			content = fmt.Sprintf("[%s %s finished]\n\nDescription: %s\nStatus: %s", label, backgroundID, desc, evt.Status)
 		}
-		if block, ok := m.viewport.FindStatusBlockByBackgroundObject(backgroundID); ok {
+		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
 			block.AgentID = evt.AgentID
 			block.InvalidateCache()

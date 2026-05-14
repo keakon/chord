@@ -585,6 +585,93 @@ func TestDeferredStartupTranscriptMouseWheelUpSwitchesWindowBeforeExactTopOffset
 	}
 }
 
+func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWheelWindowSwitch(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
+	for i := 0; i < startupTranscriptWindowMinBlocks+140; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for hidden tool result test")
+	}
+
+	argsJSON := `{"path":"internal/tui/app_agent_events.go","limit":1}`
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "live-read-hidden-1",
+		Name:     "Read",
+		ArgsJSON: argsJSON,
+	}})
+	if block, ok := m.viewport.FindBlockByToolID("live-read-hidden-1"); !ok || block == nil {
+		t.Fatal("expected pending tool block in tail window before mouse-wheel switch")
+	}
+
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript state missing")
+	}
+	startBefore, endBefore := state.windowStart, state.windowEnd
+	m.viewport.offset = startupDeferredPageUpSwitchThreshold(m.viewport.height)
+
+	updated, wheelCmd := m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelUp})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	if wheelCmd == nil {
+		t.Fatal("mouse wheel should schedule a scroll flush command")
+	}
+	model.consumeScrollFlush(scrollFlushTickMsg{generation: model.scrollFlushGeneration})
+
+	state = model.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript should remain active after mouse-wheel switch")
+	}
+	if state.windowStart >= startBefore || state.windowEnd >= endBefore {
+		t.Fatalf("mouse-wheel up should switch to previous window before exact top; got window=[%d,%d), want start<%d", state.windowStart, state.windowEnd, startBefore)
+	}
+	visibleBefore := len(model.viewport.visibleBlocks())
+	if _, ok := model.viewport.FindBlockByToolID("live-read-hidden-1"); ok {
+		t.Fatal("tail tool block should be hidden after switching to the previous deferred window")
+	}
+
+	_ = model.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "live-read-hidden-1",
+		Name:     "Read",
+		ArgsJSON: argsJSON,
+		Result:   "ok",
+		Status:   agent.ToolResultStatusSuccess,
+	}})
+
+	if got := len(model.viewport.visibleBlocks()); got != visibleBefore {
+		t.Fatalf("len(visibleBlocks()) after hidden tool result = %d, want unchanged %d", got, visibleBefore)
+	}
+	if _, ok := model.viewport.FindBlockByToolID("live-read-hidden-1"); ok {
+		t.Fatal("hidden tool result should update deferred source instead of appending a duplicate visible card")
+	}
+
+	model.handleNormalKey(modelSelectKey("G"))
+	blocks := model.viewport.visibleBlocks()
+	count := 0
+	for _, block := range blocks {
+		if block != nil && block.ToolID == "live-read-hidden-1" {
+			count++
+			if !block.ResultDone {
+				t.Fatal("expected hidden tool block to be completed after returning to tail window")
+			}
+			if got := strings.TrimSpace(block.ResultContent); got != "ok" {
+				t.Fatalf("hidden tool block result = %q, want %q", got, "ok")
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("tool blocks for live-read-hidden-1 after returning to tail = %d, want 1", count)
+	}
+}
+
 func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
@@ -2964,6 +3051,8 @@ type sessionControlAgent struct {
 	loopIteration           int
 	loopMaxIterations       int
 	loopMaxSet              bool
+	canUseLoop              bool
+	canUseLoopSet           bool
 }
 
 func (s *sessionControlAgent) Events() <-chan agent.AgentEvent { return s.events }
@@ -3157,6 +3246,12 @@ func (s *sessionControlAgent) EnableLoopMode(target string) {
 	s.loopTarget = target
 }
 func (s *sessionControlAgent) DisableLoopMode() { s.loopDisableCalls++ }
+func (s *sessionControlAgent) CanUseLoopMode() bool {
+	if s.canUseLoopSet {
+		return s.canUseLoop
+	}
+	return true
+}
 func (s *sessionControlAgent) ListSessionSummaries() ([]agent.SessionSummary, error) {
 	return nil, nil
 }

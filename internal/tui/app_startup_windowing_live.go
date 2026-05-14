@@ -24,6 +24,82 @@ func (m *Model) removeViewportBlockByID(blockID int) {
 	m.syncStartupDeferredTranscriptAfterViewportRemove(blockID)
 }
 
+func (m *Model) findDeferredBlock(match func(*Block) bool) (*Block, bool) {
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 || match == nil {
+		return nil, false
+	}
+	for _, block := range state.allBlocks {
+		if block != nil && match(block) {
+			return block, true
+		}
+	}
+	return nil, false
+}
+
+func (m *Model) findToolBlockByToolID(toolID string) (*Block, bool) {
+	if m != nil && m.viewport != nil && toolID != "" {
+		if block, ok := m.viewport.FindBlockByToolID(toolID); ok {
+			return block, true
+		}
+	}
+	return m.findDeferredBlock(func(block *Block) bool {
+		return block.Type == BlockToolCall && block.ToolID == toolID
+	})
+}
+
+func (m *Model) findLastPendingToolBlockByName(toolName string) (*Block, bool) {
+	if m != nil && m.viewport != nil && toolName != "" {
+		if block, ok := m.viewport.FindLastPendingToolBlockByName(toolName); ok {
+			return block, true
+		}
+	}
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 || toolName == "" {
+		return nil, false
+	}
+	for i := len(state.allBlocks) - 1; i >= 0; i-- {
+		block := state.allBlocks[i]
+		if block != nil && block.Type == BlockToolCall && block.ToolName == toolName && !block.ResultDone {
+			return block, true
+		}
+	}
+	return nil, false
+}
+
+func (m *Model) findStatusBlockByBackgroundObject(backgroundID string) (*Block, bool) {
+	if m != nil && m.viewport != nil && backgroundID != "" {
+		if block, ok := m.viewport.FindStatusBlockByBackgroundObject(backgroundID); ok {
+			return block, true
+		}
+	}
+	return m.findDeferredBlock(func(block *Block) bool {
+		return block.Type == BlockStatus && block.BackgroundObjectID == backgroundID
+	})
+}
+
+func (m *Model) findBlockByLinkedAgent(agentID string) (*Block, bool) {
+	if m != nil && m.viewport != nil && agentID != "" {
+		if block, ok := m.viewport.FindBlockByLinkedAgent(agentID); ok {
+			return block, true
+		}
+	}
+	return m.findDeferredBlock(func(block *Block) bool {
+		return block.Type == BlockToolCall && block.LinkedAgentID == agentID
+	})
+}
+
+func (m *Model) findBlockByLinkedTask(taskID string) (*Block, bool) {
+	if m != nil && m.viewport != nil && taskID != "" {
+		if block, ok := m.viewport.FindBlockByLinkedTask(taskID); ok {
+			return block, true
+		}
+	}
+	return m.findDeferredBlock(func(block *Block) bool {
+		return block.Type == BlockToolCall && block.LinkedTaskID == taskID
+	})
+}
+
 func (m *Model) startupDeferredTranscriptBlockIndex(blockID int) int {
 	state := m.startupDeferredTranscript
 	if state == nil || blockID < 0 {
