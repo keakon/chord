@@ -46,6 +46,9 @@ func (a *MainAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, mainAgentCommunicationPrompt)
 	parts = append(parts, mainAgentResponseClosurePrompt)
+	if block := a.completionFollowUpPromptBlock(); block != "" {
+		parts = append(parts, block)
+	}
 	if block := a.userConfirmationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
@@ -98,19 +101,53 @@ func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
 	return "## " + a.pendingLoopContinuation.Title + "\n\n" + a.pendingLoopContinuation.Text
 }
 
+func (a *MainAgent) questionToolExplicitlyConfigured() bool {
+	cfg := a.currentActiveConfig()
+	if cfg == nil || cfg.Permission.Kind == 0 {
+		return false
+	}
+	for _, rule := range permission.ParsePermission(&cfg.Permission) {
+		if rule.Permission == tools.NameQuestion {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) questionFollowUpAtEndEnabled() bool {
+	cfg := a.currentActiveConfig()
+	if cfg == nil {
+		return false
+	}
+	return cfg.QuestionFollowUpAtEnd
+}
+
 func (a *MainAgent) questionToolAvailable() bool {
 	visible := a.mainLLMVisibleToolNames()
 	if len(visible) == 0 {
 		return false
 	}
-	if _, ok := visible["Question"]; !ok {
+	if _, ok := visible[tools.NameQuestion]; !ok {
 		return false
 	}
 	ruleset := a.effectiveRuleset()
-	if len(ruleset) > 0 && ruleset.Evaluate("Question", "*") == permission.ActionDeny {
+	if len(ruleset) > 0 && ruleset.Evaluate(tools.NameQuestion, "*") == permission.ActionDeny {
 		return false
 	}
 	return true
+}
+
+func (a *MainAgent) completionFollowUpPromptBlock() string {
+	if !a.questionFollowUpAtEndEnabled() || !a.questionToolAvailable() {
+		return ""
+	}
+	return strings.TrimSpace(`## Completion Follow-Up
+- This mode must be satisfied inside the current request: when the current task is complete and you are ready to end the turn, you must proactively call the ` + "`Question`" + ` tool before finishing.
+- Keep the completion summary concise, then make that ` + "`Question`" + ` call as your last action before ending the turn.
+- Use the ` + "`Question`" + ` tool to ask whether the user wants another task. When you have clear, directly relevant follow-up suggestions, offer a small set of concrete next-step / improvement options plus free-text follow-up. When you do not have meaningful suggestions, only ask whether the user wants you to do anything else.
+- If the user gives a new goal, continue with that work in the same ongoing session and use the same completion follow-up behavior again after that work is complete.
+- Only skip that final ` + "`Question`" + ` call when the user has already explicitly said they are done, want to end, do not want further help, or have no more tasks.
+- Do not use a plain-text closing question and do not rely on a later follow-up request to satisfy this rule; use the ` + "`Question`" + ` tool in the current turn instead.`)
 }
 
 func (a *MainAgent) userConfirmationPromptBlock() string {
@@ -191,6 +228,11 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	base := "- If user permission, confirmation, or a real decision is still needed, "
 	if a.questionToolAvailable() {
+		if a.questionFollowUpAtEndEnabled() {
+			return "- Do not use <done>...</done> unless the task is actually complete and the user has already explicitly said they are done, want to end, or do not want further help\n" +
+				"- When the task is complete and you are ready to end as completed, call the `Question` tool before ending as completed so the user can provide another task, choose a follow-up option, or explicitly end the session\n" +
+				base + "call the `Question` tool instead of ending as completed"
+		}
 		return "- Do not use <done>...</done> unless the task is actually complete and no user decision remains\n" +
 			base + "call the `Question` tool instead of ending as completed"
 	}

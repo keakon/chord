@@ -253,10 +253,20 @@ Question: deny
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: allow
+Question: ask
 `)}
 	a.rebuildRuleset()
 	got := a.userConfirmationPromptBlock()
+	if !strings.Contains(got, "## Structured User Confirmation") {
+		t.Fatalf("userConfirmationPromptBlock with Question: ask should use structured branch, got %q", got)
+	}
+
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+Question: allow
+`)}
+	a.rebuildRuleset()
+	got = a.userConfirmationPromptBlock()
 	for _, want := range []string{
 		"Structured User Confirmation",
 		"Default to making ordinary implementation decisions yourself",
@@ -298,8 +308,21 @@ Question: deny
 	if strings.Contains(got, "## Structured User Confirmation") {
 		t.Fatalf("buildSystemPrompt unexpectedly included structured guidance when Question is denied: %q", got)
 	}
+	if strings.Contains(got, "## Completion Follow-Up") {
+		t.Fatalf("buildSystemPrompt should not inject completion follow-up when Question is denied: %q", got)
+	}
 	if !strings.Contains(got, "## Plain-Text User Confirmation") {
 		t.Fatalf("buildSystemPrompt missing plain-text branch when Question is denied: %q", got)
+	}
+
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+Question: ask
+`)}
+	a.rebuildRuleset()
+	got = a.buildSystemPrompt()
+	if !strings.Contains(got, "## Structured User Confirmation") {
+		t.Fatalf("buildSystemPrompt missing structured guidance when Question: ask is configured: %q", got)
 	}
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
@@ -313,6 +336,104 @@ Question: allow
 	}
 	if strings.Contains(got, "## Plain-Text User Confirmation") {
 		t.Fatalf("buildSystemPrompt should not keep plain-text branch when Question tool is permitted: %q", got)
+	}
+}
+
+func TestCompletionFollowUpPromptBlock_RequiresQuestionToolOnlyWhenFeatureEnabled(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.NewQuestionTool(nil))
+
+	if got := a.completionFollowUpPromptBlock(); got != "" {
+		t.Fatalf("completionFollowUpPromptBlock() without feature = %q, want empty", got)
+	}
+
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+	got := a.completionFollowUpPromptBlock()
+	for _, want := range []string{
+		"## Completion Follow-Up",
+		"call the `Question` tool before finishing",
+		"as your last action before ending the turn",
+		"Do not use a plain-text closing question",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("completionFollowUpPromptBlock missing %q in %q", want, got)
+		}
+	}
+
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": allow
+Question: deny
+`),
+	}
+	a.rebuildRuleset()
+	if got := a.completionFollowUpPromptBlock(); got != "" {
+		t.Fatalf("completionFollowUpPromptBlock() with Question denied = %q, want empty", got)
+	}
+}
+
+func TestLoopCompletionRequirementLines_RequireQuestionFollowUpWhenEnabled(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewQuestionTool(nil))
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
+	if !strings.Contains(joined, "call the `Question` tool before ending as completed") {
+		t.Fatalf("loop completion requirements should require Question follow-up when feature enabled, got %q", joined)
+	}
+
+	a.activeConfig = &config.AgentConfig{
+		QuestionFollowUpAtEnd: true,
+		Permission: parsePermissionNode(t, `
+"*": allow
+Question: deny
+`),
+	}
+	a.rebuildRuleset()
+	joined = strings.Join(a.loopCompletionRequirementLines(), "\n")
+	if strings.Contains(joined, "call the `Question` tool before ending as completed") {
+		t.Fatalf("loop completion requirements should not require Question follow-up when Question is denied, got %q", joined)
+	}
+}
+
+func TestEvaluateToolPermission_TreatsQuestionAskAsAllow(t *testing.T) {
+	ruleset := permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionAsk}}
+	decision := evaluateToolPermission(ruleset, tools.NameQuestion, []byte(`{"questions":[{"header":"Next","question":"What next?","options":[]}]}`))
+	if decision.Action != permission.ActionAllow {
+		t.Fatalf("Question permission action = %q, want allow", decision.Action)
+	}
+	if len(decision.NeedsApprovalPaths) != 0 {
+		t.Fatalf("Question ask should not require approval paths, got %v", decision.NeedsApprovalPaths)
+	}
+}
+
+func TestShouldAutoAllowQuestionFollowUp(t *testing.T) {
+	cfg := &config.AgentConfig{QuestionFollowUpAtEnd: true}
+	if !shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow}}) {
+		t.Fatal("expected auto allow when feature enabled and Question not explicitly configured")
+	}
+	if shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionAllow}}) {
+		t.Fatal("should not auto allow when Question already explicitly configured")
+	}
+	if shouldAutoAllowQuestionFollowUp(cfg, permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionDeny}}) {
+		t.Fatal("should not auto allow when Question is explicitly denied")
+	}
+	if shouldAutoAllowQuestionFollowUp(&config.AgentConfig{}, nil) {
+		t.Fatal("feature disabled should not auto allow Question")
 	}
 }
 

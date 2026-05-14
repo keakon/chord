@@ -618,9 +618,27 @@ Common fields include:
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
 - `permission`: per-tool permission policy for this agent.
+- `question_follow_up_at_end`: when `true` on a MainAgent role, the model must proactively call `Question` in the current turn before finishing completed work, unless the user already explicitly said they are done. If `Question` is not explicitly configured in `permission`, Chord auto-adds `Question: allow` at the role base layer so the tool is visible to the model. Explicit `Question: deny` disables this feature entirely (no follow-up prompt injection). `Question: ask` is treated as `allow` to avoid a redundant second confirmation step before the user can answer the question.
 - `mcp`: MCP config scoped to this agent.
 - `delegation`: limits such as `max_children`, `max_depth`, and `child_join`.
 - `prompt` / `system_prompt`: system prompt for plain YAML files.
+
+Example:
+
+```yaml
+name: builder
+mode: main
+model_pools: [default]
+question_follow_up_at_end: true
+permission:
+  "*": deny
+  Read: allow
+  Grep: allow
+  Glob: allow
+  Shell: allow
+  Edit: ask
+  Write: ask
+```
 
 ## Context compaction
 

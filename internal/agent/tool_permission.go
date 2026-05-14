@@ -23,6 +23,13 @@ type permissionAggregateItem struct {
 	AllowList []string
 }
 
+func normalizeToolPermissionAction(toolName string, action permission.Action) permission.Action {
+	if toolName == tools.NameQuestion && action == permission.ActionAsk {
+		return permission.ActionAllow
+	}
+	return action
+}
+
 func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	if strings.TrimSpace(toolName) == "" {
@@ -34,13 +41,13 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 
 	unwrapped := llm.UnwrapToolArgs(args)
 	switch toolName {
-	case "Delete":
+	case tools.NameDelete:
 		return evaluateDeleteToolPermission(ruleset, unwrapped)
-	case "Shell":
+	case tools.NameShell:
 		return evaluateShellToolPermission(ruleset, unwrapped)
 	default:
 		arg := extractToolArgument(toolName, unwrapped)
-		decision.Action = ruleset.Evaluate(toolName, arg)
+		decision.Action = normalizeToolPermissionAction(toolName, ruleset.Evaluate(toolName, arg))
 		decision.MatchArgument = arg
 		return decision
 	}
