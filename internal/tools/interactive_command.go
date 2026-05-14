@@ -47,10 +47,16 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 	if len(tokens) == 0 {
 		return nil
 	}
-	first := tokens[0]
-	if isAssignment(first) && len(tokens) > 1 {
-		return detectInteractiveCommandTokens(tokens[1:])
+	env := make(map[string]string)
+	for len(tokens) > 0 && isAssignment(tokens[0]) {
+		parts := strings.SplitN(tokens[0], "=", 2)
+		env[parts[0]] = parts[1]
+		tokens = tokens[1:]
 	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	first := tokens[0]
 	name := commandBase(first)
 	if name == "" {
 		return nil
@@ -75,7 +81,7 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 	case "sftp", "ftp", "telnet", "su", "passwd":
 		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Run this manually in a terminal or use a non-interactive authentication method.")
 	case "git":
-		return detectInteractiveGit(tokens)
+		return detectInteractiveGit(tokens, env)
 	case "docker", "podman":
 		return detectInteractiveContainerCommand(name, tokens)
 	case "kubectl":
@@ -135,7 +141,7 @@ func sshOptionConsumesValue(arg string) bool {
 		arg == "-R" || arg == "-S" || arg == "-W" || arg == "-w"
 }
 
-func detectInteractiveGit(tokens []string) *InteractiveCommandFinding {
+func detectInteractiveGit(tokens []string, env map[string]string) *InteractiveCommandFinding {
 	sub, args, ok := gitSubcommand(tokens)
 	if !ok {
 		return nil
@@ -150,6 +156,9 @@ func detectInteractiveGit(tokens []string) *InteractiveCommandFinding {
 		}
 	case "rebase":
 		if hasOption(args, "-i", "--interactive") || hasOption(args, "", "--edit-todo") {
+			if gitSequenceEditorAvoidsPrompt(env) {
+				return nil
+			}
 			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Run it manually in a terminal, or use non-interactive git commands.")
 		}
 	case "add", "checkout", "restore", "reset", "stash":
@@ -325,20 +334,28 @@ func gitCommitAvoidsEditor(args []string) bool {
 		if arg == "-m" || arg == "-F" || arg == "--message" || arg == "--file" || arg == "-C" || arg == "--reuse-message" || arg == "--no-edit" {
 			return true
 		}
-		if strings.HasPrefix(arg, "-m") && len(arg) > 2 {
-			return true
-		}
-		if strings.HasPrefix(arg, "-F") && len(arg) > 2 {
-			return true
-		}
-		if strings.HasPrefix(arg, "-C") && len(arg) > 2 {
-			return true
+		if strings.HasPrefix(arg, "--fixup=") {
+			value := strings.TrimPrefix(arg, "--fixup=")
+			if value != "" && !strings.HasPrefix(value, "amend:") && !strings.HasPrefix(value, "reword:") {
+				return true
+			}
 		}
 		if strings.HasPrefix(arg, "--message=") || strings.HasPrefix(arg, "--file=") || strings.HasPrefix(arg, "--reuse-message=") {
 			return true
 		}
+		if len(arg) > 2 && strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+			short := arg[1:]
+			if strings.ContainsRune(short, 'm') || strings.ContainsRune(short, 'F') || strings.ContainsRune(short, 'C') {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+func gitSequenceEditorAvoidsPrompt(env map[string]string) bool {
+	value := strings.TrimSpace(env["GIT_SEQUENCE_EDITOR"])
+	return value == ":" || value == "true"
 }
 
 func hasTTYOptionBeforeContainerCommand(args []string) bool {
