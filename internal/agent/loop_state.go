@@ -34,9 +34,10 @@ const (
 )
 
 type LoopAssessment struct {
-	Action  LoopAssessmentAction
-	Message string
-	Reasons []string
+	Action            LoopAssessmentAction
+	Message           string
+	Reasons           []string
+	TriggerStopReason string
 }
 
 type LoopContinuationNote struct {
@@ -46,18 +47,23 @@ type LoopContinuationNote struct {
 }
 
 type loopRuntimeState struct {
-	Enabled               bool
-	State                 LoopState
-	Target                string
-	ConsecutiveNoProgress int
-	LastProgressSignature string
-	LastAssessmentMessage string
-	ProgressVersion       uint64
-	VerificationVersion   uint64
-	LastAssessmentVersion uint64
-	Iteration             int
-	MaxIterations         int
-	MaxIterationsSet      bool
+	Enabled bool
+	State   LoopState
+	Target  string
+	// DeferContinuationPromptUntilDone is enabled when /loop on is issued while
+	// a turn is already running. In that mode, LOOP CONTINUE/VERIFY prompt
+	// injection is suppressed until a terminal assistant stop_reason=done is
+	// observed, or a Done tool exit attempt is rejected.
+	DeferContinuationPromptUntilDone bool
+	ConsecutiveNoProgress            int
+	LastProgressSignature            string
+	LastAssessmentMessage            string
+	ProgressVersion                  uint64
+	VerificationVersion              uint64
+	LastAssessmentVersion            uint64
+	Iteration                        int
+	MaxIterations                    int
+	MaxIterationsSet                 bool
 }
 
 func (s *loopRuntimeState) enable() {
@@ -91,6 +97,7 @@ func (s *loopRuntimeState) disable() {
 	s.Iteration = 0
 	s.MaxIterations = 0
 	s.MaxIterationsSet = false
+	s.DeferContinuationPromptUntilDone = false
 	s.Enabled = false
 }
 

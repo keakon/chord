@@ -28,6 +28,9 @@ func (a *MainAgent) loopWorkflowPromptBlock() string {
 	if !a.loopState.Enabled {
 		return ""
 	}
+	if a.loopState.DeferContinuationPromptUntilDone {
+		return ""
+	}
 	completionClause := "- A task is complete only when all requested work is finished"
 	syncClause := ""
 	if a.hasActiveSubAgents() {

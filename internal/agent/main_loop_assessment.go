@@ -35,10 +35,12 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		}
 		a.loopState.State = LoopStateExecuting
 		a.emitLoopStateChanged()
-		a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
-		if a.pendingLoopContinuation != nil {
-			a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
-			a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+		if a.shouldEmitLoopContinuationForAssessment(payload) {
+			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
+			if a.pendingLoopContinuation != nil {
+				a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
+				a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+			}
 		}
 		a.emitActivity("main", ActivityExecuting, "loop")
 		a.handleContinueFromContext(Event{Type: EventContinue})
@@ -53,10 +55,12 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.loopState.State = LoopStateVerifying
 		a.emitLoopStateChanged()
 		a.emitActivity("main", ActivityVerifying, "loop")
-		a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
-		if a.pendingLoopContinuation != nil {
-			a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
-			a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+		if a.shouldEmitLoopContinuationForAssessment(payload) {
+			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
+			if a.pendingLoopContinuation != nil {
+				a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
+				a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+			}
 		}
 		a.handleContinueFromContext(Event{Type: EventContinue})
 	case LoopAssessmentActionBlocked:
@@ -80,6 +84,22 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.emitLoopStateChanged()
 		a.setIdleAndDrainPending()
 	}
+}
+
+func (a *MainAgent) shouldEmitLoopContinuationForAssessment(assessment *LoopAssessment) bool {
+	if assessment == nil {
+		return false
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		return true
+	}
+	stopReason := strings.ToLower(strings.TrimSpace(assessment.TriggerStopReason))
+	if stopReason == "done" {
+		a.loopState.DeferContinuationPromptUntilDone = false
+		a.emitLoopStateChanged()
+		return true
+	}
+	return false
 }
 
 // loopKeepsMainBusy returns true if the loop controller is in an active state
@@ -232,22 +252,23 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 	}
 	if a.hasOpenTodos() {
 		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "open_todos", "terminal_reply"))
-		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: sync unfinished todos before finishing.", Reasons: reasons}
+		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: sync unfinished todos before finishing.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 	}
 	if a.hasActiveSubAgents() {
 		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "subagents_active", "terminal_reply"))
-		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: active subagents must finish before completion.", Reasons: reasons}
+		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: active subagents must finish before completion.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 	}
 	if !a.loopVerificationSatisfied(msg.Content) {
 		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_verification_status", "terminal_reply"))
 		return &LoopAssessment{
-			Action:  LoopAssessmentActionContinue,
-			Message: "Loop continuing: report verification status or include <verify-not-run>reason</verify-not-run> before finishing.",
-			Reasons: reasons,
+			Action:            LoopAssessmentActionContinue,
+			Message:           "Loop continuing: report verification status or include <verify-not-run>reason</verify-not-run> before finishing.",
+			Reasons:           reasons,
+			TriggerStopReason: strings.TrimSpace(msg.StopReason),
 		}
 	}
 	reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_done_tool", "terminal_reply"))
-	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons}
+	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 }
 
 // nextLoopAssessmentFromAssistant evaluates the loop state after an assistant message
@@ -266,7 +287,12 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 		if stopReason == "stop" || stopReason == "end_turn" || stopReason == "tool_calls" {
 			return a.terminalLoopAssessment(msg, false)
 		}
-		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing after observable progress.", Reasons: a.currentLoopContinuationReasons("progress_continuation")}
+		return &LoopAssessment{
+			Action:            LoopAssessmentActionContinue,
+			Message:           "Loop continuing after observable progress.",
+			Reasons:           a.currentLoopContinuationReasons("progress_continuation"),
+			TriggerStopReason: stopReason,
+		}
 	}
 	signature := normalizeLoopProgressSignature(msg.Content, msg.StopReason)
 	if signature != "" && signature == a.loopState.LastProgressSignature {
@@ -294,7 +320,12 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 	if a.loopState.ConsecutiveNoProgress >= 2 {
 		reasons = append([]string{"suspected_stall"}, reasons...)
 	}
-	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing from existing context.", Reasons: reasons}
+	return &LoopAssessment{
+		Action:            LoopAssessmentActionContinue,
+		Message:           "Loop continuing from existing context.",
+		Reasons:           reasons,
+		TriggerStopReason: stopReason,
+	}
 }
 
 // currentLoopContinuationReasons builds a deduplicated list of reasons for loop continuation.

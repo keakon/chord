@@ -127,8 +127,15 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 			target = "Continue and finish all remaining tasks in the current session."
 		}
 		a.EnableLoopMode(target)
-		// busy=true: turn is active, so this queues the loop anchor target for the
-		// next round without treating the slash command as transcript content.
+		if busy {
+			// Busy /loop on should not emit LOOP card or inject continuation
+			// prompt immediately; only enforce required tool calls for the ongoing
+			// turn, and defer loop continuation prompt until terminal stop_reason=done
+			// or a rejected Done exit attempt.
+			a.loopState.DeferContinuationPromptUntilDone = true
+			return true
+		}
+		// Idle /loop on keeps current behavior: emit LOOP card and inject target.
 		a.sendLoopAnchorFromCommand(target)
 		return true
 	default:

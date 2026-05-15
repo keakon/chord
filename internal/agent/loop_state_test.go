@@ -150,7 +150,7 @@ Done: allow
 			CallID:   callID,
 			Name:     tools.NameDone,
 			ArgsJSON: `{"reason":"completed and verified"}`,
-			Result:   "Done requested: completed and verified",
+			Result:   "completed and verified",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -220,7 +220,7 @@ Done: allow
 			CallID:   callID,
 			Name:     tools.NameDone,
 			ArgsJSON: `{"reason":"everything looks done"}`,
-			Result:   "Done requested: everything looks done",
+			Result:   "everything looks done",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -366,7 +366,7 @@ Done: allow
 			CallID:   callID,
 			Name:     tools.NameDone,
 			ArgsJSON: `{"reason":"implemented but not verified"}`,
-			Result:   "Done requested: implemented but not verified",
+			Result:   "implemented but not verified",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -876,7 +876,7 @@ Done: allow
 			CallID:   callID,
 			Name:     tools.NameDone,
 			ArgsJSON: `{"reason":"completed and verified"}`,
-			Result:   "Done requested: completed and verified",
+			Result:   "completed and verified",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -962,6 +962,84 @@ func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
 		t.Fatalf("len(pendingUserMessages) = %d, want 0 when /loop on is rejected", got)
+	}
+}
+
+func TestHandleUserMessageBusyLoopOnDefersContinuationPromptInjection(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.newTurn()
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
+
+	if !a.loopState.Enabled {
+		t.Fatal("loop should be enabled when Done tool is available")
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("busy /loop on should defer loop continuation prompt injection")
+	}
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0 for busy /loop on control command", got)
+	}
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Kind == "loop_notice" {
+			t.Fatalf("unexpected persisted loop notice on busy /loop on: %q", msg.Content)
+		}
+	}
+	for len(a.outputCh) > 0 {
+		if _, ok := (<-a.outputCh).(LoopNoticeEvent); ok {
+			t.Fatal("unexpected LoopNoticeEvent on busy /loop on")
+		}
+	}
+}
+
+func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.DeferContinuationPromptUntilDone = true
+
+	if a.shouldEmitLoopContinuationForAssessment(&LoopAssessment{
+		Action:            LoopAssessmentActionContinue,
+		TriggerStopReason: "interrupted",
+	}) {
+		t.Fatal("should not emit continuation when deferred gate is active and stop reason is not done")
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("deferred gate should remain active for non-done stop reason")
+	}
+	if a.shouldEmitLoopContinuationForAssessment(&LoopAssessment{
+		Action:            LoopAssessmentActionContinue,
+		TriggerStopReason: "stop",
+	}) {
+		t.Fatal("should not emit continuation on stop when deferred gate requires done")
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("deferred gate should remain active for stop when done is required")
+	}
+	if !a.shouldEmitLoopContinuationForAssessment(&LoopAssessment{
+		Action:            LoopAssessmentActionContinue,
+		TriggerStopReason: "done",
+	}) {
+		t.Fatal("should emit continuation when terminal done stop reason arrives")
+	}
+	if a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("deferred gate should be cleared after terminal done stop reason")
+	}
+}
+
+func TestLoopWorkflowPromptBlockHiddenWhenBusyLoopOnIsDeferred(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.DeferContinuationPromptUntilDone = true
+	if got := a.loopWorkflowPromptBlock(); got != "" {
+		t.Fatalf("loopWorkflowPromptBlock() = %q, want empty while deferred injection gate is active", got)
 	}
 }
 

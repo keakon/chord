@@ -51,5 +51,5 @@ func (DoneTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	if strings.TrimSpace(args.Reason) == "" {
 		return "Done requested", nil
 	}
-	return "Done requested: " + strings.TrimSpace(args.Reason), nil
+	return strings.TrimSpace(args.Reason), nil
 }
