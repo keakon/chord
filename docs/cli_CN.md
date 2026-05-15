@@ -24,7 +24,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
 | `chord worktree remove <name>`    | 移除 chord 管理的 worktree                                        |
-| `chord worktree finish <name>`    | 先将 worktree 状态 squash 回目标分支，再 fast-forward 并删除 worktree |
+| `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord                                       |
 
@@ -263,14 +263,14 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 | Flag                     | 说明                                                                                                                               |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `--onto <分支>`          | 要先合入 worktree、再 squash 回去的目标分支（默认主 worktree 当前分支）                                                           |
-| `--check`                | 在临时 worktree 中预检“目标分支能否干净合入 worktree”，不改动真实 worktree 或目标分支                                             |
+| `--check`                | 在临时 worktree 中预检“目标分支能否干净合入 worktree”；真正执行 finish 时若出现冲突，真实 worktree 可能停留在 merge 状态，等待你解决                                             |
 | `-m, --message <message>` | 覆盖自动生成的 squash commit message，手动指定最终 finish commit 的说明                                                           |
 
 如果把目标分支合并进 worktree 时会冲突，`finish` 会打印冲突详情，保持目标分支不变，并把真实 worktree 保留在这次 merge 中，供你解决后重跑。
 
 如果 worktree 内已经有进行中的 rebase 或 merge，`finish` 会直接退出，避免叠加新的合并流程。
 
-只想提前判断会不会冲突、又不想改动真实 worktree / 分支 / 目标分支时，用 `--check`。
+只想提前判断会不会冲突、又不想改动真实 worktree / 分支 / 目标分支时，用 `--check`。真正执行 `finish` 则不是无副作用操作：如果目标分支合入 worktree 时发生冲突，Chord 会把真实 worktree 保留在该 merge 状态，等你解决后再重跑 `finish`。
 
 想手动控制最终 squash commit 的说明时，用 `-m/--message` 覆盖自动生成的 message。
 

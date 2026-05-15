@@ -201,6 +201,17 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 
 When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
 
+**Using `/loop` + `Done` to get more value from Codex quota:** loop mode does not create extra quota, but it helps spend existing quota on end-to-end progress instead of repeated human re-prompting. In normal mode, the model often stops after one local milestone and waits for your next message; that burns another turn later just to say "continue", rerun checks, or pick up unfinished cleanup. With `/loop`, the agent keeps iterating inside the same task until it either reaches a real stop condition or asks to exit through `Done`. The `Done` gate matters here: it prevents premature stopping, so the agent is pushed to finish the whole chain — implement → test → fix failures → verify again → summarize — before giving control back.
+
+A good pattern for Codex-heavy work is:
+
+1. turn on loop with a concrete target (`/loop on implement feature X with tests`)
+2. give one complete instruction with success criteria
+3. let the agent continue through edits, test failures, and follow-up fixes
+4. only confirm the final `Done` request when the work is actually complete
+
+This usually improves quota efficiency for multi-step coding tasks because fewer turns are wasted on manual nudges like "continue", "run the tests too", or "fix the failing case and try again". Do **not** use `/loop` just to keep the model running aimlessly; if the task is exploratory, ambiguous, or likely to need frequent product decisions, normal mode is often cheaper and easier to control.
+
 If the task is genuinely blocked, the agent can still report `<blocked>category: reason</blocked>`. You can always press `Esc` to cancel the current iteration.
 
 **Status bar:** when enabled, the TUI status bar shows a `[↻]` marker.

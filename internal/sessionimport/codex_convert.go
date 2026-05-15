@@ -26,6 +26,10 @@ type codexRolloutEntry struct {
 // Handles both the current protocol format (type+payload) and legacy
 // item-based format used by older Codex versions.
 func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
+	// ---------------------------------------------------------------------------
+	// Stage 1a: JSONL scanning + legacy/current schema normalization
+	// ---------------------------------------------------------------------------
+
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 
@@ -89,6 +93,10 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 
 		// Detect item kind from the legacy object.
 		kind := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "type")))
+
+		// ---------------------------------------------------------------------------
+		// Stage 1b: legacy item adapters + shared raw JSON helpers
+		// ---------------------------------------------------------------------------
 
 		// Legacy FunctionCall/FunctionCallOutput keys.
 		if fcRaw, ok := itemObj["FunctionCall"]; ok {
@@ -332,6 +340,10 @@ func pickJSONStringOK(m map[string]json.RawMessage, keys ...string) (string, boo
 //   - response_item is the canonical content source
 //   - event_msg supplements metadata (turn boundaries, usage, status)
 //   - turn_context defines turn identity
+// ---------------------------------------------------------------------------
+// Stage 2: Build IR from normalized rollout entries
+// ---------------------------------------------------------------------------
+
 func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *ImportReport) ([]*codexTurn, error) {
 	// Phase A: Collect all response_items into turns.
 	// We first scan for turn_context boundaries, then assign items.
@@ -877,6 +889,10 @@ func codexProvenance() *message.MessageProvenance {
 // 2. Assistant tool-call message(s)
 // 3. Corresponding tool-result message(s)
 // 4. Assistant plain-text response(s) (after tool execution)
+// ---------------------------------------------------------------------------
+// Stage 3: Linearize IR into Chord messages
+// ---------------------------------------------------------------------------
+
 func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Message {
 	var out []message.Message
 

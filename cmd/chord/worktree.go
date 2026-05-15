@@ -229,7 +229,7 @@ func newWorktreeFinishCmd() *cobra.Command {
 	var message string
 	cmd := &cobra.Command{
 		Use:           "finish <name>",
-		Short:         "Merge the target branch into the worktree, squash it back as one commit, then remove the worktree and its branch",
+		Short:         "Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree and its branch",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -283,7 +283,7 @@ func newWorktreeFinishCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&onto, "onto", "", "target branch to merge into the worktree and squash back onto (default: main worktree's current branch)")
-	cmd.Flags().BoolVar(&check, "check", false, "preview whether the target branch can merge cleanly into the worktree in a temporary worktree without mutating the real worktree or target branch")
+	cmd.Flags().BoolVar(&check, "check", false, "preview whether the target branch can merge cleanly into the worktree in a temporary worktree; a real finish may leave the real worktree in a merge state if conflicts must be resolved")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "override the generated squash commit message")
 	return cmd
 }

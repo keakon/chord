@@ -24,7 +24,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
 | `chord worktree remove <name>`   | Remove a chord-managed worktree                                  |
-| `chord worktree finish <name>`   | Squash a worktree branch into the target branch, fast-forward, then remove |
+| `chord worktree finish <name>`   | Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree |
 | `chord resume <session-id>`      | Resume a session by ID, auto-locating its worktree               |
 | `chord import <source> [file]`   | Import an external session into Chord's session store            |
 
@@ -263,14 +263,14 @@ Merge the target branch into the real worktree branch first, then squash the fin
 | Flag               | Description                                                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `--onto <branch>`  | Target branch to merge into the worktree and squash back onto (default: the main worktree's current branch)                      |
-| `--check`          | Preview whether the target branch can merge cleanly into the worktree in a temporary worktree without mutating the real worktree or target branch |
+| `--check`          | Preview whether the target branch can merge cleanly into the worktree in a temporary worktree; a real finish may leave the real worktree in a merge state while you resolve conflicts |
 | `-m, --message <message>` | Override the generated squash commit message for the final finish commit                                                     |
 
 If merging the target branch into the worktree would hit conflicts, `finish` exits with conflict details, keeps the target branch unchanged, and leaves the real worktree in that merge for you to resolve and re-run.
 
 If a rebase or merge is already in progress in the worktree, `finish` exits early instead of starting another merge on top of it.
 
-Use `--check` when you want a conflict preflight without mutating the real worktree, branch, or target branch.
+Use `--check` when you want a conflict preflight without mutating the real worktree, branch, or target branch. A real `finish` is intentionally not side-effect free: if the merge from the target branch conflicts, Chord keeps the real worktree in that merge state so you can resolve it and rerun `finish`.
 
 Pass `-m/--message` when you want to override the generated squash message with a final commit message you wrote yourself.
 

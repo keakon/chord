@@ -55,6 +55,9 @@ func TestDetectInteractiveShellCommandAllowsNonInteractiveCommands(t *testing.T)
 		"go test ./...",
 		"printf 'y\\n' | some-command",
 		"echo '/dev/tty'",
+		"git show HEAD:path/to/file",
+		"git diff -- README.md",
+		"git branch --show-current",
 	}
 	for _, command := range cases {
 		t.Run(command, func(t *testing.T) {
