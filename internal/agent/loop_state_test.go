@@ -335,6 +335,94 @@ Done: ask
 	}
 }
 
+func TestHandleToolResult_DoneInLoopUserDenialDoesNotEmitLoopContinue(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: ask
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-user-deny-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"completed and verified"}`,
+			Result:   "completed and verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	var sawConfirm bool
+	var sawToolResult bool
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				if payload.ToolName != tools.NameDone {
+					t.Fatalf("ConfirmRequestEvent.ToolName = %q, want %q", payload.ToolName, tools.NameDone)
+				}
+				sawConfirm = true
+				a.ResolveConfirm("deny", payload.ArgsJSON, "", "need a manual final check", payload.RequestID)
+			case LoopNoticeEvent:
+				if payload.Title == "LOOP CONTINUE" {
+					t.Fatalf("unexpected LoopNoticeEvent after user denied Done: %+v", payload)
+				}
+			case ToolResultEvent:
+				if payload.CallID != callID || payload.Name != tools.NameDone {
+					continue
+				}
+				sawToolResult = true
+				if payload.Result != "Done rejected: need a manual final check" {
+					t.Fatalf("ToolResultEvent.Result = %q, want exact user denial reason", payload.Result)
+				}
+				select {
+				case <-handled:
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for user-denied Done handling to finish")
+				}
+				msgs := a.ctxMgr.Snapshot()
+				last := msgs[len(msgs)-1]
+				if last.Role != "user" || last.Kind != "loop_notice" || last.Content != payload.Result {
+					t.Fatalf("last message = %#v, want persisted user denial only", last)
+				}
+				if !sawConfirm {
+					t.Fatal("expected Done confirmation request before denial result")
+				}
+				return
+			}
+		case <-deadline:
+			if !sawToolResult {
+				t.Fatal("timed out waiting for Done denial tool result")
+			}
+			return
+		}
+	}
+}
+
 func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenVerificationMissing(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())

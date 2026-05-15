@@ -312,18 +312,21 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.pendingLoopExitResult = &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON}
 	}
 
-	a.emitToTUI(ToolResultEvent{
-		CallID:      payload.CallID,
-		Name:        payload.Name,
-		ArgsJSON:    payload.ArgsJSON,
-		Audit:       payload.Audit.Clone(),
-		Result:      displayResult,
-		Status:      toolResultStatusFromError(isError),
-		Diff:        payload.Diff,
-		DiffAdded:   payload.DiffAdded,
-		DiffRemoved: payload.DiffRemoved,
-		FileCreated: payload.FileCreated,
-	})
+	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled
+	if !deferToolResultEmission {
+		a.emitToTUI(ToolResultEvent{
+			CallID:      payload.CallID,
+			Name:        payload.Name,
+			ArgsJSON:    payload.ArgsJSON,
+			Audit:       payload.Audit.Clone(),
+			Result:      displayResult,
+			Status:      toolResultStatusFromError(isError),
+			Diff:        payload.Diff,
+			DiffAdded:   payload.DiffAdded,
+			DiffRemoved: payload.DiffRemoved,
+			FileCreated: payload.FileCreated,
+		})
+	}
 
 	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
 	toolMsg := message.Message{
@@ -456,7 +459,14 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					if reason == "" {
 						reason = "User rejected loop exit and requires more work before Done."
 					}
-					a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, "Done rejected: "+reason)
+					rejection := "Done rejected: " + reason
+					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
+					msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
+					a.ctxMgr.Append(msg)
+					if a.recovery != nil {
+						a.persistAsync("main", msg)
+					}
 				}
 			} else {
 				a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult())
