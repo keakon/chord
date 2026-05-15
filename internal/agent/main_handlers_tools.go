@@ -352,10 +352,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.loopState.markProgress()
 		a.turn.ChangedFiles = append(a.turn.ChangedFiles, changed)
 	}
-	if isVerificationLikeToolResult(payload, contextResult) {
-		a.loopState.markVerificationProgress()
-	}
-
 	// Track malformed and empty-args calls. Both malformed sentinel args and
 	// empty "{}" args for tools with required parameters count as abnormal.
 	if llm.IsMalformedArgs(json.RawMessage(payload.ArgsJSON)) {

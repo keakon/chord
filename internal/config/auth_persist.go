@@ -114,7 +114,9 @@ func UpdateOAuthCredentialInFile(
 		if statePath, stateErr := AuthStatePath(); stateErr == nil {
 			if state, loadErr := LoadAuthState(statePath); loadErr == nil {
 				if stateCred, ok := findMatchingOAuthStateRecord(state, provider, updated); ok {
-					updated.Status = stateCred.Status
+					if stateCred.Status != "" {
+						updated.Status = stateCred.Status
+					}
 					updated.CodexPrimaryResetAt = stateCred.CodexPrimaryResetAt
 					updated.CodexSecondaryResetAt = stateCred.CodexSecondaryResetAt
 				}

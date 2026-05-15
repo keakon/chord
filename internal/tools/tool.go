@@ -116,7 +116,7 @@ func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
 func containsShellMetachar(command string) bool {
 	for _, r := range command {
 		switch r {
-		case '|', '&', ';', '>', '<', '$', '`', '\n', '\r':
+		case '|', '&', ';', '>', '<', '$', '`', '\\', '(', ')', '*', '?', '[', ']', '{', '}', '\n', '\r':
 			return true
 		}
 	}

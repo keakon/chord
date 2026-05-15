@@ -237,6 +237,29 @@ func (r *OAuthRefresher) mutateCredential(
 		return nil, false, err
 	}
 	r.authConfigMu.Lock()
+	// The YAML round-trip strips the "status" field (status is stored in the
+	// separate state file, not auth.yaml). Restore status from the state file
+	// so the in-memory runtime config stays consistent. For the mutated
+	// credential whose status was just changed, also apply the new status
+	// directly since the state file may not have been updated yet (the caller
+	// writes the state file after mutateCredential returns).
+	if r.authStatePath != "" {
+		if state, stateErr := config.LoadAuthState(r.authStatePath); stateErr == nil {
+			auth = config.MergeAuthConfigWithState(auth, state)
+		}
+	}
+	if updated != nil && updated.Status != "" {
+		creds := auth[r.providerName]
+		for i := range creds {
+			if creds[i].OAuth == nil {
+				continue
+			}
+			if creds[i].OAuth.AccountID == updated.AccountID || creds[i].OAuth.Access == updated.Access {
+				creds[i].OAuth.Status = updated.Status
+				break
+			}
+		}
+	}
 	*r.authConfig = auth
 	r.authConfigMu.Unlock()
 	return updated, changed, nil

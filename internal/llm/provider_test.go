@@ -174,7 +174,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	for _, want := range []string{"# primary oauth comment", "# sibling oauth comment", "status: deactivated", "codex_primary_reset_at: 333", "codex_secondary_reset_at: 444"} {
+	for _, want := range []string{"# primary oauth comment", "# sibling oauth comment", "codex_primary_reset_at: 333", "codex_secondary_reset_at: 444"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, string(data))
 		}
@@ -215,12 +215,8 @@ func TestSelectKeyOnDemandInvalidRefreshMarksExpiredWithoutAccountID(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := config.LoadAuthConfig(authPath)
-	if err != nil {
-		t.Fatalf("LoadAuthConfig(updated): %v", err)
-	}
-	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
-		t.Fatalf("expected auth.yaml OAuth credential status=expired, got %#v", got)
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected in-memory auth OAuth credential status=expired, got %#v", got)
 	}
 }
 
@@ -262,14 +258,10 @@ func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
 	if key != "valid-access" {
 		t.Fatalf("selected key = %q, want valid-access", key)
 	}
-	updated, err := config.LoadAuthConfig(authPath)
-	if err != nil {
-		t.Fatalf("LoadAuthConfig(updated): %v", err)
-	}
-	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
 		t.Fatalf("expected first OAuth credential status=expired, got %#v", got)
 	}
-	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+	if got := auth["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected second OAuth credential to remain normal, got %#v", got)
 	}
 }
