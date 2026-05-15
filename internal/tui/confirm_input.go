@@ -131,6 +131,25 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	switch {
+	case keyMatches(msg.String(), m.keyMap.ScrollDown):
+		return m.repeatNormalVertical(1, 1)
+	case keyMatches(msg.String(), m.keyMap.ScrollUp):
+		return m.repeatNormalVertical(-1, 1)
+	case keyMatches(msg.String(), m.keyMap.FullPageDown):
+		prevOffset := m.viewport.offset
+		m.viewport.ScrollDown(m.viewport.height)
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	case keyMatches(msg.String(), m.keyMap.FullPageUp):
+		prevOffset := m.viewport.offset
+		m.viewport.ScrollUp(m.viewport.height)
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	case keyMatches(msg.String(), m.keyMap.ScrollToBottom):
+		prevOffset := m.viewport.offset
+		m.viewport.ScrollToBottom()
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	}
+
 	switch msg.String() {
 	case "y", "Y":
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})

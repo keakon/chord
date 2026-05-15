@@ -1838,6 +1838,29 @@ func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 	}
 }
 
+func TestConfirmDialogArrowKeysScrollViewport(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Done\n\n- item"}`}
+	for i := 0; i < 6; i++ {
+		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
+	}
+	m.layout = m.generateLayout(m.width, m.height)
+	m.viewport.ScrollDown(2)
+	startOffset := m.viewport.offset
+	if startOffset == 0 {
+		t.Fatal("expected setup to produce a non-zero scroll offset")
+	}
+
+	cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	if cmd != nil {
+		t.Fatalf("confirm-dialog arrow scroll should not schedule extra cmd, got %T", cmd)
+	}
+	if m.viewport.offset >= startOffset {
+		t.Fatalf("expected confirm-dialog key scroll to decrease offset, got start=%d end=%d", startOffset, m.viewport.offset)
+	}
+}
+
 func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
