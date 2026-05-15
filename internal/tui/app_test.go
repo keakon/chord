@@ -1807,6 +1807,37 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 	}
 }
 
+func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Done\n\n- item"}`}
+	for i := 0; i < 6; i++ {
+		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
+	}
+	m.layout = m.generateLayout(m.width, m.height)
+	m.viewport.ScrollDown(2)
+	startOffset := m.viewport.offset
+	if startOffset == 0 {
+		t.Fatal("expected setup to produce a non-zero scroll offset")
+	}
+
+	updated, cmd := m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelUp})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	if cmd == nil {
+		t.Fatal("mouse wheel during confirm dialog should still schedule a scroll flush command")
+	}
+	if model.pendingScrollDelta != -mouseWheelScrollStep {
+		t.Fatalf("pendingScrollDelta = %d, want %d", model.pendingScrollDelta, -mouseWheelScrollStep)
+	}
+	model.consumeScrollFlush(scrollFlushTickMsg{generation: model.scrollFlushGeneration})
+	if model.viewport.offset >= startOffset {
+		t.Fatalf("expected confirm-dialog scroll flush to decrease offset, got start=%d end=%d", startOffset, model.viewport.offset)
+	}
+}
+
 func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 

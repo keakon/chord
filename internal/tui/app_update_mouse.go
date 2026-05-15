@@ -124,10 +124,15 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	// Confirm/Question/Rules/UsageStats/Help overlay modes consume all mouse events
-	// to prevent clicks from passing through to underlying components.
+	// Confirm/Question/Rules/UsageStats/Help overlay modes keep clicks from
+	// passing through, but allow wheel scrolling of the underlying viewport so
+	// long background cards remain readable while the overlay is open.
 	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeHelp {
 		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			return m.handleMouseWheel(mouse), true
+		}
 		return nil, true
 	}
 	if m.mode == ModeImageViewer {
