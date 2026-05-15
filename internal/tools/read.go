@@ -185,6 +185,10 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
+	if isBlockedDevicePath(resolvedPath) {
+		return "", fmt.Errorf("cannot read blocked device path: %s", a.Path)
+	}
+
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -194,6 +198,9 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			return "", fmt.Errorf("permission denied: %s", a.Path)
 		}
 		return "", fmt.Errorf("reading file: %w", err)
+	}
+	if err := ensureRegularFilePath(a.Path, info); err != nil {
+		return "", err
 	}
 	if info.Size() > MaxReadFileBytes {
 		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or Grep to search", info.Size(), MaxReadFileBytes)

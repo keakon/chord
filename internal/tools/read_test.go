@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -187,6 +189,42 @@ func TestReadToolExecuteAllowsTargetedRangeWithinTokenBudget(t *testing.T) {
 	}
 	if !strings.Contains(got, "(showing lines 1-50 of 1200 total)") {
 		t.Fatalf("expected ranged output marker, got %q", got)
+	}
+}
+
+func TestReadToolRejectsNamedPipePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("named pipe filesystem semantics differ on windows")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.pipe")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("Mkfifo: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q}`, path))
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error for named pipe path")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("error = %v, want regular-file rejection", err)
+	}
+}
+
+func TestReadToolRejectsBlockedDevicePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("device path blacklist is unix-specific")
+	}
+
+	raw := json.RawMessage(`{"path":"/dev/stdin"}`)
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error for blocked device path")
+	}
+	if !strings.Contains(err.Error(), "blocked device path") {
+		t.Fatalf("error = %v, want blocked-device rejection", err)
 	}
 }
 

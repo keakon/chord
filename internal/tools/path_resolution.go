@@ -2,13 +2,30 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
 var errHomeDirUnavailable = errors.New("home directory is unavailable")
+
+var blockedDevicePaths = map[string]struct{}{
+	"/dev/console": {},
+	"/dev/fd/0":    {},
+	"/dev/fd/1":    {},
+	"/dev/fd/2":    {},
+	"/dev/full":    {},
+	"/dev/random":  {},
+	"/dev/stderr":  {},
+	"/dev/stdin":   {},
+	"/dev/stdout":  {},
+	"/dev/tty":     {},
+	"/dev/urandom": {},
+	"/dev/zero":    {},
+}
 
 func expandTildePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
@@ -57,4 +74,44 @@ func resolveToolPathAbs(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Abs(resolved)
+}
+
+func isBlockedDevicePath(path string) bool {
+	if path == "" || runtime.GOOS == "windows" {
+		return false
+	}
+	cleaned := filepath.Clean(path)
+	if !filepath.IsAbs(cleaned) {
+		return false
+	}
+	if _, ok := blockedDevicePaths[cleaned]; ok {
+		return true
+	}
+	if strings.HasPrefix(cleaned, "/dev/fd/") {
+		fd, err := strconv.Atoi(strings.TrimPrefix(cleaned, "/dev/fd/"))
+		return err == nil && fd >= 0 && fd <= 2
+	}
+	if strings.HasPrefix(cleaned, "/proc/") {
+		rel := strings.TrimPrefix(cleaned, "/proc/")
+		parts := strings.Split(rel, "/")
+		if len(parts) == 3 && parts[1] == "fd" {
+			_, pidErr := strconv.Atoi(parts[0])
+			fd, fdErr := strconv.Atoi(parts[2])
+			return pidErr == nil && fdErr == nil && fd >= 0 && fd <= 2
+		}
+	}
+	return false
+}
+
+func ensureRegularFilePath(path string, info os.FileInfo) error {
+	if info == nil {
+		return fmt.Errorf("path is not a regular file: %s", path)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("path is a directory, not a regular file: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("path is not a regular file: %s", path)
+	}
+	return nil
 }

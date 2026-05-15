@@ -89,6 +89,10 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
+	if isBlockedDevicePath(resolvedSearchPath) {
+		return "", fmt.Errorf("cannot search blocked device path: %s", searchPath)
+	}
+
 	// Check if searchPath is a file or directory.
 	info, err := os.Stat(resolvedSearchPath)
 	if err != nil {
@@ -103,6 +107,9 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	truncated := false
 
 	if !info.IsDir() {
+		if err := ensureRegularFilePath(searchPath, info); err != nil {
+			return "", err
+		}
 		// Search a single file. Honor the binary-extension fast-path so that
 		// e.g. `Grep pattern path=foo.pyc` never returns mojibake.
 		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {

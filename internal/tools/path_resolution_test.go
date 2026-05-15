@@ -48,6 +48,31 @@ func TestResolveToolPathExpandsTildeHome(t *testing.T) {
 	}
 }
 
+func TestIsBlockedDevicePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("device path blacklist is unix-specific")
+	}
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "/dev/stdin", want: true},
+		{path: "/dev/fd/0", want: true},
+		{path: "/dev/fd/2", want: true},
+		{path: "/dev/fd/3", want: false},
+		{path: "/proc/123/fd/0", want: true},
+		{path: "/proc/self/fd/0", want: false},
+		{path: "/tmp/demo.txt", want: false},
+		{path: "relative.txt", want: false},
+	}
+	for _, tt := range tests {
+		if got := isBlockedDevicePath(tt.path); got != tt.want {
+			t.Fatalf("isBlockedDevicePath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestResolveToolPathDoesNotExpandNonLeadingTilde(t *testing.T) {
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)

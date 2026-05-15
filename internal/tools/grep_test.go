@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -81,5 +83,41 @@ func TestGrepSanitizesEmbeddedControlBytes(t *testing.T) {
 	}
 	if !strings.Contains(out, "red") {
 		t.Errorf("non-control content must be preserved; got:\n%s", out)
+	}
+}
+
+func TestGrepRejectsNamedPipePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("named pipe filesystem semantics differ on windows")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.pipe")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("Mkfifo: %v", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "path": path})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error for named pipe path")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("error = %v, want regular-file rejection", err)
+	}
+}
+
+func TestGrepRejectsBlockedDevicePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("device path blacklist is unix-specific")
+	}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "path": "/dev/stdin"})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error for blocked device path")
+	}
+	if !strings.Contains(err.Error(), "blocked device path") {
+		t.Fatalf("error = %v, want blocked-device rejection", err)
 	}
 }
