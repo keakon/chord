@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -67,6 +68,8 @@ type loopRuntimeState struct {
 }
 
 func (s *loopRuntimeState) enable() {
+	const defaultMaxAutoExitIntercepts = 10
+
 	s.Enabled = true
 	if s.State == "" {
 		s.State = LoopStateIdle
@@ -78,7 +81,7 @@ func (s *loopRuntimeState) enable() {
 		return
 	}
 	if s.MaxIterations < 0 {
-		s.MaxIterations = 100
+		s.MaxIterations = defaultMaxAutoExitIntercepts
 	}
 }
 
@@ -110,9 +113,31 @@ func (s *loopRuntimeState) markVerificationProgress() {
 	s.markProgress()
 }
 
-func (s *loopRuntimeState) advanceIteration() bool {
+func (s *loopRuntimeState) recordAutoExitIntercept() int {
 	s.Iteration++
+	return s.Iteration
+}
+
+func (s *loopRuntimeState) autoExitInterceptsExhausted() bool {
 	return s.MaxIterations > 0 && s.Iteration >= s.MaxIterations
+}
+
+func (a *MainAgent) markLoopExitDecisionRequired() {
+	a.loopState.State = LoopStateBudgetExhausted
+	a.emitLoopStateChanged()
+	a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
+	a.clearCurrentTurnKeepLoopState()
+}
+
+func (a *MainAgent) clearCurrentTurnKeepLoopState() {
+	a.turnMu.Lock()
+	a.turn = nil
+	a.turnMu.Unlock()
+	a.setBugTriagePromptActive(false)
+	a.emitActivity("main", ActivityIdle, "")
+	a.loopState.State = LoopStateBudgetExhausted
+	a.emitLoopStateChanged()
+	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 }
 
 func normalizeLoopProgressSignature(parts ...string) string {

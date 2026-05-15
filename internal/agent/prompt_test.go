@@ -354,7 +354,7 @@ Done: allow
 		"The `Done.report` field must contain the detailed final report in Markdown, not just a short label",
 		"To request loop exit, call the `Done` tool with that final report in `report`; do not stop with only assistant text",
 		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains",
-		"ask in plain assistant text with enough context for a non-implementer to answer",
+		"keep working until the automatic Done interception limit is reached",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
@@ -1223,8 +1223,8 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 	a := newTestMainAgent(t, t.TempDir())
 	lines := a.loopCompletionRequirementLines()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "ask in plain assistant text with enough context for a non-implementer to answer") {
-		t.Fatalf("loop completion requirements without Question should use plain-text guidance, got %q", joined)
+	if !strings.Contains(joined, "keep working until the automatic Done interception limit is reached") {
+		t.Fatalf("loop completion requirements should describe interception-limit behavior, got %q", joined)
 	}
 	if strings.Contains(joined, "Question tool") {
 		t.Fatalf("loop completion requirements without Question should not require Question tool, got %q", joined)
@@ -1240,8 +1240,11 @@ Question: allow
 `)}
 	a.rebuildRuleset()
 	joined = strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if !strings.Contains(joined, "call the `Question` tool") {
-		t.Fatalf("loop completion requirements with Question should require Question tool, got %q", joined)
+	if strings.Contains(joined, "call the `Question` tool") {
+		t.Fatalf("loop completion requirements should not generally require Question during loop completion, got %q", joined)
+	}
+	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete") {
+		t.Fatalf("loop completion requirements should preserve Done gating, got %q", joined)
 	}
 	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `Question` call") {
 		t.Fatalf("loop completion requirements should not mention completion follow-up exception, got %q", joined)

@@ -60,14 +60,14 @@ func (a *MainAgent) loopWorkflowPromptBlock() string {
 	completionClause += ", and required verification is done or explicitly reported as not run.\n"
 	finalCompletionLine := "- When completion requirements are satisfied, explicitly mark completion in your final response: clearly state the task is complete, summarize completed work, report verification status, list any remaining limitations or unverified areas, and then call the `Done` tool to request loop exit.\n"
 	return "## Loop Mode\n" +
-		"- Loop mode is active. Keep driving toward the current loop target until it is completed, blocked, max iterations are reached, or it is explicitly disabled.\n" +
+		"- Loop mode is active. Keep driving toward the current loop target until it is completed, blocked, the automatic Done interception limit is reached, or it is explicitly disabled.\n" +
 		completionClause +
 		finalCompletionLine +
 		"- If verification is not run, include <verify-not-run>reason</verify-not-run> in the terminal response.\n" +
 		"- If the task is genuinely blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}.\n" +
 		"- Do not mark completion merely because you produced a summary or reached a natural stopping point in reasoning.\n" +
 		"- Default to making ordinary engineering decisions yourself. Do not stop to ask the user to choose between normal implementation options.\n" +
-		a.loopUserConfirmationInstructionLine() + "\n" +
+		a.loopContinuationDecisionInstructionLine() + "\n" +
 		"- A regular assistant response is not the end of the task. If work remains and no true blocker exists, continue.\n" +
 		"- Only stop for missing external information, missing credentials or permissions, or genuinely high-risk irreversible actions.\n" +
 		syncClause

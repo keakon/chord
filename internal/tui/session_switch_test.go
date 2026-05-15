@@ -1172,7 +1172,7 @@ func TestLoopStateChangedEventRefreshesStatusBarDuringStreaming(t *testing.T) {
 	backend.loopState = agent.LoopStateExecuting
 	backend.loopTarget = "finish current task"
 	backend.loopIteration = 1
-	backend.loopMaxIterations = 100
+	backend.loopMaxIterations = 10
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.LoopStateChangedEvent{}})
 
 	plain := stripANSI(m.renderStatusBar())

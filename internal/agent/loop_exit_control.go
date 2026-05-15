@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -26,9 +27,16 @@ func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
 func (a *MainAgent) loopExitRejectionToolResult() string {
 	reasons := a.currentLoopContinuationReasons()
 	if len(reasons) == 0 {
-		return "Done rejected: loop exit conditions are not satisfied yet. Continue working toward the current loop target."
+		return "Done rejected automatically: loop exit conditions are not satisfied yet. Continue working toward the current loop target."
 	}
-	return "Done rejected: loop exit conditions are not satisfied yet (" + strings.Join(reasons, ", ") + "). Continue working toward the current loop target."
+	return "Done rejected automatically: loop exit conditions are not satisfied yet (" + strings.Join(reasons, ", ") + "). Continue working toward the current loop target."
+}
+
+func (a *MainAgent) loopExitInterceptLimitResult() string {
+	if a.loopState.MaxIterations > 0 {
+		return "Done requires user decision: automatic Done interception limit reached (" + strconv.Itoa(a.loopState.MaxIterations) + "). Approve exit or deny to continue."
+	}
+	return "Done requires user decision: automatic Done interception is disabled. Approve exit or deny to continue."
 }
 
 func (a *MainAgent) awaitLoopExitConfirmation(ctx context.Context, pending *loopExitResult) (ConfirmResponse, error) {
@@ -72,6 +80,26 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	if a.recovery != nil {
 		a.persistAsync("main", msg)
 	}
+}
+
+func (a *MainAgent) shouldAutoInterceptLoopExit() bool {
+	if !a.loopState.Enabled {
+		return false
+	}
+	if a.loopState.MaxIterations <= 0 {
+		return true
+	}
+	return a.loopState.Iteration < a.loopState.MaxIterations
+}
+
+func (a *MainAgent) autoRejectLoopExitAndContinue(callID, argsJSON, result string) bool {
+	if !a.shouldAutoInterceptLoopExit() {
+		return false
+	}
+	a.loopState.recordAutoExitIntercept()
+	a.appendLoopContinuationAndContinue(callID, argsJSON, result)
+	a.emitLoopStateChanged()
+	return true
 }
 
 func (a *MainAgent) shouldRequireToolCallInLoop() bool {

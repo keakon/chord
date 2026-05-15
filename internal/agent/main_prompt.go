@@ -200,17 +200,12 @@ func (a *MainAgent) loopUserConfirmationInstructionLine() string {
 }
 
 func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
-	return "- When you need user permission, confirmation, or a real decision between materially different options, " + a.userDecisionActionPhrase() + "."
+	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic Done interception budget is low."
 }
 
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
-	base := "- If user permission, confirmation, or a real decision is still needed, "
-	if a.questionToolAvailable() {
-		return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains\n" +
-			base + "call the `Question` tool instead of ending as completed"
-	}
 	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains\n" +
-		base + "ask in plain assistant text with enough context for a non-implementer to answer instead of ending as completed"
+		"- If a real user decision is still required, do not finish as completed; keep working until the automatic Done interception limit is reached, then surface the decision requirement explicitly"
 }
 
 func (a *MainAgent) plannerPermissionAdjustmentInstruction() string {

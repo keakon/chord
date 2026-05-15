@@ -24,15 +24,6 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 	a.emitLoopStateChanged()
 	switch payload.Action {
 	case LoopAssessmentActionContinue:
-		if a.loopState.advanceIteration() {
-			a.loopState.State = LoopStateBudgetExhausted
-			a.emitLoopStateChanged()
-			a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop stopped: max iterations reached (%d).", a.loopState.MaxIterations)})
-			a.loopState.disable()
-			a.emitLoopStateChanged()
-			a.setIdleAndDrainPending()
-			return
-		}
 		a.loopState.State = LoopStateExecuting
 		a.emitLoopStateChanged()
 		if a.shouldEmitLoopContinuationForAssessment(payload) {
@@ -431,8 +422,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		sections = append(sections, "<loop-continuation>", "Continue required.")
 	}
 
-	// Iteration budget. Continue assessments are emitted after advanceIteration(),
-	// so the continuation notice is for the next run and should show one less.
+	// Automatic Done interception budget. Continue notices are emitted after an
+	// automatic rejection, so show the current counter as the number already used.
 	maxIter := a.loopState.MaxIterations
 	iter := a.loopState.Iteration
 	if assessment.Action == LoopAssessmentActionContinue && iter > 0 {
@@ -443,12 +434,12 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		if remaining < 0 {
 			remaining = 0
 		}
-		sections = append(sections, fmt.Sprintf("Iteration %d of %d (%d remaining).", iter, maxIter, remaining))
+		sections = append(sections, fmt.Sprintf("Automatic Done interceptions %d of %d (%d remaining).", iter, maxIter, remaining))
 		if remaining <= 2 {
-			sections = append(sections, "Budget is nearly exhausted — prioritize closing out remaining work over starting new subtasks.")
+			sections = append(sections, "Automatic Done interception budget is nearly exhausted — the next failed Done attempts may require explicit user approval or denial.")
 		}
 	} else {
-		sections = append(sections, fmt.Sprintf("Iteration %d (unlimited).", iter))
+		sections = append(sections, fmt.Sprintf("Automatic Done interceptions %d (unlimited).", iter))
 	}
 
 	if todoLines := a.openTodoContinuationLines(); len(todoLines) > 0 {
@@ -524,7 +515,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		instructionLines = append(instructionLines, "- Run the smallest relevant verification now, or include <verify-not-run>reason</verify-not-run> only if verification cannot be run")
 	}
 	if maxIter > 0 && maxIter-iter <= 2 {
-		instructionLines = append(instructionLines, "- You are near the iteration limit: wrap up remaining work, do not start new subtasks or investigations")
+		instructionLines = append(instructionLines, "- You are near the automatic Done interception limit: avoid marginal work and prepare for a user decision if Done is rejected again")
 	}
 	if a.hasActiveSubAgents() {
 		instructionLines = append(instructionLines, "- If a subagent appears stuck or blocked, escalate or cancel it rather than waiting indefinitely")

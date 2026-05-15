@@ -105,6 +105,11 @@ func (a *MainAgent) CurrentLoopState() LoopState {
 	if !a.loopState.Enabled {
 		return ""
 	}
+	if a.loopState.MaxIterations > 0 && a.loopState.Iteration >= a.loopState.MaxIterations {
+		if a.turn == nil || a.loopState.State == LoopStateIdle {
+			return LoopStateBudgetExhausted
+		}
+	}
 	return a.loopState.State
 }
 
@@ -202,12 +207,12 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 		"Target:",
 		"- " + target,
 	}
-	// Iteration budget.
+	// Automatic Done interception budget.
 	maxIter := a.loopState.MaxIterations
 	if maxIter > 0 {
-		sections = append(sections, fmt.Sprintf("Iteration budget: %d", maxIter))
+		sections = append(sections, fmt.Sprintf("Automatic Done interceptions: %d", maxIter))
 	} else {
-		sections = append(sections, "Iteration budget: unlimited")
+		sections = append(sections, "Automatic Done interceptions: unlimited")
 	}
 	if todoLines := a.openTodoContinuationLines(); len(todoLines) > 0 {
 		sections = append(sections, "", "Open TODO items:", strings.Join(todoLines, "\n"))
@@ -246,16 +251,16 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 func (a *MainAgent) EnableLoopMode(target string) {
 	a.loopState.enableWithTarget(target)
 	if !a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {
-		a.loopState.MaxIterations = 100
+		a.loopState.MaxIterations = 10
 	}
 	if a.loopState.State == "" || a.loopState.State == LoopStateIdle || a.loopState.State == LoopStateCompleted || a.loopState.State == LoopStateBlocked || a.loopState.State == LoopStateBudgetExhausted {
 		a.loopState.State = LoopStateExecuting
 	}
 	a.refreshSystemPrompt()
 	a.emitLoopStateChanged()
-	msg := fmt.Sprintf("Loop enabled. Max iterations: %d.", a.loopState.MaxIterations)
+	msg := fmt.Sprintf("Loop enabled. Automatic Done interceptions: %d.", a.loopState.MaxIterations)
 	if a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {
-		msg = "Loop enabled. Max iterations: unlimited."
+		msg = "Loop enabled. Automatic Done interceptions: unlimited."
 	}
 	a.emitToTUI(InfoEvent{Message: msg})
 }

@@ -244,7 +244,7 @@ Done: allow
 				if payload.CallID != callID || payload.Name != tools.NameDone {
 					continue
 				}
-				if !strings.Contains(payload.Result, "Done rejected: loop exit conditions are not satisfied yet") {
+				if !strings.Contains(payload.Result, "Done rejected automatically: loop exit conditions are not satisfied yet") {
 					continue
 				}
 				select {
@@ -478,7 +478,7 @@ Done: allow
 				if payload.CallID != callID || payload.Name != tools.NameDone {
 					continue
 				}
-				if !strings.Contains(payload.Result, "Done rejected: loop exit conditions are not satisfied yet") {
+				if !strings.Contains(payload.Result, "Done rejected automatically: loop exit conditions are not satisfied yet") {
 					continue
 				}
 				select {
@@ -1217,28 +1217,20 @@ func TestNextLoopAssessmentFromAssistantReturnsNilWhenLoopDisabled(t *testing.T)
 	}
 }
 
-func TestHandleLoopAssessmentStopsAtMaxIterations(t *testing.T) {
+func TestHandleLoopAssessmentContinueDoesNotConsumeAutoExitInterceptionBudget(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 1
 	a.handleLoopAssessment(Event{Type: EventLoopAssessment, Payload: &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing."}})
 
-	if a.loopState.Enabled {
-		t.Fatal("loop should be disabled after budget exhaustion")
+	if !a.loopState.Enabled {
+		t.Fatal("loop should remain enabled after a normal continuation assessment")
 	}
-	if got := a.CurrentLoopState(); got != "" {
-		t.Fatalf("CurrentLoopState() = %q, want empty after terminal stop", got)
+	if got := a.loopState.Iteration; got != 0 {
+		t.Fatalf("Iteration = %d, want 0 because only automatic Done rejections count toward the interception budget", got)
 	}
-	var found bool
-	for len(a.outputCh) > 0 {
-		evt := <-a.outputCh
-		if info, ok := evt.(InfoEvent); ok && strings.Contains(info.Message, "max iterations reached") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("expected budget exhausted info event")
+	if got := a.loopState.State; got != LoopStateExecuting {
+		t.Fatalf("loopState.State = %q, want %q", got, LoopStateExecuting)
 	}
 }
 
@@ -1361,8 +1353,8 @@ func TestLoopWorkflowPromptUsesPermissionSpecificConfirmationGuidance(t *testing
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.Enabled = true
 	block := a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "ask in plain assistant text with enough context for a non-implementer to answer") {
-		t.Fatalf("loop workflow prompt without Question should use plain-text guidance, got %q", block)
+	if !strings.Contains(block, "Continue autonomously from the existing context") {
+		t.Fatalf("loop workflow prompt should emphasize autonomous continuation, got %q", block)
 	}
 	if strings.Contains(block, "Question tool") {
 		t.Fatalf("loop workflow prompt without Question should not require Question tool, got %q", block)
@@ -1375,8 +1367,11 @@ Question: allow
 `)}
 	a.rebuildRuleset()
 	block = a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "call the `Question` tool") {
-		t.Fatalf("loop workflow prompt with Question should require Question tool, got %q", block)
+	if strings.Contains(block, "call the `Question` tool") {
+		t.Fatalf("loop workflow prompt should not generally require Question during loop continuation, got %q", block)
+	}
+	if !strings.Contains(block, "do not ask merely because the automatic Done interception budget is low") {
+		t.Fatalf("loop workflow prompt should discourage premature user prompts near the interception limit, got %q", block)
 	}
 }
 
@@ -1495,6 +1490,62 @@ Done: ask
 	}
 }
 
+func TestHandleToolResult_DoneInLoopAutoRejectionStopsAtMaxIterations(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.MaxIterations = 1
+	a.newTurn()
+	turn := a.turn
+	callID := "done-auto-reject-budget-stop-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed without verification",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed without verification"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+		CallID:   callID,
+		Name:     tools.NameDone,
+		ArgsJSON: `{"reason":"completed without verification"}`,
+		Result:   "completed without verification",
+		TurnID:   turn.ID,
+	}})
+
+	if !a.loopState.Enabled {
+		t.Fatal("loop should remain enabled while awaiting an explicit user decision after automatic Done interception limit is reached")
+	}
+	if got := a.CurrentLoopState(); got != LoopStateBudgetExhausted {
+		t.Fatalf("CurrentLoopState() = %q, want %q while awaiting user decision", got, LoopStateBudgetExhausted)
+	}
+
+	var rejected bool
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		switch payload := evt.(type) {
+		case ToolResultEvent:
+			if payload.CallID == callID && payload.Name == tools.NameDone && strings.Contains(payload.Result, "Done") {
+				rejected = true
+			}
+		}
+	}
+	if !rejected {
+		t.Fatal("expected Done tool result event before pausing for user decision")
+	}
+}
+
 func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
@@ -1532,7 +1583,7 @@ func TestEnableLoopModeEmitsUnlimitedMessageWhenMaxIterationsZero(t *testing.T) 
 	var found bool
 	for len(a.outputCh) > 0 {
 		evt := <-a.outputCh
-		if info, ok := evt.(InfoEvent); ok && strings.Contains(info.Message, "Max iterations: unlimited") {
+		if info, ok := evt.(InfoEvent); ok && strings.Contains(info.Message, "Automatic Done interceptions: unlimited") {
 			found = true
 			break
 		}
@@ -1821,7 +1872,7 @@ func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected persisted loop notice message")
 	}
-	if !strings.Contains(found.Content, "Iteration budget:") {
+	if !strings.Contains(found.Content, "Automatic Done interceptions:") {
 		t.Fatalf("loop notice should contain iteration budget, got: %q", found.Content)
 	}
 }
@@ -1835,7 +1886,7 @@ func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Iteration 6 of 100 (94 remaining)") {
+	if !strings.Contains(note.Text, "Automatic Done interceptions 6 of 100 (94 remaining)") {
 		t.Fatalf("LOOP CONTINUE should contain iteration budget with remaining count, got: %q", note.Text)
 	}
 }
@@ -1849,10 +1900,10 @@ func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Budget is nearly exhausted") {
+	if !strings.Contains(note.Text, "Automatic Done interception budget is nearly exhausted") {
 		t.Fatalf("LOOP CONTINUE should warn when budget nearly exhausted, got: %q", note.Text)
 	}
-	if !strings.Contains(note.Text, "near the iteration limit") {
+	if !strings.Contains(note.Text, "near the automatic Done interception limit") {
 		t.Fatalf("LOOP CONTINUE instruction should mention iteration limit, got: %q", note.Text)
 	}
 }
@@ -1955,7 +2006,7 @@ func TestBuildLoopVerificationContinuationNote(t *testing.T) {
 	if !strings.Contains(note.Text, "Verification required") || !strings.Contains(note.Text, "Run the smallest relevant verification now") {
 		t.Fatalf("verification note text missing verification instruction: %q", note.Text)
 	}
-	if !strings.Contains(note.Text, "Iteration 7 (unlimited).") {
+	if !strings.Contains(note.Text, "Automatic Done interceptions 7 (unlimited).") {
 		t.Fatalf("verification note iteration text = %q, want verification iteration without decrement", note.Text)
 	}
 }
