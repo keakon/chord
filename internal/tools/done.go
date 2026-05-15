@@ -16,10 +16,16 @@ func NewDoneTool() DoneTool { return DoneTool{} }
 func (DoneTool) Name() string { return "Done" }
 
 func (DoneTool) Description() string {
-	return "Request to stop the current loop or hand control back to the user. " +
-		"Use this only when you believe the current loop goal is complete or should stop now. " +
-		"Put your full final report in the assistant message immediately before calling this tool, using concise Markdown with completion status, what changed, verification results, and any remaining limitations. " +
-		"The runtime will decide whether stopping is allowed; if not, it will return a rejection result and you must continue."
+	return "Exit-control signal for requesting task completion or loop exit, not a generic conversation ending. " +
+		"Use this only when the current objective is fully complete and no unresolved user decision, error, or verification remains. " +
+		"Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. " +
+		"In loop mode, it requests loop exit; outside loop mode, it requests final completion and user approval. " +
+		"Before calling this tool, you MUST provide a final assistant message in Markdown format with the following structure: " +
+		"- **Completion status**: one line summary (e.g., 'All requested work is finished') " +
+		"- **What changed**: files modified, created, deleted or key actions taken " +
+		"- **Verification**: tests run and their results " +
+		"- **Remaining issues**: any limitations, unverified areas, or known issues " +
+		"If you are unsure whether the task is truly complete, continue working instead of calling Done."
 }
 
 func (DoneTool) Parameters() map[string]any {

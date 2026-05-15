@@ -204,8 +204,14 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 }
 
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
-	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains\n" +
-		"- If a real user decision is still required, do not finish as completed; keep working until the automatic Done interception limit is reached, then surface the decision requirement explicitly"
+	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
+		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling `Done`\n" +
+		"- Immediately before calling `Done`, write a final report in the assistant message with this structure:\n" +
+		"  - **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
+		"  - **What changed**: files modified, created, deleted or key actions taken\n" +
+		"  - **Verification**: tests run and their results\n" +
+		"  - **Remaining issues**: any limitations, unverified areas, or known issues\n" +
+		"- If you are unsure whether the task is truly complete, do not call `Done`; keep working"
 }
 
 func (a *MainAgent) plannerPermissionAdjustmentInstruction() string {

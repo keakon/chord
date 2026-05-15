@@ -351,10 +351,13 @@ Done: allow
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"Put the detailed final report in the assistant message using concise Markdown before calling `Done`",
-		"To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text",
-		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains",
-		"keep working until the automatic Done interception limit is reached",
+		"Immediately before calling `Done`, write a final report in the assistant message with this structure:",
+		"**Completion status**: one line summary",
+		"**What changed**: files modified, created, deleted or key actions taken",
+		"**Verification**: tests run and their results",
+		"**Remaining issues**: any limitations, unverified areas, or known issues",
+		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains",
+		"continue working instead of calling `Done`",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
@@ -1203,11 +1206,21 @@ Delegate: allow
 func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if !strings.Contains(joined, "Put the detailed final report in the assistant message using concise Markdown before calling `Done`") {
-		t.Fatalf("loop completion requirements should mention assistant-message final report, got %q", joined)
+	// Check for the new structured format in the final report instruction
+	if !strings.Contains(joined, "Immediately before calling `Done`, write a final report in the assistant message with this structure:") {
+		t.Fatalf("loop completion requirements should mention final report structure, got %q", joined)
 	}
-	if !strings.Contains(joined, "To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text") {
-		t.Fatalf("loop completion requirements should mention Done exit contract, got %q", joined)
+	if !strings.Contains(joined, "**Completion status**:") {
+		t.Fatalf("loop completion requirements should mention completion status field, got %q", joined)
+	}
+	if !strings.Contains(joined, "**What changed**:") {
+		t.Fatalf("loop completion requirements should mention what changed field, got %q", joined)
+	}
+	if !strings.Contains(joined, "**Verification**:") {
+		t.Fatalf("loop completion requirements should mention verification field, got %q", joined)
+	}
+	if !strings.Contains(joined, "**Remaining issues**:") {
+		t.Fatalf("loop completion requirements should mention remaining issues field, got %q", joined)
 	}
 	finalJoined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
 	if !strings.Contains(finalJoined, "Call the `Done` tool to request loop exit once those conditions are satisfied") {
@@ -1223,8 +1236,8 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 	a := newTestMainAgent(t, t.TempDir())
 	lines := a.loopCompletionRequirementLines()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "keep working until the automatic Done interception limit is reached") {
-		t.Fatalf("loop completion requirements should describe interception-limit behavior, got %q", joined)
+	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
+		t.Fatalf("loop completion requirements should describe stricter Done usage, got %q", joined)
 	}
 	if strings.Contains(joined, "Question tool") {
 		t.Fatalf("loop completion requirements without Question should not require Question tool, got %q", joined)
@@ -1243,7 +1256,7 @@ Question: allow
 	if strings.Contains(joined, "call the `Question` tool") {
 		t.Fatalf("loop completion requirements should not generally require Question during loop completion, got %q", joined)
 	}
-	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete") {
+	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
 		t.Fatalf("loop completion requirements should preserve Done gating, got %q", joined)
 	}
 	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `Question` call") {
