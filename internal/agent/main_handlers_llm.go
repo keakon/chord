@@ -412,16 +412,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				}
 			}
 
-			// Repetition guard for promoted results.
-			a.repMu.Lock()
-			allowed := a.repetition.Check(effective.Name, effective.Args)
-			a.repMu.Unlock()
-			if !allowed {
-				_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "repetition")
-				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q called too many times with the same arguments (loop detected)", tc.Name), TurnID: turnID}})
-				promoted = true
-				continue
-			}
+			// Repetition guard for promoted results is currently handled by the
+			// finalized execution path; do not apply a separate stale MainAgent-only
+			// checker here.
 
 			if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
 				promoted = true

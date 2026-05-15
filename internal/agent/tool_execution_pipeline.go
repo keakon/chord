@@ -42,7 +42,6 @@ type toolExecutionPipeline struct {
 	currentTurnID                 func() uint64
 	fireHook                      func(context.Context, string, uint64, map[string]any) (*hook.Result, error)
 	updatePending                 func(PendingToolCall)
-	checkRepetition               func(string, json.RawMessage) bool
 	reservedToolError             func(string) error
 }
 
@@ -61,9 +60,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		if err := p.applyToolHook(ctx, &tc, &execResult); err != nil {
 			return execResult, err
 		}
-	}
-	if p.checkRepetition != nil && !p.checkRepetition(tc.Name, tc.Args) {
-		return execResult, fmt.Errorf("tool %q called too many times with the same arguments (loop detected)", tc.Name)
 	}
 	if err := validateToolCallArguments(p.registry, tc, p.logPrefix, p.agentID); err != nil {
 		return execResult, err

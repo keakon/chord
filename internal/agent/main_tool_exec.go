@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,12 +14,12 @@ import (
 // ---------------------------------------------------------------------------
 
 // executeToolCall runs a single tool invocation with permission checks,
-// repetition detection, and output truncation.
+// output truncation.
 func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	return a.toolExecutionPipeline().execute(ctx, tc, true)
 }
 
-// executeToolCallSpeculative runs a tool without firing hooks, repetition detection,
+// executeToolCallSpeculative runs a tool without firing hooks,
 // or irreversible finalize-only side effects. Results are UI-only until the
 // finalized call promotes them through the normal handleToolResult path.
 func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
@@ -52,15 +51,6 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			if a.turn != nil {
 				a.turn.updatePendingToolCall(call)
 			}
-		},
-		checkRepetition: func(name string, args json.RawMessage) bool {
-			if a.repetition == nil {
-				return true
-			}
-			a.repMu.Lock()
-			allowed := a.repetition.Check(name, args)
-			a.repMu.Unlock()
-			return allowed
 		},
 		reservedToolError: func(name string) error {
 			if isMainAgentReservedTool(name) {

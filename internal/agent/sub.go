@@ -133,8 +133,8 @@ type SubAgent struct {
 	// Permission: merged ruleset (global + project + agent-level).
 	ruleset permission.Ruleset
 
-	// Repetition detection (SubAgent-local, single-goroutine access).
-	repetition *tools.RepetitionDetector
+	// Repetition detection removed; tool execution no longer rejects repeated
+	// (name, args) calls at the agent layer.
 
 	// System prompt components (set at construction, read-only afterward).
 	workDir      string
@@ -156,10 +156,6 @@ type SubAgent struct {
 	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
 	// construction. Kept stable so the provider request prefix does not drift.
 	frozenToolDefs []message.ToolDefinition
-
-	// repMu serialises access to the RepetitionDetector from concurrent
-	// tool-execution goroutines.
-	repMu sync.Mutex
 
 	// semHeld is true when this SubAgent holds a slot in the MainAgent's
 	// concurrency semaphore. Set by CreateSubAgent; restored agents do not
@@ -314,7 +310,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		cancel:          cfg.Cancel,
 		recovery:        cfg.Recovery,
 		ruleset:         cfg.Ruleset,
-		repetition:      tools.NewRepetitionDetector(),
 		workDir:         cfg.WorkDir,
 		venvPath:        cfg.VenvPath,
 		sessionDir:      cfg.SessionDir,

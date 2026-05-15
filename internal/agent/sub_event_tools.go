@@ -89,18 +89,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			}
 		}
 
-		// Repetition guard for promoted results.
-		s.repMu.Lock()
-		allowed := s.repetition.Check(effective.Name, effective.Args)
-		s.repMu.Unlock()
-		if !allowed {
-			_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "repetition")
-			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q called too many times with the same arguments (loop detected)", tc.Name), TurnID: turn.ID}:
-			case <-s.parentCtx.Done():
-			}
-			continue
-		}
+		// repetition removed
 
 		if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
 			audit := payload.Audit

@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
-
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -50,15 +48,6 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			if s.turn != nil {
 				s.turn.updatePendingToolCall(call)
 			}
-		},
-		checkRepetition: func(name string, args json.RawMessage) bool {
-			if s.repetition == nil {
-				return true
-			}
-			s.repMu.Lock()
-			allowed := s.repetition.Check(name, args)
-			s.repMu.Unlock()
-			return allowed
 		},
 	}
 }

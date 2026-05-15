@@ -241,7 +241,6 @@ type MainAgent struct {
 	skillsMu               sync.RWMutex
 	loadedSkills           []*skill.Meta
 	invokedSkills          map[string]*skill.Meta
-	repetition             *tools.RepetitionDetector
 	promptMetaMu           sync.RWMutex
 	sessionInitMu          sync.Mutex
 	stateMu                sync.RWMutex
@@ -324,10 +323,6 @@ type MainAgent struct {
 	llmMu                sync.RWMutex
 	installedSysPrompt   string
 	systemPromptOverride string
-
-	// repMu serialises access to the RepetitionDetector, which is called
-	// from concurrent tool-execution goroutines.
-	repMu sync.Mutex
 
 	// done is closed when Run exits, allowing Shutdown to wait.
 	done chan struct{}
@@ -604,7 +599,6 @@ func NewMainAgent(
 		usageTracker:             analytics.NewUsageTracker(),
 		usageLedger:              analytics.NewUsageLedger(sessionDir, projectRoot),
 		invokedSkills:            make(map[string]*skill.Meta),
-		repetition:               tools.NewRepetitionDetector(),
 		globalConfig:             globalCfg,
 		projectConfig:            projectCfg,
 		eventCh:                  make(chan Event, 256),

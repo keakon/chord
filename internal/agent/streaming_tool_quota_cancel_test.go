@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tools"
 )
 
 func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T) {
@@ -168,7 +167,6 @@ func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T)
 		parentCtx:    context.Background(),
 		turn:         turn,
 		toolCh:       make(chan *toolResult, 8),
-		repetition:   tools.NewRepetitionDetector(),
 		sessionDir:   parent.sessionDir,
 		modelName:    "test-model",
 		workDir:      projectRoot,
