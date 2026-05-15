@@ -22,6 +22,7 @@ func (DoneTool) Name() string { return "Done" }
 func (DoneTool) Description() string {
 	return "Request to stop the current loop or hand control back to the user. " +
 		"Use this only when you believe the current loop goal is complete or should stop now. " +
+		"Put your full final report in reason, using concise Markdown with completion status, what changed, verification results, and any remaining limitations. " +
 		"The runtime will decide whether stopping is allowed; if not, it will return a rejection result and you must continue."
 }
 
@@ -31,7 +32,7 @@ func (DoneTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"reason": map[string]any{
 				"type":        "string",
-				"description": "Short reason for requesting stop or handoff.",
+				"description": "Detailed final report in Markdown: completion status, summary of work, verification status, and remaining limitations.",
 			},
 		},
 		"additionalProperties": false,

@@ -153,7 +153,9 @@ func (a *MainAgent) loopCompletionRequirementLines() []string {
 		"- Required verification is completed, or explicitly reported as not run",
 		"- If verification is not run, include <verify-not-run>single-line reason</verify-not-run> in the terminal response",
 		"- If the task is blocked, use <blocked>category: reason</blocked> instead of stopping the loop",
-		"- To request loop exit, call the `Done` tool; do not stop with only assistant text",
+		"- Before calling the `Done` tool, first output the final user-visible report in assistant text",
+		"- The `Done.reason` field must contain the detailed final report in Markdown, not just a short label",
+		"- To request loop exit, call the `Done` tool only after that final report; do not stop with only assistant text",
 		a.loopCompletionDecisionRequirementLine(),
 	}
 	if a.hasActiveSubAgents() {

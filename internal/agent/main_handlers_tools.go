@@ -302,8 +302,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 	}
 	if payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled {
-		a.loopState.advanceIteration()
-		a.emitLoopStateChanged()
 		assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID)
 		assistantContent := ""
 		if ok {
@@ -445,6 +443,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				if err != nil {
 					log.Warnf("loop exit confirmation failed error=%v", err)
 					a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, "Done rejected: exit confirmation failed. Continue the loop and keep working.")
+					a.loopState.advanceIteration()
+					a.emitLoopStateChanged()
 				} else if resp.Approved {
 					a.loopState.State = LoopStateCompleted
 					a.emitLoopStateChanged()
@@ -470,6 +470,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				}
 			} else {
 				a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult())
+				a.loopState.advanceIteration()
+				a.emitLoopStateChanged()
 			}
 		}
 

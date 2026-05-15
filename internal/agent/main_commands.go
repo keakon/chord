@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/command"
@@ -92,6 +94,41 @@ func isLoopSlashCommand(content string) bool {
 	}
 }
 
+func parseLoopOnCommand(content string) (target string, maxIterations int, maxSet bool, err error) {
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(content), "/loop on"))
+	if rest == "" {
+		return "Continue and finish all remaining tasks in the current session.", 0, false, nil
+	}
+	const flag = "--max-iterations"
+	if idx := strings.Index(rest, flag); idx >= 0 {
+		before := strings.TrimSpace(rest[:idx])
+		after := strings.TrimSpace(rest[idx+len(flag):])
+		if after == "" {
+			return "", 0, false, fmt.Errorf("missing value for %s", flag)
+		}
+		fields := strings.Fields(after)
+		if len(fields) == 0 {
+			return "", 0, false, fmt.Errorf("missing value for %s", flag)
+		}
+		n, convErr := strconv.Atoi(fields[0])
+		if convErr != nil || n < 0 {
+			return "", 0, false, fmt.Errorf("invalid %s value %q", flag, fields[0])
+		}
+		trailing := strings.TrimSpace(strings.TrimPrefix(after, fields[0]))
+		if trailing != "" {
+			if before != "" {
+				before += " "
+			}
+			before += trailing
+		}
+		if strings.TrimSpace(before) == "" {
+			before = "Continue and finish all remaining tasks in the current session."
+		}
+		return strings.TrimSpace(before), n, true, nil
+	}
+	return rest, 0, false, nil
+}
+
 func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 	c := strings.TrimSpace(content)
 	switch {
@@ -109,7 +146,7 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 			}
 			return true
 		}
-		a.emitToTUI(ToastEvent{Message: "Usage: /loop on [target] | /loop off", Level: "info"})
+		a.emitToTUI(ToastEvent{Message: "Usage: /loop on [target] [--max-iterations N] | /loop off", Level: "info"})
 		if !busy {
 			a.setIdleAndDrainPending()
 		}
@@ -122,11 +159,19 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 			}
 			return true
 		}
-		target := strings.TrimSpace(strings.TrimPrefix(c, "/loop on"))
-		if target == "" {
-			target = "Continue and finish all remaining tasks in the current session."
+		target, maxIterations, maxSet, err := parseLoopOnCommand(c)
+		if err != nil {
+			a.emitToTUI(ToastEvent{Message: "Usage: /loop on [target] [--max-iterations N] | /loop off", Level: "error"})
+			if !busy {
+				a.setIdleAndDrainPending()
+			}
+			return true
 		}
 		a.EnableLoopMode(target)
+		if maxSet {
+			a.loopState.MaxIterations = maxIterations
+			a.loopState.MaxIterationsSet = true
+		}
 		if busy {
 			// Busy /loop on should not emit LOOP card or inject continuation
 			// prompt immediately; only enforce required tool calls for the ongoing

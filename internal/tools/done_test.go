@@ -11,8 +11,12 @@ func TestDoneToolParameters(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties type = %T", params["properties"])
 	}
-	if _, ok := props["reason"]; !ok {
-		t.Fatalf("Done tool parameters missing reason property: %#v", props)
+	reason, ok := props["reason"].(map[string]any)
+	if !ok {
+		t.Fatalf("Done tool reason property type = %T", props["reason"])
+	}
+	if got := reason["description"]; got != "Detailed final report in Markdown: completion status, summary of work, verification status, and remaining limitations." {
+		t.Fatalf("reason description = %v", got)
 	}
 }
 

@@ -253,7 +253,7 @@ Done: allow
 					t.Fatal("timed out waiting for Done rejection handling to finish")
 				}
 				if a.loopState.Iteration != 1 {
-					t.Fatalf("loop iteration = %d, want 1 after Done attempt", a.loopState.Iteration)
+					t.Fatalf("loop iteration = %d, want 1 after automatic Done rejection", a.loopState.Iteration)
 				}
 				msgs := a.ctxMgr.Snapshot()
 				last := msgs[len(msgs)-1]
@@ -487,7 +487,7 @@ Done: allow
 					t.Fatal("timed out waiting for verification-missing rejection handling to finish")
 				}
 				if a.loopState.Iteration != 1 {
-					t.Fatalf("loop iteration = %d, want 1 after Done attempt", a.loopState.Iteration)
+					t.Fatalf("loop iteration = %d, want 1 after automatic Done rejection", a.loopState.Iteration)
 				}
 				return
 			}
@@ -1259,6 +1259,12 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
+	if !strings.Contains(found.Content, "Before calling the `Done` tool, first output the final user-visible report in assistant text") {
+		t.Fatalf("loop notice content = %q, want pre-Done reporting requirement", found.Content)
+	}
+	if !strings.Contains(found.Content, "The `Done.reason` field must contain the detailed final report in Markdown") {
+		t.Fatalf("loop notice content = %q, want detailed Done.reason requirement", found.Content)
+	}
 }
 
 func TestSendLoopAnchorFromCommandPersistsLoopNoticeAsUser(t *testing.T) {
@@ -1421,6 +1427,100 @@ func TestLoopWorkflowPromptIncludesTodoClauseWhenOpenTodosWithoutTodoWrite(t *te
 	}
 	if !strings.Contains(block, "Open TODO items:") {
 		t.Fatalf("loop workflow prompt should list open TODOs even without TodoWrite, got: %q", block)
+	}
+}
+
+func TestHandleToolResult_DoneInLoopUserDenialDoesNotIncrementIteration(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: ask
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-user-deny-count-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"completed and verified"}`,
+			Result:   "completed and verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				a.ResolveConfirm("deny", payload.ArgsJSON, "", "need a manual final check", payload.RequestID)
+			case ToolResultEvent:
+				if payload.CallID != callID || payload.Name != tools.NameDone {
+					continue
+				}
+				if payload.Result != "Done rejected: need a manual final check" {
+					continue
+				}
+				<-handled
+				if a.loopState.Iteration != 0 {
+					t.Fatalf("loop iteration = %d, want 0 after manual Done rejection", a.loopState.Iteration)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for manual Done rejection result")
+		}
+	}
+}
+
+func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`)}
+	a.rebuildRuleset()
+	a.newTurn()
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on revised target --max-iterations 7"})
+
+	if !a.loopState.Enabled {
+		t.Fatal("loop should be enabled")
+	}
+	if a.loopState.Target != "revised target" {
+		t.Fatalf("loop target = %q, want revised target", a.loopState.Target)
+	}
+	if a.loopState.MaxIterations != 7 {
+		t.Fatalf("MaxIterations = %d, want 7", a.loopState.MaxIterations)
+	}
+	if !a.loopState.MaxIterationsSet {
+		t.Fatal("MaxIterationsSet = false, want true")
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("busy /loop on should still defer continuation prompt")
 	}
 }
 
