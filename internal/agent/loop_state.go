@@ -78,7 +78,7 @@ func (s *loopRuntimeState) enable() {
 		return
 	}
 	if s.MaxIterations < 0 {
-		s.MaxIterations = 10
+		s.MaxIterations = 100
 	}
 }
 

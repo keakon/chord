@@ -1053,7 +1053,7 @@ func TestRenderStatusBarShowsLoopStateImmediatelyAfterEnableEvent(t *testing.T) 
 	backend.loopState = agent.LoopStateExecuting
 	backend.loopTarget = "finish current task"
 	backend.loopIteration = 1
-	backend.loopMaxIterations = 10
+	backend.loopMaxIterations = 100
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.LoopStateChangedEvent{}})
 
 	plain := stripANSI(m.renderStatusBar())
@@ -1067,7 +1067,7 @@ func TestRenderStatusBarShowsLoopStateAfterRuntimeEnable(t *testing.T) {
 	backend.loopState = ""
 	backend.loopTarget = "finish current task"
 	backend.loopIteration = 1
-	backend.loopMaxIterations = 10
+	backend.loopMaxIterations = 100
 	backend.loopState = agent.LoopStateExecuting
 	m := NewModelWithSize(backend, 120, 24)
 	plain := stripANSI(m.renderStatusBar())

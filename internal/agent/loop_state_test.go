@@ -1829,13 +1829,13 @@ func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
 func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
-	a.loopState.MaxIterations = 10
+	a.loopState.MaxIterations = 100
 	a.loopState.Iteration = 7
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Iteration 6 of 10 (4 remaining)") {
+	if !strings.Contains(note.Text, "Iteration 6 of 100 (94 remaining)") {
 		t.Fatalf("LOOP CONTINUE should contain iteration budget with remaining count, got: %q", note.Text)
 	}
 }
@@ -1843,8 +1843,8 @@ func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
-	a.loopState.MaxIterations = 10
-	a.loopState.Iteration = 10
+	a.loopState.MaxIterations = 100
+	a.loopState.Iteration = 99
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
 	if note == nil {
 		t.Fatal("expected continuation note")

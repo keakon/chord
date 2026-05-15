@@ -246,7 +246,7 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 func (a *MainAgent) EnableLoopMode(target string) {
 	a.loopState.enableWithTarget(target)
 	if !a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {
-		a.loopState.MaxIterations = 10
+		a.loopState.MaxIterations = 100
 	}
 	if a.loopState.State == "" || a.loopState.State == LoopStateIdle || a.loopState.State == LoopStateCompleted || a.loopState.State == LoopStateBlocked || a.loopState.State == LoopStateBudgetExhausted {
 		a.loopState.State = LoopStateExecuting
