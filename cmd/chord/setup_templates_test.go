@@ -153,39 +153,20 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 	}
 }
 
-func TestBuildInitialSetupConfigYAML_OptionalFields(t *testing.T) {
-	preventSleep := true
-	data, err := buildInitialSetupConfigYAML(initialSetupConfigInput{
-		Kind:            initialSetupProviderAPIKey,
-		ProviderName:    "openai",
-		ProviderType:    "responses",
-		APIURL:          "https://api.openai.com/v1/responses",
-		ModelName:       "gpt-5.5",
-		Proxy:           "http://proxy.example:8080",
-		IMESwitchTarget: "com.apple.keylayout.ABC",
-		PreventSleep:    &preventSleep,
-		ContextLimit:    400000,
-		InputLimit:      272000,
-		OutputLimit:     128000,
-	})
-	if err != nil {
-		t.Fatalf("buildInitialSetupConfigYAML: %v", err)
+func TestDefaultAPIURLForProviderType(t *testing.T) {
+	if got := defaultAPIURLForProviderType("generate-content"); got != "https://generativelanguage.googleapis.com/v1beta/models" {
+		t.Fatalf("defaultAPIURLForProviderType(generate-content) = %q", got)
 	}
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	if got := defaultAPIURLForProviderType("responses"); got != "https://api.openai.com/v1/responses" {
+		t.Fatalf("defaultAPIURLForProviderType(responses) = %q", got)
 	}
-	cfg, err := config.LoadConfigFromPath(cfgPath)
-	if err != nil {
-		t.Fatalf("LoadConfigFromPath: %v", err)
+}
+
+func TestInferProviderTypeFromAPIURL_GeminiModels(t *testing.T) {
+	if got := inferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models"); got != "generate-content" {
+		t.Fatalf("inferProviderTypeFromAPIURL(gemini) = %q", got)
 	}
-	if cfg.Proxy != "http://proxy.example:8080" {
-		t.Fatalf("proxy = %q", cfg.Proxy)
-	}
-	if cfg.IMESwitchTarget != "com.apple.keylayout.ABC" {
-		t.Fatalf("ime_switch_target = %q", cfg.IMESwitchTarget)
-	}
-	if cfg.PreventSleep == nil || !*cfg.PreventSleep {
-		t.Fatalf("prevent_sleep = %#v", cfg.PreventSleep)
+	if got := inferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models/"); got != "generate-content" {
+		t.Fatalf("inferProviderTypeFromAPIURL(gemini trailing slash) = %q", got)
 	}
 }

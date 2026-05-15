@@ -175,7 +175,7 @@ func defaultAPIKeyEnvVar(providerName string) string {
 func defaultAPIURLForProviderType(providerType string) string {
 	switch strings.TrimSpace(providerType) {
 	case "chat-completions":
-		return "https://api.openai.com/v1/chat/completions"
+		return "https://gateway.example.com/v1/chat/completions"
 	case "messages":
 		return "https://api.anthropic.com/v1/messages"
 	case "generate-content":
