@@ -396,11 +396,17 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 	}
 	if b.ResultDone && strings.TrimSpace(b.ResultContent) != "" {
 		statusText := strings.TrimSpace(b.ResultContent)
-		if report == "" || !strings.Contains(statusText, report) {
+		if strings.HasPrefix(strings.ToLower(statusText), "done rejected:") {
+			statusText = strings.TrimSpace(strings.TrimSpace(statusText[len("Done rejected:"):]))
+			result = append(result, "")
+			result = append(result, ErrorStyle.Render("  ↳ rejected reason: "+statusText))
+		} else if report == "" {
 			result = append(result, "")
 			label := ToolResultExpandedStyle.Render("  ↳ Status:")
 			if b.toolResultIsError() {
 				label = ErrorStyle.Render("  ↳ Error:")
+			} else if b.toolResultIsCancelled() {
+				label = DimStyle.Render("  ↳ Cancelled:")
 			}
 			result = append(result, label)
 			style := DimStyle
@@ -775,6 +781,9 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "✗"
 		}
 		if b.toolResultIsCancelled() {
+			if b.ToolName == "Done" {
+				return "❌"
+			}
 			return "◌"
 		}
 		return "✓"

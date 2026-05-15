@@ -2017,6 +2017,78 @@ func TestQuestionCallFallbackResultPreservesMultilineText(t *testing.T) {
 	}
 }
 
+func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Done",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultContent: "Done rejected: 达到100%通过才能调用，调用时需要汇报结果",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	if !strings.Contains(plain, "❌ Done") {
+		t.Fatalf("expected rejected Done to use cross icon, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "rejected reason: 达到100%通过才能调用，调用时需要汇报结果") {
+		t.Fatalf("expected simplified rejected reason text, got:\n%s", plain)
+	}
+	for _, unwanted := range []string{"Status:", "Done rejected:"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected rejected Done to omit %q, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Done",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Done",
+		DoneReport:    "## Summary\n- shipped\n- verified",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	for _, want := range []string{"✓ Done", "Summary", "• shipped", "• verified"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected accepted Done render to contain %q, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"Status:", "rejected reason:", "Done rejected:"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected accepted Done render to omit %q, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:           1,
+		Type:         BlockToolCall,
+		ToolName:     "Done",
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
+		DoneReport:   "## Summary\n- shipped\n- verified",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	for _, want := range []string{"Summary", "• shipped", "• verified"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected rendered Done report to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	block := &Block{
 		ID:         1,
