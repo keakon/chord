@@ -31,6 +31,7 @@ type confirmSummary struct {
 	Fields         []confirmSummaryField
 	ParseErr       error
 	RawJSON        string
+	DoneReport     string
 	NeedsApproval  []string
 	AlreadyAllowed []string
 }
@@ -79,12 +80,15 @@ func (s confirmSummary) summaryFields() []confirmSummaryField {
 	return fields
 }
 
-func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowed []string) confirmSummary {
+func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowed []string, doneReport ...string) confirmSummary {
 	summary := confirmSummary{
 		ToolName: toolName,
 		Action:   confirmActionText(toolName),
 		Risk:     confirmRiskForTool(toolName),
 		RawJSON:  argsJSON,
+	}
+	if len(doneReport) > 0 {
+		summary.DoneReport = strings.TrimSpace(doneReport[0])
 	}
 
 	parsed, err := parseConfirmArgs(argsJSON)
@@ -112,12 +116,17 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 		buildDeleteConfirmSummary(&summary, parsed, needsApproval, alreadyAllowed)
 	case "webfetch":
 		buildWebFetchConfirmSummary(&summary, parsed)
+	case "done":
+		buildDoneConfirmSummary(&summary, parsed, summary.DoneReport)
 	default:
 		buildGenericConfirmSummary(&summary, parsed)
 	}
 
 	ensureConfirmImportantFields(&summary)
 	if len(summary.Fields) == 0 {
+		if strings.EqualFold(toolName, "Done") && strings.TrimSpace(summary.DoneReport) != "" {
+			return summary
+		}
 		summary.Fields = []confirmSummaryField{newConfirmField("Arguments", "(none)", true)}
 	}
 	return summary
@@ -375,6 +384,31 @@ func ensureConfirmImportantFields(summary *confirmSummary) {
 		}
 		summary.Fields[i].Important = true
 	}
+}
+
+// buildDoneConfirmSummary populates the summary for Done tool confirmation dialogs.
+// It extracts key information from the parsed arguments and formats the completion report.
+func buildDoneConfirmSummary(summary *confirmSummary, parsed map[string]any, doneReport string) {
+	// Extract optional reason field if present
+	if reason, ok := parsed["reason"].(string); ok && strings.TrimSpace(reason) != "" {
+		summary.Fields = append(summary.Fields, confirmSummaryField{
+			Label:        "Reason",
+			SummaryValue: sanitizeToolDisplayText(reason),
+			Important:    true,
+		})
+	}
+
+	// If there's a completion report, add it as a field
+	if doneReport != "" {
+		summary.Fields = append(summary.Fields, confirmSummaryField{
+			Label:        "Completion Report",
+			SummaryValue: sanitizeToolDisplayText(doneReport),
+			Important:    true,
+		})
+	}
+
+	// Ensure at least one important field exists
+	ensureConfirmImportantFields(summary)
 }
 
 func appendUnhandledConfirmFields(summary *confirmSummary, parsed map[string]any, handled map[string]bool) {

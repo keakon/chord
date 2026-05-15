@@ -67,7 +67,7 @@ func (m *Model) renderConfirmDialog() string {
 		return m.renderRulePicker(maxWidth, innerWidth)
 	}
 
-	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed)
+	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
 	lines := m.renderConfirmSummary(title, summary, innerWidth)
 	lines = append(lines, "", m.renderConfirmOptions())
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
@@ -87,6 +87,21 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 	lines := []string{title, ""}
 	lines = append(lines, ConfirmToolStyle.Render("Tool: "+summary.ToolName))
 	lines = append(lines, ConfirmToolStyle.Render("Action: "+summary.Action))
+	if strings.EqualFold(summary.ToolName, "Done") {
+		if strings.TrimSpace(summary.DoneReport) != "" {
+			lines = append(lines, "")
+			lines = append(lines, ConfirmToolStyle.Render("Report:"))
+			for _, line := range renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil) {
+				lines = append(lines, "  "+line)
+			}
+		}
+		fields := renderConfirmFields(summary.summaryFields(), innerWidth-1, false)
+		if len(fields) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, fields...)
+		}
+		return lines
+	}
 	if strings.EqualFold(summary.ToolName, "Delete") {
 		lines = append(lines, DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
 		for _, warning := range summary.Warnings {

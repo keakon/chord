@@ -15,7 +15,7 @@ import (
 // AwaitConfirm emits a confirmation request event, waits for the user's reply,
 // and returns the resolved response. Only one confirm flow may be active at a
 // time because the TUI supports a single modal dialog.
-func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
+func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, summary ...string) (ConfirmResponse, error) {
 	a.confirmFlowMu.Lock()
 	defer a.confirmFlowMu.Unlock()
 
@@ -42,6 +42,11 @@ func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string,
 		a.confirmMapMu.Unlock()
 	}()
 
+	summaryVal := ""
+	if len(summary) > 0 {
+		summaryVal = summary[0]
+	}
+
 	if err := a.emitInteractiveToTUI(ctx, ConfirmRequestEvent{
 		ToolName:       toolName,
 		ArgsJSON:       argsJSON,
@@ -49,6 +54,7 @@ func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string,
 		Timeout:        timeout,
 		NeedsApproval:  append([]string(nil), needsApproval...),
 		AlreadyAllowed: append([]string(nil), alreadyAllowed...),
+		DoneReport:     summaryVal,
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}

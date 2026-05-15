@@ -653,11 +653,14 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			if block, ok := m.findLastPendingToolBlockByName(evt.ToolName); ok {
 				m.recordTUIDiagnostic("confirm-request", "tool=%s block=%d args_len=%d", evt.ToolName, block.ID, len(evt.ArgsJSON))
 				block.Content = evt.ArgsJSON
+				if strings.EqualFold(evt.ToolName, "Done") && strings.TrimSpace(evt.DoneReport) != "" {
+					block.DoneReport = evt.DoneReport
+				}
 				block.InvalidateCache()
 				m.updateViewportBlock(block)
 			}
 		}
-		req := ConfirmRequest{ToolName: evt.ToolName, ArgsJSON: evt.ArgsJSON, RequestID: evt.RequestID, Timeout: evt.Timeout, NeedsApproval: append([]string(nil), evt.NeedsApproval...), AlreadyAllowed: append([]string(nil), evt.AlreadyAllowed...)}
+		req := ConfirmRequest{ToolName: evt.ToolName, ArgsJSON: evt.ArgsJSON, DoneReport: evt.DoneReport, RequestID: evt.RequestID, Timeout: evt.Timeout, NeedsApproval: append([]string(nil), evt.NeedsApproval...), AlreadyAllowed: append([]string(nil), evt.AlreadyAllowed...)}
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
 		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Permission confirmation required"))
 		return true, effects
@@ -703,6 +706,9 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		block.ResultContent = evt.Result
 		block.Audit = evt.Audit.Clone()
+		if strings.EqualFold(evt.Name, "Done") && strings.TrimSpace(evt.DoneReport) != "" {
+			block.DoneReport = evt.DoneReport
+		}
 		if displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
 			block.Content = displayArgs
 		}

@@ -89,6 +89,12 @@ type Block struct {
 	// Displayed in the collapsed tool call view instead of the raw result.
 	DoneSummary string
 
+	// DoneReport stores the assistant's final Markdown report associated with a
+	// Done tool call. It is rendered with assistant Markdown styling in the Done
+	// tool card and confirmation dialog so users can review the actual completion
+	// report instead of the synthetic Done tool result text.
+	DoneReport string
+
 	// Diff holds a unified diff string for Write/Edit tool calls.
 	// Not sent to the LLM; used only for TUI display.
 	Diff string

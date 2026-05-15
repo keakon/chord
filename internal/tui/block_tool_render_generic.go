@@ -254,6 +254,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == "Delegate" {
 		return b.renderTaskCall(width, spinnerFrame)
 	}
+	if b.ToolName == "Done" {
+		return b.renderDoneCall(width, spinnerFrame)
+	}
 	if b.ToolName == "Cancel" {
 		return b.renderCancelCall(width, spinnerFrame)
 	}
@@ -360,6 +363,56 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		}
 	}
 
+	return renderPrewrappedToolCard(blockStyle, cardWidth, ToolLabelStyle.Render("TOOL CALL"), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
+	blockStyle := ToolBlockStyle
+	toolCardBg := currentTheme.ToolCallBg
+	boxWidth := width - blockStyle.GetHorizontalMargins()
+	if boxWidth < 10 {
+		boxWidth = 10
+	}
+	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
+	if cardWidth < 10 {
+		cardWidth = 10
+	}
+	contentWidth := cardWidth - 4
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+
+	prefix := b.renderToolPrefix(spinnerFrame)
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result := []string{headerLine}
+
+	report := strings.TrimSpace(b.DoneReport)
+	if report != "" {
+		result = append(result, "")
+		for _, line := range renderRichMarkdownContent(report, contentWidth, &b.richMarkdownHL) {
+			result = append(result, "    "+line)
+		}
+	}
+	if b.ResultDone && strings.TrimSpace(b.ResultContent) != "" {
+		statusText := strings.TrimSpace(b.ResultContent)
+		if report == "" || !strings.Contains(statusText, report) {
+			result = append(result, "")
+			label := ToolResultExpandedStyle.Render("  ↳ Status:")
+			if b.toolResultIsError() {
+				label = ErrorStyle.Render("  ↳ Error:")
+			}
+			result = append(result, label)
+			style := DimStyle
+			if b.toolResultIsError() {
+				style = ErrorStyle
+			}
+			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
+				result = append(result, style.Render("    "+line))
+			}
+		}
+	}
+	result = appendToolElapsedFooter(result, b)
 	return renderPrewrappedToolCard(blockStyle, cardWidth, ToolLabelStyle.Render("TOOL CALL"), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

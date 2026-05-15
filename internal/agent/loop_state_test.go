@@ -1384,11 +1384,14 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
-	if !strings.Contains(found.Content, "Put the detailed final report in the assistant message using concise Markdown before calling `Done`") {
+	if !strings.Contains(found.Content, "Immediately before calling `Done`, write a final report in the assistant message with this structure:") {
 		t.Fatalf("loop notice content = %q, want assistant-message final report requirement", found.Content)
 	}
-	if !strings.Contains(found.Content, "To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text") {
-		t.Fatalf("loop notice content = %q, want Done exit requirement", found.Content)
+	if !strings.Contains(found.Content, "**Completion status**:") {
+		t.Fatalf("loop notice content = %q, want completion status field", found.Content)
+	}
+	if !strings.Contains(found.Content, "**Verification**:") {
+		t.Fatalf("loop notice content = %q, want verification field", found.Content)
 	}
 }
 

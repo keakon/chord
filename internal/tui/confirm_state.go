@@ -35,6 +35,7 @@ type ConfirmRuleIntent struct {
 type ConfirmRequest struct {
 	ToolName       string
 	ArgsJSON       string
+	DoneReport     string
 	RequestID      string
 	Timeout        time.Duration
 	NeedsApproval  []string

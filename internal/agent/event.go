@@ -312,6 +312,7 @@ type ToolResultEvent struct {
 	ArgsJSON    string // full tool arguments (available after streaming completes)
 	Audit       *message.ToolArgsAudit
 	Result      string
+	DoneReport  string
 	Status      ToolResultStatus
 	AgentID     string // originating agent ("" = main agent)
 	Diff        string // unified diff for Write/Edit tools (not sent to LLM)
@@ -585,6 +586,8 @@ type ConfirmRequestEvent struct {
 	Timeout        time.Duration
 	NeedsApproval  []string
 	AlreadyAllowed []string
+	// DoneReport is the completion report content for Done tool confirmation.
+	DoneReport string
 }
 
 func (ConfirmRequestEvent) agentEvent() {}
