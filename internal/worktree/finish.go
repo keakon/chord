@@ -107,13 +107,20 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		if err != nil {
 			return err
 		}
+		restoreMainBranch := false
 		if mainBranch != onto {
 			if _, err := runGit(ctx, mainRoot, "checkout", onto); err != nil {
 				return fmt.Errorf("checkout %q in main repository: %w", onto, err)
 			}
+			restoreMainBranch = true
 		}
 		if _, err := runGit(ctx, mainRoot, "merge", "--ff-only", tmpBranch); err != nil {
 			return fmt.Errorf("fast-forward %q to the squashed worktree result: %w", onto, err)
+		}
+		if restoreMainBranch {
+			if _, err := runGit(ctx, mainRoot, "checkout", mainBranch); err != nil {
+				return fmt.Errorf("restore main repository branch %q after finishing worktree %q: %w", mainBranch, name, err)
+			}
 		}
 	}
 

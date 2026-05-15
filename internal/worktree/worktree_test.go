@@ -489,6 +489,41 @@ func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
 	}
 }
 
+func TestFinish_RestoresOriginalMainBranchAfterSquashFinish(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+
+	runTestGit(t, repo, "checkout", "-q", "-b", "release")
+	runTestGit(t, repo, "checkout", "-q", "main")
+
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runTestGit(t, repo, "checkout", "-q", "release")
+	beforeBranch := strings.TrimSpace(string(mustRunGit(t, repo, "branch", "--show-current")))
+	if beforeBranch != "release" {
+		t.Fatalf("expected main repo to start on release, got %q", beforeBranch)
+	}
+
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	if err := Finish(ctx, repo, "feat", FinishOptions{Onto: "main"}, pl); err != nil {
+		t.Fatalf("Finish onto main: %v", err)
+	}
+
+	afterBranch := strings.TrimSpace(string(mustRunGit(t, repo, "branch", "--show-current")))
+	if afterBranch != "release" {
+		t.Fatalf("main repo branch after Finish = %q, want release", afterBranch)
+	}
+}
+
 func TestFinish_RefusesExistingRebaseInProgress(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
