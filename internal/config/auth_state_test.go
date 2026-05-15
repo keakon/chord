@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestMergeAuthConfigWithStateOverlaysStatus(t *testing.T) {
+	auth := AuthConfig{"openai": {{OAuth: &OAuthCredential{Access: "access-a", AccountID: "acc-1", Email: "user@example.com"}}}}
+	state := AuthStateFile{"openai": {"openai:account_id:acc-1": {AccountID: "acc-1", Email: "user@example.com", Status: OAuthStatusExpired}}}
+	merged := MergeAuthConfigWithState(auth, state)
+	if got := merged["openai"][0].OAuth; got == nil || got.Status != OAuthStatusExpired {
+		t.Fatalf("merged oauth = %#v, want expired status from auth.state", got)
+	}
+}
+
 func TestAuthStateRoundTripAndFind(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.yaml")
 	hasCredits := true

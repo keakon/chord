@@ -193,6 +193,61 @@ func ExtractAPIKeys(creds []ProviderCredential) []string {
 	return keys
 }
 
+func MergeAuthConfigWithState(auth AuthConfig, state AuthStateFile) AuthConfig {
+	if len(auth) == 0 {
+		return make(AuthConfig)
+	}
+	merged := make(AuthConfig, len(auth))
+	for provider, creds := range auth {
+		out := make([]ProviderCredential, len(creds))
+		copy(out, creds)
+		for i := range out {
+			if out[i].OAuth == nil {
+				continue
+			}
+			if record, ok := findMatchingOAuthStateRecord(state, provider, out[i].OAuth); ok {
+				copyCred := *out[i].OAuth
+				copyCred.Status = record.Status
+				if record.CodexPrimaryResetAt != 0 {
+					copyCred.CodexPrimaryResetAt = record.CodexPrimaryResetAt
+				}
+				if record.CodexSecondaryResetAt != 0 {
+					copyCred.CodexSecondaryResetAt = record.CodexSecondaryResetAt
+				}
+				out[i].OAuth = &copyCred
+			}
+		}
+		merged[provider] = out
+	}
+	return merged
+}
+
+func findMatchingOAuthStateRecord(state AuthStateFile, provider string, cred *OAuthCredential) (OAuthStateRecord, bool) {
+	if cred == nil {
+		return OAuthStateRecord{}, false
+	}
+	entries := state[strings.TrimSpace(provider)]
+	if len(entries) == 0 {
+		return OAuthStateRecord{}, false
+	}
+	for _, record := range entries {
+		if strings.TrimSpace(record.AccountID) != "" && strings.EqualFold(strings.TrimSpace(record.AccountID), strings.TrimSpace(cred.AccountID)) {
+			return record, true
+		}
+	}
+	for _, record := range entries {
+		if strings.TrimSpace(record.Email) != "" && strings.EqualFold(strings.TrimSpace(record.Email), strings.TrimSpace(cred.Email)) {
+			return record, true
+		}
+	}
+	for _, record := range entries {
+		if strings.TrimSpace(record.Access) != "" && strings.TrimSpace(record.Access) == strings.TrimSpace(cred.Access) {
+			return record, true
+		}
+	}
+	return OAuthStateRecord{}, false
+}
+
 // LoadAuthConfig loads authentication configuration from a YAML file.
 // Credentials with an empty APIKey are filtered out unless ExplicitEmpty is true
 // (i.e., the YAML value was a literal "" rather than an unset $ENV_VAR).

@@ -100,26 +100,119 @@ func newAuthCmd() *cobra.Command {
 func newAuthStateCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "state", Short: "Manage shared OAuth runtime state"}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "clean",
-		Short: "Remove invalid OAuth state entries from auth.state.yaml",
+		Use:   "list",
+		Short: "List expired or deactivated OAuth accounts from auth.state.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			statePath, err := config.AuthStatePath()
 			if err != nil {
 				return fmt.Errorf("resolve auth state path: %w", err)
 			}
-			_, removed, err := config.RemoveInvalidOAuthStateRecords(statePath)
+			state, err := config.LoadAuthState(statePath)
 			if err != nil {
-				return fmt.Errorf("clean auth state: %w", err)
+				return fmt.Errorf("load auth state: %w", err)
 			}
-			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth state entries from %s\n", len(removed), statePath)
-			for _, entry := range removed {
+			entries := listInvalidOAuthStateEntries(state)
+			fmt.Fprintf(os.Stdout, "Found %d expired/deactivated OAuth accounts in %s\n", len(entries), statePath)
+			for _, entry := range entries {
 				fmt.Fprintf(os.Stdout, "- %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
 			return nil
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "clean",
+		Short: "Remove expired or deactivated OAuth accounts from auth.yaml and auth.state.yaml",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			statePath, err := config.AuthStatePath()
+			if err != nil {
+				return fmt.Errorf("resolve auth state path: %w", err)
+			}
+			authPath, err := config.AuthPath()
+			if err != nil {
+				return fmt.Errorf("resolve auth config path: %w", err)
+			}
+			state, err := config.LoadAuthState(statePath)
+			if err != nil {
+				return fmt.Errorf("load auth state: %w", err)
+			}
+			entries := listInvalidOAuthStateEntries(state)
+			_, removedState, err := config.RemoveInvalidOAuthStateRecords(statePath)
+			if err != nil {
+				return fmt.Errorf("clean auth state: %w", err)
+			}
+			_, removedCreds, err := config.RemoveOAuthCredentialsInFile(authPath, func(provider string, cred *config.OAuthCredential, _ int) bool {
+				if cred == nil {
+					return false
+				}
+				for _, entry := range entries {
+					if entry.Provider != provider {
+						continue
+					}
+					if oauthCredentialMatchesStateEntry(cred, entry) {
+						return true
+					}
+				}
+				return false
+			})
+			if err != nil {
+				return fmt.Errorf("clean auth config: %w", err)
+			}
+			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth state entries from %s\n", len(removedState), statePath)
+			for _, entry := range removedState {
+				fmt.Fprintf(os.Stdout, "- state: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+			}
+			fmt.Fprintf(os.Stdout, "Removed %d expired/deactivated OAuth credentials from %s\n", len(removedCreds), authPath)
+			for _, entry := range removedCreds {
+				fmt.Fprintf(os.Stdout, "- auth: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+			}
+			return nil
+		},
+	})
 	return cmd
+}
+
+func listInvalidOAuthStateEntries(state config.AuthStateFile) []config.RemovedOAuthStateEntry {
+	var removed []config.RemovedOAuthStateEntry
+	for provider, entries := range state {
+		for key, record := range entries {
+			if record.Status.IsValid() {
+				continue
+			}
+			removed = append(removed, config.RemovedOAuthStateEntry{
+				Provider:  provider,
+				StateKey:  key,
+				AccountID: record.AccountID,
+				Email:     record.Email,
+				Access:    record.Access,
+				Status:    record.Status,
+			})
+		}
+	}
+	sort.Slice(removed, func(i, j int) bool {
+		if removed[i].Provider != removed[j].Provider {
+			return removed[i].Provider < removed[j].Provider
+		}
+		return removed[i].DisplayName() < removed[j].DisplayName()
+	})
+	return removed
+}
+
+func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config.RemovedOAuthStateEntry) bool {
+	if cred == nil {
+		return false
+	}
+	if cred.AccountID != "" && entry.AccountID != "" && cred.AccountID == entry.AccountID {
+		return true
+	}
+	if cred.Email != "" && entry.Email != "" && cred.Email == entry.Email {
+		return true
+	}
+	if cred.Access != "" && entry.Access != "" && cred.Access == entry.Access {
+		return true
+	}
+	return false
 }
 
 func bindAuthLoginFlags(cmd *cobra.Command) {

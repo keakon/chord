@@ -23,6 +23,28 @@ type OAuthCredentialMatch struct {
 	CredentialIndex *int
 }
 
+type RemovedOAuthCredentialEntry struct {
+	Provider        string
+	CredentialIndex int
+	AccountID       string
+	Email           string
+	Access          string
+	Status          OAuthCredentialStatus
+}
+
+func (e RemovedOAuthCredentialEntry) DisplayName() string {
+	if email := strings.TrimSpace(e.Email); email != "" {
+		return email
+	}
+	if accountID := strings.TrimSpace(e.AccountID); accountID != "" {
+		return accountID
+	}
+	if access := strings.TrimSpace(e.Access); access != "" {
+		return access
+	}
+	return fmt.Sprintf("%s[%d]", strings.TrimSpace(e.Provider), e.CredentialIndex)
+}
+
 type authYAMLDocument struct {
 	root  yaml.Node
 	dirty bool
@@ -88,7 +110,34 @@ func UpdateOAuthCredentialInFile(
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if updated != nil {
+		if statePath, stateErr := AuthStatePath(); stateErr == nil {
+			if state, loadErr := LoadAuthState(statePath); loadErr == nil {
+				if stateCred, ok := findMatchingOAuthStateRecord(state, provider, updated); ok {
+					updated.Status = stateCred.Status
+					updated.CodexPrimaryResetAt = stateCred.CodexPrimaryResetAt
+					updated.CodexSecondaryResetAt = stateCred.CodexSecondaryResetAt
+				}
+			}
+		}
+	}
 	return auth, updated, changed, nil
+}
+
+func RemoveOAuthCredentialsInFile(path string, remove func(provider string, cred *OAuthCredential, normalizedIndex int) bool) (AuthConfig, []RemovedOAuthCredentialEntry, error) {
+	if remove == nil {
+		return nil, nil, fmt.Errorf("oauth credential remove func is nil")
+	}
+	var removed []RemovedOAuthCredentialEntry
+	auth, err := mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
+		var removeErr error
+		removed, removeErr = doc.removeOAuthCredentials(remove)
+		return removeErr
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return auth, removed, nil
 }
 
 func mutateAuthYAMLFile(path string, mutate func(*authYAMLDocument) error) (AuthConfig, error) {
@@ -361,6 +410,55 @@ func writeAuthYAMLFile(path string, data []byte) error {
 	}
 	return nil
 }
+func (d *authYAMLDocument) removeOAuthCredentials(remove func(provider string, cred *OAuthCredential, normalizedIndex int) bool) ([]RemovedOAuthCredentialEntry, error) {
+	if d == nil {
+		return nil, nil
+	}
+	root := d.rootMapping()
+	var removed []RemovedOAuthCredentialEntry
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		seq := root.Content[i+1]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode || seq == nil || seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		provider := keyNode.Value
+		newContent := make([]*yaml.Node, 0, len(seq.Content))
+		normalizedIndex := 0
+		changed := false
+		for _, node := range seq.Content {
+			var cred ProviderCredential
+			if err := node.Decode(&cred); err != nil {
+				return nil, fmt.Errorf("decode auth provider %q credential: %w", provider, err)
+			}
+			if cred.OAuth != nil {
+				idx := normalizedIndex
+				if remove(provider, cred.OAuth, idx) {
+					removed = append(removed, RemovedOAuthCredentialEntry{
+						Provider:        provider,
+						CredentialIndex: idx,
+						AccountID:       cred.OAuth.AccountID,
+						Email:           cred.OAuth.Email,
+						Access:          cred.OAuth.Access,
+						Status:          cred.OAuth.Status,
+					})
+					changed = true
+					continue
+				}
+			}
+			newContent = append(newContent, node)
+			if isRetainedProviderCredential(cred) {
+				normalizedIndex++
+			}
+		}
+		if changed {
+			seq.Content = newContent
+			d.dirty = true
+		}
+	}
+	return removed, nil
+}
+
 func findOAuthCredentialUpsertTarget(refs []authCredentialNodeRef, cred *OAuthCredential) *authCredentialNodeRef {
 	if cred == nil || cred.AccountID == "" {
 		return nil
@@ -460,7 +558,7 @@ func updateOAuthMappingNode(node *yaml.Node, cred *OAuthCredential) bool {
 	changed = setMappingInt64(node, "expires", cred.Expires) || changed
 	changed = setMappingString(node, "account_id", cred.AccountID, true) || changed
 	changed = setMappingString(node, "email", cred.Email, true) || changed
-	changed = setMappingString(node, "status", string(cred.Status), true) || changed
+	changed = removeMappingKey(node, "status") || changed
 	changed = setMappingOptionalInt64(node, "codex_primary_reset_at", cred.CodexPrimaryResetAt) || changed
 	changed = setMappingOptionalInt64(node, "codex_secondary_reset_at", cred.CodexSecondaryResetAt) || changed
 	return changed

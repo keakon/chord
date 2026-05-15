@@ -180,8 +180,8 @@ func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedNorma
 	if !creds[1].ExplicitEmpty {
 		t.Fatalf("expected second normalized credential to be explicit empty, got %#v", creds[1])
 	}
-	if got := creds[2].OAuth; got == nil || got.Access != "target-access" || got.Status != OAuthStatusExpired {
-		t.Fatalf("expected credential index 2 OAuth to be marked expired, got %#v", got)
+	if got := creds[2].OAuth; got == nil || got.Access != "target-access" || got.Status != OAuthStatusNormal {
+		t.Fatalf("expected auth.yaml credential to omit status, got %#v", got)
 	}
 	if got := creds[3].OAuth; got == nil || got.Access != "sibling-access" || got.Status != OAuthStatusNormal {
 		t.Fatalf("expected sibling OAuth credential to remain unchanged, got %#v", got)
@@ -192,11 +192,8 @@ func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedNorma
 		t.Fatalf("ReadFile: %v", err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "access: target-access\n    expires: 111\n    status: expired") {
-		t.Fatalf("expected target OAuth slot to gain expired status, got:\n%s", text)
-	}
-	if strings.Contains(text, "access: sibling-access\n    expires: 222\n    status: expired") {
-		t.Fatalf("expected sibling OAuth slot to remain unchanged, got:\n%s", text)
+	if strings.Contains(text, "status:") {
+		t.Fatalf("expected auth.yaml to omit status fields, got:\n%s", text)
 	}
 }
 
@@ -233,8 +230,8 @@ func TestUpdateOAuthCredentialInFile_PrefersAccessAndCredentialIndexWhenAccountI
 	if got := auth["openai"][0].OAuth; got == nil || got.Access != "access-a" || got.Status != OAuthStatusNormal {
 		t.Fatalf("expected first duplicate account_id credential unchanged, got %#v", got)
 	}
-	if got := auth["openai"][1].OAuth; got == nil || got.Access != "access-b" || got.Status != OAuthStatusExpired {
-		t.Fatalf("expected second duplicate account_id credential marked expired, got %#v", got)
+	if got := auth["openai"][1].OAuth; got == nil || got.Access != "access-b" || got.Status != OAuthStatusNormal {
+		t.Fatalf("expected auth.yaml to omit status from persisted credentials, got %#v", got)
 	}
 
 	data, err := os.ReadFile(path)
@@ -242,11 +239,8 @@ func TestUpdateOAuthCredentialInFile_PrefersAccessAndCredentialIndexWhenAccountI
 		t.Fatalf("ReadFile: %v", err)
 	}
 	text := string(data)
-	if strings.Contains(text, "access: access-a\n    expires: 111\n    account_id: shared-acc\n    status: expired") {
-		t.Fatalf("expected first duplicate account_id slot to remain unchanged, got:\n%s", text)
-	}
-	if !strings.Contains(text, "access: access-b\n    expires: 222\n    account_id: shared-acc\n    status: expired") {
-		t.Fatalf("expected second duplicate account_id slot to be marked expired, got:\n%s", text)
+	if strings.Contains(text, "status:") {
+		t.Fatalf("expected auth.yaml to omit status fields, got:\n%s", text)
 	}
 }
 
