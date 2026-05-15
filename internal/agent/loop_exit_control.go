@@ -53,6 +53,17 @@ func (a *MainAgent) awaitLoopExitConfirmation(ctx context.Context, pending *loop
 	return a.AwaitConfirm(ctx, "Done", string(encoded), 0, nil, nil)
 }
 
+func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason string) (ConfirmResponse, error) {
+	payload := struct {
+		Reason string `json:"reason,omitempty"`
+	}{Reason: strings.TrimSpace(reason)}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ConfirmResponse{}, err
+	}
+	return a.AwaitConfirm(ctx, tools.NameDone, string(encoded), 0, nil, nil)
+}
+
 func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result string) {
 	if a.turn == nil {
 		return

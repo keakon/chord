@@ -351,8 +351,8 @@ Done: allow
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"The `Done.report` field must contain the detailed final report in Markdown, not just a short label",
-		"To request loop exit, call the `Done` tool with that final report in `report`; do not stop with only assistant text",
+		"Put the detailed final report in the assistant message using concise Markdown before calling `Done`",
+		"To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text",
 		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision remains",
 		"keep working until the automatic Done interception limit is reached",
 	} {
@@ -408,9 +408,9 @@ func TestEvaluateToolPermission_TreatsQuestionAskAsAllow(t *testing.T) {
 	}
 }
 
-func TestNormalizeToolPermissionActionTreatsDoneAskAsAllow(t *testing.T) {
-	if got := normalizeToolPermissionAction(tools.NameDone, permission.ActionAsk); got != permission.ActionAllow {
-		t.Fatalf("normalizeToolPermissionAction(Done, ask) = %q, want allow", got)
+func TestNormalizeToolPermissionActionLeavesDoneAskAsAsk(t *testing.T) {
+	if got := normalizeToolPermissionAction(tools.NameDone, permission.ActionAsk); got != permission.ActionAsk {
+		t.Fatalf("normalizeToolPermissionAction(Done, ask) = %q, want ask", got)
 	}
 }
 
@@ -1203,10 +1203,10 @@ Delegate: allow
 func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if !strings.Contains(joined, "The `Done.report` field must contain the detailed final report in Markdown, not just a short label") {
-		t.Fatalf("loop completion requirements should mention Done.report report contract, got %q", joined)
+	if !strings.Contains(joined, "Put the detailed final report in the assistant message using concise Markdown before calling `Done`") {
+		t.Fatalf("loop completion requirements should mention assistant-message final report, got %q", joined)
 	}
-	if !strings.Contains(joined, "To request loop exit, call the `Done` tool with that final report in `report`; do not stop with only assistant text") {
+	if !strings.Contains(joined, "To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text") {
 		t.Fatalf("loop completion requirements should mention Done exit contract, got %q", joined)
 	}
 	finalJoined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")

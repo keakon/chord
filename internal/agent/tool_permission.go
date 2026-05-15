@@ -24,7 +24,7 @@ type permissionAggregateItem struct {
 }
 
 func normalizeToolPermissionAction(toolName string, action permission.Action) permission.Action {
-	if (toolName == tools.NameQuestion || toolName == tools.NameDone) && action == permission.ActionAsk {
+	if toolName == tools.NameQuestion && action == permission.ActionAsk {
 		return permission.ActionAllow
 	}
 	return action

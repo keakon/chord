@@ -433,7 +433,7 @@ func TestHandleConfirmDenyReasonKeyEscGoesBack(t *testing.T) {
 
 func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"reason":"finished"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
@@ -447,7 +447,7 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 func TestHandleConfirmDoneDenyRequiresReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"reason":"finished"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 

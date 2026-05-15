@@ -153,6 +153,9 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		logToolPermissionDenied(p.logPrefix, p.agentID, tc.Name, decision.MatchArgument)
 		return wrapToolPermissionDenied(tc.Name)
 	case permission.ActionAsk:
+		if tc.Name == tools.NameDone {
+			return nil
+		}
 		if p.confirm == nil {
 			return wrapToolRequiresConfirmation(tc.Name)
 		}

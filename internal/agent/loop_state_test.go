@@ -187,6 +187,139 @@ Done: allow
 	}
 }
 
+func TestHandleToolResult_DoneOutsideLoopWithAskRequestsConfirmation(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: ask
+`),
+	}
+	a.rebuildRuleset()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-nonloop-ask-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "task complete",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{}`,
+			Result:   "Done requested",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	var sawConfirm bool
+	for !sawConfirm {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				if payload.ToolName != tools.NameDone {
+					t.Fatalf("ConfirmRequestEvent.ToolName = %q, want %q", payload.ToolName, tools.NameDone)
+				}
+				sawConfirm = true
+				a.ResolveConfirm("allow", payload.ArgsJSON, "", "", payload.RequestID)
+			case RequestCycleStartedEvent, ToolResultEvent:
+				continue
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for non-loop Done confirmation request")
+		}
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for non-loop Done handling to finish")
+	}
+	if a.turn != nil {
+		t.Fatal("turn should be cleared after approving non-loop Done confirmation")
+	}
+}
+
+func TestHandleToolResult_DoneOutsideLoopDenyContinuesWork(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-nonloop-deny-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "task complete",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{}`,
+			Result:   "Done requested",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	var sawConfirm bool
+	for !sawConfirm {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				sawConfirm = true
+				a.ResolveConfirm("deny", payload.ArgsJSON, "", "need more detail", payload.RequestID)
+			case RequestCycleStartedEvent, ToolResultEvent:
+				continue
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for non-loop Done confirmation request")
+		}
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for non-loop Done denial handling to finish")
+	}
+	if a.turn == nil {
+		t.Fatal("turn should continue after denying non-loop Done")
+	}
+	msgs := a.ctxMgr.Snapshot()
+	if got := msgs[len(msgs)-1].Content; !strings.Contains(got, "Done rejected: need more detail") {
+		t.Fatalf("last message = %q, want Done rejection reason", got)
+	}
+}
+
 func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenExitConditionsFail(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
@@ -1251,11 +1384,11 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
-	if !strings.Contains(found.Content, "The `Done.report` field must contain the detailed final report in Markdown") {
-		t.Fatalf("loop notice content = %q, want detailed Done.report requirement", found.Content)
+	if !strings.Contains(found.Content, "Put the detailed final report in the assistant message using concise Markdown before calling `Done`") {
+		t.Fatalf("loop notice content = %q, want assistant-message final report requirement", found.Content)
 	}
-	if !strings.Contains(found.Content, "To request loop exit, call the `Done` tool with that final report in `report`") {
-		t.Fatalf("loop notice content = %q, want Done.report exit requirement", found.Content)
+	if !strings.Contains(found.Content, "To request loop exit, call the `Done` tool after writing that final report; do not stop with only assistant text") {
+		t.Fatalf("loop notice content = %q, want Done exit requirement", found.Content)
 	}
 }
 

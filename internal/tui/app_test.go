@@ -1810,7 +1810,7 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Done\n\n- item"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 	for i := 0; i < 6; i++ {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
@@ -1841,7 +1841,7 @@ func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 func TestConfirmDialogArrowKeysScrollViewport(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Done\n\n- item"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 	for i := 0; i < 6; i++ {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}

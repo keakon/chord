@@ -11,12 +11,8 @@ func TestDoneToolParameters(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties type = %T", params["properties"])
 	}
-	reason, ok := props["report"].(map[string]any)
-	if !ok {
-		t.Fatalf("Done tool report property type = %T", props["report"])
-	}
-	if got := reason["description"]; got != "Detailed final report in Markdown: completion status, summary of work, verification status, and remaining limitations." {
-		t.Fatalf("report description = %v", got)
+	if len(props) != 0 {
+		t.Fatalf("Done tool properties = %v, want empty object", props)
 	}
 }
 
@@ -32,10 +28,9 @@ func TestDoneToolExecute(t *testing.T) {
 	}{
 		{name: "null args", raw: `null`, want: "Done requested"},
 		{name: "empty object", raw: `{}`, want: "Done requested"},
-		{name: "blank report", raw: `{"report":"   "}`, want: "Done requested"},
-		{name: "report only", raw: `{"report":"Implementation complete."}`, want: "Implementation complete."},
-		{name: "trimmed report", raw: `{"report":"  verified  "}`, want: "verified"},
-		{name: "invalid json", raw: `{`, wantErr: true},
+		{name: "blank object", raw: `{"report":"   "}`, wantErr: true},
+		{name: "no args", raw: ``, want: "Done requested"},
+		{name: "with args", raw: `{"report":"Implementation complete."}`, wantErr: true},
 	}
 
 	for _, tt := range tests {

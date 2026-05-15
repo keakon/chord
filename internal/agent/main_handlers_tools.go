@@ -301,7 +301,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.pendingHandoff = &HandoffResult{PlanPath: pcData.PlanPath}
 		}
 	}
-	if payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled {
+	if payload.Name == tools.NameDone && payload.Error == nil {
 		assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID)
 		assistantContent := ""
 		if ok {
@@ -310,7 +310,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.pendingLoopExitResult = &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON}
 	}
 
-	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil && a.loopState.Enabled
+	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
 			CallID:      payload.CallID,
@@ -438,50 +438,81 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if a.pendingLoopExitResult != nil {
 			pending := a.pendingLoopExitResult
 			a.pendingLoopExitResult = nil
-			if a.loopExitConditionsSatisfied(pending.AssistantContent) {
-				resp, err := a.awaitLoopExitConfirmation(a.turn.Ctx, pending)
+			if a.loopState.Enabled {
+				if a.loopExitConditionsSatisfied(pending.AssistantContent) {
+					resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason)
+					if err != nil {
+						log.Warnf("loop exit confirmation failed error=%v", err)
+						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
+						a.markLoopExitDecisionRequired()
+						a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
+						a.loopState.State = LoopStateBudgetExhausted
+						a.emitLoopStateChanged()
+						return
+					} else if resp.Approved {
+						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", Status: ToolResultStatusSuccess})
+						a.loopState.State = LoopStateCompleted
+						a.emitLoopStateChanged()
+						a.loopState.disable()
+						a.refreshSystemPrompt()
+						a.emitLoopStateChanged()
+						a.emitActivity("main", ActivityIdle, "")
+						a.setIdleAndDrainPending()
+						return
+					} else {
+						reason := normalizeDenyReason(resp.DenyReason)
+						if reason == "" {
+							reason = "User rejected loop exit and requires more work before Done."
+						}
+						a.loopState.Iteration = 0
+						rejection := "Done rejected: " + reason
+						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
+						msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
+						a.ctxMgr.Append(msg)
+						if a.recovery != nil {
+							a.persistAsync("main", msg)
+						}
+					}
+				} else {
+					if !a.autoRejectLoopExitAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult()) {
+						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
+						a.markLoopExitDecisionRequired()
+						a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
+						a.loopState.State = LoopStateBudgetExhausted
+						a.emitLoopStateChanged()
+						return
+					}
+				}
+			} else {
+				resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason)
 				if err != nil {
-					log.Warnf("loop exit confirmation failed error=%v", err)
+					log.Warnf("Done confirmation failed error=%v", err)
 					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
-					a.markLoopExitDecisionRequired()
-					a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
-					a.loopState.State = LoopStateBudgetExhausted
-					a.emitLoopStateChanged()
+					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done requires user decision: confirmation failed; approve exit or deny with a reason to continue.", Status: ToolResultStatusSuccess})
 					return
 				} else if resp.Approved {
-					a.loopState.State = LoopStateCompleted
-					a.emitLoopStateChanged()
-					a.loopState.disable()
-					a.refreshSystemPrompt()
-					a.emitLoopStateChanged()
+					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", Status: ToolResultStatusSuccess})
 					a.emitActivity("main", ActivityIdle, "")
 					a.setIdleAndDrainPending()
 					return
 				} else {
 					reason := normalizeDenyReason(resp.DenyReason)
 					if reason == "" {
-						reason = "User rejected loop exit and requires more work before Done."
+						reason = "User rejected completion and requires more work before Done."
 					}
-					a.loopState.Iteration = 0
 					rejection := "Done rejected: " + reason
 					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
-					msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
+					msg := message.Message{Role: "user", Content: rejection}
 					a.ctxMgr.Append(msg)
 					if a.recovery != nil {
 						a.persistAsync("main", msg)
 					}
-				}
-			} else {
-				if !a.autoRejectLoopExitAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult()) {
-					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
-					a.markLoopExitDecisionRequired()
-					a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
-					a.loopState.State = LoopStateBudgetExhausted
-					a.emitLoopStateChanged()
-					return
 				}
 			}
 		}
