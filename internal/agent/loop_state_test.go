@@ -257,8 +257,8 @@ Done: allow
 				}
 				msgs := a.ctxMgr.Snapshot()
 				last := msgs[len(msgs)-1]
-				if last.Role != "assistant" || last.Kind != "loop_notice" {
-					t.Fatalf("last rejection message = %#v, want assistant loop_notice", last)
+				if last.Role != "user" || last.Kind != "loop_notice" {
+					t.Fatalf("last rejection message = %#v, want user loop_notice", last)
 				}
 				if last.Content != payload.Result {
 					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Result)
@@ -1171,6 +1171,22 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
+}
+
+func TestSendLoopAnchorFromCommandPersistsLoopNoticeAsUser(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.sendLoopAnchorFromCommand("finish current task")
+	msgs := a.ctxMgr.Snapshot()
+	for i := range msgs {
+		if msgs[i].Kind != "loop_notice" {
+			continue
+		}
+		if msgs[i].Role != "user" {
+			t.Fatalf("loop notice role = %q, want user", msgs[i].Role)
+		}
+		return
+	}
+	t.Fatal("expected persisted loop notice message")
 }
 
 func TestEnableLoopModeSetsExecutingStateWhenPreviouslyUnset(t *testing.T) {

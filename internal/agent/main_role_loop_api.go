@@ -142,7 +142,7 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	if text == "" {
 		return
 	}
-	msg := message.Message{Role: "assistant", Content: title + "\n\n" + text, Kind: "loop_notice"}
+	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	a.persistAsync("main", msg)
 }

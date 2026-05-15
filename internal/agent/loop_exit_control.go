@@ -67,7 +67,7 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	}
 	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
 	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})
-	msg := message.Message{Role: "assistant", Content: result, Kind: "loop_notice"}
+	msg := message.Message{Role: "user", Content: result, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
 		a.persistAsync("main", msg)
