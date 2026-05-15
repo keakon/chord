@@ -1135,18 +1135,18 @@ func TestRenderStatusBarLoopPillNotSqueezedByEscHint(t *testing.T) {
 	}
 }
 
-func TestSlashCompletionEnterCompletesWithoutSubmitting(t *testing.T) {
+func TestSlashCompletionTabCompletesWithoutSubmitting(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
 	m.input.SetValue("/exp")
 
-	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	if cmd != nil {
-		t.Fatal("Enter should not submit while slash completion is visible")
+		t.Fatal("Tab should not submit while slash completion is visible")
 	}
 	if got := m.input.Value(); got != "/export " {
-		t.Fatalf("input value after Enter = %q, want /export<space>", got)
+		t.Fatalf("input value after Tab = %q, want /export<space>", got)
 	}
 	if got := len(backend.sentMessages); got != 0 {
 		t.Fatalf("SendUserMessage() calls = %d, want 0", got)

@@ -68,13 +68,6 @@ func TestInsertSlashHelpOpensHelp(t *testing.T) {
 	m.mode = ModeInsert
 	m.input.SetValue("/help")
 
-	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
-		t.Fatal("first Enter should only accept slash completion")
-	}
-	if got := m.input.Value(); got != "/help " {
-		t.Fatalf("input value after first Enter = %q, want /help<space>", got)
-	}
-
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if m.mode != ModeHelp {

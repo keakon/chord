@@ -197,10 +197,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case keyMatches(key, m.keyMap.InsertSubmit):
-		matches := m.getSlashCompletions(m.input.Value())
-		if m.applySelectedSlashCompletion(matches) {
-			return nil
-		}
 		raw := strings.TrimSpace(m.input.Value())
 		var value string
 		if m.input.BangMode() {
@@ -419,7 +415,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	default:
 		value := m.input.Value()
 		matches := m.getSlashCompletions(value)
-		if len(matches) > 0 && (key == "tab" || key == "enter" || key == "down" || key == "up" || key == "j" || key == "k") {
+		if len(matches) > 0 && (key == "tab" || key == "down" || key == "up" || key == "j" || key == "k") {
 			if m.slashCompleteSelected >= len(matches) {
 				m.slashCompleteSelected = len(matches) - 1
 			}
@@ -427,7 +423,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				m.slashCompleteSelected = 0
 			}
 			switch key {
-			case "tab", "enter":
+			case "tab":
 				if m.applySelectedSlashCompletion(matches) {
 					return nil
 				}
