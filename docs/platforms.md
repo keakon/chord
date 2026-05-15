@@ -122,7 +122,9 @@ Most "this works on macOS but not on my Linux box" reports really come down to t
 - **Ghostty** (cross-platform) — image preview, terminal notifications (tries OSC 777)
 - **WezTerm** (cross-platform) — image preview, terminal notifications (tries OSC 777), clipboard image paste
 - **kitty** (Linux/macOS) — image preview, terminal notifications
-- **Windows Terminal** — works as a general TUI; image and notification behavior depends more on the host chain and version
+- **macOS Terminal.app** works for basic TUI use, but it does **not** reliably deliver modified `Enter` keys (for example `Shift+Enter`). Use `Ctrl+J` for newline in the composer, or switch to iTerm2 / Ghostty / WezTerm for full key behavior.
+
+Key disambiguation note: in terminal multiplexers like `tmux` / `zellij`, modified keys such as `Shift+Enter` can be lost or rewritten unless the host chain is configured for extended keys. When in doubt, use `Ctrl+J` for newline (it works everywhere).
 
 `tmux` and `screen` add a layer between Chord and your terminal; some features (terminal notifications, certain image flows) require explicit pass-through configuration, and Chord currently disables image preview by default inside `tmux` / `zellij`.
 
