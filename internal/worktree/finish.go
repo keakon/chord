@@ -186,13 +186,13 @@ func prepareFinish(ctx context.Context, repoRoot, name string, opts FinishOption
 }
 
 func checkFinish(ctx context.Context, mainRoot string, info *Info, name, onto string) error {
-	tmpPath, _, cleanup, err := createFinishScratch(ctx, mainRoot, name, info.Branch)
+	tmpPath, _, cleanup, err := createFinishScratch(ctx, mainRoot, name, onto)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	if err := mergeOnto(ctx, tmpPath, onto); err != nil {
+	if err := applySquash(ctx, tmpPath, info.Branch); err != nil {
 		return formatConflictError(err, tmpPath, name, onto, finishCheckHelp(name, onto, info.Path), "finish check for worktree")
 	}
 	return nil

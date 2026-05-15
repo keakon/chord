@@ -60,13 +60,14 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	}
 	note := a.buildLoopContinuationNote(assessment)
 	if note != nil {
+		a.loopState.DeferContinuationPromptUntilDone = false
 		a.pendingLoopContinuation = note
 		a.appendLoopNoticeMessage(note.Title, note.Text)
 		a.emitToTUI(LoopNoticeEvent{Title: note.Title, Text: note.Text, DedupKey: note.DedupKey})
 	}
 	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
 	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})
-	msg := message.Message{Role: "user", Content: result, Kind: "loop_notice"}
+	msg := message.Message{Role: "assistant", Content: result, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
 		a.persistAsync("main", msg)

@@ -257,8 +257,8 @@ Done: allow
 				}
 				msgs := a.ctxMgr.Snapshot()
 				last := msgs[len(msgs)-1]
-				if last.Role != "user" || last.Kind != "loop_notice" {
-					t.Fatalf("last rejection message = %#v, want user loop_notice", last)
+				if last.Role != "assistant" || last.Kind != "loop_notice" {
+					t.Fatalf("last rejection message = %#v, want assistant loop_notice", last)
 				}
 				if last.Content != payload.Result {
 					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Result)
