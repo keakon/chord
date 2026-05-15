@@ -11,12 +11,12 @@ func TestDoneToolParameters(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties type = %T", params["properties"])
 	}
-	reason, ok := props["reason"].(map[string]any)
+	reason, ok := props["report"].(map[string]any)
 	if !ok {
-		t.Fatalf("Done tool reason property type = %T", props["reason"])
+		t.Fatalf("Done tool report property type = %T", props["report"])
 	}
 	if got := reason["description"]; got != "Detailed final report in Markdown: completion status, summary of work, verification status, and remaining limitations." {
-		t.Fatalf("reason description = %v", got)
+		t.Fatalf("report description = %v", got)
 	}
 }
 
@@ -32,9 +32,9 @@ func TestDoneToolExecute(t *testing.T) {
 	}{
 		{name: "null args", raw: `null`, want: "Done requested"},
 		{name: "empty object", raw: `{}`, want: "Done requested"},
-		{name: "blank reason", raw: `{"reason":"   "}`, want: "Done requested"},
-		{name: "reason only", raw: `{"reason":"Implementation complete."}`, want: "Implementation complete."},
-		{name: "trimmed reason", raw: `{"reason":"  verified  "}`, want: "verified"},
+		{name: "blank report", raw: `{"report":"   "}`, want: "Done requested"},
+		{name: "report only", raw: `{"report":"Implementation complete."}`, want: "Implementation complete."},
+		{name: "trimmed report", raw: `{"report":"  verified  "}`, want: "verified"},
 		{name: "invalid json", raw: `{`, wantErr: true},
 	}
 
