@@ -47,7 +47,7 @@ func TestRenderUserLocalShellShowsExpandHintForCollapsedOutput(t *testing.T) {
 	if !strings.Contains(joined, "LOCAL SHELL") {
 		t.Fatalf("expected LOCAL SHELL badge, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed local shell output to show expand hint, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "2 more lines") {

@@ -358,7 +358,7 @@ func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	if !strings.Contains(joined, "• keep markdown") {
 		t.Fatalf("expected markdown bullet rendering, got %q", joined)
 	}
-	if !strings.Contains(joined, "[space] expand full preserved context") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed hint, got %q", joined)
 	}
 }

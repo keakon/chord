@@ -211,7 +211,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"Write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] expand"} {
+	for _, want := range []string{"Write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
 		}
@@ -230,7 +230,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 			t.Fatalf("expected expanded Write preview to contain %q; got:\n%s", want, expanded)
 		}
 	}
-	if strings.Contains(expanded, "[space] expand") {
+	if strings.Contains(expanded, "[space] toggle expand/collapse") {
 		t.Fatalf("expanded Write preview should not show expand hint; got:\n%s", expanded)
 	}
 }
@@ -402,7 +402,7 @@ func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// Short output: stdout is already shown inline, but expanded mode still adds
 	// exit status + stream headers, so we should still show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
@@ -453,7 +453,7 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with long output to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line 8") {
@@ -725,7 +725,7 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	}
 	// Even when stdout/stderr are fully visible inline, expanded mode still adds
 	// exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
@@ -751,7 +751,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	// Short output: all stdout/stderr are shown inline, but expanded mode still
 	// adds exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "echo third") {
@@ -808,7 +808,7 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	if !strings.Contains(joined, "Status: success · Changes: line one") {
 		t.Fatalf("expected collapsed Complete to show summary preview; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "more lines · [space] expand") {
+	if !strings.Contains(joined, "more lines · [space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Complete to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line twelve") {
@@ -930,7 +930,7 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 	if strings.Contains(joined, "line-49999") {
 		t.Fatalf("collapsed Shell preview should not render the hidden tail, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "49999 more lines · [space] expand") {
+	if !strings.Contains(joined, "49999 more lines · [space] toggle expand/collapse") {
 		t.Fatalf("expected cheap hidden-line hint for large output, got:\n%s", joined)
 	}
 }
@@ -1333,7 +1333,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			}
 
 			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if strings.Contains(joined, "[space] expand") || strings.Contains(joined, "1 more lines") {
+			if strings.Contains(joined, "[space] toggle expand/collapse") || strings.Contains(joined, "1 more lines") {
 				t.Fatalf("single hidden line should be shown inline without expand hint; got:\n%s", joined)
 			}
 			if !strings.Contains(joined, tt.wantPrefix) {
@@ -1415,7 +1415,7 @@ func TestCollapsedTaskShowsMultilineDescription(t *testing.T) {
 	if strings.Contains(joined, "update docs") {
 		t.Fatalf("expected collapsed Delegate preview to hide later description lines; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "1 more lines · [space] expand") {
+	if !strings.Contains(joined, "1 more lines · [space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Delegate preview to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "(reviewer)") {
@@ -1442,7 +1442,7 @@ func TestCollapsedGenericToolDeduplicatesMatchingParamAndResultPreview(t *testin
 	if strings.Count(joined, "[Image #1]") != 1 {
 		t.Fatalf("expected duplicated result first line to be suppressed, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] expand") {
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected expand hint to remain after deduplication, got:\n%s", joined)
 	}
 }

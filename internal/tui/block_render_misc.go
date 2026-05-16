@@ -105,7 +105,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	lines = append(lines, label, "")
 	lines = append(lines, bodyLines...)
 	if b.Collapsed {
-		lines = append(lines, "", DimStyle.Render("[space] expand full preserved context"))
+		lines = append(lines, "", DimStyle.Render("[space] toggle expand/collapse"))
 	} else {
 		lines = append(lines, "", DimStyle.Render("[space] collapse to preview"))
 	}

@@ -542,7 +542,7 @@ func renderToolExpandHint(indent string, hidden int) string {
 	if hidden <= 0 {
 		return ""
 	}
-	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] expand ──", indent, hidden))
+	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] toggle expand/collapse ──", indent, hidden))
 }
 
 func ensureCodeHighlighter(slot **codeHighlighter, filePath, sample string) *codeHighlighter {
