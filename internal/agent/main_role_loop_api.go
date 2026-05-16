@@ -105,11 +105,6 @@ func (a *MainAgent) CurrentLoopState() LoopState {
 	if !a.loopState.Enabled {
 		return ""
 	}
-	if a.loopState.MaxIterations > 0 && a.loopState.Iteration >= a.loopState.MaxIterations {
-		if a.turn == nil || a.loopState.State == LoopStateIdle {
-			return LoopStateBudgetExhausted
-		}
-	}
 	return a.loopState.State
 }
 
@@ -155,6 +150,17 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	a.persistAsync("main", msg)
+}
+
+func (a *MainAgent) emitLoopContinuationNote(note *LoopContinuationNote, persistUserMessage bool) {
+	if note == nil {
+		return
+	}
+	if !persistUserMessage {
+		return
+	}
+	a.appendLoopNoticeMessage(note.Title, note.Text)
+	a.emitToTUI(LoopNoticeEvent{Title: note.Title, Text: note.Text, DedupKey: note.DedupKey})
 }
 
 func (a *MainAgent) loopCompletionRequirementLines() []string {

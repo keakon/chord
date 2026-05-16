@@ -3279,6 +3279,45 @@ func TestSessionRestoredEventSchedulesImageProtocolRedrawForRestoredImages(t *te
 	}
 }
 
+func TestRebuildViewportFromMessagesRestoresRejectedDoneIntoSingleToolCard(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{{
+				ID:   "done-1",
+				Name: tools.NameDone,
+				Args: []byte(`{"report":"## Completion status\ndone\n\n**Verification**: passed"}`),
+			}},
+		},
+		{Role: "tool", ToolCallID: "done-1", Content: "Done rejected: 按需更新文档，分析当前实现是否能正确实现 loop 和 done 的意图，提交所有改动"},
+	}}
+	m := NewModel(backend)
+
+	m.rebuildViewportFromMessages()
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.Type != BlockToolCall || block.ToolName != tools.NameDone || block.ToolID != "done-1" {
+		t.Fatalf("restored block = %#v, want single Done tool card", block)
+	}
+	if !block.ResultDone {
+		t.Fatal("restored Done block should be marked complete")
+	}
+	if !strings.Contains(block.ResultContent, "Done rejected:") {
+		t.Fatalf("ResultContent = %q, want rejected Done content", block.ResultContent)
+	}
+	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	if !strings.Contains(plain, "✓ Done") && !strings.Contains(plain, "❌ Done") {
+		t.Fatalf("rendered Done card = %q, want visible Done header", plain)
+	}
+	if !strings.Contains(plain, "按需更新文档") {
+		t.Fatalf("rendered Done card = %q, want visible rejected reason text", plain)
+	}
+}
+
 func TestRebuildViewportFromMessagesMarksRestoredToolErrorsAndCancellationsDone(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{

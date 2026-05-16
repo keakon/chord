@@ -282,6 +282,46 @@ func TestRestoreSessionAtStartupRepairsBlankReadToolResults(t *testing.T) {
 	}
 }
 
+func TestRestoreSessionAtStartupPreservesRejectedDoneAsSingleToolMessage(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "rejected-done-single-tool")
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
+		ID:   "done-1",
+		Name: tools.NameDone,
+		Args: []byte(`{"report":"## Completion status\ndone\n\n**Verification**: passed"}`),
+	}}}); err != nil {
+		t.Fatalf("PersistMessage(assistant done): %v", err)
+	}
+	if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "done-1", Content: "Done rejected: 按需更新文档，分析当前实现是否能正确实现 loop 和 done 的意图，提交所有改动"}); err != nil {
+		t.Fatalf("PersistMessage(tool rejected done): %v", err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+
+	msgs := a.GetMessages()
+	if got := len(msgs); got != 2 {
+		t.Fatalf("len(GetMessages()) = %d, want 2", got)
+	}
+	if msgs[0].Role != "assistant" || len(msgs[0].ToolCalls) != 1 || msgs[0].ToolCalls[0].ID != "done-1" {
+		t.Fatalf("restored assistant done call = %#v, want single Done tool call", msgs[0])
+	}
+	if msgs[1].Role != "tool" || msgs[1].ToolCallID != "done-1" {
+		t.Fatalf("restored rejected done tool message = %#v, want single tool result for same call", msgs[1])
+	}
+	if !strings.Contains(msgs[1].Content, "Done rejected:") {
+		t.Fatalf("restored rejected done content = %q, want rejection text", msgs[1].Content)
+	}
+}
+
 func TestRestoreSessionAtStartupClosesDanglingDeclaredToolCalls(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "dangling-main-tool")

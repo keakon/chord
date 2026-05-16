@@ -327,25 +327,27 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
-	toolMsg := message.Message{
-		Role:            "tool",
-		Content:         contextResult,
-		ToolCallID:      payload.CallID,
-		ToolDiff:        payload.Diff,
-		ToolDiffAdded:   payload.DiffAdded,
-		ToolDiffRemoved: payload.DiffRemoved,
-		ToolDurationMs:  payload.Duration.Milliseconds(),
-		ToolStatus:      string(toolResultStatusFromError(isError)),
-		Audit:           payload.Audit.Clone(),
-		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
-		FileState:       payload.FileState.Clone(),
-		Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
+	if !deferToolResultEmission {
+		toolMsg := message.Message{
+			Role:            "tool",
+			Content:         contextResult,
+			ToolCallID:      payload.CallID,
+			ToolDiff:        payload.Diff,
+			ToolDiffAdded:   payload.DiffAdded,
+			ToolDiffRemoved: payload.DiffRemoved,
+			ToolDurationMs:  payload.Duration.Milliseconds(),
+			ToolStatus:      string(toolResultStatusFromError(isError)),
+			Audit:           payload.Audit.Clone(),
+			LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
+			FileState:       payload.FileState.Clone(),
+			Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
+		}
+		a.ctxMgr.Append(toolMsg)
+		if a.recovery != nil {
+			a.persistAsync("main", toolMsg)
+		}
+		a.recordEvidenceFromMessage(toolMsg)
 	}
-	a.ctxMgr.Append(toolMsg)
-	if a.recovery != nil {
-		a.persistAsync("main", toolMsg)
-	}
-	a.recordEvidenceFromMessage(toolMsg)
 
 	a.turn.CompletedToolCalls = append(a.turn.CompletedToolCalls, toolResultSummary(payload, contextResult, errorText))
 	if changed := changedFileSummary(payload); changed != nil {
@@ -437,13 +439,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			if len(pendingResults) > 1 {
 				for _, skipped := range pendingResults[:len(pendingResults)-1] {
 					rejection := "Done rejected: multiple Done tool calls were emitted in the same batch; only the final Done request can be considered."
+					a.persistLoopDoneToolResult(skipped.CallID, rejection)
 					a.emitToTUI(ToolCallUpdateEvent{ID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 					a.emitToTUI(ToolResultEvent{CallID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
-					msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
-					a.ctxMgr.Append(msg)
-					if a.recovery != nil {
-						a.persistAsync("main", msg)
-					}
 				}
 			}
 			pending := pendingResults[len(pendingResults)-1]
@@ -455,9 +453,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
 						a.markLoopExitDecisionRequired()
-						a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
-						a.loopState.State = LoopStateBudgetExhausted
-						a.emitLoopStateChanged()
 						return
 					} else if resp.Approved {
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
@@ -476,23 +471,13 @@ func (a *MainAgent) handleToolResult(evt Event) {
 							reason = "User rejected loop exit and requires more work before Done."
 						}
 						a.loopState.Iteration = 0
-						rejection := "Done rejected: " + reason
-						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
-						msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
-						a.ctxMgr.Append(msg)
-						if a.recovery != nil {
-							a.persistAsync("main", msg)
-						}
+						a.appendLoopContinuationAndContinue(pending.CallID, pending.ArgsJSON, "Done rejected: "+reason)
 					}
 				} else {
 					if !a.autoRejectLoopExitAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult()) {
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
 						a.markLoopExitDecisionRequired()
-						a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
-						a.loopState.State = LoopStateBudgetExhausted
-						a.emitLoopStateChanged()
 						return
 					}
 				}
@@ -515,13 +500,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						reason = "User rejected completion and requires more work before Done."
 					}
 					rejection := "Done rejected: " + reason
+					a.persistLoopDoneToolResult(pending.CallID, rejection)
 					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
-					msg := message.Message{Role: "user", Content: rejection}
-					a.ctxMgr.Append(msg)
-					if a.recovery != nil {
-						a.persistAsync("main", msg)
-					}
 				}
 			}
 		}

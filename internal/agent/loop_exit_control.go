@@ -74,6 +74,24 @@ func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason, argsJSON,
 	return a.AwaitConfirm(ctx, tools.NameDone, string(encoded), 0, nil, nil, report)
 }
 
+func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
+	if a == nil {
+		return
+	}
+	result = strings.TrimSpace(result)
+	if callID == "" || result == "" {
+		return
+	}
+	toolMsg := message.Message{Role: "tool", Content: result, ToolCallID: callID}
+	a.ctxMgr.Append(toolMsg)
+	if a.recovery != nil {
+		a.persistAsync("main", toolMsg)
+	}
+	if a.turn != nil {
+		a.recordEvidenceFromMessage(toolMsg)
+	}
+}
+
 func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result string) {
 	if a.turn == nil {
 		return
@@ -82,6 +100,7 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	if result == "" {
 		result = "Continue the loop."
 	}
+	a.persistLoopDoneToolResult(callID, result)
 	assessment := &LoopAssessment{
 		Action:  LoopAssessmentActionContinue,
 		Message: result,
@@ -91,16 +110,10 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	if note != nil {
 		a.loopState.DeferContinuationPromptUntilDone = false
 		a.pendingLoopContinuation = note
-		a.appendLoopNoticeMessage(note.Title, note.Text)
-		a.emitToTUI(LoopNoticeEvent{Title: note.Title, Text: note.Text, DedupKey: note.DedupKey})
+		a.emitLoopContinuationNote(note, false)
 	}
 	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
 	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})
-	msg := message.Message{Role: "user", Content: result, Kind: "loop_notice"}
-	a.ctxMgr.Append(msg)
-	if a.recovery != nil {
-		a.persistAsync("main", msg)
-	}
 }
 
 func (a *MainAgent) shouldAutoInterceptLoopExit() bool {

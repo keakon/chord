@@ -119,9 +119,7 @@ func (s *loopRuntimeState) recordAutoExitIntercept() int {
 }
 
 func (a *MainAgent) markLoopExitDecisionRequired() {
-	a.loopState.State = LoopStateBudgetExhausted
-	a.emitLoopStateChanged()
-	a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop paused: automatic Done interception limit reached (%d). User decision required to exit or continue.", a.loopState.MaxIterations)})
+	a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop requires user decision: automatic Done interception limit reached (%d). Approve exit or deny to continue.", a.loopState.MaxIterations)})
 	a.clearCurrentTurnKeepLoopState()
 }
 
@@ -131,7 +129,9 @@ func (a *MainAgent) clearCurrentTurnKeepLoopState() {
 	a.turnMu.Unlock()
 	a.setBugTriagePromptActive(false)
 	a.emitActivity("main", ActivityIdle, "")
-	a.loopState.State = LoopStateBudgetExhausted
+	if a.loopState.Enabled {
+		a.loopState.State = LoopStateExecuting
+	}
 	a.emitLoopStateChanged()
 	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 }

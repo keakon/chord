@@ -30,8 +30,7 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		if a.shouldEmitLoopContinuationForAssessment(payload) {
 			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
 			if a.pendingLoopContinuation != nil {
-				a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
-				a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+				a.emitLoopContinuationNote(a.pendingLoopContinuation, true)
 			}
 		}
 		a.emitActivity("main", ActivityExecuting, "loop")
@@ -50,8 +49,7 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		if a.shouldEmitLoopContinuationForAssessment(payload) {
 			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
 			if a.pendingLoopContinuation != nil {
-				a.appendLoopNoticeMessage(a.pendingLoopContinuation.Title, a.pendingLoopContinuation.Text)
-				a.emitToTUI(LoopNoticeEvent{Title: a.pendingLoopContinuation.Title, Text: a.pendingLoopContinuation.Text, DedupKey: a.pendingLoopContinuation.DedupKey})
+				a.emitLoopContinuationNote(a.pendingLoopContinuation, true)
 			}
 		}
 		a.handleContinueFromContext(Event{Type: EventContinue})

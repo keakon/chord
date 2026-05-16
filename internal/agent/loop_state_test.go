@@ -370,9 +370,7 @@ Done: allow
 				if payload.Title != "LOOP CONTINUE" {
 					continue
 				}
-				if !strings.Contains(payload.Text, "the previous Done request was rejected") || !strings.Contains(payload.Text, "Open TODO items:") {
-					t.Fatalf("LoopNoticeEvent.Text = %q, want done-rejected continuation with open TODOs", payload.Text)
-				}
+				t.Fatal("unexpected LoopNoticeEvent for Done tool-call continuation; runtime must not inject user continuation after tool calls")
 			case ToolResultEvent:
 				if payload.CallID != callID || payload.Name != tools.NameDone {
 					continue
@@ -389,14 +387,13 @@ Done: allow
 					t.Fatalf("loop iteration = %d, want 1 after automatic Done rejection", a.loopState.Iteration)
 				}
 				msgs := a.ctxMgr.Snapshot()
-				last := msgs[len(msgs)-1]
-				if last.Role != "user" || last.Kind != "loop_notice" {
-					t.Fatalf("last rejection message = %#v, want user loop_notice", last)
-				}
-				if last.Content != payload.Result {
-					t.Fatalf("loop notice content = %q, want %q", last.Content, payload.Result)
-				}
 				for _, msg := range msgs {
+					if msg.Role == "user" && msg.Kind == "loop_notice" && msg.Content == payload.Result {
+						t.Fatalf("unexpected rejection user message persisted in context: %#v", msg)
+					}
+					if msg.Role == "tool" && msg.ToolCallID == callID && msg.Content != payload.Result {
+						t.Fatalf("restored Done tool result content = %#v, want exact synthetic rejection result", msg)
+					}
 					if msg.Role == "tool" && msg.ToolCallID == "loop-exit-control" {
 						t.Fatalf("found orphan loop-exit-control tool message in context: %#v", msg)
 					}
@@ -521,9 +518,10 @@ Done: ask
 				sawConfirm = true
 				a.ResolveConfirm("deny", payload.ArgsJSON, "", "need a manual final check", payload.RequestID)
 			case LoopNoticeEvent:
-				if payload.Title == "LOOP CONTINUE" {
-					t.Fatalf("unexpected LoopNoticeEvent after user denied Done: %+v", payload)
+				if payload.Title != "LOOP CONTINUE" {
+					continue
 				}
+				t.Fatal("unexpected LoopNoticeEvent for user-denied Done tool-call continuation; runtime must not inject user continuation after tool calls")
 			case ToolResultEvent:
 				if payload.CallID != callID || payload.Name != tools.NameDone {
 					continue
@@ -538,9 +536,13 @@ Done: ask
 					t.Fatal("timed out waiting for user-denied Done handling to finish")
 				}
 				msgs := a.ctxMgr.Snapshot()
-				last := msgs[len(msgs)-1]
-				if last.Role != "user" || last.Kind != "loop_notice" || last.Content != payload.Result {
-					t.Fatalf("last message = %#v, want persisted user denial only", last)
+				for _, msg := range msgs {
+					if msg.Role == "user" && msg.Kind == "loop_notice" && msg.Content == payload.Result {
+						t.Fatalf("unexpected persisted user denial loop_notice: %#v", msg)
+					}
+					if msg.Role == "tool" && msg.ToolCallID == callID && msg.Content != payload.Result {
+						t.Fatalf("restored Done user-denial tool result content = %#v, want exact synthetic rejection result", msg)
+					}
 				}
 				if !sawConfirm {
 					t.Fatal("expected Done confirmation request before denial result")
@@ -604,9 +606,7 @@ Done: allow
 				if payload.Title != "LOOP CONTINUE" {
 					continue
 				}
-				if !strings.Contains(payload.Text, "the previous Done request was rejected") || !strings.Contains(payload.Text, "Required verification is completed") {
-					t.Fatalf("LoopNoticeEvent.Text = %q, want done-rejected continuation with verification requirements", payload.Text)
-				}
+				t.Fatal("unexpected LoopNoticeEvent for Done tool-call continuation with missing verification; runtime must not inject user continuation after tool calls")
 			case ToolResultEvent:
 				if payload.CallID != callID || payload.Name != tools.NameDone {
 					continue
@@ -1709,8 +1709,8 @@ Done: allow
 	if !a.loopState.Enabled {
 		t.Fatal("loop should remain enabled while awaiting an explicit user decision after automatic Done interception limit is reached")
 	}
-	if got := a.CurrentLoopState(); got != LoopStateBudgetExhausted {
-		t.Fatalf("CurrentLoopState() = %q, want %q while awaiting user decision", got, LoopStateBudgetExhausted)
+	if got := a.CurrentLoopState(); got == LoopStateBudgetExhausted {
+		t.Fatalf("CurrentLoopState() = %q, should not enter budget_exhausted while awaiting explicit user decision", got)
 	}
 
 	var rejected bool
@@ -1724,7 +1724,7 @@ Done: allow
 		}
 	}
 	if !rejected {
-		t.Fatal("expected Done tool result event before pausing for user decision")
+		t.Fatal("expected Done tool result event before waiting for explicit user decision")
 	}
 }
 
