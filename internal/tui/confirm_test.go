@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -154,6 +155,45 @@ func TestRenderConfirmSummaryFallsBackToRawPayloadOnMalformedArgs(t *testing.T) 
 	}
 	if !strings.Contains(plain, `{"command":"rm"`) {
 		t.Fatalf("expected raw payload in confirm dialog, got:\n%s", plain)
+	}
+}
+
+func TestRenderDoneConfirmDialogShowsOnlyReportBody(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{
+		ToolName:   "Done",
+		ArgsJSON:   `{"report":"## Completion status\nAll requested work is finished\n\n**Verification**: passed"}`,
+		DoneReport: "## Completion status\nAll requested work is finished\n\n**Verification**: passed",
+	}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "Confirmation Required") {
+		t.Fatalf("expected confirmation badge in Done dialog, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "All requested work is finished") || !strings.Contains(plain, "Verification") {
+		t.Fatalf("expected Done report body in confirm dialog, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Completion Report:") || strings.Contains(plain, "Reason:") || strings.Contains(plain, "Report:") || strings.Contains(plain, "Tool: Done") || strings.Contains(plain, "Action: Execute Done") {
+		t.Fatalf("unexpected duplicate or hard-coded Done chrome in confirm dialog:\n%s", plain)
+	}
+}
+
+func TestRenderDoneConfirmDialogDoesNotShowHiddenLinesMarker(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 18)
+	reportLines := make([]string, 0, 40)
+	for i := 1; i <= 40; i++ {
+		reportLines = append(reportLines, fmt.Sprintf("- line %d", i))
+	}
+	report := strings.Join(reportLines, "\n")
+	m.confirm.request = &ConfirmRequest{
+		ToolName:   "Done",
+		ArgsJSON:   fmt.Sprintf(`{"report":%q}`, report),
+		DoneReport: report,
+	}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if strings.Contains(plain, "more lines hidden") {
+		t.Fatalf("unexpected hidden-lines marker in Done confirm dialog:\n%s", plain)
 	}
 }
 

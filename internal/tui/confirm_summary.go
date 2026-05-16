@@ -387,30 +387,16 @@ func ensureConfirmImportantFields(summary *confirmSummary) {
 }
 
 // buildDoneConfirmSummary populates the summary for Done tool confirmation dialogs.
-// It extracts key information from the parsed arguments and formats the completion report.
+// Done confirmations render the Markdown report body directly, so the raw report
+// and status text should not also appear as generic summary fields.
 func buildDoneConfirmSummary(summary *confirmSummary, parsed map[string]any, doneReport string) {
-	if reason, ok := parsed["reason"].(string); ok && strings.TrimSpace(reason) != "" {
-		summary.Fields = append(summary.Fields, confirmSummaryField{
-			Label:        "Reason",
-			SummaryValue: sanitizeToolDisplayText(reason),
-			Important:    true,
-		})
-	}
-
 	report := strings.TrimSpace(doneReport)
 	if parsedReport, ok := parsed["report"].(string); ok && strings.TrimSpace(parsedReport) != "" {
 		report = strings.TrimSpace(parsedReport)
 	}
 	if report != "" {
 		summary.DoneReport = report
-		summary.Fields = append(summary.Fields, confirmSummaryField{
-			Label:        "Completion Report",
-			SummaryValue: sanitizeToolDisplayText(report),
-			Important:    true,
-		})
 	}
-
-	ensureConfirmImportantFields(summary)
 }
 
 func appendUnhandledConfirmFields(summary *confirmSummary, parsed map[string]any, handled map[string]bool) {
