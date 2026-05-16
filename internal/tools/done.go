@@ -26,6 +26,7 @@ func (DoneTool) Description() string {
 		"In loop mode, it requests loop exit; outside loop mode, it requests final completion and user approval. " +
 		"This tool REQUIRES a non-empty 'report' argument containing the complete final Markdown completion report. " +
 		"You must put the full completion summary in the report argument itself; do not rely on the surrounding assistant message to carry the report. " +
+		"Write the report in the user's current language unless the user explicitly asked for a different language. " +
 		"The report must include: " +
 		"- **Completion status**: one line summary (e.g., 'All requested work is finished') " +
 		"- **What changed**: files modified, created, deleted or key actions taken " +
@@ -41,7 +42,7 @@ func (DoneTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"report": map[string]any{
 				"type":        "string",
-				"description": "Required final Markdown completion report describing completion status, changes, verification, and remaining issues.",
+				"description": "Required final Markdown completion report describing completion status, changes, verification, and remaining issues. Write it in the user's current language unless the user explicitly asked for a different language.",
 				"minLength":   1,
 			},
 		},

@@ -401,8 +401,11 @@ type MainAgent struct {
 
 	// Minimal loop-controller runtime state for post-assistant stop assessment.
 	loopState loopRuntimeState
-	// pendingLoopContinuation is a request-scoped continuation notice shown to
-	// the user and injected into the next continued LLM request only.
+	// pendingLoopContinuation is a request-scoped continuation note surfaced via
+	// turn overlays for the next LLM request. It must not be re-persisted as a
+	// synthetic user message after assistant turns that already emitted tool
+	// calls; only terminal assistant stops without tool calls may inject a new
+	// runtime user continuation message.
 	pendingLoopContinuation *LoopContinuationNote
 	// pendingLSPDiagnosticOverlay is a one-shot generic reminder injected into the next
 	// LLM request after a write/edit changes LSP diagnostics on a directly

@@ -457,6 +457,8 @@ func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T
 		"Complete the requested outcome with the smallest safe change set",
 		"targeted regression tests",
 		"required doc updates",
+		"Match the user's current language for all user-facing text",
+		"completion reports, confirmation content, tool arguments intended for display",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedAgentValuesPrompt missing %q in %q", want, got)

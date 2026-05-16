@@ -147,6 +147,11 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	if text == "" {
 		return
 	}
+	// loop_notice persists a synthetic user message and is therefore reserved
+	// for runtime continuations after terminal assistant stops that had no tool
+	// calls, or for explicit user-triggered loop entry (/loop on). Tool-call
+	// turns must continue via tool results plus pendingLoopContinuation overlays
+	// instead of injecting another user message.
 	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
 	a.persistAsync("main", msg)

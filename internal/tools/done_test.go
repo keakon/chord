@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,10 @@ func TestDoneToolParameters(t *testing.T) {
 	}
 	if report["type"] != "string" {
 		t.Fatalf("report type = %v, want string", report["type"])
+	}
+	desc, _ := report["description"].(string)
+	if !strings.Contains(desc, "user's current language") {
+		t.Fatalf("report description missing user language guidance: %q", desc)
 	}
 	required, ok := params["required"].([]string)
 	if !ok {
