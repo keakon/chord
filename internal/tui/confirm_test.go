@@ -439,8 +439,22 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
 		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
 	}
-	if strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") {
-		t.Fatalf("Done confirm should not show generic actions:\n%s", plain)
+	if strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") || strings.Contains(plain, "Press E") {
+		t.Fatalf("Done confirm should not show generic actions or edit hints:\n%s", plain)
+	}
+}
+
+func TestHandleConfirmDoneIgnoresEditShortcut(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"ok"}`}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "e", Code: 'e'}))
+	if cmd != nil {
+		t.Fatalf("Done confirm edit shortcut should be ignored, got %T", cmd)
+	}
+	if m.confirm.editing {
+		t.Fatal("Done confirm should not enter edit mode on E")
 	}
 }
 

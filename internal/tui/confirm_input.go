@@ -164,6 +164,9 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return textareaBlinkCmd()
 
 	case "e", "E":
+		if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+			return nil
+		}
 		m.confirm.editing = true
 		m.confirm.editError = ""
 		m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
