@@ -10,6 +10,7 @@ import (
 
 type configMutationLock struct {
 	file *os.File
+	path string
 }
 
 func (l *configMutationLock) Close() error {
@@ -20,7 +21,13 @@ func (l *configMutationLock) Close() error {
 		_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 	}
 	err := l.file.Close()
+	if err == nil && l.path != "" {
+		if removeErr := os.Remove(l.path); removeErr != nil && !os.IsNotExist(removeErr) {
+			err = removeErr
+		}
+	}
 	l.file = nil
+	l.path = ""
 	return err
 }
 
@@ -42,7 +49,7 @@ func LockConfigMutation(targetPath string) (*configMutationLock, error) {
 			return nil, fmt.Errorf("lock config file: %w", err)
 		}
 	}
-	return &configMutationLock{file: f}, nil
+	return &configMutationLock{file: f, path: lockPath}, nil
 }
 
 func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error {

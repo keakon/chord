@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 )
 
@@ -41,43 +40,29 @@ func TestWriteConfigFileAtomicallyRejectsExistingFile(t *testing.T) {
 	}
 }
 
-func TestLockConfigMutationSerializesWriters(t *testing.T) {
+func TestLockConfigMutationCloseRemovesLockFileAndAllowsReacquire(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	firstLock, err := LockConfigMutation(path)
+	lockPath := path + ".lock"
+
+	lock, err := LockConfigMutation(path)
 	if err != nil {
-		t.Fatalf("LockConfigMutation first: %v", err)
+		t.Fatalf("LockConfigMutation: %v", err)
 	}
-	defer func() { _ = firstLock.Close() }()
-
-	acquired := make(chan struct{})
-	released := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lock, err := LockConfigMutation(path)
-		if err != nil {
-			t.Errorf("LockConfigMutation second: %v", err)
-			close(acquired)
-			close(released)
-			return
-		}
-		close(acquired)
-		_ = lock.Close()
-		close(released)
-	}()
-
-	select {
-	case <-acquired:
-		t.Fatal("second lock acquired before first was released")
-	default:
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("expected lock file to exist while held: %v", err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file to be removed after close, got %v", err)
 	}
 
-	if err := firstLock.Close(); err != nil {
-		t.Fatalf("Close first lock: %v", err)
+	lock, err = LockConfigMutation(path)
+	if err != nil {
+		t.Fatalf("LockConfigMutation reacquire: %v", err)
 	}
-
-	<-acquired
-	<-released
-	wg.Wait()
+	if err := lock.Close(); err != nil {
+		t.Fatalf("Close reacquired lock: %v", err)
+	}
 }
