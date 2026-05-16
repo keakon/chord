@@ -198,8 +198,7 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 				FirstUserMessage:                    s.FirstUserMessage,
 				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
 				OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
-				OriginalFirstUserMessageIsCompactionSummary: s.OriginalFirstUserMessageIsCompactionSummary,
-				ForkedFrom: s.ForkedFrom,
+				ForkedFrom:                          s.ForkedFrom,
 			})
 		}
 		env, err = NewEnvelope(TypeSessionSelectRequest, payload)
@@ -426,8 +425,7 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 				FirstUserMessage:                    s.FirstUserMessage,
 				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
 				OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
-				OriginalFirstUserMessageIsCompactionSummary: s.OriginalFirstUserMessageIsCompactionSummary,
-				ForkedFrom: s.ForkedFrom,
+				ForkedFrom:                          s.ForkedFrom,
 			})
 		}
 		return agent.SessionSelectEvent{Sessions: list}, nil

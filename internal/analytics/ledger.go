@@ -57,28 +57,27 @@ type UsageAggregate struct {
 
 // SessionUsageSummary is the materialized session-level view of usage.jsonl.
 type SessionUsageSummary struct {
-	Version                                     int                                   `json:"version"`
-	SessionID                                   string                                `json:"session_id"`
-	ProjectID                                   string                                `json:"project_id,omitempty"`
-	ProjectPath                                 string                                `json:"project_path,omitempty"`
-	CreatedAt                                   time.Time                             `json:"created_at,omitempty"`
-	LastUpdatedAt                               time.Time                             `json:"last_updated_at,omitempty"`
-	LastEventID                                 string                                `json:"last_event_id,omitempty"`
-	EventCount                                  int64                                 `json:"event_count,omitempty"`
-	Timezone                                    string                                `json:"timezone,omitempty"`
-	FirstUserMessage                            string                                `json:"first_user_message,omitempty"`
-	FirstUserMessageIsCompactionSummary         bool                                  `json:"first_user_message_is_compaction_summary,omitempty"`
-	OriginalFirstUserMessage                    string                                `json:"original_first_user_message,omitempty"`
-	OriginalFirstUserMessageIsCompactionSummary bool                                  `json:"original_first_user_message_is_compaction_summary,omitempty"`
-	Status                                      string                                `json:"status,omitempty"`
-	UsageTotal                                  UsageAggregate                        `json:"usage_total"`
-	ByProvider                                  map[string]*UsageAggregate            `json:"by_provider,omitempty"`
-	ByModelRef                                  map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
-	ByAgent                                     map[string]*UsageAggregate            `json:"by_agent,omitempty"`
-	ByPurpose                                   map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
-	ByDate                                      map[string]*UsageAggregate            `json:"by_date,omitempty"`
-	ByDateModelRef                              map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
-	ByDateAgent                                 map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
+	Version                             int                                   `json:"version"`
+	SessionID                           string                                `json:"session_id"`
+	ProjectID                           string                                `json:"project_id,omitempty"`
+	ProjectPath                         string                                `json:"project_path,omitempty"`
+	CreatedAt                           time.Time                             `json:"created_at,omitempty"`
+	LastUpdatedAt                       time.Time                             `json:"last_updated_at,omitempty"`
+	LastEventID                         string                                `json:"last_event_id,omitempty"`
+	EventCount                          int64                                 `json:"event_count,omitempty"`
+	Timezone                            string                                `json:"timezone,omitempty"`
+	FirstUserMessage                    string                                `json:"first_user_message,omitempty"`
+	FirstUserMessageIsCompactionSummary bool                                  `json:"first_user_message_is_compaction_summary,omitempty"`
+	OriginalFirstUserMessage            string                                `json:"original_first_user_message,omitempty"`
+	Status                              string                                `json:"status,omitempty"`
+	UsageTotal                          UsageAggregate                        `json:"usage_total"`
+	ByProvider                          map[string]*UsageAggregate            `json:"by_provider,omitempty"`
+	ByModelRef                          map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
+	ByAgent                             map[string]*UsageAggregate            `json:"by_agent,omitempty"`
+	ByPurpose                           map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
+	ByDate                              map[string]*UsageAggregate            `json:"by_date,omitempty"`
+	ByDateModelRef                      map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
+	ByDateAgent                         map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
 }
 
 // UsageLedger manages append-only usage.jsonl and usage-summary.json.
@@ -127,7 +126,6 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 	if summary != nil && summary.FirstUserMessage != "" {
 		if summary.OriginalFirstUserMessage == "" && !summary.FirstUserMessageIsCompactionSummary {
 			summary.OriginalFirstUserMessage = summary.FirstUserMessage
-			summary.OriginalFirstUserMessageIsCompactionSummary = false
 			l.originalFirstUserMessage = summary.OriginalFirstUserMessage
 			return l.writeSummaryLocked(summary)
 		}
@@ -181,7 +179,7 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	if err != nil {
 		return err
 	}
-	if l.originalFirstUserMessage == "" && summary != nil && !summary.OriginalFirstUserMessageIsCompactionSummary {
+	if l.originalFirstUserMessage == "" && summary != nil {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
 	}
 	if l.originalFirstUserMessage == "" && originalPreview != "" {
@@ -193,9 +191,8 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	l.firstUserMessage = preview
 	summary.FirstUserMessage = preview
 	summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
-	if summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessageIsCompactionSummary {
+	if summary.OriginalFirstUserMessage == "" {
 		summary.OriginalFirstUserMessage = l.originalFirstUserMessage
-		summary.OriginalFirstUserMessageIsCompactionSummary = false
 	}
 	return l.writeSummaryLocked(summary)
 }
@@ -449,7 +446,7 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 			l.firstUserMessage = summary.FirstUserMessage
 		}
 	}
-	if summary.OriginalFirstUserMessage != "" && !summary.OriginalFirstUserMessageIsCompactionSummary {
+	if summary.OriginalFirstUserMessage != "" {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
 	} else if l.originalFirstUserMessage == "" && summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {
 		l.originalFirstUserMessage = summary.FirstUserMessage

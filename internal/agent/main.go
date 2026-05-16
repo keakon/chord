@@ -1757,7 +1757,6 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 			}
 			if summary.OriginalFirstUserMessage == "" {
 				summary.OriginalFirstUserMessage = fmt.Sprintf("Execute the plan at %s", planPath)
-				summary.OriginalFirstUserMessageIsCompactionSummary = false
 			}
 		})
 	}

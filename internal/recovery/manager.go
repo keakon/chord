@@ -411,15 +411,14 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 // display (e.g. session picker). LastModTime is the mtime of main.jsonl;
 // FirstUserMessage is a short preview of the first user message.
 type SessionInfo struct {
-	ID                                          string    // directory name (e.g. Unix millisecond timestamp)
-	Path                                        string    // full path to session directory
-	LastModTime                                 time.Time // last write to main.jsonl
-	FirstUserMessage                            string    // preview of first user message (truncated, newlines replaced)
-	FirstUserMessageIsCompactionSummary         bool      // true when FirstUserMessage is the synthetic compaction summary
-	OriginalFirstUserMessage                    string    // original first user message, preserved across compaction
-	OriginalFirstUserMessageIsCompactionSummary bool      // legacy-only: true when older sessions persisted a compaction summary as the original; current code always writes false
-	ForkedFrom                                  string    // parent session ID when this session was created via fork
-	Locked                                      bool      // true when another live Chord process currently holds session.lock
+	ID                                  string    // directory name (e.g. Unix millisecond timestamp)
+	Path                                string    // full path to session directory
+	LastModTime                         time.Time // last write to main.jsonl
+	FirstUserMessage                    string    // preview of first user message (truncated, newlines replaced)
+	FirstUserMessageIsCompactionSummary bool      // true when FirstUserMessage is the synthetic compaction summary
+	OriginalFirstUserMessage            string    // original first user message, preserved across compaction
+	ForkedFrom                          string    // parent session ID when this session was created via fork
+	Locked                              bool      // true when another live Chord process currently holds session.lock
 }
 
 // maxFirstUserMessagePreview is the max rune count for FirstUserMessage in SessionInfo.
@@ -461,7 +460,6 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		firstUser, _ := firstUserMessageFromFile(mainPath)
 		firstUserIsCompactionSummary := false
 		originalFirstUser := ""
-		originalFirstUserIsCompactionSummary := false
 		if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
 			if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
 				lastModTime = summary.LastUpdatedAt
@@ -472,7 +470,6 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			}
 			if summary.OriginalFirstUserMessage != "" {
 				originalFirstUser = summary.OriginalFirstUserMessage
-				originalFirstUserIsCompactionSummary = summary.OriginalFirstUserMessageIsCompactionSummary
 			}
 		}
 		if originalFirstUser == "" && !firstUserIsCompactionSummary {
@@ -495,9 +492,8 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			FirstUserMessage:                    firstUser,
 			FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
 			OriginalFirstUserMessage:            originalFirstUser,
-			OriginalFirstUserMessageIsCompactionSummary: originalFirstUserIsCompactionSummary,
-			ForkedFrom: forkedFrom,
-			Locked:     locked,
+			ForkedFrom:                          forkedFrom,
+			Locked:                              locked,
 		})
 	}
 	return list, nil
@@ -562,7 +558,6 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 	firstUser, _ := firstUserMessageFromFile(mainPath)
 	firstUserIsCompactionSummary := false
 	originalFirstUser := ""
-	originalFirstUserIsCompactionSummary := false
 	if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
 		if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
 			lastModTime = summary.LastUpdatedAt
@@ -573,7 +568,6 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		}
 		if summary.OriginalFirstUserMessage != "" {
 			originalFirstUser = summary.OriginalFirstUserMessage
-			originalFirstUserIsCompactionSummary = summary.OriginalFirstUserMessageIsCompactionSummary
 		}
 	}
 	if originalFirstUser == "" && !firstUserIsCompactionSummary {
@@ -594,9 +588,8 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		FirstUserMessage:                    firstUser,
 		FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
 		OriginalFirstUserMessage:            originalFirstUser,
-		OriginalFirstUserMessageIsCompactionSummary: originalFirstUserIsCompactionSummary,
-		ForkedFrom: forkedFrom,
-		Locked:     locked,
+		ForkedFrom:                          forkedFrom,
+		Locked:                              locked,
 	}
 }
 

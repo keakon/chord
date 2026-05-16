@@ -20,22 +20,21 @@ func (s titleRestoreAgentStub) GetSessionSummary() *agent.SessionSummary { retur
 func (s titleRestoreAgentStub) GetMessages() []message.Message           { return s.messages }
 func (s titleRestoreAgentStub) CanUseLoopMode() bool                     { return true }
 
-func TestUpdateTerminalTitleFromRestoredSession_RejectsExplicitlyPollutedSummary(t *testing.T) {
+func TestUpdateTerminalTitleFromRestoredSession_PrefersStoredOriginalWhenPresent(t *testing.T) {
 	stub := titleRestoreAgentStub{
 		summary: &agent.SessionSummary{
-			OriginalFirstUserMessage:                    "[Context Summary]\n## Goal\nrefactor",
-			OriginalFirstUserMessageIsCompactionSummary: true,
+			OriginalFirstUserMessage: "fix login crash",
 		},
 		messages: []message.Message{
 			{Role: "user", Content: "[Context Summary]\n## Goal\nrefactor", IsCompactionSummary: true},
 			{Role: "assistant", Content: "ok"},
-			{Role: "user", Content: "请修复登录闪退"},
+			{Role: "user", Content: "newer follow-up message"},
 		},
 	}
 	m := NewModelWithSize(stub, 80, 24)
 	m.updateTerminalTitleFromRestoredSession()
 	got := m.terminalTitleBase
-	want := "请修复登录闪退"
+	want := "fix login crash"
 	if got != want {
 		t.Fatalf("terminalTitleBase = %q, want %q", got, want)
 	}

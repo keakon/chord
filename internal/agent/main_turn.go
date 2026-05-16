@@ -130,7 +130,6 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 			}
 			if summary.OriginalFirstUserMessage == "" && !userMsg.IsCompactionSummary {
 				summary.OriginalFirstUserMessage = message.UserPromptPlainText(userMsg)
-				summary.OriginalFirstUserMessageIsCompactionSummary = false
 			}
 		})
 	}

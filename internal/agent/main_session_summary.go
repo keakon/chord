@@ -89,7 +89,6 @@ func buildSessionSummaryForDir(sessionDir string, locked bool) *SessionSummary {
 			}
 			if usageSummary.OriginalFirstUserMessage != "" {
 				summary.OriginalFirstUserMessage = usageSummary.OriginalFirstUserMessage
-				summary.OriginalFirstUserMessageIsCompactionSummary = usageSummary.OriginalFirstUserMessageIsCompactionSummary
 			}
 		}
 		if summary.OriginalFirstUserMessage == "" && !summary.FirstUserMessageIsCompactionSummary {

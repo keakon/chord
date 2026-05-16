@@ -23,7 +23,7 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 	// it is user-authored. Do not infer compaction from text content: a real user
 	// may legitimately start a prompt with the compaction header text.
 	if summary := m.agent.GetSessionSummary(); summary != nil {
-		if summary.OriginalFirstUserMessage != "" && !summary.OriginalFirstUserMessageIsCompactionSummary {
+		if summary.OriginalFirstUserMessage != "" {
 			m.setTerminalTitleFromMessage(summary.OriginalFirstUserMessage)
 			return
 		}

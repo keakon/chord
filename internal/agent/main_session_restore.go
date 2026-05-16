@@ -997,14 +997,13 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 
 // SessionSummary holds display info for one session (current or list entry).
 type SessionSummary struct {
-	ID                                          string
-	LastModTime                                 time.Time
-	FirstUserMessage                            string
-	FirstUserMessageIsCompactionSummary         bool
-	OriginalFirstUserMessage                    string // preserved across compaction
-	OriginalFirstUserMessageIsCompactionSummary bool   // legacy-only: see recovery.SessionInfo
-	ForkedFrom                                  string
-	Locked                                      bool
+	ID                                  string
+	LastModTime                         time.Time
+	FirstUserMessage                    string
+	FirstUserMessageIsCompactionSummary bool
+	OriginalFirstUserMessage            string // preserved across compaction
+	ForkedFrom                          string
+	Locked                              bool
 }
 
 func (a *MainAgent) GetSessionSummary() *SessionSummary {
@@ -1033,9 +1032,8 @@ func (a *MainAgent) ListSessionSummaries() ([]SessionSummary, error) {
 			FirstUserMessage:                    s.FirstUserMessage,
 			FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
 			OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
-			OriginalFirstUserMessageIsCompactionSummary: s.OriginalFirstUserMessageIsCompactionSummary,
-			ForkedFrom: s.ForkedFrom,
-			Locked:     s.Locked,
+			ForkedFrom:                          s.ForkedFrom,
+			Locked:                              s.Locked,
 		})
 	}
 	return out, nil

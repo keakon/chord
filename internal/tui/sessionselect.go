@@ -376,7 +376,7 @@ func (m *Model) sessionSelectMaxVisible() int {
 }
 
 func sessionSummaryPreview(summary agent.SessionSummary) string {
-	if summary.OriginalFirstUserMessage != "" && !summary.OriginalFirstUserMessageIsCompactionSummary {
+	if summary.OriginalFirstUserMessage != "" {
 		return summary.OriginalFirstUserMessage
 	}
 	if summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {

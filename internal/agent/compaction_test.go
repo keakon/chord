@@ -1649,7 +1649,4 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	if !summary.FirstUserMessageIsCompactionSummary {
 		t.Error("FirstUserMessageIsCompactionSummary = false, want true after compaction")
 	}
-	if summary.OriginalFirstUserMessageIsCompactionSummary {
-		t.Error("OriginalFirstUserMessageIsCompactionSummary = true, want false after compaction")
-	}
 }

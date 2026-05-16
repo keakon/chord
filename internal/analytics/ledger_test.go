@@ -210,9 +210,6 @@ func TestRewriteFirstUserMessageWithOriginalForCompactionSeedsHintWhenNothingKno
 	if summary.OriginalFirstUserMessage != "hello world" {
 		t.Fatalf("OriginalFirstUserMessage = %q, want %q", summary.OriginalFirstUserMessage, "hello world")
 	}
-	if summary.OriginalFirstUserMessageIsCompactionSummary {
-		t.Fatal("OriginalFirstUserMessageIsCompactionSummary = true, want false")
-	}
 }
 
 func TestFirstUserMessageLockedSkipsCompactionSummary(t *testing.T) {

@@ -371,7 +371,6 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 				summary.FirstUserMessageIsCompactionSummary = true
 				if summaryOriginal != "" {
 					summary.OriginalFirstUserMessage = summaryOriginal
-					summary.OriginalFirstUserMessageIsCompactionSummary = false
 				}
 			})
 		}

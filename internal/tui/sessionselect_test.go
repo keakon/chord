@@ -54,7 +54,7 @@ func newSessionSelectTestModel(options []agent.SessionSummary) Model {
 	return m
 }
 
-func TestSessionSummaryPreviewUsesExplicitCompactionMetadata(t *testing.T) {
+func TestSessionSummaryPreviewUsesCurrentFieldsOnly(t *testing.T) {
 	userTypedHeader := agent.SessionSummary{
 		OriginalFirstUserMessage: "[Context Summary]\n## Goal\nuser typed this",
 	}
@@ -62,13 +62,12 @@ func TestSessionSummaryPreviewUsesExplicitCompactionMetadata(t *testing.T) {
 		t.Fatalf("preview for user-authored header = %q", got)
 	}
 
-	pollutedOriginal := agent.SessionSummary{
-		FirstUserMessage:                            "real request",
-		OriginalFirstUserMessage:                    "[Context Summary]\n## Goal\nsummary",
-		OriginalFirstUserMessageIsCompactionSummary: true,
+	prefersOriginal := agent.SessionSummary{
+		FirstUserMessage:         "real request",
+		OriginalFirstUserMessage: "original request",
 	}
-	if got := sessionSelectPreviewText(pollutedOriginal); got != "real request" {
-		t.Fatalf("preview for explicitly polluted original = %q, want real request", got)
+	if got := sessionSelectPreviewText(prefersOriginal); got != "original request" {
+		t.Fatalf("preview with original first user message = %q, want original request", got)
 	}
 
 	currentOnlyCompaction := agent.SessionSummary{
