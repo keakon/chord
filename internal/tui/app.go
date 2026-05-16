@@ -729,7 +729,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Guard: if the user switched back to a mode that should not force English before
 		// im-select returned, discard the result to avoid clobbering that mode's IME. Also
 		// ignore stale switch completions once a newer IME apply request has already been queued.
-		if !modeNeedsEnglishIME(m.mode) {
+		if !modeNeedsEnglishIME(m.mode) || !m.imeSwitchAllowed() {
 			return m, nil
 		}
 		m.imeMu.Lock()

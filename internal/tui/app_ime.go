@@ -89,8 +89,12 @@ func modeNeedsEnglishIME(mode Mode) bool {
 	}
 }
 
+func (m *Model) imeSwitchAllowed() bool {
+	return m != nil && m.terminalAppFocused
+}
+
 func (m *Model) reapplyIMEForCurrentModeOnFocus() {
-	if !modeNeedsEnglishIME(m.mode) || m.imeSwitchTarget == "" {
+	if !m.imeSwitchAllowed() || !modeNeedsEnglishIME(m.mode) || m.imeSwitchTarget == "" {
 		return
 	}
 	m.queueIMEApply(m.imeSwitchTarget)
@@ -146,7 +150,7 @@ func (m *Model) runIMESwitchIfTransition(from, to Mode) tea.Cmd {
 	if !modeNeedsEnglishIME(to) {
 		return nil
 	}
-	if from == to || m.imeSwitchTarget == "" {
+	if from == to || m.imeSwitchTarget == "" || !m.imeSwitchAllowed() {
 		return nil
 	}
 	if from == ModeInsert {

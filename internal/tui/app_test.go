@@ -5599,6 +5599,7 @@ func TestGetIMECurrentCmdReturnsEmptyOnQueryError(t *testing.T) {
 func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 	m := NewModel(nil)
 	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.terminalAppFocused = true
 
 	cases := []struct {
 		from, to Mode
@@ -5621,6 +5622,16 @@ func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 		if got != tc.wantCmd {
 			t.Errorf("runIMESwitchIfTransition(%v→%v): cmd!=nil = %v, want %v", tc.from, tc.to, got, tc.wantCmd)
 		}
+	}
+}
+
+func TestIMESwitchIfTransitionSkippedWhenBackgrounded(t *testing.T) {
+	m := NewModel(nil)
+	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.terminalAppFocused = false
+
+	if cmd := m.runIMESwitchIfTransition(ModeInsert, ModeNormal); cmd != nil {
+		t.Fatalf("runIMESwitchIfTransition in background returned cmd %#v, want nil", cmd)
 	}
 }
 
@@ -6396,12 +6407,16 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 			m.SetFocusResizeFreezeEnabled(false)
 			m.mode = tc.mode
 			m.imeSwitchTarget = "com.apple.keylayout.ABC"
+			m.terminalAppFocused = false
 			preventIMEApplyInTests(&m)
 
 			updated, cmd := m.Update(tea.FocusMsg{})
 			model, ok := updated.(*Model)
 			if !ok {
 				t.Fatalf("Update returned %T, want *Model", updated)
+			}
+			if !model.terminalAppFocused {
+				t.Fatal("FocusMsg should mark terminal app focused")
 			}
 			if !model.imePending || model.imePendingTarget != "com.apple.keylayout.ABC" {
 				t.Fatalf("pending IME apply = (%v, %q), want (true, com.apple.keylayout.ABC)", model.imePending, model.imePendingTarget)
@@ -6410,6 +6425,24 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 				t.Fatalf("FocusMsg with freeze disabled should not schedule command, got %#v", cmd)
 			}
 		})
+	}
+}
+
+func TestIMECurrentMsgIgnoredWhenBackgrounded(t *testing.T) {
+	m := NewModel(nil)
+	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.mode = ModeNormal
+	m.terminalAppFocused = false
+	m.imeBeforeNormal = "zh-orig"
+
+	updated, _ := m.Update(imeCurrentMsg{seq: 0, current: "zh-new"})
+	model := updated.(*Model)
+
+	if model.imeBeforeNormal != "zh-orig" {
+		t.Fatalf("imeBeforeNormal changed to %q while backgrounded, want zh-orig", model.imeBeforeNormal)
+	}
+	if model.imePending {
+		t.Fatalf("background imeCurrentMsg should not queue apply, got pending target %q", model.imePendingTarget)
 	}
 }
 

@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- TUI / IME: automatic input-method switching now only runs when the current Chord tab/window is actually foreground-focused, preventing background tabs' chord/mode transitions from clobbering the active tab's IME. On `FocusMsg`/tab return, Chord now reapplies the configured English IME target when the current mode still requires it.
 - CLI / Setup: added a first-run setup wizard for the default `chord` command when global `config.yaml` is missing. The wizard runs on a controlling TTY, writes minimal `config.yaml` plus `auth.yaml` when needed, can complete Codex OAuth login during setup, reuses matching existing credentials when possible, and prints the exact paths it used.
 - Runtime / Loop / Done: the `Done` tool now requires a non-empty `report` argument containing the full final completion report. Loop mode uses `Done` as the only exit request path: premature `Done` requests are rejected and returned to the model as tool results, while valid exit requests open a local confirmation dialog showing the report.
 - Tools / Safety: hardened local file/path safety by centralizing path validation for file-reading/search tools. `Read` and `Grep` now share the same existing-path checks and explicitly reject blocked device-style paths such as standard-stream device files.
