@@ -206,7 +206,7 @@ Done: ask
 		ToolCalls: []message.ToolCall{{
 			ID:   callID,
 			Name: tools.NameDone,
-			Args: json.RawMessage(`{}`),
+			Args: json.RawMessage(`{"report":"**Completion status**: done\n**What changed**: validated\n**Verification**: tested\n**Remaining issues**: none"}`),
 		}},
 	})
 	turn.PendingToolCalls.Store(1)
@@ -216,8 +216,8 @@ Done: ask
 		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
 			CallID:   callID,
 			Name:     tools.NameDone,
-			ArgsJSON: `{}`,
-			Result:   "Done requested",
+			ArgsJSON: `{"report":"**Completion status**: done\n**What changed**: validated\n**Verification**: tested\n**Remaining issues**: none"}`,
+			Result:   "Done requested: report received (104 chars)",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -272,7 +272,7 @@ Done: allow
 		ToolCalls: []message.ToolCall{{
 			ID:   callID,
 			Name: tools.NameDone,
-			Args: json.RawMessage(`{}`),
+			Args: json.RawMessage(`{"report":"**Completion status**: done\n**What changed**: validated\n**Verification**: tested\n**Remaining issues**: none"}`),
 		}},
 	})
 	turn.PendingToolCalls.Store(1)
@@ -282,8 +282,8 @@ Done: allow
 		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
 			CallID:   callID,
 			Name:     tools.NameDone,
-			ArgsJSON: `{}`,
-			Result:   "Done requested",
+			ArgsJSON: `{"report":"**Completion status**: done\n**What changed**: validated\n**Verification**: tested\n**Remaining issues**: none"}`,
+			Result:   "Done requested: report received (104 chars)",
 			TurnID:   turn.ID,
 		}})
 		close(handled)
@@ -722,7 +722,7 @@ Read: allow
 		Role:    "assistant",
 		Content: "finished",
 		ToolCalls: []message.ToolCall{
-			{ID: "done-1", Name: tools.NameDone, Args: json.RawMessage(`{}`)},
+			{ID: "done-1", Name: tools.NameDone, Args: json.RawMessage(`{"report":"**Completion status**: done\n**What changed**: validated\n**Verification**: tested\n**Remaining issues**: none"}`)},
 			{ID: "read-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"go.mod"}`)},
 		},
 		StopReason: "tool_calls",
@@ -1430,8 +1430,8 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
-	if !strings.Contains(found.Content, "Immediately before calling `Done`, write a final report in the assistant message with this structure:") {
-		t.Fatalf("loop notice content = %q, want assistant-message final report requirement", found.Content)
+	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:") {
+		t.Fatalf("loop notice content = %q, want Done report-argument requirement", found.Content)
 	}
 	if !strings.Contains(found.Content, "**Completion status**:") {
 		t.Fatalf("loop notice content = %q, want completion status field", found.Content)

@@ -84,22 +84,9 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	if searchPath == "" {
 		searchPath = "."
 	}
-	resolvedSearchPath, err := resolveToolPath(searchPath)
+	resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
 	if err != nil {
-		return "", fmt.Errorf("resolve path: %w", err)
-	}
-
-	if isBlockedDevicePath(resolvedSearchPath) {
-		return "", fmt.Errorf("cannot search blocked device path: %s", searchPath)
-	}
-
-	// Check if searchPath is a file or directory.
-	info, err := os.Stat(resolvedSearchPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("path not found: %s", searchPath)
-		}
-		return "", fmt.Errorf("accessing path: %w", err)
+		return "", err
 	}
 
 	var matches []string

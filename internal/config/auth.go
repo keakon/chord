@@ -282,7 +282,14 @@ func SaveAuthConfig(path string, auth AuthConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	lock, err := LockConfigMutation(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = lock.Close()
+	}()
+	return writeConfigFileAtomicallyReplace(path, data, 0o600)
 }
 
 // tokenResponse is the JSON response from an OAuth token endpoint.

@@ -27,6 +27,14 @@ var blockedDevicePaths = map[string]struct{}{
 	"/dev/zero":    {},
 }
 
+type PathTargetKind int
+
+const (
+	PathTargetAny PathTargetKind = iota
+	PathTargetRegularFile
+	PathTargetDirectory
+)
+
 func expandTildePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -120,4 +128,46 @@ func ensureRegularFilePath(path string, info os.FileInfo) error {
 		return fmt.Errorf("path is not a regular file: %s", path)
 	}
 	return nil
+}
+
+func ensureDirectoryPath(path string, info os.FileInfo) error {
+	if info == nil || !info.IsDir() {
+		return fmt.Errorf("path is not a directory: %s", path)
+	}
+	return nil
+}
+
+func resolveExistingToolPath(path string, kind PathTargetKind, action string) (string, os.FileInfo, error) {
+	resolvedPath, err := resolveToolPath(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve path: %w", err)
+	}
+	if isBlockedDevicePath(resolvedPath) {
+		verb := strings.TrimSpace(action)
+		if verb == "" {
+			verb = "access"
+		}
+		return "", nil, fmt.Errorf("cannot %s blocked device path: %s", verb, path)
+	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil, fmt.Errorf("path not found: %s", path)
+		}
+		if os.IsPermission(err) {
+			return "", nil, fmt.Errorf("permission denied: %s", path)
+		}
+		return "", nil, fmt.Errorf("accessing path: %w", err)
+	}
+	switch kind {
+	case PathTargetRegularFile:
+		if err := ensureRegularFilePath(path, info); err != nil {
+			return "", nil, err
+		}
+	case PathTargetDirectory:
+		if err := ensureDirectoryPath(path, info); err != nil {
+			return "", nil, err
+		}
+	}
+	return resolvedPath, info, nil
 }

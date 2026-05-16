@@ -67,11 +67,21 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 		return checkFinish(ctx, mainRoot, info, name, onto)
 	}
 
-	needsMergeCommit, err := mergeRequiresCommit(ctx, mainRoot, onto, info.Branch)
+	if err := ensureFinishCommitIdentity(ctx, mainRoot, onto, info.Branch); err != nil {
+		return err
+	}
+	if err := mergeFinishedWorktreeTarget(ctx, info.Path, onto, name); err != nil {
+		return err
+	}
+	return finalizeFinishedWorktree(ctx, mainRoot, info, name, onto, opts, pathLocator)
+}
+
+func ensureFinishCommitIdentity(ctx context.Context, mainRoot, onto, branch string) error {
+	needsMergeCommit, err := mergeRequiresCommit(ctx, mainRoot, onto, branch)
 	if err != nil {
 		return err
 	}
-	hadPreMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
+	hadPreMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, branch)
 	if err != nil {
 		return err
 	}
@@ -80,50 +90,69 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 			return err
 		}
 	}
+	return nil
+}
 
-	if err := mergeOnto(ctx, info.Path, onto); err != nil {
-		return formatConflictError(err, info.Path, name, onto, finishConflictHelp(name, info.Path), "finish worktree")
+func mergeFinishedWorktreeTarget(ctx context.Context, worktreePath, onto, name string) error {
+	if err := mergeOnto(ctx, worktreePath, onto); err != nil {
+		return formatConflictError(err, worktreePath, name, onto, finishConflictHelp(name, worktreePath), "finish worktree")
 	}
+	return nil
+}
 
+func finalizeFinishedWorktree(ctx context.Context, mainRoot string, info *Info, name, onto string, opts FinishOptions, pathLocator *config.PathLocator) error {
 	hasPostMergeDiff, err := branchesDiffer(ctx, mainRoot, onto, info.Branch)
 	if err != nil {
 		return err
 	}
 	if hasPostMergeDiff {
-		tmpPath, tmpBranch, cleanup, err := createFinishScratch(ctx, mainRoot, name, onto)
-		if err != nil {
+		if err := squashFinishedWorktreeOntoTarget(ctx, mainRoot, info.Branch, name, onto, opts.Message); err != nil {
 			return err
-		}
-		defer cleanup()
-
-		if err := applySquash(ctx, tmpPath, info.Branch); err != nil {
-			return fmt.Errorf("squash finished worktree %q onto %q: %w", name, onto, err)
-		}
-		if err := commitSquash(ctx, tmpPath, name, opts.Message); err != nil {
-			return fmt.Errorf("commit squashed worktree %q into %q: %w", name, onto, err)
-		}
-
-		mainBranch, err := runGitText(ctx, mainRoot, "branch", "--show-current")
-		if err != nil {
-			return err
-		}
-		restoreMainBranch := false
-		if mainBranch != onto {
-			if _, err := runGit(ctx, mainRoot, "checkout", onto); err != nil {
-				return fmt.Errorf("checkout %q in main repository: %w", onto, err)
-			}
-			restoreMainBranch = true
-		}
-		if _, err := runGit(ctx, mainRoot, "merge", "--ff-only", tmpBranch); err != nil {
-			return fmt.Errorf("fast-forward %q to the squashed worktree result: %w", onto, err)
-		}
-		if restoreMainBranch {
-			if _, err := runGit(ctx, mainRoot, "checkout", mainBranch); err != nil {
-				return fmt.Errorf("restore main repository branch %q after finishing worktree %q: %w", mainBranch, name, err)
-			}
 		}
 	}
+	return reclaimFinishedWorktree(ctx, mainRoot, info, name, opts, pathLocator)
+}
 
+func squashFinishedWorktreeOntoTarget(ctx context.Context, mainRoot, branch, name, onto, message string) error {
+	tmpPath, tmpBranch, cleanup, err := createFinishScratch(ctx, mainRoot, name, onto)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if err := applySquash(ctx, tmpPath, branch); err != nil {
+		return fmt.Errorf("squash finished worktree %q onto %q: %w", name, onto, err)
+	}
+	if err := commitSquash(ctx, tmpPath, name, message); err != nil {
+		return fmt.Errorf("commit squashed worktree %q into %q: %w", name, onto, err)
+	}
+	return fastForwardTargetToScratch(ctx, mainRoot, name, onto, tmpBranch)
+}
+
+func fastForwardTargetToScratch(ctx context.Context, mainRoot, name, onto, tmpBranch string) error {
+	mainBranch, err := runGitText(ctx, mainRoot, "branch", "--show-current")
+	if err != nil {
+		return err
+	}
+	restoreMainBranch := false
+	if mainBranch != onto {
+		if _, err := runGit(ctx, mainRoot, "checkout", onto); err != nil {
+			return fmt.Errorf("checkout %q in main repository: %w", onto, err)
+		}
+		restoreMainBranch = true
+	}
+	if _, err := runGit(ctx, mainRoot, "merge", "--ff-only", tmpBranch); err != nil {
+		return fmt.Errorf("fast-forward %q to the squashed worktree result: %w", onto, err)
+	}
+	if restoreMainBranch {
+		if _, err := runGit(ctx, mainRoot, "checkout", mainBranch); err != nil {
+			return fmt.Errorf("restore main repository branch %q after finishing worktree %q: %w", mainBranch, name, err)
+		}
+	}
+	return nil
+}
+
+func reclaimFinishedWorktree(ctx context.Context, mainRoot string, info *Info, name string, opts FinishOptions, pathLocator *config.PathLocator) error {
 	removeOpts := RemoveOptions{DeleteBranch: false, BranchPrefix: opts.BranchPrefix}
 	if err := Remove(ctx, mainRoot, name, removeOpts, pathLocator); err != nil {
 		return fmt.Errorf("remove worktree %q after squash finish: %w", name, err)

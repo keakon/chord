@@ -206,7 +206,7 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
 		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling `Done`\n" +
-		"- Immediately before calling `Done`, write a final report in the assistant message with this structure:\n" +
+		"- Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:\n" +
 		"  - **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
 		"  - **What changed**: files modified, created, deleted or key actions taken\n" +
 		"  - **Verification**: tests run and their results\n" +

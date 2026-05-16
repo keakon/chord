@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -35,5 +36,45 @@ func TestWriteInitialConfigFileWritesOnce(t *testing.T) {
 	}
 	if string(got) != string(data) {
 		t.Fatalf("file content changed: %q", got)
+	}
+}
+
+func TestWriteInitialConfigFileConcurrentSingleWinner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	payloads := [][]byte{
+		[]byte("providers:\n  p1:\n    type: responses\n"),
+		[]byte("providers:\n  p2:\n    type: responses\n"),
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(payloads))
+	for _, payload := range payloads {
+		payload := payload
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- writeInitialConfigFile(path, payload)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	successes := 0
+	failures := 0
+	for err := range errCh {
+		if err == nil {
+			successes++
+		} else {
+			failures++
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("successes=%d failures=%d, want 1/1", successes, failures)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(payloads[0]) && string(got) != string(payloads[1]) {
+		t.Fatalf("unexpected final content: %q", got)
 	}
 }

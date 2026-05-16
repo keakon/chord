@@ -389,7 +389,6 @@ func ensureConfirmImportantFields(summary *confirmSummary) {
 // buildDoneConfirmSummary populates the summary for Done tool confirmation dialogs.
 // It extracts key information from the parsed arguments and formats the completion report.
 func buildDoneConfirmSummary(summary *confirmSummary, parsed map[string]any, doneReport string) {
-	// Extract optional reason field if present
 	if reason, ok := parsed["reason"].(string); ok && strings.TrimSpace(reason) != "" {
 		summary.Fields = append(summary.Fields, confirmSummaryField{
 			Label:        "Reason",
@@ -398,16 +397,19 @@ func buildDoneConfirmSummary(summary *confirmSummary, parsed map[string]any, don
 		})
 	}
 
-	// If there's a completion report, add it as a field
-	if doneReport != "" {
+	report := strings.TrimSpace(doneReport)
+	if parsedReport, ok := parsed["report"].(string); ok && strings.TrimSpace(parsedReport) != "" {
+		report = strings.TrimSpace(parsedReport)
+	}
+	if report != "" {
+		summary.DoneReport = report
 		summary.Fields = append(summary.Fields, confirmSummaryField{
 			Label:        "Completion Report",
-			SummaryValue: sanitizeToolDisplayText(doneReport),
+			SummaryValue: sanitizeToolDisplayText(report),
 			Important:    true,
 		})
 	}
 
-	// Ensure at least one important field exists
 	ensureConfirmImportantFields(summary)
 }
 

@@ -351,7 +351,7 @@ Done: allow
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"Immediately before calling `Done`, write a final report in the assistant message with this structure:",
+		"Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:",
 		"**Completion status**: one line summary",
 		"**What changed**: files modified, created, deleted or key actions taken",
 		"**Verification**: tests run and their results",
@@ -1207,7 +1207,7 @@ func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	// Check for the new structured format in the final report instruction
-	if !strings.Contains(joined, "Immediately before calling `Done`, write a final report in the assistant message with this structure:") {
+	if !strings.Contains(joined, "Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:") {
 		t.Fatalf("loop completion requirements should mention final report structure, got %q", joined)
 	}
 	if !strings.Contains(joined, "**Completion status**:") {

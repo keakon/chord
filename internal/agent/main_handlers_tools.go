@@ -449,7 +449,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			pending := pendingResults[len(pendingResults)-1]
 			if a.loopState.Enabled {
 				if a.loopExitConditionsSatisfied(pending.AssistantContent) {
-					resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.AssistantContent)
+					resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.ArgsJSON, pending.AssistantContent)
 					if err != nil {
 						log.Warnf("loop exit confirmation failed error=%v", err)
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
@@ -497,7 +497,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					}
 				}
 			} else {
-				resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.AssistantContent)
+				resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.ArgsJSON, pending.AssistantContent)
 				if err != nil {
 					log.Warnf("Done confirmation failed error=%v", err)
 					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
