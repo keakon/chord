@@ -219,9 +219,8 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 			ref = strings.TrimSpace(m.agent.ProviderModelRef())
 		}
 		snap.proxyInUse = m.agent.ProxyInUseForRef(ref)
-		if mp, ok := m.agent.(agent.MCPStateProvider); ok {
-			snap.mcpPill = renderMCPStatusPill(mp.MCPServerList())
-		}
+		// MCP pill intentionally omitted from the status bar: space is limited and MCP is not critical status info.
+		// Users can view MCP details in the sidebar when needed.
 		snap.tokenUsage = m.agent.GetTokenUsage()
 		snap.cost = m.agent.GetSidebarUsageStats().EstimatedCost
 		snap.contextCurrent, snap.contextLimit = m.agent.GetContextStats()

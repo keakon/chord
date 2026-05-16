@@ -390,17 +390,8 @@ func (m *Model) renderCompactionBackgroundPill() string {
 		pillParts = append(pillParts, elapsedText)
 	}
 
-	// Dedicated compaction-progress events drive the optional suffix.
-	if m.compactionBgStatus.Bytes > 0 || m.compactionBgStatus.Events > 0 {
-		progress := ""
-		if m.compactionBgStatus.Bytes > 0 {
-			progress += fmt.Sprintf(" · ↓ %d KB", m.compactionBgStatus.Bytes/1024)
-		}
-		if m.compactionBgStatus.Events > 0 {
-			progress += fmt.Sprintf(" · %d", m.compactionBgStatus.Events)
-		}
-		pillParts[0] += progress
-	}
+	// Dedicated compaction-progress events previously drove an optional bytes/events suffix.
+	// Status bar should now show only the compaction icon and elapsed time.
 
 	// Handle terminal states (1-2s flush window)
 	if m.compactionBgStatus.Terminal != "" {

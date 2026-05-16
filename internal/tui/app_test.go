@@ -4994,8 +4994,12 @@ func TestRenderStatusBarShowsCompactionProgressInBackgroundLane(t *testing.T) {
 	if !strings.Contains(plain, "■") && !strings.Contains(plain, "▪") {
 		t.Fatalf("status bar should show compaction icon, got %q", plain)
 	}
-	if !strings.Contains(plain, "↓ 8 KB") {
-		t.Fatalf("status bar should show compaction progress bytes, got %q", plain)
+	// The background compaction lane should show only icon + elapsed time.
+	if strings.Contains(plain, "↓ 8 KB") {
+		t.Fatalf("status bar should not show compaction progress bytes, got %q", plain)
+	}
+	if strings.Contains(plain, " · 3") {
+		t.Fatalf("status bar should not show compaction progress event count, got %q", plain)
 	}
 }
 
