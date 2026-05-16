@@ -75,7 +75,7 @@ permission:
 
 ## 文件修改风险
 
-`Write`、`Edit`、`Delete` 都会直接改动工作区文件。
+`Write`、`Edit`、`Delete` 都会直接改动工作区文件。`Read` 和 `Grep` 虽然是只读工具，但它们仍会访问本地文件系统路径，并且会刻意拒绝标准流设备文件（如 `/dev/stdin`、`/dev/stdout`、`/dev/stderr` 等）这类受限 device-style 路径，而不会把它们当作普通文件处理。
 
 建议：
 

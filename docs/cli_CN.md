@@ -47,7 +47,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 ## `chord`（默认 — TUI）
 
-在当前目录启动本地 TUI。首次启动时，如果全局 `config.yaml` 缺失且 Chord 能取得控制 TTY，就会先启动一次性的初始化向导，再进入 TUI。向导会写入 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示实际路径。仅仅 stdin 被重定向并不会禁用向导：只要还能打开控制 TTY，初始化仍会在那里交互。只有没有控制 TTY 时，Chord 才会直接报初始化错误，不会等待输入。`help`、`version` 和非 root 子命令都不会触发这个向导。
+在当前目录启动本地 TUI。首次启动时，如果全局 `config.yaml` 缺失且 Chord 能取得控制 TTY，就会先启动一次性的初始化向导，再进入 TUI。向导会写入 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，也可以在初始化过程中直接完成 Codex OAuth 登录，并在结束时展示实际路径。仅仅 stdin 被重定向并不会禁用向导：只要还能打开控制 TTY，初始化仍会在那里交互。只有没有控制 TTY 时，Chord 才会直接报初始化错误，不会等待输入。`help`、`version` 和非 root 子命令都不会触发这个向导。
 
 ### Flag
 

@@ -1153,6 +1153,43 @@ func TestSlashCompletionTabCompletesWithoutSubmitting(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionEnterCompletesSelectedCommandAndSubmitsIt(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.SetValue("/r")
+
+	matches := m.getSlashCompletions(m.input.Value())
+	if len(matches) < 2 || matches[0].Cmd != "/resume" || matches[1].Cmd != "/rules" {
+		t.Fatalf("matches = %#v, want /resume then /rules", matches)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if backend.resumeCalls != 1 {
+		t.Fatalf("ResumeSession() calls = %d, want 1", backend.resumeCalls)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value after Enter = %q, want empty", got)
+	}
+}
+
+func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.SetValue("/resume")
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if backend.resumeCalls != 1 {
+		t.Fatalf("ResumeSession() calls = %d, want 1", backend.resumeCalls)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value after submit = %q, want empty", got)
+	}
+}
+
 func TestSlashCompletionHidesLoopCommandsWhenSubAgentFocused(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	m.focusedAgentID = "sub-1"

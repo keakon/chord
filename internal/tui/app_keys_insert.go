@@ -197,7 +197,20 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case keyMatches(key, m.keyMap.InsertSubmit):
-		raw := strings.TrimSpace(m.input.Value())
+		currentValue := m.input.Value()
+		matches := m.getSlashCompletions(currentValue)
+		if len(matches) > 0 {
+			trimmedInput := strings.TrimSpace(currentValue)
+			selected := matches[0]
+			if m.slashCompleteSelected >= 0 && m.slashCompleteSelected < len(matches) {
+				selected = matches[m.slashCompleteSelected]
+			}
+			if !strings.EqualFold(trimmedInput, strings.TrimSpace(selected.Cmd)) {
+				m.input.SetDisplayValueAndPastes(selected.Cmd, nil, 0)
+				currentValue = m.input.Value()
+			}
+		}
+		raw := strings.TrimSpace(currentValue)
 		var value string
 		if m.input.BangMode() {
 			value = "!" + raw

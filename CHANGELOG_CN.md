@@ -4,16 +4,13 @@
 
 ## 未发布
 
-- TUI：修复 deferred startup transcript 在长会话中切换标签页和发送新消息时的滚动位置错误。现在当标签页失焦时会记录是否钉在尾窗，重新获焦时会正确恢复到尾部，避免画面看似已在底部但向下滚动还能翻出旧卡片；同时，当用户在尾窗发送新消息时，会确保 viewport 滚动到底部并设置 sticky 模式，即使之前 sticky 为 false 也能正确显示新消息。
-- Runtime / 工具：修复 turn 取消或替换时工具结果被错误标记为失败的问题。此前，若工具在推测模式下已完成执行，但 turn 在 LLM 消费结果前被中断，结果会被覆盖为"Model stopped before completing this tool call: context canceled"。现在已完成的工具结果会被正确保留和持久化，即使 turn 被取消也不会丢失。
-- Runtime / 工具：补强 turn 中断时已完成工具结果的落盘与展示语义。只要工具在本地已完成执行（如 `Read`），结果会立即写入会话并显示为 tool result，不再依赖后续 LLM 请求是否返回；因此即使用户在此时直接退出 TUI，下次恢复会话仍可继续复用该工具结果。
-- TUI：修复 deferred startup transcript 在长会话恢复后的多类滚动/导航错误。现在如果标签页失焦前确实跟随最新内容，重新获焦时会先恢复真实尾窗，避免画面看似已在底部但鼠标滚轮向下还能翻出旧卡片；同时，`[count]j/k` 与 `[count]up/down` 在 deferred 窗口间会逐步按全文逻辑位置推进，超过剩余范围时稳定饱和到第一张/最后一张卡片，不再因跨窗口而少走、跳错或放大滚动范围。
+- CLI / 初始化：默认 `chord` 命令在全局 `config.yaml` 缺失时，新增首次启动初始化向导。向导会在控制 TTY 上运行，写入最小 `config.yaml`，必要时再写入 `auth.yaml`；也可以在初始化阶段直接完成 Codex OAuth 登录；如果已有匹配凭据会尽量复用，并在结束时打印实际使用的路径。
+- Runtime / Loop / Done：`Done` 工具现在要求必传非空 `report` 参数，用来承载完整的最终完成报告。loop 模式把 `Done` 作为唯一的退出申请入口：过早的 `Done` 会被拒绝并作为 tool result 回给模型继续运行；满足退出条件时，则弹出本地确认框并展示这份报告。
+- Tools / 安全：补强本地文件/路径安全，对文件读取与搜索工具统一路径校验逻辑。`Read` 与 `Grep` 现在复用同一套已存在路径检查，并会显式拒绝标准流设备文件等受限 device-style 路径。
+- Config / 持久化：补强 setup 与 auth 持久化时的配置写入流程。初始配置创建现在使用配置级锁文件 + 临时文件 + 原子安装；auth/config 保存路径也复用同一套原子写入基础设施。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
-- Config：更新内置 `planner` / `builder` 默认权限。`builder` 现在采用放行基线，因此大多数工具调用不再询问权限；仅 `Delete` 仍需确认，`Handoff` / `Delegate` 继续拒绝。`planner` 现在可直接使用 `Shell`。
-- TUI：slash 命令补全现在支持用 `Enter` 接受当前选中项，和 `Tab` 行为一致；当 `/` 补全列表可见时，按 `Enter` 会先补全命令，不再直接发送草稿。
-- CLI：`chord cleanup` 现在在 `status` 和实际清理/预览输出中，都用人类可读的 1024 进制短单位（`B`、`KB`、`MB`、`GB` 等）显示体积，不再只输出原始 byte 数。
-- TUI：将焦点恢复后的 stale-display 保护扩展到 iTerm2。iTerm2 现在会启用与 Ghostty/cmux 相同的 `focus-resize freeze` / 整帧重放恢复路径，减少重新获焦后旧的 thinking 或工具卡内容视觉上残留到后续 assistant 正文里的情况。
-- Runtime / Loop：loop 模式现在依赖新的 `Done` 工具作为唯一退出请求入口。开启 loop 时，如果当前角色无法使用 `Done`（例如被 `deny` 或不在可见工具表中），`/loop` 将不会补全也不会被接受；若 `Done` 配置为 `ask`，运行时会按 `allow` 处理，避免退出时再出现一层工具权限确认。支持的 OpenAI/Responses/Codex WS 请求在 loop 模式下会优先使用 request-level `tool_choice=required`，让模型尽量保持在 tool-call continuation 链上；当模型调用 `Done` 时，若退出条件未满足，runtime 会把拒绝结果作为 tool result 回给模型继续运行；若条件满足，则弹出本地确认框，由用户决定退出还是继续。
+- CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex/OpenCode 的工具历史默认安全降级为文本导入，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
+
 ## 0.5.3 - 2026-05-11
 
 - Runtime / 文件安全：恢复或继续会话时，现在会重建持久化的 `Read` 文件状态；之后的 `Edit` / `Write` 仍保留“先读后写”保护，但不会再误要求所有文件都重新读取一遍。
