@@ -118,10 +118,6 @@ func (s *loopRuntimeState) recordAutoExitIntercept() int {
 	return s.Iteration
 }
 
-func (s *loopRuntimeState) autoExitInterceptsExhausted() bool {
-	return s.MaxIterations > 0 && s.Iteration >= s.MaxIterations
-}
-
 func (a *MainAgent) markLoopExitDecisionRequired() {
 	a.loopState.State = LoopStateBudgetExhausted
 	a.emitLoopStateChanged()

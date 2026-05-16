@@ -89,9 +89,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 	lines := []string{title, ""}
 	if strings.EqualFold(summary.ToolName, "Done") {
 		if strings.TrimSpace(summary.DoneReport) != "" {
-			for _, line := range renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil) {
-				lines = append(lines, line)
-			}
+			lines = append(lines, renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil)...)
 		}
 		return lines
 	}

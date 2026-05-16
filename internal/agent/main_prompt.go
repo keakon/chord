@@ -143,13 +143,6 @@ func (a *MainAgent) userConfirmationPromptBlock() string {
 - When a clarification does not materially change the execution path, keep it brief and focused`
 }
 
-func (a *MainAgent) userDecisionActionPhrase() string {
-	if a.questionToolAvailable() {
-		return "call the `Question` tool instead of only asking in plain assistant text"
-	}
-	return "ask in plain assistant text with enough context for a non-implementer to answer, including the main options, their tradeoffs/risks, and your recommended default"
-}
-
 func (a *MainAgent) lspDiagnosticPromptBlock() string {
 	if !a.shouldInjectLSPDiagnosticPrompt() {
 		return ""
@@ -193,10 +186,6 @@ func hasEnabledLSPServers(globalCfg, projectCfg *config.Config) bool {
 		}
 	}
 	return false
-}
-
-func (a *MainAgent) loopUserConfirmationInstructionLine() string {
-	return "- If you need user permission, confirmation, or a real decision between materially different options, you must " + a.userDecisionActionPhrase() + "."
 }
 
 func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
