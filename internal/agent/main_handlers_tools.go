@@ -307,7 +307,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if ok {
 			assistantContent = assistantMsg.Content
 		}
-		a.pendingLoopExitResult = &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON}
+		a.pendingLoopExitResults = append(a.pendingLoopExitResults, &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON})
 	}
 
 	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil
@@ -431,9 +431,22 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath})
 			return
 		}
-		if a.pendingLoopExitResult != nil {
-			pending := a.pendingLoopExitResult
-			a.pendingLoopExitResult = nil
+		if len(a.pendingLoopExitResults) > 0 {
+			pendingResults := a.pendingLoopExitResults
+			a.pendingLoopExitResults = nil
+			if len(pendingResults) > 1 {
+				for _, skipped := range pendingResults[:len(pendingResults)-1] {
+					rejection := "Done rejected: multiple Done tool calls were emitted in the same batch; only the final Done request can be considered."
+					a.emitToTUI(ToolCallUpdateEvent{ID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+					a.emitToTUI(ToolResultEvent{CallID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
+					msg := message.Message{Role: "user", Content: rejection, Kind: "loop_notice"}
+					a.ctxMgr.Append(msg)
+					if a.recovery != nil {
+						a.persistAsync("main", msg)
+					}
+				}
+			}
+			pending := pendingResults[len(pendingResults)-1]
 			if a.loopState.Enabled {
 				if a.loopExitConditionsSatisfied(pending.AssistantContent) {
 					resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.AssistantContent)

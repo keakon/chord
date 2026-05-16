@@ -95,9 +95,15 @@ func isBlockedDevicePath(path string) bool {
 		rel := strings.TrimPrefix(cleaned, "/proc/")
 		parts := strings.Split(rel, "/")
 		if len(parts) == 3 && parts[1] == "fd" {
-			_, pidErr := strconv.Atoi(parts[0])
 			fd, fdErr := strconv.Atoi(parts[2])
-			return pidErr == nil && fdErr == nil && fd >= 0 && fd <= 2
+			if fdErr != nil || fd < 0 || fd > 2 {
+				return false
+			}
+			if parts[0] == "self" || parts[0] == "thread-self" {
+				return true
+			}
+			_, pidErr := strconv.Atoi(parts[0])
+			return pidErr == nil
 		}
 	}
 	return false

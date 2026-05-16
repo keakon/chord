@@ -702,6 +702,52 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 	}
 }
 
+func TestNextLoopAssessmentFromAssistantRejectsDoneMixedWithOtherToolCalls(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enable()
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.tools.Register(tools.NewDoneTool())
+	a.tools.Register(tools.ReadTool{})
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+
+	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
+		Role:    "assistant",
+		Content: "finished",
+		ToolCalls: []message.ToolCall{
+			{ID: "done-1", Name: tools.NameDone, Args: json.RawMessage(`{}`)},
+			{ID: "read-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"go.mod"}`)},
+		},
+		StopReason: "tool_calls",
+	})
+	if assessment == nil {
+		t.Fatal("assessment = nil, want continue assessment")
+	}
+	if assessment.Action != LoopAssessmentActionContinue {
+		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
+	}
+	if !strings.Contains(assessment.Message, "Done") || !strings.Contains(assessment.Message, "only tool call") {
+		t.Fatalf("assessment.Message = %q, want Done mixed-batch guidance", assessment.Message)
+	}
+	found := false
+	for _, reason := range assessment.Reasons {
+		if reason == "done_mixed_with_other_tools" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("assessment.Reasons = %v, want done_mixed_with_other_tools", assessment.Reasons)
+	}
+}
+
 func TestNextLoopAssessmentFromAssistantRepeatedSignatureContinues(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()

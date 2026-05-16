@@ -153,6 +153,26 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 	}
 }
 
+func TestInitialSetupDefaultsForProviderType(t *testing.T) {
+	defaults := initialSetupDefaultsForProviderType("responses")
+	if defaults.APIURL != "https://api.openai.com/v1/responses" || defaults.ProviderName != "openai" || defaults.ModelName != "gpt-5.5" {
+		t.Fatalf("responses defaults = %#v", defaults)
+	}
+	if defaults.InputLimit != 272000 || defaults.ContextLimit != 400000 || defaults.OutputLimit != 128000 {
+		t.Fatalf("responses limits = %#v", defaults)
+	}
+
+	defaults = initialSetupDefaultsForProviderType("messages")
+	if defaults.APIURL != "https://api.anthropic.com/v1/messages" || defaults.ProviderName != "anthropic" || defaults.ModelName != "claude-opus-4.7" {
+		t.Fatalf("messages defaults = %#v", defaults)
+	}
+
+	defaults = initialSetupDefaultsForProviderType("generate-content")
+	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.1-pro-preview" {
+		t.Fatalf("generate-content defaults = %#v", defaults)
+	}
+}
+
 func TestDefaultAPIURLForProviderType(t *testing.T) {
 	if got := defaultAPIURLForProviderType("generate-content"); got != "https://generativelanguage.googleapis.com/v1beta/models" {
 		t.Fatalf("defaultAPIURLForProviderType(generate-content) = %q", got)

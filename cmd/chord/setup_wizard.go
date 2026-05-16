@@ -162,7 +162,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		fmt.Fprintln(out, "  - /chat/completions  OpenAI Chat Completions compatible gateways (example: https://gateway.example.com/v1/chat/completions)")
 		fmt.Fprintln(out, "  - /models            Gemini Generate Content base path (example: https://generativelanguage.googleapis.com/v1beta/models)")
 		fmt.Fprintln(out)
-		defaultAPIURL := "https://api.openai.com/v1/responses"
+		defaultAPIURL := defaultAPIURLForProviderType("responses")
 		cfgInput.APIURL, err = promptText(termIO, "API URL", defaultAPIURL)
 		if err != nil {
 			return err
@@ -184,8 +184,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 			default:
 				cfgInput.ProviderType = "responses"
 			}
-			defaults = initialSetupDefaultsForAPIURL(defaultAPIURLForProviderType(cfgInput.ProviderType))
-			defaults.ProviderType = cfgInput.ProviderType
+			defaults = initialSetupDefaultsForProviderType(cfgInput.ProviderType)
 		}
 		cfgInput.Kind = initialSetupProviderAPIKey
 		cfgInput.ProviderName, err = promptText(termIO, "Provider name", defaults.ProviderName)

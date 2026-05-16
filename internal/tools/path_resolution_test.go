@@ -62,7 +62,8 @@ func TestIsBlockedDevicePath(t *testing.T) {
 		{path: "/dev/fd/2", want: true},
 		{path: "/dev/fd/3", want: false},
 		{path: "/proc/123/fd/0", want: true},
-		{path: "/proc/self/fd/0", want: false},
+		{path: "/proc/self/fd/0", want: true},
+		{path: "/proc/thread-self/fd/2", want: true},
 		{path: "/tmp/demo.txt", want: false},
 		{path: "relative.txt", want: false},
 	}

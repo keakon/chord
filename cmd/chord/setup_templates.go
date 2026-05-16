@@ -55,6 +55,7 @@ type initialSetupLimitYAML struct {
 type initialSetupEndpointDefaults struct {
 	ProviderName string
 	ProviderType string
+	APIURL       string
 	ModelName    string
 	ContextLimit int
 	InputLimit   int
@@ -173,26 +174,16 @@ func defaultAPIKeyEnvVar(providerName string) string {
 }
 
 func defaultAPIURLForProviderType(providerType string) string {
-	switch strings.TrimSpace(providerType) {
-	case "chat-completions":
-		return "https://gateway.example.com/v1/chat/completions"
-	case "messages":
-		return "https://api.anthropic.com/v1/messages"
-	case "generate-content":
-		return "https://generativelanguage.googleapis.com/v1beta/models"
-	case "responses":
-		fallthrough
-	default:
-		return "https://api.openai.com/v1/responses"
-	}
+	return initialSetupDefaultsForProviderType(providerType).APIURL
 }
 
-func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
-	switch inferProviderTypeFromAPIURL(apiURL) {
+func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpointDefaults {
+	switch strings.TrimSpace(providerType) {
 	case "chat-completions":
 		return initialSetupEndpointDefaults{
 			ProviderName: "openai",
 			ProviderType: "chat-completions",
+			APIURL:       "https://gateway.example.com/v1/chat/completions",
 			ModelName:    "gpt-5.5",
 			ContextLimit: 128000,
 			OutputLimit:  32768,
@@ -201,6 +192,7 @@ func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
 		return initialSetupEndpointDefaults{
 			ProviderName: "anthropic",
 			ProviderType: "messages",
+			APIURL:       "https://api.anthropic.com/v1/messages",
 			ModelName:    "claude-opus-4.7",
 			ContextLimit: 1000000,
 			OutputLimit:  64000,
@@ -209,6 +201,7 @@ func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
 		return initialSetupEndpointDefaults{
 			ProviderName: "gemini",
 			ProviderType: "generate-content",
+			APIURL:       "https://generativelanguage.googleapis.com/v1beta/models",
 			ModelName:    "gemini-3.1-pro-preview",
 			ContextLimit: 1048576,
 			OutputLimit:  65536,
@@ -219,10 +212,15 @@ func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
 		return initialSetupEndpointDefaults{
 			ProviderName: "openai",
 			ProviderType: "responses",
+			APIURL:       "https://api.openai.com/v1/responses",
 			ModelName:    "gpt-5.5",
 			ContextLimit: 400000,
 			InputLimit:   272000,
 			OutputLimit:  128000,
 		}
 	}
+}
+
+func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
+	return initialSetupDefaultsForProviderType(inferProviderTypeFromAPIURL(apiURL))
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // handleLoopAssessment processes the loop assessment result after an LLM round.
@@ -258,6 +259,21 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 			TriggerStopReason: strings.TrimSpace(msg.StopReason),
 		}
 	}
+	if len(msg.ToolCalls) > 0 {
+		doneCount := 0
+		mixedWithOtherTools := false
+		for _, tc := range msg.ToolCalls {
+			if tc.Name == tools.NameDone {
+				doneCount++
+				continue
+			}
+			mixedWithOtherTools = true
+		}
+		if doneCount > 0 && mixedWithOtherTools {
+			reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "done_mixed_with_other_tools", "terminal_reply"))
+			return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: `Done` must be the only tool call in the final batch that requests loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
+		}
+	}
 	reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_done_tool", "terminal_reply"))
 	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 }
@@ -469,6 +485,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("latest assistant reply stopped before loop completion criteria were met")
 		case "missing_done_tool":
 			addGap("end the round with a final `Done` tool call after writing the completion response")
+		case "done_mixed_with_other_tools":
+			addGap("`Done` must be the only tool call in the final exit-request batch")
 		case "missing_verification_status":
 			addGap("verification status is missing; run verification or include <verify-not-run>reason</verify-not-run>")
 		case "progress_continuation":
