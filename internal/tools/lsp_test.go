@@ -62,6 +62,8 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GrepTool{}).Description()
 	for _, want := range []string{
+		"pattern uses regex syntax, not glob syntax or plain text",
+		"Use glob only to filter filenames by basename.",
 		"Best for discovering candidate files, symbols, or text matches when the exact location is not known yet.",
 		"For semantic navigation at a known position (definition, references, implementations), prefer the Lsp tool",
 	} {
@@ -73,8 +75,13 @@ func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 
 func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GlobTool{}).Description()
-	if !strings.Contains(desc, "Best for discovering candidate files by path or extension before using Read, Grep, or Lsp.") {
-		t.Fatalf("Description() missing discovery guidance: %q", desc)
+	for _, want := range []string{
+		"pattern is a path glob, not a regular expression and not a file-contents search.",
+		"Best for discovering candidate files by path or extension before using Read, Grep, or Lsp.",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Description() missing %q: %q", want, desc)
+		}
 	}
 }
 

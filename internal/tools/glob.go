@@ -29,6 +29,7 @@ func (GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 
 func (GlobTool) Description() string {
 	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
+		" pattern is a path glob, not a regular expression and not a file-contents search." +
 		" Best for discovering candidate files by path or extension before using Read, Grep, or Lsp."
 }
 
@@ -38,7 +39,7 @@ func (GlobTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Path glob relative to path (e.g. \"**/*.go\", \"src/**/*.ts\"). Supports ** for recursive directory matching.",
+				"description": "Path glob relative to path (e.g. \"**/*.go\", \"src/**/*.ts\"). Supports ** for recursive directory matching. This is glob syntax, not regex and not a file-contents search.",
 			},
 			"path": map[string]any{
 				"type":        "string",
@@ -74,7 +75,7 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	fsys := os.DirFS(resolvedBaseDir)
 	matches, err := doublestar.Glob(fsys, a.Pattern)
 	if err != nil {
-		return "", fmt.Errorf("glob error: %w", err)
+		return "", fmt.Errorf("glob error: %w (pattern uses glob syntax like **/*.go, not regex syntax)", err)
 	}
 
 	// Filter out excluded directory entries and .gitignore matches.

@@ -35,7 +35,8 @@ func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (GrepTool) Description() string {
-	return "Search file contents using a regular expression. pattern uses regex syntax, not glob syntax; use glob only to filter filenames." +
+	return "Search file contents using a regular expression. pattern uses regex syntax, not glob syntax or plain text; escape literal special characters like \\[\\], (), and {} when needed." +
+		" Use glob only to filter filenames by basename." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
 		" For semantic navigation at a known position (definition, references, implementations), prefer the Lsp tool when the file type has LSP coverage."
@@ -47,7 +48,7 @@ func (GrepTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Regular expression for file contents. This is regex syntax, not a glob pattern (for example, use .* rather than * or **).",
+				"description": "Regular expression for file contents. This is regex syntax, not a glob pattern or plain text (for example, use .* rather than * or **, and escape literal [] as \\[\\]).",
 			},
 			"path": map[string]any{
 				"type":        "string",
@@ -77,7 +78,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 
 	re, err := regexp.Compile(a.Pattern)
 	if err != nil {
-		return "", fmt.Errorf("invalid regex pattern: %w", err)
+		return "", fmt.Errorf("invalid regex pattern: %w (pattern uses regex syntax; escape literal special characters such as [] as \\[\\])", err)
 	}
 
 	searchPath := a.FilePath

@@ -121,3 +121,29 @@ func TestGrepRejectsBlockedDevicePath(t *testing.T) {
 		t.Fatalf("error = %v, want blocked-device rejection", err)
 	}
 }
+
+func TestGrepInvalidRegexExplainsEscaping(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"pattern": "Args []byte", "path": "."})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected invalid regex error")
+	}
+	for _, want := range []string{"invalid regex pattern", `escape literal special characters such as [] as \[\]`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestGlobInvalidPatternExplainsGlobSyntax(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"pattern": "[", "path": "."})
+	_, err := GlobTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected invalid glob error")
+	}
+	for _, want := range []string{"glob error", "pattern uses glob syntax like **/*.go, not regex syntax"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
