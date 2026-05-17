@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -482,28 +483,21 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					}
 				}
 			} else {
-				resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.ArgsJSON, pending.AssistantContent)
-				if err != nil {
-					log.Warnf("Done confirmation failed error=%v", err)
-					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done requires user decision: confirmation failed; approve exit or deny with a reason to continue.", Status: ToolResultStatusSuccess})
-					return
-				} else if resp.Approved {
-					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", Status: ToolResultStatusSuccess})
-					a.emitActivity("main", ActivityIdle, "")
-					a.setIdleAndDrainPending()
-					return
-				} else {
-					reason := normalizeDenyReason(resp.DenyReason)
-					if reason == "" {
-						reason = "User rejected completion and requires more work before Done."
-					}
-					rejection := "Done rejected: " + reason
-					a.persistLoopDoneToolResult(pending.CallID, rejection)
-					a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
+				// Non-loop mode: Done is a direct completion signal.
+				// Show the report as the tool result and stop without confirmation UI.
+				report := strings.TrimSpace(pending.AssistantContent)
+				if parsed, err := tools.ParseDoneArgs(json.RawMessage(pending.ArgsJSON)); err == nil {
+					report = parsed.Report
 				}
+				if report == "" {
+					report = "Done"
+				}
+				a.persistLoopDoneToolResult(pending.CallID, report)
+				a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: ToolResultStatusSuccess})
+				a.emitActivity("main", ActivityIdle, "")
+				a.Shutdown(200 * time.Millisecond)
+				return
 			}
 		}
 

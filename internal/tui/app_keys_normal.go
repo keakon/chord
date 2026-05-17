@@ -33,6 +33,15 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		if cmd := m.cancelBusyAgent(); cmd != nil {
 			return cmd
 		}
+		if m.expectedAgentClose {
+			m.expectedAgentClose = false
+			m.markAgentIdle(m.focusedAgentIDOrMain())
+			m.inflightDraft = nil
+			m.pauseQueuedDraftDrainOnce = true
+			m.stopActiveAnimationIfIdle()
+			m.clearPendingQuit()
+			return nil
+		}
 		// If no turn to cancel, try to cancel an in-flight compaction
 		if m.agent != nil && m.agent.IsCompactionRunning() {
 			if m.agent.CancelCompaction() {

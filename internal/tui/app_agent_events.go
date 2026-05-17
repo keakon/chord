@@ -116,6 +116,15 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 		// Event channel closed (e.g. remote connection dropped). Reset streaming
 		// state so the UI does not stay stuck on "streaming (Xs)".
 		m.resetStreamingToIdle()
+		if m.expectedAgentClose {
+			m.expectedAgentClose = false
+			m.markAgentIdle(m.focusedAgentIDOrMain())
+			m.inflightDraft = nil
+			m.pauseQueuedDraftDrainOnce = true
+			m.stopActiveAnimationIfIdle()
+			m.clearPendingQuit()
+			return nil
+		}
 		if m.reconnectFunc != nil {
 			// Attempt auto-reconnect in the background.
 			fn := m.reconnectFunc
@@ -706,8 +715,14 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		block.ResultContent = evt.Result
 		block.Audit = evt.Audit.Clone()
-		if strings.EqualFold(evt.Name, "Done") && strings.TrimSpace(evt.DoneReport) != "" {
-			block.DoneReport = evt.DoneReport
+		if strings.EqualFold(evt.Name, "Done") {
+			if strings.TrimSpace(evt.DoneReport) != "" {
+				block.DoneReport = evt.DoneReport
+				m.expectedAgentClose = true
+			} else if strings.TrimSpace(evt.Result) != "" {
+				block.DoneReport = evt.Result
+				m.expectedAgentClose = true
+			}
 		}
 		if displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
 			block.Content = displayArgs

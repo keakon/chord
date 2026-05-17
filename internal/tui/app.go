@@ -163,21 +163,22 @@ type kittyTerminalMetrics struct {
 
 // Model is the top-level Bubble Tea model for the Chord TUI.
 type Model struct {
-	agent            agent.AgentForTUI
-	viewport         *Viewport
-	input            Input
-	mode             Mode
-	width            int
-	height           int
-	theme            Theme
-	keyMap           KeyMap
-	imeSwitchTarget  string // when set, use im-select <target> and save/restore previous IM
-	imeBeforeNormal  string // saved current IM before switching to English; restored when entering Insert
-	imeMu            *sync.Mutex
-	imeSeq           uint64
-	imeApplying      bool
-	imePending       bool
-	imePendingTarget string
+	agent              agent.AgentForTUI
+	viewport           *Viewport
+	input              Input
+	mode               Mode
+	width              int
+	height             int
+	expectedAgentClose bool
+	theme              Theme
+	keyMap             KeyMap
+	imeSwitchTarget    string // when set, use im-select <target> and save/restore previous IM
+	imeBeforeNormal    string // saved current IM before switching to English; restored when entering Insert
+	imeMu              *sync.Mutex
+	imeSeq             uint64
+	imeApplying        bool
+	imePending         bool
+	imePendingTarget   string
 
 	// Normal-mode Vim chord state
 	chord               chordState

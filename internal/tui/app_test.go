@@ -4179,6 +4179,83 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 	}
 }
 
+func TestMessagesToBlocksDoneToolRestoresMarkdownReport(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{{
+				ID:   "done-1",
+				Name: "Done",
+				Args: json.RawMessage(`{"report":"## Completion status\nAll requested work is finished\n\n- shipped\n- verified"}`),
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "done-1",
+			Content:    "Done approved",
+		},
+	}
+
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.ToolName != "Done" {
+		t.Fatalf("ToolName = %q, want Done", block.ToolName)
+	}
+	wantReport := "## Completion status\nAll requested work is finished\n\n- shipped\n- verified"
+	if got := block.DoneReport; got != wantReport {
+		t.Fatalf("DoneReport = %q, want %q", got, wantReport)
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{"Completion status", "All requested work is finished", "• shipped", "• verified"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected restored Done card to contain %q, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"Status:", "Done approved"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected restored Done card to omit %q, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+func TestMessagesToBlocksDelegateToolRestoresLinkedAgentMetadata(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{{
+				ID:   "delegate-1",
+				Name: "Delegate",
+				Args: json.RawMessage(`{"description":"review tests","agent_type":"reviewer"}`),
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "delegate-1",
+			Content:    `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
+		},
+	}
+
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.ToolName != "Delegate" {
+		t.Fatalf("ToolName = %q, want Delegate", block.ToolName)
+	}
+	if got := block.LinkedAgentID; got != "reviewer-2" {
+		t.Fatalf("LinkedAgentID = %q, want reviewer-2", got)
+	}
+	if got := block.LinkedTaskID; got != "adhoc-7" {
+		t.Fatalf("LinkedTaskID = %q, want adhoc-7", got)
+	}
+}
+
 func TestMessagesToBlocksUserPartsUseRawTextNotDisplayText(t *testing.T) {
 	msgs := []message.Message{{
 		Role: "user",
@@ -5907,6 +5984,27 @@ func TestPendingQuitTimerGenerationForQ(t *testing.T) {
 	_, _ = m.Update(clearPendingQuitMsg{generation: 2})
 	if m.pendingQuitBy != "" {
 		t.Fatalf("matching timer did not clear pending quit; pendingQuitBy = %q", m.pendingQuitBy)
+	}
+}
+
+func TestHandleAgentEventClosedAfterExpectedDoneCompletionDoesNotToastReconnect(t *testing.T) {
+	m := NewModel(nil)
+	m.agentHadEvent = true
+	m.expectedAgentClose = true
+	m.activities[m.focusedAgentIDOrMain()] = agent.AgentActivityEvent{Type: agent.ActivityExecuting}
+
+	cmd := m.handleAgentEvent(agentEventMsg{closed: true})
+	if cmd != nil {
+		t.Fatalf("handleAgentEvent(closed) returned cmd, want nil for expected close")
+	}
+	if m.expectedAgentClose {
+		t.Fatal("expectedAgentClose should be cleared after expected close")
+	}
+	if m.activeToast != nil {
+		t.Fatalf("activeToast = %+v, want nil", m.activeToast)
+	}
+	if got := m.activities[m.focusedAgentIDOrMain()].Type; got != agent.ActivityIdle {
+		t.Fatalf("activity = %q, want idle", got)
 	}
 }
 
