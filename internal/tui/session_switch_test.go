@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -1423,6 +1424,68 @@ func TestSessionRestoredEventClearsEditedFilesForEmptyNewSession(t *testing.T) {
 
 	if got := len(m.sidebar.agents[0].EditedFiles); got != 0 {
 		t.Fatalf("edited files count after new session restore = %d, want 0 (files=%v)", got, m.sidebar.agents[0].EditedFiles)
+	}
+}
+
+func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
+	backend := &sessionControlAgent{
+		messages: []message.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []message.ToolCall{{
+					ID:   "done-1",
+					Name: "Done",
+					Args: json.RawMessage(`{"report":"## Summary\n- shipped\n- verified"}`),
+				}},
+			},
+			{Role: "tool", ToolCallID: "done-1", Content: "Done approved"},
+			{
+				Role: "assistant",
+				ToolCalls: []message.ToolCall{{
+					ID:   "delegate-1",
+					Name: "Delegate",
+					Args: json.RawMessage(`{"description":"review tests","agent_type":"reviewer"}`),
+				}},
+			},
+			{Role: "tool", ToolCallID: "delegate-1", Content: `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.beginSessionSwitch("resume", "123")
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	var doneBlock, delegateBlock *Block
+	for _, block := range blocks {
+		switch block.ToolName {
+		case "Done":
+			doneBlock = block
+		case "Delegate":
+			delegateBlock = block
+		}
+	}
+	if doneBlock == nil {
+		t.Fatal("expected restored Done block")
+	}
+	if delegateBlock == nil {
+		t.Fatal("expected restored Delegate block")
+	}
+	plain := stripANSI(strings.Join(doneBlock.Render(100, ""), "\n"))
+	for _, want := range []string{"Summary", "• shipped", "• verified"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected restored Done block to contain %q, got:\n%s", want, plain)
+		}
+	}
+	if got := delegateBlock.LinkedAgentID; got != "reviewer-2" {
+		t.Fatalf("Delegate LinkedAgentID = %q, want reviewer-2", got)
+	}
+	if got := delegateBlock.LinkedTaskID; got != "adhoc-7" {
+		t.Fatalf("Delegate LinkedTaskID = %q, want adhoc-7", got)
 	}
 }
 

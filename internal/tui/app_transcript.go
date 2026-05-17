@@ -426,6 +426,11 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 					ToolID:    tc.ID,
 					Collapsed: true,
 				}
+				if tc.Name == tools.NameDone {
+					if parsed, err := tools.ParseDoneArgs(tc.Args); err == nil {
+						b.DoneReport = strings.TrimSpace(parsed.Report)
+					}
+				}
 				blocks = append(blocks, b)
 				toolIDToBlock[tc.ID] = b
 				*nextID++
@@ -449,6 +454,18 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 				}
 				if b.ToolName == tools.NameRead {
 					b.Collapsed = false
+				}
+				if b.ToolName == "Delegate" && b.ResultStatus != agent.ToolResultStatusError && strings.TrimSpace(b.ResultContent) != "" {
+					if handle, ok := parseTaskToolHandle(b.ResultContent); ok {
+						if handle.AgentID != "" {
+							b.LinkedAgentID = handle.AgentID
+						}
+						if handle.TaskID != "" {
+							b.LinkedTaskID = handle.TaskID
+						}
+					} else if id := parseTaskResultInstanceID(b.ResultContent); id != "" {
+						b.LinkedAgentID = id
+					}
 				}
 			}
 		}
