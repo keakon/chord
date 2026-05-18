@@ -488,7 +488,7 @@ func TestRunAuthLoginDevice_OpenAICodexHeadlessSuccess(t *testing.T) {
 	defer srv.Close()
 	serverURL = srv.URL
 
-	err := runOpenAICodexDeviceLogin(context.Background(), "codex", srv.Client(), serverURL+"/oauth/token", "client-123")
+	err := runOpenAICodexDeviceLoginWithOutput(context.Background(), "codex", srv.Client(), serverURL+"/oauth/token", "client-123", io.Discard)
 	if err != nil {
 		t.Fatalf("runAuthLoginDevice: %v", err)
 	}

@@ -120,19 +120,19 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
 				},
 			},
 		},
 	}
 
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
 	// Simulate agent configs with multiple models
@@ -141,7 +141,7 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 			Name:    "builder",
 			Variant: "balanced",
 			Models: map[string][]string{
-				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
 			},
 		},
 	}
@@ -150,29 +150,29 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 	factory := buildMainClientFactory(ac, cfg, auth)
 
 	// Request client for first model - should include all models in pool
-	client, modelID, ctxLimit, err := factory("openai/gpt-4o@balanced")
+	client, modelID, ctxLimit, err := factory("sample/model-alpha@balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
 
 	// Verify client is created with correct parameters
-	if modelID != "gpt-4o" {
-		t.Fatalf("modelID = %q, want gpt-4o", modelID)
+	if modelID != "model-alpha" {
+		t.Fatalf("modelID = %q, want model-alpha", modelID)
 	}
 	if ctxLimit != 128000 {
 		t.Fatalf("ctxLimit = %d, want 128000", ctxLimit)
 	}
 
-	// Verify model pool is configured - should start with gpt-4o, then others
+	// Verify model pool is configured - should start with model-alpha, then others
 	primary := client.PrimaryModelRef()
-	if primary != "openai/gpt-4o" {
-		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4o", primary)
+	if primary != "sample/model-alpha" {
+		t.Fatalf("PrimaryModelRef = %q, want sample/model-alpha", primary)
 	}
 
 	// Verify the pool includes all models (variant is tracked internally, not in ref)
 	status := client.LastCallStatus()
-	if status.SelectedModelRef != "openai/gpt-4o" {
-		t.Fatalf("SelectedModelRef = %q, want openai/gpt-4o", status.SelectedModelRef)
+	if status.SelectedModelRef != "sample/model-alpha" {
+		t.Fatalf("SelectedModelRef = %q, want sample/model-alpha", status.SelectedModelRef)
 	}
 
 	t.Logf("Model pool configured correctly: primary=%s", primary)
@@ -187,19 +187,19 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
 				},
 			},
 		},
 	}
 
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
 	agentConfigs := map[string]*config.AgentConfig{
@@ -207,7 +207,7 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 			Name:    "builder",
 			Variant: "balanced",
 			Models: map[string][]string{
-				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
 			},
 		},
 	}
@@ -216,18 +216,18 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 	factory := buildMainClientFactory(ac, cfg, auth)
 
 	// Request client for second model - pool should start from here
-	client, modelID, _, err := factory("openai/gpt-4.1")
+	client, modelID, _, err := factory("sample/model-beta")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
 
-	if modelID != "gpt-4.1" {
-		t.Fatalf("modelID = %q, want gpt-4.1", modelID)
+	if modelID != "model-beta" {
+		t.Fatalf("modelID = %q, want model-beta", modelID)
 	}
 
 	primary := client.PrimaryModelRef()
-	if primary != "openai/gpt-4.1" {
-		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4.1", primary)
+	if primary != "sample/model-beta" {
+		t.Fatalf("PrimaryModelRef = %q, want sample/model-beta", primary)
 	}
 
 	t.Logf("Pool correctly starts from selected model: %s", primary)
@@ -238,20 +238,20 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
 				},
 			},
 		},
 	}
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/missing", "openai/gpt-4o", "openai/gpt-4.1"},
+		[]string{"sample/missing", "sample/model-alpha", "sample/model-beta"},
 		"",
-		"openai/gpt-4.1",
+		"sample/model-beta",
 		cfg.Providers,
 		nil,
 		"",
@@ -266,11 +266,11 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 	if selectedIdx != 1 {
 		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
 	}
-	if got := pool[selectedIdx].ProviderConfig.Name() + "/" + pool[selectedIdx].ModelID; got != "openai/gpt-4.1" {
-		t.Fatalf("selected pool entry = %q, want openai/gpt-4.1", got)
+	if got := pool[selectedIdx].ProviderConfig.Name() + "/" + pool[selectedIdx].ModelID; got != "sample/model-beta" {
+		t.Fatalf("selected pool entry = %q, want sample/model-beta", got)
 	}
-	if got := pool[0].ProviderConfig.Name() + "/" + pool[0].ModelID; got != "openai/gpt-4o" {
-		t.Fatalf("first pool entry = %q, want openai/gpt-4o", got)
+	if got := pool[0].ProviderConfig.Name() + "/" + pool[0].ModelID; got != "sample/model-alpha" {
+		t.Fatalf("first pool entry = %q, want sample/model-alpha", got)
 	}
 }
 
@@ -279,20 +279,20 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
 				},
 			},
 		},
 	}
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
+		[]string{"sample/model-alpha", "sample/model-beta"},
 		"",
-		"openai/missing",
+		"sample/missing",
 		cfg.Providers,
 		nil,
 		"",
@@ -314,10 +314,10 @@ func TestBuildModelPoolSelectsMatchingVariantForDuplicateBaseModel(t *testing.T)
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"o3-pro": {
+					"model-gamma": {
 						Limit: config.ModelLimit{Context: 200000, Output: 100000},
 						Variants: map[string]config.ModelVariant{
 							"balanced": {},
@@ -331,9 +331,9 @@ func TestBuildModelPoolSelectsMatchingVariantForDuplicateBaseModel(t *testing.T)
 
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/o3-pro@balanced", "openai/o3-pro@high"},
+		[]string{"sample/model-gamma@balanced", "sample/model-gamma@high"},
 		"",
-		"openai/o3-pro@high",
+		"sample/model-gamma@high",
 		cfg.Providers,
 		nil,
 		"",
@@ -358,18 +358,18 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o": {
+					"model-alpha": {
 						Limit:    config.ModelLimit{Context: 128000, Output: 4096},
 						Variants: map[string]config.ModelVariant{"balanced": {}},
 					},
-					"gpt-4.1": {
+					"model-beta": {
 						Limit:    config.ModelLimit{Context: 200000, Output: 4096},
 						Variants: map[string]config.ModelVariant{"high": {}},
 					},
-					"o3-pro": {
+					"model-gamma": {
 						Limit:    config.ModelLimit{Context: 200000, Output: 100000},
 						Variants: map[string]config.ModelVariant{"high": {}},
 					},
@@ -380,9 +380,9 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/gpt-4o@balanced", "openai/gpt-4.1", "openai/o3-pro@high"},
+		[]string{"sample/model-alpha@balanced", "sample/model-beta", "sample/model-gamma@high"},
 		"high",
-		"openai/gpt-4.1",
+		"sample/model-beta",
 		cfg.Providers,
 		nil,
 		"",
@@ -404,9 +404,9 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 		pool[2].ProviderConfig.Name() + "/" + pool[2].ModelID + "@" + pool[2].Variant,
 	}
 	wantRefs := []string{
-		"openai/gpt-4o@balanced",
-		"openai/gpt-4.1@high",
-		"openai/o3-pro@high",
+		"sample/model-alpha@balanced",
+		"sample/model-beta@high",
+		"sample/model-gamma@high",
 	}
 	for i := range wantRefs {
 		if gotRefs[i] != wantRefs[i] {
@@ -420,7 +420,7 @@ func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
 					"gpt-5.5": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
@@ -432,9 +432,9 @@ func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
 
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/gpt-5.5", "openai/gpt-5"},
+		[]string{"sample/gpt-5.5", "sample/gpt-5"},
 		"",
-		"openai/gpt-5.5",
+		"sample/gpt-5.5",
 		cfg.Providers,
 		nil,
 		"",
@@ -469,37 +469,37 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
 				},
 			},
 		},
 	}
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	providerCfg := resolveProviderConfigForTest("openai", cfg.Providers["openai"], auth)
+	providerCfg := resolveProviderConfigForTest("sample", cfg.Providers["sample"], auth)
 	selectedImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "selected failed"}}}}
 	fallbackOneImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "fallback one failed"}}}}
 	fallbackTwoImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}, {resp: &message.Response{Content: "next call starts here"}}}}
 
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+		[]string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
 		"",
-		"openai/gpt-4.1",
+		"sample/model-beta",
 		cfg.Providers,
 		auth,
 		"",
 		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
 			switch provName {
-			case "openai":
+			case "sample":
 				return providerCfg, nil
 			default:
 				return nil, os.ErrNotExist
@@ -507,11 +507,11 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 		},
 		func(_ string, _ config.ProviderConfig, _ *llm.ProviderConfig, modelID string) (llm.Provider, error) {
 			switch modelID {
-			case "gpt-4o":
+			case "model-alpha":
 				return fallbackTwoImpl, nil
-			case "gpt-4.1":
+			case "model-beta":
 				return selectedImpl, nil
-			case "o3-pro":
+			case "model-gamma":
 				return fallbackOneImpl, nil
 			default:
 				return nil, os.ErrNotExist
@@ -526,12 +526,12 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
 	}
 
-	client := llm.NewClient(providerCfg, selectedImpl, "gpt-4.1", 4096, "")
+	client := llm.NewClient(providerCfg, selectedImpl, "model-beta", 4096, "")
 	client.SetOutputTokenMax(cfg.MaxOutputTokens)
 	client.SetModelPool(pool, selectedIdx)
 
-	if got := client.PrimaryModelRef(); got != "openai/gpt-4.1" {
-		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4.1", got)
+	if got := client.PrimaryModelRef(); got != "sample/model-beta" {
+		t.Fatalf("PrimaryModelRef = %q, want sample/model-beta", got)
 	}
 
 	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
@@ -545,14 +545,14 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 	if !st.FallbackTriggered {
 		t.Fatal("expected fallback across rotated model pool")
 	}
-	if st.SelectedModelRef != "openai/gpt-4.1" {
-		t.Fatalf("SelectedModelRef = %q, want openai/gpt-4.1", st.SelectedModelRef)
+	if st.SelectedModelRef != "sample/model-beta" {
+		t.Fatalf("SelectedModelRef = %q, want sample/model-beta", st.SelectedModelRef)
 	}
-	if st.RunningModelRef != "openai/gpt-4o" {
-		t.Fatalf("RunningModelRef = %q, want openai/gpt-4o", st.RunningModelRef)
+	if st.RunningModelRef != "sample/model-alpha" {
+		t.Fatalf("RunningModelRef = %q, want sample/model-alpha", st.RunningModelRef)
 	}
 
-	// After success on gpt-4o, the next request should start from that rotated
+	// After success on model-alpha, the next request should start from that rotated
 	// pool entry even though the client object still stores the original selected
 	// head as its primary config surface.
 	resp, err = client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "again"}}, nil, nil)
@@ -563,11 +563,11 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 		t.Fatalf("second response = %#v, want next call starts here", resp)
 	}
 	st = client.LastCallStatus()
-	if st.SelectedModelRef != "openai/gpt-4o" {
-		t.Fatalf("second SelectedModelRef = %q, want openai/gpt-4o", st.SelectedModelRef)
+	if st.SelectedModelRef != "sample/model-alpha" {
+		t.Fatalf("second SelectedModelRef = %q, want sample/model-alpha", st.SelectedModelRef)
 	}
-	if st.RunningModelRef != "openai/gpt-4o" {
-		t.Fatalf("second RunningModelRef = %q, want openai/gpt-4o", st.RunningModelRef)
+	if st.RunningModelRef != "sample/model-alpha" {
+		t.Fatalf("second RunningModelRef = %q, want sample/model-alpha", st.RunningModelRef)
 	}
 }
 
@@ -579,17 +579,17 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 				},
 			},
 		},
 	}
 
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
 	agentConfigs := map[string]*config.AgentConfig{
@@ -597,7 +597,7 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 			Name:    "builder",
 			Variant: "balanced",
 			Models: map[string][]string{
-				"standard": {"openai/gpt-4o"}, // single model
+				"standard": {"sample/model-alpha"}, // single model
 			},
 		},
 	}
@@ -605,15 +605,15 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
 	factory := buildMainClientFactory(ac, cfg, auth)
 
-	client, _, _, err := factory("openai/gpt-4o")
+	client, _, _, err := factory("sample/model-alpha")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
 
 	// Single model pool - pool should have just one entry
 	primary := client.PrimaryModelRef()
-	if primary != "openai/gpt-4o" {
-		t.Fatalf("PrimaryModelRef = %q, want openai/gpt-4o", primary)
+	if primary != "sample/model-alpha" {
+		t.Fatalf("PrimaryModelRef = %q, want sample/model-alpha", primary)
 	}
 
 	t.Logf("Single model pool handled correctly: %s", primary)
@@ -627,19 +627,19 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"o3-pro":  {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
 				},
 			},
 		},
 	}
 
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
 	agentConfigs := map[string]*config.AgentConfig{
@@ -647,7 +647,7 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 			Name:    "builder",
 			Variant: "balanced",
 			Models: map[string][]string{
-				"standard": {"openai/gpt-4o", "openai/gpt-4.1", "openai/o3-pro"},
+				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
 			},
 		},
 	}
@@ -656,18 +656,18 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 	factory := buildMainClientFactory(ac, cfg, auth)
 
 	// Request client for third model - pool should wrap around
-	client, modelID, _, err := factory("openai/o3-pro")
+	client, modelID, _, err := factory("sample/model-gamma")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
 
-	if modelID != "o3-pro" {
-		t.Fatalf("modelID = %q, want o3-pro", modelID)
+	if modelID != "model-gamma" {
+		t.Fatalf("modelID = %q, want model-gamma", modelID)
 	}
 
 	primary := client.PrimaryModelRef()
-	if primary != "openai/o3-pro" {
-		t.Fatalf("PrimaryModelRef = %q, want openai/o3-pro", primary)
+	if primary != "sample/model-gamma" {
+		t.Fatalf("PrimaryModelRef = %q, want sample/model-gamma", primary)
 	}
 
 	t.Logf("Pool wrap-around handled correctly: %s", primary)
@@ -679,35 +679,35 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
-			"openai": {
+			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"gpt-4o":  {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"gpt-4.1": {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
 				},
 			},
 		},
 	}
 	auth := config.AuthConfig{
-		"openai": []config.ProviderCredential{{APIKey: "test-key"}},
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	providerCfg := resolveProviderConfigForTest("openai", cfg.Providers["openai"], auth)
-	primaryImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "primary failed"}}}}
+	providerCfg := resolveProviderConfigForTest("sample", cfg.Providers["sample"], auth)
+	primaryImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "upstream unavailable"}}}}
 	fallbackImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}}}
 
 	pool, selectedIdx := buildModelPool(
 		context.Background(),
-		[]string{"openai/gpt-4o", "openai/gpt-4.1"},
+		[]string{"sample/model-alpha", "sample/model-beta"},
 		"",
-		"openai/gpt-4o",
+		"sample/model-alpha",
 		cfg.Providers,
 		auth,
 		"",
 		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
 			switch provName {
-			case "openai":
+			case "sample":
 				return providerCfg, nil
 			default:
 				return nil, os.ErrNotExist
@@ -715,9 +715,9 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 		},
 		func(_ string, _ config.ProviderConfig, _ *llm.ProviderConfig, modelID string) (llm.Provider, error) {
 			switch modelID {
-			case "gpt-4o":
+			case "model-alpha":
 				return primaryImpl, nil
-			case "gpt-4.1":
+			case "model-beta":
 				return fallbackImpl, nil
 			default:
 				return nil, os.ErrNotExist
@@ -732,7 +732,7 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 		t.Fatalf("selectedIdx = %d, want 0", selectedIdx)
 	}
 
-	client := llm.NewClient(providerCfg, primaryImpl, "gpt-4o", 4096, "")
+	client := llm.NewClient(providerCfg, primaryImpl, "model-alpha", 4096, "")
 	client.SetOutputTokenMax(cfg.MaxOutputTokens)
 	client.SetModelPool(pool, selectedIdx)
 
@@ -747,8 +747,8 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 	if !st.FallbackTriggered {
 		t.Fatal("expected first request to trigger fallback across builder model pool")
 	}
-	if st.RunningModelRef != "openai/gpt-4.1" {
-		t.Fatalf("RunningModelRef = %q, want openai/gpt-4.1", st.RunningModelRef)
+	if st.RunningModelRef != "sample/model-beta" {
+		t.Fatalf("RunningModelRef = %q, want sample/model-beta", st.RunningModelRef)
 	}
 }
 
@@ -768,8 +768,8 @@ func newTestAppContextWithBuilder(
 		t.Fatalf("mkdir %s: %v", sessionDir, err)
 	}
 
-	providerCfg := llm.NewProviderConfig("openai", cfg.Providers["openai"], []string{"test-key"})
-	llmClient := llm.NewClient(providerCfg, &stubProviderImpl{}, "gpt-4o", 4096, "")
+	providerCfg := llm.NewProviderConfig("sample", cfg.Providers["sample"], []string{"test-key"})
+	llmClient := llm.NewClient(providerCfg, &stubProviderImpl{}, "model-alpha", 4096, "")
 	ctxMgr := ctxmgr.NewManager(128000, 0)
 
 	// Create pool policy
@@ -783,7 +783,7 @@ func newTestAppContextWithBuilder(
 		tools.NewRegistry(),
 		&hook.NoopEngine{},
 		sessionDir,
-		"gpt-4o",
+		"model-alpha",
 		projectRoot,
 		cfg,
 		nil,
@@ -803,8 +803,8 @@ func newTestAppContextWithBuilder(
 		CtxMgr:      ctxMgr,
 		MainAgent:   mainAgent,
 		ProviderCache: &providerCache{
-			m:     map[string]*llm.ProviderConfig{"openai": providerCfg},
-			impls: map[string]llm.Provider{"openai": &stubProviderImpl{}},
+			m:     map[string]*llm.ProviderConfig{"sample": providerCfg},
+			impls: map[string]llm.Provider{"sample": &stubProviderImpl{}},
 			auth:  auth,
 			cfg:   cfg,
 		},

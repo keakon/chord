@@ -7,21 +7,21 @@ import (
 
 func TestLookupConfiguredModelVariantValidatesVariant(t *testing.T) {
 	providers := map[string]ProviderConfig{
-		"openai": {
+		"sample": {
 			Models: map[string]ModelConfig{
-				"gpt-4.1": {
+				"model-beta": {
 					Variants: map[string]ModelVariant{"high": {}},
 				},
 			},
 		},
 	}
 
-	providerCfg, modelCfg, err := LookupConfiguredModelVariant(providers, "openai", "gpt-4.1", "high")
+	providerCfg, modelCfg, err := LookupConfiguredModelVariant(providers, "sample", "model-beta", "high")
 	if err != nil {
 		t.Fatalf("LookupConfiguredModelVariant: %v", err)
 	}
-	if _, ok := providerCfg.Models["gpt-4.1"]; !ok {
-		t.Fatal("expected returned provider config to include gpt-4.1")
+	if _, ok := providerCfg.Models["model-beta"]; !ok {
+		t.Fatal("expected returned provider config to include model-beta")
 	}
 	if _, ok := modelCfg.Variants["high"]; !ok {
 		t.Fatal("expected returned model config to include high variant")
@@ -30,14 +30,14 @@ func TestLookupConfiguredModelVariantValidatesVariant(t *testing.T) {
 
 func TestValidateConfiguredVariantRejectsUnknownVariant(t *testing.T) {
 	modelCfg := ModelConfig{}
-	if err := ValidateConfiguredVariant(modelCfg, "openai", "gpt-4.1", "high"); err == nil || !strings.Contains(err.Error(), `variant "high" not found for model "gpt-4.1" in provider "openai"`) {
+	if err := ValidateConfiguredVariant(modelCfg, "sample", "model-beta", "high"); err == nil || !strings.Contains(err.Error(), `variant "high" not found for model "model-beta" in provider "sample"`) {
 		t.Fatalf("ValidateConfiguredVariant err = %v, want unknown variant error", err)
 	}
 }
 
 func TestResolveConfiguredModelRefRequiresProvider(t *testing.T) {
 	providers := map[string]ProviderConfig{
-		"openai": {
+		"sample": {
 			Models: map[string]ModelConfig{
 				"shared": {},
 			},

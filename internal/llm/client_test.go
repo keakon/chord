@@ -2048,7 +2048,7 @@ func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
 		},
 	}, []string{"fb-key"})
 
-	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "primary failed"}}}}
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "upstream unavailable"}}}}
 	fallbackImpl := &scriptedProvider{calls: []scriptedCall{
 		{resp: &message.Response{Content: "fallback first"}},
 		{resp: &message.Response{Content: "fallback second"}},
@@ -3220,7 +3220,7 @@ func TestCompleteStreamFallbackVariantCarriesPromptCacheTuning(t *testing.T) {
 			},
 		},
 	}, []string{"k2"})
-	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "primary failed"}}}}
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 500, Message: "upstream unavailable"}}}}
 	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "fallback ok"}, expectTuning: &expect}}}
 	c := NewClient(primaryCfg, primaryImpl, "claude-primary", 4096, "sys")
 	c.SetFallbackModels([]FallbackModel{{

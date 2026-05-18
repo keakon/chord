@@ -8,9 +8,9 @@ func TestSplitRunningModelRef(t *testing.T) {
 		ref                   string
 		provider, model, var_ string
 	}{
-		{name: "provider model variant", ref: "qt/gpt-5.5@xhigh", provider: "qt", model: "gpt-5.5", var_: "xhigh"},
+		{name: "provider model variant", ref: "qt/model-alpha@balanced", provider: "qt", model: "model-alpha", var_: "balanced"},
 		{name: "provider nested model", ref: "anthropic/claude/opus@fast", provider: "anthropic", model: "claude/opus", var_: "fast"},
-		{name: "model only variant", ref: "gpt-5.5@mini", model: "gpt-5.5", var_: "mini"},
+		{name: "model only variant", ref: "model-alpha@mini", model: "model-alpha", var_: "mini"},
 		{name: "trim empty", ref: "  ", provider: "", model: "", var_: ""},
 	}
 	for _, tc := range tests {
@@ -27,9 +27,9 @@ func TestEnsureRefShowsVariant(t *testing.T) {
 	tests := []struct {
 		name, ref, active, want string
 	}{
-		{name: "appends active variant", ref: "qt/gpt-5.5", active: "xhigh", want: "qt/gpt-5.5@xhigh"},
-		{name: "keeps existing variant", ref: "qt/gpt-5.5@high", active: "xhigh", want: "qt/gpt-5.5@high"},
-		{name: "ignores blank active", ref: "qt/gpt-5.5", active: " ", want: "qt/gpt-5.5"},
+		{name: "appends active variant", ref: "qt/model-alpha", active: "balanced", want: "qt/model-alpha@balanced"},
+		{name: "keeps existing variant", ref: "qt/model-alpha@high", active: "balanced", want: "qt/model-alpha@high"},
+		{name: "ignores blank active", ref: "qt/model-alpha", active: " ", want: "qt/model-alpha"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,11 +44,11 @@ func TestEnsureRefShowsMatchingVariant(t *testing.T) {
 	tests := []struct {
 		name, running, selected, active, want string
 	}{
-		{name: "matching selected appends", running: "qt/gpt-5.5", selected: "qt/gpt-5.5", active: "xhigh", want: "qt/gpt-5.5@xhigh"},
-		{name: "different provider unchanged", running: "fallback/gpt-5.5", selected: "qt/gpt-5.5", active: "xhigh", want: "fallback/gpt-5.5"},
-		{name: "different model unchanged", running: "qt/gpt-4.1", selected: "qt/gpt-5.5", active: "xhigh", want: "qt/gpt-4.1"},
-		{name: "existing variant unchanged", running: "qt/gpt-5.5@high", selected: "qt/gpt-5.5", active: "xhigh", want: "qt/gpt-5.5@high"},
-		{name: "missing provider unchanged", running: "gpt-5.5", selected: "qt/gpt-5.5", active: "xhigh", want: "gpt-5.5"},
+		{name: "matching selected appends", running: "qt/model-alpha", selected: "qt/model-alpha", active: "balanced", want: "qt/model-alpha@balanced"},
+		{name: "different provider unchanged", running: "fallback/model-alpha", selected: "qt/model-alpha", active: "balanced", want: "fallback/model-alpha"},
+		{name: "different model unchanged", running: "qt/model-beta", selected: "qt/model-alpha", active: "balanced", want: "qt/model-beta"},
+		{name: "existing variant unchanged", running: "qt/model-alpha@high", selected: "qt/model-alpha", active: "balanced", want: "qt/model-alpha@high"},
+		{name: "missing provider unchanged", running: "model-alpha", selected: "qt/model-alpha", active: "balanced", want: "model-alpha"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,9 +61,9 @@ func TestEnsureRefShowsMatchingVariant(t *testing.T) {
 
 func TestEnsureRefShowsProvider(t *testing.T) {
 	tests := []struct{ running, selected, want string }{
-		{running: "gpt-5.5@xhigh", selected: "qt/gpt-5.5@xhigh", want: "qt/gpt-5.5@xhigh"},
-		{running: "other/gpt-5.5", selected: "qt/gpt-5.5", want: "other/gpt-5.5"},
-		{running: "gpt-5.5", selected: "gpt-5.5", want: "gpt-5.5"},
+		{running: "model-alpha@balanced", selected: "qt/model-alpha@balanced", want: "qt/model-alpha@balanced"},
+		{running: "other/model-alpha", selected: "qt/model-alpha", want: "other/model-alpha"},
+		{running: "model-alpha", selected: "model-alpha", want: "model-alpha"},
 	}
 	for _, tc := range tests {
 		if got := EnsureRefShowsProvider(tc.running, tc.selected); got != tc.want {
@@ -80,7 +80,7 @@ func TestTruncateRunningModelRef(t *testing.T) {
 	}{
 		{name: "fits unchanged", ref: "qt/gpt-5", max: 20, want: "qt/gpt-5"},
 		{name: "strips nested model path", ref: "anthropic/family/claude-opus-4.6@high", max: 28, want: "anthropic/claude-opus-4.6"},
-		{name: "drops variant then provider", ref: "qt/very-long-model-name@xhigh", max: 20, want: "very-long-model-name"},
+		{name: "drops variant then provider", ref: "qt/very-long-model-name@balanced", max: 20, want: "very-long-model-name"},
 		{name: "ellipsis fallback", ref: "provider/supercalifragilistic", max: 10, want: "superca..."},
 		{name: "non-positive default", ref: "qt/gpt-5", max: 0, want: "qt/gpt-5"},
 	}
@@ -94,8 +94,8 @@ func TestTruncateRunningModelRef(t *testing.T) {
 }
 
 func TestFormatRunningModelRefForDisplay(t *testing.T) {
-	got := FormatRunningModelRefForDisplay("gpt-5.5", "qt/gpt-5.5", "xhigh", 30)
-	if got != "qt/gpt-5.5@xhigh" {
+	got := FormatRunningModelRefForDisplay("model-alpha", "qt/model-alpha", "balanced", 30)
+	if got != "qt/model-alpha@balanced" {
 		t.Fatalf("FormatRunningModelRefForDisplay = %q", got)
 	}
 }

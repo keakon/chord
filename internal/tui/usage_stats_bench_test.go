@@ -18,9 +18,9 @@ func (a *usageStatsBenchAgent) GetUsageStats() analytics.SessionStats {
 		ReasoningTokens:  5600,
 		EstimatedCost:    12.34,
 		ByModel: map[string]*analytics.ModelStats{
-			"gpt-4.1": {Calls: 20, InputTokens: 60000, OutputTokens: 300000, EstimatedCost: 7.25},
-			"gpt-5.5": {Calls: 12, InputTokens: 35000, OutputTokens: 200000, EstimatedCost: 3.10},
-			"claude":  {Calls: 10, InputTokens: 28456, OutputTokens: 154321, EstimatedCost: 1.99},
+			"model-beta": {Calls: 20, InputTokens: 60000, OutputTokens: 300000, EstimatedCost: 7.25},
+			"gpt-5.5":    {Calls: 12, InputTokens: 35000, OutputTokens: 200000, EstimatedCost: 3.10},
+			"claude":     {Calls: 10, InputTokens: 28456, OutputTokens: 154321, EstimatedCost: 1.99},
 		},
 		ByAgent: map[string]*analytics.AgentStats{
 			"main":     {LLMCalls: 18, InputTokens: 50000, OutputTokens: 250000, EstimatedCost: 5.60},

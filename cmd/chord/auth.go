@@ -393,6 +393,20 @@ func runOpenAICodexDeviceLogin(
 	tokenURL string,
 	clientID string,
 ) error {
+	return runOpenAICodexDeviceLoginWithOutput(parentCtx, providerName, client, tokenURL, clientID, os.Stderr)
+}
+
+func runOpenAICodexDeviceLoginWithOutput(
+	parentCtx context.Context,
+	providerName string,
+	client *http.Client,
+	tokenURL string,
+	clientID string,
+	out io.Writer,
+) error {
+	if out == nil {
+		out = io.Discard
+	}
 	issuer := strings.TrimSuffix(strings.TrimRight(tokenURL, "/"), "/oauth/token")
 	if issuer == "" || issuer == tokenURL {
 		return fmt.Errorf("provider %q has unsupported token_url %q for built-in Codex device login", providerName, tokenURL)
@@ -406,9 +420,9 @@ func runOpenAICodexDeviceLogin(
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "Device login URL:\n%s\n", issuer+"/codex/device")
-	fmt.Fprintf(os.Stderr, "\nuser_code: %s\n", deviceResp.UserCode)
-	fmt.Fprintln(os.Stderr, "Complete authorization on another device that is already signed in.")
+	fmt.Fprintf(out, "Device login URL:\n%s\n", issuer+"/codex/device")
+	fmt.Fprintf(out, "\nuser_code: %s\n", deviceResp.UserCode)
+	fmt.Fprintln(out, "Complete authorization on another device that is already signed in.")
 
 	interval := openAICodexDevicePollingInterval(deviceResp.Interval)
 	ctx, cancel := context.WithTimeout(parentCtx, 15*time.Minute)
@@ -443,13 +457,13 @@ func runOpenAICodexDeviceLogin(
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "\nLogin successful. Credentials written to %s\n", authPath)
-	fmt.Fprintf(os.Stderr, "provider: %s\n", providerName)
+	fmt.Fprintf(out, "\nLogin successful. Credentials written to %s\n", authPath)
+	fmt.Fprintf(out, "provider: %s\n", providerName)
 	if cred.Email != "" {
-		fmt.Fprintf(os.Stderr, "email: %s\n", cred.Email)
+		fmt.Fprintf(out, "email: %s\n", cred.Email)
 	}
 	if cred.AccountID != "" {
-		fmt.Fprintf(os.Stderr, "account_id: %s\n", cred.AccountID)
+		fmt.Fprintf(out, "account_id: %s\n", cred.AccountID)
 	}
 	return nil
 }
