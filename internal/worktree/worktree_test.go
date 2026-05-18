@@ -93,6 +93,14 @@ func setupTestLocator(t *testing.T) *config.PathLocator {
 	}
 }
 
+func withGitIdentityEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.invalid")
+}
+
 func TestCreate_Basic(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -360,6 +368,7 @@ func TestFinish_Basic_MergesOntoThenSquashesAndReclaims(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
@@ -423,6 +432,7 @@ func TestFinish_WhenWorktreeOnlyBehindMain_ReclaimsWithoutSquashCommit(t *testin
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
@@ -468,6 +478,7 @@ func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
@@ -493,6 +504,7 @@ func TestFinish_RestoresOriginalMainBranchAfterSquashFinish(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 
 	runTestGit(t, repo, "checkout", "-q", "-b", "release")
 	runTestGit(t, repo, "checkout", "-q", "main")
@@ -792,6 +804,7 @@ func TestFinish_NoNetTreeDiff_ReclaimsWithoutChangingMain(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
@@ -873,6 +886,7 @@ func TestFinish_MergeConflictError_LeavesWorktreeForResolution(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
@@ -978,6 +992,7 @@ func TestFinish_NoNetDiff_ReclaimsWithoutChangingMain(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
