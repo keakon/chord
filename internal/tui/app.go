@@ -81,6 +81,8 @@ type statusBarTickMsg struct {
 	generation uint64
 }
 
+const codexActiveRateLimitPollInterval = time.Minute
+
 type toastTickMsg struct{ generation uint64 }
 
 // clearPendingQuitMsg is sent after pendingQuitWindow (2s) to auto-clear the
@@ -325,7 +327,6 @@ type Model struct {
 
 	// keyPoolTickGen invalidates in-flight key-pool refresh ticks when agent events arrive.
 	keyPoolTickGen int
-
 	// reconnectFunc, when set, is called asynchronously after a connection drop.
 	// It should return a new AgentForTUI on success, or an error after exhausting retries.
 	reconnectFunc func() (agent.AgentForTUI, error)
@@ -893,20 +894,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// If a Codex rate-limit reset timestamp has been reached, trigger a usage poll
-		// so the sidebar can move from an expired window to the new one quickly.
+		// so the sidebar can move from an expired window to the new one quickly. While
+		// the agent is active, also poll at most once per minute in case the Responses
+		// stream stops emitting inline rate_limits events after a quota window recovers.
 		type codexUsagePoller interface {
 			WakeCodexRateLimitPolling()
 		}
 		if p, ok := m.agent.(codexUsagePoller); ok && m.agent != nil {
 			now := time.Now()
+			wake := false
 			if snap := m.agent.CurrentRateLimitSnapshot(); snap != nil {
 				expiredPrimary := snap.Primary != nil && !snap.Primary.ResetsAt.IsZero() && !snap.Primary.ResetsAt.After(now)
 				expiredSecondary := snap.Secondary != nil && !snap.Secondary.ResetsAt.IsZero() && !snap.Secondary.ResetsAt.After(now)
-				if expiredPrimary || expiredSecondary {
-					p.WakeCodexRateLimitPolling()
-				}
+				staleSnapshot := !snap.CapturedAt.IsZero() && now.Sub(snap.CapturedAt) >= codexActiveRateLimitPollInterval
+				wake = expiredPrimary || expiredSecondary || (staleSnapshot && m.hasActiveAgentActivity())
+			}
+			if wake {
+				p.WakeCodexRateLimitPolling()
 			}
 		}
+
 		m.invalidateUsageStatsCache()
 		m.refreshSidebar()
 		return m, m.scheduleKeyPoolTick()

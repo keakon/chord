@@ -20,6 +20,15 @@ func activityNeedsVisualAnimation(activity agent.ActivityType) bool {
 	}
 }
 
+func (m Model) hasActiveAgentActivity() bool {
+	for _, act := range m.activities {
+		if act.Type != "" && act.Type != agent.ActivityIdle {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) hasActiveAnimation() bool {
 	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
 		return true

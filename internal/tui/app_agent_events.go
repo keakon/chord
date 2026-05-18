@@ -1217,13 +1217,23 @@ func (m *Model) scheduleKeyPoolTick() tea.Cmd {
 	if kp, ok := m.agent.(keyPooler); ok {
 		d = kp.KeyPoolNextTransition()
 	}
-	if snapDelay := nextRateLimitSnapshotDisplayTransition(m.agent.CurrentRateLimitSnapshot(), now); snapDelay > 0 && (d == 0 || snapDelay < d) {
+	const minWait = 200 * time.Millisecond
+	snap := m.agent.CurrentRateLimitSnapshot()
+	if snapDelay := nextRateLimitSnapshotDisplayTransition(snap, now); snapDelay > 0 && (d == 0 || snapDelay < d) {
 		d = snapDelay
+	}
+	if m.hasActiveAgentActivity() && snap != nil && !snap.CapturedAt.IsZero() {
+		pollDelay := snap.CapturedAt.Add(codexActiveRateLimitPollInterval).Sub(now)
+		if pollDelay <= 0 {
+			pollDelay = codexActiveRateLimitPollInterval
+		}
+		if d == 0 || pollDelay < d {
+			d = pollDelay
+		}
 	}
 	if d <= 0 {
 		return nil
 	}
-	const minWait = 200 * time.Millisecond
 	if d < minWait {
 		d = minWait
 	}

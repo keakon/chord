@@ -32,6 +32,7 @@ type infoPanelAgent struct {
 	invokedSkills       []*skill.Meta
 	keysConfirmed       int
 	keysTotal           int
+	wakeRateLimitCalls  int
 }
 
 func newInfoPanelAgent() *infoPanelAgent {
@@ -80,6 +81,10 @@ func (a *infoPanelAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnaps
 	return a.rateLimitSnapshot
 }
 
+func (a *infoPanelAgent) WakeCodexRateLimitPolling() {
+	a.wakeRateLimitCalls++
+}
+
 func (a *infoPanelAgent) KeyStats() (confirmed, total int) {
 	return a.keysConfirmed, a.keysTotal
 }
@@ -90,6 +95,26 @@ func (a *infoPanelAgent) LSPServerList() []agent.LSPServerDisplay {
 
 func (a *infoPanelAgent) MCPServerList() []agent.MCPServerDisplay {
 	return append([]agent.MCPServerDisplay(nil), a.mcpRows...)
+}
+
+func TestKeyPoolTickWakesCodexRateLimitPollingWhileAgentActive(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.rateLimitSnapshot = &ratelimit.KeyRateLimitSnapshot{CapturedAt: time.Now().Add(-codexActiveRateLimitPollInterval)}
+	m := NewModel(backend)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	updated, _ := m.Update(keyPoolTickMsg{gen: m.keyPoolTickGen})
+	m = *(updated.(*Model))
+
+	if backend.wakeRateLimitCalls != 1 {
+		t.Fatalf("WakeCodexRateLimitPolling calls = %d, want 1", backend.wakeRateLimitCalls)
+	}
+
+	backend.rateLimitSnapshot.CapturedAt = time.Now()
+	_, _ = m.Update(keyPoolTickMsg{gen: m.keyPoolTickGen})
+	if backend.wakeRateLimitCalls != 1 {
+		t.Fatalf("WakeCodexRateLimitPolling calls with fresh snapshot = %d, want 1", backend.wakeRateLimitCalls)
+	}
 }
 
 func TestRenderInfoPanelCollapsibleHeaderUsesExtraSpaceAfterSummaryDot(t *testing.T) {
