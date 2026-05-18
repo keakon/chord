@@ -97,6 +97,28 @@ func (a *infoPanelAgent) MCPServerList() []agent.MCPServerDisplay {
 	return append([]agent.MCPServerDisplay(nil), a.mcpRows...)
 }
 
+func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 1_000
+	backend.usage.InputTokens = 1_000
+	m := NewModel(backend)
+
+	first := stripANSI(m.renderInfoPanel(40, 24))
+	if !strings.Contains(first, "1.0k") {
+		t.Fatalf("initial info panel should include initial token usage, got %q", first)
+	}
+	backend.contextCurrent = 2_000
+	backend.usage.InputTokens = 2_000
+	m.cachedInfoPanelFP = m.infoPanelFingerprint(40, 24)
+	m.cachedInfoPanelOut = first
+
+	m.handleAgentEvent(agentEventMsg{event: agent.UsageUpdatedEvent{}})
+	second := stripANSI(m.renderInfoPanel(40, 24))
+	if !strings.Contains(second, "2.0k") {
+		t.Fatalf("info panel should refresh after UsageUpdatedEvent, got %q", second)
+	}
+}
+
 func TestKeyPoolTickWakesCodexRateLimitPollingWhileAgentActive(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.rateLimitSnapshot = &ratelimit.KeyRateLimitSnapshot{CapturedAt: time.Now().Add(-codexActiveRateLimitPollInterval)}

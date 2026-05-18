@@ -170,6 +170,8 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 	if effects.invalidateUsage {
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateUsageStatsCache()
+		m.cachedInfoPanelFP = ""
+		m.cachedInfoPanelOut = ""
 	}
 
 	return effects.followup
@@ -1120,7 +1122,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			effects.addFollowup(m.requestStreamBoundaryFlush())
 		}
 		return true, effects
-	case agent.ContextUsageUpdateEvent:
+	case agent.ContextUsageUpdateEvent, agent.UsageUpdatedEvent:
 		effects.invalidateUsage = true
 		return true, effects
 	case agent.ForkSessionEvent:
