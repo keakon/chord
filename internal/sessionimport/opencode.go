@@ -85,6 +85,10 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 	role := pickStringField(obj, "role", "sender")
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "" {
+		role = pickNestedStringField(obj, "info", "role", "sender")
+		role = strings.ToLower(strings.TrimSpace(role))
+	}
+	if role == "" {
 		switch kind {
 		case "user", "human":
 			role = "user"
@@ -152,6 +156,19 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 }
 
 func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
+	// Current OpenCode exports messages as {info, parts}. Preserve ordered text-like
+	// parts here; tool parts are handled separately by extractToolishText.
+	if raw, ok := obj["parts"]; ok {
+		partsText, partTypes, partWarns, partErr := extractOpenCodePartsContent(raw)
+		warns = append(warns, partWarns...)
+		if partErr != nil {
+			return "", contentTypes, warns, partErr
+		}
+		if strings.TrimSpace(partsText) != "" || len(partTypes) > 0 {
+			return strings.TrimSpace(partsText), partTypes, warns, nil
+		}
+	}
+
 	// Fast paths for common shapes.
 	if v := pickStringField(obj, "text", "content"); strings.TrimSpace(v) != "" {
 		return v, nil, nil, nil
@@ -224,10 +241,51 @@ func extractTextFromBlock(m map[string]any) (text string, typ string, ok bool) {
 	return "", typ, false
 }
 
+func extractOpenCodePartsContent(raw json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
+	var parts []map[string]any
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return "", nil, nil, fmt.Errorf("parse parts array: %w", err)
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		typ, _ := part["type"].(string)
+		typ = strings.ToLower(strings.TrimSpace(typ))
+		if typ != "" {
+			contentTypes = append(contentTypes, typ)
+		}
+		switch typ {
+		case "text":
+			if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
+				b.WriteString(s)
+				b.WriteString("\n")
+			}
+		case "reasoning", "tool", "tool-invocation", "step-start", "step-finish":
+			// Handled by reasoning/tool extraction or intentionally skipped.
+		case "":
+			warns = append(warns, "part missing type; skipped")
+		default:
+			payload, _ := json.MarshalIndent(part, "", "  ")
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString("[Imported OpenCode ")
+			b.WriteString(typ)
+			b.WriteString(" part]\n")
+			b.Write(payload)
+			b.WriteString("\n")
+			warns = append(warns, "unsupported part type "+typ+"; imported as text")
+		}
+	}
+	return strings.TrimSpace(b.String()), contentTypes, warns, nil
+}
+
 func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string) (string, []string, error) {
 	// Some exports include a dedicated reasoning field.
 	if s := pickStringField(obj, "reasoning", "thought", "thinking"); strings.TrimSpace(s) != "" {
 		return s, nil, nil
+	}
+	if raw, ok := obj["parts"]; ok {
+		return extractOpenCodeReasoningFromParts(raw)
 	}
 	// If content blocks include a "reasoning" type, extract it too.
 	for _, typ := range contentTypes {
@@ -239,9 +297,39 @@ func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string)
 	return "", nil, nil
 }
 
+func extractOpenCodeReasoningFromParts(raw json.RawMessage) (string, []string, error) {
+	var parts []map[string]any
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return "", nil, fmt.Errorf("parse parts array: %w", err)
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		typ, _ := part["type"].(string)
+		typ = strings.ToLower(strings.TrimSpace(typ))
+		if typ != "reasoning" && typ != "thinking" {
+			continue
+		}
+		if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(s)
+		}
+	}
+	return b.String(), nil, nil
+}
+
 func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (string, []string) {
-	// Common OpenCode shapes: {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
+	// Common OpenCode shapes: current export {parts:[{type:"tool",...}]}, legacy
+	// {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
 	var warns []string
+	if raw, ok := obj["parts"]; ok {
+		text, w := extractOpenCodeToolParts(raw)
+		warns = append(warns, w...)
+		if strings.TrimSpace(text) != "" {
+			return text, warns
+		}
+	}
 	if raw, ok := obj["tool"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		pretty := indentJSON(raw)
 		return joinNonEmpty("[Imported tool]", pretty), warns
@@ -275,6 +363,53 @@ func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (
 	}
 	_ = contentTypes
 	return "", warns
+}
+
+func extractOpenCodeToolParts(raw json.RawMessage) (string, []string) {
+	var parts []map[string]any
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return "", []string{"parts array could not be scanned for tool parts"}
+	}
+	var b strings.Builder
+	toolCount := 0
+	for _, part := range parts {
+		typ, _ := part["type"].(string)
+		typ = strings.ToLower(strings.TrimSpace(typ))
+		if typ != "tool" && typ != "tool-invocation" {
+			continue
+		}
+		toolCount++
+		payload, _ := json.MarshalIndent(part, "", "  ")
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("[Imported unsupported tool")
+		if name := openCodeToolName(part); name != "" {
+			b.WriteString(": ")
+			b.WriteString(name)
+		}
+		b.WriteString("]\n")
+		b.Write(payload)
+	}
+	if toolCount == 0 {
+		return "", nil
+	}
+	return b.String(), []string{"tool parts were imported as text"}
+}
+
+func openCodeToolName(part map[string]any) string {
+	if s, ok := part["tool"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	if s, ok := part["toolName"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	if inv, ok := part["toolInvocation"].(map[string]any); ok {
+		if s, ok := inv["toolName"].(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 func indentJSON(raw json.RawMessage) string {
@@ -312,6 +447,18 @@ func pickStringField(obj map[string]json.RawMessage, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func pickNestedStringField(obj map[string]json.RawMessage, field string, keys ...string) string {
+	raw, ok := obj[field]
+	if !ok {
+		return ""
+	}
+	var nested map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &nested); err != nil {
+		return ""
+	}
+	return pickStringField(nested, keys...)
 }
 
 func firstString(m map[string]any, keys ...string) (string, bool) {

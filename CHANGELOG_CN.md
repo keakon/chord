@@ -15,7 +15,7 @@
 - Tools / 安全：补强本地文件/路径安全，对文件读取与搜索工具统一路径校验逻辑。`Read` 与 `Grep` 现在复用同一套已存在路径检查，并会显式拒绝标准流设备文件等受限 device-style 路径。
 - Config / 持久化：补强 setup 与 auth 持久化时的配置写入流程。初始配置创建现在使用配置级锁文件 + 临时文件 + 原子安装；auth/config 保存路径也复用同一套原子写入基础设施。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
-- CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
+- CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史且现在能处理当前 `{info, parts}` 导出并以可读 fallback 保留不支持的工具，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
 - TUI / 标题告警：确认 / 问题请求在 Chord 后台出现时，终端标题栏仍会闪烁以吸引注意；用户重新聚焦该标签页/窗口后，当前请求的告警会保持可见但停止闪烁。
 - TUI / 用量：usage/context 更新现在会让信息面板渲染缓存失效，修复上下文压缩或其它用量刷新事件后侧边栏 `TOKENS` 可能保持旧值的问题。
 - Docs：明确 `chord auth state clean` 会清理无效运行时状态和匹配的过期/已停用 OAuth 凭据，并更新 README 亮点，说明后台压缩与 `/loop` 可支撑长时间连续运行任务。
