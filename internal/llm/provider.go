@@ -39,11 +39,19 @@ type OpenAITuning struct {
 	ToolChoice        string // ""|"auto"|"required"
 }
 
+// GeminiTuning holds Gemini-specific request tuning parameters.
+type GeminiTuning struct {
+	ThinkingBudget  *int   // nil = omit; -1 dynamic; 0 disable (model-dependent); >0 fixed budget
+	ThinkingLevel   string // ""|"low"|"medium"|"high" (Gemini 3+)
+	IncludeThoughts *bool  // nil = omit; true/false explicit includeThoughts
+}
+
 // RequestTuning bundles all provider-specific tuning parameters for a single
 // LLM request. Each provider reads only its own sub-struct.
 type RequestTuning struct {
 	Anthropic AnthropicTuning
 	OpenAI    OpenAITuning
+	Gemini    GeminiTuning
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.

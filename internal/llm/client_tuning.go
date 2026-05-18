@@ -12,6 +12,21 @@ func cloneBoolPtr(v *bool) *bool {
 	return &b
 }
 
+func intPtrFromThinkingBudget(v int) *int {
+	if v == 0 {
+		return nil
+	}
+	n := v
+	return &n
+}
+
+func geminiLevelFromThinking(t *config.ThinkingConfig) string {
+	if t == nil {
+		return ""
+	}
+	return t.Level
+}
+
 // tuningFromModel builds a RequestTuning from a ModelConfig.
 func tuningFromModel(m config.ModelConfig) RequestTuning {
 	var t RequestTuning
@@ -27,6 +42,11 @@ func tuningFromModel(m config.ModelConfig) RequestTuning {
 	}
 	t.OpenAI.TextVerbosity = m.EffectiveTextVerbosity()
 	t.OpenAI.ParallelToolCalls = cloneBoolPtr(m.ParallelToolCalls)
+	if m.Thinking != nil {
+		t.Gemini.ThinkingBudget = intPtrFromThinkingBudget(m.Thinking.Budget)
+		t.Gemini.ThinkingLevel = geminiLevelFromThinking(m.Thinking)
+		t.Gemini.IncludeThoughts = cloneBoolPtr(m.Thinking.IncludeThoughts)
+	}
 	return t
 }
 
@@ -108,6 +128,17 @@ func mergeVariantTuning(base RequestTuning, v config.ModelVariant) RequestTuning
 	}
 	if v.ParallelToolCalls != nil {
 		base.OpenAI.ParallelToolCalls = cloneBoolPtr(v.ParallelToolCalls)
+	}
+	if v.Thinking != nil {
+		if v.Thinking.Budget != 0 {
+			base.Gemini.ThinkingBudget = intPtrFromThinkingBudget(v.Thinking.Budget)
+		}
+		if lvl := geminiLevelFromThinking(v.Thinking); lvl != "" {
+			base.Gemini.ThinkingLevel = lvl
+		}
+		if v.Thinking.IncludeThoughts != nil {
+			base.Gemini.IncludeThoughts = cloneBoolPtr(v.Thinking.IncludeThoughts)
+		}
 	}
 	return base
 }

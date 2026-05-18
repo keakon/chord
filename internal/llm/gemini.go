@@ -70,8 +70,15 @@ type geminiRequest struct {
 	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
+type geminiThinkingConfig struct {
+	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
+	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
+}
+
 type geminiGenerationConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
 type geminiContent struct {
@@ -146,7 +153,6 @@ func (g *GeminiProvider) CompleteStream(
 ) (*message.Response, error) {
 	traceCollector := newLLMTraceCollector("gemini", model, cb)
 	traceCB := traceCollector.Callback
-	_ = tuning
 	contents := convertMessagesToGemini(messages)
 	reqBody := geminiRequest{
 		Contents: contents,
@@ -155,8 +161,19 @@ func (g *GeminiProvider) CompleteStream(
 	if systemPrompt != "" {
 		reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}}
 	}
+
+	var genCfg geminiGenerationConfig
 	if maxTokens > 0 {
-		reqBody.GenerationConfig = &geminiGenerationConfig{MaxOutputTokens: maxTokens}
+		genCfg.MaxOutputTokens = maxTokens
+	}
+	if tuning.Gemini.ThinkingBudget != nil || tuning.Gemini.ThinkingLevel != "" || tuning.Gemini.IncludeThoughts != nil {
+		// Gemini thinkingLevel values are documented as lowercase strings in the
+		// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
+		// configured casing as-is.
+		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: tuning.Gemini.ThinkingBudget, ThinkingLevel: tuning.Gemini.ThinkingLevel, IncludeThoughts: tuning.Gemini.IncludeThoughts}
+	}
+	if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
+		reqBody.GenerationConfig = &genCfg
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
