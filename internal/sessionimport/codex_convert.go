@@ -26,10 +26,6 @@ type codexRolloutEntry struct {
 // Handles both the current protocol format (type+payload) and legacy
 // item-based format used by older Codex versions.
 func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
-	// ---------------------------------------------------------------------------
-	// Stage 1a: JSONL scanning + legacy/current schema normalization
-	// ---------------------------------------------------------------------------
-
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 
@@ -93,10 +89,6 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 
 		// Detect item kind from the legacy object.
 		kind := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "type")))
-
-		// ---------------------------------------------------------------------------
-		// Stage 1b: legacy item adapters + shared raw JSON helpers
-		// ---------------------------------------------------------------------------
 
 		// Legacy FunctionCall/FunctionCallOutput keys.
 		if fcRaw, ok := itemObj["FunctionCall"]; ok {
@@ -340,10 +332,6 @@ func pickJSONStringOK(m map[string]json.RawMessage, keys ...string) (string, boo
 //   - response_item is the canonical content source
 //   - event_msg supplements metadata (turn boundaries, usage, status)
 //   - turn_context defines turn identity
-// ---------------------------------------------------------------------------
-// Stage 2: Build IR from normalized rollout entries
-// ---------------------------------------------------------------------------
-
 func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *ImportReport) ([]*codexTurn, error) {
 	// Phase A: Collect all response_items into turns.
 	// We first scan for turn_context boundaries, then assign items.
@@ -352,6 +340,7 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 	var currentTurnID string
 	turnOrder := make(map[string]int) // turn_id -> order
 	var turnOrderList []string
+	fallbackTurnSeq := 0
 
 	// Pre-scan to identify turn boundaries.
 	for _, e := range entries {
@@ -384,8 +373,12 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 		}
 	}
 
-	// Create turn structs.
 	turns := make(map[string]*codexTurn)
+	callOwners := make(map[string]string) // call_id -> owning turn_id
+	newFallbackTurnID := func() string {
+		fallbackTurnSeq++
+		return fmt.Sprintf("_fallback_%d", fallbackTurnSeq)
+	}
 	getOrCreateTurn := func(turnID string) *codexTurn {
 		if turnID == "" {
 			turnID = "_default"
@@ -398,6 +391,9 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 			ToolCalls:   make(map[string]*codexToolCall),
 			ToolResults: make(map[string]*codexToolResult),
 		}
+		if turnID != "_default" && strings.HasPrefix(turnID, "_fallback_") {
+			t.FallbackTurnNumber = fallbackTurnSeq
+		}
 		turns[turnID] = t
 		if _, exists := turnOrder[turnID]; !exists {
 			turnOrder[turnID] = len(turnOrderList)
@@ -406,11 +402,7 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 		return t
 	}
 
-	// Global source order counter.
 	sourceOrder := 0
-
-	// Track response_item message roles to avoid duplicates from event_msg.
-	// Maps turn_id -> set of roles seen from response_item.
 	responseItemRoles := make(map[string]map[string]bool)
 	recordResponseItemRole := func(turnID, role string) {
 		if _, ok := responseItemRoles[turnID]; !ok {
@@ -424,13 +416,27 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 		}
 		return false
 	}
+	resolveActiveTurnID := func(role string) string {
+		if currentTurnID != "" {
+			return currentTurnID
+		}
+		if role == "user" {
+			if t, ok := turns["_default"]; ok {
+				hasAssistantActivity := len(t.AssistantMessages) > 0 || len(t.ToolCalls) > 0 || len(t.ToolResults) > 0
+				if hasAssistantActivity {
+					newID := newFallbackTurnID()
+					currentTurnID = newID
+					return newID
+				}
+			}
+		}
+		return "_default"
+	}
 
-	// Phase B: Process entries in source order.
 	for _, e := range entries {
 		switch e.EventType {
 		case "response_item":
-			if err := codexProcessResponseItem(e.Payload, currentTurnID, reasoningMode, getOrCreateTurn, recordResponseItemRole, &sourceOrder, report); err != nil {
-				// Log but don't fail on individual item errors.
+			if err := codexProcessResponseItem(e.Payload, resolveActiveTurnID, reasoningMode, getOrCreateTurn, recordResponseItemRole, callOwners, &sourceOrder, report); err != nil {
 				report.warnf("response_item parse error: %v", err)
 			}
 
@@ -440,59 +446,21 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 			}
 			if err := json.Unmarshal(e.Payload, &tc); err == nil && tc.TurnID != "" {
 				currentTurnID = tc.TurnID
-				getOrCreateTurn(currentTurnID) // ensure it exists
+				turn := getOrCreateTurn(currentTurnID)
+				turn.HasTurnContext = true
+				turn.HasExplicitTurnID = true
 			}
 
 		case "event_msg":
-			codexProcessEventMsg(e.Payload, currentTurnID, getOrCreateTurn, hasResponseItemRole, &sourceOrder, report)
+			codexProcessEventMsg(e.Payload, resolveActiveTurnID, getOrCreateTurn, hasResponseItemRole, &sourceOrder, report)
 		}
 	}
 
-	// Phase C: Deduplicate event_msg entries that have response_item
-	// counterparts in the same turn. response_item is the canonical source.
 	for _, t := range turns {
-		hasResponseUser := false
-		hasResponseAssistant := false
-		for _, m := range t.UserMessages {
-			if m.Source == "response_item" {
-				hasResponseUser = true
-				break
-			}
-		}
-		for _, m := range t.AssistantMessages {
-			if m.Source == "response_item" {
-				hasResponseAssistant = true
-				break
-			}
-		}
-		if hasResponseUser {
-			filtered := t.UserMessages[:0]
-			for _, m := range t.UserMessages {
-				if m.Source == "event_msg" {
-					report.SkippedDuplicates++
-					report.SkippedEntries++
-				} else {
-					filtered = append(filtered, m)
-				}
-			}
-			t.UserMessages = filtered
-		}
-		if hasResponseAssistant {
-			filtered := t.AssistantMessages[:0]
-			for _, m := range t.AssistantMessages {
-				if m.Source == "event_msg" {
-					report.SkippedDuplicates++
-					report.SkippedEntries++
-				} else {
-					filtered = append(filtered, m)
-				}
-			}
-			t.AssistantMessages = filtered
-		}
+		t.UserMessages = codexResolveMessageConflicts(t.UserMessages, report)
+		t.AssistantMessages = codexResolveMessageConflicts(t.AssistantMessages, report)
 	}
 
-	// Phase D: Assemble turns in order.
-	// If no turns were created, create a single default turn.
 	if len(turnOrderList) == 0 {
 		turnOrderList = append(turnOrderList, "_default")
 	}
@@ -509,16 +477,19 @@ func buildCodexIR(entries []codexRolloutEntry, reasoningMode string, report *Imp
 // codexProcessResponseItem handles a single response_item payload.
 func codexProcessResponseItem(
 	payload json.RawMessage,
-	currentTurnID string,
+	resolveActiveTurnID func(string) string,
 	reasoningMode string,
 	getOrCreateTurn func(string) *codexTurn,
 	recordResponseItemRole func(string, string),
+	callOwners map[string]string,
 	sourceOrder *int,
 	report *ImportReport,
 ) error {
 	var item struct {
 		Type    string          `json:"type"`
 		Role    string          `json:"role"`
+		TurnID  string          `json:"turn_id"`
+		TurnID2 string          `json:"turnId"`
 		Content json.RawMessage `json:"content"`
 		Name    string          `json:"name"`
 		CallID  string          `json:"call_id"`
@@ -530,7 +501,22 @@ func codexProcessResponseItem(
 		return err
 	}
 
-	turn := getOrCreateTurn(currentTurnID)
+	turnID := strings.TrimSpace(item.TurnID)
+	if turnID == "" {
+		turnID = strings.TrimSpace(item.TurnID2)
+	}
+	if turnID == "" {
+		if owner := strings.TrimSpace(callOwners[item.CallID]); owner != "" {
+			turnID = owner
+		}
+	}
+	if turnID == "" {
+		turnID = resolveActiveTurnID(item.Role)
+	}
+	turn := getOrCreateTurn(turnID)
+	if strings.TrimSpace(item.TurnID) != "" || strings.TrimSpace(item.TurnID2) != "" {
+		turn.HasExplicitTurnID = true
+	}
 	*sourceOrder++
 
 	switch item.Type {
@@ -541,28 +527,35 @@ func codexProcessResponseItem(
 			return nil
 		}
 		text := codexExtractContentText(item.Content)
+		if role == "user" && isCodexStartupInstructionMessage(text) {
+			report.SkippedEntries++
+			return nil
+		}
 		if strings.TrimSpace(text) == "" {
 			report.SkippedEntries++
 			return nil
 		}
-		recordResponseItemRole(currentTurnID, role)
+		recordResponseItemRole(turnID, role)
 		if role == "user" {
 			turn.UserMessages = append(turn.UserMessages, codexMessageItem{
-				Role:    "user",
-				Content: text,
-				Source:  "response_item",
+				Role:        "user",
+				Content:     text,
+				Source:      "response_item",
+				SourceOrder: *sourceOrder,
 			})
 		} else {
 			turn.AssistantMessages = append(turn.AssistantMessages, codexMessageItem{
-				Role:    "assistant",
-				Content: text,
-				Source:  "response_item",
+				Role:        "assistant",
+				Content:     text,
+				Source:      "response_item",
+				SourceOrder: *sourceOrder,
 			})
 		}
 
 	case "function_call":
 		callID := item.CallID
 		if callID == "" {
+			report.MissingToolCallIDs++
 			report.SkippedEntries++
 			report.warnf("function_call without call_id, skipped")
 			return nil
@@ -571,23 +564,30 @@ func codexProcessResponseItem(
 			CallID:      callID,
 			Name:        item.Name,
 			Arguments:   json.RawMessage(item.Args),
-			TurnID:      currentTurnID,
+			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
 		}
+		callOwners[callID] = turnID
 
 	case "function_call_output":
 		callID := item.CallID
 		if callID == "" {
+			report.MissingToolCallIDs++
 			report.SkippedEntries++
 			report.warnf("function_call_output without call_id, skipped")
 			return nil
+		}
+		if owner := strings.TrimSpace(callOwners[callID]); owner != "" && owner != turnID {
+			turnID = owner
+			turn = getOrCreateTurn(turnID)
 		}
 		outputText := codexExtractOutputText(item.Output)
 		turn.ToolResults[callID] = &codexToolResult{
 			CallID:      callID,
 			Output:      outputText,
-			TurnID:      currentTurnID,
+			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
+			Status:      strings.TrimSpace(item.Status),
 		}
 
 	case "custom_tool_call":
@@ -596,9 +596,6 @@ func codexProcessResponseItem(
 			report.SkippedEntries++
 			return nil
 		}
-		// Custom tool calls are stored as "function_call" equivalents
-		// but with name from the custom tool. We map apply_patch and
-		// other known custom tools to the tool mapping table.
 		var inputStr string
 		if err := json.Unmarshal(payload, &struct {
 			Input *string `json:"input"`
@@ -612,9 +609,10 @@ func codexProcessResponseItem(
 			CallID:      callID,
 			Name:        item.Name,
 			Arguments:   argsJSON,
-			TurnID:      currentTurnID,
+			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
 		}
+		callOwners[callID] = turnID
 
 	case "custom_tool_call_output":
 		callID := item.CallID
@@ -622,12 +620,17 @@ func codexProcessResponseItem(
 			report.SkippedEntries++
 			return nil
 		}
+		if owner := strings.TrimSpace(callOwners[callID]); owner != "" && owner != turnID {
+			turnID = owner
+			turn = getOrCreateTurn(turnID)
+		}
 		outputText := codexExtractOutputText(item.Output)
 		turn.ToolResults[callID] = &codexToolResult{
 			CallID:      callID,
 			Output:      outputText,
-			TurnID:      currentTurnID,
+			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
+			Status:      strings.TrimSpace(item.Status),
 		}
 
 	case "reasoning":
@@ -641,7 +644,7 @@ func codexProcessResponseItem(
 		case ReasoningVisible:
 			turn.ReasoningEntries = append(turn.ReasoningEntries, codexReasoningEntry{
 				Text:        reasoningText,
-				TurnID:      currentTurnID,
+				TurnID:      turnID,
 				SourceOrder: *sourceOrder,
 			})
 		default:
@@ -661,17 +664,20 @@ func codexProcessResponseItem(
 // codexProcessEventMsg handles a single event_msg payload.
 func codexProcessEventMsg(
 	payload json.RawMessage,
-	currentTurnID string,
+	resolveActiveTurnID func(string) string,
 	getOrCreateTurn func(string) *codexTurn,
 	hasResponseItemRole func(string, string) bool,
 	sourceOrder *int,
 	report *ImportReport,
 ) {
 	var ev struct {
-		Type    string `json:"type"`
-		TurnID  string `json:"turn_id"`
-		Message string `json:"message"`
-		Text    string `json:"text"`
+		Type    string          `json:"type"`
+		TurnID  string          `json:"turn_id"`
+		Message string          `json:"message"`
+		Text    string          `json:"text"`
+		CallID  string          `json:"call_id"`
+		Query   string          `json:"query"`
+		Action  json.RawMessage `json:"action"`
 		// TokenCountEvent fields
 		Info *struct {
 			TotalTokenUsage *struct {
@@ -692,7 +698,7 @@ func codexProcessEventMsg(
 		return
 	}
 
-	turnID := currentTurnID
+	turnID := resolveActiveTurnID("")
 	if ev.TurnID != "" {
 		turnID = ev.TurnID
 	}
@@ -716,9 +722,10 @@ func codexProcessEventMsg(
 		turn := getOrCreateTurn(turnID)
 		*sourceOrder++
 		turn.AssistantMessages = append(turn.AssistantMessages, codexMessageItem{
-			Role:    "assistant",
-			Content: text,
-			Source:  "event_msg",
+			Role:        "assistant",
+			Content:     text,
+			Source:      "event_msg",
+			SourceOrder: *sourceOrder,
 		})
 
 	case "user_message":
@@ -738,9 +745,10 @@ func codexProcessEventMsg(
 		turn := getOrCreateTurn(turnID)
 		*sourceOrder++
 		turn.UserMessages = append(turn.UserMessages, codexMessageItem{
-			Role:    "user",
-			Content: text,
-			Source:  "event_msg",
+			Role:        "user",
+			Content:     text,
+			Source:      "event_msg",
+			SourceOrder: *sourceOrder,
 		})
 
 	case "token_count":
@@ -764,19 +772,128 @@ func codexProcessEventMsg(
 		report.ReasoningBlocksSkipped++
 		report.SkippedEntries++
 
+	case "web_search_end":
+		callID := strings.TrimSpace(ev.CallID)
+		if callID == "" {
+			report.MissingToolCallIDs++
+			report.SkippedEntries++
+			report.warnf("web_search_end without call_id, skipped")
+			return
+		}
+		turn := getOrCreateTurn(turnID)
+		*sourceOrder++
+		turn.ToolCalls[callID] = &codexToolCall{
+			CallID:      callID,
+			Name:        "web_search",
+			Arguments:   codexWebSearchArgs(ev.Query, ev.Action),
+			TurnID:      turnID,
+			SourceOrder: *sourceOrder,
+		}
+
 	case "task_started", "turn_started", "task_complete", "turn_complete",
-		"patch_apply_end", "patch_apply_begin", "web_search_end", "web_search_begin",
+		"patch_apply_end", "patch_apply_begin", "web_search_begin",
 		"exec_command_begin", "exec_command_end", "exec_command_output_delta",
 		"mcp_tool_call_begin", "mcp_tool_call_end", "mcp_startup_update", "mcp_startup_complete",
 		"image_generation_begin", "image_generation_end",
 		"context_compacted", "error", "warning", "turn_aborted", "turn_diff",
 		"model_reroute", "model_verification", "stream_error", "deprecation_notice":
 		// Supplemental/status events – skip silently.
+		report.SkippedStatusEvents++
 		report.SkippedEntries++
 
 	default:
 		report.SkippedEntries++
 	}
+}
+
+func isCodexStartupInstructionMessage(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	return strings.HasPrefix(trimmed, "# AGENTS.md instructions for ") || strings.HasPrefix(trimmed, "# instructions")
+}
+
+func codexWebSearchArgs(query string, action json.RawMessage) json.RawMessage {
+	args := map[string]any{}
+	if strings.TrimSpace(query) != "" {
+		args["query"] = strings.TrimSpace(query)
+	}
+	if len(bytes.TrimSpace(action)) > 0 && !bytes.Equal(bytes.TrimSpace(action), []byte("null")) {
+		var v any
+		if json.Unmarshal(action, &v) == nil {
+			args["action"] = v
+		} else {
+			args["action"] = string(action)
+		}
+	}
+	b, _ := json.Marshal(args)
+	return b
+}
+
+func codexResolveMessageConflicts(items []codexMessageItem, report *ImportReport) []codexMessageItem {
+	if len(items) <= 1 {
+		return items
+	}
+	var responseItems []codexMessageItem
+	var eventItems []codexMessageItem
+	for _, item := range items {
+		if item.Source == "response_item" {
+			responseItems = append(responseItems, item)
+		} else {
+			eventItems = append(eventItems, item)
+		}
+	}
+	if len(responseItems) == 0 || len(eventItems) == 0 {
+		return items
+	}
+	canonical := responseItems[0]
+	for _, ev := range eventItems {
+		if strings.TrimSpace(ev.Content) == strings.TrimSpace(canonical.Content) {
+			report.SkippedDuplicates++
+		} else {
+			report.DuplicateSourceConflicts++
+		}
+		report.SkippedEntries++
+	}
+	return responseItems
+}
+
+func codexAttachReasoning(turn *codexTurn, report *ImportReport) (string, bool) {
+	if len(turn.ReasoningEntries) == 0 {
+		return "", false
+	}
+	if len(turn.AssistantMessages)+len(turn.ToolCalls) > 1 {
+		report.SkippedAmbiguousReasoning += len(turn.ReasoningEntries)
+		return "", false
+	}
+	var texts []string
+	for _, entry := range turn.ReasoningEntries {
+		if strings.TrimSpace(entry.Text) != "" {
+			texts = append(texts, strings.TrimSpace(entry.Text))
+		}
+	}
+	if len(texts) == 0 {
+		return "", false
+	}
+	return strings.Join(texts, "\n\n"), true
+}
+
+func codexAttachUsage(turn *codexTurn) (*message.TokenUsage, bool) {
+	if len(turn.UsageEvents) == 0 {
+		return nil, false
+	}
+	if len(turn.AssistantMessages)+len(turn.ToolCalls) != 1 {
+		return nil, false
+	}
+	usage := &message.TokenUsage{}
+	for _, ev := range turn.UsageEvents {
+		usage.InputTokens += ev.InputTokens
+		usage.OutputTokens += ev.OutputTokens
+		usage.CacheReadTokens += ev.CacheTokens
+		usage.ReasoningTokens += ev.ReasonTokens
+	}
+	return usage, true
 }
 
 // codexExtractContentText extracts text from a response_item message's
@@ -871,16 +988,6 @@ func codexExtractReasoningText(payload json.RawMessage) string {
 // Stage 3: Linearize IR → Chord messages
 // ---------------------------------------------------------------------------
 
-// codexProvenance returns the standard provenance for imported Codex messages.
-func codexProvenance() *message.MessageProvenance {
-	return &message.MessageProvenance{
-		Source:     "import:codex",
-		ProviderID: "openai",
-		WireFamily: "openai-responses",
-		Imported:   true,
-	}
-}
-
 // linearizeCodexTurns converts reconstructed turns into a linear sequence
 // of Chord messages suitable for transcript restore and context replay.
 //
@@ -889,121 +996,170 @@ func codexProvenance() *message.MessageProvenance {
 // 2. Assistant tool-call message(s)
 // 3. Corresponding tool-result message(s)
 // 4. Assistant plain-text response(s) (after tool execution)
-// ---------------------------------------------------------------------------
-// Stage 3: Linearize IR into Chord messages
-// ---------------------------------------------------------------------------
-
-func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Message {
+func linearizeCodexTurns(turns []*codexTurn, toolMode string, report *ImportReport) []message.Message {
 	var out []message.Message
 
 	for _, turn := range turns {
-		// 1. Emit user messages.
-		for _, um := range turn.UserMessages {
-			out = append(out, message.Message{
-				Role:       "user",
-				Content:    um.Content,
-				Provenance: codexProvenance(),
-			})
+		reasoningText, reasoningAttached := codexAttachReasoning(turn, report)
+		usage, usageAttached := codexAttachUsage(turn)
+		if usageAttached {
+			report.UsageEventsAttached += len(turn.UsageEvents)
+		} else if len(turn.UsageEvents) > 0 {
+			report.UsageEventsSkipped += len(turn.UsageEvents)
 		}
 
-		// 2. Emit structured tool calls + results, paired by call_id.
-		//    Build ordered list of tool call IDs by source order.
-		type toolCallEntry struct {
-			callID string
+		type orderedItem struct {
+			kind   string
 			order  int
+			user   codexMessageItem
+			assist codexMessageItem
+			callID string
 		}
-		var orderedCalls []toolCallEntry
+		var ordered []orderedItem
+		for _, um := range turn.UserMessages {
+			ordered = append(ordered, orderedItem{kind: "user", order: um.SourceOrder, user: um})
+		}
+		for _, am := range turn.AssistantMessages {
+			ordered = append(ordered, orderedItem{kind: "assistant", order: am.SourceOrder, assist: am})
+		}
 		for callID, tc := range turn.ToolCalls {
-			orderedCalls = append(orderedCalls, toolCallEntry{callID: callID, order: tc.SourceOrder})
+			ordered = append(ordered, orderedItem{kind: "tool_call", order: tc.SourceOrder, callID: callID})
 		}
-		// Sort by source order.
-		for i := 0; i < len(orderedCalls); i++ {
-			for j := i + 1; j < len(orderedCalls); j++ {
-				if orderedCalls[j].order < orderedCalls[i].order {
-					orderedCalls[i], orderedCalls[j] = orderedCalls[j], orderedCalls[i]
+		for i := 0; i < len(ordered); i++ {
+			for j := i + 1; j < len(ordered); j++ {
+				if ordered[j].order < ordered[i].order {
+					ordered[i], ordered[j] = ordered[j], ordered[i]
 				}
 			}
 		}
 
-		for _, entry := range orderedCalls {
-			tc := turn.ToolCalls[entry.callID]
-			tr := turn.ToolResults[entry.callID]
-
-			chordName, ok := codexToolMapping[tc.Name]
-			if !ok {
-				// Unsupported tool: downgrade to text fallback.
-				out = append(out, codexUnsupportedToolCallFallback(tc))
-				report.UnsupportedToolCalls++
-				if tr != nil {
-					out = append(out, codexUnsupportedToolResultFallback(tr, tc.Name))
-					report.UnsupportedToolResults++
-					delete(turn.ToolResults, entry.callID) // mark as consumed
+		for _, item := range ordered {
+			switch item.kind {
+			case "user":
+				out = append(out, message.Message{
+					Role:       "user",
+					Content:    item.user.Content,
+					Provenance: importedCodexProvenance(),
+				})
+			case "assistant":
+				msg := message.Message{
+					Role:       "assistant",
+					Content:    item.assist.Content,
+					Provenance: importedCodexProvenance(),
 				}
-				continue
-			}
-
-			// Map the tool call to Chord structured format.
-			normArgs := codexNormalizeToolArgs(tc.Name, chordName, tc.Arguments)
-			if normArgs == nil {
-				// Normalization failed: downgrade.
-				out = append(out, codexUnsupportedToolCallFallback(tc))
-				report.UnsupportedToolCalls++
-				if tr != nil {
-					out = append(out, codexUnsupportedToolResultFallback(tr, tc.Name))
-					report.UnsupportedToolResults++
-					delete(turn.ToolResults, entry.callID)
+				if reasoningText != "" {
+					msg.ReasoningContent = reasoningText
+					reasoningText = ""
+					reasoningAttached = false
 				}
-				continue
-			}
+				if usage != nil {
+					msg.Usage = usage
+					usage = nil
+				}
+				out = append(out, msg)
+			case "tool_call":
+				tc := turn.ToolCalls[item.callID]
+				tr := turn.ToolResults[item.callID]
 
-			out = append(out, message.Message{
-				Role: "assistant",
-				ToolCalls: []message.ToolCall{
-					{
+				chordName, ok := codexToolMapping[tc.Name]
+				if toolMode == ToolModeText {
+					out = append(out, codexUnsupportedToolCallFallback(tc))
+					report.UnsupportedToolCalls++
+					if tr != nil {
+						out = append(out, codexUnsupportedToolResultFallback(tr, tc.Name))
+						report.UnsupportedToolResults++
+						delete(turn.ToolResults, item.callID)
+					}
+					continue
+				}
+				if !ok {
+					out = append(out, codexUnsupportedToolCallCard(tc, "no safe Chord mapping", reasoningText, usage))
+					reasoningText = ""
+					reasoningAttached = false
+					usage = nil
+					report.UnsupportedToolCalls++
+					if tr != nil {
+						out = append(out, codexToolResultMessage(tr))
+						report.UnsupportedToolResults++
+						delete(turn.ToolResults, item.callID)
+					}
+					continue
+				}
+
+				normArgs := codexNormalizeToolArgs(tc.Name, chordName, tc.Arguments)
+				if normArgs == nil {
+					out = append(out, codexUnsupportedToolCallCard(tc, "argument normalization failed", reasoningText, usage))
+					reasoningText = ""
+					reasoningAttached = false
+					usage = nil
+					report.UnsupportedToolCalls++
+					if tr != nil {
+						out = append(out, codexToolResultMessage(tr))
+						report.UnsupportedToolResults++
+						delete(turn.ToolResults, item.callID)
+					}
+					continue
+				}
+
+				out = append(out, message.Message{
+					Role: "assistant",
+					ToolCalls: []message.ToolCall{{
 						ID:   tc.CallID,
 						Name: chordName,
 						Args: normArgs,
-					},
-				},
-				Provenance: codexProvenance(),
-			})
-			report.StructuredToolCalls++
-
-			if tr != nil {
-				status := "success"
-				if tr.Status != "" {
-					status = tr.Status
-				}
-				out = append(out, message.Message{
-					Role:       "tool",
-					ToolCallID: tr.CallID,
-					Content:    tr.Output,
-					ToolStatus: status,
-					Provenance: codexProvenance(),
+					}},
+					ReasoningContent: reasoningText,
+					Usage:            usage,
+					Provenance:       importedCodexProvenance(),
 				})
-				report.StructuredToolResults++
-				delete(turn.ToolResults, entry.callID) // mark as consumed
+				if reasoningAttached {
+					reasoningText = ""
+					reasoningAttached = false
+				}
+				if usage != nil {
+					usage = nil
+				}
+				report.StructuredToolCalls++
+
+				if tr != nil {
+					status := "success"
+					if tr.Status != "" {
+						status = tr.Status
+					}
+					out = append(out, message.Message{
+						Role:       "tool",
+						ToolCallID: tr.CallID,
+						Content:    tr.Output,
+						ToolStatus: status,
+						Provenance: importedCodexProvenance(),
+					})
+					report.StructuredToolResults++
+					delete(turn.ToolResults, item.callID)
+				}
 			}
 		}
 
-		// 3. Emit any orphaned tool results that weren't paired above.
-		for _, tr := range turn.ToolResults {
-			// No matching tool call was imported structurally.
-			out = append(out, codexOrphanedToolResultFallback(tr))
-			report.MissingToolDeclarations++
+		type orphanResult struct {
+			callID string
+			order  int
 		}
-
-		// 4. Emit assistant messages.
-		for _, am := range turn.AssistantMessages {
-			out = append(out, message.Message{
-				Role:       "assistant",
-				Content:    am.Content,
-				Provenance: codexProvenance(),
-			})
+		var orphaned []orphanResult
+		for callID, tr := range turn.ToolResults {
+			orphaned = append(orphaned, orphanResult{callID: callID, order: tr.SourceOrder})
+		}
+		for i := 0; i < len(orphaned); i++ {
+			for j := i + 1; j < len(orphaned); j++ {
+				if orphaned[j].order < orphaned[i].order {
+					orphaned[i], orphaned[j] = orphaned[j], orphaned[i]
+				}
+			}
+		}
+		for _, orphan := range orphaned {
+			out = append(out, codexOrphanedToolResultFallback(turn.ToolResults[orphan.callID]))
+			report.MissingToolDeclarations++
 		}
 	}
 
-	// Filter out empty messages.
 	filtered := out[:0]
 	for _, m := range out {
 		if m.Role == "tool" || len(m.ToolCalls) > 0 {
@@ -1014,12 +1170,40 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 			filtered = append(filtered, m)
 		}
 	}
-	// Keep the legacy aggregate field populated for older tooling that only
-	// understands text-mode tool-entry counts.
 	report.ToolEntriesRendered = report.StructuredToolCalls + report.StructuredToolResults +
 		report.UnsupportedToolCalls + report.UnsupportedToolResults + report.MissingToolDeclarations
 
 	return filtered
+}
+
+func validateImportedCodexMessages(msgs []message.Message, report *ImportReport) error {
+	declared := make(map[string]struct{})
+	for i, msg := range msgs {
+		switch msg.Role {
+		case "assistant":
+			for _, tc := range msg.ToolCalls {
+				if tc.ID == "" || tc.Name == "" || len(tc.Args) == 0 {
+					report.ValidationFailures++
+					return fmt.Errorf("codex import: invalid structured tool call at message %d", i)
+				}
+				declared[tc.ID] = struct{}{}
+			}
+		case "tool":
+			if msg.ToolCallID == "" {
+				report.ValidationFailures++
+				return fmt.Errorf("codex import: tool result missing tool_call_id at message %d", i)
+			}
+			if _, ok := declared[msg.ToolCallID]; !ok {
+				report.ValidationFailures++
+				return fmt.Errorf("codex import: tool result references undeclared tool_call_id %q", msg.ToolCallID)
+			}
+		case "user":
+		default:
+			report.ValidationFailures++
+			return fmt.Errorf("codex import: invalid role %q at message %d", msg.Role, i)
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,10 +1218,6 @@ var codexToolMapping = map[string]string{
 	"shell":        "Shell",
 	"read_file":    "Read",
 	"file_read":    "Read",
-	"write_file":   "Write",
-	"file_write":   "Write",
-	"edit_file":    "Edit",
-	"file_edit":    "Edit",
 	"grep":         "Grep",
 	"search":       "Grep",
 	"glob":         "Glob",
@@ -1212,6 +1392,52 @@ func codexPickFloat(m map[string]any, keys ...string) float64 {
 // Fallback rendering for unsupported tools
 // ---------------------------------------------------------------------------
 
+func codexUnsupportedToolCallCard(tc *codexToolCall, reason string, reasoningText string, usage *message.TokenUsage) message.Message {
+	name := strings.TrimSpace(tc.Name)
+	if name == "" {
+		name = "unknown"
+	}
+	args := map[string]any{
+		"unsupported": true,
+		"source":      "codex",
+		"reason":      reason,
+	}
+	if len(tc.Arguments) > 0 {
+		var v any
+		if json.Unmarshal(tc.Arguments, &v) == nil {
+			args["arguments"] = v
+		} else {
+			args["arguments"] = string(tc.Arguments)
+		}
+	}
+	argsJSON, _ := json.Marshal(args)
+	return message.Message{
+		Role: "assistant",
+		ToolCalls: []message.ToolCall{{
+			ID:   tc.CallID,
+			Name: name,
+			Args: argsJSON,
+		}},
+		ReasoningContent: reasoningText,
+		Usage:            usage,
+		Provenance:       importedCodexProvenance(),
+	}
+}
+
+func codexToolResultMessage(tr *codexToolResult) message.Message {
+	status := "success"
+	if tr.Status != "" {
+		status = tr.Status
+	}
+	return message.Message{
+		Role:       "tool",
+		ToolCallID: tr.CallID,
+		Content:    tr.Output,
+		ToolStatus: status,
+		Provenance: importedCodexProvenance(),
+	}
+}
+
 func codexUnsupportedToolCallFallback(tc *codexToolCall) message.Message {
 	var argsPretty string
 	if len(tc.Arguments) > 0 {
@@ -1230,7 +1456,7 @@ func codexUnsupportedToolCallFallback(tc *codexToolCall) message.Message {
 	return message.Message{
 		Role:       "assistant",
 		Content:    content,
-		Provenance: codexProvenance(),
+		Provenance: importedCodexProvenance(),
 	}
 }
 
@@ -1243,7 +1469,7 @@ func codexUnsupportedToolResultFallback(tr *codexToolResult, toolName string) me
 		Role: "assistant",
 		Content: fmt.Sprintf("[Imported unsupported tool result]\nTool: %s\nCall ID: %s\nOutput:\n%s",
 			toolName, tr.CallID, output),
-		Provenance: codexProvenance(),
+		Provenance: importedCodexProvenance(),
 	}
 }
 
@@ -1256,6 +1482,6 @@ func codexOrphanedToolResultFallback(tr *codexToolResult) message.Message {
 		Role: "assistant",
 		Content: fmt.Sprintf("[Imported orphaned tool result]\nCall ID: %s\nOutput:\n%s",
 			tr.CallID, output),
-		Provenance: codexProvenance(),
+		Provenance: importedCodexProvenance(),
 	}
 }

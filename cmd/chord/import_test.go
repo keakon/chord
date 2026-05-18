@@ -49,3 +49,49 @@ func TestNewImportCmd_SucceedsWithIDAndRoot(t *testing.T) {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
+
+func TestNewImportCmd_PrintsImportSummaryAndLimitsWarnings(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	input := filepath.Join(t.TempDir(), "rollout.jsonl")
+	data := []byte(`{"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run"}]}}
+{"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":\"pwd\"}","call_id":"call_1"}}
+{"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"function_call_output","output":"/tmp","call_id":"call_1"}}
+`)
+	if err := os.WriteFile(input, data, 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cmd := newImportCmd()
+	_ = cmd.Flags().Set("project", t.TempDir())
+
+	out, err := captureStdout(t, func() error {
+		return cmd.RunE(cmd, []string{"codex", input})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{
+		"Tools: structured 1 calls / 1 results, downgraded 0 calls / 0 results",
+		"Skipped: 0 entries, 0 status events, 0 duplicates",
+		"Report:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	var b strings.Builder
+	printImportWarnings(&b, []string{"w1", "w2", "w3", "w4", "w5", "w6"}, "/tmp/import-report.json")
+	warnings := b.String()
+	if strings.Count(warnings, "- w") != maxImportWarningsShown || !strings.Contains(warnings, "1 more warnings omitted; see /tmp/import-report.json") {
+		t.Fatalf("warning output not limited as expected: %q", warnings)
+	}
+
+	b.Reset()
+	printImportWarnings(&b, []string{"w1", "w2", "w3", "w4", "w5", "w6"}, "")
+	dryRunWarnings := b.String()
+	if strings.Contains(dryRunWarnings, "see import-report.json") || !strings.Contains(dryRunWarnings, "run without --dry-run") {
+		t.Fatalf("dry-run warning output should not point to a missing report file: %q", dryRunWarnings)
+	}
+}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -74,22 +76,15 @@ func newImportCmd() *cobra.Command {
 
 			if dryRun {
 				fmt.Fprintf(os.Stdout, "Dry-run import (%s)\nProject: %s\nMessages: %d\n", source, res.ProjectRoot, res.Messages)
-				if len(res.Report.Warnings) > 0 {
-					fmt.Fprintln(os.Stdout, "Warnings:")
-					for _, w := range res.Report.Warnings {
-						fmt.Fprintf(os.Stdout, "- %s\n", w)
-					}
-				}
+				printImportSummary(os.Stdout, res, "")
+				printImportWarnings(os.Stdout, res.Report.Warnings, "")
 				return nil
 			}
 
+			reportPath := filepath.Join(res.SessionDir, "import-report.json")
 			fmt.Fprintf(os.Stdout, "Imported %s session\nPWD:  %s\nSID:  %s\nPath: %s\nResume: chord resume %s\nMessages: %d\n", source, res.ProjectRoot, res.SessionID, res.SessionDir, res.SessionID, res.Messages)
-			if len(res.Report.Warnings) > 0 {
-				fmt.Fprintln(os.Stdout, "Warnings:")
-				for _, w := range res.Report.Warnings {
-					fmt.Fprintf(os.Stdout, "- %s\n", w)
-				}
-			}
+			printImportSummary(os.Stdout, res, reportPath)
+			printImportWarnings(os.Stdout, res.Report.Warnings, reportPath)
 			return nil
 		},
 	}
@@ -105,4 +100,38 @@ func newImportCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "allow overwriting an existing session id")
 
 	return cmd
+}
+
+const maxImportWarningsShown = 5
+
+func printImportSummary(w io.Writer, res *sessionimport.ImportResult, reportPath string) {
+	r := res.Report
+	fmt.Fprintf(w, "Tools: structured %d calls / %d results, downgraded %d calls / %d results\n",
+		r.StructuredToolCalls, r.StructuredToolResults, r.UnsupportedToolCalls, r.UnsupportedToolResults)
+	fmt.Fprintf(w, "Skipped: %d entries, %d status events, %d duplicates\n",
+		r.SkippedEntries, r.SkippedStatusEvents, r.SkippedDuplicates+r.DuplicateSourceConflicts)
+	if reportPath != "" {
+		fmt.Fprintf(w, "Report: %s\n", reportPath)
+	}
+}
+
+func printImportWarnings(w io.Writer, warnings []string, reportPath string) {
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Warnings:")
+	shown := len(warnings)
+	if shown > maxImportWarningsShown {
+		shown = maxImportWarningsShown
+	}
+	for _, warning := range warnings[:shown] {
+		fmt.Fprintf(w, "- %s\n", warning)
+	}
+	if remaining := len(warnings) - shown; remaining > 0 {
+		if strings.TrimSpace(reportPath) != "" {
+			fmt.Fprintf(w, "- ... %d more warnings omitted; see %s\n", remaining, reportPath)
+		} else {
+			fmt.Fprintf(w, "- ... %d more warnings omitted; run without --dry-run to write the full import-report.json\n", remaining)
+		}
+	}
 }

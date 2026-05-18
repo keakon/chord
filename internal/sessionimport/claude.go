@@ -191,7 +191,7 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 
 	switch role {
 	case "assistant":
-		assistant := message.Message{Role: "assistant", Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true, WireFamily: "anthropic"}}
+		assistant := message.Message{Role: "assistant", Provenance: importedClaudeProvenance()}
 		for _, raw := range cm.Content {
 			var block claudeContentBlock
 			if err := json.Unmarshal(raw, &block); err != nil {
@@ -246,7 +246,7 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 		return []message.Message{assistant}, false, toolRendered, reasoningSkipped, warns, nil
 
 	case "user":
-		user := message.Message{Role: "user", Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true, WireFamily: "anthropic"}}
+		user := message.Message{Role: "user", Provenance: importedClaudeProvenance()}
 		var toolMsgs []message.Message
 		for _, raw := range cm.Content {
 			var block claudeContentBlock
@@ -269,7 +269,7 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 					toolRendered = true
 					continue
 				}
-				toolMsgs = append(toolMsgs, message.Message{Role: "tool", ToolCallID: block.ToolUseID, Content: rawContentString(block.Content), Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true, WireFamily: "anthropic"}})
+				toolMsgs = append(toolMsgs, message.Message{Role: "tool", ToolCallID: block.ToolUseID, Content: rawContentString(block.Content), Provenance: importedClaudeProvenance()})
 			default:
 				warns = append(warns, "unsupported user content block type="+block.Type)
 			}

@@ -26,17 +26,20 @@ type codexTurn struct {
 	ToolResults map[string]*codexToolResult
 
 	// Supplemental metadata.
-	UsageEvents []codexTokenUsageEvent
-	SourceOrder []codexOrderRef
+	UsageEvents        []codexTokenUsageEvent
+	SourceOrder        []codexOrderRef
+	HasExplicitTurnID  bool
+	HasTurnContext     bool
+	FallbackTurnNumber int
 }
 
 // codexMessageItem holds a single user/assistant text message before
 // Chord linearization.
 type codexMessageItem struct {
-	Role    string // "user" or "assistant"
-	Content string
-	// Source indicates whether this came from response_item or event_msg.
-	Source string
+	Role        string // "user" or "assistant"
+	Content     string
+	Source      string // response_item or event_msg
+	SourceOrder int
 }
 
 // codexReasoningEntry holds visible reasoning text that may be attached
@@ -76,6 +79,7 @@ type codexTokenUsageEvent struct {
 	CacheTokens  int
 	ReasonTokens int
 	TurnID       string
+	SourceOrder  int
 }
 
 // codexOrderRef records the source order of an item within a turn for

@@ -26,10 +26,10 @@ func normalizeToolMode(source, raw string) (string, error) {
 	if mode == "" {
 		// Per-source defaults.
 		switch source {
-		case "opencode", "codex":
-			return ToolModeText, nil
-		case "claude":
+		case "codex", "claude":
 			return ToolModeAuto, nil
+		case "opencode":
+			return ToolModeText, nil
 		default:
 			return ToolModeText, nil
 		}

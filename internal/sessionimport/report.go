@@ -27,12 +27,23 @@ type ImportReport struct {
 	UnsupportedToolCalls    int `json:"unsupported_tool_calls,omitempty"`
 	UnsupportedToolResults  int `json:"unsupported_tool_results,omitempty"`
 	MissingToolDeclarations int `json:"missing_tool_declarations,omitempty"`
+	MissingToolCallIDs      int `json:"missing_tool_call_ids,omitempty"`
 
-	// Content source deduplication.
-	SkippedDuplicates int `json:"skipped_duplicates,omitempty"`
+	// Content source resolution.
+	SkippedDuplicates        int `json:"skipped_duplicates,omitempty"`
+	DuplicateSourceConflicts int `json:"duplicate_source_conflicts,omitempty"`
+	SkippedStatusEvents      int `json:"skipped_status_events,omitempty"`
 
 	// Reasoning.
-	ReasoningBlocksSkipped int `json:"reasoning_blocks_skipped,omitempty"`
+	ReasoningBlocksSkipped    int `json:"reasoning_blocks_skipped,omitempty"`
+	SkippedAmbiguousReasoning int `json:"skipped_ambiguous_reasoning,omitempty"`
+
+	// Usage attribution.
+	UsageEventsAttached int `json:"usage_events_attached,omitempty"`
+	UsageEventsSkipped  int `json:"usage_events_skipped,omitempty"`
+
+	// Validation.
+	ValidationFailures int `json:"validation_failures,omitempty"`
 
 	// Legacy fields kept for backwards compatibility with existing tooling.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitempty"`

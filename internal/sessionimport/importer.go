@@ -106,10 +106,7 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 			return nil, err
 		}
 	case "codex":
-		if toolMode == ToolModeStructured {
-			return nil, fmt.Errorf("codex import: --tool-mode structured is not supported for codex; use --tool-mode text")
-		}
-		msgs, err = convertCodexRollout(data, reasoningMode, &report)
+		msgs, err = convertCodexRollout(data, toolMode, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
