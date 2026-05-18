@@ -76,14 +76,14 @@ func newImportCmd() *cobra.Command {
 
 			if dryRun {
 				fmt.Fprintf(os.Stdout, "Dry-run import (%s)\nProject: %s\nMessages: %d\n", source, res.ProjectRoot, res.Messages)
-				printImportSummary(os.Stdout, res, "")
+				printImportSummary(os.Stdout, source, res, "")
 				printImportWarnings(os.Stdout, res.Report.Warnings, "")
 				return nil
 			}
 
 			reportPath := filepath.Join(res.SessionDir, "import-report.json")
 			fmt.Fprintf(os.Stdout, "Imported %s session\nPWD:  %s\nSID:  %s\nPath: %s\nResume: chord resume %s\nMessages: %d\n", source, res.ProjectRoot, res.SessionID, res.SessionDir, res.SessionID, res.Messages)
-			printImportSummary(os.Stdout, res, reportPath)
+			printImportSummary(os.Stdout, source, res, reportPath)
 			printImportWarnings(os.Stdout, res.Report.Warnings, reportPath)
 			return nil
 		},
@@ -104,14 +104,43 @@ func newImportCmd() *cobra.Command {
 
 const maxImportWarningsShown = 5
 
-func printImportSummary(w io.Writer, res *sessionimport.ImportResult, reportPath string) {
+func printImportSummary(w io.Writer, source string, res *sessionimport.ImportResult, reportPath string) {
 	r := res.Report
+	structuredToolCalls := r.StructuredToolCalls
+	structuredToolResults := r.StructuredToolResults
+	if source == "claude" && r.Claude != nil {
+		if r.Claude.StructuredToolCalls > structuredToolCalls {
+			structuredToolCalls = r.Claude.StructuredToolCalls
+		}
+		if r.Claude.StructuredToolResults > structuredToolResults {
+			structuredToolResults = r.Claude.StructuredToolResults
+		}
+	}
 	fmt.Fprintf(w, "Tools: structured %d calls / %d results, downgraded %d calls / %d results\n",
-		r.StructuredToolCalls, r.StructuredToolResults, r.UnsupportedToolCalls, r.UnsupportedToolResults)
+		structuredToolCalls, structuredToolResults, r.UnsupportedToolCalls, r.UnsupportedToolResults)
 	fmt.Fprintf(w, "Skipped: %d entries, %d status events, %d duplicates\n",
 		r.SkippedEntries, r.SkippedStatusEvents, r.SkippedDuplicates+r.DuplicateSourceConflicts)
+	if source == "claude" && r.Claude != nil {
+		printClaudeImportSummary(w, r.Claude)
+	}
 	if reportPath != "" {
 		fmt.Fprintf(w, "Report: %s\n", reportPath)
+	}
+}
+
+func printClaudeImportSummary(w io.Writer, report *sessionimport.ClaudeImportReport) {
+	fmt.Fprintf(w, "Claude: selected %d/%d main messages, skipped %d sidechain messages, %d compact boundaries, %d tombstones\n",
+		report.SelectedSpanLength, report.NonSidechainMessages, report.SidechainMessagesSkipped, report.CompactBoundaries, report.Tombstones)
+	fmt.Fprintf(w, "Claude selection: %s", report.SelectionReason)
+	if report.TerminalCandidates > 0 {
+		fmt.Fprintf(w, ", candidates=%d", report.TerminalCandidates)
+	}
+	if report.DowngradedVisibleEntries > 0 {
+		fmt.Fprintf(w, ", downgraded_visible=%d", report.DowngradedVisibleEntries)
+	}
+	fmt.Fprintln(w)
+	if report.SidechainMessagesSkipped > 0 {
+		fmt.Fprintf(w, "Detected %d sub-agent messages (not imported in current version).\n", report.SidechainMessagesSkipped)
 	}
 }
 

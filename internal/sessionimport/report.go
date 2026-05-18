@@ -45,10 +45,30 @@ type ImportReport struct {
 	// Validation.
 	ValidationFailures int `json:"validation_failures,omitempty"`
 
+	// Source-specific diagnostics.
+	Claude *ClaudeImportReport `json:"claude,omitempty"`
+
 	// Legacy fields kept for backwards compatibility with existing tooling.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitempty"`
 
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+type ClaudeImportReport struct {
+	NonSidechainMessages     int      `json:"non_sidechain_messages,omitempty"`
+	SidechainMessagesSkipped int      `json:"sidechain_messages_skipped,omitempty"`
+	SidechainAgentIDs        []string `json:"sidechain_agent_ids,omitempty"`
+	MetadataEntries          int      `json:"metadata_entries,omitempty"`
+	CompactBoundaries        int      `json:"compact_boundaries,omitempty"`
+	Tombstones               int      `json:"tombstones,omitempty"`
+	TerminalCandidates       int      `json:"terminal_candidates,omitempty"`
+	SelectedSpanLength       int      `json:"selected_span_length,omitempty"`
+	SelectionReason          string   `json:"selection_reason,omitempty"`
+	SelectedLeafUUID         string   `json:"selected_leaf_uuid,omitempty"`
+	StructuredToolCalls      int      `json:"structured_tool_calls,omitempty"`
+	StructuredToolResults    int      `json:"structured_tool_results,omitempty"`
+	DowngradedVisibleEntries int      `json:"downgraded_visible_entries,omitempty"`
+	Diagnostics              []string `json:"diagnostics,omitempty"`
 }
 
 func (r *ImportReport) warnf(format string, args ...any) {

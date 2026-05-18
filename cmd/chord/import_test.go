@@ -50,6 +50,41 @@ func TestNewImportCmd_SucceedsWithIDAndRoot(t *testing.T) {
 	}
 }
 
+func TestNewImportCmd_PrintsClaudeImportSummary(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	input := filepath.Join(t.TempDir(), "claude.jsonl")
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"think","signature":"sig"},{"type":"tool_use","id":"tool1","name":"Read","input":{"file_path":"README.md"}}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}
+{"uuid":"s1","isSidechain":true,"agentId":"agent-1","message":{"role":"assistant","content":"side"}}
+`)
+	if err := os.WriteFile(input, data, 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cmd := newImportCmd()
+	_ = cmd.Flags().Set("project", t.TempDir())
+	_ = cmd.Flags().Set("dry-run", "true")
+
+	out, err := captureStdout(t, func() error {
+		return cmd.RunE(cmd, []string{"claude", input})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{
+		"Tools: structured 1 calls / 1 results, downgraded 0 calls / 0 results",
+		"Claude: selected 3/3 main messages, skipped 1 sidechain messages",
+		"Claude selection:",
+		"Detected 1 sub-agent messages",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestNewImportCmd_PrintsImportSummaryAndLimitsWarnings(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("CHORD_STATE_DIR", stateDir)
