@@ -49,26 +49,9 @@ jobs:
 
       - name: Test
         env:
-          MIN_COVERAGE: "65.0"
-        shell: bash
-        run: |
-          set -euo pipefail
-          coverage_file="coverage.out"
-          go test -timeout=2m -coverprofile="${coverage_file}" ./...
-          cover_output="$(go tool cover -func="${coverage_file}")"
-          printf '%s\n' "${cover_output}"
-          total_coverage="$(printf '%s\n' "${cover_output}" | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"
-          if [[ -z "${total_coverage}" ]]; then
-            echo "failed to parse total coverage" >&2
-            exit 1
-          fi
-          awk -v total="${total_coverage}" -v min="${MIN_COVERAGE}" 'BEGIN {
-            if (total + 0 < min + 0) {
-              printf("coverage check failed: total %.1f%% < required %.1f%%\n", total + 0, min + 0)
-              exit 1
-            }
-            printf("coverage check passed: total %.1f%% >= required %.1f%%\n", total + 0, min + 0)
-          }'
+          MIN_COVERAGE: "70.0"
+          CHORD_TEST_COUNT: "1"
+        run: scripts/check_ci_local.sh
 
   vet:
     name: Vet
