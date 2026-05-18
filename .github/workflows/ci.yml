@@ -108,14 +108,7 @@ jobs:
           rm -f "${log}"
 
       - name: Test with -race
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The race detector slows execution 2-20x, so this job runs in
-          # parallel with the coverage job rather than gating on it.
-          # -count=1 disables the test cache so the race instrumentation
-          # actually runs on every CI invocation.
-          go test -race -count=1 -timeout=10m ./...
+        run: scripts/check_ci_race.sh
 
   staticcheck:
     name: Staticcheck

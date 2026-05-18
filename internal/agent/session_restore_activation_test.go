@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -176,12 +177,12 @@ func TestThinkingTranslationIgnoresCanceledTurnContext(t *testing.T) {
 	}
 	svc.TargetLang = "zh-Hans"
 	svc.ModelPool = "translation"
-	calls := 0
+	var calls atomic.Int32
 	svc.SetTranslator(agentTestChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
 		if targetLang != "zh-Hans" {
 			t.Fatalf("targetLang = %q, want zh-Hans", targetLang)
 		}
-		calls++
+		calls.Add(1)
 		return "翻译:" + chunk, nil
 	}})
 	a.thinkingTranslateSvc = svc
@@ -201,8 +202,8 @@ func TestThinkingTranslationIgnoresCanceledTurnContext(t *testing.T) {
 	a.maybeTranslateLatestThinkingAfterIdle(1)
 	a.outputWg.Wait()
 
-	if calls != 2 {
-		t.Fatalf("translator calls = %d, want 2", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("translator calls = %d, want 2", calls.Load())
 	}
 	gotEvents := 0
 	for _, evt := range drainAgentEvents(a.Events()) {
