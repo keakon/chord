@@ -942,6 +942,7 @@ func TestFinish_Check_SucceedsWithoutMutatingRealWorktree(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
+	withGitIdentityEnv(t)
 	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
 	if err != nil {
 		t.Fatal(err)
