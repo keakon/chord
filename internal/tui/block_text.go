@@ -227,14 +227,16 @@ func preserveBackground(line, bgColor string) string {
 	}
 	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgSeq)
 	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+bgSeq)
-	return strings.ReplaceAll(line, "\x1b[49m", "\x1b[49m"+bgSeq)
+	line = strings.ReplaceAll(line, "\x1b[49m", "\x1b[49m"+bgSeq)
+	line = strings.ReplaceAll(line, "\x1b[39m", "\x1b[39m"+bgSeq)
+	return line
 }
 
-// preserveCardBg re-inserts the card's background ANSI sequence after every
-// full reset (\x1b[0m) and explicit background reset (\x1b[49m) in each line.
-// This prevents inner Render() calls and glamour's ANSI output from breaking
-// the outer card's background color when nested ANSI-rendered content resets
-// the terminal style.
+// preserveCardBg re-inserts the card's background ANSI sequence after full
+// resets (\x1b[0m / \x1b[m), foreground resets (\x1b[39m), and background
+// resets (\x1b[49m) in each line. This prevents inner Render() calls and
+// glamour's ANSI output from breaking the outer card's background color when
+// nested ANSI-rendered content resets the terminal style.
 func preserveCardBg(lines []string, bgColorNum string) []string {
 	for i, line := range lines {
 		if line == "" {
