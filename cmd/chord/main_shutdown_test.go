@@ -153,6 +153,26 @@ func TestResumeHintCommand_UsesActiveWorktreeFlag(t *testing.T) {
 	}
 }
 
+func captureStderr(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
+	err = fn()
+	_ = w.Close()
+
+	var buf bytes.Buffer
+	if _, readErr := buf.ReadFrom(r); readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+	return buf.String(), err
+}
+
 func TestWorktreeResumeCommand_ReservedNameFallsBackToFlagForm(t *testing.T) {
 	got := worktreeResumeCommand("list", "sid-123")
 	if got != "chord --worktree list --resume sid-123" {
@@ -165,9 +185,17 @@ func TestResumeHintCommand_DetectsWorktreeFromProjectRoot(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "feat-auth")
+	var info *worktree.Info
+	worktreeOutput, err := captureStderr(t, func() error {
+		var createErr error
+		info, createErr = prepareStartupWorktree(context.Background(), "feat-auth")
+		return createErr
+	})
 	if err != nil {
 		t.Fatalf("prepareStartupWorktree: %v", err)
+	}
+	if !strings.Contains(worktreeOutput, "Created worktree feat-auth") {
+		t.Fatalf("worktree startup output = %q, want created worktree summary", worktreeOutput)
 	}
 	prev := flagWorktreeStartupInfo
 	flagWorktreeStartupInfo = nil

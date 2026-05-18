@@ -58,7 +58,7 @@ fi
 # successful CI test run. It intentionally includes generic golog line prefixes:
 # package tests should capture expected logs explicitly instead of letting runtime
 # logs leak to the job log.
-leak_pattern='go: downloading|^\[[DIWE] [0-9]{4}-[0-9]{2}-[0-9]{2} |Device login URL|user_code:|Complete authorization|Login successful|Credentials written|client_fallback|client_retry|API key permission denied|terminal API error'
+leak_pattern='go: downloading|^\[[DIWE] [0-9]{4}-[0-9]{2}-[0-9]{2} |Created worktree |Entered worktree |Device login URL|user_code:|Complete authorization|Login successful|Credentials written|client_fallback|client_retry|API key permission denied|terminal API error'
 if grep -En "${leak_pattern}" "${stdout_file}" "${stderr_file}" >/tmp/chord-ci-log-leaks.txt; then
   echo "unexpected CI test output detected:" >&2
   cat /tmp/chord-ci-log-leaks.txt >&2
