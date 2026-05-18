@@ -238,6 +238,12 @@ type Model struct {
 	// Lifecycle
 	quitting bool
 
+	// Paste de-dup state: some terminals emit both KeyMsg (Ctrl/Cmd+V)
+	// and PasteMsg for the same user action. Keep a short-lived latch so
+	// one clipboard image paste only inserts once.
+	lastImagePasteAt     time.Time
+	lastImagePasteSource string
+
 	// Exit confirmation: first q or Ctrl+C sets these; second same key within 2s quits.
 	pendingQuitAt  time.Time
 	pendingQuitBy  string // "q" or "ctrl+c"; only the same key counts as second press

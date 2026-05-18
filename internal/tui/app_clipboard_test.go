@@ -121,6 +121,95 @@ func TestInsertAttachClipboardPrefersClipboardImageOverText(t *testing.T) {
 	}
 }
 
+func TestPasteImageDeduplicatesKeyAndPasteMsg(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tiny png: %v", err)
+	}
+
+	origImage := readImageFromClipboard
+	readImageFromClipboard = func() ([]byte, string, error) {
+		return data, "image/png", nil
+	}
+	origText := clipboardReadAll
+	clipboardReadAll = func() (string, error) {
+		return "fallback text", nil
+	}
+	t.Cleanup(func() {
+		readImageFromClipboard = origImage
+		clipboardReadAll = origText
+	})
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+v to return image-added toast cmd")
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after ctrl+v = %d, want 1", got)
+	}
+
+	cmd = m.handleNonKeyInputMsg(tea.PasteMsg{Content: "clipboard text"})
+	if cmd != nil {
+		t.Fatalf("expected deduplicated PasteMsg to return no command, got %T", cmd)
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after duplicate PasteMsg = %d, want 1", got)
+	}
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+		t.Fatalf("input value after duplicate PasteMsg = %q, want %q", got, inlineImagePlaceholderDisplay)
+	}
+}
+
+func TestPasteImageDeduplicatesPasteMsgAndKey(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tiny png: %v", err)
+	}
+
+	origImage := readImageFromClipboard
+	readImageFromClipboard = func() ([]byte, string, error) {
+		return data, "image/png", nil
+	}
+	origText := clipboardReadAll
+	clipboardReadAll = func() (string, error) {
+		return "fallback text", nil
+	}
+	t.Cleanup(func() {
+		readImageFromClipboard = origImage
+		clipboardReadAll = origText
+	})
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+
+	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "clipboard text"})
+	if cmd == nil {
+		t.Fatal("expected PasteMsg to return image-added toast cmd")
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after PasteMsg = %d, want 1", got)
+	}
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"clipboard text" {
+		t.Fatalf("input value after PasteMsg = %q, want %q", got, inlineImagePlaceholderDisplay+"clipboard text")
+	}
+
+	cmd = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if cmd != nil {
+		t.Fatalf("expected deduplicated ctrl+v to return no command, got %T", cmd)
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after duplicate ctrl+v = %d, want 1", got)
+	}
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"clipboard text" {
+		t.Fatalf("input value after duplicate ctrl+v = %q, want %q", got, inlineImagePlaceholderDisplay+"clipboard text")
+	}
+}
+
 func TestInsertAttachClipboardThenEnterSendsImageImmediately(t *testing.T) {
 	path := writeTinyPNG(t)
 	data, err := os.ReadFile(path)

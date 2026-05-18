@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -132,7 +133,27 @@ func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) {
 	m.recalcViewportSize()
 }
 
-func (m *Model) tryPasteImageIntoComposer(pastedText string) tea.Cmd {
+func (m *Model) shouldSuppressDuplicateImagePasteAction(source string) bool {
+	now := time.Now()
+	if !m.lastImagePasteAt.IsZero() && now.Sub(m.lastImagePasteAt) <= 150*time.Millisecond {
+		return source != "" && m.lastImagePasteSource != "" && source != m.lastImagePasteSource
+	}
+	return false
+}
+
+func (m *Model) shouldHandleImagePaste(source string) bool {
+	return !m.shouldSuppressDuplicateImagePasteAction(source)
+}
+
+func (m *Model) markImagePasteHandled(source string) {
+	m.lastImagePasteAt = time.Now()
+	m.lastImagePasteSource = source
+}
+
+func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
+	if !m.shouldHandleImagePaste(source) {
+		return nil
+	}
 	if len(m.attachments) >= maxInlineImageAttachments {
 		return nil
 	}
@@ -140,6 +161,7 @@ func (m *Model) tryPasteImageIntoComposer(pastedText string) tea.Cmd {
 	if img == nil {
 		return nil
 	}
+	m.markImagePasteHandled(source)
 	attach, ok := img.(attachmentReadyMsg)
 	if !ok {
 		return func() tea.Msg { return img }
@@ -168,7 +190,10 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 		// content, or paste a textual representation. We do NOT auto-convert
 		// pasted paths/URIs into attachments.
 		if pm, ok := msg.(tea.PasteMsg); ok {
-			if cmd := m.tryPasteImageIntoComposer(pm.Content); cmd != nil {
+			if m.shouldSuppressDuplicateImagePasteAction("paste") {
+				return nil
+			}
+			if cmd := m.tryPasteImageIntoComposer("paste", pm.Content); cmd != nil {
 				return cmd
 			}
 			if strings.TrimSpace(pm.Content) == "" {

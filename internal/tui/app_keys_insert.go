@@ -409,7 +409,10 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case keyMatches(key, m.keyMap.InsertAttachClipboard):
-		if cmd := m.tryPasteImageIntoComposer(""); cmd != nil {
+		if m.shouldSuppressDuplicateImagePasteAction("key") {
+			return nil
+		}
+		if cmd := m.tryPasteImageIntoComposer("key", ""); cmd != nil {
 			return cmd
 		}
 		return m.pasteFromClipboard()
