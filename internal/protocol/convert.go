@@ -1,8 +1,10 @@
 package protocol
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
@@ -88,19 +90,20 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		return nil, ErrTUIOnlyEvent
 
 	case agent.ToolResultEvent:
-		status := string(e.Status)
-		env, err = NewEnvelope(TypeToolResult, ToolResultPayload{
-			CallID:      e.CallID,
-			Name:        e.Name,
-			ArgsJSON:    e.ArgsJSON,
-			Audit:       e.Audit.Clone(),
-			Result:      e.Result,
-			Status:      status,
-			AgentID:     e.AgentID,
-			Diff:        e.Diff,
-			DiffAdded:   e.DiffAdded,
-			DiffRemoved: e.DiffRemoved,
-			FileCreated: e.FileCreated,
+		if e.Name != "Done" || strings.TrimSpace(e.DoneReport) == "" {
+			return nil, ErrTUIOnlyEvent
+		}
+		reason, report := ParseDoneArgs(e.ArgsJSON)
+		if strings.TrimSpace(e.DoneReport) != "" {
+			report = strings.TrimSpace(e.DoneReport)
+		}
+		env, err = NewEnvelope(TypeDoneCompletion, DoneCompletionPayload{
+			CallID:  e.CallID,
+			Report:  report,
+			Reason:  reason,
+			Status:  string(e.Status),
+			AgentID: e.AgentID,
+			Mode:    "normal",
 		})
 
 	case agent.ErrorEvent:
@@ -213,6 +216,10 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		env, err = NewEnvelope(TypeSessionRestored, nil)
 
 	case agent.ConfirmRequestEvent:
+		doneReason, doneReport := ParseDoneArgs(e.ArgsJSON)
+		if strings.TrimSpace(e.DoneReport) != "" {
+			doneReport = strings.TrimSpace(e.DoneReport)
+		}
 		env, err = NewEnvelope(TypeConfirmRequest, ConfirmRequestPayload{
 			ToolName:       e.ToolName,
 			ArgsJSON:       e.ArgsJSON,
@@ -220,6 +227,8 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 			TimeoutMS:      e.Timeout.Milliseconds(),
 			NeedsApproval:  append([]string(nil), e.NeedsApproval...),
 			AlreadyAllowed: append([]string(nil), e.AlreadyAllowed...),
+			DoneReport:     doneReport,
+			DoneReason:     doneReason,
 		})
 
 	case agent.QuestionRequestEvent:
@@ -249,6 +258,30 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 	}
 	env.Seq = seq
 	return env, nil
+}
+
+func parseProtocolToolResultStatus(status string) agent.ToolResultStatus {
+	switch status {
+	case string(agent.ToolResultStatusError):
+		return agent.ToolResultStatusError
+	case string(agent.ToolResultStatusCancelled):
+		return agent.ToolResultStatusCancelled
+	default:
+		return agent.ToolResultStatusSuccess
+	}
+}
+
+func ParseDoneArgs(argsJSON string) (reason, report string) {
+	if strings.TrimSpace(argsJSON) == "" {
+		return "", ""
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", ""
+	}
+	reason, _ = args["reason"].(string)
+	report, _ = args["report"].(string)
+	return strings.TrimSpace(reason), strings.TrimSpace(report)
 }
 
 // ErrTUIOnlyEvent is returned by FromAgentEvent for events that are only
@@ -317,33 +350,12 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 			state = agent.ToolCallExecutionStateQueued
 		}
 		return agent.ToolCallExecutionEvent{ID: p.CallID, Name: p.Name, ArgsJSON: p.ArgsJSON, State: state, AgentID: p.AgentID}, nil
-	case TypeToolResult:
-		p, err := ParsePayload[ToolResultPayload](env)
+	case TypeDoneCompletion:
+		p, err := ParsePayload[DoneCompletionPayload](env)
 		if err != nil {
 			return nil, err
 		}
-		status := agent.ToolResultStatusSuccess
-		switch p.Status {
-		case string(agent.ToolResultStatusCancelled):
-			status = agent.ToolResultStatusCancelled
-		case string(agent.ToolResultStatusError):
-			status = agent.ToolResultStatusError
-		case string(agent.ToolResultStatusSuccess):
-			status = agent.ToolResultStatusSuccess
-		}
-		return agent.ToolResultEvent{
-			CallID:      p.CallID,
-			Name:        p.Name,
-			ArgsJSON:    p.ArgsJSON,
-			Audit:       p.Audit.Clone(),
-			Result:      p.Result,
-			Status:      status,
-			AgentID:     p.AgentID,
-			Diff:        p.Diff,
-			DiffAdded:   p.DiffAdded,
-			DiffRemoved: p.DiffRemoved,
-			FileCreated: p.FileCreated,
-		}, nil
+		return agent.ToolResultEvent{CallID: p.CallID, Name: "Done", Result: p.Report, DoneReport: p.Report, Status: parseProtocolToolResultStatus(p.Status), AgentID: p.AgentID}, nil
 	case TypeError:
 		p, err := ParsePayload[ErrorPayload](env)
 		if err != nil {
@@ -449,6 +461,7 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 			Timeout:        time.Duration(p.TimeoutMS) * time.Millisecond,
 			NeedsApproval:  append([]string(nil), p.NeedsApproval...),
 			AlreadyAllowed: append([]string(nil), p.AlreadyAllowed...),
+			DoneReport:     p.DoneReport,
 		}, nil
 	case TypeQuestionRequest:
 		p, err := ParsePayload[QuestionRequestPayload](env)

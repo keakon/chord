@@ -43,16 +43,16 @@ You send these on stdin. Unknown command types are answered with an `error` enve
 Select which event types you want pushed. If you never send `subscribe`, Chord forwards **all** optional event types by default. Sending `subscribe` replaces that default with an explicit allowlist.
 
 ```json
-{"type": "subscribe", "events": ["activity", "assistant_message", "idle", "tool_result"]}
+{"type": "subscribe", "events": ["activity", "assistant_message", "idle", "done_completion"]}
 ```
 
 Response:
 
 ```json
-{"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "tool_result"]}}
+{"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `error`, `agent_done`, `info`, `toast`, `tool_result`, `assistant_rollback`, `todos`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `error`, `agent_done`, `info`, `toast`, `done_completion`, `assistant_rollback`, `todos`.
 
 ### `status`
 
@@ -175,7 +175,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `activity`              | Agent enters a new phase                                                                          | `agent_id`, `type` (`connecting`, `streaming`, `compacting`, …), `detail`                                    |
 | `assistant_message`     | A complete assistant message is ready for consumption                                             | `agent_id`, `text`, `tool_calls`                                                                             |
 | `idle`                  | Agent is ready to receive input again                                                             | `last_outcome` (`completed` / `cancelled` / `error`)                                                         |
-| `tool_result`           | A tool execution finished                                                                         | `call_id`, `name`, `status` (`success` / `error` / `cancelled`), `agent_id`                                  |
+| `done_completion`      | Done tool completed with a final report outside loop mode                                         | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `timeout_ms`                    |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
 | `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `summary`                                                                             |
@@ -225,7 +225,7 @@ def send(cmd: dict) -> None:
 
 # Wait for ready (the first line is always "ready"), then subscribe and send.
 send({"type": "subscribe",
-      "events": ["activity", "assistant_message", "idle", "tool_result"]})
+      "events": ["activity", "assistant_message", "idle", "done_completion"]})
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 

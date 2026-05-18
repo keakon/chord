@@ -157,7 +157,7 @@ var headlessEventTypes = map[string]bool{
 	"agent_done":         true,
 	"info":               true,
 	"toast":              true,
-	"tool_result":        true,
+	"done_completion":    true,
 	"assistant_rollback": true,
 	"todos":              true,
 }
@@ -232,7 +232,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 			}})
 		}
 	case agent.ConfirmRequestEvent:
-		state.pendingConfirm = &protocol.ConfirmRequestPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed}
+		doneReason, doneReport := protocol.ParseDoneArgs(e.ArgsJSON)
+		if strings.TrimSpace(e.DoneReport) != "" {
+			doneReport = strings.TrimSpace(e.DoneReport)
+		}
+		state.pendingConfirm = &protocol.ConfirmRequestPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, DoneReport: doneReport, DoneReason: doneReason}
 		state.updatedAt = time.Now()
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
@@ -242,6 +246,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 				"timeout_ms":      e.Timeout.Milliseconds(),
 				"needs_approval":  e.NeedsApproval,
 				"already_allowed": e.AlreadyAllowed,
+				"done_report":     doneReport,
+				"done_reason":     doneReason,
 			}})
 		}
 	case agent.QuestionRequestEvent:
@@ -270,8 +276,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 		}
 	case agent.ToolResultEvent:
 		state.updatedAt = time.Now()
-		if state.isSubscribed("tool_result") {
-			out = append(out, &headlessEnvelope{Type: "tool_result", Payload: map[string]string{"call_id": e.CallID, "name": e.Name, "status": string(e.Status), "agent_id": e.AgentID}})
+		if strings.EqualFold(e.Name, "Done") && e.AgentID == "" {
+			reason, report := protocol.ParseDoneArgs(e.ArgsJSON)
+			if strings.TrimSpace(e.DoneReport) != "" {
+				report = strings.TrimSpace(e.DoneReport)
+			}
+			if report != "" && state.isSubscribed("done_completion") {
+				out = append(out, &headlessEnvelope{Type: "done_completion", Payload: map[string]any{"call_id": e.CallID, "report": report, "reason": reason, "status": string(e.Status), "agent_id": e.AgentID, "mode": "normal"}})
+			}
 		}
 	case agent.StreamRollbackEvent:
 		state.updatedAt = time.Now()

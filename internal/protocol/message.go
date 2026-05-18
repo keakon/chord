@@ -61,8 +61,8 @@ const (
 	TypeToolCallUpdate = "tool_call_update"
 	// TypeToolCallExecution updates the live execution phase of a tool card.
 	TypeToolCallExecution = "tool_call_execution"
-	// TypeToolResult carries a completed tool execution result.
-	TypeToolResult = "tool_result"
+	// TypeDoneCompletion carries a non-loop Done tool completion report.
+	TypeDoneCompletion = "done_completion"
 	// TypeError reports an error from the agent.
 	TypeError = "error"
 	// TypeIdle signals the agent is waiting for user input.
@@ -198,19 +198,14 @@ type ToolCallExecutionPayload struct {
 	AgentID  string `json:"agent_id"`
 }
 
-// ToolResultPayload is the payload for TypeToolResult.
-type ToolResultPayload struct {
-	CallID      string                 `json:"call_id"`
-	Name        string                 `json:"name"`
-	ArgsJSON    string                 `json:"args_json"`
-	Audit       *message.ToolArgsAudit `json:"audit,omitempty"`
-	Result      string                 `json:"result"`
-	Status      string                 `json:"status,omitempty"` // success, error, cancelled
-	AgentID     string                 `json:"agent_id"`
-	Diff        string                 `json:"diff,omitempty"`         // unified diff for Write/Edit tools
-	DiffAdded   int                    `json:"diff_added,omitempty"`   // full added-line count before any diff truncation
-	DiffRemoved int                    `json:"diff_removed,omitempty"` // full removed-line count before any diff truncation
-	FileCreated bool                   `json:"file_created,omitempty"` // true when Write created a file that did not previously exist
+// DoneCompletionPayload is the payload for TypeDoneCompletion.
+type DoneCompletionPayload struct {
+	CallID  string `json:"call_id,omitempty"`
+	Report  string `json:"report"`
+	Reason  string `json:"reason,omitempty"`
+	Status  string `json:"status,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
+	Mode    string `json:"mode,omitempty"`
 }
 
 // ErrorPayload is the payload for TypeError.
@@ -309,6 +304,8 @@ type ConfirmRequestPayload struct {
 	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
 	NeedsApproval  []string `json:"needs_approval,omitempty"`
 	AlreadyAllowed []string `json:"already_allowed,omitempty"`
+	DoneReport     string   `json:"done_report,omitempty"`
+	DoneReason     string   `json:"done_reason,omitempty"`
 }
 
 // QuestionRequestPayload is the payload for TypeQuestionRequest.

@@ -43,16 +43,16 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 选择你想接收的推送事件类型。**如果从未发送 `subscribe`，Chord 默认会转发所有可订阅事件。** 一旦发送 `subscribe`，默认行为就会被替换成显式 allowlist。
 
 ```json
-{"type": "subscribe", "events": ["activity", "assistant_message", "idle", "tool_result"]}
+{"type": "subscribe", "events": ["activity", "assistant_message", "idle", "done_completion"]}
 ```
 
 响应：
 
 ```json
-{"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "tool_result"]}}
+{"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`error`、`agent_done`、`info`、`toast`、`tool_result`、`assistant_rollback`、`todos`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`error`、`agent_done`、`info`、`toast`、`done_completion`、`assistant_rollback`、`todos`。
 
 ### `status`
 
@@ -175,7 +175,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `activity`           | Agent 进入新阶段                             | `agent_id`、`type`（如 `connecting`、`streaming`、`compacting`） 、`detail` |
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`text`、`tool_calls` |
 | `idle`               | Agent 再次可接收输入                         | `last_outcome`（`completed` / `cancelled` / `error`） |
-| `tool_result`        | 某个工具执行完成                             | `call_id`、`name`、`status`（`success` / `error` / `cancelled`）、`agent_id` |
+| `done_completion`   | 非 loop 模式下 Done 工具完成并给出最终报告 | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`timeout_ms` |
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
 | `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`summary` |
@@ -225,7 +225,7 @@ def send(cmd: dict) -> None:
 
 # 等待 ready（第一行一定是 ready），然后订阅并发送消息。
 send({"type": "subscribe",
-      "events": ["activity", "assistant_message", "idle", "tool_result"]})
+      "events": ["activity", "assistant_message", "idle", "done_completion"]})
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 

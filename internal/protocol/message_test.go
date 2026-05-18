@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
-	"github.com/keakon/chord/internal/message"
 )
 
 // ---------------------------------------------------------------------------
@@ -172,7 +171,7 @@ func TestAllEventPayloads(t *testing.T) {
 		{TypeStreamRollback, StreamRollbackPayload{Reason: "retry", AgentID: ""}},
 		{TypeToolCallStart, ToolCallStartPayload{CallID: "c1", Name: "Read", ArgsJSON: `{}`, AgentID: ""}},
 		{TypeToolCallUpdate, ToolCallUpdatePayload{CallID: "c1", Name: "Read", ArgsJSON: `{"path":"README.md"}`, ArgsStreamingDone: true, AgentID: "agent-1"}},
-		{TypeToolResult, ToolResultPayload{CallID: "c1", Name: "Read", ArgsJSON: `{}`, Result: "ok", Status: string(agent.ToolResultStatusSuccess), AgentID: ""}},
+		{TypeDoneCompletion, DoneCompletionPayload{CallID: "c1", Report: "done", Reason: "complete", Status: string(agent.ToolResultStatusSuccess), AgentID: "", Mode: "normal"}},
 		{TypeError, ErrorPayload{Message: "boom", AgentID: ""}},
 		{TypeIdle, nil},
 		{TypePlanComplete, PlanCompletePayload{Summary: "done", PlanPath: "/tmp/plan.md"}},
@@ -232,7 +231,6 @@ func TestFromAgentEvent_AllTypes(t *testing.T) {
 		{"ToolCallStart", agent.ToolCallStartEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, AgentID: ""}, TypeToolCallStart},
 		{"ToolCallUpdate", agent.ToolCallUpdateEvent{ID: "c1", Name: "Shell", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true, AgentID: ""}, TypeToolCallUpdate},
 		{"ToolCallExecution", agent.ToolCallExecutionEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateQueued, AgentID: ""}, TypeToolCallExecution},
-		{"ToolResult", agent.ToolResultEvent{CallID: "c1", Name: "Shell", ArgsJSON: `{}`, Result: "ok", Status: agent.ToolResultStatusSuccess, AgentID: ""}, TypeToolResult},
 		{"Error", agent.ErrorEvent{Err: errors.New("oops"), AgentID: "a2"}, TypeError},
 		{"ErrorNil", agent.ErrorEvent{Err: nil, AgentID: ""}, TypeError},
 		{"Idle", agent.IdleEvent{}, TypeIdle},
@@ -352,32 +350,45 @@ func TestFromAgentEvent_ToolCallExecutionPayload(t *testing.T) {
 	}
 }
 
-func TestFromAgentEvent_ToolResultPayload(t *testing.T) {
+func TestFromAgentEvent_DoneCompletionPayload(t *testing.T) {
 	env, err := FromAgentEvent(agent.ToolResultEvent{
-		CallID:   "c1",
-		Name:     "Read",
-		ArgsJSON: `{"path":"/tmp"}`,
-		Audit: &message.ToolArgsAudit{
-			OriginalArgsJSON:  `{"path":"/orig"}`,
-			EffectiveArgsJSON: `{"path":"/tmp"}`,
-			UserModified:      true,
-		},
-		Result:  "contents",
-		Status:  agent.ToolResultStatusError,
-		AgentID: "a2",
+		CallID:     "call-done",
+		Name:       "Done",
+		ArgsJSON:   `{"reason":"ready","report":"fallback"}`,
+		DoneReport: "## Summary\nDone",
+		Status:     agent.ToolResultStatusSuccess,
+		AgentID:    "",
 	}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := ParsePayload[ToolResultPayload](env)
+	if env.Type != TypeDoneCompletion {
+		t.Fatalf("type = %q, want %q", env.Type, TypeDoneCompletion)
+	}
+	p, err := ParsePayload[DoneCompletionPayload](env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.CallID != "c1" || p.Name != "Read" || p.Status != string(agent.ToolResultStatusError) || p.AgentID != "a2" {
+	if p.CallID != "call-done" || p.Report != "## Summary\nDone" || p.Reason != "ready" || p.Status != "success" || p.Mode != "normal" {
 		t.Fatalf("payload mismatch: %+v", p)
 	}
-	if p.Audit == nil || !p.Audit.UserModified || p.Audit.OriginalArgsJSON != `{"path":"/orig"}` {
-		t.Fatalf("payload audit mismatch: %+v", p.Audit)
+	got, err := ToAgentEvent(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := got.(agent.ToolResultEvent)
+	if !ok {
+		t.Fatalf("event = %T, want ToolResultEvent", got)
+	}
+	if ev.Name != "Done" || ev.DoneReport != "## Summary\nDone" || ev.Result != "## Summary\nDone" || ev.Status != agent.ToolResultStatusSuccess {
+		t.Fatalf("event mismatch: %+v", ev)
+	}
+}
+
+func TestFromAgentEvent_NonDoneToolResultIsTUIOnly(t *testing.T) {
+	_, err := FromAgentEvent(agent.ToolResultEvent{CallID: "c1", Name: "Read", Status: agent.ToolResultStatusSuccess}, 5)
+	if !errors.Is(err, ErrTUIOnlyEvent) {
+		t.Fatalf("err = %v, want ErrTUIOnlyEvent", err)
 	}
 }
 
@@ -636,19 +647,6 @@ func TestProtocolRoundTripAdditionalEvents(t *testing.T) {
 			},
 		},
 		{
-			name: "tool result cancelled with diff metadata",
-			event: agent.ToolResultEvent{
-				CallID: "call-3", Name: "Edit", ArgsJSON: `{}`, Result: "cancelled",
-				Status: agent.ToolResultStatusCancelled, AgentID: "a3", Diff: "diff", DiffAdded: 2, DiffRemoved: 1, FileCreated: true,
-			},
-			check: func(t *testing.T, got agent.AgentEvent) {
-				ev := got.(agent.ToolResultEvent)
-				if ev.CallID != "call-3" || ev.Status != agent.ToolResultStatusCancelled || ev.Diff != "diff" || ev.DiffAdded != 2 || ev.DiffRemoved != 1 || !ev.FileCreated {
-					t.Fatalf("ToolResultEvent = %+v", ev)
-				}
-			},
-		},
-		{
 			name:  "error",
 			event: agent.ErrorEvent{Err: errors.New("boom"), AgentID: "a4"},
 			check: func(t *testing.T, got agent.AgentEvent) {
@@ -852,21 +850,6 @@ func TestToAgentEventAdditionalTypesAndErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("tool result unknown status defaults success", func(t *testing.T) {
-		env, err := NewEnvelope(TypeToolResult, ToolResultPayload{CallID: "c", Name: "Read", Status: "future"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ev, err := ToAgentEvent(env)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got := ev.(agent.ToolResultEvent)
-		if got.Status != agent.ToolResultStatusSuccess {
-			t.Fatalf("status = %q, want success", got.Status)
-		}
-	})
-
 	t.Run("session select nil on malformed payload", func(t *testing.T) {
 		ev, err := ToAgentEvent(&Envelope{Type: TypeSessionSelectRequest, Payload: []byte(`{`)})
 		if err != nil {
@@ -887,7 +870,6 @@ func TestAgentEventConversionDirectionMatrix(t *testing.T) {
 			wantType string
 		}{
 			{"stream text", agent.StreamTextEvent{Text: "hi", AgentID: "a1"}, TypeStreamText},
-			{"tool result", agent.ToolResultEvent{CallID: "c1", Name: "Read", ArgsJSON: `{}`, Result: "ok", Status: agent.ToolResultStatusSuccess}, TypeToolResult},
 			{"toast", agent.ToastEvent{Message: "saved", Level: "success", AgentID: "a2"}, TypeToast},
 			{"role changed", agent.RoleChangedEvent{Role: "reviewer"}, TypeRoleChanged},
 			{"running model", agent.RunningModelChangedEvent{AgentID: "main", ProviderModelRef: "p/m", RunningModelRef: "p/m"}, TypeRunningModelChanged},
