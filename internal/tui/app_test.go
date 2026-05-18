@@ -6006,6 +6006,9 @@ func TestHandleAgentEventClosedAfterExpectedDoneCompletionDoesNotToastReconnect(
 	if got := m.activities[m.focusedAgentIDOrMain()].Type; got != agent.ActivityIdle {
 		t.Fatalf("activity = %q, want idle", got)
 	}
+	if m.isAgentBusy() {
+		t.Fatal("model should not remain busy after expected Done close")
+	}
 }
 
 func TestViewRefreshesStatusBarForCtrlCHintWhileToastActive(t *testing.T) {
@@ -7307,6 +7310,165 @@ func findThinkingBlockInViewport(v *Viewport) *Block {
 		}
 	}
 	return nil
+}
+
+func TestThinkingTranslatedEventTargetsExactThinkingBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	first := &Block{ID: 1, Type: BlockThinking, Content: "first", MsgIndex: 2, ThinkingBlockIndex: 0}
+	second := &Block{ID: 2, Type: BlockThinking, Content: "second", MsgIndex: 3, ThinkingBlockIndex: 0}
+	m.viewport.AppendBlock(first)
+	m.viewport.AppendBlock(second)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{MessageID: "msgidx:2", BlockIndex: 0, Translated: "bonjour", TargetLang: "fr"}})
+
+	if got := strings.TrimSpace(first.ThinkingTranslations[0].Content); got != "bonjour" {
+		t.Fatalf("first translated content = %q, want bonjour", got)
+	}
+	if len(second.ThinkingTranslations) != 0 {
+		t.Fatalf("second block should remain untranslated, got %#v", second.ThinkingTranslations)
+	}
+}
+
+func TestThinkingTranslatedEventDoesNotFallbackToNearestThinkingBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	block := &Block{ID: 1, Type: BlockThinking, Content: "first", MsgIndex: 7, ThinkingBlockIndex: 0}
+	m.viewport.AppendBlock(block)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{MessageID: "msgidx:99", BlockIndex: 0, Translated: "bonjour", TargetLang: "fr"}})
+
+	if len(block.ThinkingTranslations) != 0 {
+		t.Fatalf("translation should not apply on mismatched message id, got %#v", block.ThinkingTranslations)
+	}
+}
+
+func TestThinkingTranslatedEventDeduplicatesStructuredTranslation(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	block := &Block{ID: 1, Type: BlockThinking, Content: "first", MsgIndex: 2, ThinkingBlockIndex: 0}
+	m.viewport.AppendBlock(block)
+	evt := agent.ThinkingTranslatedEvent{MessageID: "msgidx:2", BlockIndex: 0, Translated: "bonjour", TargetLang: "fr"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: evt})
+	_ = m.handleAgentEvent(agentEventMsg{event: evt})
+
+	if len(block.ThinkingTranslations) != 1 {
+		t.Fatalf("translations len = %d, want 1", len(block.ThinkingTranslations))
+	}
+	if got := block.ThinkingTranslations[0].Content; got != "bonjour" {
+		t.Fatalf("translated content = %q, want bonjour", got)
+	}
+}
+
+func TestThinkingTranslatedEventAppliesToStreamingThinkingBlockWithMessageIndex(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{{Role: "user", Content: "hello"}}}
+	m := NewModelWithSize(backend, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestCycleStartedEvent{TurnID: 1}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "Plan", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
+
+	blocks := m.viewport.visibleBlocks()
+	var thinkingBlock *Block
+	for _, b := range blocks {
+		if b.Type == BlockThinking {
+			thinkingBlock = b
+			break
+		}
+	}
+	if thinkingBlock == nil {
+		t.Fatal("expected thinking block")
+	}
+	if thinkingBlock.Streaming {
+		t.Fatal("thinking block should be settled")
+	}
+	if thinkingBlock.MsgIndex != 1 {
+		t.Fatalf("MsgIndex = %d, want next assistant message index 1", thinkingBlock.MsgIndex)
+	}
+	if thinkingBlock.ThinkingBlockIndex != 0 {
+		t.Fatalf("ThinkingBlockIndex = %d, want 0", thinkingBlock.ThinkingBlockIndex)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{MessageID: "msgidx:1", BlockIndex: 0, Translated: "计划", TargetLang: "zh-Hans"}})
+	if got := strings.TrimSpace(thinkingBlock.ThinkingTranslations[0].Content); got != "计划" {
+		t.Fatalf("translated content = %q, want 计划", got)
+	}
+}
+
+func TestStreamingThinkingMsgIndexCatchesUpWhenMessagesAdvanceBeforeEvent(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{{Role: "user", Content: "hello"}}}
+	m := NewModelWithSize(backend, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestCycleStartedEvent{TurnID: 1}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "first", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
+
+	backend.messages = append(backend.messages,
+		message.Message{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Shell"}}},
+		message.Message{Role: "tool", Content: "result", ToolCallID: "call-1"},
+		message.Message{Role: "tool", Content: "result", ToolCallID: "call-2"},
+	)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "second", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
+
+	var thinkingBlocks []*Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockThinking {
+			thinkingBlocks = append(thinkingBlocks, b)
+		}
+	}
+	if len(thinkingBlocks) != 2 {
+		t.Fatalf("thinking block count = %d, want 2", len(thinkingBlocks))
+	}
+	if thinkingBlocks[0].MsgIndex != 1 || thinkingBlocks[1].MsgIndex != 4 {
+		t.Fatalf("MsgIndex = [%d,%d], want [1,4]", thinkingBlocks[0].MsgIndex, thinkingBlocks[1].MsgIndex)
+	}
+	if thinkingBlocks[0].ThinkingBlockIndex != 0 || thinkingBlocks[1].ThinkingBlockIndex != 0 {
+		t.Fatalf("ThinkingBlockIndex = [%d,%d], want [0,0]", thinkingBlocks[0].ThinkingBlockIndex, thinkingBlocks[1].ThinkingBlockIndex)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{MessageID: "msgidx:4", BlockIndex: 0, Translated: "第二", TargetLang: "zh-Hans"}})
+	if len(thinkingBlocks[0].ThinkingTranslations) != 0 {
+		t.Fatalf("first block should not receive second assistant translation, got %#v", thinkingBlocks[0].ThinkingTranslations)
+	}
+	if got := strings.TrimSpace(thinkingBlocks[1].ThinkingTranslations[0].Content); got != "第二" {
+		t.Fatalf("second translated content = %q, want 第二", got)
+	}
+}
+
+func TestStreamingThinkingBlocksIncrementThinkingBlockIndex(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{{Role: "user", Content: "hello"}}}
+	m := NewModelWithSize(backend, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestCycleStartedEvent{TurnID: 1}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "first", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "second", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
+
+	var thinkingBlocks []*Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockThinking {
+			thinkingBlocks = append(thinkingBlocks, b)
+		}
+	}
+	if len(thinkingBlocks) != 2 {
+		t.Fatalf("thinking block count = %d, want 2", len(thinkingBlocks))
+	}
+	if thinkingBlocks[0].MsgIndex != 1 || thinkingBlocks[1].MsgIndex != 1 {
+		t.Fatalf("MsgIndex = [%d,%d], want [1,1]", thinkingBlocks[0].MsgIndex, thinkingBlocks[1].MsgIndex)
+	}
+	if thinkingBlocks[0].ThinkingBlockIndex != 0 || thinkingBlocks[1].ThinkingBlockIndex != 1 {
+		t.Fatalf("ThinkingBlockIndex = [%d,%d], want [0,1]", thinkingBlocks[0].ThinkingBlockIndex, thinkingBlocks[1].ThinkingBlockIndex)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{MessageID: "msgidx:1", BlockIndex: 1, Translated: "第二", TargetLang: "zh-Hans"}})
+	if len(thinkingBlocks[0].ThinkingTranslations) != 0 {
+		t.Fatalf("first block should not receive second translation, got %#v", thinkingBlocks[0].ThinkingTranslations)
+	}
+	if got := strings.TrimSpace(thinkingBlocks[1].ThinkingTranslations[1].Content); got != "第二" {
+		t.Fatalf("second translated content = %q, want 第二", got)
+	}
 }
 
 func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {

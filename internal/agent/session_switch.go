@@ -231,6 +231,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 
 func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionEpoch++
+	a.resetThinkingTranslationSeen()
 	a.sessionDir = sessionDir
 	a.compactionFileCtxMu.Lock()
 	a.compactionFileCtxSig = ""

@@ -140,6 +140,10 @@ func (m *Model) tryPasteImageIntoComposer(pastedText string) tea.Cmd {
 	if img == nil {
 		return nil
 	}
+	attach, ok := img.(attachmentReadyMsg)
+	if !ok {
+		return func() tea.Msg { return img }
+	}
 	m.input.ClearSelection()
 	placeholderRaw := imagePlaceholder(len(m.attachments) + 1)
 	m.input.InsertImagePlaceholder(len(m.attachments) + 1)
@@ -152,13 +156,8 @@ func (m *Model) tryPasteImageIntoComposer(pastedText string) tea.Cmd {
 		}
 		m.recalcViewportSize()
 	}
-	return func() tea.Msg {
-		if attach, ok := img.(attachmentReadyMsg); ok {
-			attach.inlineImagePlaceholderRaw = placeholderRaw
-			return attach
-		}
-		return img
-	}
+	attach.inlineImagePlaceholderRaw = placeholderRaw
+	return m.handleAttachmentReadyMsg(attach)
 }
 
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {

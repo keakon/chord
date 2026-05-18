@@ -37,6 +37,7 @@ func TestShutdownLocalRuntimeWaitsForIdleOnlyWhenCancelSucceeds(t *testing.T) {
 		ac,
 		rt,
 		localExitIdleWait,
+		false,
 		func() bool { return agent.CancelCurrentTurn() },
 		func(time.Duration) bool {
 			waitCalled = true
@@ -73,6 +74,7 @@ func TestShutdownLocalRuntimeSkipsIdleWaitWhenAlreadyIdle(t *testing.T) {
 		ac,
 		rt,
 		localExitIdleWait,
+		false,
 		func() bool { return agent.CancelCurrentTurn() },
 		func(time.Duration) bool {
 			waitCalled = true
@@ -87,6 +89,43 @@ func TestShutdownLocalRuntimeSkipsIdleWaitWhenAlreadyIdle(t *testing.T) {
 	}
 	if waitCalled {
 		t.Fatal("did not expect WaitIdleOrTimeout hook when cancel returned false")
+	}
+	if !closeCalled {
+		t.Fatal("expected runtime close hook to be called")
+	}
+	if !appCloseCalled {
+		t.Fatal("expected app close hook to be called")
+	}
+}
+
+func TestShutdownLocalRuntimeSkipsCancelWhenDoneCompletedExpectedClose(t *testing.T) {
+	agent := &shutdownTrackingAgent{cancelResult: true}
+	rt := &Runtime{Agent: nil}
+	ac := &AppContext{}
+
+	waitCalled := false
+	closeCalled := false
+	appCloseCalled := false
+
+	shutdownLocalRuntimeForTest(
+		ac,
+		rt,
+		localExitIdleWait,
+		true,
+		func() bool { return agent.CancelCurrentTurn() },
+		func(time.Duration) bool {
+			waitCalled = true
+			return true
+		},
+		func() { closeCalled = true },
+		func() { appCloseCalled = true },
+	)
+
+	if agent.cancelCalls != 0 {
+		t.Fatalf("cancelCalls = %d, want 0", agent.cancelCalls)
+	}
+	if waitCalled {
+		t.Fatal("did not expect WaitIdleOrTimeout hook when skipping cancel")
 	}
 	if !closeCalled {
 		t.Fatal("expected runtime close hook to be called")

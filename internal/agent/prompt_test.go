@@ -170,7 +170,7 @@ func TestShouldEnableBugTriagePrompt_UsesLatestRealUserMessage(t *testing.T) {
 }
 
 func TestSyncBugTriagePromptFromSnapshot_UsesCurrentContext(t *testing.T) {
-	a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, false, 0)}
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0)}
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "analyze this bug regression"})
 	a.syncBugTriagePromptFromSnapshot()
 	if !a.bugTriagePromptActive.Load() {

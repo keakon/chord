@@ -10,7 +10,7 @@ import (
 )
 
 func TestRepairOrphanToolMessagesInPlace(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "ok", Name: "Read", Args: json.RawMessage(`{}`)}}})
 	m.Append(message.Message{Role: "tool", ToolCallID: "ok", Content: "kept"})
 	m.Append(message.Message{Role: "tool", ToolCallID: "missing", Content: "dropped"})
@@ -28,7 +28,7 @@ func TestRepairOrphanToolMessagesInPlace(t *testing.T) {
 }
 
 func TestRepairOrphanToolMessagesInPlaceClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 123, CacheWriteTokens: 11})
 	m.Append(message.Message{Role: "tool", ToolCallID: "ghost", Content: "orphan"})
 
@@ -47,7 +47,7 @@ func TestRepairOrphanToolMessagesInPlaceClearsTrackedTokensWhenRepairEmptiesHist
 }
 
 func TestAnyAssistantDeclaresToolCallID(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.Append(message.Message{Role: "user", Content: "hello"})
 	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Read", Args: json.RawMessage(`{}`)}}})
 	if !m.AnyAssistantDeclaresToolCallID("call-1") {
@@ -81,7 +81,7 @@ func TestSafeKeepBoundaryAndManagerWrapper(t *testing.T) {
 		t.Fatalf("SafeKeepBoundary beyond end = %d, want %d", got, len(msgs))
 	}
 
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.RestoreMessages(msgs)
 	if got := m.ComputeSafeKeepBoundary(2); got != 1 {
 		t.Fatalf("ComputeSafeKeepBoundary = %d, want 1", got)
@@ -89,7 +89,7 @@ func TestSafeKeepBoundaryAndManagerWrapper(t *testing.T) {
 }
 
 func TestCompressForTarget(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	msgs := []message.Message{
 		{Role: "system", Content: "system"},
 		{Role: "user", Content: "older message that should be dropped"},
@@ -112,7 +112,7 @@ func TestCompressForTarget(t *testing.T) {
 }
 
 func TestShouldAutoCompact(t *testing.T) {
-	m := NewManager(1000, true, 0.8)
+	m := NewManager(1000, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 799})
 	if m.ShouldAutoCompact() {
 		t.Fatal("expected threshold check to stay false below 80%")
@@ -125,7 +125,7 @@ func TestShouldAutoCompact(t *testing.T) {
 }
 
 func TestShouldAutoCompactUsesInputBudgetWhenConfigured(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217599})
 	if m.ShouldAutoCompact() {
 		t.Fatal("expected threshold check to stay false below 80% of input budget")
@@ -137,7 +137,7 @@ func TestShouldAutoCompactUsesInputBudgetWhenConfigured(t *testing.T) {
 }
 
 func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 20000, true, 0.8)
+	m := NewManagerWithInputBudget(400000, 272000, 20000, 0.8)
 	if got := m.GetUsableInputBudget(); got != 252000 {
 		t.Fatalf("GetUsableInputBudget() = %d, want 252000", got)
 	}
@@ -152,7 +152,7 @@ func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 }
 
 func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.UpdateFromUsage(message.TokenUsage{
 		InputTokens:      100,
 		OutputTokens:     40,
@@ -189,7 +189,7 @@ func TestEstimateMessagesTokensCountsToolCallsAndThinking(t *testing.T) {
 }
 
 func TestRestoreMessagesDropsOrphanToolResults(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	in := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "a", Name: "Read", Args: json.RawMessage(`{}`)}}},
 		{Role: "tool", ToolCallID: "a", Content: "ok"},
@@ -206,7 +206,7 @@ func TestRestoreMessagesDropsOrphanToolResults(t *testing.T) {
 }
 
 func TestRestoreMessagesClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T) {
-	m := NewManager(1000, false, 0.8)
+	m := NewManager(1000, 0)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 123, CacheWriteTokens: 11})
 
 	m.RestoreMessages([]message.Message{{Role: "tool", ToolCallID: "ghost", Content: "orphan"}})
@@ -224,7 +224,7 @@ func TestRestoreMessagesClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T
 
 func TestReplacePrefixAtomic(t *testing.T) {
 	t.Run("basic replacement", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		m.Append(message.Message{Role: "user", Content: "u1"})
 		m.Append(message.Message{Role: "assistant", Content: "a1"})
 		m.Append(message.Message{Role: "user", Content: "u2"})
@@ -259,7 +259,7 @@ func TestReplacePrefixAtomic(t *testing.T) {
 	})
 
 	t.Run("empty tail", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		m.Append(message.Message{Role: "user", Content: "u1"})
 		m.Append(message.Message{Role: "assistant", Content: "a1"})
 
@@ -283,7 +283,7 @@ func TestReplacePrefixAtomic(t *testing.T) {
 	})
 
 	t.Run("repairs orphan tool result in tail", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		// head: assistant with tool_call "a"
 		m.Append(message.Message{
 			Role:      "assistant",
@@ -322,7 +322,7 @@ func TestReplacePrefixAtomic(t *testing.T) {
 	})
 
 	t.Run("keeps valid tool result in tail", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		// head: assistant with tool_call "a"
 		m.Append(message.Message{
 			Role:      "assistant",
@@ -362,7 +362,7 @@ func TestReplacePrefixAtomic(t *testing.T) {
 	})
 
 	t.Run("callback error aborts", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		m.Append(message.Message{Role: "user", Content: "u1"})
 		m.Append(message.Message{Role: "assistant", Content: "a1"})
 		m.Append(message.Message{Role: "user", Content: "u2"})
@@ -388,7 +388,7 @@ func TestReplacePrefixAtomic(t *testing.T) {
 	})
 
 	t.Run("nil callback applies prefix and tail directly", func(t *testing.T) {
-		m := NewManager(1000, false, 0.8)
+		m := NewManager(1000, 0)
 		m.Append(message.Message{Role: "user", Content: "u1"})
 		m.Append(message.Message{Role: "assistant", Content: "a1"})
 		m.Append(message.Message{Role: "user", Content: "u2"})

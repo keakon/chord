@@ -167,7 +167,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 	}()
 
-	// Update token usage (no auto_compact, but tracks stats).
+	// Update token usage (does not auto-compact, but tracks stats).
 	if resp.Usage != nil {
 		s.ctxMgr.UpdateFromUsage(*resp.Usage)
 	}

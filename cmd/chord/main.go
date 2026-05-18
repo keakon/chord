@@ -324,8 +324,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		log.Warnf("tui runtime cache cleanup failed error=%v", err)
 	}
 
-	// Graceful shutdown: cancel the current turn and let the agent wind down.
-	shutdownLocalRuntime(ac, rt, localExitIdleWait)
+	// Graceful shutdown: when Done completed and the agent closed as expected,
+	// avoid re-cancelling an already completed turn during local runtime teardown.
+	skipCancelOnShutdown := tuiModel.ExpectedAgentCloseCompleted()
+	shutdownLocalRuntime(ac, rt, localExitIdleWait, skipCancelOnShutdown)
 	rtClosed = true
 	acClosed = true
 	if summary := ac.MainAgent.GetSessionSummary(); summary != nil && sessionDirHasMessages(ac.SessionDir) {
@@ -338,11 +340,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func shutdownLocalRuntime(ac *AppContext, rt *Runtime, waitTimeout time.Duration) {
+func shutdownLocalRuntime(ac *AppContext, rt *Runtime, waitTimeout time.Duration, skipCancel bool) {
 	shutdownLocalRuntimeForTest(
 		ac,
 		rt,
 		waitTimeout,
+		skipCancel,
 		func() bool {
 			return rt != nil && rt.Agent != nil && rt.Agent.CancelCurrentTurn()
 		},
@@ -369,12 +372,13 @@ func shutdownLocalRuntimeForTest(
 	ac *AppContext,
 	rt *Runtime,
 	waitTimeout time.Duration,
+	skipCancel bool,
 	cancelCurrentTurn func() bool,
 	waitIdle func(time.Duration) bool,
 	closeRuntime func(),
 	closeApp func(),
 ) {
-	if cancelCurrentTurn != nil && cancelCurrentTurn() && waitIdle != nil {
+	if !skipCancel && cancelCurrentTurn != nil && cancelCurrentTurn() && waitIdle != nil {
 		waitIdle(waitTimeout)
 	}
 	if closeRuntime != nil {

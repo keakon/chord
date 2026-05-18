@@ -568,7 +568,7 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 	a := NewMainAgent(
 		context.Background(),
 		newTestLLMClient(),
-		ctxmgr.NewManager(8192, false, 0),
+		ctxmgr.NewManager(8192, 0),
 		tools.NewRegistry(),
 		&hook.NoopEngine{},
 		sessionDir,
@@ -1123,7 +1123,7 @@ func TestRunningModelRefAndKeyStatsFollowFocusedSubAgent(t *testing.T) {
 		parentCtx:  context.Background(),
 		cancel:     cancel,
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 		turn: &Turn{
 			ID:              1,
 			Ctx:             ctx,
@@ -1325,7 +1325,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents[sub.instanceID] = sub

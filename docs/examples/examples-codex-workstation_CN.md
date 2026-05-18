@@ -64,10 +64,9 @@ lsp:
         typeCheckingMode: standard
 
 context:
-  auto_compact: true
   compact_threshold: 0.8
-  compact_model: fast/gpt-5.4-mini
   compaction:
+    model_pool: fast
     reserved: 16000
 
 desktop_notification: true

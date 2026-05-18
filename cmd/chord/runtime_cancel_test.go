@@ -76,7 +76,7 @@ func newBlockingRuntime(t *testing.T) (*Runtime, *agent.MainAgent, chan struct{}
 		},
 	}, []string{"test-key"})
 	provider := &blockingProvider{started: make(chan struct{}, 1)}
-	ctxMgr := ctxmgr.NewManager(8192, false, 0)
+	ctxMgr := ctxmgr.NewManager(8192, 0)
 	mainAgent := agent.NewMainAgent(
 		context.Background(),
 		llm.NewClient(providerCfg, provider, "test-model", 1024, ""),

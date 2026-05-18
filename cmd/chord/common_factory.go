@@ -246,7 +246,7 @@ func buildMainClientFactory(
 			ac.GetOrCreateProviderImpl,
 			"main-agent",
 		)
-		if len(pool) > 0 {
+		if len(pool) > 0 && selectedIdx >= 0 && selectedIdx < len(pool) && config.CanonicalModelRef(pool[selectedIdx].ProviderConfig.Name(), pool[selectedIdx].ModelID, pool[selectedIdx].Variant) == config.CanonicalModelRef(pProvCfg.Name(), pModelID, selectedVariant) {
 			client.SetModelPool(pool, selectedIdx)
 		}
 

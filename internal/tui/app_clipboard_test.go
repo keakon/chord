@@ -70,22 +70,16 @@ func TestPasteMsgPrefersClipboardImageOverText(t *testing.T) {
 
 	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "hello"})
 	if cmd == nil {
-		t.Fatal("expected paste handler to return image attach cmd")
+		t.Fatal("expected paste handler to return image-added toast cmd")
 	}
 	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"hello" {
 		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay+"hello")
 	}
-
-	msg := cmd()
-	attach, ok := msg.(attachmentReadyMsg)
-	if !ok {
-		t.Fatalf("cmd() = %T, want attachmentReadyMsg", msg)
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments = %d, want 1", got)
 	}
-	if attach.err != nil {
-		t.Fatalf("attachment err = %v", attach.err)
-	}
-	if attach.attachment.MimeType != "image/png" {
-		t.Fatalf("attachment mime = %q, want image/png", attach.attachment.MimeType)
+	if attach := m.attachments[0]; attach.MimeType != "image/png" {
+		t.Fatalf("attachment mime = %q, want image/png", attach.MimeType)
 	}
 }
 
@@ -114,19 +108,64 @@ func TestInsertAttachClipboardPrefersClipboardImageOverText(t *testing.T) {
 
 	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
 	if cmd == nil {
-		t.Fatal("expected ctrl+v to return image attach cmd")
+		t.Fatal("expected ctrl+v to return image-added toast cmd")
 	}
 	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
 		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay)
 	}
-
-	msg := cmd()
-	attach, ok := msg.(attachmentReadyMsg)
-	if !ok {
-		t.Fatalf("cmd() = %T, want attachmentReadyMsg", msg)
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments = %d, want 1", got)
 	}
-	if attach.err != nil {
-		t.Fatalf("attachment err = %v", attach.err)
+	if attach := m.attachments[0]; attach.MimeType != "image/png" {
+		t.Fatalf("attachment mime = %q, want image/png", attach.MimeType)
+	}
+}
+
+func TestInsertAttachClipboardThenEnterSendsImageImmediately(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tiny png: %v", err)
+	}
+
+	origImage := readImageFromClipboard
+	readImageFromClipboard = func() ([]byte, string, error) {
+		return data, "image/png", nil
+	}
+	origText := clipboardReadAll
+	clipboardReadAll = func() (string, error) {
+		return "fallback text", nil
+	}
+	t.Cleanup(func() {
+		readImageFromClipboard = origImage
+		clipboardReadAll = origText
+	})
+
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after ctrl+v = %d, want 1", got)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	parts := backend.sentMultipart[0]
+	if len(parts) != 1 {
+		t.Fatalf("sent parts = %#v, want single image part", parts)
+	}
+	if got := parts[0].Type; got != "image" {
+		t.Fatalf("sent part type = %q, want image", got)
+	}
+	if got := parts[0].MimeType; got != "image/png" {
+		t.Fatalf("sent image mime = %q, want image/png", got)
+	}
+	if got := len(m.attachments); got != 0 {
+		t.Fatalf("attachments after enter = %d, want 0", got)
 	}
 }
 
@@ -187,21 +226,14 @@ func TestPasteTextFromClipboardReturnsNilWhenClipboardEmpty(t *testing.T) {
 }
 
 func TestAttachmentReadyMsgErrorRollsBackPendingInlineImagePlaceholder(t *testing.T) {
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return []byte{0x89, 'P', 'N', 'G'}, "image/png", nil
-	}
-	defer func() { readImageFromClipboard = origImage }()
-
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 	m.input.InsertString("hello")
 	m.input.SetCursorPosition(0, len([]rune(m.input.Value())))
-
-	cmd := m.tryPasteImageIntoComposer(" world")
-	if cmd == nil {
-		t.Fatal("expected image paste cmd")
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
 	}
+	m.insertComposerText(" world")
 	if got := m.input.Value(); got != "hello"+inlineImagePlaceholderDisplay+" world" {
 		t.Fatalf("input value after insert = %q", got)
 	}
@@ -220,12 +252,6 @@ func TestAttachmentReadyMsgErrorRollsBackPendingInlineImagePlaceholder(t *testin
 }
 
 func TestAttachmentReadyMsgSizeLimitRollsBackOnlyNewPendingInlineImagePlaceholder(t *testing.T) {
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return []byte{0x89, 'P', 'N', 'G'}, "image/png", nil
-	}
-	defer func() { readImageFromClipboard = origImage }()
-
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}}}
@@ -234,10 +260,8 @@ func TestAttachmentReadyMsgSizeLimitRollsBackOnlyNewPendingInlineImagePlaceholde
 	}
 	m.insertComposerText("tail")
 	m.input.SetCursorPosition(0, len([]rune(m.input.Value())))
-
-	cmd := m.tryPasteImageIntoComposer("")
-	if cmd == nil {
-		t.Fatal("expected second image paste cmd")
+	if !m.input.InsertImagePlaceholder(2) {
+		t.Fatal("InsertImagePlaceholder(2) = false, want true")
 	}
 	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"tail"+inlineImagePlaceholderDisplay {
 		t.Fatalf("input value after second insert = %q", got)

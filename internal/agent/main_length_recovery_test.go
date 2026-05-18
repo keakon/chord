@@ -335,7 +335,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 	a.sessionDir = testProjectSessionDir(t, projectRoot, "oversize-overlay")
 	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "finish the refactor safely"})
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

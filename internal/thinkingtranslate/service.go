@@ -36,8 +36,6 @@ func NewService() (*Service, error) {
 	return s, nil
 }
 
-func (s *Service) Close() error { return nil }
-
 func (s *Service) SetTranslator(t ChunkTranslator) {
 	if s == nil {
 		return

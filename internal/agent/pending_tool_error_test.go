@@ -84,7 +84,7 @@ func newPersistenceTestSubAgent(parent *MainAgent, instanceID string) *SubAgent 
 		parentCtx:  context.Background(),
 		cancel:     cancel,
 		recovery:   parent.recovery,
-		ctxMgr:     ctxmgr.NewManager(8192, false, 0),
+		ctxMgr:     ctxmgr.NewManager(8192, 0),
 		turn: &Turn{
 			ID:              1,
 			Ctx:             ctx,
@@ -111,7 +111,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 			1024,
 			"",
 		),
-		ctxmgr.NewManager(8192, false, 0),
+		ctxmgr.NewManager(8192, 0),
 		tools.NewRegistry(),
 		&hook.NoopEngine{},
 		sessionDir,

@@ -15,7 +15,7 @@ import (
 func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(10000, true, 0.9)
+	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
 	a.gitStatusInjected.Store(true)
 	a.autoCompactRequested.Store(true)
 
@@ -62,7 +62,7 @@ func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
 func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(1000, true, 0.5)
+	a.ctxMgr = ctxmgr.NewManager(1000, 0.5)
 	a.ctxMgr.RestoreMessages([]message.Message{
 		{Role: "user", Content: strings.Repeat("very large prompt ", 400)},
 		{Role: "assistant", Content: strings.Repeat("very large answer ", 400)},

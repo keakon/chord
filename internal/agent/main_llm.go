@@ -267,6 +267,9 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		}
 	}
 
+	streamingThinkingMessageIndex := len(a.ctxMgr.Snapshot())
+	streamingThinkingBlockIndex := 0
+
 	streamReducer := &llmStreamReducer{}
 	streamReducer.content = streamContentReducer{
 		agentID: "",
@@ -283,8 +286,14 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		closeThinkingOnText:     true,
 		closeThinkingOnFinish:   true,
 		thinkingCommitMode:      streamContentCommitEmpty,
-		textFlushInterval:       defaultStreamTextFlushInterval,
-		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
+		onThinkingBlockClosed: func(agentID, text string) {
+			_ = agentID
+			blockIndex := streamingThinkingBlockIndex
+			streamingThinkingBlockIndex++
+			a.scheduleStreamingThinkingTranslation(streamingThinkingMessageIndex, blockIndex, text)
+		},
+		textFlushInterval:     defaultStreamTextFlushInterval,
+		thinkingFlushInterval: defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
 		agentID:                  "",

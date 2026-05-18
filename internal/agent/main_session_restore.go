@@ -527,6 +527,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.recovery.Close()
 	}
 	a.sessionEpoch++
+	a.resetThinkingTranslationSeen()
 	a.sessionDir = loaded.SessionPath
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)

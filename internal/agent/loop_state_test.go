@@ -133,13 +133,14 @@ Done: allow
 	a.newTurn()
 	turn := a.turn
 	callID := "done-confirm-1"
+	report := "**Completion status**: done\n\n**Verification**: tested"
 	a.ctxMgr.Append(message.Message{
 		Role:    "assistant",
 		Content: "completed and verified",
 		ToolCalls: []message.ToolCall{{
 			ID:   callID,
 			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+			Args: json.RawMessage(`{"report":"**Completion status**: done\n\n**Verification**: tested"}`),
 		}},
 	})
 	turn.PendingToolCalls.Store(1)
@@ -149,7 +150,7 @@ Done: allow
 		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
 			CallID:   callID,
 			Name:     tools.NameDone,
-			ArgsJSON: `{"reason":"completed and verified"}`,
+			ArgsJSON: `{"report":"**Completion status**: done\n\n**Verification**: tested"}`,
 			Result:   "completed and verified",
 			TurnID:   turn.ID,
 		}})
@@ -179,6 +180,23 @@ Done: allow
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for Done tool result handling to finish")
 	}
+	var doneResult *ToolResultEvent
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if payload, ok := evt.(ToolResultEvent); ok && payload.CallID == callID && payload.Name == tools.NameDone {
+			copy := payload
+			doneResult = &copy
+		}
+	}
+	if doneResult == nil {
+		t.Fatal("expected Done ToolResultEvent after approving Done confirmation")
+	}
+	if doneResult.Result != "Done approved" {
+		t.Fatalf("Done ToolResultEvent.Result = %q, want Done approved", doneResult.Result)
+	}
+	if doneResult.DoneReport != report {
+		t.Fatalf("Done ToolResultEvent.DoneReport = %q, want %q", doneResult.DoneReport, report)
+	}
 	if a.loopState.Enabled {
 		t.Fatal("loop should be disabled after approving Done confirmation")
 	}
@@ -187,7 +205,7 @@ Done: allow
 	}
 }
 
-func TestHandleToolResult_DoneOutsideLoopWithAskRequestsConfirmation(t *testing.T) {
+func TestHandleToolResult_DoneOutsideLoopEntersIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -247,8 +265,14 @@ Done: ask
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for non-loop Done handling to finish")
 	}
-	// Non-loop Done triggers shutdown; turn state may not be cleared synchronously
-	// in this unit-test harness.
+	if a.turn != nil {
+		t.Fatal("non-loop Done should clear the current turn and enter idle")
+	}
+	select {
+	case <-a.done:
+		t.Fatal("non-loop Done must not shut down the agent runtime")
+	default:
+	}
 }
 
 func TestHandleToolResult_DoneOutsideLoopDenyContinuesWork(t *testing.T) {
@@ -311,8 +335,14 @@ Done: allow
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for non-loop Done denial handling to finish")
 	}
-	// Non-loop Done triggers shutdown; turn state may not be cleared synchronously
-	// in this unit-test harness.
+	if a.turn != nil {
+		t.Fatal("non-loop Done should clear the current turn and enter idle")
+	}
+	select {
+	case <-a.done:
+		t.Fatal("non-loop Done must not shut down the agent runtime")
+	default:
+	}
 }
 
 func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenExitConditionsFail(t *testing.T) {
@@ -660,7 +690,7 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents["agent-1"] = sub
@@ -1934,7 +1964,7 @@ func TestLoopAnchorIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) 
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents["agent-1"] = sub
@@ -1983,7 +2013,7 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents["agent-1"] = sub
@@ -2021,7 +2051,7 @@ func TestLoopWorkflowPromptIncludesSubAgentClauseWhenActiveSubAgents(t *testing.
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents["agent-1"] = sub
@@ -2128,7 +2158,7 @@ func TestLoopContinuationSubAgentStuckInstruction(t *testing.T) {
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.mu.Lock()
 	a.subAgents["agent-1"] = sub
@@ -2155,7 +2185,7 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
 		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, false, 0),
+		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	sub.setState(SubAgentStateCompleted, "")
 	a.mu.Lock()

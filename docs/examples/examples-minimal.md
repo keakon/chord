@@ -33,7 +33,6 @@ model_pools:
     - anthropic/claude-opus-4.7
 
 context:
-  auto_compact: true
   compact_threshold: 0.8
 
 desktop_notification: true

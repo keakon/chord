@@ -143,6 +143,13 @@ func (m *Model) runtimeImageOpenDir() string {
 	return strings.TrimSpace(m.runtimeCacheHandle.ImageOpenDir())
 }
 
+func (m *Model) ExpectedAgentCloseCompleted() bool {
+	if m == nil {
+		return false
+	}
+	return m.completedExpectedAgentClose
+}
+
 func (m *Model) Close() error {
 	if m == nil {
 		return nil

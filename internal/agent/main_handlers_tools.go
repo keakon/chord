@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -456,8 +455,15 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						a.markLoopExitDecisionRequired()
 						return
 					} else if resp.Approved {
+						report := strings.TrimSpace(pending.AssistantContent)
+						if parsed, err := tools.ParseDoneArgs(json.RawMessage(pending.ArgsJSON)); err == nil {
+							report = parsed.Report
+						}
+						if report == "" {
+							report = "Done approved"
+						}
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", Status: ToolResultStatusSuccess})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", DoneReport: report, Status: ToolResultStatusSuccess})
 						a.loopState.State = LoopStateCompleted
 						a.emitLoopStateChanged()
 						a.loopState.disable()
@@ -496,7 +502,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: ToolResultStatusSuccess})
 				a.emitActivity("main", ActivityIdle, "")
-				a.Shutdown(200 * time.Millisecond)
+				a.setIdleAndDrainPending()
 				return
 			}
 		}

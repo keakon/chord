@@ -17,7 +17,7 @@ func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
 
 	providerCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/protocol"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -929,7 +928,7 @@ func TestHeadlessSubscribeUnknownOnlyDoesNotFallBackToAll(t *testing.T) {
 	state := &headlessState{}
 	cmd := headlessCommand{
 		Type:   "subscribe",
-		Events: []string{"notification"},
+		Events: []string{"nonexistent_event"},
 	}
 	to := newTestOut()
 	backend := &mockBackend{}
@@ -1323,187 +1322,66 @@ func TestHeadlessQuestionMismatchedRequestID(t *testing.T) {
 	}
 }
 
-func TestHeadlessToolResultEvent(t *testing.T) {
+func TestHeadlessToolResultEventIsNotForwarded(t *testing.T) {
 	state := &headlessState{}
 
-	ev := agent.ToolResultEvent{
-		CallID:   "call-1",
-		Name:     "Shell",
-		ArgsJSON: `{"command":"ls -la"}`,
-		Result:   "file1.go\nfile2.go",
-		Status:   agent.ToolResultStatusSuccess,
-		AgentID:  "",
-	}
+	envs := filterHeadlessEvent(agent.ToolResultEvent{
+		CallID: "call-1",
+		Name:   "Shell",
+		Status: agent.ToolResultStatusSuccess,
+	}, state)
 
-	envs := filterHeadlessEvent(ev, state)
-
-	if len(envs) == 0 {
-		t.Fatal("ToolResultEvent should produce an envelope")
-	}
-	if envs[0].Type != "tool_result" {
-		t.Errorf("type = %q, want %q", envs[0].Type, "tool_result")
-	}
-
-	payload, ok := envs[0].Payload.(map[string]string)
-	if !ok {
-		t.Fatalf("payload type = %T, want map[string]string", envs[0].Payload)
-	}
-	if payload["call_id"] != "call-1" {
-		t.Errorf("call_id = %q, want %q", payload["call_id"], "call-1")
-	}
-	if payload["name"] != "Shell" {
-		t.Errorf("name = %q, want %q", payload["name"], "Shell")
-	}
-	if payload["status"] != "success" {
-		t.Errorf("status = %q, want %q", payload["status"], "success")
-	}
-
-	// Verify payload does NOT contain result or args_json (too large for IM notifications)
-	if _, exists := payload["result"]; exists {
-		t.Error("payload should not contain 'result' key")
-	}
-	if _, exists := payload["args_json"]; exists {
-		t.Error("payload should not contain 'args_json' key")
+	if len(envs) != 0 {
+		t.Fatalf("envs = %+v, want none", envs)
 	}
 }
 
-func TestHeadlessEventEnvelopeTypes(t *testing.T) {
-	state := &headlessState{subscriptions: map[string]bool{"confirm_request": true, "question_request": true, "error": true, "idle": true}}
-
-	confirmEnvs := filterHeadlessEvent(agent.ConfirmRequestEvent{ToolName: "Edit", RequestID: "req-1"}, state)
-	if len(confirmEnvs) != 1 || confirmEnvs[0].Type != "confirm_request" {
-		t.Fatalf("confirm envs = %#v, want confirm_request only", confirmEnvs)
-	}
-
-	questionEnvs := filterHeadlessEvent(agent.QuestionRequestEvent{ToolName: "Question", Header: "h", Question: "q", RequestID: "req-2"}, state)
-	if len(questionEnvs) != 1 || questionEnvs[0].Type != "question_request" {
-		t.Fatalf("question envs = %#v, want question_request only", questionEnvs)
-	}
-
-	_ = filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "working"}, state)
-	errorEnvs := filterHeadlessEvent(agent.ErrorEvent{Err: errors.New("blocked by missing input")}, state)
-	if len(errorEnvs) != 1 || errorEnvs[0].Type != "error" {
-		t.Fatalf("error envs = %#v, want error only", errorEnvs)
-	}
-
-	state = &headlessState{subscriptions: map[string]bool{"idle": true}, pendingOutcome: "completed"}
-	idleEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(idleEnvs) != 1 || idleEnvs[0].Type != "idle" {
-		t.Fatalf("idle envs = %#v, want idle only", idleEnvs)
-	}
-
-	// Idle with error outcome is also represented by a single idle envelope.
-	state = &headlessState{subscriptions: map[string]bool{"idle": true}, pendingOutcome: "error", lastError: "something failed"}
-	idleErrorEnvs := filterHeadlessEvent(agent.IdleEvent{}, state)
-	if len(idleErrorEnvs) != 1 || idleErrorEnvs[0].Type != "idle" {
-		t.Fatalf("idle error envs = %#v, want idle only", idleErrorEnvs)
-	}
-}
-
-func TestHeadlessTodosUpdatedEvent(t *testing.T) {
+func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 	state := &headlessState{}
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer(), "test-session")
 
-	ev := agent.TodosUpdatedEvent{
-		Todos: []tools.TodoItem{
-			{ID: "1", Content: "Implement feature", Status: "in_progress", ActiveForm: "editing main.go"},
-			{ID: "2", Content: "Write tests", Status: "pending"},
-		},
+	envs := filterHeadlessEvent(agent.ToolResultEvent{
+		CallID:     "call-done",
+		Name:       "Done",
+		ArgsJSON:   `{"reason":"ready","report":"from args"}`,
+		Status:     agent.ToolResultStatusSuccess,
+		DoneReport: "All requested work is complete.",
+		AgentID:    "",
+	}, state)
+
+	if len(envs) != 1 {
+		t.Fatalf("envs len = %d, want 1: %+v", len(envs), envs)
 	}
-
-	envs := filterHeadlessEvent(ev, state)
-
-	if len(envs) == 0 {
-		t.Fatal("TodosUpdatedEvent should produce an envelope")
+	if envs[0].Type != "done_completion" {
+		t.Fatalf("env type = %q, want done_completion", envs[0].Type)
 	}
-	if envs[0].Type != "todos" {
-		t.Errorf("type = %q, want %q", envs[0].Type, "todos")
-	}
-
 	payload, ok := envs[0].Payload.(map[string]any)
 	if !ok {
 		t.Fatalf("payload type = %T, want map[string]any", envs[0].Payload)
 	}
-
-	todosRaw, ok := payload["todos"]
-	if !ok {
-		t.Fatal("payload should contain 'todos' key")
+	if payload["report"] != "All requested work is complete." {
+		t.Fatalf("report = %q", payload["report"])
 	}
-
-	data, err := json.Marshal(todosRaw)
-	if err != nil {
-		t.Fatalf("marshal todos: %v", err)
+	if payload["reason"] != "ready" {
+		t.Fatalf("reason = %q", payload["reason"])
 	}
-
-	var todos []tools.TodoItem
-	if err := json.Unmarshal(data, &todos); err != nil {
-		t.Fatalf("unmarshal todos: %v", err)
-	}
-
-	if len(todos) != 2 {
-		t.Fatalf("len(todos) = %d, want 2", len(todos))
-	}
-	if todos[0].ID != "1" {
-		t.Errorf("todos[0].ID = %q, want %q", todos[0].ID, "1")
-	}
-	if todos[0].Content != "Implement feature" {
-		t.Errorf("todos[0].Content = %q, want %q", todos[0].Content, "Implement feature")
-	}
-	if todos[0].Status != "in_progress" {
-		t.Errorf("todos[0].Status = %q, want %q", todos[0].Status, "in_progress")
-	}
-	if todos[1].ID != "2" {
-		t.Errorf("todos[1].ID = %q, want %q", todos[1].ID, "2")
+	if payload["mode"] != "normal" {
+		t.Fatalf("mode = %q", payload["mode"])
 	}
 }
 
-func TestHeadlessToolResultEventStatuses(t *testing.T) {
-	tests := []struct {
-		name   string
-		status agent.ToolResultStatus
-		want   string
-	}{
-		{
-			name:   "success",
-			status: agent.ToolResultStatusSuccess,
-			want:   "success",
-		},
-		{
-			name:   "error",
-			status: agent.ToolResultStatusError,
-			want:   "error",
-		},
-		{
-			name:   "cancelled",
-			status: agent.ToolResultStatusCancelled,
-			want:   "cancelled",
-		},
-	}
+func TestHeadlessDoneToolResultWithoutReportDoesNotNotify(t *testing.T) {
+	state := &headlessState{}
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer(), "test-session")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			state := &headlessState{}
+	envs := filterHeadlessEvent(agent.ToolResultEvent{
+		CallID: "call-done",
+		Name:   "Done",
+		Status: agent.ToolResultStatusSuccess,
+	}, state)
 
-			ev := agent.ToolResultEvent{
-				CallID:  "call-1",
-				Name:    "Shell",
-				Status:  tt.status,
-				AgentID: "",
-			}
-
-			envs := filterHeadlessEvent(ev, state)
-
-			if len(envs) == 0 {
-				t.Fatal("ToolResultEvent should produce an envelope")
-			}
-
-			payload, ok := envs[0].Payload.(map[string]string)
-			if !ok {
-				t.Fatalf("payload type = %T, want map[string]string", envs[0].Payload)
-			}
-			if payload["status"] != tt.want {
-				t.Errorf("status = %q, want %q", payload["status"], tt.want)
-			}
-		})
+	if len(envs) != 0 {
+		t.Fatalf("envs = %+v, want none", envs)
 	}
 }
 

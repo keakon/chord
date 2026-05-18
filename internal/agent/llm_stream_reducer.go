@@ -41,8 +41,11 @@ type streamContentReducer struct {
 	textLastEmit time.Time
 
 	thinkingAccum    strings.Builder
+	thinkingFull     strings.Builder
 	thinkingActive   bool
 	thinkingLastEmit time.Time
+
+	onThinkingBlockClosed func(agentID, text string)
 
 	responseTextStarted bool
 }
@@ -112,6 +115,7 @@ func (r *streamContentReducer) handleThinking(text string) {
 		r.thinkingLastEmit = time.Now()
 	}
 	r.thinkingAccum.WriteString(text)
+	r.thinkingFull.WriteString(text)
 	if r.thinkingFlushInterval <= 0 {
 		// SubAgent historically forwards thinking deltas immediately while still
 		// retaining the full accumulated block for thinking_end.
@@ -165,18 +169,20 @@ func (r *streamContentReducer) closeThinkingBlock() {
 	if r == nil {
 		return
 	}
-	if !r.thinkingActive && r.thinkingAccum.Len() == 0 {
+	if !r.thinkingActive && r.thinkingAccum.Len() == 0 && r.thinkingFull.Len() == 0 {
 		return
+	}
+	fullText := r.thinkingFull.String()
+	if r.scrubThinkingFinal {
+		fullText = scrubThinkingToolcallMarkers(fullText)
 	}
 	var finalText string
 	switch r.thinkingCommitMode {
 	case streamContentCommitFullText:
-		finalText = r.thinkingAccum.String()
-		if r.scrubThinkingFinal {
-			finalText = scrubThinkingToolcallMarkers(finalText)
-		}
+		finalText = fullText
 		if strings.TrimSpace(finalText) == "" {
 			r.thinkingAccum.Reset()
+			r.thinkingFull.Reset()
 			r.thinkingActive = false
 			return
 		}
@@ -184,9 +190,13 @@ func (r *streamContentReducer) closeThinkingBlock() {
 		r.flushThinkingDelta()
 	}
 	r.thinkingAccum.Reset()
+	r.thinkingFull.Reset()
 	r.thinkingActive = false
 	if r.emit != nil {
 		r.emit(StreamThinkingEvent{Text: finalText, AgentID: r.agentID})
+	}
+	if r.onThinkingBlockClosed != nil && strings.TrimSpace(fullText) != "" {
+		r.onThinkingBlockClosed(r.agentID, fullText)
 	}
 }
 

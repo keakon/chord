@@ -770,7 +770,7 @@ func newTestAppContextWithBuilder(
 
 	providerCfg := llm.NewProviderConfig("openai", cfg.Providers["openai"], []string{"test-key"})
 	llmClient := llm.NewClient(providerCfg, &stubProviderImpl{}, "gpt-4o", 4096, "")
-	ctxMgr := ctxmgr.NewManager(128000, false, 0)
+	ctxMgr := ctxmgr.NewManager(128000, 0)
 
 	// Create pool policy
 	poolPolicy := agent.NewRuntimeModelPoolPolicy()

@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
@@ -96,49 +95,6 @@ func renderStatusBarViewingPill(label, color string) string {
 		return PillStyle.Render("◉ " + label)
 	}
 	return PillStyle.Foreground(lipgloss.Color(color)).Render("◉ " + label)
-}
-
-func renderMCPStatusPill(rows []agent.MCPServerDisplay) string {
-	if len(rows) == 0 {
-		return ""
-	}
-
-	okCount := 0
-	pendingCount := 0
-	disabledCount := 0
-	failCount := 0
-	for _, row := range rows {
-		switch {
-		case row.OK:
-			okCount++
-		case row.Pending:
-			pendingCount++
-		case row.Disabled:
-			disabledCount++
-		default:
-			failCount++
-		}
-	}
-
-	color := currentTheme.InfoPanelSuccessFg
-	switch {
-	case failCount > 0:
-		color = currentTheme.InfoPanelCriticalFg
-	case pendingCount > 0:
-		// Connecting/retrying MCP uses warning/orange for visibility.
-		color = currentTheme.InfoPanelWarningFg
-	case disabledCount > 0:
-		// Disabled manual servers: keep dim/gray.
-		color = currentTheme.InfoPanelPendingFg
-	}
-
-	label := "mcp"
-	if len(rows) == 1 {
-		label = "mcp:" + rows[0].Name
-	} else {
-		label = fmt.Sprintf("mcp:%d/%d", okCount, len(rows))
-	}
-	return PillStyle.Foreground(lipgloss.Color(color)).Render(label)
 }
 
 func formatContextPill(current, limit int) string {

@@ -487,7 +487,7 @@ func newTestAppContext(t *testing.T) *AppContext {
 			},
 		},
 	}, []string{"test-key"})
-	ctxMgr := ctxmgr.NewManager(8192, false, 0)
+	ctxMgr := ctxmgr.NewManager(8192, 0)
 	mainAgent := agent.NewMainAgent(
 		context.Background(),
 		llm.NewClient(providerCfg, noopProvider{}, "test-model", 1024, ""),

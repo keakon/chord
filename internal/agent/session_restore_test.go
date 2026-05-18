@@ -1391,7 +1391,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	a := NewMainAgent(
 		context.Background(),
 		llm.NewClient(providerCfg, nil, "test-model", 1024, ""),
-		ctxmgr.NewManager(8192, false, 0),
+		ctxmgr.NewManager(8192, 0),
 		tools.NewRegistry(),
 		&hook.NoopEngine{},
 		sessionDir,
