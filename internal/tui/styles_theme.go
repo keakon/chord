@@ -162,6 +162,13 @@ func applyBlockStyles(t Theme) {
 	ThinkingTitleStyle = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(t.ThinkingCardFg))
+
+	ThinkingTranslationStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.ThinkingCardFg))
+
+	ThinkingTranslationRuleStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.SeparatorFg))
 }
 
 func applyPanelStyles(t Theme) {

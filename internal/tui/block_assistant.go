@@ -785,6 +785,53 @@ func styleStreamingThinkingLines(mdLines []string, settledLineCount int) []strin
 	return raw
 }
 
+func renderThinkingTranslationHeader(targetLang string, width int) string {
+	targetLang = strings.TrimSpace(targetLang)
+	label := "Translated"
+	if targetLang != "" {
+		label += " · " + targetLang
+	}
+	if width < 8 {
+		return ThinkingTranslationStyle.Render(label)
+	}
+	rawLabelWidth := ansi.StringWidth(label)
+	if rawLabelWidth+2 >= width {
+		return ThinkingTranslationStyle.Render(label)
+	}
+	ruleWidth := width - rawLabelWidth - 2
+	left := ruleWidth / 2
+	right := ruleWidth - left
+	if left == 0 || right == 0 {
+		return ThinkingTranslationStyle.Render(label)
+	}
+	rule := ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, left))
+	trail := ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, right))
+	return rule + " " + ThinkingTranslationStyle.Render(label) + " " + trail
+}
+
+func renderThinkingTranslationLines(translation ThinkingTranslationView, contentWidth int) []string {
+	translated := strings.TrimSpace(translation.Content)
+	if translated == "" {
+		return nil
+	}
+	lines := []string{"", renderThinkingTranslationHeader(translation.TargetLang, contentWidth), ""}
+	for _, line := range renderMarkdownContent(preprocessThinkingMarkdown(removeTrailingCursorGlyph(translated)), contentWidth) {
+		lines = append(lines, "  "+preserveStyleAfterResets(line, ThinkingContentStyle))
+	}
+	return lines
+}
+
+func renderThinkingTranslationSections(translations []ThinkingTranslationView, contentWidth int) []string {
+	if len(translations) == 0 {
+		return nil
+	}
+	var out []string
+	for _, translation := range translations {
+		out = append(out, renderThinkingTranslationLines(translation, contentWidth)...)
+	}
+	return out
+}
+
 func (b *Block) renderThinkingParts(innerWidth int) []string {
 	if len(b.ThinkingParts) == 0 {
 		return nil
@@ -815,6 +862,9 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 			rawLines = append(rawLines, styleStreamingThinkingLines(mdLines, settledLineCount)...)
 		} else {
 			rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
+			if i < len(b.ThinkingTranslations) {
+				rawLines = append(rawLines, renderThinkingTranslationLines(b.ThinkingTranslations[i], contentWidth)...)
+			}
 		}
 	}
 
@@ -865,6 +915,7 @@ func (b *Block) renderThinking(width int) []string {
 		rawLines = append(rawLines, styleStreamingThinkingLines(mdLines, settledLineCount)...)
 	} else {
 		rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
+		rawLines = append(rawLines, renderThinkingTranslationSections(b.ThinkingTranslations, contentWidth)...)
 	}
 
 	// Thinking duration footer

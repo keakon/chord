@@ -163,22 +163,23 @@ type kittyTerminalMetrics struct {
 
 // Model is the top-level Bubble Tea model for the Chord TUI.
 type Model struct {
-	agent              agent.AgentForTUI
-	viewport           *Viewport
-	input              Input
-	mode               Mode
-	width              int
-	height             int
-	expectedAgentClose bool
-	theme              Theme
-	keyMap             KeyMap
-	imeSwitchTarget    string // when set, use im-select <target> and save/restore previous IM
-	imeBeforeNormal    string // saved current IM before switching to English; restored when entering Insert
-	imeMu              *sync.Mutex
-	imeSeq             uint64
-	imeApplying        bool
-	imePending         bool
-	imePendingTarget   string
+	agent                       agent.AgentForTUI
+	viewport                    *Viewport
+	input                       Input
+	mode                        Mode
+	width                       int
+	height                      int
+	expectedAgentClose          bool
+	completedExpectedAgentClose bool
+	theme                       Theme
+	keyMap                      KeyMap
+	imeSwitchTarget             string // when set, use im-select <target> and save/restore previous IM
+	imeBeforeNormal             string // saved current IM before switching to English; restored when entering Insert
+	imeMu                       *sync.Mutex
+	imeSeq                      uint64
+	imeApplying                 bool
+	imePending                  bool
+	imePendingTarget            string
 
 	// Normal-mode Vim chord state
 	chord               chordState
@@ -191,18 +192,20 @@ type Model struct {
 	usageStats usageStatsState
 
 	// Streaming assistant block (nil when idle)
-	currentAssistantBlock  *Block
-	assistantBlockAppended bool   // true once we've appended the block (avoids empty blocks)
-	currentThinkingBlock   *Block // standalone streaming thinking block (nil when idle)
-	thinkingBlockAppended  bool   // true once thinking block has been appended to viewport
-	nextBlockID            int
-	thinkingStartTime      time.Time // when the current thinking started
-	streamFlushGeneration  uint64
-	streamFlushScheduled   bool
-	streamFlushDelay       time.Duration
-	scrollFlushGeneration  uint64
-	scrollFlushScheduled   bool
-	pendingScrollDelta     int
+	currentAssistantBlock    *Block
+	assistantBlockAppended   bool   // true once we've appended the block (avoids empty blocks)
+	currentThinkingBlock     *Block // standalone streaming thinking block (nil when idle)
+	thinkingBlockAppended    bool   // true once thinking block has been appended to viewport
+	thinkingStreamMsgIndex   int
+	thinkingStreamBlockIndex int
+	nextBlockID              int
+	thinkingStartTime        time.Time // when the current thinking started
+	streamFlushGeneration    uint64
+	streamFlushScheduled     bool
+	streamFlushDelay         time.Duration
+	scrollFlushGeneration    uint64
+	scrollFlushScheduled     bool
+	pendingScrollDelta       int
 
 	// Block selection state
 	focusedBlockID int // ID of the block selected by mouse/keyboard
@@ -772,22 +775,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case attachmentReadyMsg:
-		if msg.err != nil {
-			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-			return m, m.enqueueToast(msg.err.Error(), "error")
-		}
-		const maxBytes = 5 * 1024 * 1024
-		if len(m.attachments) >= maxInlineImageAttachments {
-			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-			return m, m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn")
-		}
-		if len(msg.attachment.Data) > maxBytes {
-			m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-			return m, m.enqueueToast("Image exceeds 5 MB limit", "warn")
-		}
-		m.attachments = append(m.attachments, msg.attachment)
-		m.recalcViewportSize()
-		return m, m.enqueueToast(fmt.Sprintf("Image added: %s", msg.attachment.FileName), "info")
+		return m, m.handleAttachmentReadyMsg(msg)
 
 	case openImageResultMsg:
 		if msg.err != nil {

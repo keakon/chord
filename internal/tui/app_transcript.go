@@ -394,12 +394,14 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 		case "assistant":
 			// Emit each thinking block as an independent BlockThinking so they
 			// can be focused / copied individually.
-			for _, tb := range msg.ThinkingBlocks {
+			for blockIndex, tb := range msg.ThinkingBlocks {
 				if strings.TrimSpace(tb.Thinking) != "" {
 					blocks = append(blocks, &Block{
-						ID:      *nextID,
-						Type:    BlockThinking,
-						Content: tb.Thinking,
+						ID:                 *nextID,
+						Type:               BlockThinking,
+						Content:            tb.Thinking,
+						MsgIndex:           msgIdx,
+						ThinkingBlockIndex: blockIndex,
 					})
 					*nextID++
 				}

@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/thinkingtranslate"
 )
 
 func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *testing.T) {
@@ -127,6 +129,100 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 		t.Fatalf("text = %q, want answer", text.Text)
 	}
 }
+func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "请用中文回复。"})
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+
+	svc, err := thinkingtranslate.NewService()
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	svc.TargetLang = "zh-Hans"
+	svc.ModelPool = "translation"
+	var translatedMu sync.Mutex
+	var translated []string
+	svc.SetTranslator(agentTestChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
+		if targetLang != "zh-Hans" {
+			t.Fatalf("targetLang = %q, want zh-Hans", targetLang)
+		}
+		translatedMu.Lock()
+		translated = append(translated, chunk)
+		translatedMu.Unlock()
+		return "翻译:" + chunk, nil
+	}})
+	a.thinkingTranslateSvc = svc
+
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	providerImpl := &blockingStreamProvider{
+		calls: []scriptedStreamCall{{
+			streams: []message.StreamDelta{
+				{Type: "thinking", Text: "First streaming thought."},
+				{Type: "thinking_end"},
+				{Type: "thinking", Text: "Second streaming thought."},
+				{Type: "thinking_end"},
+			},
+			resp: &message.Response{Content: "answer", StopReason: "stop"},
+		}},
+	}
+
+	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
+	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
+
+	if _, err := a.callLLM(context.Background(), a.GetMessages()); err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+	a.outputWg.Wait()
+
+	translatedMu.Lock()
+	translatedCount := len(translated)
+	translatedSet := make(map[string]bool, len(translated))
+	for _, chunk := range translated {
+		translatedSet[chunk] = true
+	}
+	translatedMu.Unlock()
+	if translatedCount != 2 {
+		t.Fatalf("translator calls = %d, want 2; chunks=%#v", translatedCount, translated)
+	}
+	if !translatedSet["First streaming thought."] || !translatedSet["Second streaming thought."] {
+		t.Fatalf("translated chunks = %#v", translated)
+	}
+
+	var got []ThinkingTranslatedEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if translated, ok := evt.(ThinkingTranslatedEvent); ok {
+			got = append(got, translated)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("ThinkingTranslatedEvent count = %d, want 2; events=%#v", len(got), got)
+	}
+	byBlock := make(map[int]ThinkingTranslatedEvent, len(got))
+	for _, evt := range got {
+		byBlock[evt.BlockIndex] = evt
+	}
+	for i, want := range []string{"First streaming thought.", "Second streaming thought."} {
+		evt, ok := byBlock[i]
+		if !ok {
+			t.Fatalf("missing ThinkingTranslatedEvent for block %d; events=%#v", i, got)
+		}
+		if evt.MessageID != "msgidx:1" {
+			t.Fatalf("block %d MessageID = %q, want msgidx:1", i, evt.MessageID)
+		}
+		if evt.Translated != "翻译:"+want {
+			t.Fatalf("block %d Translated = %q, want %q", i, evt.Translated, "翻译:"+want)
+		}
+	}
+}
+
 func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenance(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	providerCfg := llm.NewProviderConfig("deepseek", config.ProviderConfig{

@@ -21,6 +21,13 @@ type BlockImagePart struct {
 	RenderRows      int
 }
 
+// ThinkingTranslationView stores translated thinking content rendered below the
+// original thinking block using the same Markdown/code-highlighting pipeline.
+type ThinkingTranslationView struct {
+	TargetLang string
+	Content    string
+}
+
 // BlockType enumerates the kinds of visual elements rendered in the message viewport.
 type BlockType int
 
@@ -140,9 +147,13 @@ type Block struct {
 	displayWorkingDir string
 
 	// MsgIndex is the index of the corresponding message in the agent's message
-	// list. Set for user blocks during transcript restore; -1 for dynamically
-	// appended blocks or non-user blocks.
+	// list. Set for transcript-backed blocks; -1 for dynamically appended blocks
+	// whose source message is not yet known.
 	MsgIndex int
+
+	// ThinkingBlockIndex identifies which thinking block within an assistant
+	// message this card represents. It is meaningful only for thinking blocks.
+	ThinkingBlockIndex int
 
 	// FileRefs holds the @-mentioned file paths injected with this user message.
 	// Used only for TUI display; not sent to the LLM separately (content is in Parts).
@@ -171,6 +182,11 @@ type Block struct {
 	// blocks. Each entry is one LLM round's complete thinking content,
 	// rendered dimmed above the main response text.
 	ThinkingParts []string
+
+	// ThinkingTranslations holds post-processed translated thinking content for
+	// the corresponding ThinkingParts index. Empty entries mean no translated
+	// content is currently available for that thinking block.
+	ThinkingTranslations []ThinkingTranslationView
 
 	// ThinkingCollapsed controls whether thinking sections are collapsed
 	// to maxCollapsedThinkingLines or shown in full.

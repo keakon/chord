@@ -144,6 +144,42 @@ providers:
 
 For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.1-pro-preview`, is the model ID sent to Gemini.
 
+Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
+
+- `thinking.budget` → `generationConfig.thinkingConfig.thinkingBudget`
+  - Gemini: ✅ used
+  - Anthropic: ⚠️ only when `thinking.type: enabled` (mapped to Anthropic budget mode)
+  - OpenAI: ❌ ignored
+- `thinking.include_thoughts` → `generationConfig.thinkingConfig.includeThoughts`
+  - Gemini: ✅ used
+  - Anthropic / OpenAI: ❌ ignored
+- `thinking.level` → `generationConfig.thinkingConfig.thinkingLevel` (`minimal|low|medium|high`, Gemini 3+; not all models support `minimal`)
+  - Gemini (3+): ✅ used
+  - Gemini 2.x / Anthropic / OpenAI: ❌ ignored
+
+Example:
+
+```yaml
+providers:
+  gemini:
+    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    models:
+      gemini-2.5-flash:
+        limit:
+          context: 1048576
+          output: 65536
+        thinking:
+          budget: -1
+          include_thoughts: true
+      gemini-3-pro:
+        limit:
+          context: 1048576
+          output: 65536
+        thinking:
+          budget: -1
+          level: high
+```
+
 If `type` is omitted, Chord auto-detects it from provider config:
 
 - `preset: codex` → `responses`
@@ -153,6 +189,33 @@ If `type` is omitted, Chord auto-detects it from provider config:
 - `api_url` ending in `/models` → `generate-content`
 
 If none of these rules match, set `type` explicitly.
+
+## Thinking bilingual appended translation
+
+If your model outputs English thinking / reasoning and you want an appended translation (for example, Chinese) in the TUI, you can enable `thinking_translation`:
+
+```yaml
+model_pools:
+  translation:
+    - openai/gpt-5.4-mini
+
+thinking_translation:
+  target_language: zh-Hans
+  model_pool: translation
+```
+
+Notes:
+
+- This feature only translates **thinking / reasoning**. It does not translate the assistant final answer.
+- Translation uses an LLM provider you already configured. `thinking_translation.model_pool` must point to a top-level `model_pools` entry.
+- `target_language` and `model_pool` are both required. If either is missing, the feature is disabled.
+- Use a separate low-cost translation pool when possible. The pool can contain multiple `provider/model[@variant]` refs; translation runs a **single fallback round** across pool entries in order: if one candidate fails (including network/5xx/timeout), it moves to the next candidate, and an empty translation result also triggers trying the next candidate.
+- The thinking-translation layer does not impose its own whole-translation timeout and does not use a circuit breaker. A temporary failure for one thinking block only skips that block; it does not block later thinking translations or the main response.
+- Per-provider request/header/stream idle timeouts still apply at the LLM transport layer. With the default auxiliary client settings, these are one-minute-class timeouts, so a stalled model/key can fail over while the pool still gets a chance to run.
+- The translated content is appended under the corresponding thinking card, separated by a neutral header like `Translated · <target_language>`. The translation is rendered with the same Markdown / code-highlighting pipeline and is not written back into model context.
+- Translations are reused **only within the current process** (in-memory). They are not persisted to disk and are not replayed across sessions.
+
+More detailed fields are described in the config reference below.
 
 ## auth.yaml
 
@@ -645,10 +708,15 @@ durable compaction automatically. Common settings:
 
 ```yaml
 context:
-  auto_compact: true
   compact_threshold: 0.8
-  compact_model: openai/gpt-5.4-mini
+  compaction:
+    model_pool: compact
+    reserved: 16000
 ```
+
+Set `context.compaction.model_pool` to pick a dedicated compaction model pool. If it is omitted, compaction clones the current agent model pool and starts from the current sticky cursor instead of falling back to a single model.
+
+Automatic compaction is enabled when `context.compact_threshold > 0`; set `context.compact_threshold: 0` to disable it.
 
 Automatic compaction is driven by the **usable input-side** budget. If a model config
 sets `limit.input`, Chord starts from that value; otherwise it starts from
@@ -664,7 +732,6 @@ compaction/recovery safety margin:
 
 ```yaml
 context:
-  auto_compact: true
   compact_threshold: 0.8
   compaction:
     reserved: 16000
@@ -717,7 +784,8 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
-| `context`               | object                | see below                        | global / project         | `auto_compact`, `compact_threshold`, `compact_model`, `compaction.reserved`. See [Context compaction](#context-compaction).                     |
+| `thinking_translation`  | object                | disabled                         | global / project         | Optional appended translation for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
+| `context`               | object                | see below                        | global / project         | `compact_threshold`, `compaction.model_pool`, `compaction.reserved`. See [Context compaction](#context-compaction).                     |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |

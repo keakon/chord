@@ -28,6 +28,9 @@ func (m *Model) finalizeAssistantBlock() {
 			m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
 			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 		}
+		if m.currentThinkingBlock.AgentID == "" {
+			m.thinkingStreamBlockIndex++
+		}
 		m.currentThinkingBlock = nil
 		m.thinkingBlockAppended = false
 	}

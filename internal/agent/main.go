@@ -25,6 +25,7 @@ import (
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -302,6 +303,11 @@ type MainAgent struct {
 	nextCompactionPlanID uint64
 	compactionFileCtxMu  sync.Mutex
 	compactionFileCtxSig string
+
+	thinkingTranslateMu          sync.Mutex
+	thinkingTranslateSvc         *thinkingtranslate.Service
+	thinkingTranslateSeen        map[string]struct{}
+	thinkingTranslateTurnHandled map[uint64]struct{}
 
 	sessionDir       string
 	modelName        string

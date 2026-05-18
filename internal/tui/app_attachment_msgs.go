@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -13,6 +14,25 @@ type attachmentReadyMsg struct {
 	attachment                Attachment
 	err                       error
 	inlineImagePlaceholderRaw string
+}
+
+func (m *Model) handleAttachmentReadyMsg(msg attachmentReadyMsg) tea.Cmd {
+	if msg.err != nil {
+		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
+		return m.enqueueToast(msg.err.Error(), "error")
+	}
+	const maxBytes = 5 * 1024 * 1024
+	if len(m.attachments) >= maxInlineImageAttachments {
+		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
+		return m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn")
+	}
+	if len(msg.attachment.Data) > maxBytes {
+		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
+		return m.enqueueToast("Image exceeds 5 MB limit", "warn")
+	}
+	m.attachments = append(m.attachments, msg.attachment)
+	m.recalcViewportSize()
+	return m.enqueueToast(fmt.Sprintf("Image added: %s", msg.attachment.FileName), "info")
 }
 
 // shellBangResultMsg carries output from a local !command (TUI shell).

@@ -270,6 +270,12 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		a.persistAsync("main", assistantMsg)
 	}
 
+	// Thinking translation is a best-effort post-processing enhancement. It is
+	// scheduled only after the assistant message is finalized and persisted. The
+	// TUI applies it only to settled thinking cards, so it must not affect the main
+	// response or streaming display.
+	a.maybeTranslateLatestThinkingAfterIdle(evt.TurnID)
+
 	// No valid tool calls → agent is idle, waiting for the next user message.
 	if len(validCalls) == 0 {
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "no_valid_calls")

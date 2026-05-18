@@ -485,6 +485,30 @@ func TestRenderThinkingPartsStreamingWidthInvalidatesPartCache(t *testing.T) {
 	}
 }
 
+func TestRenderThinkingPartsIncludesStructuredTranslationMarkdown(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:                 BlockAssistant,
+		ThinkingParts:        []string{"## Plan\n\n- inspect"},
+		ThinkingTranslations: []ThinkingTranslationView{{TargetLang: "zh-Hans", Content: "## 翻译\n\n```go\nfmt.Println(1)\n```"}},
+	}
+	lines := block.renderThinkingParts(70)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Translated · zh-Hans") {
+		t.Fatalf("expected translated header, got %q", plain)
+	}
+	if !strings.Contains(plain, "翻译") {
+		t.Fatalf("expected translated markdown heading, got %q", plain)
+	}
+	if !strings.Contains(plain, "fmt.Println(1)") {
+		t.Fatalf("expected translated code block content, got %q", plain)
+	}
+	joinedANSI := strings.Join(lines, "\n")
+	if !strings.Contains(joinedANSI, "\x1b[") {
+		t.Fatalf("expected ANSI styling for translated markdown, got %q", joinedANSI)
+	}
+}
+
 func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{

@@ -118,6 +118,7 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 		m.resetStreamingToIdle()
 		if m.expectedAgentClose {
 			m.expectedAgentClose = false
+			m.completedExpectedAgentClose = true
 			m.markAgentIdle(m.focusedAgentIDOrMain())
 			m.inflightDraft = nil
 			m.pauseQueuedDraftDrainOnce = true
@@ -174,6 +175,35 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 	return effects.followup
 }
 
+func (m *Model) currentMainAssistantMsgIndex() int {
+	if m == nil || m.agent == nil {
+		return -1
+	}
+	return len(m.agent.GetMessages())
+}
+
+func (m *Model) ensureStreamingThinkingBlock(agentID string) *Block {
+	if m.currentThinkingBlock != nil {
+		return m.currentThinkingBlock
+	}
+	msgIndex := -1
+	blockIndex := 0
+	if agentID == "" {
+		msgIndex = m.thinkingStreamMsgIndex
+		currentMsgIndex := m.currentMainAssistantMsgIndex()
+		if msgIndex < 0 || (currentMsgIndex >= 0 && currentMsgIndex > msgIndex) {
+			msgIndex = currentMsgIndex
+			m.thinkingStreamMsgIndex = msgIndex
+			m.thinkingStreamBlockIndex = 0
+		}
+		blockIndex = m.thinkingStreamBlockIndex
+	}
+	m.currentThinkingBlock = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: agentID, MsgIndex: msgIndex, ThinkingBlockIndex: blockIndex}
+	m.nextBlockID++
+	m.thinkingBlockAppended = false
+	return m.currentThinkingBlock
+}
+
 func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -215,11 +245,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.thinkingStartTime.IsZero() {
 			m.thinkingStartTime = time.Now()
 		}
-		if m.currentThinkingBlock == nil {
-			m.currentThinkingBlock = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true}
-			m.nextBlockID++
-			m.thinkingBlockAppended = false
-		}
+		m.ensureStreamingThinkingBlock("")
 		return true, effects
 	case agent.StreamThinkingDeltaEvent:
 		m.touchStreamDelta(evt.AgentID)
@@ -229,11 +255,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.currentThinkingBlock != nil && m.currentThinkingBlock.AgentID != evt.AgentID {
 			m.finalizeAssistantBlock()
 		}
-		if m.currentThinkingBlock == nil {
-			m.currentThinkingBlock = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: evt.AgentID}
-			m.nextBlockID++
-			m.thinkingBlockAppended = false
-		}
+		m.ensureStreamingThinkingBlock(evt.AgentID)
 		m.currentThinkingBlock.Content += evt.Text
 		if strings.TrimSpace(m.currentThinkingBlock.Content) != "" && !m.thinkingBlockAppended {
 			m.appendViewportBlock(m.currentThinkingBlock)
@@ -257,11 +279,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		return true, effects
 	case agent.StreamThinkingEvent:
 		if strings.TrimSpace(evt.Text) != "" {
-			if m.currentThinkingBlock == nil {
-				m.currentThinkingBlock = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: evt.AgentID}
-				m.nextBlockID++
-				m.thinkingBlockAppended = false
-			}
+			m.ensureStreamingThinkingBlock(evt.AgentID)
 			m.currentThinkingBlock.Content += evt.Text
 			if !m.thinkingBlockAppended {
 				m.appendViewportBlock(m.currentThinkingBlock)
@@ -301,6 +319,9 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			// a fresh card. Without this, subsequent thinking deltas would
 			// be appended to an already-frozen block and the footer would
 			// render alongside still-streaming content.
+			if m.currentThinkingBlock.AgentID == "" {
+				m.thinkingStreamBlockIndex++
+			}
 			m.currentThinkingBlock = nil
 			m.thinkingBlockAppended = false
 		}
@@ -330,6 +351,42 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.streamRenderDeferred = false
 		m.streamRenderDeferNext = false
 		effects.addFollowup(m.requestStreamBoundaryFlush())
+		return true, effects
+	case agent.ThinkingTranslatedEvent:
+		translated := strings.TrimSpace(evt.Translated)
+		if translated == "" {
+			return true, effects
+		}
+		if evt.BlockIndex >= 0 {
+			for i := len(m.viewport.blocks) - 1; i >= 0; i-- {
+				b := m.viewport.blocks[i]
+				if b == nil || b.Type != BlockThinking || b.Streaming || b.AgentID != evt.AgentID {
+					continue
+				}
+				if b.MsgIndex < 0 || b.ThinkingBlockIndex != evt.BlockIndex {
+					continue
+				}
+				if evt.MessageID != "" {
+					wantMsgID := fmt.Sprintf("msgidx:%d", b.MsgIndex)
+					if wantMsgID != evt.MessageID {
+						continue
+					}
+				}
+				if len(b.ThinkingTranslations) <= evt.BlockIndex {
+					translations := make([]ThinkingTranslationView, evt.BlockIndex+1)
+					copy(translations, b.ThinkingTranslations)
+					b.ThinkingTranslations = translations
+				}
+				if existing := strings.TrimSpace(b.ThinkingTranslations[evt.BlockIndex].Content); existing == translated {
+					return true, effects
+				}
+				b.ThinkingTranslations[evt.BlockIndex] = ThinkingTranslationView{TargetLang: strings.TrimSpace(evt.TargetLang), Content: translated}
+				b.InvalidateCache()
+				m.updateViewportBlock(b)
+				m.markBlockSettled(b)
+				return true, effects
+			}
+		}
 		return true, effects
 	default:
 		return false, effects
@@ -579,6 +636,10 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
 			agentID = "main"
 		}
+		if agentID == "main" {
+			m.thinkingStreamMsgIndex = m.currentMainAssistantMsgIndex()
+			m.thinkingStreamBlockIndex = 0
+		}
 		delete(m.requestProgress, agentID)
 		m.cachedStatusBarActivityKey = ""
 		m.cachedStatusBarActivityText = ""
@@ -647,6 +708,8 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)
 		return true, effects
 	case agent.SessionRestoredEvent:
+		m.thinkingStreamMsgIndex = -1
+		m.thinkingStreamBlockIndex = 0
 		reason := "session_restored"
 		if m.startupRestorePending {
 			reason = "startup_restored"

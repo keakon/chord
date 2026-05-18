@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.6
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.3
+	github.com/abadojack/whatlanggo v1.0.1
 	github.com/alecthomas/chroma/v2 v2.16.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
