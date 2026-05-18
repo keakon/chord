@@ -429,15 +429,20 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 }
 
 func doneResultIsRejected(result string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(result)), "done rejected:")
+	trimmed := strings.ToLower(strings.TrimSpace(result))
+	return strings.HasPrefix(trimmed, "done rejected:") || strings.HasPrefix(trimmed, "done rejected automatically:")
 }
 
 func doneRejectedReason(result string) string {
 	trimmed := strings.TrimSpace(result)
-	if !doneResultIsRejected(trimmed) {
-		return trimmed
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "done rejected automatically:") {
+		return strings.TrimSpace(trimmed[len("Done rejected automatically:"):])
 	}
-	return strings.TrimSpace(trimmed[len("Done rejected:"):])
+	if strings.HasPrefix(lower, "done rejected:") {
+		return strings.TrimSpace(trimmed[len("Done rejected:"):])
+	}
+	return trimmed
 }
 
 func compactToolHiddenResultLines(b *Block, contentWidth int) int {
@@ -798,9 +803,12 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		if b.toolResultIsError() {
 			return "✗"
 		}
+		if b.ToolName == "Done" && doneResultIsRejected(b.ResultContent) {
+			return "✗"
+		}
 		if b.toolResultIsCancelled() {
 			if b.ToolName == "Done" {
-				return "❌"
+				return "✗"
 			}
 			return "◌"
 		}

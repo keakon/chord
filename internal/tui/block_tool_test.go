@@ -2030,8 +2030,8 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if !strings.Contains(plain, "❌ Done") {
-		t.Fatalf("expected rejected Done to use cross icon, got:\n%s", plain)
+	if !strings.Contains(plain, "✗ Done") {
+		t.Fatalf("expected rejected Done to use failure icon, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "rejected reason: 达到100%通过才能调用，调用时需要汇报结果") {
 		t.Fatalf("expected simplified rejected reason text, got:\n%s", plain)
@@ -2039,6 +2039,34 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	for _, unwanted := range []string{"Status:", "Done rejected:"} {
 		if strings.Contains(plain, unwanted) {
 			t.Fatalf("expected rejected Done to omit %q, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Done",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet (open_todos, verification_required). Finish the remaining work before calling Done again.",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "✗ Done") {
+		t.Fatalf("expected auto-rejected Done to use failure icon, got:\n%s", plain)
+	}
+	for _, want := range []string{"rejected reason: loop exit conditions are not", "satisfied yet (open_todos,", "verification_required). Finish the remaining work before calling Done", "again."} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected auto-rejected Done render to contain %q, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"Status:", "Done rejected automatically:"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected auto-rejected Done to omit %q, got:\n%s", unwanted, plain)
 		}
 	}
 }

@@ -10,6 +10,7 @@
 - TUI / 输入法：自动切换输入法现在只会在当前 Chord 所在标签页/窗口实际处于前台激活时执行，避免后台标签页中的 chord / mode 切换干扰当前正在使用的标签页输入法；当收到 `FocusMsg` 或切回该标签页时，如果当前 mode 仍需要英文输入法，Chord 会重新应用已配置的英文 IME target。
 - CLI / 初始化：默认 `chord` 命令在全局 `config.yaml` 缺失时，新增首次启动初始化向导。向导会在控制 TTY 上运行，写入最小 `config.yaml`，必要时再写入 `auth.yaml`；也可以在初始化阶段直接完成 Codex OAuth 登录；如果已有匹配凭据会尽量复用，并在结束时打印实际使用的路径。
 - Runtime / Loop / Done：`Done` 工具现在要求必传非空 `report` 参数，用来承载完整的最终完成报告。loop 模式把 `Done` 作为唯一的退出申请入口：过早的 `Done` 会被拒绝并作为 tool result 回给模型继续运行；满足退出条件时，则弹出本地确认框并展示这份报告。
+- TUI / Done：`Done rejected:` 与 `Done rejected automatically:` 现在都会按 rejected completion 渲染，统一复用现有失败态样式（`✗ Done`）并显示精简后的 rejected reason 行，让 loop 自动拒绝和手动拒绝在界面上保持一致可见。
 - Tools / 安全：补强本地文件/路径安全，对文件读取与搜索工具统一路径校验逻辑。`Read` 与 `Grep` 现在复用同一套已存在路径检查，并会显式拒绝标准流设备文件等受限 device-style 路径。
 - Config / 持久化：补强 setup 与 auth 持久化时的配置写入流程。初始配置创建现在使用配置级锁文件 + 临时文件 + 原子安装；auth/config 保存路径也复用同一套原子写入基础设施。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
