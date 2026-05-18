@@ -13,6 +13,7 @@ func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
 		requestID: msg.request.RequestID,
 		prevMode:  m.mode,
 	}
+	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	if msg.request.Timeout > 0 {
 		m.confirm.deadline = time.Now().Add(msg.request.Timeout)
 	}
@@ -55,6 +56,7 @@ func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
 		prevMode:   m.mode,
 		input:      ei,
 	}
+	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	if msg.request.Timeout > 0 {
 		m.question.deadline = time.Now().Add(msg.request.Timeout)
 	}

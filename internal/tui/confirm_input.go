@@ -398,6 +398,7 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 
 	prevMode := m.confirm.prevMode
 	m.confirm = confirmState{}
+	m.terminalTitleRequestSeen = false
 	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
 	titleCmd := m.syncTerminalTitleState()

@@ -83,7 +83,7 @@ func (m *Model) setTerminalTitle(mode terminalTitleMode) {
 		m.terminalTitleView = terminaltitle.ComposeTitle(title, frame)
 	case terminalTitleModeRequest:
 		prefix := terminalTitleRequestIcon
-		if m.displayState == stateBackground && m.terminalTitleRequestBlinkOff {
+		if m.displayState == stateBackground && !m.terminalTitleRequestSeen && m.terminalTitleRequestBlinkOff {
 			prefix = terminalTitleRequestSpacer
 		}
 		m.terminalTitleView = terminaltitle.ComposeTitle(title, prefix)
@@ -179,7 +179,7 @@ func (m *Model) currentTitleTickerDelay() time.Duration {
 		return 0
 	}
 	if m.terminalTitleNeedsUserResponse() {
-		if m.displayState == stateForeground {
+		if m.displayState == stateForeground || m.terminalTitleRequestSeen {
 			return 0
 		}
 		return backgroundActiveCadence.titleTickerDelay

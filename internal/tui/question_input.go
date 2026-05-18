@@ -246,6 +246,7 @@ func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
 
 	prevMode := m.question.prevMode
 	m.question = questionState{}
+	m.terminalTitleRequestSeen = false
 	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
 	titleCmd := m.syncTerminalTitleState()

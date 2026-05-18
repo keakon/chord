@@ -169,6 +169,9 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 	m.lastForegroundAt = now
 	m.backgroundIdleSince = time.Time{}
 	m.idleSweepScheduled = false
+	if m.terminalTitleNeedsUserResponse() {
+		m.terminalTitleRequestSeen = true
+	}
 	m.exitRenderFreeze()
 	m.streamRenderForceView = true
 	m.streamRenderDeferred = false

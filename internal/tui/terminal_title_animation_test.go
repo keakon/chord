@@ -137,6 +137,40 @@ func TestHandleBlurMsgStartsBlinkingRequestTitleForPendingConfirm(t *testing.T) 
 	}
 }
 
+func TestHandleFocusMsgStopsBlinkingButKeepsRequestTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "await approval"
+	m.confirm.request = &ConfirmRequest{RequestID: "req-1"}
+	m.terminalTitleTickRunning = true
+	m.terminalTitleTickGeneration = 7
+	m.terminalTitleRequestBlinkOff = true
+
+	m.handleFocusMsg()
+	if m.terminalTitleTickRunning {
+		t.Fatal("focus should stop request-title blinking")
+	}
+	if !m.terminalTitleRequestSeen {
+		t.Fatal("focus should mark the pending request as seen")
+	}
+	if m.currentTitleMode() != terminalTitleModeRequest {
+		t.Fatalf("title mode = %v, want request", m.currentTitleMode())
+	}
+	if delay := m.currentTitleTickerDelay(); delay != 0 {
+		t.Fatalf("title ticker delay after focus = %s, want 0", delay)
+	}
+
+	if cmd := m.handleBlurMsg(); cmd != nil {
+		_ = cmd()
+	}
+	if m.terminalTitleTickRunning {
+		t.Fatal("seen pending request should stay solid instead of blinking again after blur")
+	}
+	if m.currentTitleMode() != terminalTitleModeRequest {
+		t.Fatalf("title mode after blur = %v, want request", m.currentTitleMode())
+	}
+}
+
 func TestResolveConfirmRestoresSpinnerWhenBusyWorkRemains(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground

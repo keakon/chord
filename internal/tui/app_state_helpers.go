@@ -35,6 +35,7 @@ type renderRuntimeState struct {
 	terminalTitleTickRunning         bool
 	terminalTitleTickGeneration      uint64
 	terminalTitleRequestBlinkOff     bool
+	terminalTitleRequestSeen         bool
 	startupDeferredTranscript        *startupDeferredTranscriptState
 	startupDeferredPreheatGeneration uint64
 }
