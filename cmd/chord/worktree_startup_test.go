@@ -131,15 +131,29 @@ func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
 	}
 }
 
+func prepareStartupWorktreeForTest(t *testing.T, ctx context.Context, name string) *worktree.Info {
+	t.Helper()
+	var info *worktree.Info
+	output, err := captureStderr(t, func() error {
+		var createErr error
+		info, createErr = prepareStartupWorktree(ctx, name)
+		return createErr
+	})
+	if err != nil {
+		t.Fatalf("prepareStartupWorktree %q: %v", name, err)
+	}
+	if output != "" && !strings.Contains(output, "worktree") {
+		t.Fatalf("unexpected worktree startup output = %q", output)
+	}
+	return info
+}
+
 func TestPrepareStartupWorktree_ChdirAndIndex(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "feat-a")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-a")
 	cwd, _ := os.Getwd()
 	canonicalCwd, _ := config.CanonicalProjectRoot(cwd)
 	if canonicalCwd != info.Path {
@@ -152,10 +166,7 @@ func TestPrepareStartupWorktree_AutoSlug(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	info := prepareStartupWorktreeForTest(t, context.Background(), "")
 	if !strings.HasPrefix(info.Name, "task-") {
 		t.Errorf("auto slug did not get task- prefix: %s", info.Name)
 	}
@@ -206,10 +217,7 @@ func TestResolveSessionWorktree_FindsInWorktree(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "feat-a")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-a")
 
 	pl, err := startupPathLocator()
 	if err != nil {
@@ -318,10 +326,7 @@ func TestResolveSessionWorktree_FromInsideWorktree(t *testing.T) {
 	chdirForTest(t, repo)
 
 	// Create the worktree first so the repo index has both main + wt.
-	wtInfo, err := prepareStartupWorktree(context.Background(), "feat-x")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	wtInfo := prepareStartupWorktreeForTest(t, context.Background(), "feat-x")
 
 	// Seed a main-repo session and register the main project in the index.
 	pl, err := startupPathLocator()

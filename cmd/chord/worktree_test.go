@@ -59,13 +59,9 @@ func TestWorktreeListCmd_ShowsCreated(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	if _, err := prepareStartupWorktree(context.Background(), "alpha"); err != nil {
-		t.Fatalf("prepareStartupWorktree alpha: %v", err)
-	}
+	_ = prepareStartupWorktreeForTest(t, context.Background(), "alpha")
 	chdirForTest(t, repo)
-	if _, err := prepareStartupWorktree(context.Background(), "beta"); err != nil {
-		t.Fatalf("prepareStartupWorktree beta: %v", err)
-	}
+	_ = prepareStartupWorktreeForTest(t, context.Background(), "beta")
 	chdirForTest(t, repo)
 
 	cmd := newWorktreeListCmd()
@@ -83,9 +79,7 @@ func TestWorktreeRemoveCmd_DefaultPreservesBranch(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	if _, err := prepareStartupWorktree(context.Background(), "alpha"); err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	_ = prepareStartupWorktreeForTest(t, context.Background(), "alpha")
 	chdirForTest(t, repo)
 
 	cmd := newWorktreeRemoveCmd()
@@ -110,10 +104,7 @@ func TestWorktreeFinishCmd_CheckReportsCleanPreview(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "alpha")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	info := prepareStartupWorktreeForTest(t, context.Background(), "alpha")
 	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatalf("write extra: %v", err)
 	}
@@ -144,10 +135,7 @@ func TestWorktreeFinishCmd_MessageFlagCreatesCustomSquashCommit(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	info, err := prepareStartupWorktree(context.Background(), "alpha")
-	if err != nil {
-		t.Fatalf("prepareStartupWorktree: %v", err)
-	}
+	info := prepareStartupWorktreeForTest(t, context.Background(), "alpha")
 	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatalf("write extra: %v", err)
 	}
