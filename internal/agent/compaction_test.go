@@ -684,12 +684,7 @@ func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
 		response: &message.Response{Content: "too short"},
 	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
-		if providerModel != "sample/compact-model" {
-			t.Fatalf("providerModel = %q, want sample/compact-model", providerModel)
-		}
-		return client, "compact-model", 16384, nil
-	})
+	a.llmClient = client
 
 	head := []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
@@ -722,12 +717,7 @@ func TestSummarizeCompactionHeadUsesCompactEndpointForCodexPreset(t *testing.T) 
 		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
 	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
-		if providerModel != "sample/compact-model" {
-			t.Fatalf("providerModel = %q, want sample/compact-model", providerModel)
-		}
-		return client, "compact-model", 16384, nil
-	})
+	a.llmClient = client
 
 	head := []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
@@ -767,9 +757,7 @@ func TestSummarizeCompactionHeadUsesGenericBackendWhenCompactionPresetIsGeneric(
 		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
 	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
-		return client, "compact-model", 16384, nil
-	})
+	a.llmClient = client
 
 	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
@@ -805,9 +793,7 @@ func TestSummarizeCompactionHeadCodexPresetFallsBackToGenericWhenEndpointUnavail
 		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
 	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
-		return client, "compact-model", 16384, nil
-	})
+	a.llmClient = client
 
 	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
@@ -1250,7 +1236,7 @@ func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) 
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	if !a.ensureOversizeDrivenCompaction() {
 		t.Fatal("expected oversize-driven compaction to start")
 	}
@@ -1288,7 +1274,7 @@ func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
 	if a.ensureOversizeDrivenCompaction() {
 		t.Fatal("expected oversize-driven compaction to stop after retry limit")
@@ -1332,7 +1318,7 @@ func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
 func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(10000, true, 0.9)
+	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
 	a.autoCompactRequested.Store(true)
 
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
@@ -1352,7 +1338,7 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(10000, true, 0.9)
+	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
 	a.autoCompactRequested.Store(true)
 
 	for planID := uint64(1); planID <= usageDrivenCompactionFailureThreshold; planID++ {
@@ -1371,7 +1357,7 @@ func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 func TestUsageDrivenCompactionSkipsAfterPreRequestShrink(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(8000, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManager(8000, 0.8)
 	a.autoCompactRequested.Store(true)
 	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: ""})
 	snapshot := []message.Message{
@@ -1400,7 +1386,7 @@ func TestUsageDrivenCompactionSkipsAfterPreRequestShrink(t *testing.T) {
 func TestUsageDrivenCompactionStillNeededWhenShrinkEstimateRemainsHigh(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(1000, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManager(1000, 0.8)
 	a.autoCompactRequested.Store(true)
 	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: strings.Repeat("system ", 120)})
 	snapshot := []message.Message{
@@ -1420,7 +1406,7 @@ func TestUsageDrivenCompactionStillNeededWhenShrinkEstimateRemainsHigh(t *testin
 func TestUsageDrivenCompactionShrinkUsesInputBudget(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, true, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	a.autoCompactRequested.Store(true)
 	snapshot := []message.Message{
 		{Role: "user", Content: strings.Repeat("x", 750000)}, // ~250k estimated input tokens
@@ -1437,7 +1423,7 @@ func TestUsageDrivenCompactionShrinkUsesInputBudget(t *testing.T) {
 func TestLargeTranscriptDoesNotAutoCompactWithoutUsageSignal(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(1000, true, 0.5)
+	a.ctxMgr = ctxmgr.NewManager(1000, 0.5)
 	a.ctxMgr.RestoreMessages([]message.Message{
 		{Role: "user", Content: strings.Repeat("large prompt ", 400)},
 		{Role: "assistant", Content: strings.Repeat("large answer ", 400)},

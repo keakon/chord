@@ -21,7 +21,6 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("" +
 		"context:\n" +
-		"  auto_compact: true\n" +
 		"  compact_threshold: 0.75\n" +
 		"  compaction:\n" +
 		"    preset: codex\n" +

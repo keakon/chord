@@ -93,7 +93,7 @@ type SubAgent struct {
 	color           string // optional ANSI color code from agent config for TUI display
 	llmMu           sync.RWMutex
 	llmClient       *llm.Client
-	ctxMgr          *ctxmgr.Manager // own context (no auto_compact)
+	ctxMgr          *ctxmgr.Manager // own context; automatic compaction disabled
 	tools           *tools.Registry // shared base + SubAgent-specific tools
 	parent          *MainAgent      // reference to parent for event forwarding
 	parentCtx       context.Context
@@ -286,7 +286,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	}
 
 	// Build the SubAgent's own context manager; sub-agents do not auto-compact.
-	ctxMgr := ctxmgr.NewManager(0, false, 0)
+	ctxMgr := ctxmgr.NewManager(0, 0)
 
 	s = &SubAgent{
 		instanceID:      cfg.InstanceID,

@@ -4,6 +4,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- **Breaking / Config:** removed `context.auto_compact`. Automatic context compaction is now enabled when `context.compact_threshold > 0`; set `context.compact_threshold: 0` to disable it.
+- **Breaking / Config:** removed `context.compact_model`. Context compaction now only accepts `context.compaction.model_pool` for a dedicated compaction pool; when unset, compaction clones the current agent model pool instead of falling back to a single selected model.
+- **Breaking / Headless:** removed the external `tool_result` event from the headless/protocol integration surface. Non-loop `Done` reports now use the dedicated `done_completion` event, while loop-mode `Done` exit requests continue to use `confirm_request` with explicit `done_report` / `done_reason` fields. Ordinary tool results remain internal to the agent/TUI lifecycle and are no longer forwarded to headless clients.
 - TUI / IME: automatic input-method switching now only runs when the current Chord tab/window is actually foreground-focused, preventing background tabs' chord/mode transitions from clobbering the active tab's IME. On `FocusMsg`/tab return, Chord now reapplies the configured English IME target when the current mode still requires it.
 - CLI / Setup: added a first-run setup wizard for the default `chord` command when global `config.yaml` is missing. The wizard runs on a controlling TTY, writes minimal `config.yaml` plus `auth.yaml` when needed, can complete Codex OAuth login during setup, reuses matching existing credentials when possible, and prints the exact paths it used.
 - Runtime / Loop / Done: the `Done` tool now requires a non-empty `report` argument containing the full final completion report. Loop mode uses `Done` as the only exit request path: premature `Done` requests are rejected and returned to the model as tool results, while valid exit requests open a local confirmation dialog showing the report.
@@ -44,6 +47,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - TUI: removed the pre-read + diff generation pipeline from the Write tool. Write tool results no longer carry `Diff`, `DiffAdded`, or `DiffRemoved` metadata. Edit tool results continue to show diffs as before.
 - Write tool `Execute` now reports the line count in addition to byte count in its success message.
 - Runtime/Codex rate limits: when active Responses WS streams run without fresh `rate_limits` events, Chord now proactively wakes Codex polling so RATE LIMIT/usage panels stay current instead of showing stale windows.
+- Thinking translation: when a translation model returns a semantically empty result, Chord now keeps trying the next model in the configured model pool before giving up, instead of treating the empty translation as a hard failure on the first model.
 - Tools/Safety: Bash and Spawn now reject high-confidence interactive shell commands before execution and run with explicit non-interactive environment defaults (for example disabling git credential/editor prompts) to reduce hang risk.
 - Tools/Process lifecycle: timeout/cancel shutdown now escalates from graceful terminate to force-kill for process groups after a grace period, preventing stubborn child processes from leaving Bash/Spawn calls stuck.
 

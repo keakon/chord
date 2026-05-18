@@ -310,6 +310,46 @@ func (c *Client) Variant() string {
 	return c.activeVariant
 }
 
+// PrimaryModelEntry returns the current cursor-head entry as a reusable fallback-model
+// descriptor. Callers can use it to assemble a separate model pool while
+// preserving provider implementations and model limits.
+func (c *Client) PrimaryModelEntry() FallbackModel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entry := FallbackModel{
+		ProviderConfig: c.provider,
+		ProviderImpl:   c.providerImpl,
+		ModelID:        c.modelID,
+		MaxTokens:      c.maxTokens,
+		Variant:        c.activeVariant,
+	}
+	if c.provider != nil {
+		if m, ok := c.provider.GetModel(c.modelID); ok {
+			entry.ContextLimit = m.Limit.Context
+			entry.InputLimit = m.Limit.EffectiveInputBudget(c.outputTokenMax, DefaultOutputTokenMax)
+		}
+	}
+	return entry
+}
+
+// ModelPoolSnapshot returns the effective model pool and the sticky cursor index.
+// The returned pool is ordered the same way CompleteStream traverses it; callers
+// can pass the pair to SetModelPool on a separate client to preserve routing state
+// without sharing request-local mutations.
+func (c *Client) ModelPoolSnapshot() ([]FallbackModel, int) {
+	if c == nil {
+		return nil, 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	pool := c.modelPoolLocked()
+	cursor := c.poolCursor
+	if cursor < 0 || cursor >= len(pool) {
+		cursor = 0
+	}
+	return pool, cursor
+}
+
 // SetOutputTokenMax sets the global output token cap (Layer 1). If n is 0,
 // DefaultOutputTokenMax is used. This cap is applied before the dynamic
 // context-aware capping (Layer 2) in completeStreamWithRetry.

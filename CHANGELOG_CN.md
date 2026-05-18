@@ -4,6 +4,9 @@
 
 ## 未发布
 
+- **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compact_threshold > 0` 时启用自动上下文压缩；设置 `context.compact_threshold: 0` 可关闭。
+- **不兼容 / 配置：** 移除 `context.compact_model`。上下文压缩现在只接受 `context.compaction.model_pool` 来指定专用压缩模型池；未设置时，压缩会克隆当前 agent 的模型池，而不是回退到单个已选模型。
+- **不兼容 / Headless：** 从 headless/protocol 集成面移除对外 `tool_result` 事件。非 loop 的 `Done` 报告现在使用专门的 `done_completion` 事件；loop 模式的 `Done` 退出申请继续使用 `confirm_request`，并显式携带 `done_report` / `done_reason` 字段。普通工具结果仍保留在 agent/TUI 内部生命周期中，不再转发给 headless 客户端。
 - TUI / 输入法：自动切换输入法现在只会在当前 Chord 所在标签页/窗口实际处于前台激活时执行，避免后台标签页中的 chord / mode 切换干扰当前正在使用的标签页输入法；当收到 `FocusMsg` 或切回该标签页时，如果当前 mode 仍需要英文输入法，Chord 会重新应用已配置的英文 IME target。
 - CLI / 初始化：默认 `chord` 命令在全局 `config.yaml` 缺失时，新增首次启动初始化向导。向导会在控制 TTY 上运行，写入最小 `config.yaml`，必要时再写入 `auth.yaml`；也可以在初始化阶段直接完成 Codex OAuth 登录；如果已有匹配凭据会尽量复用，并在结束时打印实际使用的路径。
 - Runtime / Loop / Done：`Done` 工具现在要求必传非空 `report` 参数，用来承载完整的最终完成报告。loop 模式把 `Done` 作为唯一的退出申请入口：过早的 `Done` 会被拒绝并作为 tool result 回给模型继续运行；满足退出条件时，则弹出本地确认框并展示这份报告。
@@ -44,6 +47,7 @@
 - TUI：移除了 Write 工具的预读 + diff 生成流程。Write 工具结果不再携带 `Diff`、`DiffAdded`、`DiffRemoved` 元数据。Edit 工具结果继续正常展示 diff。
 - Write 工具 `Execute` 的成功消息现在同时报告写入行数和字节数。
 - Runtime/Codex 限流：当 Responses WS 活跃流在一段时间内没有新的 `rate_limits` 事件时，Chord 现在会主动唤醒 Codex 轮询刷新，确保 RATE LIMIT/用量面板及时更新，避免长时间显示陈旧窗口。
+- Thinking translation：当某个翻译模型返回语义上为空的结果时，Chord 现在会继续尝试模型池中的下一个模型，而不是在第一个模型空译文时直接失败。
 - Tools/Safety：Bash 与 Spawn 现在会在执行前拒绝高置信度交互式 shell 命令，并注入明确的 non-interactive 环境默认值（例如禁用 git 凭据/编辑器提示）以降低卡死风险。
 - Tools/进程生命周期：超时/取消后的回收流程现会在宽限期后从 graceful terminate 升级为 force-kill 进程组，避免顽固子进程导致 Bash/Spawn 调用悬挂。
 

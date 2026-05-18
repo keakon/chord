@@ -532,7 +532,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		modelCfg.Limit.Context,
 		modelCfg.Limit.EffectiveInputBudget(cfg.MaxOutputTokens, llm.DefaultOutputTokenMax),
 		cfg.Context.Compaction.Reserved,
-		cfg.Context.AutoCompact,
 		cfg.Context.CompactThreshold,
 	)
 

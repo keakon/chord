@@ -31,21 +31,22 @@ type Config struct {
 	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.
-	PreventSleep      *bool               `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
-	KeyMap            map[string][]string `json:"keymap,omitempty" yaml:"keymap,omitempty"`                       // custom key bindings (snake_case action → key list)
-	Commands          map[string]string   `json:"commands,omitempty" yaml:"commands,omitempty"`                   // custom slash commands: "/cmd" → text to send as message
-	IMESwitchTarget   string              `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"` // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
-	LogLevel          string              `json:"log_level" yaml:"log_level"`                                     // log verbosity: "debug", "info" (default), "warn", "error"
-	Paths             PathsConfig         `json:"paths,omitempty" yaml:"paths,omitempty"`                         // user-level state/cache/logs path overrides
-	Maintenance       MaintenanceConfig   `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`             // optional cleanup/status checks
-	LSP               LSPConfig           `json:"lsp" yaml:"lsp"`                                                 // LSP server config
-	MCP               MCPConfig           `json:"mcp,omitempty" yaml:"mcp,omitempty"`                             // MCP server configs
-	Hooks             HookConfig          `json:"hooks,omitempty" yaml:"hooks,omitempty"`                         // lifecycle hook configs
-	MaxOutputTokens   int                 `json:"max_output_tokens" yaml:"max_output_tokens"`                     // global output token cap (0 = use DefaultOutputTokenMax)
-	StreamRetryRounds int                 `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                 // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
-	Proxy             string              `json:"proxy,omitempty" yaml:"proxy,omitempty"`                         // global proxy URL (http/https/socks5), empty = no proxy
-	WebFetch          WebFetchConfig      `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                 // WebFetch-specific options
-	Worktree          WorktreeConfig      `json:"worktree,omitempty" yaml:"worktree,omitempty"`                   // git worktree integration options
+	PreventSleep        *bool                      `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
+	KeyMap              map[string][]string        `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
+	Commands            map[string]string          `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
+	IMESwitchTarget     string                     `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
+	LogLevel            string                     `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
+	Paths               PathsConfig                `json:"paths,omitempty" yaml:"paths,omitempty"`                               // user-level state/cache/logs path overrides
+	Maintenance         MaintenanceConfig          `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`                   // optional cleanup/status checks
+	LSP                 LSPConfig                  `json:"lsp" yaml:"lsp"`                                                       // LSP server config
+	MCP                 MCPConfig                  `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
+	Hooks               HookConfig                 `json:"hooks,omitempty" yaml:"hooks,omitempty"`                               // lifecycle hook configs
+	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
+	StreamRetryRounds   int                        `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
+	Proxy               string                     `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
+	WebFetch            WebFetchConfig             `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                       // WebFetch-specific options
+	Worktree            WorktreeConfig             `json:"worktree,omitempty" yaml:"worktree,omitempty"`                         // git worktree integration options
+	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
 }
 
 // WebFetchConfig controls WebFetch runtime behavior.
@@ -472,10 +473,12 @@ func (l ModelLimit) EffectiveOutputBudget(outputCapSetting, defaultOutputCap int
 // Effort belongs to adaptive mode only.
 // Display is valid only for enabled/adaptive modes.
 type ThinkingConfig struct {
-	Type    string `json:"type,omitempty" yaml:"type,omitempty"`
-	Budget  int    `json:"budget,omitempty" yaml:"budget,omitempty"`
-	Effort  string `json:"effort,omitempty" yaml:"effort,omitempty"`
-	Display string `json:"display,omitempty" yaml:"display,omitempty"`
+	Type            string `json:"type,omitempty" yaml:"type,omitempty"`
+	Budget          int    `json:"budget,omitempty" yaml:"budget,omitempty"`
+	Effort          string `json:"effort,omitempty" yaml:"effort,omitempty"`
+	Display         string `json:"display,omitempty" yaml:"display,omitempty"`
+	IncludeThoughts *bool  `json:"include_thoughts,omitempty" yaml:"include_thoughts,omitempty"`
+	Level           string `json:"level,omitempty" yaml:"level,omitempty"`
 }
 
 // EffectiveType returns the configured thinking type.
@@ -588,25 +591,23 @@ type ModelCost struct {
 
 // ContextConfig controls automatic context compression behavior.
 type ContextConfig struct {
-	AutoCompact      bool             `json:"auto_compact" yaml:"auto_compact"`
 	CompactThreshold float64          `json:"compact_threshold" yaml:"compact_threshold"`
-	CompactModel     string           `json:"compact_model,omitempty" yaml:"compact_model,omitempty"`
 	Compaction       CompactionConfig `json:"compaction,omitempty" yaml:"compaction,omitempty"`
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
 // input-budget reservation used by auto-compaction / oversize recovery.
 type CompactionConfig struct {
-	Preset   string `json:"preset,omitempty" yaml:"preset,omitempty"`
-	Profile  string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Reserved int    `json:"reserved,omitempty" yaml:"reserved,omitempty"`
+	Preset    string `json:"preset,omitempty" yaml:"preset,omitempty"`
+	Profile   string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Reserved  int    `json:"reserved,omitempty" yaml:"reserved,omitempty"`
+	ModelPool string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Context: ContextConfig{
-			AutoCompact:      true,
 			CompactThreshold: 0.8,
 			Compaction: CompactionConfig{
 				Profile: CompactionProfileAuto,
@@ -693,6 +694,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"providers":            true,
 	"model_pools":          true,
 	"context":              true,
+	"thinking_translation": true,
 	"skills":               true,
 	"confirm_timeout":      true,
 	"diff":                 true,

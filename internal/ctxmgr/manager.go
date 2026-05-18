@@ -23,26 +23,25 @@ type Manager struct {
 	inputBudget            int
 	inputBudgetReserved    int
 
-	autoCompact bool
-	threshold   float64 // fraction of usable input budget that triggers compaction
+	threshold float64 // fraction of usable input budget that triggers compaction; <= 0 disables automatic compaction
 
 	stats message.TokenUsage
 }
 
 // NewManager creates a Manager with the given token budget and compression
-// settings.
+// threshold. A threshold <= 0 disables automatic compaction.
 //
 //   - maxTokens: the model's context window size (in tokens).
-//   - autoCompact: whether to automatically compact when usage exceeds threshold.
 //   - threshold: fraction (0–1) of the input budget at which to trigger compaction.
-func NewManager(maxTokens int, autoCompact bool, threshold float64) *Manager {
-	return NewManagerWithInputBudget(maxTokens, 0, 0, autoCompact, threshold)
+func NewManager(maxTokens int, threshold float64) *Manager {
+	return NewManagerWithInputBudget(maxTokens, 0, 0, threshold)
 }
 
 // NewManagerWithInputBudget creates a Manager with separate total-context,
 // input-side budget, and reserved input headroom. If inputBudget <= 0,
 // maxTokens is used for backward compatibility with older single-limit configs.
-func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, autoCompact bool, threshold float64) *Manager {
+// A threshold <= 0 disables automatic compaction.
+func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, threshold float64) *Manager {
 	if inputBudget <= 0 {
 		inputBudget = maxTokens
 	}
@@ -53,7 +52,6 @@ func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, autoCo
 		maxTokens:           maxTokens,
 		inputBudget:         inputBudget,
 		inputBudgetReserved: reservedInput,
-		autoCompact:         autoCompact,
 		threshold:           threshold,
 	}
 }
@@ -132,7 +130,7 @@ func (m *Manager) GetUsableInputBudget() int {
 func (m *Manager) IsAutoCompactEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.autoCompact
+	return m.threshold > 0
 }
 
 // Threshold returns the configured compression threshold fraction (0–1).
@@ -374,7 +372,7 @@ func (m *Manager) ShouldAutoCompact() bool {
 		budget = m.maxTokens
 	}
 	budget -= m.inputBudgetReserved
-	if !m.autoCompact || budget <= 0 {
+	if m.threshold <= 0 || budget <= 0 {
 		return false
 	}
 	return float64(m.lastInputTokens) >= m.threshold*float64(budget)

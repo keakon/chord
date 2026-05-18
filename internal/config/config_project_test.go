@@ -35,7 +35,7 @@ func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *te
           context: 8192
           output: 1024
 context:
-  auto_compact: true
+  compact_threshold: 0.8
   compaction:
     profile: archival
     reserved: 128
@@ -82,13 +82,16 @@ stream_retry_rounds: 0
         limit:
           output: 2048
 context:
-  auto_compact: false
+  compact_threshold: 0
   compaction:
     profile: continuation
     reserved: 0
 skills:
   paths: [/project-skill]
 confirm_timeout: 0
+thinking_translation:
+  target_language: zh-Hans
+  model_pool: fast
 desktop_notification: true
 prevent_sleep: true
 commands:
@@ -127,8 +130,14 @@ keymap:
 	if mergedCfg.ConfirmTimeout != 0 {
 		t.Fatalf("merged confirm_timeout = %d, want 0", mergedCfg.ConfirmTimeout)
 	}
-	if mergedCfg.Context.AutoCompact {
-		t.Fatal("expected project auto_compact=false to override global true")
+	if mergedCfg.ThinkingTranslation.TargetLanguage != "zh-Hans" {
+		t.Fatalf("merged thinking_translation.target_language = %q, want zh-Hans", mergedCfg.ThinkingTranslation.TargetLanguage)
+	}
+	if mergedCfg.ThinkingTranslation.ModelPool != "fast" {
+		t.Fatalf("merged thinking_translation.model_pool = %q, want fast", mergedCfg.ThinkingTranslation.ModelPool)
+	}
+	if mergedCfg.Context.CompactThreshold != 0 {
+		t.Fatalf("merged compact_threshold = %v, want explicit project override 0", mergedCfg.Context.CompactThreshold)
 	}
 	if mergedCfg.Context.Compaction.Profile != CompactionProfileContinuation {
 		t.Fatalf("merged compaction profile = %q, want %q", mergedCfg.Context.Compaction.Profile, CompactionProfileContinuation)

@@ -550,106 +550,98 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 	return summary, modelRef, nil
 }
 
+func (a *MainAgent) configuredCompactionModelRefs() ([]string, bool, error) {
+	if a.projectConfig != nil {
+		if pool := strings.TrimSpace(a.projectConfig.Context.Compaction.ModelPool); pool != "" {
+			refs, err := a.resolveConfiguredModelPool(pool)
+			if err != nil {
+				return nil, true, err
+			}
+			return refs, true, nil
+		}
+	}
+	if a.globalConfig != nil {
+		if pool := strings.TrimSpace(a.globalConfig.Context.Compaction.ModelPool); pool != "" {
+			refs, err := a.resolveConfiguredModelPool(pool)
+			if err != nil {
+				return nil, true, err
+			}
+			return refs, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (a *MainAgent) compactionModelRefs() []string {
+	refs, _, err := a.configuredCompactionModelRefs()
+	if err != nil {
+		return nil
+	}
+	return refs
+}
+
 func (a *MainAgent) compactionModelRef() string {
-	if a.projectConfig != nil && strings.TrimSpace(a.projectConfig.Context.CompactModel) != "" {
-		return strings.TrimSpace(a.projectConfig.Context.CompactModel)
+	if a == nil {
+		return ""
 	}
-	if a.globalConfig != nil && strings.TrimSpace(a.globalConfig.Context.CompactModel) != "" {
-		return strings.TrimSpace(a.globalConfig.Context.CompactModel)
+	refs, configured, err := a.configuredCompactionModelRefs()
+	if err == nil && configured && len(refs) > 0 {
+		return refs[0]
 	}
-	return a.ProviderModelRef()
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	if client == nil {
+		return ""
+	}
+	return client.PrimaryModelRef()
 }
 
 func (a *MainAgent) newCompactionClient(ref string) (*llm.Client, int, error) {
-	if ref == "" {
-		return nil, 0, fmt.Errorf("no model available for context compaction")
-	}
-	if a.modelSwitchFactory == nil {
-		return nil, 0, fmt.Errorf("model switch factory is not configured")
-	}
-
-	client, _, contextLimit, err := a.modelSwitchFactory(ref)
-	if err == nil {
-		if _, rebuilt, rbErr := a.rebuildCompactionClientWithExtendedHeaderTimeout(client); rbErr == nil && rebuilt != nil {
-			return rebuilt, contextLimit, nil
-		} else if rbErr != nil {
-			log.Warnf("failed to rebuild compaction client with extended header timeout model=%v error=%v", ref, rbErr)
-		}
-		return client, contextLimit, nil
-	}
-
-	selected := a.ProviderModelRef()
-	if selected == "" || selected == ref {
+	refs, configured, err := a.configuredCompactionModelRefs()
+	if err != nil {
 		return nil, 0, err
 	}
-
-	log.Warnf("failed to create compact model client, falling back to selected model compact_model=%v selected_model=%v error=%v", ref, selected, err)
-	client, _, contextLimit, selErr := a.modelSwitchFactory(selected)
-	if selErr != nil {
-		return nil, 0, fmt.Errorf("compact model failed (%v); selected model fallback also failed: %w", err, selErr)
+	var client *llm.Client
+	if configured {
+		client, err = a.newAuxModelPoolClient(refs, 5*time.Minute, 0)
+		if err != nil {
+			return nil, 0, err
+		}
+	} else {
+		client = a.newCompactionClientFromMainModelPool()
+		if client == nil {
+			return nil, 0, fmt.Errorf("no model pool available for context compaction")
+		}
 	}
-	if _, rebuilt, rbErr := a.rebuildCompactionClientWithExtendedHeaderTimeout(client); rbErr == nil && rebuilt != nil {
-		return rebuilt, contextLimit, nil
-	} else if rbErr != nil {
-		log.Warnf("failed to rebuild fallback compaction client with extended header timeout model=%v error=%v", selected, rbErr)
+	client.SetStreamRetryRounds(1)
+	entry := client.PrimaryModelEntry()
+	if entry.ContextLimit <= 0 {
+		if ref := strings.TrimSpace(client.PrimaryModelRef()); ref != "" {
+			entry.ContextLimit = client.ContextLimitForModelRef(ref)
+		}
 	}
-	return client, contextLimit, nil
+	if entry.ContextLimit <= 0 {
+		entry.ContextLimit = client.ContextLimitForModelRef(client.PrimaryModelRef())
+	}
+	return client, entry.ContextLimit, nil
 }
 
-func (a *MainAgent) rebuildCompactionClientWithExtendedHeaderTimeout(client *llm.Client) (bool, *llm.Client, error) {
-	if client == nil {
-		return false, nil, nil
+func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
+	if a == nil {
+		return nil
 	}
-	providerCfg := client.ProviderConfig()
-	if providerCfg == nil {
-		return false, nil, nil
+	a.llmMu.RLock()
+	mainClient := a.llmClient
+	a.llmMu.RUnlock()
+	if mainClient == nil {
+		return nil
 	}
-	proxyURL := providerCfg.EffectiveProxyURL()
-	responseHeaderTimeout := 5 * time.Minute
-	totalTimeout := 5 * time.Minute
-	switch providerCfg.Type() {
-	case config.ProviderTypeChatCompletions:
-		httpClient, err := llm.NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, responseHeaderTimeout)
-		if err != nil {
-			return false, nil, err
-		}
-		impl, err := llm.NewOpenAIProviderWithClient(providerCfg, httpClient, proxyURL)
-		if err != nil {
-			return true, nil, err
-		}
-		rebuilt := llm.NewClient(providerCfg, impl, client.ModelID(), client.MaxTokens(), "")
-		rebuilt.SetOutputTokenMax(client.OutputTokenMax())
-		rebuilt.SetVariant(client.Variant())
-		return true, rebuilt, nil
-	case config.ProviderTypeResponses:
-		httpClient, err := llm.NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, responseHeaderTimeout)
-		if err != nil {
-			return false, nil, err
-		}
-		impl, err := llm.NewResponsesProviderWithClient(providerCfg, httpClient, proxyURL)
-		if err != nil {
-			return true, nil, err
-		}
-		rebuilt := llm.NewClient(providerCfg, impl, client.ModelID(), client.MaxTokens(), "")
-		rebuilt.SetOutputTokenMax(client.OutputTokenMax())
-		rebuilt.SetVariant(client.Variant())
-		return true, rebuilt, nil
-	case config.ProviderTypeMessages:
-		httpClient, err := llm.NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, responseHeaderTimeout)
-		if err != nil {
-			return false, nil, err
-		}
-		impl, err := llm.NewAnthropicProviderWithClient(providerCfg, httpClient, proxyURL)
-		if err != nil {
-			return true, nil, err
-		}
-		rebuilt := llm.NewClient(providerCfg, impl, client.ModelID(), client.MaxTokens(), "")
-		rebuilt.SetOutputTokenMax(client.OutputTokenMax())
-		rebuilt.SetVariant(client.Variant())
-		return true, rebuilt, nil
-	default:
-		return false, nil, nil
+	pool, selectedIdx := mainClient.ModelPoolSnapshot()
+	if len(pool) == 0 {
+		return nil
 	}
+	return newAuxClientFromPool(pool, selectedIdx, 0)
 }
 
 // compactionKeepAlive sends periodic activity signals during long compaction

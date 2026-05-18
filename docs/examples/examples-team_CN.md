@@ -31,7 +31,6 @@ model_pools:
     - anthropic/claude-opus-4.7
 
 context:
-  auto_compact: true
   compact_threshold: 0.8
 
 desktop_notification: true
@@ -49,8 +48,8 @@ anthropic:
 
 ```yaml
 context:
-  compact_model: anthropic/claude-opus-4.7
   compaction:
+    model_pool: fast
     reserved: 16000
 
 hooks:
