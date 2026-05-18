@@ -406,10 +406,57 @@ func detectMergeInProgress(ctx context.Context, cwd string) (string, bool, error
 
 func formatConflictError(cause error, conflictPath, name, onto, help, prefix string) error {
 	conflicts, err := conflictedFiles(context.Background(), conflictPath)
-	if err == nil && len(conflicts) > 0 {
+	if err != nil {
+		conflicts = nil
+	}
+	if len(conflicts) == 0 {
+		conflicts = conflictFilesFromError(cause)
+	}
+	if len(conflicts) > 0 || isLikelyMergeConflict(cause) {
+		if len(conflicts) == 0 {
+			conflicts = []string{"(not reported by git)"}
+		}
 		return fmt.Errorf("%s %q with %q would conflict: %w\n\nConflicted files:\n  %s\n\n%s", prefix, name, onto, cause, strings.Join(conflicts, "\n  "), help)
 	}
 	return fmt.Errorf("%s %q with %q would fail: %w\n\n%s", prefix, name, onto, cause, help)
+}
+
+func isLikelyMergeConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "merge conflict") ||
+		strings.Contains(msg, "automatic merge failed") ||
+		strings.Contains(msg, "fix conflicts") ||
+		strings.Contains(msg, "after resolving the conflicts") ||
+		strings.Contains(msg, "conflict (")
+}
+
+func conflictFilesFromError(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var files []string
+	for line := range strings.SplitSeq(err.Error(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(strings.ToLower(line), "conflict") {
+			continue
+		}
+		for _, marker := range []string{" in ", " in file "} {
+			idx := strings.LastIndex(strings.ToLower(line), marker)
+			if idx < 0 {
+				continue
+			}
+			file := strings.TrimSpace(line[idx+len(marker):])
+			file = strings.Trim(file, "`'\"")
+			if file != "" {
+				files = append(files, file)
+			}
+			break
+		}
+	}
+	return files
 }
 
 func finishConflictHelp(name, worktreePath string) string {
