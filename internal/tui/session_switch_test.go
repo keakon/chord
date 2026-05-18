@@ -3548,6 +3548,7 @@ type sessionControlAgent struct {
 	loopMaxSet              bool
 	canUseLoop              bool
 	canUseLoopSet           bool
+	fastMode                bool
 }
 
 func (s *sessionControlAgent) Events() <-chan agent.AgentEvent { return s.events }
@@ -3740,7 +3741,8 @@ func (s *sessionControlAgent) EnableLoopMode(target string) {
 	s.loopEnableCalls++
 	s.loopTarget = target
 }
-func (s *sessionControlAgent) DisableLoopMode() { s.loopDisableCalls++ }
+func (s *sessionControlAgent) DisableLoopMode()      { s.loopDisableCalls++ }
+func (s *sessionControlAgent) FastModeEnabled() bool { return s.fastMode }
 func (s *sessionControlAgent) CanUseLoopMode() bool {
 	if s.canUseLoopSet {
 		return s.canUseLoop

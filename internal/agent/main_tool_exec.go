@@ -61,12 +61,9 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	}
 }
 
-// normalizeDenyReason trims, collapses newlines, and limits length of a deny reason.
+// normalizeDenyReason trims and collapses newlines in a deny reason.
 func normalizeDenyReason(reason string) string {
 	reason = strings.TrimSpace(reason)
 	reason = strings.ReplaceAll(reason, "\n", " ")
-	if len([]rune(reason)) > 200 {
-		reason = string([]rune(reason)[:200])
-	}
 	return reason
 }

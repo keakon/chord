@@ -42,6 +42,8 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	keysConfirmed, keysTotal := m.agent.KeyStats()
 	b.WriteString(m.agent.RunningModelRef())
 	appendSep()
+	appendBool(m.fastModeEnabled())
+	appendSep()
 	b.WriteString(m.agent.RunningVariant())
 	appendSep()
 	appendInt(keysConfirmed)

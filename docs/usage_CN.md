@@ -88,6 +88,9 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 - **Tools**：默认策略按来源区分。Codex 使用保守的 `auto` 工具导入，只在高置信度映射时保留结构化工具；OpenCode 会把 tool/shell payload 导入为可读纯文本，不支持 `--tool-mode structured`；Claude 默认使用 `--tool-mode auto`，仅在具备 signed thinking 时保留结构化工具调用，否则降级为纯文本。
 - **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
+- **Claude 主会话重建**：Claude 导入会尽力重建非 sidechain 的主会话连续片段，而不是简单选择最新的原始叶子节点。compact 边界会参与重建，但不会作为普通 transcript 消息渲染。
+- **Claude sidechain**：sidechain / sub-agent transcript 条目默认不会导入到主 session。存在这些条目时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在可用时记录 sidechain agent ID。
+- **Claude fallback 渲染**：无法安全映射到 Chord 结构的可见 Claude artifacts 会尽量导入为可读的 assistant fallback 文本块，而不是原始 JSON blob。
 - 导入后的 session 包含 `import-report.json`，记录转换统计与 warnings。
 - 运行时会在每次请求前对历史消息做 provider 兼容标准化，导入后切换模型/provider 不会重播不兼容 payload。
 
@@ -128,6 +131,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可在空闲时切换手动 server
 - `/compact`：手动触发上下文压缩
+- `/fast on` / `/fast off`：开启或关闭快速响应模式，对后续模型请求生效（包括尚未开始的后续 retry round）
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
 
 下面几个命令有更多交互细节，单独展开说明。

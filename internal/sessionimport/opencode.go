@@ -15,9 +15,10 @@ type openCodeExportFile struct {
 }
 
 // convertOpenCodeExport converts an OpenCode `opencode export <sessionID>` JSON
-// file into a Chord main transcript.
-//
-// Tool history is always imported as text (no structured tools).
+// file into a Chord main transcript. OpenCode current-export tool parts keep
+// call state/result inside the same part, so unsupported tools are preserved as
+// text cards instead of Chord ToolCalls that would have no matching tool result
+// message.
 func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -46,24 +47,25 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 
 	var out []message.Message
 	for idx, raw := range file.Messages {
-		msg, skipped, toolRendered, reasoningSkipped, warns, err := convertOpenCodeMessage(raw, reasoningMode)
+		msg, skipped, toolRenderedCount, reasoningSkipped, warns, err := convertOpenCodeMessage(raw, reasoningMode)
 		for _, w := range warns {
 			report.warnf("opencode message[%d]: %s", idx, w)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("opencode import: message[%d]: %w", idx, err)
 		}
-		if skipped {
-			report.SkippedEntries++
-			continue
-		}
-		if toolRendered {
-			report.ToolEntriesRendered++
+		if toolRenderedCount > 0 {
+			report.ToolEntriesRendered += toolRenderedCount
+			report.UnsupportedToolCalls += toolRenderedCount
 		}
 		if reasoningSkipped {
 			report.ReasoningBlocksSkipped++
 		}
-		if strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 {
+		if skipped {
+			report.SkippedEntries++
+			continue
+		}
+		if strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 {
 			report.SkippedEntries++
 			continue
 		}
@@ -73,10 +75,10 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 	return out, nil
 }
 
-func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, err error) {
+func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg message.Message, skipped bool, toolRenderedCount int, reasoningSkipped bool, warns []string, err error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return msg, false, false, false, nil, fmt.Errorf("parse message object: %w", err)
+		return msg, false, 0, false, nil, fmt.Errorf("parse message object: %w", err)
 	}
 
 	kind := pickStringField(obj, "type", "kind", "role")
@@ -100,7 +102,7 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 	// Ignore model-switched/compaction markers; the importer is report-only for these.
 	switch kind {
 	case "model-switched", "model_switched", "model_switched_event", "compaction", "session-event", "event":
-		return msg, true, false, false, []string{"skipped non-conversation event type=" + kind}, nil
+		return msg, true, 0, false, []string{"skipped non-conversation event type=" + kind}, nil
 	}
 
 	if role != "user" && role != "assistant" {
@@ -113,62 +115,67 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		}
 	}
 
-	contentText, contentTypes, w, e := extractOpenCodeContent(obj)
-	warns = append(warns, w...)
-	if e != nil {
-		return msg, false, false, false, warns, e
-	}
-
-	// Reasoning handling: OpenCode exports often include separate reasoning.
-	// We never map it to ThinkingBlocks (no Anthropic signature). In strict mode
-	// we drop it; in visible mode we surface it as normal text.
-	reasoningText, rWarns, rErr := extractReasoningText(obj, contentTypes)
-	warns = append(warns, rWarns...)
-	if rErr != nil {
-		return msg, false, false, false, warns, rErr
-	}
-	if strings.TrimSpace(reasoningText) != "" {
-		switch reasoningMode {
-		case ReasoningVisible:
-			contentText = joinNonEmpty(contentText, "[Imported reasoning]", reasoningText)
-		case ReasoningOff:
-			reasoningSkipped = true
-		case ReasoningStrict:
-			reasoningSkipped = true
-		default:
-			reasoningSkipped = true
+	var contentText string
+	if rawParts, ok := obj["parts"]; ok {
+		partsText, partsToolCount, partsReasoningSkipped, partWarns, partErr := extractOpenCodePartsOrdered(rawParts, reasoningMode)
+		warns = append(warns, partWarns...)
+		if partErr != nil {
+			return msg, false, 0, false, warns, partErr
 		}
-	}
+		contentText = partsText
+		toolRenderedCount = partsToolCount
+		reasoningSkipped = partsReasoningSkipped
+	} else {
+		var contentTypes []string
+		var w []string
+		var e error
+		contentText, contentTypes, w, e = extractOpenCodeContent(obj)
+		warns = append(warns, w...)
+		if e != nil {
+			return msg, false, 0, false, warns, e
+		}
 
-	toolText, toolWarns := extractToolishText(obj, contentTypes)
-	warns = append(warns, toolWarns...)
-	if strings.TrimSpace(toolText) != "" {
-		contentText = joinNonEmpty(contentText, toolText)
-		toolRendered = true
+		// Reasoning handling: OpenCode exports often include separate reasoning.
+		// We never map it to ThinkingBlocks (no Anthropic signature). In strict mode
+		// we drop it; in visible mode we surface it as normal text.
+		reasoningText, rWarns, rErr := extractReasoningText(obj, contentTypes)
+		warns = append(warns, rWarns...)
+		if rErr != nil {
+			return msg, false, 0, false, warns, rErr
+		}
+		if strings.TrimSpace(reasoningText) != "" {
+			switch reasoningMode {
+			case ReasoningVisible:
+				contentText = joinNonEmpty(contentText, "[Imported reasoning]", reasoningText)
+			case ReasoningOff:
+				reasoningSkipped = true
+			case ReasoningStrict:
+				reasoningSkipped = true
+			default:
+				reasoningSkipped = true
+			}
+		}
+
+		toolText, toolWarns := extractToolishText(obj, contentTypes)
+		warns = append(warns, toolWarns...)
+		if strings.TrimSpace(toolText) != "" {
+			contentText = joinNonEmpty(contentText, toolText)
+			toolRenderedCount = countOpenCodeToolishParts(obj)
+			if toolRenderedCount == 0 {
+				toolRenderedCount = 1
+			}
+		}
 	}
 
 	contentText = strings.TrimSpace(contentText)
 	if contentText == "" {
-		return msg, true, toolRendered, reasoningSkipped, warns, nil
+		return msg, true, toolRenderedCount, reasoningSkipped, warns, nil
 	}
 
-	return message.Message{Role: role, Content: contentText}, false, toolRendered, reasoningSkipped, warns, nil
+	return message.Message{Role: role, Content: contentText, Provenance: importedOpenCodeProvenance()}, false, toolRenderedCount, reasoningSkipped, warns, nil
 }
 
 func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
-	// Current OpenCode exports messages as {info, parts}. Preserve ordered text-like
-	// parts here; tool parts are handled separately by extractToolishText.
-	if raw, ok := obj["parts"]; ok {
-		partsText, partTypes, partWarns, partErr := extractOpenCodePartsContent(raw)
-		warns = append(warns, partWarns...)
-		if partErr != nil {
-			return "", contentTypes, warns, partErr
-		}
-		if strings.TrimSpace(partsText) != "" || len(partTypes) > 0 {
-			return strings.TrimSpace(partsText), partTypes, warns, nil
-		}
-	}
-
 	// Fast paths for common shapes.
 	if v := pickStringField(obj, "text", "content"); strings.TrimSpace(v) != "" {
 		return v, nil, nil, nil
@@ -241,51 +248,63 @@ func extractTextFromBlock(m map[string]any) (text string, typ string, ok bool) {
 	return "", typ, false
 }
 
-func extractOpenCodePartsContent(raw json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
+func extractOpenCodePartsOrdered(raw json.RawMessage, reasoningMode string) (text string, toolCount int, reasoningSkipped bool, warns []string, err error) {
 	var parts []map[string]any
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", nil, nil, fmt.Errorf("parse parts array: %w", err)
+		return "", 0, false, nil, fmt.Errorf("parse parts array: %w", err)
 	}
-	var b strings.Builder
+	var rendered []string
 	for _, part := range parts {
 		typ, _ := part["type"].(string)
 		typ = strings.ToLower(strings.TrimSpace(typ))
-		if typ != "" {
-			contentTypes = append(contentTypes, typ)
-		}
 		switch typ {
 		case "text":
 			if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
-				b.WriteString(s)
-				b.WriteString("\n")
+				rendered = append(rendered, strings.TrimSpace(s))
 			}
-		case "reasoning", "tool", "tool-invocation", "step-start", "step-finish":
-			// Handled by reasoning/tool extraction or intentionally skipped.
+		case "tool", "tool-invocation":
+			toolCount++
+			payload, _ := json.MarshalIndent(part, "", "  ")
+			var b strings.Builder
+			b.WriteString("[Imported unsupported tool")
+			if name := openCodeToolName(part); name != "" {
+				b.WriteString(": ")
+				b.WriteString(name)
+			}
+			b.WriteString("]\n")
+			b.Write(payload)
+			rendered = append(rendered, b.String())
+		case "reasoning", "thinking":
+			if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
+				switch reasoningMode {
+				case ReasoningVisible:
+					rendered = append(rendered, "[Imported reasoning]", strings.TrimSpace(s))
+				case ReasoningOff, ReasoningStrict:
+					reasoningSkipped = true
+				default:
+					reasoningSkipped = true
+				}
+			}
+		case "step-start", "step-finish":
+			// OpenCode step markers are UI-only and intentionally skipped.
 		case "":
 			warns = append(warns, "part missing type; skipped")
 		default:
 			payload, _ := json.MarshalIndent(part, "", "  ")
-			if b.Len() > 0 {
-				b.WriteString("\n")
-			}
-			b.WriteString("[Imported OpenCode ")
-			b.WriteString(typ)
-			b.WriteString(" part]\n")
-			b.Write(payload)
-			b.WriteString("\n")
+			rendered = append(rendered, "[Imported OpenCode "+typ+" part]\n"+string(payload))
 			warns = append(warns, "unsupported part type "+typ+"; imported as text")
 		}
 	}
-	return strings.TrimSpace(b.String()), contentTypes, warns, nil
+	if toolCount > 0 {
+		warns = append(warns, "tool parts were imported as text")
+	}
+	return strings.TrimSpace(strings.Join(rendered, "\n\n")), toolCount, reasoningSkipped, warns, nil
 }
 
 func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string) (string, []string, error) {
 	// Some exports include a dedicated reasoning field.
 	if s := pickStringField(obj, "reasoning", "thought", "thinking"); strings.TrimSpace(s) != "" {
 		return s, nil, nil
-	}
-	if raw, ok := obj["parts"]; ok {
-		return extractOpenCodeReasoningFromParts(raw)
 	}
 	// If content blocks include a "reasoning" type, extract it too.
 	for _, typ := range contentTypes {
@@ -297,39 +316,9 @@ func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string)
 	return "", nil, nil
 }
 
-func extractOpenCodeReasoningFromParts(raw json.RawMessage) (string, []string, error) {
-	var parts []map[string]any
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", nil, fmt.Errorf("parse parts array: %w", err)
-	}
-	var b strings.Builder
-	for _, part := range parts {
-		typ, _ := part["type"].(string)
-		typ = strings.ToLower(strings.TrimSpace(typ))
-		if typ != "reasoning" && typ != "thinking" {
-			continue
-		}
-		if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
-			if b.Len() > 0 {
-				b.WriteString("\n\n")
-			}
-			b.WriteString(s)
-		}
-	}
-	return b.String(), nil, nil
-}
-
 func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (string, []string) {
-	// Common OpenCode shapes: current export {parts:[{type:"tool",...}]}, legacy
-	// {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
+	// Common legacy OpenCode shapes: {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
 	var warns []string
-	if raw, ok := obj["parts"]; ok {
-		text, w := extractOpenCodeToolParts(raw)
-		warns = append(warns, w...)
-		if strings.TrimSpace(text) != "" {
-			return text, warns
-		}
-	}
 	if raw, ok := obj["tool"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		pretty := indentJSON(raw)
 		return joinNonEmpty("[Imported tool]", pretty), warns
@@ -365,36 +354,26 @@ func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (
 	return "", warns
 }
 
-func extractOpenCodeToolParts(raw json.RawMessage) (string, []string) {
-	var parts []map[string]any
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", []string{"parts array could not be scanned for tool parts"}
+func countOpenCodeToolishParts(obj map[string]json.RawMessage) int {
+	count := 0
+	if raw, ok := obj["tool"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		count++
 	}
-	var b strings.Builder
-	toolCount := 0
-	for _, part := range parts {
-		typ, _ := part["type"].(string)
-		typ = strings.ToLower(strings.TrimSpace(typ))
-		if typ != "tool" && typ != "tool-invocation" {
-			continue
-		}
-		toolCount++
-		payload, _ := json.MarshalIndent(part, "", "  ")
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("[Imported unsupported tool")
-		if name := openCodeToolName(part); name != "" {
-			b.WriteString(": ")
-			b.WriteString(name)
-		}
-		b.WriteString("]\n")
-		b.Write(payload)
+	if raw, ok := obj["shell"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		count++
 	}
-	if toolCount == 0 {
-		return "", nil
+	if raw, ok := obj["content"]; ok {
+		var arr []map[string]any
+		if err := json.Unmarshal(raw, &arr); err == nil {
+			for _, block := range arr {
+				typ, _ := block["type"].(string)
+				if strings.ToLower(strings.TrimSpace(typ)) == "tool" {
+					count++
+				}
+			}
+		}
 	}
-	return b.String(), []string{"tool parts were imported as text"}
+	return count
 }
 
 func openCodeToolName(part map[string]any) string {

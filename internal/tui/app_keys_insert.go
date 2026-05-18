@@ -274,6 +274,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
 			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
 				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
+				trimmed == "/fast" || strings.HasPrefix(trimmed, "/fast ") ||
 				trimmed == "/compact" || trimmed == "/loop" || trimmed == "/loop on" || strings.HasPrefix(trimmed, "/loop on ") || trimmed == "/loop off" {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 				m.agent.SendUserMessage(value)

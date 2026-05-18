@@ -11,6 +11,13 @@ func importedCodexProvenance() *message.MessageProvenance {
 	}
 }
 
+func importedOpenCodeProvenance() *message.MessageProvenance {
+	return &message.MessageProvenance{
+		Source:   "import:opencode",
+		Imported: true,
+	}
+}
+
 func importedClaudeProvenance() *message.MessageProvenance {
 	return &message.MessageProvenance{
 		Source:     "import:claude",

@@ -209,6 +209,15 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 		}
 	}
 	out = append(out, loopCommands...)
+	fastCommands := []slashCommand{}
+	if m.focusedAgentID == "" && strings.HasPrefix("/fast", prefix) {
+		if m.fastModeEnabled() {
+			fastCommands = append(fastCommands, slashCommand{Cmd: "/fast off", Desc: "disable fast responses"})
+		} else {
+			fastCommands = append(fastCommands, slashCommand{Cmd: "/fast on", Desc: "enable fast responses"})
+		}
+	}
+	out = append(out, fastCommands...)
 	for _, c := range slashCommands {
 		if strings.HasPrefix(strings.ToLower(c.Cmd), prefix) {
 			out = append(out, c)

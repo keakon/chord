@@ -120,6 +120,11 @@ type LoopController interface {
 	CanUseLoopMode() bool
 }
 
+// FastModeReporter exposes runtime fast-mode state for command completion and status UI.
+type FastModeReporter interface {
+	FastModeEnabled() bool
+}
+
 // RoleController exposes role/handoff lifecycle for the active agent.
 type RoleController interface {
 	// SwitchRole requests the agent to switch its active role.

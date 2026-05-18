@@ -56,6 +56,7 @@ type Client struct {
 	fallbackModels         []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
 	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
 	lastCallStatus         CallStatus
+	fastMode               bool
 
 	routingGeneration atomic.Uint64
 	routingChangedCh  chan struct{}
@@ -477,6 +478,9 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	if tuning.Anthropic.CacheTools {
 		merged.Anthropic.CacheTools = true
 	}
+	if tuning.Anthropic.Speed != "" {
+		merged.Anthropic.Speed = tuning.Anthropic.Speed
+	}
 	if tuning.OpenAI.ReasoningEffort != "" {
 		merged.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
 	}
@@ -532,6 +536,21 @@ func (c *Client) RunningModelRef() string {
 		return st.RunningModelRef
 	}
 	return st.SelectedModelRef
+}
+
+// FastMode reports whether runtime fast mode is enabled for this client.
+func (c *Client) FastMode() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.fastMode
+}
+
+// SetFastMode toggles runtime fast mode. It affects subsequent LLM requests,
+// including later retry rounds that have not yet built their request targets.
+func (c *Client) SetFastMode(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fastMode = enabled
 }
 
 // ContextLimitForModelRef returns the configured context window for a

@@ -46,7 +46,9 @@ func TestConvertOpenCodeExport_ParsesCurrentExportPartsAndToolFallback(t *testin
       "parts": [
         {"id":"p2","type":"text","text":"I'll check."},
         {"id":"p3","type":"tool","callID":"call-1","tool":"unknown-tool","state":{"status":"completed","input":{"path":"README.md"},"output":"done","title":"unknown","metadata":{},"time":{"start":1,"end":2}}},
-        {"id":"p4","type":"reasoning","text":"private chain of thought","time":{"start":1}}
+        {"id":"p4","type":"text","text":"Then I checked another file."},
+        {"id":"p5","type":"tool-invocation","callID":"call-2","tool":"second-tool","state":{"status":"completed","input":{"path":"main.go"},"output":"ok"}},
+        {"id":"p6","type":"reasoning","text":"private chain of thought","time":{"start":1}}
       ]
     }
   ]
@@ -62,14 +64,50 @@ func TestConvertOpenCodeExport_ParsesCurrentExportPartsAndToolFallback(t *testin
 	if msgs[0].Role != "user" || msgs[0].Content != "please inspect" {
 		t.Fatalf("msg0=%+v", msgs[0])
 	}
-	if msgs[1].Role != "assistant" || !strings.Contains(msgs[1].Content, "I'll check.") || !strings.Contains(msgs[1].Content, "[Imported unsupported tool: unknown-tool]") || !strings.Contains(msgs[1].Content, "call-1") {
-		t.Fatalf("assistant tool fallback missing, got %+v", msgs[1])
+	if msgs[1].Role != "assistant" || !strings.Contains(msgs[1].Content, "I'll check.") || len(msgs[1].ToolCalls) != 0 {
+		t.Fatalf("assistant tool fallback should be text-only, got %+v", msgs[1])
+	}
+	firstToolIdx := strings.Index(msgs[1].Content, "[Imported unsupported tool: unknown-tool]")
+	middleTextIdx := strings.Index(msgs[1].Content, "Then I checked another file.")
+	secondToolIdx := strings.Index(msgs[1].Content, "[Imported unsupported tool: second-tool]")
+	if firstToolIdx < 0 || middleTextIdx < 0 || secondToolIdx < 0 || !(firstToolIdx < middleTextIdx && middleTextIdx < secondToolIdx) {
+		t.Fatalf("assistant tool fallback order not preserved: %q", msgs[1].Content)
+	}
+	for _, want := range []string{"[Imported unsupported tool: unknown-tool]", "call-1", "README.md", "done", "[Imported unsupported tool: second-tool]", "call-2", "main.go", "ok"} {
+		if !strings.Contains(msgs[1].Content, want) {
+			t.Fatalf("assistant tool fallback content = %q, want fragment %q", msgs[1].Content, want)
+		}
 	}
 	if strings.Contains(msgs[1].Content, "private chain of thought") {
 		t.Fatalf("strict reasoning should be skipped, got %q", msgs[1].Content)
 	}
-	if report.ToolEntriesRendered != 1 {
-		t.Fatalf("ToolEntriesRendered=%d, want 1", report.ToolEntriesRendered)
+	if report.ToolEntriesRendered != 2 {
+		t.Fatalf("ToolEntriesRendered=%d, want 2", report.ToolEntriesRendered)
+	}
+	if report.UnsupportedToolCalls != 2 {
+		t.Fatalf("UnsupportedToolCalls=%d, want 2", report.UnsupportedToolCalls)
+	}
+	if report.ReasoningBlocksSkipped != 1 {
+		t.Fatalf("ReasoningBlocksSkipped=%d, want 1", report.ReasoningBlocksSkipped)
+	}
+}
+
+func TestConvertOpenCodeExport_CountsSkippedReasoningOnlyParts(t *testing.T) {
+	data := []byte(`{
+  "messages": [
+    {"info":{"role":"assistant"},"parts":[{"type":"reasoning","text":"private chain of thought"}]}
+  ]
+}`)
+	var report ImportReport
+	msgs, err := convertOpenCodeExport(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertOpenCodeExport: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("msgs len=%d, want 0", len(msgs))
+	}
+	if report.SkippedEntries != 1 {
+		t.Fatalf("SkippedEntries=%d, want 1", report.SkippedEntries)
 	}
 	if report.ReasoningBlocksSkipped != 1 {
 		t.Fatalf("ReasoningBlocksSkipped=%d, want 1", report.ReasoningBlocksSkipped)

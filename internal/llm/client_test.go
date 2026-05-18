@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -75,7 +76,7 @@ func (p *scriptedProvider) CompleteStream(
 	p.calls = p.calls[1:]
 	if next.expectTuning != nil {
 		if tuning != *next.expectTuning {
-			return nil, errors.New("unexpected request tuning")
+			return nil, fmt.Errorf("unexpected request tuning: got %#v want %#v", tuning, *next.expectTuning)
 		}
 	}
 	if cb != nil {
@@ -121,6 +122,42 @@ func (p *constantErrProvider) CompleteStream(
 type recordingTuningProvider struct {
 	calls  int
 	tuning []RequestTuning
+}
+
+type fastModeToggleRetryProvider struct {
+	client     *Client
+	expectFast RequestTuning
+	calls      int
+}
+
+func (p *fastModeToggleRetryProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	tuning RequestTuning,
+	_ StreamCallback,
+) (*message.Response, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		want := RequestTuning{Anthropic: AnthropicTuning{PromptCacheMode: "explicit"}}
+		if tuning != want {
+			return nil, fmt.Errorf("first retry-round tuning = %#v, want %#v", tuning, want)
+		}
+		p.client.SetFastMode(true)
+		return nil, &APIError{StatusCode: 500, Message: "retry with fast mode"}
+	case 2:
+		if tuning != p.expectFast {
+			return nil, fmt.Errorf("second retry-round tuning = %#v, want %#v", tuning, p.expectFast)
+		}
+		return &message.Response{Content: "ok"}, nil
+	default:
+		return nil, fmt.Errorf("unexpected provider call %d", p.calls)
+	}
 }
 
 func (p *recordingTuningProvider) CompleteStream(
@@ -3042,6 +3079,81 @@ func TestClientRunningModelRefOmitsVariantOnFallbackSuccess(t *testing.T) {
 	st := c.LastCallStatus()
 	if st.RunningModelRef != "fallback-prov/fallback-model" {
 		t.Fatalf("RunningModelRef = %q, want fallback-prov/fallback-model (no variant leak)", st.RunningModelRef)
+	}
+}
+
+func TestClientFastModeOverridesRequestTuning(t *testing.T) {
+	cfg := testProviderConfig("openai", "gpt-5-codex")
+	expect := RequestTuning{
+		Anthropic: AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
+		OpenAI:    OpenAITuning{ReasoningEffort: "minimal", TextVerbosity: "low"},
+	}
+	impl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
+	c := NewClient(cfg, impl, "gpt-5-codex", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+	c.SetFastMode(true)
+
+	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+}
+
+func TestClientFastModeAppliesToFallbackTuning(t *testing.T) {
+	primaryCfg := testProviderConfig("primary", "primary-model")
+	fallbackCfg := testProviderConfig("fallback", "gpt-5-codex")
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 503, Message: "try fallback"}}}}
+	expect := RequestTuning{
+		Anthropic: AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
+		OpenAI:    OpenAITuning{ReasoningEffort: "minimal", TextVerbosity: "low"},
+	}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "gpt-5-codex", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+	c.SetFastMode(true)
+
+	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+}
+
+func TestClientFastModeToggleAppliesToNextRetryRound(t *testing.T) {
+	cfg := testProviderConfig("openai", "gpt-5-codex")
+	expectFast := RequestTuning{
+		Anthropic: AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
+		OpenAI:    OpenAITuning{ReasoningEffort: "minimal", TextVerbosity: "low"},
+	}
+	c := NewClient(cfg, nil, "gpt-5-codex", 4096, "sys")
+	impl := &fastModeToggleRetryProvider{client: c, expectFast: expectFast}
+	c.providerImpl = impl
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("resp = %#v, want ok", resp)
+	}
+	if impl.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", impl.calls)
+	}
+}
+
+func TestClientFastModeSet(t *testing.T) {
+	c := NewClient(testProviderConfig("openai", "gpt-5-codex"), &scriptedProvider{}, "gpt-5-codex", 4096, "sys")
+	if c.FastMode() {
+		t.Fatal("FastMode() = true, want false by default")
+	}
+	c.SetFastMode(true)
+	if !c.FastMode() {
+		t.Fatal("SetFastMode(true) did not enable fast mode")
+	}
+	c.SetFastMode(false)
+	if c.FastMode() {
+		t.Fatal("SetFastMode(false) did not disable fast mode")
 	}
 }
 

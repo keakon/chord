@@ -161,6 +161,9 @@ func (c *Client) buildStreamRetryTargets(
 	fallbackEnabled bool,
 	fallbackModels []FallbackModel,
 ) []streamRetryTarget {
+	if c.FastMode() {
+		startTuning = fastModeTuning(startTuning)
+	}
 	targets := []streamRetryTarget{
 		{
 			provider:     startProvider,
@@ -196,6 +199,9 @@ func (c *Client) buildStreamRetryTargets(
 		}
 		if fbInputLimit <= 0 {
 			fbInputLimit = fbContextLimit
+		}
+		if c.FastMode() {
+			fbTuning = fastModeTuning(fbTuning)
 		}
 		targets = append(targets, streamRetryTarget{
 			provider:     fb.ProviderConfig,

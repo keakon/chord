@@ -583,6 +583,83 @@ Done: ask
 	}
 }
 
+func TestHandleToolResult_DoneInLoopUserDenialPreservesLongReason(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: ask
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.markProgress()
+	a.loopState.markVerificationProgress()
+	a.newTurn()
+	turn := a.turn
+	callID := "done-user-deny-long-1"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"reason":"completed and verified"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(1)
+
+	longReason := strings.Repeat("长", 250) + " tail that must be preserved"
+	wantResult := "Done rejected: " + longReason
+
+	handled := make(chan struct{})
+	go func() {
+		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+			CallID:   callID,
+			Name:     tools.NameDone,
+			ArgsJSON: `{"reason":"completed and verified"}`,
+			Result:   "completed and verified",
+			TurnID:   turn.ID,
+		}})
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch payload := evt.(type) {
+			case ConfirmRequestEvent:
+				a.ResolveConfirm("deny", payload.ArgsJSON, "", longReason, payload.RequestID)
+			case ToolResultEvent:
+				if payload.CallID != callID || payload.Name != tools.NameDone {
+					continue
+				}
+				if payload.Result != wantResult {
+					t.Fatalf("ToolResultEvent.Result length/content mismatch: got %q, want %q", payload.Result, wantResult)
+				}
+				if !strings.Contains(payload.Result, "tail that must be preserved") {
+					t.Fatalf("ToolResultEvent.Result lost long deny reason tail: %q", payload.Result)
+				}
+				select {
+				case <-handled:
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for long user-denied Done handling to finish")
+				}
+				for _, msg := range a.ctxMgr.Snapshot() {
+					if msg.Role == "tool" && msg.ToolCallID == callID && msg.Content != wantResult {
+						t.Fatalf("persisted Done rejection = %q, want truncated %q", msg.Content, wantResult)
+					}
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for long Done denial tool result")
+		}
+	}
+}
+
 func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenVerificationMissing(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())

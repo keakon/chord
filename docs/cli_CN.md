@@ -26,7 +26,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord worktree remove <name>`    | 移除 chord 管理的 worktree                                        |
 | `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
-| `chord import <source> [file]`    | 把外部 agent 会话导入 Chord                                       |
+| `chord import <source> [file]`    | 把外部 agent 会话导入 Chord；Codex 保持 `auto` 工具模式但只结构化高置信度映射 |
 
 ## 全局 flag
 
@@ -296,6 +296,10 @@ chord resume 20260428064910975
 ## `chord import <source> [file]`
 
 将外部 agent 会话导入为 Chord 可恢复的会话。当前支持的 source：`opencode`、`codex`、`claude`。
+
+Claude Code 导入会尽力重建**非 sidechain 的主会话**，而不是盲目导入最新的原始叶子节点。compact 边界会用于重建，但不会渲染为可见 transcript 消息。sidechain/sub-agent 条目默认会从主导入 session 中排除；检测到时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在存在 sidechain agent ID 时一并记录。
+
+没有安全 Chord 映射但仍可见的 Claude transcript artifacts，会尽量保留为可读的 assistant fallback 消息，而不是原始 JSON。
 
 ### Flag
 

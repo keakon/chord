@@ -1118,6 +1118,49 @@ func TestRenderStatusBarDoesNotShowLoopWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarShowsFastModeAfterModelWhenInfoPanelHidden(t *testing.T) {
+	backend := &sessionControlAgent{currentRole: "builder", fastMode: true, runningModelRef: "anthropic/claude-sonnet-4.5"}
+	m := NewModelWithSize(backend, 180, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+
+	plain := stripANSI(m.renderStatusBar())
+	modelIdx := strings.Index(plain, "◇ anthropic/claude-sonnet-4.5")
+	fastIdx := strings.Index(plain, "FAST")
+	if modelIdx < 0 || fastIdx < 0 || fastIdx <= modelIdx {
+		t.Fatalf("status bar = %q, want FAST after model when info panel is hidden", plain)
+	}
+}
+
+func TestRenderStatusBarFastModeChangesFingerprint(t *testing.T) {
+	backend := &sessionControlAgent{currentRole: "builder"}
+	m := NewModelWithSize(backend, 180, 24)
+	now := time.Unix(123, 0)
+
+	before := m.statusBarFingerprint(now)
+	backend.fastMode = true
+	after := m.statusBarFingerprint(now)
+	if before == after {
+		t.Fatal("statusBarFingerprint did not change after fast mode changed")
+	}
+}
+
+func TestRenderInfoPanelShowsFastModeState(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModelWithSize(backend, 100, 24)
+
+	plain := stripANSI(m.renderInfoPanel(40, 20))
+	if strings.Contains(plain, "Fast:") {
+		t.Fatalf("info panel = %q, should not show fast state when disabled", plain)
+	}
+
+	backend.fastMode = true
+	plain = stripANSI(m.renderInfoPanel(40, 20))
+	if !strings.Contains(plain, "Fast: on") {
+		t.Fatalf("info panel = %q, want fast on state", plain)
+	}
+}
+
 func TestRenderStatusBarLoopPillNotSqueezedByEscHint(t *testing.T) {
 	// When loop is active, nextEscHint() returns "" so the LOOP pill is not
 	// pushed past the activity center and clipped by renderStatusBarPlacedLine.
@@ -1187,6 +1230,32 @@ func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
 	}
 	if got := m.input.Value(); got != "" {
 		t.Fatalf("input value after submit = %q, want empty", got)
+	}
+}
+
+func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	matches := m.getSlashCompletions("/f")
+	if len(matches) != 1 || matches[0].Cmd != "/fast on" {
+		t.Fatalf("matches = %#v, want /fast on", matches)
+	}
+
+	backend.fastMode = true
+	matches = m.getSlashCompletions("/f")
+	if len(matches) != 1 || matches[0].Cmd != "/fast off" {
+		t.Fatalf("matches = %#v, want /fast off", matches)
+	}
+}
+
+func TestSlashCompletionHidesFastCommandWhenSubAgentFocused(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
+	m.focusedAgentID = "sub-1"
+	matches := m.getSlashCompletions("/f")
+	for _, item := range matches {
+		if strings.HasPrefix(item.Cmd, "/fast") {
+			t.Fatalf("slash completions = %#v, should hide /fast commands when subagent is focused", matches)
+		}
 	}
 }
 

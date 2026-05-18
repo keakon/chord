@@ -60,6 +60,9 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 		m.cachedModelPill = modelPill
 	}
 	pills = append(pills, modelPill)
+	if m.fastModeEnabled() {
+		pills = append(pills, StatusHintStyle.Render("FAST"))
+	}
 
 	if snap.proxyInUse {
 		pills = append(pills, PillStyle.Render("↗"))

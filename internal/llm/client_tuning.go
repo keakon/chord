@@ -50,6 +50,13 @@ func tuningFromModel(m config.ModelConfig) RequestTuning {
 	return t
 }
 
+func fastModeTuning(t RequestTuning) RequestTuning {
+	t.Anthropic.Speed = "fast"
+	t.OpenAI.ReasoningEffort = "minimal"
+	t.OpenAI.TextVerbosity = "low"
+	return t
+}
+
 // mergeAnthropicThinkingTuning overlays Anthropic thinking fields according to
 // the effective thinking type. Only fields that belong to the resolved type are
 // carried forward; switching types clears inherited fields from the old type so

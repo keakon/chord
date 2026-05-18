@@ -71,6 +71,7 @@ type anthropicRequest struct {
 	Stream       bool                   `json:"stream"`
 	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	Speed        string                 `json:"speed,omitempty"`
 	CacheControl *anthropicCacheCtrl    `json:"cache_control,omitempty"`
 	Metadata     *anthropicMetadata     `json:"metadata,omitempty"`
 }
@@ -195,6 +196,9 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 	if oc := buildAnthropicOutputConfig(at); oc != nil {
 		reqBody.OutputConfig = oc
+	}
+	if at.Speed != "" {
+		reqBody.Speed = at.Speed
 	}
 	if userID := stableAnthropicMetadataUserID(a.provider, transportCompat); userID != "" {
 		reqBody.Metadata = &anthropicMetadata{UserID: userID}
@@ -420,6 +424,9 @@ func validateAnthropicTuning(tuning AnthropicTuning) (AnthropicTuning, error) {
 	default:
 		return tuning, fmt.Errorf("unsupported anthropic thinking.type %q", tuning.ThinkingType)
 	}
+	if tuning.Speed != "" && tuning.Speed != "fast" {
+		return tuning, fmt.Errorf("unsupported anthropic speed %q", tuning.Speed)
+	}
 	mode, err := normalizeAnthropicPromptCacheMode(tuning.PromptCacheMode)
 	if err != nil {
 		return tuning, err
@@ -435,6 +442,9 @@ func anthropicBetaHeader(tuning AnthropicTuning, compat *config.AnthropicTranspo
 	}
 	if compat != nil && len(compat.ExtraBeta) > 0 {
 		betas = append(betas, compat.ExtraBeta...)
+	}
+	if tuning.Speed == "fast" {
+		betas = append(betas, "fast-mode-2026-02-01")
 	}
 	if len(betas) == 0 {
 		return ""

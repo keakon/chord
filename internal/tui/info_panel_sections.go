@@ -94,6 +94,9 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 		keysStr := fmt.Sprintf("Keys: %d/%d", keysConfirmed, keysTotal)
 		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(keysStyle.Render(keysStr)))
 	}
+	if m.fastModeEnabled() {
+		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Fast: on")))
+	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))
 }
 

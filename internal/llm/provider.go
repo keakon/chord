@@ -28,6 +28,7 @@ type AnthropicTuning struct {
 	PromptCacheMode string // ""|"off"|"auto"|"explicit"
 	PromptCacheTTL  string // ""|"1h"
 	CacheTools      bool
+	Speed           string // ""|"fast" (Anthropic first-party fast mode)
 }
 
 // OpenAITuning holds OpenAI-specific request tuning parameters.
