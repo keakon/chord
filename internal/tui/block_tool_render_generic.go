@@ -396,10 +396,16 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 	}
 	if b.ResultDone && strings.TrimSpace(b.ResultContent) != "" {
 		statusText := strings.TrimSpace(b.ResultContent)
-		if strings.HasPrefix(strings.ToLower(statusText), "done rejected:") {
-			statusText = strings.TrimSpace(strings.TrimSpace(statusText[len("Done rejected:"):]))
+		if doneResultIsRejected(statusText) {
+			statusText = doneRejectedReason(statusText)
 			result = append(result, "")
-			result = append(result, ErrorStyle.Render("  ↳ rejected reason: "+statusText))
+			for i, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth-len("  ↳ rejected reason: ")) {
+				if i == 0 {
+					result = append(result, ErrorStyle.Render("  ↳ rejected reason: "+line))
+				} else {
+					result = append(result, ErrorStyle.Render("    "+line))
+				}
+			}
 		} else if report == "" {
 			result = append(result, "")
 			label := ToolResultExpandedStyle.Render("  ↳ Status:")
@@ -420,6 +426,18 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 	}
 	result = appendToolElapsedFooter(result, b)
 	return renderPrewrappedToolCard(blockStyle, cardWidth, ToolLabelStyle.Render("TOOL CALL"), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+func doneResultIsRejected(result string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(result)), "done rejected:")
+}
+
+func doneRejectedReason(result string) string {
+	trimmed := strings.TrimSpace(result)
+	if !doneResultIsRejected(trimmed) {
+		return trimmed
+	}
+	return strings.TrimSpace(trimmed[len("Done rejected:"):])
 }
 
 func compactToolHiddenResultLines(b *Block, contentWidth int) int {

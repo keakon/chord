@@ -178,7 +178,7 @@ func TestRenderDoneConfirmDialogShowsOnlyReportBody(t *testing.T) {
 	}
 }
 
-func TestRenderDoneConfirmDialogDoesNotShowHiddenLinesMarker(t *testing.T) {
+func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 18)
 	reportLines := make([]string, 0, 40)
 	for i := 1; i <= 40; i++ {
@@ -191,9 +191,16 @@ func TestRenderDoneConfirmDialogDoesNotShowHiddenLinesMarker(t *testing.T) {
 		DoneReport: report,
 	}
 
-	plain := stripANSI(m.renderConfirmDialog())
-	if strings.Contains(plain, "more lines hidden") {
-		t.Fatalf("unexpected hidden-lines marker in Done confirm dialog:\n%s", plain)
+	rendered := m.renderConfirmDialog()
+	plain := stripANSI(rendered)
+	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
+		t.Fatalf("Done confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
+	}
+	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
+		t.Fatalf("expected Done confirm actions to remain visible, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "more lines hidden") {
+		t.Fatalf("expected truncation marker in constrained Done confirm dialog, got:\n%s", plain)
 	}
 }
 

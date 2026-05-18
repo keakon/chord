@@ -70,9 +70,7 @@ func (m *Model) renderConfirmDialog() string {
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
 	lines := m.renderConfirmSummary(title, summary, innerWidth)
 	lines = append(lines, "", m.renderConfirmOptions())
-	if !strings.EqualFold(req.ToolName, "Done") {
-		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-	}
+	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 	body := strings.Join(lines, "\n")
 	out := DirectoryBorderStyle.Width(maxWidth).Render(body)
 	if m.confirm.deadline.IsZero() {

@@ -2043,6 +2043,33 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	}
 }
 
+func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "Done",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Done rejected: coverage must be >= 70% before exiting",
+		DoneReport:    "## Completion status\nReport body stays visible",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(72, ""), "\n"))
+	for _, want := range []string{"Completion status", "Report body stays visible", "rejected reason: coverage must be >= 70% before", "exiting"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected rejected Done render to contain %q, got:\n%s", want, plain)
+		}
+	}
+	if strings.Count(plain, "rejected reason:") != 1 {
+		t.Fatalf("expected exactly one rejected reason line, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Done rejected:") || strings.Contains(plain, "Status:") {
+		t.Fatalf("expected rejected Done render to omit raw rejection/status, got:\n%s", plain)
+	}
+}
+
 func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 

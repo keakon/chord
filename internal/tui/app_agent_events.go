@@ -781,9 +781,10 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		if strings.EqualFold(evt.Name, "Done") {
 			if strings.TrimSpace(evt.DoneReport) != "" {
 				block.DoneReport = evt.DoneReport
-				m.expectedAgentClose = true
-			} else if strings.TrimSpace(evt.Result) != "" {
-				block.DoneReport = evt.Result
+			} else if parsed, err := tools.ParseDoneArgs(json.RawMessage(evt.ArgsJSON)); err == nil && strings.TrimSpace(parsed.Report) != "" {
+				block.DoneReport = strings.TrimSpace(parsed.Report)
+			}
+			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {
 				m.expectedAgentClose = true
 			}
 		}
