@@ -34,6 +34,10 @@ if [[ -n "${test_count}" ]]; then
 fi
 
 if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
+  GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Chord Test}" \
+  GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chord-test@example.invalid}" \
+  GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chord Test}" \
+  GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chord-test@example.invalid}" \
   go test "${test_args[@]}" "${packages[@]}" \
   >"${stdout_file}" 2>"${stderr_file}"; then
   echo "go test failed" >&2
