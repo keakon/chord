@@ -22,6 +22,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps ./cmd/chord >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
       - name: Build release assets
         shell: bash
         run: |

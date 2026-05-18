@@ -35,6 +35,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
       - name: Test
         env:
           MIN_COVERAGE: "65.0"
@@ -71,6 +83,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
       - name: Vet
         run: |
           go vet ./...
@@ -87,6 +111,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
 
       - name: Test with -race
         shell: bash
@@ -111,6 +147,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
       - name: Install staticcheck
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
@@ -132,6 +180,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
       - name: Install gopls
         run: |
           go install golang.org/x/tools/gopls@latest
@@ -152,6 +212,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./... >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
 
       - name: Install goimports
         run: go install golang.org/x/tools/cmd/goimports@latest
