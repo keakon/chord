@@ -86,7 +86,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- **Tools**: by default, Codex and OpenCode keep safe tool calls/results as plain text unless the importer can map them with high confidence. Claude tool history uses `--tool-mode auto` by default: it keeps structured tool calls only when signed thinking is present; otherwise it downgrades to text.
+- **Tools**: defaults are source-specific. Codex uses conservative `auto` tool import and only structures high-confidence mappings; OpenCode imports tool/shell payloads as readable text and does not support `--tool-mode structured`; Claude uses `--tool-mode auto` by default and keeps structured tool calls only when signed thinking is present, otherwise downgrading to text.
 - **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
 - **Claude main-session reconstruction**: Claude imports rebuild the best-effort main non-sidechain conversation span instead of simply choosing the latest raw leaf. Compact boundaries participate in reconstruction, but are not rendered as ordinary transcript messages.
 - **Claude sidechains**: sidechain / sub-agent transcript entries are excluded from the main imported session by default. When present, CLI output reports the skipped count, and `import-report.json` records Claude-specific diagnostics plus sidechain agent IDs when available.

@@ -86,7 +86,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 说明：
 
-- **Tools**：默认情况下，Codex/OpenCode 的工具调用与结果以"纯文本"形式导入，避免跨 provider 的工具协议差异；Claude 默认 `--tool-mode auto`，仅在具备 signed thinking 时保留结构化工具调用，否则自动降级为纯文本。
+- **Tools**：默认策略按来源区分。Codex 使用保守的 `auto` 工具导入，只在高置信度映射时保留结构化工具；OpenCode 会把 tool/shell payload 导入为可读纯文本，不支持 `--tool-mode structured`；Claude 默认使用 `--tool-mode auto`，仅在具备 signed thinking 时保留结构化工具调用，否则降级为纯文本。
 - **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
 - 导入后的 session 包含 `import-report.json`，记录转换统计与 warnings。
 - 运行时会在每次请求前对历史消息做 provider 兼容标准化，导入后切换模型/provider 不会重播不兼容 payload。

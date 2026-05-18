@@ -15,7 +15,10 @@
 - Tools / 安全：补强本地文件/路径安全，对文件读取与搜索工具统一路径校验逻辑。`Read` 与 `Grep` 现在复用同一套已存在路径检查，并会显式拒绝标准流设备文件等受限 device-style 路径。
 - Config / 持久化：补强 setup 与 auth 持久化时的配置写入流程。初始配置创建现在使用配置级锁文件 + 临时文件 + 原子安装；auth/config 保存路径也复用同一套原子写入基础设施。
 - Worktree：`chord worktree finish` 现在会先把目标分支合并进真实 worktree 分支，把冲突前移到那里处理；随后再把完成后的 worktree 状态以单个 squash commit 合回目标分支。`--check` 也改为在临时 worktree 中预检这一步 merge，而不改动真实 worktree 或目标分支；另外，若真实 worktree 已有进行中的 rebase 或 merge，`finish` 会直接拒绝启动。
-- CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex/OpenCode 的工具历史默认安全降级为文本导入，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
+- CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
+- TUI / 标题告警：确认 / 问题请求在 Chord 后台出现时，终端标题栏仍会闪烁以吸引注意；用户重新聚焦该标签页/窗口后，当前请求的告警会保持可见但停止闪烁。
+- TUI / 用量：usage/context 更新现在会让信息面板渲染缓存失效，修复上下文压缩或其它用量刷新事件后侧边栏 `TOKENS` 可能保持旧值的问题。
+- Docs：明确 `chord auth state clean` 会清理无效运行时状态和匹配的过期/已停用 OAuth 凭据，并更新 README 亮点，说明后台压缩与 `/loop` 可支撑长时间连续运行任务。
 
 ## 0.5.3 - 2026-05-11
 
@@ -56,7 +59,7 @@
 ## 0.5.0 - 2026-05-08
 
 - Config：agent 配置现用 `mode: main` 表示 MainAgent 角色，`mode: subagent` 表示 SubAgent。`sub_agent` 和 `sub` 也可作为 SubAgent 别名；空值或其他值按 `main` 处理。Hook `agent_kind` 过滤器使用 `main` / `subagent`。
-- CLI：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入生成可 `/resume` 的 Chord session 及 `import-report.json`；Codex/OpenCode 默认以安全文本模式导入 tools，Claude 默认 `auto`。
+- CLI：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入生成可 `/resume` 的 Chord session 及 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史，Claude 默认 `auto`。
 - Runtime：新增请求前的模型兼容标准化——切换 provider/model 时对历史中 provider 专用 payload（如 Anthropic signed thinking、结构化 tools）进行安全回放或降级，避免协议错误。
 - Runtime：修复潜在卡死：工具 batch/turn 在等待共享流式工具执行配额（slot）时被取消，现在会生成一条 cancelled 的工具结果，确保 PendingToolCalls 归零、界面不会卡在 busy。
 - TUI：修复运行中工具/Bash 的 spinner 动画：现在每次 visual animation tick 推进一帧，而非按 wall-clock 时间采样，避免确定性跳帧和旋转不均匀；后台 active 会话保持与前台一致的视觉 spinner cadence，同时保留较慢的内容 flush。

@@ -12,7 +12,7 @@
 
 Start with the core experience you notice immediately:
 
-- **Stable for the long haul.** Chord can summarize earlier turns before a long conversation gets too large for the model, while preserving what is needed to continue. No more "wait, did it forget?".
+- **Stable for the long haul.** Before a long conversation approaches the model's token limit, Chord can compact earlier turns in the background; once compaction finishes, it atomically replaces the old history and keeps running while preserving the context needed for follow-up work. Paired with `/loop`, complex tasks can run continuously for hours.
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
 - **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
