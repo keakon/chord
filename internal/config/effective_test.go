@@ -66,6 +66,20 @@ func TestModelConfigEffectiveAccessors(t *testing.T) {
 	if (ModelConfig{}).EffectivePromptCacheMode() != "explicit" {
 		t.Fatal("prompt cache mode should default explicit")
 	}
+	if !(&ModelConfig{}).SupportsFastMode(ProviderPresetCodex) {
+		t.Fatal("preset: codex should default supports_fast to true")
+	}
+	if (&ModelConfig{}).SupportsFastMode("") {
+		t.Fatal("non-codex preset should default supports_fast to false")
+	}
+	fast := true
+	if !(&ModelConfig{SupportsFast: &fast}).SupportsFastMode("") {
+		t.Fatal("explicit supports_fast=true should enable fast mode")
+	}
+	fast = false
+	if (&ModelConfig{SupportsFast: &fast}).SupportsFastMode(ProviderPresetCodex) {
+		t.Fatal("explicit supports_fast=false should disable codex fast mode")
+	}
 	v := ModelVariant{Text: &TextConfig{Verbosity: "low"}, Thinking: &ThinkingConfig{Type: "enabled"}}
 	if v.EffectiveTextVerbosity() != "low" || v.EffectiveThinkingType() != "enabled" {
 		t.Fatalf("unexpected variant effective accessors: %+v", v)

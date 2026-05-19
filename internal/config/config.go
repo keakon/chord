@@ -238,6 +238,7 @@ type ModelConfig struct {
 	Name              string                  `json:"name" yaml:"name"`
 	Limit             ModelLimit              `json:"limit" yaml:"limit"`
 	Modalities        *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
+	SupportsFast      *bool                   `json:"supports_fast,omitempty" yaml:"supports_fast,omitempty"` // nil = preset default; true enables /fast request parameters for this model
 	Thinking          *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning         *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text              *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
@@ -365,6 +366,16 @@ func (m *ModelConfig) SupportsInput(modality string) bool {
 		}
 	}
 	return false
+}
+
+// SupportsFastMode reports whether /fast may emit provider-specific request
+// parameters for this model. Explicit model config wins; preset: codex defaults
+// to enabled because Codex first-party transport supports fast service tier.
+func (m *ModelConfig) SupportsFastMode(providerPreset string) bool {
+	if m != nil && m.SupportsFast != nil {
+		return *m.SupportsFast
+	}
+	return strings.EqualFold(strings.TrimSpace(providerPreset), ProviderPresetCodex)
 }
 
 // ModelCompatConfig contains provider/model-specific compatibility toggles.

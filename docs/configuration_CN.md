@@ -377,6 +377,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
   gpt-1m: &gpt-1m
     limit:
@@ -396,6 +397,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
   claude-1m: &claude-1m
     limit:
@@ -415,6 +417,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
 providers:
   codex:
@@ -445,6 +448,7 @@ providers:
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
+- `supports_fast`：`/fast on` 是否可以为该模型发送 provider 专用 fast-mode 请求参数。省略时使用 preset 默认值：`preset: codex` 下的模型默认启用，其他模型默认关闭。只有确认模型 / provider 支持 Chord 使用的 fast 参数（OpenAI Responses 的 `service_tier="fast"`，或 Anthropic 的 `speed="fast"`）时才设为 `true`；设为 `false` 可强制关闭，包括 Codex preset provider。
 
 只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不被运行时解释，示例中刻意省略。
 
@@ -795,6 +799,7 @@ chord doctor models --pool thinking
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认 `[text, image]`。                                                           |
+| `supports_fast`  | bool   | `/fast on` 是否可发送 provider 专用 fast 参数。省略时 `preset: codex` 启用，其他模型关闭。                         |
 
 Agent 用法见 [扩展与定制 — Agent](./customization_CN.md#agent)；agent 完整 schema 见 [Agent 配置](#agent-配置)。
 

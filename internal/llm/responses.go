@@ -106,6 +106,7 @@ type responsesRequest struct {
 	Tools              []responsesTool      `json:"tools,omitempty"`
 	ToolChoice         string               `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
+	ServiceTier        string               `json:"service_tier,omitempty"`
 	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
 	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
 	Text               *textConfig          `json:"text,omitempty"`
@@ -237,6 +238,9 @@ func (r *ResponsesProvider) CompleteStream(
 	reqBody.Input = fullInput
 	if r.sessionID != "" {
 		reqBody.PromptCacheKey = r.sessionID
+	}
+	if ot.ServiceTier != "" {
+		reqBody.ServiceTier = ot.ServiceTier
 	}
 	if effectiveStore {
 		v := true

@@ -131,7 +131,11 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
 - `/compact`: manually trigger context compaction
-- `/fast on` / `/fast off`: enable or disable fast-response mode for subsequent model requests (including later retry rounds that have not started yet)
+- `/fast on` / `/fast off`: enable or disable fast-response mode for subsequent model requests (including later retry rounds that have not started yet).
+  - Fast request parameters are sent only for models whose `supports_fast` capability is enabled. Omitted `supports_fast` defaults to enabled for `preset: codex` models and disabled elsewhere.
+  - OpenAI Responses: sets `service_tier="fast"` when enabled.
+  - Claude (Anthropic): enables `speed="fast"` when enabled (requires provider support / beta).
+  - Does not change behavior knobs like `reasoning.effort` / `text.verbosity`; use model pools or `@variant` for more aggressive tradeoffs.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
 The following commands have more interactive detail, expanded below.

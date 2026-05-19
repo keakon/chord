@@ -33,6 +33,7 @@ type AnthropicTuning struct {
 
 // OpenAITuning holds OpenAI-specific request tuning parameters.
 type OpenAITuning struct {
+	ServiceTier       string // ""|"fast"|"flex"|"priority" ("" = omit; OpenAI Responses only)
 	ReasoningEffort   string // "low"|"medium"|"high"|"xhigh" ("" = disabled)
 	ReasoningSummary  string // "auto"|"concise"|"detailed" ("" = disabled)
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
@@ -50,9 +51,10 @@ type GeminiTuning struct {
 // RequestTuning bundles all provider-specific tuning parameters for a single
 // LLM request. Each provider reads only its own sub-struct.
 type RequestTuning struct {
-	Anthropic AnthropicTuning
-	OpenAI    OpenAITuning
-	Gemini    GeminiTuning
+	Anthropic         AnthropicTuning
+	OpenAI            OpenAITuning
+	Gemini            GeminiTuning
+	FastModeSupported bool
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.
@@ -136,6 +138,7 @@ type ProviderConfig struct {
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
 	keyOrder                   string                       // "sequential" (default) | "random"
+	retryDelayBase             time.Duration                // test hook; <0 disables retry backoff
 	stickyIdx                  int                          // index of the currently pinned key (on_failure rotation)
 	oauthRefresher             *OAuthRefresher              // nil if no OAuth support
 	lastSelectedKey            string                       // last key returned by SelectKeyWithContext (for inline snapshot selection)
@@ -1604,6 +1607,13 @@ func (p *ProviderConfig) TryRefreshOAuthKey(ctx context.Context, key string) (st
 	return refreshedKey, true, nil
 }
 
+// Preset returns the provider preset name.
+func (p *ProviderConfig) Preset() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.preset
+}
+
 // GetModel returns the ModelConfig for the given model ID.
 func (p *ProviderConfig) GetModel(modelID string) (config.ModelConfig, bool) {
 	p.mu.Lock()
@@ -1672,12 +1682,19 @@ func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 	if attempt <= 0 {
 		return 0
 	}
+	if p.retryDelayBase < 0 {
+		return 0
+	}
+	baseDelay := time.Second
+	if p.retryDelayBase > 0 {
+		baseDelay = p.retryDelayBase
+	}
 	const maxRetryDelayAttempt = 6
 	const maxRetryDelay = 60 * time.Second
 	if attempt > maxRetryDelayAttempt {
 		return maxRetryDelay
 	}
-	return saturatingDoublingDuration(time.Second, maxRetryDelay, attempt-1)
+	return saturatingDoublingDuration(baseDelay, maxRetryDelay, attempt-1)
 }
 
 // KeyCount returns the number of API keys configured for this provider,

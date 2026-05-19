@@ -87,7 +87,7 @@ func NewClient(
 ) *Client {
 	var tuning RequestTuning
 	if m, ok := providerCfg.GetModel(modelID); ok {
-		tuning = tuningFromModel(m)
+		tuning = tuningFromModel(m, providerCfg.Preset())
 	}
 
 	c := &Client{
@@ -260,7 +260,7 @@ func (c *Client) SetModelPool(models []FallbackModel, selectedIdx int) {
 	c.tuning = RequestTuning{}
 	c.activeVariant = ""
 	if m, ok := sel.ProviderConfig.GetModel(sel.ModelID); ok {
-		c.tuning = tuningFromModel(m)
+		c.tuning = tuningFromModel(m, sel.ProviderConfig.Preset())
 		if sel.Variant != "" {
 			if v, ok := m.Variants[sel.Variant]; ok {
 				c.tuning = mergeVariantTuning(c.tuning, v)
@@ -426,7 +426,7 @@ func (c *Client) SetVariant(variantName string) {
 	if !ok {
 		return
 	}
-	base := tuningFromModel(m)
+	base := tuningFromModel(m, c.provider.Preset())
 	c.tuning = mergeVariantTuning(base, v)
 	c.activeVariant = variantName
 }
@@ -937,7 +937,7 @@ func tuningForPoolTarget(t FallbackModel) RequestTuning {
 	if !ok {
 		return RequestTuning{}
 	}
-	base := tuningFromModel(m)
+	base := tuningFromModel(m, t.ProviderConfig.Preset())
 	if t.Variant == "" {
 		return base
 	}

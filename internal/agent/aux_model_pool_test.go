@@ -201,7 +201,7 @@ func TestNewCompactionClientInheritsMainModelPoolWhenUnconfigured(t *testing.T) 
 	mainClient := newAuxClientFromPool([]llm.FallbackModel{
 		first.PrimaryModelEntry(),
 		second.PrimaryModelEntry(),
-	}, 1, 0)
+	}, 1, 0, false)
 	a.llmClient = mainClient
 
 	client, contextLimit, err := a.newCompactionClient("")

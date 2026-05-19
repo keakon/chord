@@ -407,6 +407,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
   gpt-1m: &gpt-1m
     limit:
@@ -426,6 +427,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
   claude-1m: &claude-1m
     limit:
@@ -445,6 +447,7 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
+    supports_fast: true
 
 providers:
   codex:
@@ -483,6 +486,13 @@ Model fields used in the example:
 - `modalities.input`: supported input modalities. Supported values are `text`,
   `image`, and `pdf`. When omitted, Chord defaults to `text` and `image` for
   backward compatibility.
+- `supports_fast`: whether `/fast on` may emit provider-specific fast-mode
+  request parameters for this model. Omit it to use the preset default: models
+  under `preset: codex` default to enabled; all other models default to disabled.
+  Set `supports_fast: true` only for models/providers that accept Chord's fast
+  request parameters (`service_tier="fast"` for OpenAI Responses or `speed="fast"`
+  for Anthropic). Set `supports_fast: false` to force-disable them, including in
+  a Codex preset provider.
 
 Only fields defined by Chord's model schema are used. `modalities.output` is
 not currently interpreted, so it is intentionally omitted from the example.
@@ -871,6 +881,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text, image]`.                                                       |
+| `supports_fast`  | bool   | Whether `/fast on` may send provider-specific fast parameters. Omitted = enabled for `preset: codex`, disabled elsewhere. |
 
 For more on agents, see [Customization — Agents](./customization.md#agents); for the full agent schema, see [Agent config](#agent-config).
 

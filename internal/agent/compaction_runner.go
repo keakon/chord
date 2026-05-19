@@ -654,7 +654,7 @@ func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
-	return newAuxClientFromPool(pool, selectedIdx, 0)
+	return newAuxClientFromPool(pool, selectedIdx, 0, a.FastModeEnabled())
 }
 
 // compactionKeepAlive sends periodic activity signals during long compaction

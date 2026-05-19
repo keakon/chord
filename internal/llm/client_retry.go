@@ -186,7 +186,7 @@ func (c *Client) buildStreamRetryTargets(
 		fbContextLimit := fb.ContextLimit
 		fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
 		if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-			fbTuning = tuningFromModel(m)
+			fbTuning = tuningFromModel(m, fb.ProviderConfig.Preset())
 			if fbContextLimit <= 0 {
 				fbContextLimit = m.Limit.Context
 			}

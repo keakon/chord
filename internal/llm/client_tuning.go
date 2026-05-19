@@ -28,8 +28,9 @@ func geminiLevelFromThinking(t *config.ThinkingConfig) string {
 }
 
 // tuningFromModel builds a RequestTuning from a ModelConfig.
-func tuningFromModel(m config.ModelConfig) RequestTuning {
+func tuningFromModel(m config.ModelConfig, providerPreset string) RequestTuning {
 	var t RequestTuning
+	t.FastModeSupported = (&m).SupportsFastMode(providerPreset)
 	t.Anthropic = mergeAnthropicThinkingTuning(t.Anthropic, m.Thinking)
 	t.Anthropic.PromptCacheMode = m.EffectivePromptCacheMode()
 	if m.PromptCache != nil {
@@ -51,9 +52,18 @@ func tuningFromModel(m config.ModelConfig) RequestTuning {
 }
 
 func fastModeTuning(t RequestTuning) RequestTuning {
+	if !t.FastModeSupported {
+		return t
+	}
+	// Align with Codex: "fast" is a service tier / transport-level acceleration.
+	// It should NOT change behavior knobs like reasoning effort / verbosity.
+	//
+	// - OpenAI Responses: set service_tier="fast".
+	// - Anthropic: enable first-party fast mode via speed="fast".
+	// - Gemini: there is no generic "speed" knob; fast mode is a no-op (callers
+	//   can still choose a cheaper model pool / thinking level via variants).
+	t.OpenAI.ServiceTier = "fast"
 	t.Anthropic.Speed = "fast"
-	t.OpenAI.ReasoningEffort = "minimal"
-	t.OpenAI.TextVerbosity = "low"
 	return t
 }
 
