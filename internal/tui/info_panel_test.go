@@ -24,6 +24,7 @@ type infoPanelAgent struct {
 	contextCurrent      int
 	contextLimit        int
 	contextMessageCount int
+	contextReduction    agent.ContextReductionStats
 	todos               []tools.TodoItem
 	rateLimitSnapshot   *ratelimit.KeyRateLimitSnapshot
 	lspRows             []agent.LSPServerDisplay
@@ -63,6 +64,10 @@ func (a *infoPanelAgent) GetContextStats() (current, limit int) {
 
 func (a *infoPanelAgent) GetContextMessageCount() int {
 	return a.contextMessageCount
+}
+
+func (a *infoPanelAgent) GetContextReductionStats() agent.ContextReductionStats {
+	return a.contextReduction
 }
 
 func (a *infoPanelAgent) GetTodos() []tools.TodoItem {
@@ -458,6 +463,7 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 159_100
 	backend.contextMessageCount = 360
+	backend.contextReduction = agent.ContextReductionStats{Messages: 12, Bytes: 86_323}
 	backend.usage = analytics.SessionStats{
 		InputTokens:     20_400_000,
 		OutputTokens:    112_400,
@@ -470,6 +476,7 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 		"Context: 159.1k (80%)",
 		"[■■■■■■■■■■■■■■■■■■■■□□□□□□]",
 		"Messages: 360",
+		"Reduced: 12 msg / 84.3 KB",
 		"",
 		"TOKENS",
 		"↑ 20.4M  ↓ 112.4k",
@@ -1481,6 +1488,9 @@ func TestInfoPanelBreakpointTier0HidesContextDetails(t *testing.T) {
 	}
 	if strings.Contains(plain, "Messages") {
 		t.Fatalf("tier 0 should hide Messages line, got %q", plain)
+	}
+	if strings.Contains(plain, "Reduced") {
+		t.Fatalf("tier 0 should hide Reduced line, got %q", plain)
 	}
 	if strings.Contains(plain, "Cache") {
 		t.Fatalf("tier 0 should hide cache details, got %q", plain)

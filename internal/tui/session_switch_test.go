@@ -3713,7 +3713,10 @@ func (s *sessionControlAgent) GetSidebarUsageStats() analytics.SessionStats {
 func (s *sessionControlAgent) GetContextStats() (current, limit int) {
 	return s.contextCurrent, s.contextLimit
 }
-func (s *sessionControlAgent) GetContextMessageCount() int                               { return 0 }
+func (s *sessionControlAgent) GetContextMessageCount() int { return 0 }
+func (s *sessionControlAgent) GetContextReductionStats() agent.ContextReductionStats {
+	return agent.ContextReductionStats{}
+}
 func (s *sessionControlAgent) KeyStats() (available, total int)                          { return 0, 0 }
 func (s *sessionControlAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot { return nil }
 func (s *sessionControlAgent) ProxyInUseForRef(ref string) bool                          { return false }

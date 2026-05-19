@@ -195,3 +195,7 @@ func (s *SubAgent) GetContextStats() (current, limit int) {
 func (s *SubAgent) GetContextMessageCount() int {
 	return s.ctxMgr.MessageCount()
 }
+
+func (s *SubAgent) GetContextReductionStats() ContextReductionStats {
+	return ContextReductionStats{}
+}

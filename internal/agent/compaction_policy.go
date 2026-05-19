@@ -45,6 +45,9 @@ func splitMessagesForCompactionWithSelections(messages []message.Message, recent
 
 func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.Message {
 	if len(messages) == 0 {
+		if a != nil {
+			a.setContextReductionStats(ContextReductionStats{})
+		}
 		return nil
 	}
 
@@ -54,6 +57,15 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		return a.applyLoopFrozenReductionPrefix(prepared)
 	}
 	policy := a.contextReductionPolicy()
+	stats := ContextReductionStats{}
+	noteReduction := func(original, reduced string) {
+		saved := len(original) - len(reduced)
+		if saved <= 0 {
+			return
+		}
+		stats.Messages++
+		stats.Bytes += saved
+	}
 
 	callMeta := buildToolCallMeta(prepared)
 	turnsAfter := userTurnsAfter(prepared)
@@ -64,21 +76,25 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		if prepared[i].Role != "tool" {
 			continue
 		}
+		original := prepared[i].Content
 		age := turnsAfter[i]
 		if repeated[i] && age >= 1 {
 			meta := callMeta[prepared[i].ToolCallID]
 			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(meta.Name))
 			prepared[i].ToolDiff = ""
+			noteReduction(original, prepared[i].Content)
 			continue
 		}
 		if age >= policy.ErrorAgeTurns && isToolErrorContent(prepared[i].Content) {
 			prepared[i].Content = "[Older tool error omitted]"
 			prepared[i].ToolDiff = ""
+			noteReduction(original, prepared[i].Content)
 			continue
 		}
 		if age >= policy.ConfirmAgeTurns && isConfirmationOutput(prepared[i].Content) {
 			prepared[i].Content = "[Confirmed]"
 			prepared[i].ToolDiff = ""
+			noteReduction(original, prepared[i].Content)
 			continue
 		}
 		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
@@ -86,6 +102,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			if strings.TrimSpace(meta.Name) == "Shell" {
 				prepared[i].Content = "[Older Shell output omitted to save context; re-run the command if needed.]"
 				prepared[i].ToolDiff = ""
+				noteReduction(original, prepared[i].Content)
 				continue
 			}
 		}
@@ -94,6 +111,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			if tools.IsReadLike(meta.Name) {
 				prepared[i].Content = compactReadLikeOutputSummary(meta.Name, meta.Args, prepared[i].Content)
 				prepared[i].ToolDiff = ""
+				noteReduction(original, prepared[i].Content)
 				continue
 			}
 		}
@@ -103,9 +121,13 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			meta := callMeta[prepared[i].ToolCallID]
 			prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(meta.Name))
 			prepared[i].ToolDiff = ""
+			noteReduction(original, prepared[i].Content)
 		}
 	}
 
+	if a != nil {
+		a.setContextReductionStats(stats)
+	}
 	return prepared
 }
 
@@ -117,6 +139,32 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message
 	defer a.loopReductionMu.Unlock()
 	a.lastPreparedLLMTurnID = turnID
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(messages)
+	a.lastPreparedReductionStats = a.contextReductionStats
+}
+
+func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
+	if a == nil {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	a.contextReductionStats = stats
+}
+
+func (a *MainAgent) resetContextReductionStats() {
+	a.setContextReductionStats(ContextReductionStats{})
+}
+
+func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
+	if a == nil {
+		return ContextReductionStats{}
+	}
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return sub.GetContextReductionStats()
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	return a.contextReductionStats
 }
 
 func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
@@ -131,9 +179,12 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	defer a.loopReductionMu.Unlock()
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
 		a.lastPreparedLLMRequestPrefix = nil
+		a.lastPreparedReductionStats = ContextReductionStats{}
 		return
 	}
 	a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
+	a.loopState.FrozenReductionStats = a.lastPreparedReductionStats
+	a.contextReductionStats = a.lastPreparedReductionStats
 }
 
 func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message) []message.Message {
@@ -145,6 +196,7 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message) [
 	for i := 0; i < limit; i++ {
 		prepared[i] = cloneMessageForRequestShape(prefix[i])
 	}
+	a.setContextReductionStats(a.loopState.FrozenReductionStats)
 	return prepared
 }
 

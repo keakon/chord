@@ -153,6 +153,8 @@ type UsageReporter interface {
 	GetContextStats() (current, limit int)
 	// GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar). -1 if unknown.
 	GetContextMessageCount() int
+	// GetContextReductionStats returns request-level prompt trimming effect for the focused agent.
+	GetContextReductionStats() ContextReductionStats
 }
 
 // KeyHealthReporter exposes provider key/rate-limit/proxy state for the right

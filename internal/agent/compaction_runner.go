@@ -362,6 +362,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 
 	a.resetRuntimeEvidenceFromMessages(d.NewMessages)
+	a.resetContextReductionStats()
 	a.saveRecoverySnapshot()
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()

@@ -51,8 +51,11 @@ func (loopBusyAgentStub) GetUsageStats() analytics.SessionStats                 
 func (loopBusyAgentStub) GetSidebarUsageStats() analytics.SessionStats {
 	return analytics.SessionStats{}
 }
-func (loopBusyAgentStub) GetContextStats() (int, int)                               { return 0, 0 }
-func (loopBusyAgentStub) GetContextMessageCount() int                               { return 0 }
+func (loopBusyAgentStub) GetContextStats() (int, int) { return 0, 0 }
+func (loopBusyAgentStub) GetContextMessageCount() int { return 0 }
+func (loopBusyAgentStub) GetContextReductionStats() agent.ContextReductionStats {
+	return agent.ContextReductionStats{}
+}
 func (loopBusyAgentStub) KeyStats() (int, int)                                      { return 0, 0 }
 func (loopBusyAgentStub) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot { return nil }
 func (loopBusyAgentStub) ProxyInUseForRef(string) bool                              { return false }

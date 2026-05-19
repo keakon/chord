@@ -211,6 +211,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
 	a.ctxMgr.SetLastInputTokens(0)
 	a.ctxMgr.SetLastTotalContextTokens(0)
+	a.resetContextReductionStats()
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(analytics.SessionStats{})
 	}

@@ -63,6 +63,10 @@ type loopRuntimeState struct {
 	// so old messages do not flip from pruned to unpruned, while later messages are
 	// left unpruned.
 	FrozenReductionPrefix []message.Message
+	// FrozenReductionStats is the request-level reduction effect of the frozen
+	// prefix. It remains stable while loop mode is enabled because later loop
+	// messages are appended unreduced.
+	FrozenReductionStats  ContextReductionStats
 	ConsecutiveNoProgress int
 	LastProgressSignature string
 	LastAssessmentMessage string
@@ -109,6 +113,7 @@ func (s *loopRuntimeState) disable() {
 	s.MaxIterationsSet = false
 	s.DeferContinuationPromptUntilDone = false
 	s.FrozenReductionPrefix = nil
+	s.FrozenReductionStats = ContextReductionStats{}
 	s.Enabled = false
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
@@ -147,6 +148,10 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 			)
 			if msgCount := m.agent.GetContextMessageCount(); msgCount >= 0 {
 				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", InfoPanelValue.Render(formatTokens(msgCount))))
+			}
+			if reduction := m.agent.GetContextReductionStats(); reduction.Messages > 0 && reduction.Bytes > 0 {
+				reduced := fmt.Sprintf("%s msg / %s", formatTokens(reduction.Messages), bytefmt.Short(int64(reduction.Bytes)))
+				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Reduced", InfoPanelValue.Render(reduced)))
 			}
 		}
 	}

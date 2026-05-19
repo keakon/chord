@@ -223,6 +223,7 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 
 func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	a := &MainAgent{}
+	largeOutput := strings.Repeat("test output line\n", 500)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
@@ -237,6 +238,34 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != "[Older Shell output omitted to save context; re-run the command if needed.]" {
 		t.Fatalf("expected old successful Shell output to be pruned, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	wantSaved := len(largeOutput) - len(prepared[2].Content)
+	if stats.Messages != 1 || stats.Bytes != wantSaved {
+		t.Fatalf("reduction stats = %+v, want messages=1 bytes=%d", stats, wantSaved)
+	}
+}
+
+func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+	_ = a.prepareMessagesForLLM(msgs)
+	if stats := a.GetContextReductionStats(); stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("expected initial reduction stats, got %+v", stats)
+	}
+	_ = a.prepareMessagesForLLM([]message.Message{{Role: "user", Content: "short"}})
+	if stats := a.GetContextReductionStats(); stats != (ContextReductionStats{}) {
+		t.Fatalf("expected stats reset when request has no reduction, got %+v", stats)
 	}
 }
 
@@ -301,8 +330,12 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	}
 
 	firstPrepared := a.prepareMessagesForLLM(msgs)
+	firstStats := a.GetContextReductionStats()
 	if !strings.Contains(firstPrepared[2].Content, "Older Shell output omitted") {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
+	}
+	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
+		t.Fatalf("expected initial reduction stats, got %+v", firstStats)
 	}
 	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
 	a.EnableLoopMode("finish current task")
@@ -317,11 +350,15 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 		message.Message{Role: "user", Content: "u6"},
 	)
 	loopPrepared := a.prepareMessagesForLLM(loopMsgs)
+	loopStats := a.GetContextReductionStats()
 	if loopPrepared[2].Content != firstPrepared[2].Content {
 		t.Fatalf("loop should reuse frozen pruned prefix, got %q want %q", loopPrepared[2].Content, firstPrepared[2].Content)
 	}
 	if loopPrepared[7].Content != newLargeOutput {
 		t.Fatalf("loop should not prune messages added after frozen prefix, got %q", loopPrepared[7].Content)
+	}
+	if loopStats != firstStats {
+		t.Fatalf("loop reduction stats = %+v, want frozen %+v", loopStats, firstStats)
 	}
 
 	a.DisableLoopMode()

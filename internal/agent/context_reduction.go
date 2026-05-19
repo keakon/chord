@@ -8,6 +8,11 @@ import (
 	"github.com/keakon/chord/internal/llm"
 )
 
+type ContextReductionStats struct {
+	Messages int
+	Bytes    int
+}
+
 type contextReductionPolicy struct {
 	ConfirmAgeTurns      int
 	ErrorAgeTurns        int
