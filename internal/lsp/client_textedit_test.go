@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 )
 
 func TestSplitLinesAndUTF16Offsets(t *testing.T) {

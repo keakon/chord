@@ -14,12 +14,12 @@ require (
 	github.com/bytedance/sonic v1.15.1-0.20260305062320-c9e5b0f6896d
 	github.com/charmbracelet/ultraviolet v0.0.0-20260428153724-66037269d7be
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/charmbracelet/x/powernap v0.1.3
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/dgraph-io/ristretto/v2 v2.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/keakon/golog v0.3.0
+	github.com/keakon/x/powernap v0.1.5-fork
 	github.com/mackee/go-readability v0.3.1
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/muesli/cancelreader v0.2.2
@@ -35,10 +35,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.13.1
 )
-
-// TEMP: keep this replace until upstream accepts our required powernap fixes.
-// Pin to an immutable pseudo-version for reproducible builds.
-replace github.com/charmbracelet/x/powernap => github.com/keakon/x/powernap v0.0.0-20260330063338-2b2cb686f9cc
 
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect

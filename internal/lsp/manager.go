@@ -11,7 +11,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	pnprotocol "github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	pnprotocol "github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )

@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	powertransport "github.com/charmbracelet/x/powernap/pkg/transport"
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
+	powertransport "github.com/keakon/x/powernap/pkg/transport"
 
 	"github.com/keakon/chord/internal/config"
 )

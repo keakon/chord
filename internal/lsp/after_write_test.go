@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernap "github.com/keakon/x/powernap/pkg/lsp"
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )

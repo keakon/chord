@@ -14,9 +14,9 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	powertransport "github.com/charmbracelet/x/powernap/pkg/transport"
+	powernap "github.com/keakon/x/powernap/pkg/lsp"
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
+	powertransport "github.com/keakon/x/powernap/pkg/transport"
 
 	"github.com/keakon/chord/internal/config"
 )

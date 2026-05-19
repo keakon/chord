@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 )
 
 // Limits for tool result text appended to the model (aligned with opencode).

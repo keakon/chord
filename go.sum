@@ -83,8 +83,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/keakon/golog v0.3.0 h1:6ia9XMXE12c0DxoPxem+FDbmuCrZaPwxHoj5HiH/R20=
 github.com/keakon/golog v0.3.0/go.mod h1:VaRf1sNrjyL0MBAGAJUXajaJ3Zg0Z8+5A6faep08BHA=
-github.com/keakon/x/powernap v0.0.0-20260330063338-2b2cb686f9cc h1:F094BTHUkLo2iFSLaicUaPdhVddMTmDjDPFO+L1dTB4=
-github.com/keakon/x/powernap v0.0.0-20260330063338-2b2cb686f9cc/go.mod h1:cmdl5zlP5mR8TF2Y68UKc7hdGUDiSJ2+4hk0h04Hsx4=
+github.com/keakon/x/powernap v0.1.5-fork h1:Qx8QuEgiv+d7BvVNAqaGdgOc17Zz5LS1UagYg9KJc/E=
+github.com/keakon/x/powernap v0.1.5-fork/go.mod h1:w8nObTAIcIPJI/msiOXCFs6utx3yuLVl7lm0oa2/DAY=
 github.com/klauspost/cpuid/v2 v2.2.9 h1:66ze0taIn2H33fBvCkXuv9BmCwDfafmiIVpKV9kKGuY=
 github.com/klauspost/cpuid/v2 v2.2.9/go.mod h1:rqkxqrZ1EhYM9G+hXH7YdowN5R5RGN6NK4QwQ3WMXF8=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
