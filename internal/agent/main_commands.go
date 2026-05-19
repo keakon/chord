@@ -171,16 +171,22 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 		if busy {
 			a.freezeLoopReductionPrefixForCurrentTurn()
 		}
-		if maxSet {
-			a.loopState.MaxIterations = maxIterations
-			a.loopState.MaxIterationsSet = true
+		if maxSet || busy {
+			a.loopReductionMu.Lock()
+			if maxSet {
+				a.loopState.MaxIterations = maxIterations
+				a.loopState.MaxIterationsSet = true
+			}
+			if busy {
+				// Busy /loop on should not emit LOOP card or inject continuation
+				// prompt immediately; only enforce required tool calls for the ongoing
+				// turn, and defer loop continuation prompt until terminal stop_reason=done
+				// or a rejected Done exit attempt.
+				a.loopState.DeferContinuationPromptUntilDone = true
+			}
+			a.loopReductionMu.Unlock()
 		}
 		if busy {
-			// Busy /loop on should not emit LOOP card or inject continuation
-			// prompt immediately; only enforce required tool calls for the ongoing
-			// turn, and defer loop continuation prompt until terminal stop_reason=done
-			// or a rejected Done exit attempt.
-			a.loopState.DeferContinuationPromptUntilDone = true
 			return true
 		}
 		// Idle /loop on keeps current behavior: emit LOOP card and inject target.

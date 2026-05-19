@@ -297,10 +297,9 @@ type MainAgent struct {
 	evidenceCandidates   []evidenceItem
 	evidenceCandidateSet map[string]struct{}
 
-	// loopReductionMu protects request-shape snapshots and reduction stats used
-	// when loop mode is enabled while an LLM request is already in flight.
-	// The event loop may read it from a busy /loop command while callLLM runs on
-	// a worker goroutine.
+	// loopReductionMu protects request-shape snapshots, reduction stats, and
+	// loopState fields that may be read by callLLM on a worker goroutine while
+	// the event loop handles a busy /loop command.
 	loopReductionMu              sync.Mutex
 	lastPreparedLLMTurnID        uint64
 	lastPreparedLLMRequestPrefix []message.Message

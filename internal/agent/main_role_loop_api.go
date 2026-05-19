@@ -258,6 +258,7 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 }
 
 func (a *MainAgent) EnableLoopMode(target string) {
+	a.loopReductionMu.Lock()
 	a.loopState.enableWithTarget(target)
 	if !a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {
 		a.loopState.MaxIterations = 10
@@ -265,17 +266,23 @@ func (a *MainAgent) EnableLoopMode(target string) {
 	if a.loopState.State == "" || a.loopState.State == LoopStateIdle || a.loopState.State == LoopStateCompleted || a.loopState.State == LoopStateBlocked || a.loopState.State == LoopStateBudgetExhausted {
 		a.loopState.State = LoopStateExecuting
 	}
+	maxIterations := a.loopState.MaxIterations
+	maxIterationsSet := a.loopState.MaxIterationsSet
+	a.loopReductionMu.Unlock()
+
 	a.refreshSystemPrompt()
 	a.emitLoopStateChanged()
-	msg := fmt.Sprintf("Loop enabled. Automatic Done interceptions: %d.", a.loopState.MaxIterations)
-	if a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {
+	msg := fmt.Sprintf("Loop enabled. Automatic Done interceptions: %d.", maxIterations)
+	if maxIterationsSet && maxIterations == 0 {
 		msg = "Loop enabled. Automatic Done interceptions: unlimited."
 	}
 	a.emitToTUI(InfoEvent{Message: msg})
 }
 
 func (a *MainAgent) DisableLoopMode() {
+	a.loopReductionMu.Lock()
 	a.loopState.disable()
+	a.loopReductionMu.Unlock()
 	a.refreshSystemPrompt()
 	a.emitLoopStateChanged()
 	a.emitToTUI(InfoEvent{Message: "Loop disabled."})

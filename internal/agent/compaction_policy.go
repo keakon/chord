@@ -53,8 +53,11 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 
 	prepared := make([]message.Message, len(messages))
 	copy(prepared, messages)
-	if a != nil && a.loopState.Enabled {
-		return a.applyLoopFrozenReductionPrefix(prepared)
+	if a != nil {
+		loopEnabled, frozenPrefix, frozenStats := a.loopReductionSnapshot()
+		if loopEnabled {
+			return a.applyLoopFrozenReductionPrefix(prepared, frozenPrefix, frozenStats)
+		}
 	}
 	policy := a.contextReductionPolicy()
 	stats := ContextReductionStats{}
@@ -187,16 +190,27 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	a.contextReductionStats = a.lastPreparedReductionStats
 }
 
-func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message) []message.Message {
-	if a == nil || len(a.loopState.FrozenReductionPrefix) == 0 {
+func (a *MainAgent) loopReductionSnapshot() (enabled bool, frozenPrefix []message.Message, frozenStats ContextReductionStats) {
+	if a == nil {
+		return false, nil, ContextReductionStats{}
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if !a.loopState.Enabled {
+		return false, nil, ContextReductionStats{}
+	}
+	return true, cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix), a.loopState.FrozenReductionStats
+}
+
+func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, prefix []message.Message, stats ContextReductionStats) []message.Message {
+	if a == nil || len(prefix) == 0 {
 		return prepared
 	}
-	prefix := a.loopState.FrozenReductionPrefix
 	limit := min(len(prefix), len(prepared))
 	for i := 0; i < limit; i++ {
 		prepared[i] = cloneMessageForRequestShape(prefix[i])
 	}
-	a.setContextReductionStats(a.loopState.FrozenReductionStats)
+	a.setContextReductionStats(stats)
 	return prepared
 }
 

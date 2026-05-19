@@ -1331,7 +1331,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.subAgents[sub.instanceID] = sub
 	a.mu.Unlock()
 
-	a.loopState.enableWithTarget("execute the active plan")
+	a.EnableLoopMode("execute the active plan")
 	a.loopState.markProgress()
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
