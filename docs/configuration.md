@@ -707,7 +707,7 @@ Common fields include:
 - `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
-- `permission`: per-tool permission policy for this agent.
+- `permission`: per-tool permission policy for this agent. Permissions live directly in agent config files; when the confirmation popup remembers a rule, `project` updates the current project's `.chord/agents/<role>.yaml`, and `global` updates the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). Chord no longer writes a separate permissions directory.
 - `mcp`: MCP config scoped to this agent.
 - `delegation`: limits such as `max_children`, `max_depth`, and `child_join`.
 - `prompt` / `system_prompt`: system prompt for plain YAML files.

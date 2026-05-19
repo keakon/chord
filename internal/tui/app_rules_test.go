@@ -44,7 +44,7 @@ func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 		},
 		added: []permission.AddedRule{
 			{Role: "builder", Rule: permission.Rule{Permission: "Shell", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
-			{Role: "builder", Rule: permission.Rule{Permission: "Write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/permissions/builder.yaml"},
+			{Role: "builder", Rule: permission.Rule{Permission: "Write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/agents/builder.yaml"},
 		},
 	}
 	m := NewModel(ag)
@@ -92,6 +92,8 @@ func TestOpenRulesWithNoRulesShowsToastAndKeepsMode(t *testing.T) {
 }
 
 func TestAddSessionRuleBuildsPersistentPaths(t *testing.T) {
+	configHome := filepath.Join(t.TempDir(), "config-home")
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
 	ag := &sessionControlAgent{
 		events:      make(chan agent.AgentEvent),
 		currentRole: "builder",
@@ -107,12 +109,12 @@ func TestAddSessionRuleBuildsPersistentPaths(t *testing.T) {
 		t.Fatalf("rules count = %d, want 2", got)
 	}
 	projectPath := m.rules.rules[0].Path
-	if got, want := projectPath, filepath.Join("/home/user/project-root", ".chord", "permissions", "builder.yaml"); got != want {
+	if got, want := projectPath, filepath.Join("/home/user/project-root", ".chord", "agents", "builder.yaml"); got != want {
 		t.Fatalf("project path = %q, want %q", got, want)
 	}
 	globalPath := m.rules.rules[1].Path
-	if !strings.HasSuffix(globalPath, filepath.Join(".chord", "permissions", "builder.yaml")) {
-		t.Fatalf("global path = %q, want suffix .chord/permissions/builder.yaml", globalPath)
+	if got, want := globalPath, filepath.Join(configHome, "agents", "builder.yaml"); got != want {
+		t.Fatalf("global path = %q, want %q", got, want)
 	}
 	if globalPath == projectPath {
 		t.Fatalf("global path should differ from project path, both are %q", projectPath)
@@ -137,11 +139,11 @@ func TestResolveRuleScopePathUsesProjectRootInsteadOfWorkingDir(t *testing.T) {
 	m.confirm.scopeIdx = 1 // project
 
 	plain := stripANSI(m.renderConfirmDialog())
-	want := filepath.Join("/repo/root", ".chord", "permissions", "builder.yaml")
+	want := filepath.Join("/repo/root", ".chord", "agents", "builder.yaml")
 	if !strings.Contains(plain, want) {
 		t.Fatalf("confirm rule picker project path = %q, want contains %q", plain, want)
 	}
-	if strings.Contains(plain, filepath.Join("/repo/root/subdir/deep", ".chord", "permissions", "builder.yaml")) {
+	if strings.Contains(plain, filepath.Join("/repo/root/subdir/deep", ".chord", "agents", "builder.yaml")) {
 		t.Fatalf("confirm rule picker should not use workingDir as project root: %q", plain)
 	}
 }

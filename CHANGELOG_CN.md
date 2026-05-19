@@ -23,7 +23,8 @@
 - CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史且现在能处理当前 `{info, parts}` 导出并以可读 fallback 保留不支持的工具，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
 - TUI / 标题告警：确认 / 问题请求在 Chord 后台出现时，终端标题栏仍会闪烁以吸引注意；用户重新聚焦该标签页/窗口后，当前请求的告警会保持可见但停止闪烁。
 - TUI / 用量：usage/context 更新现在会让信息面板渲染缓存失效，修复上下文压缩或其它用量刷新事件后侧边栏 `TOKENS` 可能保持旧值的问题。
-- Docs：明确 `chord auth state clean` 会清理无效运行时状态和匹配的过期/已停用 OAuth 凭据，并更新 README 亮点，说明后台压缩与 `/loop` 可支撑长时间连续运行任务。
+- Runtime / 权限：记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。
+- Docs：明确 agent 权限保存在 `agents/<role>.yaml`，确认弹窗和 headless 记住规则都会更新对应 agent 配置文件。
 
 ## 0.5.3 - 2026-05-11
 

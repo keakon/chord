@@ -118,7 +118,7 @@ Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/c
 - `ask` —— 暂停，需要用户确认
 - `deny` —— 直接拒绝
 
-权限是 agent 级配置，与项目/全局配置合并。属于产品层面的风险控制，**不是** OS 级安全沙箱。详见 [权限与安全](./permissions-and-safety_CN.md)。
+权限是 agent 级配置：全局默认写在 `~/.config/chord/agents/<role>.yaml`，项目覆盖写在 `.chord/agents/<role>.yaml`。属于产品层面的风险控制，**不是** OS 级安全沙箱。详见 [权限与安全](./permissions-and-safety_CN.md)。
 
 ## Local TUI / Local mode
 

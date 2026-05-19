@@ -118,7 +118,7 @@ The result of evaluating a permission rule against a tool call. The three outcom
 - `ask` — pause and require user confirmation
 - `deny` — refuse outright
 
-Permissions are agent-level and combine with project / global configuration. They are product-level risk control, not an OS-level sandbox. See [Permissions & Safety](./permissions-and-safety.md).
+Permissions are agent-level config: global defaults live in `~/.config/chord/agents/<role>.yaml`, and project overrides live in `.chord/agents/<role>.yaml`. They are product-level risk control, not an OS-level sandbox. See [Permissions & Safety](./permissions-and-safety.md).
 
 ## Local TUI vs Local mode
 

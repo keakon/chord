@@ -17,8 +17,18 @@ func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
 	}{
 		{perm: "Shell", pattern: "go test ./...", want: permission.ActionAllow},
 		{perm: "Read", pattern: "internal/agent/main.go", want: permission.ActionAllow},
-		{perm: "Write", pattern: "docs/plan.md", want: permission.ActionAsk},
-		{perm: "Edit", pattern: "docs/plan.md", want: permission.ActionAsk},
+		{
+			perm:    "Write",
+			pattern: ".chord/plans/plan-001.md",
+			want:    permission.ActionAllow,
+		},
+		{perm: "Write", pattern: "docs/plan.md", want: permission.ActionDeny},
+		{
+			perm:    "Edit",
+			pattern: ".chord/plans/plan-001.md",
+			want:    permission.ActionAllow,
+		},
+		{perm: "Edit", pattern: "docs/plan.md", want: permission.ActionDeny},
 		{perm: "Handoff", pattern: "*", want: permission.ActionAllow},
 	}
 	for _, tt := range checks {

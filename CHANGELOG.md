@@ -23,7 +23,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - CLI / Import: added `chord import` support for importing external sessions from Claude Code (`claude`), Codex (`codex`), and OpenCode (`opencode`). Import writes a resumable Chord session plus `import-report.json`; Codex defaults to conservative `auto` tool import, OpenCode defaults to text-only tool import and now handles current `{info, parts}` exports with readable unsupported-tool fallbacks, and Claude defaults to `auto` structured-tool preservation only when compatible.
 - TUI / Title alert: when a confirmation or question request arrives while Chord is in the background, the terminal title alert still blinks for attention; after the user focuses the tab/window, the alert stays visible but stops blinking for that pending request.
 - TUI / Usage: usage/context updates now invalidate the info-panel render cache, fixing stale `TOKENS` values after context compaction or other usage refresh events.
-- Docs: clarified that `chord auth state clean` removes invalid runtime-state entries and matching expired/deactivated OAuth credentials, and updated README highlights to describe background compaction plus `/loop` for long-running tasks.
+- Runtime / Permissions: remembered permission rules now write directly to agent config files instead of separate permissions overlays. Session rules remain in memory, project rules update `<project>/.chord/agents/<role>.yaml`, and global rules update `<config-home>/agents/<role>.yaml`; `/rules` removes persisted rules from the same agent file. The built-in planner now allows `Write`/`Edit` only under `.chord/plans/*` by default.
+- Docs: clarified that agent permissions live in `agents/<role>.yaml` and that confirmation/headless remembered rules update the corresponding agent config file.
 
 ## 0.5.3 - 2026-05-11
 

@@ -134,7 +134,7 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
 }
 ```
 
-`action` follows whatever the model/runtime offered (`allow`, `deny`, `allow_once`, …). Optional `rule_pattern` + `rule_scope` (`session` / `project` / `user_global`) installs a permission rule along with the answer; omit both for one-shot decisions.
+`action` follows whatever the model/runtime offered (`allow`, `deny`, `allow_once`, …). Optional `rule_pattern` + `rule_scope` (`session` / `project` / `user_global`) installs a permission rule along with the answer; omit both for one-shot decisions. `session` applies only to the current session; `project` writes to the current project's `.chord/agents/<role>.yaml`; `user_global` writes to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`).
 
 ### `question`
 

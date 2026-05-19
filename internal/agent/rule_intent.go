@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -48,15 +49,23 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 	scope := permission.RuleScope(intent.Scope)
 
 	var err error
+	scopePath := ""
 	switch scope {
 	case permission.ScopeSession:
 		a.overlay.AddSessionRule(roleName, rule)
 	case permission.ScopeProject:
-		err = a.overlay.AddProjectRule(roleName, rule)
+		scopePath = strings.TrimSpace(a.overlay.ProjectPath())
 	case permission.ScopeUserGlobal:
-		err = a.overlay.AddUserGlobalRule(roleName, rule)
+		scopePath = strings.TrimSpace(a.overlay.UserGlobalPath())
 	default:
 		err = fmt.Errorf("unknown rule scope %d", intent.Scope)
+	}
+	if err == nil && (scope == permission.ScopeProject || scope == permission.ScopeUserGlobal) {
+		if scopePath == "" {
+			err = fmt.Errorf("%s agent config path is empty", scope.String())
+		} else if _, err = config.UpsertAgentPermissionRuleForAgent(scopePath, a.activeConfigSnapshot(), rule); err == nil {
+			err = a.overlay.AddPersistentRule(roleName, rule, scope, scopePath)
+		}
 	}
 	if err != nil {
 		log.Warnf("failed to add permission overlay rule tool=%v pattern=%v scope=%v err=%v", toolName, intent.Pattern, scope.String(), err)
@@ -94,6 +103,19 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 			Level:   "info",
 		})
 	}
+}
+
+func (a *MainAgent) activeConfigSnapshot() *config.AgentConfig {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	if a.activeConfig == nil {
+		return nil
+	}
+	cfg := *a.activeConfig
+	cfg.ModelPools = append([]string(nil), a.activeConfig.ModelPools...)
+	cfg.Capabilities = append([]string(nil), a.activeConfig.Capabilities...)
+	cfg.PreferredTasks = append([]string(nil), a.activeConfig.PreferredTasks...)
+	return &cfg
 }
 
 // syncSubAgentOverlay propagates the overlay changes to all SubAgents.

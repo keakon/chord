@@ -181,7 +181,7 @@ Opens an overlay listing rules added during the current session via the confirma
 - `o`: open the rule's backing config file in the OS editor
 - `Esc` / `q`: close
 
-Each rule shows its scope (`session` / `project` / `global`) and on-disk file path. These are **dynamically added temporary rules** that complement the pre-written permission rules in `config.yaml` — they never modify the original config files.
+Each rule shows its scope (`session` / `project` / `global`) and on-disk file path. `session` rules apply only to the current session; `project` rules are written to the current project's `.chord/agents/<role>.yaml`; `global` rules are written to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). These rules directly update the target agent's `permission` config, and deleting a rule removes it from the same agent config file.
 
 ### `/loop` — continuous execution mode
 

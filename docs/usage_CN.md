@@ -181,7 +181,7 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 - `o`：在系统编辑器中打开规则对应的配置文件
 - `Esc` / `q`：关闭
 
-规则旁会显示作用域（`session` / `project` / `global`）和落盘文件路径。这些规则是**动态添加的临时规则**，与 `config.yaml` 中预写的权限规则互补，不修改原有配置文件。
+规则旁会显示作用域（`session` / `project` / `global`）和落盘文件路径。`session` 规则只在当前会话内生效；`project` 规则写入当前项目的 `.chord/agents/<role>.yaml`；`global` 规则写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。这些规则会直接更新对应 agent 的 `permission` 配置，删除规则时也会从同一 agent 配置文件移除。
 
 ### `/loop` — 持续执行模式
 

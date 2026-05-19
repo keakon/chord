@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -18,13 +19,13 @@ func resolveRuleScopePath(scope permission.RuleScope, projectRoot, homeDir, role
 		if projectRoot == "" {
 			return ""
 		}
-		return filepath.Join(projectRoot, ".chord", "permissions", role+".yaml")
+		return filepath.Join(projectRoot, ".chord", "agents", role+".yaml")
 	case permission.ScopeUserGlobal:
-		homeDir = strings.TrimSpace(homeDir)
-		if homeDir == "" {
+		configHome, err := config.ConfigHomeDir()
+		if err != nil || strings.TrimSpace(configHome) == "" {
 			return ""
 		}
-		return filepath.Join(homeDir, ".chord", "permissions", role+".yaml")
+		return filepath.Join(configHome, "agents", role+".yaml")
 	default:
 		return ""
 	}

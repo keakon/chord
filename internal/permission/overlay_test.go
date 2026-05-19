@@ -1,119 +1,9 @@
 package permission
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
-
-func TestAppendRoleOverlayRule_CreatesNewFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test-role.yaml")
-
-	rule := Rule{
-		Permission: "Shell",
-		Pattern:    "git log *",
-		Action:     ActionAllow,
-	}
-
-	if err := AppendRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("AppendRoleOverlayRule failed: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read created file: %v", err)
-	}
-
-	content := string(data)
-	if content == "" {
-		t.Fatal("expected non-empty file content")
-	}
-	if !containsLine(content, "permission:") {
-		t.Fatalf("expected permission root key, got:\n%s", content)
-	}
-}
-
-func TestAppendRoleOverlayRule_Deduplicates(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test-role.yaml")
-
-	rule := Rule{
-		Permission: "Shell",
-		Pattern:    "git log *",
-		Action:     ActionAllow,
-	}
-
-	if err := AppendRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("first AppendRoleOverlayRule failed: %v", err)
-	}
-
-	if err := AppendRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("second AppendRoleOverlayRule failed: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-
-	// Should contain the rule exactly once
-	content := string(data)
-	count := 0
-	for i := 0; i < len(content); i++ {
-		if i+7 <= len(content) && content[i:i+7] == "git log" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected rule to appear exactly once, found %d occurrences in:\n%s", count, content)
-	}
-}
-
-func TestRemoveRoleOverlayRule(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test-role.yaml")
-
-	rule := Rule{
-		Permission: "Shell",
-		Pattern:    "git log *",
-		Action:     ActionAllow,
-	}
-
-	if err := AppendRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("AppendRoleOverlayRule failed: %v", err)
-	}
-
-	if err := RemoveRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("RemoveRoleOverlayRule failed: %v", err)
-	}
-
-	if _, err := os.ReadFile(path); err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-
-	rules, err := loadOverlayFile(path)
-	if err != nil {
-		t.Fatalf("loadOverlayFile failed: %v", err)
-	}
-	if len(rules) != 0 {
-		t.Fatalf("expected no rules after removal, got: %+v", rules)
-	}
-}
-
-func TestRemoveRoleOverlayRule_NoFile(t *testing.T) {
-	rule := Rule{
-		Permission: "Shell",
-		Pattern:    "git log *",
-		Action:     ActionAllow,
-	}
-	// Should not error when file doesn't exist
-	if err := RemoveRoleOverlayRule("/nonexistent/path.yaml", rule); err != nil {
-		t.Fatalf("RemoveRoleOverlayRule should not error on missing file: %v", err)
-	}
-}
 
 func TestOverlay_AddAndRemove(t *testing.T) {
 	o := NewOverlay()
@@ -177,55 +67,33 @@ func TestOverlay_AddSessionRule_Deduplicates(t *testing.T) {
 	}
 }
 
-func TestOverlay_AddProjectRule_PathRequired(t *testing.T) {
+func TestOverlay_AddPersistentRule_RejectsSessionScope(t *testing.T) {
 	o := NewOverlay()
 	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
-	if err := o.AddProjectRule("builder", rule); err == nil {
-		t.Fatal("expected AddProjectRule to fail when project path is empty")
+	if err := o.AddPersistentRule("builder", rule, ScopeSession, ""); err == nil {
+		t.Fatal("expected AddPersistentRule to fail for session scope")
 	}
 }
 
-func TestOverlay_LoadOverlayFile_RequiresPermissionRoot(t *testing.T) {
-	dir := t.TempDir()
-	legacyPath := filepath.Join(dir, "legacy.yaml")
-	permissionPath := filepath.Join(dir, "permission.yaml")
+func TestOverlay_AddPersistentRuleTracksPathAndMerges(t *testing.T) {
+	o := NewOverlay()
+	o.SetActiveRole("builder")
+	o.SetBase(Ruleset{{Permission: "Shell", Pattern: "*", Action: ActionAsk}})
+	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
+	path := "/tmp/chord-test-agent.yaml"
 
-	legacy := "Shell:\n  \"git *\": allow\n"
-	if err := os.WriteFile(legacyPath, []byte(legacy), 0o644); err != nil {
-		t.Fatalf("write legacy file: %v", err)
+	if err := o.AddPersistentRule("builder", rule, ScopeProject, path); err != nil {
+		t.Fatalf("AddPersistentRule failed: %v", err)
 	}
-	withPermission := "permission:\n  Shell:\n    \"git *\": allow\n"
-	if err := os.WriteFile(permissionPath, []byte(withPermission), 0o644); err != nil {
-		t.Fatalf("write permission file: %v", err)
+	if got := o.MergedRuleset().Evaluate("Shell", "git status"); got != ActionAllow {
+		t.Fatalf("merged evaluation = %s, want %s", got, ActionAllow)
 	}
-
-	rules, err := loadOverlayFile(permissionPath)
-	if err != nil {
-		t.Fatalf("loadOverlayFile(permissionPath) failed: %v", err)
+	added := o.AddedRules()
+	if len(added) != 1 {
+		t.Fatalf("added rules = %d, want 1", len(added))
 	}
-	if got := rules.Evaluate("Shell", "git status"); got != ActionAllow {
-		t.Fatalf("evaluate loaded rules = %s, want %s", got, ActionAllow)
-	}
-
-	if _, err := loadOverlayFile(legacyPath); err == nil {
-		t.Fatal("expected legacy overlay file without permission root to fail")
-	}
-}
-
-func TestAppendRoleOverlayRule_RejectsLegacyRootSchema(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "legacy.yaml")
-	legacy := "Shell:\n  \"git *\": allow\n"
-	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
-		t.Fatalf("write legacy file: %v", err)
-	}
-	rule := Rule{
-		Permission: "Shell",
-		Pattern:    "git status *",
-		Action:     ActionAllow,
-	}
-	if err := AppendRoleOverlayRule(path, rule); err == nil {
-		t.Fatal("expected AppendRoleOverlayRule to reject legacy root schema")
+	if added[0].Path != path {
+		t.Fatalf("added path = %q, want %q", added[0].Path, path)
 	}
 }
 
@@ -252,31 +120,6 @@ func TestOverlay_SessionRulesAreRoleScoped(t *testing.T) {
 	}
 }
 
-func TestOverlay_RemoveAddedRulePersistentFailureKeepsTrackingState(t *testing.T) {
-	o := NewOverlay()
-	path := filepath.Join(t.TempDir(), "builder.yaml")
-	rule := Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}
-	if err := AppendRoleOverlayRule(path, rule); err != nil {
-		t.Fatalf("AppendRoleOverlayRule failed: %v", err)
-	}
-	o.SetProjectPath(path)
-	o.project = Ruleset{rule}
-	o.addedRules = []AddedRule{{Role: "builder", Rule: rule, Scope: ScopeProject, Path: path, AddedAt: time.Now()}}
-
-	if err := os.Chmod(filepath.Dir(path), 0o500); err != nil {
-		t.Fatalf("chmod dir read-only: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(path), 0o700) })
-	if err := o.RemoveAddedRule(0); err == nil {
-		t.Fatal("expected RemoveAddedRule to fail when backing file removal fails")
-	}
-	if got := len(o.AddedRules()); got != 1 {
-		t.Fatalf("added rules after failure = %d, want 1", got)
-	}
-	if got := len(o.project); got != 1 {
-		t.Fatalf("project rules after failure = %d, want 1", got)
-	}
-}
 func TestOverlay_AddedRulesPreserveRemovalIndexOrder(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
@@ -304,13 +147,4 @@ func TestOverlay_AddedRulesPreserveRemovalIndexOrder(t *testing.T) {
 	if got := remaining[0].Rule.Pattern; got != "git status *" {
 		t.Fatalf("remaining rule = %q, want git status *", got)
 	}
-}
-
-func containsLine(content, line string) bool {
-	for _, l := range strings.Split(content, "\n") {
-		if strings.TrimSpace(l) == line {
-			return true
-		}
-	}
-	return false
 }

@@ -1,12 +1,11 @@
 package agent
 
 import (
-	"os"
+	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/keakon/golog/log"
-
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -31,14 +30,11 @@ func (a *MainAgent) initOverlay() {
 		}
 	}
 
-	projectPath, userGlobalPath := overlayPersistentRulePaths(projectRoot, roleName)
+	projectPath, userGlobalPath := agentPermissionRulePaths(projectRoot, roleName)
 	a.overlay.SetActiveRole(roleName)
 	a.overlay.SetBase(base)
 	a.overlay.SetProjectPath(projectPath)
 	a.overlay.SetUserGlobalPath(userGlobalPath)
-	if err := a.overlay.LoadPersistentOverlays(); err != nil {
-		log.Warnf("failed to load permission overlays role=%v err=%v", roleName, err)
-	}
 
 	a.stateMu.Lock()
 	a.ruleset = a.overlay.MergedRuleset()
@@ -64,6 +60,20 @@ func (a *MainAgent) RemoveOverlayAddedRule(index int) error {
 	if a.overlay == nil {
 		return nil
 	}
+	added := a.overlay.AddedRules()
+	if index < 0 || index >= len(added) {
+		return a.overlay.RemoveAddedRule(index)
+	}
+	rule := added[index]
+	if rule.Scope == permission.ScopeProject || rule.Scope == permission.ScopeUserGlobal {
+		path := strings.TrimSpace(rule.Path)
+		if path == "" {
+			return fmt.Errorf("%s agent config path is empty", rule.Scope.String())
+		}
+		if _, err := config.RemoveAgentPermissionRule(path, rule.Rule); err != nil {
+			return err
+		}
+	}
 	if err := a.overlay.RemoveAddedRule(index); err != nil {
 		return err
 	}
@@ -74,17 +84,16 @@ func (a *MainAgent) RemoveOverlayAddedRule(index int) error {
 	return nil
 }
 
-func overlayPersistentRulePaths(projectRoot, roleName string) (projectPath, userGlobalPath string) {
+func agentPermissionRulePaths(projectRoot, roleName string) (projectPath, userGlobalPath string) {
 	roleName = strings.TrimSpace(roleName)
 	if roleName == "" {
 		return "", ""
 	}
 	if projectRoot = strings.TrimSpace(projectRoot); projectRoot != "" {
-		projectPath = filepath.Join(projectRoot, ".chord", "permissions", roleName+".yaml")
+		projectPath = filepath.Join(projectRoot, ".chord", "agents", roleName+".yaml")
 	}
-	homeDir, err := os.UserHomeDir()
-	if err == nil && strings.TrimSpace(homeDir) != "" {
-		userGlobalPath = filepath.Join(homeDir, ".chord", "permissions", roleName+".yaml")
+	if configHome, err := config.ConfigHomeDir(); err == nil && strings.TrimSpace(configHome) != "" {
+		userGlobalPath = filepath.Join(configHome, "agents", roleName+".yaml")
 	}
 	return projectPath, userGlobalPath
 }

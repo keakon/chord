@@ -1,23 +1,22 @@
 // Package permission implements overlay layering for permission rules.
 //
-// Overlays allow runtime additions to the permission ruleset without modifying
-// the base role configuration. Rules are evaluated in reverse order (last match wins),
-// with layers merged in this priority (highest first):
+// Overlays allow runtime additions to the permission ruleset. Persistent project
+// and user-global additions are stored in agent YAML files; this overlay keeps
+// the current process in sync immediately after a rule is added. Rules are
+// evaluated in reverse order (last match wins), with layers merged in this
+// priority (highest first):
 //
 //  1. session overlay (memory only, highest priority)
-//  2. project persistent overlay (.chord/permissions/<role>.yaml)
-//  3. user-global persistent overlay (<config-home>/permissions/<role>.yaml)
+//  2. project agent-file additions made in this process
+//  3. user-global agent-file additions made in this process
 //  4. role base rules (activeConfig.Permission)
 package permission
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // RuleScope represents where a permission rule is persisted.
@@ -25,8 +24,8 @@ type RuleScope int
 
 const (
 	ScopeSession    RuleScope = iota // memory only, cleared on session end
-	ScopeProject                     // .chord/permissions/<role>.yaml
-	ScopeUserGlobal                  // <config-home>/permissions/<role>.yaml
+	ScopeProject                     // project agent file: <project>/.chord/agents/<role>.yaml
+	ScopeUserGlobal                  // user agent file: <config-home>/agents/<role>.yaml
 )
 
 func (s RuleScope) String() string {
@@ -115,70 +114,6 @@ func (o *Overlay) SetUserGlobalPath(path string) {
 	o.userGlobalPath = path
 }
 
-// LoadPersistentOverlays loads project and user-global overlays from disk.
-func (o *Overlay) LoadPersistentOverlays() error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	if o.projectPath != "" {
-		rules, err := loadOverlayFile(o.projectPath)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		o.project = rules
-	}
-
-	if o.userGlobalPath != "" {
-		rules, err := loadOverlayFile(o.userGlobalPath)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		o.userGlobal = rules
-	}
-
-	return nil
-}
-
-// loadOverlayFile reads and parses an overlay YAML file.
-func loadOverlayFile(path string) (Ruleset, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var node yaml.Node
-	if err := yaml.Unmarshal(data, &node); err != nil {
-		return nil, err
-	}
-
-	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
-		root := node.Content[0]
-		if root != nil && root.Kind == yaml.MappingNode {
-			permissionNode := mappingValue(root, "permission")
-			if permissionNode != nil && permissionNode.Kind == yaml.MappingNode {
-				return ParsePermission(permissionNode), nil
-			}
-			return nil, fmt.Errorf("overlay file %q must use root \"permission\" mapping", path)
-		}
-		return nil, fmt.Errorf("overlay file %q has invalid root structure", path)
-	}
-	return nil, fmt.Errorf("overlay file %q has invalid document structure", path)
-}
-
-func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		k := mapping.Content[i]
-		v := mapping.Content[i+1]
-		if k != nil && k.Value == key {
-			return v
-		}
-	}
-	return nil
-}
-
 // MergedRuleset returns the full ruleset with all layers merged.
 // Later rules override earlier ones (last-match-wins).
 func (o *Overlay) MergedRuleset() Ruleset {
@@ -246,51 +181,30 @@ func (o *Overlay) AddSessionRule(role string, r Rule) {
 	})
 }
 
-// AddProjectRule adds a rule to the project overlay and persists it.
-func (o *Overlay) AddProjectRule(role string, r Rule) error {
+// AddPersistentRule records a project or user-global agent-file rule in memory so
+// the current process observes it immediately after the caller persists it.
+func (o *Overlay) AddPersistentRule(role string, r Rule, scope RuleScope, path string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	role = normalizeOverlayRole(role)
-	if o.projectPath == "" {
-		return fmt.Errorf("project overlay path is empty")
+	var target *Ruleset
+	switch scope {
+	case ScopeProject:
+		target = &o.project
+	case ScopeUserGlobal:
+		target = &o.userGlobal
+	default:
+		return fmt.Errorf("persistent rule scope must be project or user-global, got %s", scope.String())
 	}
-	if rulesetContainsRule(o.project, r) {
+	if rulesetContainsRule(*target, r) {
 		return nil
 	}
-	if err := AppendRoleOverlayRule(o.projectPath, r); err != nil {
-		return err
-	}
-	o.project = append(o.project, r)
+	*target = append(*target, r)
 	o.addedRules = append(o.addedRules, AddedRule{
 		Role:    role,
 		Rule:    r,
-		Scope:   ScopeProject,
-		Path:    o.projectPath,
-		AddedAt: time.Now(),
-	})
-	return nil
-}
-
-// AddUserGlobalRule adds a rule to the user-global overlay and persists it.
-func (o *Overlay) AddUserGlobalRule(role string, r Rule) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	role = normalizeOverlayRole(role)
-	if o.userGlobalPath == "" {
-		return fmt.Errorf("user-global overlay path is empty")
-	}
-	if rulesetContainsRule(o.userGlobal, r) {
-		return nil
-	}
-	if err := AppendRoleOverlayRule(o.userGlobalPath, r); err != nil {
-		return err
-	}
-	o.userGlobal = append(o.userGlobal, r)
-	o.addedRules = append(o.addedRules, AddedRule{
-		Role:    role,
-		Rule:    r,
-		Scope:   ScopeUserGlobal,
-		Path:    o.userGlobalPath,
+		Scope:   scope,
+		Path:    strings.TrimSpace(path),
 		AddedAt: time.Now(),
 	})
 	return nil
@@ -303,9 +217,9 @@ func (o *Overlay) AddRule(role string, r Rule, scope RuleScope) error {
 		o.AddSessionRule(role, r)
 		return nil
 	case ScopeProject:
-		return o.AddProjectRule(role, r)
+		return o.AddPersistentRule(role, r, scope, o.projectPath)
 	case ScopeUserGlobal:
-		return o.AddUserGlobalRule(role, r)
+		return o.AddPersistentRule(role, r, scope, o.userGlobalPath)
 	default:
 		return fmt.Errorf("unknown rule scope: %d", scope)
 	}
@@ -355,20 +269,10 @@ func (o *Overlay) RemoveAddedRule(index int) error {
 		o.addedRules = append(o.addedRules[:index], o.addedRules[index+1:]...)
 		return nil
 	case ScopeProject:
-		if added.Path != "" {
-			if err := RemoveRoleOverlayRule(added.Path, added.Rule); err != nil {
-				return err
-			}
-		}
 		o.project = removeLastMatchingRule(o.project, added.Rule)
 		o.addedRules = append(o.addedRules[:index], o.addedRules[index+1:]...)
 		return nil
 	case ScopeUserGlobal:
-		if added.Path != "" {
-			if err := RemoveRoleOverlayRule(added.Path, added.Rule); err != nil {
-				return err
-			}
-		}
 		o.userGlobal = removeLastMatchingRule(o.userGlobal, added.Rule)
 		o.addedRules = append(o.addedRules[:index], o.addedRules[index+1:]...)
 		return nil
@@ -429,14 +333,14 @@ func (o *Overlay) SessionRuleCountForRole(role string) int {
 	return len(o.sessionByRole[normalizeOverlayRole(role)])
 }
 
-// ProjectPath returns the project overlay file path.
+// ProjectPath returns the project agent config path.
 func (o *Overlay) ProjectPath() string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.projectPath
 }
 
-// UserGlobalPath returns the user-global overlay file path.
+// UserGlobalPath returns the user-global agent config path.
 func (o *Overlay) UserGlobalPath() string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
