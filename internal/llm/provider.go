@@ -137,7 +137,7 @@ type ProviderConfig struct {
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
-	keyOrder                   string                       // "sequential" (default) | "random"
+	keyOrder                   string                       // "sequential" (default, non-Codex) | "random" | "smart" (Codex)
 	retryDelayBase             time.Duration                // test hook; <0 disables retry backoff
 	stickyIdx                  int                          // index of the currently pinned key (on_failure rotation)
 	oauthRefresher             *OAuthRefresher              // nil if no OAuth support
@@ -362,11 +362,11 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 	}
 
 	keyRotation := cfg.KeyRotation
-	if keyRotation == "" {
+	if keyRotation != config.KeyRotationPerRequest {
 		keyRotation = config.KeyRotationOnFailure
 	}
 	keyOrder := cfg.KeyOrder
-	if keyOrder == "" {
+	if keyOrder != config.KeyOrderSequential && keyOrder != config.KeyOrderRandom && keyOrder != config.KeyOrderSmart {
 		if cfg.Preset == config.ProviderPresetCodex {
 			keyOrder = config.KeyOrderSmart
 		} else {

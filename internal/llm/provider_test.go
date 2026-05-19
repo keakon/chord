@@ -309,6 +309,26 @@ func TestNewProviderConfig_CodexDefaultsToSmartKeyOrder(t *testing.T) {
 	}
 }
 
+func TestNewProviderConfig_NormalizesUnknownKeySelectionDefensively(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, KeyRotation: "per-call", KeyOrder: "round_robin"}, []string{"k1", "k2"})
+	if p.keyRotation != config.KeyRotationOnFailure {
+		t.Fatalf("keyRotation = %q, want %q", p.keyRotation, config.KeyRotationOnFailure)
+	}
+	if p.keyOrder != config.KeyOrderSequential {
+		t.Fatalf("keyOrder = %q, want %q", p.keyOrder, config.KeyOrderSequential)
+	}
+}
+
+func TestNewProviderConfig_PreservesValidPerRequestRandom(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, KeyRotation: config.KeyRotationPerRequest, KeyOrder: config.KeyOrderRandom}, []string{"k1", "k2"})
+	if p.keyRotation != config.KeyRotationPerRequest {
+		t.Fatalf("keyRotation = %q, want %q", p.keyRotation, config.KeyRotationPerRequest)
+	}
+	if p.keyOrder != config.KeyOrderRandom {
+		t.Fatalf("keyOrder = %q, want %q", p.keyOrder, config.KeyOrderRandom)
+	}
+}
+
 func TestSelectKey_CodexSmartTreatsSnapshotAsHeadroomNotSoftCooldown(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	reset := time.Now().Add(time.Hour)

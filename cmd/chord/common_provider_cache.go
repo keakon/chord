@@ -42,6 +42,9 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 	if err != nil {
 		return cfg, fmt.Errorf("normalize provider %q: %w", provName, err)
 	}
+	if err := config.ValidateProviderKeySelection(provName, normalized); err != nil {
+		return cfg, err
+	}
 
 	// Auto-detect and set type if not configured
 	if normalized.Type == "" {
