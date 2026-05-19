@@ -20,7 +20,43 @@
 
 ## Compaction（上下文压缩）
 
-将早期对话压缩为摘要的运行时过程，让长会话在接近模型上下文窗口上限时仍能继续。自动压缩表示 Chord 会在请求过大前自动触发；也可以手动执行 `/compact`。详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩)。
+将早期对话压缩为摘要的运行时过程，让长会话在接近模型上下文窗口上限时仍能继续。自动压缩表示 Chord 会在请求过大前自动触发；也可以手动执行 `/compact`。详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)。
+
+## Reduction（上下文剪裁）
+
+每次 LLM 请求前执行的轻量级确定性裁剪。根据工具输出的年龄和大小启发式规则，从当前 prompt 中裁剪过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [配置 — 上下文剪裁](./configuration_CN.md#上下文剪裁reduction)。
+
+## Fast mode
+
+可通过 `/fast on|off` 切换的快速响应模式。启用后，Chord 会在支持的模型上发送 provider 专用 fast 参数：OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`。只有 `supports_fast: true` 的模型才会真正发送这些参数。Fast mode 是向 provider 发出的请求，不保证一定降延迟。
+
+## Loop mode
+
+Chord 自主连续执行任务的模式，适合长时间任务。loop 模式下 agent 会持续处理任务、工具和结果，直到通过 `Done` 工具申请退出。为保留完整工作状态，loop 模式会禁用上下文压缩和上下文剪裁。
+
+## Thinking
+
+部分模型在最终回答前执行的扩展推理 / 思考阶段。Chord 通过模型配置里的 `thinking.type`、`thinking.effort`、`thinking.budget`、`thinking.level` 控制不同 provider 的 thinking 行为；`thinking_translation` 可在 TUI 中附加 thinking 卡片译文。
+
+## Turn（用户轮次）
+
+一次完整的用户到 agent 交互：你发送消息，Chord 处理，模型回复文本和 / 或工具调用，工具执行，模型可能继续回复，最终 agent 回到 idle。上下文剪裁的 `*_age_turns` 使用用户轮次计数。
+
+## Session
+
+持久化会话记录，默认保存在 `<state-dir>/sessions/<project-key>/` 下。它包含消息历史、turn 元数据和上下文压缩归档，并会跨重启保留。
+
+## OAuth
+
+Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存在 `auth.yaml`，将额度快照、reset 时间等频繁变化的运行时状态保存在 `auth.state.yaml`。使用 `chord auth` 登录；无桌面 / SSH 环境可用 `chord auth codex --device-code`。
+
+## Key rotation
+
+控制何时重新选择 provider credential / API key 的策略。`on_failure` 表示固定当前 key，失败或冷却时才切换；`per_request` 表示每次请求前重新选择，适合多个独立 key 做负载均衡。它不会切换模型。
+
+## Key order
+
+控制在可用 key 中如何选择的策略。`sequential` 按稳定顺序 / 最久未使用优先；`random` 随机选择；`smart` 仅适用于 Codex，会结合额度快照、soft cooldown 和 reset 时间选择 OAuth 账号。
 
 ## Context window（上下文窗口）
 

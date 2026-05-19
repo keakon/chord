@@ -274,24 +274,34 @@ local-provider:
 
 不要依赖未设置的环境变量来表示空 key——未设置的 `$ENV_VAR` 会被视为缺失凭据而过滤掉。
 
+## Provider key 选择
+
+Chord 支持多个 API key / OAuth 账号时的两层选择策略：`key_rotation` 决定何时重新选 key，`key_order` 决定在候选 key 中如何选择。
+
+- `key_rotation: on_failure`（默认）：尽量固定使用当前 key，只有失败、冷却或不可用时才切换。
+- `key_rotation: per_request`：每次请求前都重新选择 key，适合多个独立 key 做负载均衡。
+- `key_order: sequential`（默认的非 Codex 行为）：按可用 key 的稳定顺序选择，通常接近“最久未使用优先”。
+- `key_order: random`：在可用 key 中随机挑选。
+- `key_order: smart`：仅 Codex provider 支持。会优先健康、额度更充足、reset 更近的 OAuth 账号。
+
+`key_rotation` 只轮换 credential / API key，不会轮换模型；模型选择仍由 model pool 的 sticky cursor 和 fallback 逻辑控制。
+
+在 loop 模式下，Chord 仍尊重用户显式配置的 `key_rotation` / `key_order`。如果希望 Codex 长任务保持 transport / cache 连续性，建议保留默认 `key_rotation: on_failure`；如果希望多账号分摊额度，则可显式启用 `per_request`。
+
 ## OAuth 登录
 
 当前仅配置了 `preset: codex` 的 provider 支持 OAuth。
 
-对 Codex provider，`key_order` 额外支持：
+对 Codex provider，建议只写 `preset: codex` 和模型配置，不要手动覆盖 `api_url`、`token_url`、`client_id`、`type`、`store`、`responses_websocket`、`supports_fast` 等由 preset 管理的字段。Codex preset 会自动选择官方 OAuth transport、Responses endpoint、WebSocket / cache 相关默认值和 fast-mode 能力；手动改这些字段通常不会提升效果，反而可能破坏 WebSocket 增量复用、prompt cache 或官方接口兼容性。
 
-- `sequential`
-- `random`
-- `smart`
+Codex OAuth 账号的选择由 [Provider key 选择](#provider-key-选择) 中的 `key_rotation` / `key_order` 控制。Codex 默认使用 `key_order: smart`，会结合额度快照、soft cooldown 和 reset 时间选择更合适的账号。
 
-当 `preset: codex` 且未显式配置 `key_order` 时，Chord 默认使用 `key_order: smart`；其它 provider 仍默认 `sequential`。
+`smart` 会在可选 Codex OAuth 账号之间优先：
 
-`smart` 不改变现有 `key_rotation` 语义，但会在可选的 Codex OAuth 账号之间优先：
-
-- 优先共享缓存里显示 **两种** 跟踪窗口都仍有剩余额度的账号；
-- 其次优先至少有一种窗口仍有剩余额度的账号；
-- 在已有 rate-limit snapshot 时再比较剩余额度头寸；
-- 候选差不多时再优先更早到达已知 reset 时间的账号；
+- 共享缓存里显示 **两种** 跟踪窗口都仍有剩余额度的账号；
+- 至少有一种窗口仍有剩余额度的账号；
+- 在已有 rate-limit snapshot 时剩余额度更高的账号；
+- 候选差不多时更早到达已知 reset 时间的账号；
 - 如果没有更优信息，仍会回退尝试未知或缓存较旧的账号。
 
 当 Codex client 变为活跃状态后，Chord 还可能在后台探测其他 OAuth slot，以刷新缓存的 headroom 快照。这个 warm-up 是 best-effort、低并发的，会在活跃 client 被替换时取消，并且在账号不可用时可能同步更新持久化的 OAuth 凭据状态。
@@ -443,7 +453,7 @@ providers:
 - `limit.context`：已知时表示总请求窗口大小。
 - `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，Chord 会按 `limit.context - 有效请求输出` 推导输入预算；有效请求输出来自 `max_output_tokens`，并受 `limit.output` 上限约束。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
 - `limit.output`：模型最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
-- `reasoning`：OpenAI reasoning 选项，主要用于 Responses 风格的 reasoning 模型。`summary` 控制推理摘要输出；variant 通常覆盖 `reasoning.effort`。
+- `reasoning`：OpenAI / OpenAI-compatible reasoning 选项。`type: chat-completions` 会把 `reasoning.effort` 发送为顶层 `reasoning_effort`，并使用 `max_completion_tokens`；`type: responses` 会把 `reasoning.effort` 和 `reasoning.summary` 放进 `reasoning` 对象。`summary` 只对支持 Responses reasoning summary 的模型有意义；variant 通常覆盖 `reasoning.effort`。
 - `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
@@ -464,7 +474,7 @@ providers:
 
 ## Provider 请求压缩
 
-Provider 级别的 `compress` 控制上游 HTTP 请求体的 gzip 压缩。它和上下文压缩是两回事——只影响请求传输编码，不会总结或移除对话历史。
+Provider 级别的 `compress` 控制上游 HTTP 请求体的 gzip 压缩。它和上下文管理（compaction / reduction）是两回事——只影响请求传输编码，不会总结或移除对话历史。
 
 ```yaml
 providers:
@@ -644,9 +654,29 @@ permission:
   Write: ask
 ```
 
-## 上下文压缩
+## 上下文压缩与上下文剪裁
 
-主会话接近模型上下文上限时，Chord 可自动执行持久化压缩。常见配置：
+Chord 提供两层互补的上下文管理机制：**上下文压缩（Compaction）**调用 LLM 生成摘要并持久化改写会话历史，**上下文剪裁（Reduction）**在每次请求前用启发式规则裁剪 prompt。两者分别作用于持久化历史和单次请求，各司其职。
+
+### 对比速览
+
+| 特性 | 上下文压缩（Compaction） | 上下文剪裁（Reduction） |
+|------|-------------------------|------------------------|
+| 做了什么 | 调用 LLM 生成结构化摘要，归档旧历史，用摘要替代原文 | 按规则裁剪本次请求中过时的工具输出 |
+| 是否落盘 | ✅ 改写 session 文件 | ❌ session 文件不变 |
+| 是否调用模型 | ✅（可配置专用模型池） | ❌（纯启发式规则） |
+| 触发时机 | 上下文超过阈值的百分比 / 手动 `/compact` / 异常恢复 | 每次 LLM 请求前自动执行 |
+| 典型耗时 | 数秒到数十秒（需等待 LLM 回复） | 毫秒级（内存内规则匹配） |
+| 用户感知 | TUI 显示"Compacting context..."进度 | 无感知（静默） |
+| loop 模式 | 禁用 | 禁用 |
+
+**两者的关系**：Reduction 是轻量级的第一道防线——每次请求前自动裁剪过时的工具输出，减缓上下文膨胀速度。当 Reduction 仍不够、上下文持续增长到 Compaction 阈值时，Compaction 启动做深度压缩。大多数用户只需关注 Compaction 配置；Reduction 的默认值已经适配常见场景，通常无需调整。
+
+### 上下文压缩（Compaction）
+
+当主会话上下文使用量接近模型上限时，Chord 会自动触发上下文压缩。压缩过程调用 LLM 分析当前对话，生成结构化摘要（目标、进度、关键决策、文件证据等），归档旧消息，用摘要替换对话历史。压缩结果持久保存到磁盘，会话文件体积显著缩小。
+
+**最小配置**（启用自动压缩）：
 
 ```yaml
 context:
@@ -655,53 +685,19 @@ context:
     model_pool: compact
 ```
 
-请求级 reduction 与持久化压缩不同：它只缩短“当前这次请求”发送给模型的 prompt，不会改写保存下来的会话历史。loop 模式会完全禁用这类请求级剪裁，以便长时间任务保留完整本地状态。
+**配置字段说明**：
 
-大多数用户不需要配置 `context.reduction`。内置默认值是偏保守的启发式，来自常见 Chord 会话形态：确认 / 权限结果很快过时；大型 `Read` / `Grep` / `Glob` 输出通常可以在需要时重新读取，所以一轮之后即可剪裁；成功 Shell 输出保留稍久；失败结果保留更久，因为失败原因经常仍有价值；同时用最小 tool-result 数量避免小会话被过早处理。这些默认值不是对历史会话做正式统计拟合得出的。如果不确定，建议保持默认。
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `threshold` | 浮点数 | `0.8` | 触发自动压缩的上下文使用率阈值。取值 `0` ~ `1`，例如 `0.8` 表示用量达到可用输入预算的 80% 时触发；设为 `0` 可关闭自动压缩。 |
+| `model_pool` | 字符串 | 克隆当前 agent 模型池 | 执行压缩的专用模型池名。建议使用低成本/快速模型以节省开销。 |
+| `reserved` | 整数 | `0` | 为 tokenizer 误差、工具 schema 开销、压缩恢复安全等预留的 token 余量。计算触发阈值时先从输入预算中扣除。 |
+| `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
+| `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 
-只有在你有便宜/快速模型池、并希望预留给后续 cache-aware reduction 判定时，才需要设置 `context.reduction.model_pool`。当前确定性剪裁不依赖这个字段；未设置时不会调用辅助模型。
+**触发阈值如何计算**：以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。TUI 信息面板和底部栏的 `Context` 百分比使用同一口径，与自动压缩阈值保持对齐。
 
-完整覆盖示例：
-
-```yaml
-context:
-  reduction:
-    model_pool: fast
-    confirm_age_turns: 2
-    error_age_turns: 3
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 1
-    read_like_output_bytes: 2500
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    min_tool_results_prune: 8
-```
-
-这些值的读法：
-
-- `*_age_turns` 统计工具结果之后又经过了多少个**用户**轮次。例如 `read_like_age_turns: 1` 表示大型读取/搜索结果从下一次用户发言开始就可以被缩短。
-- `*_bytes` 是该类别参与剪裁的最小输出字节数；小输出会保持完整。
-- `min_tool_results_prune` 是安全门槛：会话中至少有这么多 tool result 消息时，Chord 才尝试确定性请求级剪裁。
-
-字段说明与调参建议：
-
-- `confirm_age_turns`（默认 `2`）：旧确认 / 权限结果的年龄阈值。只有当权限确认信息明显挤占 prompt 时才建议调低。
-- `error_age_turns`（默认 `3`）：失败工具结果的年龄阈值；失败状态会保留。除非失败输出特别嘈杂，否则建议不低于成功结果阈值。
-- `shell_success_age_turns`（默认 `2`）+ `shell_success_bytes`（默认 `4000`）：成功 Shell 输出的年龄与大小阈值。如果构建/测试日志经常是关键上下文，可调高 bytes；日志特别多的项目可调低。
-- `read_like_age_turns`（默认 `1`）+ `read_like_output_bytes`（默认 `2500`）：读取/搜索类工具输出的年龄与大小阈值。这类内容通常可按需重新读取，因此可以更激进。
-- `stale_age_turns`（默认 `4`）+ `stale_output_bytes`（默认 `1500`）：其他旧工具结果的兜底年龄与大小阈值。它比 read-like 更保守，因为内容不一定容易重建。
-- `min_tool_results_prune`（默认 `8`）：如果希望中小型会话完全不动，可调高；只有短会话也经常工具很多并接近上下文上限时才建议调低。
-
-未设置或非正数的阈值字段使用以上默认值。项目级配置可按字段覆盖全局配置。
-
-设置 `context.compaction.model_pool` 可指定专用压缩模型池。未设置时，压缩会克隆当前 agent 的模型池，并从当前粘性游标开始，而不是回退到单个模型。
-
-当 `context.compaction.threshold > 0` 时启用自动压缩；设置 `context.compaction.threshold: 0` 可关闭。
-
-自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compaction.threshold`。TUI 信息面板和底部栏里的 `Context` 百分比也使用这套输入预算口径，因此会与自动压缩阈值对齐，而不是按模型总上下文窗口计算。
-
-可通过配置预留 headroom，用于 tokenizer 漂移、tool schema 开销和压缩/恢复安全余量：
+**预留 headroom 示例**：
 
 ```yaml
 context:
@@ -710,9 +706,11 @@ context:
     reserved: 16000
 ```
 
-例如当模型配置为 `input: 272000` 时，以上配置会让自动压缩按 `256000` 的可用输入预算触发。
+以模型 `input: 272000` 为例，扣除 `reserved` 后可用预算为 `256000`，当上下文达到 `256000 × 0.8 = 204800` tokens 时触发自动压缩。设置合理的 `reserved` 可避免由于 tokenizer 计算误差或工具描述开销导致压缩触发偏晚。
 
-当 provider 同时公布“总上下文窗口”和“单独的输入上限”时，已知限制的话建议三个字段都写明：
+除自动触发外，你也可通过 TUI 的 `/compact` 命令随时手动压缩，或使用 `/compact --no` 临时关闭当前会话的后续自动压缩。
+
+当 provider 同时公布"总上下文窗口"和"单独的输入上限"时，已知限制则建议三个字段都写明：
 
 ```yaml
 providers:
@@ -725,7 +723,59 @@ providers:
           output: 128000
 ```
 
-原因是降低 `output` 并不会提高 provider 的硬输入上限。若所选模型输入预算较小，或 provider 明确区分 input/output limit，建议保持自动压缩开启。
+降低 `output` 并不会提高 provider 的硬输入上限。若所选模型输入预算较小，或 provider 区分 input/output limit，建议保持自动压缩开启。
+
+### 上下文剪裁（Reduction）
+
+每次向 LLM 发送请求前，Chord 会用一套确定性规则检查对话中的工具输出，对过时的大段内容做裁剪。**这只影响本次请求的 prompt，不会改写磁盘上的会话文件。**
+
+> **大多数用户不需要配置这一节。** 内置默认值已适配常见场景，以下参数仅在需要精细控制时调整。
+
+**剪裁规则**：按工具输出的类型和时效分五类处理，类别不同，裁剪激进程度也不同。
+
+| 类别 | 典型场景 | 年龄阈值 | 大小阈值 | 设计意图 |
+|------|----------|----------|----------|----------|
+| 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
+| 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
+| Shell 成功 | `git`、`go test`、`npm run` 等命令输出 | `shell_success_age_turns`（默认 2 轮后） | `shell_success_bytes`（默认 4000 字节以上才剪） | 构建/测试输出有时是关键上下文，但通常可重新执行 |
+| 读取/搜索 | `Read`、`Grep`、`Glob` 等工具输出 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 2500 字节以上才剪） | 文件内容可随时重新读取，裁剪最激进 |
+| 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 4 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
+
+年龄参数说明：
+
+- `*_age_turns` 统计的是工具结果之后又经过了多少个**用户轮次**（你发送消息的次数）。例如 `read_like_age_turns: 1` 表示大型读取结果从你下一次发言起就可能被裁剪。
+- `*_bytes` 是该类别参与裁剪的**最小输出字节数**。小于此值的输出保留完整内容——短输出不需要裁剪。
+- `min_tool_results_prune`（默认 8）是**安全门槛**：会话中至少有这么多条工具结果时，Chord 才启动剪裁，避免小会话被过早处理。
+
+**调参思路**：
+
+| 你遇到的情况 | 建议 |
+|--------------|------|
+| 每次对话很短但工具输出特别多 | 降低 `min_tool_results_prune`（如 `4`） |
+| Prompt 中权限确认信息过多 | 降低 `confirm_age_turns`（如 `1`） |
+| 构建/测试日志经常需要回头看 | 调高 `shell_success_bytes`（如 `16000`） |
+| 文件内容经常需要回头查阅 | 调高 `read_like_age_turns`（如 `3`）和 `read_like_output_bytes`（如 `8000`） |
+| 工具输出都很重要不想丢 | 整体调高各 `*_age_turns` 和 `*_bytes` |
+
+完整配置示例（同时展示所有默认值）：
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 4000
+    read_like_age_turns: 1
+    read_like_output_bytes: 2500
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+未设置或非正数的字段使用默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
+
+> `context.reduction.model_pool` 保留用于未来可能的 cache-aware 剪裁判定。当前确定性剪裁不依赖此字段，不设置不会调用模型。
 
 ## Provider/model 诊断
 
@@ -752,10 +802,10 @@ chord doctor models --pool thinking
 
 | Key                     | 类型                  | 默认值                          | 适用层级                 | 简述                                                                                                                  |
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
+| `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`key_rotation`、`key_order`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭                            | global / project         | 可选的 thinking / reasoning 卡片附加翻译。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
-| `context`               | object                | 见下文                          | global / project         | `compaction.threshold`、`reduction.model_pool`、`compaction.model_pool`、`compaction.reserved`。见 [上下文压缩](#上下文压缩)。 |
+| `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
@@ -783,6 +833,8 @@ chord doctor models --pool thinking
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
 | `api_url`     | string | 接口地址。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。                                                |
 | `preset`      | string | 当前可选 `codex`（OpenAI Codex / ChatGPT OAuth）。                                                                                                  |
+| `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
+| `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
 | `compress`    | bool   | gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
 
@@ -794,7 +846,7 @@ chord doctor models --pool thinking
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compaction.threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
-| `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |
+| `reasoning`       | object | OpenAI reasoning 选项。Chat Completions 发送 `reasoning.effort` 为 `reasoning_effort`；Responses 发送 `reasoning.effort` / `reasoning.summary` 到 `reasoning` 对象。 |
 | `text.verbosity`  | string | OpenAI 文本详细程度提示，支持的模型生效。                                                                      |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |

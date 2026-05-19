@@ -130,7 +130,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可在空闲时切换手动 server
-- `/compact`：手动触发上下文压缩
+- `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)
 - `/fast on` / `/fast off`：开启或关闭快速响应模式，对后续模型请求生效（包括尚未开始的后续 retry round）。
   - 只有启用了 `supports_fast` 能力的模型才会发送 fast 请求参数。省略 `supports_fast` 时，`preset: codex` 模型默认启用，其他模型默认关闭。
   - 对 OpenAI Responses：启用时会设置 `service_tier="fast"`。

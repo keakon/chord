@@ -224,11 +224,50 @@ curl -I https://api.openai.com/v1
 
 维护项目本身时，还可进一步使用仓库内的性能检查脚本与 pprof。例如可运行 `go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingLongTextCardProfile' -cpuprofile cpu.out -memprofile mem.out`，继续区分剩余热点是在 block 渲染还是 viewport 切片。
 
+## 上下文压缩不触发 / 触发过频繁
+
+**现象**：上下文使用率很高但一直没有压缩；或相反，频繁压缩影响使用体验。
+
+排查步骤：
+
+1. 确认 `context.compaction.threshold` 是否已设置且大于 0（0 表示关闭自动压缩）。
+2. 检查 TUI 底部栏或信息面板的 `Context` 百分比。它按**可用输入预算**计算，不是按总窗口大小，所以可能比预期的低（详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)）。
+3. 如果设置了 `context.compaction.reserved`，由于会先扣除预留再应用 `threshold`，自动压缩会在更低的绝对 token 数触发；若压缩过于频繁，可检查 reserved 是否设得过大。
+4. `/compact --no` 会临时关闭当前会话的自动压缩；重新启动会话或执行 `/compact` 可恢复。
+
+**注意**：loop 模式会完全禁用自动压缩，以便长时间任务保留完整状态。
+
+## 上下文剪裁误裁重要内容
+
+**现象**：模型似乎"忘了"之前的工具输出，但会话文件里内容还在。
+
+排查步骤：
+
+1. 这是上下文剪裁（Reduction）的正常行为：每次 LLM 请求前，过时的工具输出会被从 prompt 中裁剪，但**不会修改**磁盘上的会话文件。
+2. 如果你经常需要回头参考较早的读取/搜索结果，可调高 `read_like_age_turns` 和 `read_like_output_bytes`。
+3. 如果构建/测试日志很重要，可调高 `shell_success_bytes`。
+4. 如果希望更保守的裁剪行为，整体调高各 `*_age_turns` 和 `*_bytes` 参数。
+
+详见 [配置 — 上下文剪裁](./configuration_CN.md#上下文剪裁reduction)。
+
+## 请求被拒绝：`context length` / `input too large`
+
+**现象**：provider 返回类似 "context length exceeded" 或 "input too large" 的错误。
+
+排查步骤：
+
+1. 确认模型 `limit.input` 和 `limit.context` 配置正确。如果 provider 公布了单独的输入上限，必须同时配置 `limit.input`。
+2. 检查 `context.compaction.threshold` 是否过高导致自动压缩触发偏晚。
+3. 增大 `context.compaction.reserved` 可提前触发压缩，避免请求被拒。
+4. 如果频繁出现，可使用 `/compact` 立即手动压缩，或降低 `threshold` 提前触发自动压缩。
+5. 在 `log_level: debug` 的日志中搜索 `oversize`，确认是否触发了 oversize recovery（压缩后再重试）。
+
 ## 何时检查日志
 
 遇到以下问题时，优先查看日志：
 
 - provider 请求失败但终端只显示摘要错误
+- 上下文压缩未触发 / 上下文超限
 - MCP / LSP 初始化异常
 - hook 执行结果与预期不符
 - headless 集成事件不完整

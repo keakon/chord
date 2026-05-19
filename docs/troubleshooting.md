@@ -203,11 +203,50 @@ If scrolling, streaming output, or large message rendering feels noticeably slow
 
 - for render hotspot analysis, maintainers can profile `go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingLongTextCardProfile' -cpuprofile cpu.out -memprofile mem.out` and inspect the remaining cost in block rendering vs viewport slicing
 
+## Compaction not triggering / triggering too often
+
+**Symptom**: context usage is high but compaction never runs; or the opposite — frequent compaction disrupts your workflow.
+
+What to check:
+
+1. Verify `context.compaction.threshold` is set and greater than 0 (0 disables automatic compaction).
+2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Configuration — Context compaction](./configuration.md#context-compaction)).
+3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
+4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
+
+Note: loop mode fully disables automatic compaction so long-running tasks can retain their full state.
+
+## Reduction trimming important content
+
+**Symptom**: the model seems to "forget" earlier tool output, but the session file on disk still contains it.
+
+What to check:
+
+1. This is normal behavior for context reduction: stale tool output is trimmed from each LLM request prompt, but **never modifies** session files on disk.
+2. If you frequently need to revisit earlier read/search results, raise `read_like_age_turns` and `read_like_output_bytes`.
+3. If build/test logs are important context, raise `shell_success_bytes`.
+4. For more conservative trimming behavior, raise all `*_age_turns` and `*_bytes` values.
+
+See [Configuration — Context reduction](./configuration.md#context-reduction).
+
+## Requests rejected: "context length" / "input too large"
+
+**Symptom**: the provider returns an error like "context length exceeded" or "input too large".
+
+What to check:
+
+1. Verify that `limit.input` and `limit.context` are correctly configured for your model. If the provider publishes a separate input cap, you must also configure `limit.input`.
+2. Check if `context.compaction.threshold` is too high, causing automatic compaction to fire too late.
+3. Increase `context.compaction.reserved` to trigger compaction earlier, avoiding rejected requests.
+4. If this happens frequently, use `/compact` to manually compact immediately, or lower `threshold`.
+5. With `log_level: debug`, search the logs for `oversize` to confirm whether oversize recovery (compact then retry) was triggered.
+
 ## When to check logs
 
 Check logs first when you encounter:
 
 - provider request failures where the terminal only shows a summarized error
+- context compaction not triggering / context limit issues
 - MCP / LSP initialization errors
 - hook execution results that differ from expectations
 - incomplete headless integration events

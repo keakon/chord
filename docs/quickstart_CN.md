@@ -59,7 +59,7 @@ chord doctor models
 
 如果你选择的是 Codex OAuth 路径，向导会在结束前直接完成 OAuth 登录。它会创建一个 `preset: codex` provider，并自动配置这些起始模型：`gpt-5.2`、`gpt-5.3-codex`、`gpt-5.4`、`gpt-5.5`。
 
-如果后续要使用持续执行模式，请记住：loop 模式只能通过 `Done` 工具申请退出，而 `Done` 现在要求在 `report` 参数中提供最终完成报告。
+如果后续要使用持续执行模式，请记住：loop 模式只能通过 `Done` 工具申请退出，而 `Done` 现在要求在 `report` 参数中提供最终完成报告。注意 loop 模式下会自动禁用上下文压缩和上下文剪裁，以便长时间任务保留完整工作状态。
 
 ## 3. 运行
 

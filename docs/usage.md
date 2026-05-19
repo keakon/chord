@@ -130,7 +130,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
-- `/compact`: manually trigger context compaction
+- `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Configuration — Context compaction](./configuration.md#context-compaction)
 - `/fast on` / `/fast off`: enable or disable fast-response mode for subsequent model requests (including later retry rounds that have not started yet).
   - Fast request parameters are sent only for models whose `supports_fast` capability is enabled. Omitted `supports_fast` defaults to enabled for `preset: codex` models and disabled elsewhere.
   - OpenAI Responses: sets `service_tier="fast"` when enabled.

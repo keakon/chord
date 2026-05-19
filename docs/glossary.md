@@ -20,7 +20,43 @@ A named parameter preset for a single model — for example `claude-opus-4.7@hig
 
 ## Compaction
 
-The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Configuration — Context compaction](./configuration.md#context-compaction).
+The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Configuration — Compaction](./configuration.md#context-compaction).
+
+## Reduction (context reduction)
+
+A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Configuration — Reduction](./configuration.md#context-reduction).
+
+## Fast mode
+
+A user-togglable mode (`/fast on|off`) that sends provider-specific fast-mode request parameters to reduce response latency. For OpenAI Responses this requests `service_tier="fast"`; for Anthropic it requests `speed="fast"`. Only models with `supports_fast: true` include the fast parameters. Fast mode is a *request* to the provider, not a guarantee — the provider may ignore it under load.
+
+## Loop mode
+
+A specialized execution mode where Chord runs autonomously in a continuous loop — processing tasks, tools, and results — without waiting for user input. Essential for long-running tasks. While loop mode is active, both context reduction (request-level trimming) and automatic compaction are disabled so the agent can retain its full working state across iterations.
+
+## Thinking
+
+An extended reasoning or chain-of-thought phase that some models perform before producing their final answer. In Chord, thinking behavior is configured per model via `thinking.type`, `thinking.effort`, `thinking.budget`, and `thinking.level`. For Gemini, `thinking.level` maps to the model's thinking level (e.g. `low`, `high`). The optional `thinking_translation` feature appends translated thinking cards in the TUI.
+
+## Turn
+
+A single user-to-agent interaction round: you send a message → Chord processes it → the model responds with text and/or tool calls → tools execute → the model potentially responds again → the agent becomes idle. Many age-based settings (especially reduction thresholds) use *user turns* as the unit: one user turn is one complete message you send.
+
+## Session
+
+A persistent conversation record stored under `<state-dir>/sessions/<project-key>/`. Each session contains the full message history, turn metadata, and compaction archives. Sessions are project-scoped and survive restarts.
+
+## OAuth
+
+An authentication flow (device-code flow) used by Codex preset providers to obtain API access tokens. Chord stores stable OAuth fields in `auth.yaml` and frequently changing runtime state (quota snapshots, reset times) in `auth.state.yaml`. Use `chord auth` to log in; `chord auth codex --device-code` for headless environments.
+
+## Key rotation
+
+The strategy that controls when Chord reselects a provider credential / API key. `on_failure` keeps using the current key until it fails or cools down; `per_request` reselects before every request and is useful for load balancing across independent keys. It does not switch models.
+
+## Key order
+
+The strategy that controls how Chord chooses among selectable keys. `sequential` uses stable order / least-recently-used selection; `random` chooses randomly; `smart` is Codex-only and considers quota snapshots, soft cooldown, and reset timing for OAuth accounts.
 
 ## Context window
 

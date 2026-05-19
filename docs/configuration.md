@@ -291,24 +291,34 @@ local-provider:
 
 Do not rely on an unset environment variable for this case. An unset `$ENV_VAR` is treated as a missing credential and is filtered out.
 
+## Provider key selection
+
+When a provider has multiple API keys / OAuth accounts, Chord uses two settings: `key_rotation` controls when Chord reselects a key, and `key_order` controls how Chord chooses among selectable keys.
+
+- `key_rotation: on_failure` (default): keep using the current key until it fails, cools down, or becomes unusable.
+- `key_rotation: per_request`: reselect a key before every request; useful for load balancing across independent keys.
+- `key_order: sequential` (default for non-Codex providers): choose in stable key order, generally preferring the least-recently-used selectable key.
+- `key_order: random`: choose randomly among selectable keys.
+- `key_order: smart`: Codex providers only. Prefer healthy OAuth accounts with better quota headroom and reset timing.
+
+`key_rotation` only rotates credentials / API keys. It does not rotate models; model selection still follows the model pool sticky cursor and fallback logic.
+
+Loop mode still follows the configured `key_rotation` / `key_order`. For Codex long-running loops, keep the default `key_rotation: on_failure` if you prefer stable transport/cache continuity; explicitly use `per_request` only when you want to distribute quota across multiple accounts.
+
 ## OAuth
 
 Only providers with `preset: codex` are treated as OAuth providers.
 
-For Codex providers, `key_order` supports an additional value:
+For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supports_fast` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, and fast-mode capability; overriding these fields usually does not improve quality and may degrade WebSocket incremental reuse, prompt-cache behavior, or official API compatibility.
 
-- `sequential`
-- `random`
-- `smart`
+Codex OAuth account selection is controlled by `key_rotation` / `key_order` in [Provider key selection](#provider-key-selection). Codex defaults to `key_order: smart`, which considers quota snapshots, soft cooldown, and reset timing when choosing an account.
 
-`preset: codex` defaults to `key_order: smart` when `key_order` is omitted. Other providers still default to `sequential`.
+`smart` ranks selectable Codex OAuth accounts by preferring:
 
-`smart` keeps existing `key_rotation` behavior, but ranks selectable Codex OAuth accounts by:
-
-- preferring accounts whose shared cached snapshot shows **both** tracked windows still have remaining quota;
-- then preferring accounts where at least one tracked window still has remaining quota;
-- then preferring higher remaining headroom when rate-limit snapshots are available;
-- then preferring the nearer known reset time when candidates are otherwise similar;
+- accounts whose shared cached snapshot shows **both** tracked windows still have remaining quota;
+- then accounts where at least one tracked window still has remaining quota;
+- then higher remaining headroom when rate-limit snapshots are available;
+- then the nearer known reset time when candidates are otherwise similar;
 - still falling back to unknown / stale candidates when no better option exists.
 
 When a Codex client becomes active, Chord may also background-probe additional OAuth slots to refresh cached headroom snapshots. That warm-up is best-effort, low-concurrency, cancels when the active client is replaced, and may update persisted OAuth credential status when an account becomes unusable.
@@ -474,9 +484,7 @@ Model fields used in the example:
 - `limit.input`: use this only when the provider also publishes a separate input cap. Chord uses it to decide when to compact before the prompt is too large and how to retry after a provider rejects a too-large request. If omitted, Chord derives the input budget from `limit.context` minus the effective requested output (`max_output_tokens`, capped by `limit.output`). It does not by itself reduce requested output tokens; output clamping follows `limit.output`, `max_output_tokens`, and any total-context (`limit.context`) remainder.
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
-- `reasoning`: OpenAI reasoning options, mainly for Responses-style reasoning
-  models. `summary` controls reasoning summary output; variants commonly
-  override `reasoning.effort`.
+- `reasoning`: OpenAI / OpenAI-compatible reasoning options. For `type: chat-completions`, `reasoning.effort` is sent as top-level `reasoning_effort` and Chord uses `max_completion_tokens`; for `type: responses`, `reasoning.effort` and `reasoning.summary` are sent inside the `reasoning` object. `summary` is only meaningful for models that support Responses reasoning summaries; variants commonly override `reasoning.effort`.
 - `text.verbosity`: OpenAI text verbosity hint, where supported.
 - `thinking`: Anthropic extended-thinking options. `type: adaptive` lets Chord
   derive an appropriate thinking budget from `effort`; variants can override
@@ -513,7 +521,7 @@ Common uses include:
 ## Provider request compression
 
 Provider-level `compress` controls gzip compression for upstream request bodies.
-It is different from context compaction: it only changes HTTP request transfer
+It is different from context management (compaction / reduction): it only changes HTTP request transfer
 encoding and does not summarize or remove conversation history.
 
 ```yaml
@@ -713,74 +721,70 @@ permission:
   Write: ask
 ```
 
-## Context compaction
+## Context management: Compaction vs. Reduction
 
-When the main conversation approaches the model context limit, Chord can run
-durable compaction automatically. Common settings:
+Chord provides two complementary context management layers:
+**context compaction** rewrites the session history with an LLM-generated
+summary, while **context reduction** trims stale tool output from each
+individual request prompt. They operate at different levels and serve different
+purposes.
+
+### Quick comparison
+
+| Aspect | Context compaction | Context reduction |
+|--------|-----------|-----------|
+| What it does | Calls an LLM to generate a structured summary and replaces old history | Applies deterministic rules to trim stale tool output from the current request |
+| Writes to disk | ✅ Rewrites session files | ❌ Session files unchanged |
+| Uses an LLM | ✅ (configurable model pool) | ❌ (heuristic rules only) |
+| When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
+| Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
+| User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
+| Loop mode | Disabled | Disabled |
+
+**How they work together**: Reduction is the lightweight first line of defense —
+it trims stale tool output before every request, slowing down context growth.
+When reduction alone is not enough and the context keeps growing past the
+compaction threshold, compaction steps in for a deep compression pass. Most
+users only need to care about compaction settings; reduction defaults are
+already tuned for common usage patterns.
+
+### Context compaction
+
+When the main conversation approaches the model context limit, Chord
+automatically triggers context compaction. The compaction process calls an LLM
+to analyze the current conversation, generates a structured summary (covering
+goals, progress, key decisions, file evidence, etc.), archives old messages,
+and replaces the conversation history with the summary. The compacted session
+is persisted to disk.
+
+**Minimal config** (enable automatic compaction):
 
 ```yaml
 context:
   compaction:
     threshold: 0.8
     model_pool: compact
-    reserved: 16000
 ```
 
-Request-level reduction is different from durable compaction: it only shortens the prompt sent for the current request. The saved session history is not rewritten, and loop mode disables this request pruning entirely so long-running loop tasks keep full local state.
+**Configuration fields**:
 
-Most users do not need to configure `context.reduction`. The built-in defaults are conservative heuristics chosen from common Chord transcript shapes: permission confirmations become stale quickly; large `Read` / `Grep` / `Glob` outputs are usually recoverable from files after one more user turn; successful shell output is kept a little longer; failures are kept longer because the reason can matter; and a minimum tool-result count avoids spending effort on small conversations. They are not the result of a formal statistical fit to historical sessions. If you are unsure, keep the defaults.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `threshold` | float | `0.8` | Context usage ratio that triggers automatic compaction. Range `0`–`1`, e.g. `0.8` means trigger when usage reaches 80% of the usable input budget. Set to `0` to disable automatic compaction. |
+| `model_pool` | string | clone current agent pool | Name of a dedicated model pool for compaction. Use a low-cost/fast model to minimize overhead. |
+| `reserved` | int | `0` | Token headroom reserved for tokenizer drift, tool schema overhead, and compaction/recovery safety margin. Subtracted from the input budget before applying `threshold`. |
+| `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
+| `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 
-Use `context.reduction.model_pool` only when you have a cheap/fast pool reserved for future cache-aware reduction decisions. Current deterministic pruning does not require this field and does not call an auxiliary model when it is omitted.
+**How the threshold is calculated**: Chord uses the **usable input budget** as
+the baseline. If the model config sets `limit.input`, that value is used;
+otherwise Chord derives it from `limit.context - effective requested output`
+(where effective output is `max_output_tokens` capped by the model's
+`limit.output`). If `reserved` is set, it is subtracted first. The TUI
+`Context` indicator in the info panel and footer uses the same input-budget
+calculation, so its percentage matches automatic compaction thresholds.
 
-A complete override looks like this:
-
-```yaml
-context:
-  reduction:
-    model_pool: fast
-    confirm_age_turns: 2
-    error_age_turns: 3
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 1
-    read_like_output_bytes: 2500
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    min_tool_results_prune: 8
-```
-
-How to read these values:
-
-- `*_age_turns` counts later **user** turns after the tool result. For example, `read_like_age_turns: 1` means a large read/search result can be shortened starting with the next user turn.
-- `*_bytes` is the minimum output size, in bytes, before that category is eligible. Small outputs stay intact.
-- `min_tool_results_prune` is a safety gate. Chord does not try deterministic request pruning until the conversation has at least this many tool-result messages.
-
-Field details and practical guidance:
-
-- `confirm_age_turns` (default `2`): age for old confirmation / permission results. Lower only if permission chatter dominates your prompts.
-- `error_age_turns` (default `3`): age for failed tool results; the failure status is preserved. Keep this at least as high as success thresholds unless failures are very noisy in your workflow.
-- `shell_success_age_turns` (default `2`) + `shell_success_bytes` (default `4000`): age and size threshold for successful shell output. Increase bytes if build/test logs are important context; decrease bytes for very log-heavy projects.
-- `read_like_age_turns` (default `1`) + `read_like_output_bytes` (default `2500`): age and size threshold for read/search-style tools. These can be more aggressive because files can usually be read again when needed.
-- `stale_age_turns` (default `4`) + `stale_output_bytes` (default `1500`): fallback age and size threshold for other older tool results. This is intentionally older than read-like output because the content may be less easy to reconstruct.
-- `min_tool_results_prune` (default `8`): raise this if you prefer small and medium conversations to remain untouched; lower it only if short tool-heavy conversations regularly hit context limits.
-
-Unset or non-positive threshold fields use the defaults above. Project config can override global config field-by-field.
-
-Set `context.compaction.model_pool` to pick a dedicated compaction model pool. If it is omitted, compaction clones the current agent model pool and starts from the current sticky cursor instead of falling back to a single model.
-
-Automatic compaction is enabled when `context.compaction.threshold > 0`; set `context.compaction.threshold: 0` to disable it.
-
-Automatic compaction is driven by the **usable input-side** budget. If a model config
-sets `limit.input`, Chord starts from that value; otherwise it starts from
-`limit.context - effective_max_output`, where effective output is `max_output_tokens`
-(or the runtime default) capped by the model's `limit.output`. If
-`context.compaction.reserved` is set, Chord subtracts it before applying
-`compaction.threshold`. The TUI `Context` indicator in the info panel and footer uses
-this same input-budget calculation, so its percentage matches auto-compaction
-thresholds instead of the model's total context window.
-
-You can reserve headroom for tokenizer drift, tool-schema overhead, and
-compaction/recovery safety margin:
+**Reserved headroom example**:
 
 ```yaml
 context:
@@ -789,10 +793,17 @@ context:
     reserved: 16000
 ```
 
-With that setting, a model configured as `input: 272000` will trigger automatic
-compaction based on a usable input budget of `256000` tokens.
+With a model configured as `input: 272000`, the usable budget after reserving
+is `256000`, and automatic compaction triggers when context reaches
+`256000 × 0.8 = 204800` tokens. A sensible `reserved` value prevents compaction
+from triggering too late due to tokenizer drift or tool-description overhead.
 
-When a provider publishes both a total context window and a separate input cap, use all three fields when you know them:
+Beyond automatic triggering, you can manually compact at any time with the
+`/compact` command in the TUI, or use `/compact --no` to temporarily disable
+subsequent automatic compaction for the current session.
+
+When a provider publishes both a total context window and a separate input cap,
+use all three fields when you know them:
 
 ```yaml
 providers:
@@ -808,6 +819,73 @@ providers:
 This matters because reducing `output` does not increase a provider's hard
 input allowance. Keeping automatic compaction enabled is recommended when your
 selected models have smaller input budgets or split input/output limits.
+
+### Context reduction
+
+Before each LLM request, Chord applies a set of deterministic rules to inspect
+tool results in the conversation and trim large, stale output. **This only
+affects the prompt sent for the current request — it never rewrites session
+files on disk.**
+
+> **Most users do not need to configure this section.** The built-in defaults
+> are already tuned for common scenarios. The parameters below are only for
+> fine-grained control.
+
+**Reduction categories**: Tool results are classified into five categories,
+each with its own age and size thresholds.
+
+| Category | Typical examples | Age threshold | Size threshold | Rationale |
+|----------|-----------------|---------------|----------------|-----------|
+| Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
+| Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
+| Shell success | `git`, `go test`, `npm run` output | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 4000) | Build/test output can be important context but is usually reproducible |
+| Read / search | `Read`, `Grep`, `Glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 2500) | File contents can always be re-read; most aggressive trimming |
+| Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
+
+How to read the age and size parameters:
+
+- `*_age_turns` counts the number of **user turns** (times you send a message)
+  after the tool result. For example, `read_like_age_turns: 1` means a large
+  read result may be trimmed starting with your next message.
+- `*_bytes` is the **minimum output size in bytes** for that category to be
+  eligible for trimming. Smaller outputs stay intact — short output doesn't
+  need reduction.
+- `min_tool_results_prune` (default 8) is a **safety gate**: Chord won't start
+  trimming until the conversation has at least this many tool-result messages,
+  preventing small conversations from being touched prematurely.
+
+**Tuning guidance**:
+
+| If you see this... | Try this... |
+|--------------------|-------------|
+| Short conversations with many tool results hitting limits | Lower `min_tool_results_prune` (e.g. `4`) |
+| Permission confirmations dominating the prompt | Lower `confirm_age_turns` (e.g. `1`) |
+| Build/test logs are important context to keep | Raise `shell_success_bytes` (e.g. `16000`) |
+| File contents often need to be revisited | Raise `read_like_age_turns` (e.g. `3`) and `read_like_output_bytes` (e.g. `8000`) |
+| All tool output is important, nothing should be dropped | Raise all `*_age_turns` and `*_bytes` globally |
+
+Full configuration example (showing all defaults):
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 4000
+    read_like_age_turns: 1
+    read_like_output_bytes: 2500
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+Unset or non-positive threshold fields use the defaults above. Project-level
+`.chord/config.yaml` can override global config field by field.
+
+> `context.reduction.model_pool` is reserved for future cache-aware reduction
+> decisions. The current deterministic pruning does not require this field and
+> does not call an auxiliary model when it is omitted.
 
 ## Provider/model diagnostics
 
@@ -834,10 +912,10 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 | Key                     | Type                  | Default                          | Scope                    | Summary                                                                                                                  |
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
+| `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `key_rotation`, `key_order`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled                         | global / project         | Optional appended translation for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
-| `context`               | object                | see below                        | global / project         | `compaction.threshold`, `reduction.model_pool`, `compaction.model_pool`, `compaction.reserved`. See [Context compaction](#context-compaction). |
+| `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](#context-compaction) and [Context reduction](#context-reduction). |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
@@ -865,6 +943,8 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
 | `api_url`      | string | Endpoint URL. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`.                                              |
 | `preset`       | string | Currently `codex` (OpenAI Codex / ChatGPT OAuth).                                                                                                        |
+| `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
+| `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 
@@ -876,7 +956,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
-| `reasoning`       | object | OpenAI reasoning options (`summary`, `effort`). Variants commonly override `reasoning.effort`.                         |
+| `reasoning`       | object | OpenAI reasoning options. Chat Completions sends `reasoning.effort` as `reasoning_effort`; Responses sends `reasoning.effort` / `reasoning.summary` inside `reasoning`. |
 | `text.verbosity`  | string | OpenAI text verbosity hint where supported.                                                                            |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |

@@ -59,7 +59,7 @@ chord doctor models
 
 If you choose the Codex OAuth path, the wizard completes OAuth sign-in before setup finishes. It creates a `preset: codex` provider and configures these starter models automatically: `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.4`, and `gpt-5.5`.
 
-For later continuous-execution workflows, remember that loop mode exits only through the `Done` tool, and `Done` now requires a final completion report in its `report` argument.
+For later continuous-execution workflows, remember that loop mode exits only through the `Done` tool, and `Done` now requires a final completion report in its `report` argument. Note that loop mode automatically disables context compaction and reduction so long-running tasks retain their full working state.
 
 ## 3. Run
 
