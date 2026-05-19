@@ -192,6 +192,13 @@ type openAIStreamChunk struct {
 		TotalTokens           int `json:"total_tokens"`
 		PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
 		PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+		CacheReadTokens       int `json:"cache_read_tokens"`
+		PromptTokensDetails   *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
 }
 
@@ -838,9 +845,19 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			if promptTokens <= 0 {
 				promptTokens = chunk.Usage.PromptCacheHitTokens + chunk.Usage.PromptCacheMissTokens
 			}
+			cacheReadTokens := chunk.Usage.PromptCacheHitTokens
+			if cacheReadTokens <= 0 {
+				cacheReadTokens = chunk.Usage.CacheReadTokens
+			}
+			if cacheReadTokens <= 0 && chunk.Usage.PromptTokensDetails != nil {
+				cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
 			resp.Usage.InputTokens = promptTokens
-			resp.Usage.CacheReadTokens = chunk.Usage.PromptCacheHitTokens
+			resp.Usage.CacheReadTokens = cacheReadTokens
 			resp.Usage.OutputTokens = chunk.Usage.CompletionTokens
+			if chunk.Usage.CompletionTokensDetails != nil {
+				resp.Usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 		}
 	}
 

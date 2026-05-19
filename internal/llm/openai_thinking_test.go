@@ -182,6 +182,55 @@ func TestParseOpenAISSEStream_AggregatesPromptCacheUsage(t *testing.T) {
 	}
 }
 
+func TestParseOpenAISSEStream_AggregatesDeepSeekCacheReadUsage(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"deepseek-v4-flash","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":72531,"completion_tokens":120,"total_tokens":72651,"cache_read_tokens":31232,"completion_tokens_details":{"reasoning_tokens":17}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatal("expected non-nil response usage")
+	}
+	if got := resp.Usage.InputTokens; got != 72531 {
+		t.Fatalf("InputTokens = %d, want 72531", got)
+	}
+	if got := resp.Usage.CacheReadTokens; got != 31232 {
+		t.Fatalf("CacheReadTokens = %d, want 31232", got)
+	}
+	if got := resp.Usage.OutputTokens; got != 120 {
+		t.Fatalf("OutputTokens = %d, want 120", got)
+	}
+	if got := resp.Usage.ReasoningTokens; got != 17 {
+		t.Fatalf("ReasoningTokens = %d, want 17", got)
+	}
+}
+
+func TestParseOpenAISSEStream_AggregatesOpenAICachedTokenDetails(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":2048,"completion_tokens":8,"total_tokens":2056,"prompt_tokens_details":{"cached_tokens":1024}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatal("expected non-nil response usage")
+	}
+	if got := resp.Usage.CacheReadTokens; got != 1024 {
+		t.Fatalf("CacheReadTokens = %d, want 1024", got)
+	}
+}
+
 func TestParseOpenAISSEStream_NoThinkingEndWithoutReasoning(t *testing.T) {
 	// When there is no reasoning_content at all, thinking_end should never
 	// be emitted, even with tool_calls.
