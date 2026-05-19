@@ -3,11 +3,37 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/llm"
 )
 
 func (a *MainAgent) FastModeEnabled() bool {
 	client, _, _, _ := a.llmSnapshot()
 	return client != nil && client.FastMode()
+}
+
+func (a *MainAgent) applyFastModeToClient(client *llm.Client) {
+	if a == nil || client == nil {
+		return
+	}
+	client.SetFastMode(a.FastModeEnabled())
+}
+
+func (a *MainAgent) syncSubAgentFastMode(enabled bool) {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	targets := make([]*SubAgent, 0, len(a.subAgents))
+	for _, sub := range a.subAgents {
+		if sub != nil {
+			targets = append(targets, sub)
+		}
+	}
+	a.mu.RUnlock()
+	for _, sub := range targets {
+		sub.setFastMode(enabled)
+	}
 }
 
 func (a *MainAgent) handleFastCommand(content string, busy bool) {
@@ -36,6 +62,7 @@ func (a *MainAgent) handleFastCommand(content string, busy bool) {
 		}
 		return
 	}
+	a.syncSubAgentFastMode(enabled)
 
 	state := "off"
 	if enabled {

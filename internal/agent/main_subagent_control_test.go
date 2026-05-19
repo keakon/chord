@@ -56,6 +56,45 @@ func configureNestedDelegationTestRuntime(a *MainAgent, maxDepth int) {
 	}
 }
 
+func TestCreateSubAgentInheritsFastMode(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 1)
+	client, _, _, _ := a.llmSnapshot()
+	client.SetFastMode(true)
+
+	handle, err := a.CreateSubAgent(context.Background(), "child work", "worker", "", "", tools.WriteScope{})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	child := a.subAgentByTaskID(handle.TaskID)
+	if child == nil {
+		t.Fatal("expected child SubAgent to exist")
+	}
+	childClient, _ := child.llmSnapshot()
+	if childClient == nil || !childClient.FastMode() {
+		t.Fatal("expected child SubAgent client to inherit fast mode")
+	}
+}
+
+func TestHandleFastCommandSyncsExistingSubAgents(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-fast")
+	subClient, _ := sub.llmSnapshot()
+	if subClient == nil {
+		t.Fatal("expected SubAgent client")
+	}
+
+	a.handleFastCommand("/fast on", true)
+	if !subClient.FastMode() {
+		t.Fatal("expected /fast on to enable existing SubAgent client")
+	}
+
+	a.handleFastCommand("/fast off", true)
+	if subClient.FastMode() {
+		t.Fatal("expected /fast off to disable existing SubAgent client")
+	}
+}
+
 func startMainAgentLoopForTest(t *testing.T, a *MainAgent) context.CancelFunc {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

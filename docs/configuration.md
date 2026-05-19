@@ -506,7 +506,10 @@ Model fields used in the example:
   Set `supports_fast: true` only for models/providers that accept Chord's fast
   request parameters (`service_tier="fast"` for OpenAI Responses or `speed="fast"`
   for Anthropic). Set `supports_fast: false` to force-disable them, including in
-  a Codex preset provider.
+  a Codex preset provider. At runtime, `/fast on` and `/fast off` apply to the
+  main agent and SubAgents: existing SubAgent clients are updated immediately,
+  and newly created, restored, rehydrated, or model-switched SubAgent clients
+  inherit the current fast-mode state.
 
 Only fields defined by Chord's model schema are used. `modalities.output` is
 not currently interpreted, so it is intentionally omitted from the example.

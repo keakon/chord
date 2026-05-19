@@ -170,6 +170,7 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 	if err != nil {
 		return fmt.Errorf("create LLM client for %q: %w", providerModel, err)
 	}
+	a.applyFastModeToClient(client)
 	if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
 		client.SetSessionID(sid)
 	}
@@ -492,6 +493,7 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 		if err != nil {
 			return fmt.Errorf("create LLM client for %q: %w", ref, err)
 		}
+		a.applyFastModeToClient(client)
 		if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
 			client.SetSessionID(sid)
 		}

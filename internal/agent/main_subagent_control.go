@@ -325,6 +325,7 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	}
 
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
+	a.applyFastModeToClient(subLLMClient)
 	agentRuleset := a.effectiveRuleset()
 	if agentDef.Permission.Kind != 0 {
 		agentPermRules := permission.ParsePermission(&agentDef.Permission)

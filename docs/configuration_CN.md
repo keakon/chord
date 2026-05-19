@@ -461,7 +461,7 @@ providers:
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
-- `supports_fast`：`/fast on` 是否可以为该模型发送 provider 专用 fast-mode 请求参数。省略时使用 preset 默认值：`preset: codex` 下的模型默认启用，其他模型默认关闭。只有确认模型 / provider 支持 Chord 使用的 fast 参数（OpenAI Responses 的 `service_tier="fast"`，或 Anthropic 的 `speed="fast"`）时才设为 `true`；设为 `false` 可强制关闭，包括 Codex preset provider。
+- `supports_fast`：`/fast on` 是否可以为该模型发送 provider 专用 fast-mode 请求参数。省略时使用 preset 默认值：`preset: codex` 下的模型默认启用，其他模型默认关闭。只有确认模型 / provider 支持 Chord 使用的 fast 参数（OpenAI Responses 的 `service_tier="fast"`，或 Anthropic 的 `speed="fast"`）时才设为 `true`；设为 `false` 可强制关闭，包括 Codex preset provider。运行时 `/fast on` 和 `/fast off` 会同时作用于主 agent 和 SubAgent：已有 SubAgent client 会立即更新，后续新建、恢复、rehydrate 或切换模型后的 SubAgent client 会继承当前 fast-mode 状态。
 
 只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不被运行时解释，示例中刻意省略。
 

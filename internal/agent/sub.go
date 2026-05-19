@@ -348,6 +348,18 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	return s
 }
 
+func (s *SubAgent) setFastMode(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	s.llmMu.RUnlock()
+	if client != nil {
+		client.SetFastMode(enabled)
+	}
+}
+
 func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimit int) {
 	if s == nil || client == nil {
 		return
