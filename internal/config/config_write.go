@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"syscall"
 )
 
 type configMutationLock struct {
@@ -17,9 +15,7 @@ func (l *configMutationLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
-	if runtime.GOOS != "windows" {
-		_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
-	}
+	_ = unlockConfigMutationFile(l.file)
 	err := l.file.Close()
 	if err == nil && l.path != "" {
 		if removeErr := os.Remove(l.path); removeErr != nil && !os.IsNotExist(removeErr) {
@@ -43,11 +39,9 @@ func LockConfigMutation(targetPath string) (*configMutationLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open config lock file: %w", err)
 	}
-	if runtime.GOOS != "windows" {
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("lock config file: %w", err)
-		}
+	if err := lockConfigMutationFile(f); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock config file: %w", err)
 	}
 	return &configMutationLock{file: f, path: lockPath}, nil
 }
