@@ -16,13 +16,32 @@ func TestDefaultConfigCompactionProfileDefaultsToAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigContextReductionThresholds(t *testing.T) {
+	cfg := DefaultConfig()
+	got := cfg.Context.Reduction
+	want := ContextReductionConfig{
+		ConfirmAgeTurns:      2,
+		ErrorAgeTurns:        3,
+		ShellSuccessAgeTurns: 2,
+		ReadLikeAgeTurns:     1,
+		StaleAgeTurns:        4,
+		ShellSuccessBytes:    4000,
+		ReadLikeOutputBytes:  2500,
+		StaleOutputBytes:     1500,
+		MinToolResultsPrune:  8,
+	}
+	if got != want {
+		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)
+	}
+}
+
 func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("" +
 		"context:\n" +
-		"  compact_threshold: 0.75\n" +
 		"  compaction:\n" +
+		"    threshold: 0.75\n" +
 		"    preset: codex\n" +
 		"    profile: archival\n" +
 		"    reserved: 16000\n")
@@ -43,8 +62,8 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	if cfg.Context.Compaction.Reserved != 16000 {
 		t.Fatalf("reserved = %d, want 16000", cfg.Context.Compaction.Reserved)
 	}
-	if cfg.Context.CompactThreshold != 0.75 {
-		t.Fatalf("compact_threshold = %v, want 0.75", cfg.Context.CompactThreshold)
+	if cfg.Context.Compaction.Threshold != 0.75 {
+		t.Fatalf("compaction.threshold = %v, want 0.75", cfg.Context.Compaction.Threshold)
 	}
 }
 

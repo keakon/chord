@@ -644,23 +644,63 @@ permission:
 
 ```yaml
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     model_pool: compact
 ```
 
+请求级 reduction 与持久化压缩不同：它只缩短“当前这次请求”发送给模型的 prompt，不会改写保存下来的会话历史。loop 模式会完全禁用这类请求级剪裁，以便长时间任务保留完整本地状态。
+
+大多数用户不需要配置 `context.reduction`。内置默认值是偏保守的启发式，来自常见 Chord 会话形态：确认 / 权限结果很快过时；大型 `Read` / `Grep` / `Glob` 输出通常可以在需要时重新读取，所以一轮之后即可剪裁；成功 Shell 输出保留稍久；失败结果保留更久，因为失败原因经常仍有价值；同时用最小 tool-result 数量避免小会话被过早处理。这些默认值不是对历史会话做正式统计拟合得出的。如果不确定，建议保持默认。
+
+只有在你有便宜/快速模型池、并希望预留给后续 cache-aware reduction 判定时，才需要设置 `context.reduction.model_pool`。当前确定性剪裁不依赖这个字段；未设置时不会调用辅助模型。
+
+完整覆盖示例：
+
+```yaml
+context:
+  reduction:
+    model_pool: fast
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 4000
+    read_like_age_turns: 1
+    read_like_output_bytes: 2500
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+这些值的读法：
+
+- `*_age_turns` 统计工具结果之后又经过了多少个**用户**轮次。例如 `read_like_age_turns: 1` 表示大型读取/搜索结果从下一次用户发言开始就可以被缩短。
+- `*_bytes` 是该类别参与剪裁的最小输出字节数；小输出会保持完整。
+- `min_tool_results_prune` 是安全门槛：会话中至少有这么多 tool result 消息时，Chord 才尝试确定性请求级剪裁。
+
+字段说明与调参建议：
+
+- `confirm_age_turns`（默认 `2`）：旧确认 / 权限结果的年龄阈值。只有当权限确认信息明显挤占 prompt 时才建议调低。
+- `error_age_turns`（默认 `3`）：失败工具结果的年龄阈值；失败状态会保留。除非失败输出特别嘈杂，否则建议不低于成功结果阈值。
+- `shell_success_age_turns`（默认 `2`）+ `shell_success_bytes`（默认 `4000`）：成功 Shell 输出的年龄与大小阈值。如果构建/测试日志经常是关键上下文，可调高 bytes；日志特别多的项目可调低。
+- `read_like_age_turns`（默认 `1`）+ `read_like_output_bytes`（默认 `2500`）：读取/搜索类工具输出的年龄与大小阈值。这类内容通常可按需重新读取，因此可以更激进。
+- `stale_age_turns`（默认 `4`）+ `stale_output_bytes`（默认 `1500`）：其他旧工具结果的兜底年龄与大小阈值。它比 read-like 更保守，因为内容不一定容易重建。
+- `min_tool_results_prune`（默认 `8`）：如果希望中小型会话完全不动，可调高；只有短会话也经常工具很多并接近上下文上限时才建议调低。
+
+未设置或非正数的阈值字段使用以上默认值。项目级配置可按字段覆盖全局配置。
+
 设置 `context.compaction.model_pool` 可指定专用压缩模型池。未设置时，压缩会克隆当前 agent 的模型池，并从当前粘性游标开始，而不是回退到单个模型。
 
-当 `context.compact_threshold > 0` 时启用自动压缩；设置 `context.compact_threshold: 0` 可关闭。
+当 `context.compaction.threshold > 0` 时启用自动压缩；设置 `context.compaction.threshold: 0` 可关闭。
 
-自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compact_threshold`。TUI 信息面板和底部栏里的 `Context` 百分比也使用这套输入预算口径，因此会与自动压缩阈值对齐，而不是按模型总上下文窗口计算。
+自动压缩阈值按**可用输入侧**预算计算：若模型配置了 `limit.input`，Chord 先从它出发；未配置时，按 `limit.context - effective_max_output` 推导，其中有效输出来自 `max_output_tokens`（未配置时使用运行时默认值）并受模型 `limit.output` 上限约束。如果设置了 `context.compaction.reserved`，Chord 会先减去这部分预留，再应用 `compaction.threshold`。TUI 信息面板和底部栏里的 `Context` 百分比也使用这套输入预算口径，因此会与自动压缩阈值对齐，而不是按模型总上下文窗口计算。
 
 可通过配置预留 headroom，用于 tokenizer 漂移、tool schema 开销和压缩/恢复安全余量：
 
 ```yaml
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     reserved: 16000
 ```
 
@@ -709,7 +749,7 @@ chord doctor models --pool thinking
 | `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭                            | global / project         | 可选的 thinking / reasoning 卡片附加翻译。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
-| `context`               | object                | 见下文                          | global / project         | `compact_threshold`、`compaction.model_pool`、`compaction.reserved`。见 [上下文压缩](#上下文压缩)。                                  |
+| `context`               | object                | 见下文                          | global / project         | `compaction.threshold`、`reduction.model_pool`、`compaction.model_pool`、`compaction.reserved`。见 [上下文压缩](#上下文压缩)。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
@@ -747,7 +787,7 @@ chord doctor models --pool thinking
 | `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 会从中扣除有效请求输出后推导输入预算。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
-| `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compact_threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
+| `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compaction.threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
 | `reasoning`       | object | OpenAI reasoning 选项（`summary`、`effort`）。variants 通常覆盖 `reasoning.effort`。                              |
 | `text.verbosity`  | string | OpenAI 文本详细程度提示，支持的模型生效。                                                                      |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |

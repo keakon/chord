@@ -21,7 +21,7 @@ Read model limit fields in this order:
 - `limit.input`: a separate input cap. Only set this when the provider publishes one; otherwise Chord derives the input budget from `limit.context` minus effective requested output.
 - `limit.output`: the model's own output capacity. Actual requests are also capped by `max_output_tokens` and by any remaining room in `limit.context`.
 
-Chord uses `limit.input` when present, or the derived input budget otherwise, to decide when to compact before the prompt is too large and how to recover after a provider rejects a request as too large. If `context.compaction.reserved` is set, Chord subtracts that headroom before applying `compact_threshold`.
+Chord uses `limit.input` when present, or the derived input budget otherwise, to decide when to compact before the prompt is too large and how to recover after a provider rejects a request as too large. If `context.compaction.reserved` is set, Chord subtracts that headroom before applying `compaction.threshold`.
 
 For `gpt-5.5`, Chord's public examples use `context=400000`, `input=272000`, `output=128000`. Chord still defaults `max_output_tokens` to `32000`, so actual requests use the smaller output limit unless you raise it. Provider docs sometimes call this setup split limits; see [Glossary](../glossary.md).
 

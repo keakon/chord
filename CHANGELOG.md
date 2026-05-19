@@ -4,7 +4,11 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
-- **Breaking / Config:** removed `context.auto_compact`. Automatic context compaction is now enabled when `context.compact_threshold > 0`; set `context.compact_threshold: 0` to disable it.
+- Runtime / Context: added deterministic request-time context reduction controls under `context.reduction`, including stale tool-result pruning thresholds and a dedicated reduction model-pool hook, while keeping loop mode unpruned.
+- Auth / Runtime: moved OAuth account status authority to `auth.state.yaml`, added the `invalidated` status and `key_invalidated` stream delta, and kept legacy `status` out of `auth.yaml`.
+- Runtime / Fast mode: `/fast` now uses provider-native acceleration parameters (`service_tier="fast"` for OpenAI Responses and `speed="fast"` for Anthropic) only when the model's `supports_fast` capability is enabled; `preset: codex` enables it by default, other models opt in explicitly.
+- **Breaking / Config:** renamed `context.compact_threshold` to `context.compaction.threshold`; there is no compatibility alias for the old key.
+- **Breaking / Config:** removed `context.auto_compact`. Automatic context compaction is now enabled when `context.compaction.threshold > 0`; set `context.compaction.threshold: 0` to disable it.
 - **Breaking / Config:** removed `context.compact_model`. Context compaction now only accepts `context.compaction.model_pool` for a dedicated compaction pool; when unset, compaction clones the current agent model pool instead of falling back to a single selected model.
 - **Breaking / Headless:** removed the external `tool_result` event from the headless/protocol integration surface. Non-loop `Done` reports now use the dedicated `done_completion` event, while loop-mode `Done` exit requests continue to use `confirm_request` with explicit `done_report` / `done_reason` fields. Ordinary tool results remain internal to the agent/TUI lifecycle and are no longer forwarded to headless clients.
 - TUI / IME: automatic input-method switching now only runs when the current Chord tab/window is actually foreground-focused, preventing background tabs' chord/mode transitions from clobbering the active tab's IME. On `FocusMsg`/tab return, Chord now reapplies the configured English IME target when the current mode still requires it.

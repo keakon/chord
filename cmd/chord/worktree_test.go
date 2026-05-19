@@ -27,19 +27,19 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
-	errCh := make(chan error, 1)
-	go func() { errCh <- fn() }()
-
+	var buf bytes.Buffer
+	readCh := make(chan error, 1)
 	go func() {
-		<-errCh
-		_ = w.Close()
+		_, err := buf.ReadFrom(r)
+		readCh <- err
 	}()
 
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
+	runErr := fn()
+	_ = w.Close()
+	if err := <-readCh; err != nil {
 		t.Fatalf("read pipe: %v", err)
 	}
-	return buf.String(), nil
+	return buf.String(), runErr
 }
 
 func TestWorktreeListCmd_EmptyMessage(t *testing.T) {

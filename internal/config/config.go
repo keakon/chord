@@ -591,26 +591,55 @@ type ModelCost struct {
 
 // ContextConfig controls automatic context compression behavior.
 type ContextConfig struct {
-	CompactThreshold float64          `json:"compact_threshold" yaml:"compact_threshold"`
-	Compaction       CompactionConfig `json:"compaction,omitempty" yaml:"compaction,omitempty"`
+	Compaction CompactionConfig       `json:"compaction,omitempty" yaml:"compaction,omitempty"`
+	Reduction  ContextReductionConfig `json:"reduction,omitempty" yaml:"reduction,omitempty"`
+}
+
+// ContextReductionConfig controls request-level context pruning and future
+// cache-aware reduction advisors. The model pool is optional; when set it must
+// refer to a top-level model_pools entry and is used for pruning/reduction
+// decisions rather than durable compaction summaries.
+type ContextReductionConfig struct {
+	ModelPool            string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
+	ConfirmAgeTurns      int    `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
+	ErrorAgeTurns        int    `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
+	ShellSuccessAgeTurns int    `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
+	ShellSuccessBytes    int    `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
+	ReadLikeAgeTurns     int    `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
+	ReadLikeOutputBytes  int    `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
+	StaleAgeTurns        int    `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
+	StaleOutputBytes     int    `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
+	MinToolResultsPrune  int    `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
 // input-budget reservation used by auto-compaction / oversize recovery.
 type CompactionConfig struct {
-	Preset    string `json:"preset,omitempty" yaml:"preset,omitempty"`
-	Profile   string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Reserved  int    `json:"reserved,omitempty" yaml:"reserved,omitempty"`
-	ModelPool string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
+	Threshold float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
+	Preset    string  `json:"preset,omitempty" yaml:"preset,omitempty"`
+	Profile   string  `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Reserved  int     `json:"reserved,omitempty" yaml:"reserved,omitempty"`
+	ModelPool string  `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Context: ContextConfig{
-			CompactThreshold: 0.8,
+			Reduction: ContextReductionConfig{
+				ConfirmAgeTurns:      2,
+				ErrorAgeTurns:        3,
+				ShellSuccessAgeTurns: 2,
+				ShellSuccessBytes:    4000,
+				ReadLikeAgeTurns:     1,
+				ReadLikeOutputBytes:  2500,
+				StaleAgeTurns:        4,
+				StaleOutputBytes:     1500,
+				MinToolResultsPrune:  8,
+			},
 			Compaction: CompactionConfig{
-				Profile: CompactionProfileAuto,
+				Threshold: 0.8,
+				Profile:   CompactionProfileAuto,
 			},
 		},
 		Maintenance: MaintenanceConfig{SizeCheckOnStartup: false, SizeCheckIntervalHours: 24, WarnStateBytes: 10 * 1024 * 1024 * 1024, WarnCacheBytes: 5 * 1024 * 1024 * 1024},
@@ -633,7 +662,7 @@ func ProjectConfigPath(projectRoot string) string {
 
 // LoadConfigFromPath loads configuration from an arbitrary YAML file path.
 // The config is initialised with DefaultConfig() values before unmarshalling,
-// so omitted YAML fields retain their defaults (e.g. compact_threshold: 0.8).
+// so omitted YAML fields retain their defaults (e.g. compaction.threshold: 0.8).
 func LoadConfigFromPath(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

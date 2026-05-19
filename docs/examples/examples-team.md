@@ -31,8 +31,8 @@ model_pools:
     - anthropic/claude-opus-4.7
 
 context:
-  compact_threshold: 0.8
-
+  compaction:
+    threshold: 0.8
 desktop_notification: true
 log_level: info
 ```

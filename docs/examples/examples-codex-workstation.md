@@ -64,8 +64,8 @@ lsp:
         typeCheckingMode: standard
 
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     model_pool: fast
     reserved: 16000
 

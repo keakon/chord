@@ -708,22 +708,62 @@ durable compaction automatically. Common settings:
 
 ```yaml
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     model_pool: compact
     reserved: 16000
 ```
 
+Request-level reduction is different from durable compaction: it only shortens the prompt sent for the current request. The saved session history is not rewritten, and loop mode disables this request pruning entirely so long-running loop tasks keep full local state.
+
+Most users do not need to configure `context.reduction`. The built-in defaults are conservative heuristics chosen from common Chord transcript shapes: permission confirmations become stale quickly; large `Read` / `Grep` / `Glob` outputs are usually recoverable from files after one more user turn; successful shell output is kept a little longer; failures are kept longer because the reason can matter; and a minimum tool-result count avoids spending effort on small conversations. They are not the result of a formal statistical fit to historical sessions. If you are unsure, keep the defaults.
+
+Use `context.reduction.model_pool` only when you have a cheap/fast pool reserved for future cache-aware reduction decisions. Current deterministic pruning does not require this field and does not call an auxiliary model when it is omitted.
+
+A complete override looks like this:
+
+```yaml
+context:
+  reduction:
+    model_pool: fast
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 4000
+    read_like_age_turns: 1
+    read_like_output_bytes: 2500
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+How to read these values:
+
+- `*_age_turns` counts later **user** turns after the tool result. For example, `read_like_age_turns: 1` means a large read/search result can be shortened starting with the next user turn.
+- `*_bytes` is the minimum output size, in bytes, before that category is eligible. Small outputs stay intact.
+- `min_tool_results_prune` is a safety gate. Chord does not try deterministic request pruning until the conversation has at least this many tool-result messages.
+
+Field details and practical guidance:
+
+- `confirm_age_turns` (default `2`): age for old confirmation / permission results. Lower only if permission chatter dominates your prompts.
+- `error_age_turns` (default `3`): age for failed tool results; the failure status is preserved. Keep this at least as high as success thresholds unless failures are very noisy in your workflow.
+- `shell_success_age_turns` (default `2`) + `shell_success_bytes` (default `4000`): age and size threshold for successful shell output. Increase bytes if build/test logs are important context; decrease bytes for very log-heavy projects.
+- `read_like_age_turns` (default `1`) + `read_like_output_bytes` (default `2500`): age and size threshold for read/search-style tools. These can be more aggressive because files can usually be read again when needed.
+- `stale_age_turns` (default `4`) + `stale_output_bytes` (default `1500`): fallback age and size threshold for other older tool results. This is intentionally older than read-like output because the content may be less easy to reconstruct.
+- `min_tool_results_prune` (default `8`): raise this if you prefer small and medium conversations to remain untouched; lower it only if short tool-heavy conversations regularly hit context limits.
+
+Unset or non-positive threshold fields use the defaults above. Project config can override global config field-by-field.
+
 Set `context.compaction.model_pool` to pick a dedicated compaction model pool. If it is omitted, compaction clones the current agent model pool and starts from the current sticky cursor instead of falling back to a single model.
 
-Automatic compaction is enabled when `context.compact_threshold > 0`; set `context.compact_threshold: 0` to disable it.
+Automatic compaction is enabled when `context.compaction.threshold > 0`; set `context.compaction.threshold: 0` to disable it.
 
 Automatic compaction is driven by the **usable input-side** budget. If a model config
 sets `limit.input`, Chord starts from that value; otherwise it starts from
 `limit.context - effective_max_output`, where effective output is `max_output_tokens`
 (or the runtime default) capped by the model's `limit.output`. If
 `context.compaction.reserved` is set, Chord subtracts it before applying
-`compact_threshold`. The TUI `Context` indicator in the info panel and footer uses
+`compaction.threshold`. The TUI `Context` indicator in the info panel and footer uses
 this same input-budget calculation, so its percentage matches auto-compaction
 thresholds instead of the model's total context window.
 
@@ -732,8 +772,8 @@ compaction/recovery safety margin:
 
 ```yaml
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     reserved: 16000
 ```
 
@@ -785,7 +825,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled                         | global / project         | Optional appended translation for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
-| `context`               | object                | see below                        | global / project         | `compact_threshold`, `compaction.model_pool`, `compaction.reserved`. See [Context compaction](#context-compaction).                     |
+| `context`               | object                | see below                        | global / project         | `compaction.threshold`, `reduction.model_pool`, `compaction.model_pool`, `compaction.reserved`. See [Context compaction](#context-compaction). |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
@@ -823,7 +863,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus effective requested output. |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
-| `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compact_threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
+| `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
 | `reasoning`       | object | OpenAI reasoning options (`summary`, `effort`). Variants commonly override `reasoning.effort`.                         |
 | `text.verbosity`  | string | OpenAI text verbosity hint where supported.                                                                            |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |

@@ -35,10 +35,12 @@ func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *te
           context: 8192
           output: 1024
 context:
-  compact_threshold: 0.8
   compaction:
+    threshold: 0.8
     profile: archival
     reserved: 128
+  reduction:
+    model_pool: global-reducer
 skills:
   paths: [/global-skill]
 confirm_timeout: 45
@@ -82,10 +84,12 @@ stream_retry_rounds: 0
         limit:
           output: 2048
 context:
-  compact_threshold: 0
   compaction:
+    threshold: 0
     profile: continuation
     reserved: 0
+  reduction:
+    model_pool: project-reducer
 skills:
   paths: [/project-skill]
 confirm_timeout: 0
@@ -124,8 +128,8 @@ keymap:
 	if projectCfg.Context.Compaction.Profile != CompactionProfileContinuation {
 		t.Fatalf("project compaction profile = %q, want %q", projectCfg.Context.Compaction.Profile, CompactionProfileContinuation)
 	}
-	if projectCfg.Context.CompactThreshold != 0 {
-		t.Fatalf("project compact_threshold = %v, want zero unset value", projectCfg.Context.CompactThreshold)
+	if projectCfg.Context.Compaction.Threshold != 0 {
+		t.Fatalf("project compaction.threshold = %v, want zero unset value", projectCfg.Context.Compaction.Threshold)
 	}
 	if mergedCfg.ConfirmTimeout != 0 {
 		t.Fatalf("merged confirm_timeout = %d, want 0", mergedCfg.ConfirmTimeout)
@@ -136,14 +140,17 @@ keymap:
 	if mergedCfg.ThinkingTranslation.ModelPool != "fast" {
 		t.Fatalf("merged thinking_translation.model_pool = %q, want fast", mergedCfg.ThinkingTranslation.ModelPool)
 	}
-	if mergedCfg.Context.CompactThreshold != 0 {
-		t.Fatalf("merged compact_threshold = %v, want explicit project override 0", mergedCfg.Context.CompactThreshold)
+	if mergedCfg.Context.Compaction.Threshold != 0 {
+		t.Fatalf("merged compaction.threshold = %v, want explicit project override 0", mergedCfg.Context.Compaction.Threshold)
 	}
 	if mergedCfg.Context.Compaction.Profile != CompactionProfileContinuation {
 		t.Fatalf("merged compaction profile = %q, want %q", mergedCfg.Context.Compaction.Profile, CompactionProfileContinuation)
 	}
 	if mergedCfg.Context.Compaction.Reserved != 0 {
 		t.Fatalf("merged reserved = %d, want explicit project override 0", mergedCfg.Context.Compaction.Reserved)
+	}
+	if mergedCfg.Context.Reduction.ModelPool != "project-reducer" {
+		t.Fatalf("merged context.reduction.model_pool = %q, want project-reducer", mergedCfg.Context.Reduction.ModelPool)
 	}
 	if len(mergedCfg.Skills.Paths) != 2 || mergedCfg.Skills.Paths[0] != "/global-skill" || mergedCfg.Skills.Paths[1] != "/project-skill" {
 		t.Fatalf("merged skills.paths = %#v, want global then project", mergedCfg.Skills.Paths)

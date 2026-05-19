@@ -4,7 +4,11 @@
 
 ## 未发布
 
-- **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compact_threshold > 0` 时启用自动上下文压缩；设置 `context.compact_threshold: 0` 可关闭。
+- Runtime / 上下文：新增 `context.reduction` 下的确定性请求级上下文裁剪控制，包括陈旧工具结果剪裁阈值和专用 reduction 模型池预留配置；loop 模式仍保持不做请求级裁剪。
+- Auth / Runtime：将 OAuth 账号状态的权威来源迁移到 `auth.state.yaml`，新增 `invalidated` 状态与 `key_invalidated` 流式增量，并确保旧版 `status` 不再写入 `auth.yaml`。
+- Runtime / Fast mode：`/fast` 现在只在模型启用 `supports_fast` 能力时发送 provider 原生加速参数（OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`）；`preset: codex` 默认启用，其它模型需要显式开启。
+- **不兼容 / 配置：** 将 `context.compact_threshold` 重命名为 `context.compaction.threshold`；旧字段不再提供兼容别名。
+- **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compaction.threshold > 0` 时启用自动上下文压缩；设置 `context.compaction.threshold: 0` 可关闭。
 - **不兼容 / 配置：** 移除 `context.compact_model`。上下文压缩现在只接受 `context.compaction.model_pool` 来指定专用压缩模型池；未设置时，压缩会克隆当前 agent 的模型池，而不是回退到单个已选模型。
 - **不兼容 / Headless：** 从 headless/protocol 集成面移除对外 `tool_result` 事件。非 loop 的 `Done` 报告现在使用专门的 `done_completion` 事件；loop 模式的 `Done` 退出申请继续使用 `confirm_request`，并显式携带 `done_report` / `done_reason` 字段。普通工具结果仍保留在 agent/TUI 内部生命周期中，不再转发给 headless 客户端。
 - TUI / 输入法：自动切换输入法现在只会在当前 Chord 所在标签页/窗口实际处于前台激活时执行，避免后台标签页中的 chord / mode 切换干扰当前正在使用的标签页输入法；当收到 `FocusMsg` 或切回该标签页时，如果当前 mode 仍需要英文输入法，Chord 会重新应用已配置的英文 IME target。

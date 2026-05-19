@@ -50,6 +50,10 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 
 	prepared := make([]message.Message, len(messages))
 	copy(prepared, messages)
+	if a != nil && a.loopState.Enabled {
+		return prepared
+	}
+	policy := a.contextReductionPolicy()
 
 	callMeta := buildToolCallMeta(prepared)
 	turnsAfter := userTurnsAfter(prepared)
@@ -67,17 +71,17 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			prepared[i].ToolDiff = ""
 			continue
 		}
-		if age >= compactErrorAgeTurns && isToolErrorContent(prepared[i].Content) {
+		if age >= policy.ErrorAgeTurns && isToolErrorContent(prepared[i].Content) {
 			prepared[i].Content = "[Older tool error omitted]"
 			prepared[i].ToolDiff = ""
 			continue
 		}
-		if age >= compactConfirmAgeTurns && isConfirmationOutput(prepared[i].Content) {
+		if age >= policy.ConfirmAgeTurns && isConfirmationOutput(prepared[i].Content) {
 			prepared[i].Content = "[Confirmed]"
 			prepared[i].ToolDiff = ""
 			continue
 		}
-		if age >= compactBashSuccessAgeTurns && len(prepared[i].Content) > compactBashSuccessBytes {
+		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
 			meta := callMeta[prepared[i].ToolCallID]
 			if strings.TrimSpace(meta.Name) == "Shell" {
 				prepared[i].Content = "[Older Shell output omitted to save context; re-run the command if needed.]"
@@ -85,7 +89,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 				continue
 			}
 		}
-		if age >= compactReadLikeAgeTurns && len(prepared[i].Content) > compactReadLikeOutputBytes {
+		if age >= policy.ReadLikeAgeTurns && len(prepared[i].Content) > policy.ReadLikeOutputBytes {
 			meta := callMeta[prepared[i].ToolCallID]
 			if tools.IsReadLike(meta.Name) {
 				prepared[i].Content = compactReadLikeOutputSummary(meta.Name, meta.Args, prepared[i].Content)
@@ -93,9 +97,9 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 				continue
 			}
 		}
-		if toolResults >= compactMinToolResultsPrune &&
-			age >= compactStaleAgeTurns &&
-			len(prepared[i].Content) > compactStaleOutputBytes {
+		if toolResults >= policy.MinToolResultsPrune &&
+			age >= policy.StaleAgeTurns &&
+			len(prepared[i].Content) > policy.StaleOutputBytes {
 			meta := callMeta[prepared[i].ToolCallID]
 			prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(meta.Name))
 			prepared[i].ToolDiff = ""

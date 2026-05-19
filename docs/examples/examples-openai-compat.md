@@ -51,8 +51,8 @@ model_pools:
     - backup/llama3-8b
 
 context:
-  compact_threshold: 0.85
   compaction:
+    threshold: 0.85
     model_pool: small
 
 log_level: info

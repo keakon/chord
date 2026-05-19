@@ -859,19 +859,6 @@ func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) m
 	return message.Message{Role: "assistant", Content: renderImportedFallbackBlock("[Imported Claude transcript entry]", fields...), Provenance: importedClaudeProvenance()}
 }
 
-func downgradeAssistantClaudeToolCalls(msg message.Message) message.Message {
-	if len(msg.ToolCalls) == 0 {
-		return msg
-	}
-	parts := []string{msg.Content}
-	for _, tc := range msg.ToolCalls {
-		parts = append(parts, joinNonEmpty("[Imported tool call: "+strings.TrimSpace(tc.Name)+"]", strings.TrimSpace(string(tc.Args))))
-	}
-	msg.Content = joinNonEmpty(parts...)
-	msg.ToolCalls = nil
-	return msg
-}
-
 func rawContentString(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {

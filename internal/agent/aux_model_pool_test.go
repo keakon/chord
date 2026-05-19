@@ -78,6 +78,63 @@ func TestResolveConfiguredModelPoolPrefersProjectPool(t *testing.T) {
 	}
 }
 
+func TestContextReductionModelRefsPrefersProjectPool(t *testing.T) {
+	a := &MainAgent{
+		projectConfig: &config.Config{
+			Context:    config.ContextConfig{Reduction: config.ContextReductionConfig{ModelPool: "reduce"}},
+			ModelPools: map[string][]string{"reduce": {"project/reducer"}},
+		},
+		globalConfig: &config.Config{
+			Context:    config.ContextConfig{Reduction: config.ContextReductionConfig{ModelPool: "reduce"}},
+			ModelPools: map[string][]string{"reduce": {"global/reducer"}},
+		},
+	}
+
+	refs := a.contextReductionModelRefs()
+	want := []string{"project/reducer"}
+	if !reflect.DeepEqual(refs, want) {
+		t.Fatalf("contextReductionModelRefs = %#v, want %#v", refs, want)
+	}
+}
+
+func TestNewContextReductionClientRequiresConfiguredPool(t *testing.T) {
+	a := &MainAgent{}
+	client, configured, err := a.newContextReductionClient()
+	if err != nil {
+		t.Fatalf("newContextReductionClient: %v", err)
+	}
+	if configured || client != nil {
+		t.Fatalf("newContextReductionClient = (%v, %v), want nil/false without configured pool", client, configured)
+	}
+}
+
+func TestNewContextReductionClientUsesConfiguredPool(t *testing.T) {
+	a := &MainAgent{
+		projectConfig: &config.Config{
+			Context:    config.ContextConfig{Reduction: config.ContextReductionConfig{ModelPool: "reduce"}},
+			ModelPools: map[string][]string{"reduce": {"reduce/ref"}},
+		},
+	}
+	client := newAuxModelPoolTestClient("reduce", "ref")
+	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "reduce/ref" {
+			return nil, "", 0, fmt.Errorf("unexpected ref %q", providerModel)
+		}
+		return client, providerModel, 0, nil
+	}
+
+	got, configured, err := a.newContextReductionClient()
+	if err != nil {
+		t.Fatalf("newContextReductionClient: %v", err)
+	}
+	if !configured {
+		t.Fatal("configured = false, want true")
+	}
+	if got.PrimaryModelRef() != "reduce/ref" {
+		t.Fatalf("primary ref = %q, want reduce/ref", got.PrimaryModelRef())
+	}
+}
+
 func TestNewThinkingTranslatorReusesAuxClientCursor(t *testing.T) {
 	a := &MainAgent{
 		projectConfig: &config.Config{ModelPools: map[string][]string{"fast": {"first/ref"}}},

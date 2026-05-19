@@ -240,6 +240,50 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForLLM_UsesReductionThresholdConfig(t *testing.T) {
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{ShellSuccessAgeTurns: 5}}}}
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != largeOutput {
+		t.Fatalf("configured shell age should delay pruning, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_DisablesRequestPruningInLoop(t *testing.T) {
+	a := &MainAgent{}
+	a.loopState.Enabled = true
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != largeOutput {
+		t.Fatalf("loop mode should preserve full tool output, got %q", prepared[2].Content)
+	}
+	if msgs[2].Content != largeOutput {
+		t.Fatalf("prepareMessagesForLLM mutated original messages in loop mode")
+	}
+}
+
 func TestSplitMessagesForCompaction_BuildsSyntheticEvidenceArtifact(t *testing.T) {
 	diff := strings.Repeat("+ changed line\n", 30)
 	msgs := []message.Message{
@@ -1332,6 +1376,24 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 	}
 	if !a.shouldDurableCompactBeforeMainLLM() {
 		t.Fatal("expected another turn to retry usage-driven compaction before breaker trips")
+	}
+}
+
+func TestUsageDrivenCompactionDisabledInLoop(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
+	a.loopState.Enabled = true
+	a.autoCompactRequested.Store(true)
+
+	if a.shouldDurableCompactBeforeMainLLM() {
+		t.Fatal("loop mode should disable usage-driven durable compaction")
+	}
+	if a.trySkipUsageDrivenCompactionAfterShrink([]message.Message{{Role: "user", Content: strings.Repeat("old output ", 1000)}}) {
+		t.Fatal("loop mode should not use request pruning to clear durable compaction")
+	}
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("loop mode should leave pending auto compaction request armed for later decision")
 	}
 }
 
