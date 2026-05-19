@@ -759,6 +759,62 @@ func TestParseAuthBrowserPromptByte(t *testing.T) {
 	}
 }
 
+func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
+	entry := config.RemovedOAuthStateEntry{AccountID: "acct-1", Email: "user@example.com", Access: "access-token"}
+	tests := []struct {
+		name string
+		cred *config.OAuthCredential
+		want bool
+	}{
+		{name: "nil", cred: nil, want: false},
+		{name: "account id", cred: &config.OAuthCredential{AccountID: "acct-1"}, want: true},
+		{name: "email", cred: &config.OAuthCredential{Email: "user@example.com"}, want: true},
+		{name: "access token", cred: &config.OAuthCredential{Access: "access-token"}, want: true},
+		{name: "empty fields do not match", cred: &config.OAuthCredential{}, want: false},
+		{name: "different", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "other@example.com", Access: "other"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := oauthCredentialMatchesStateEntry(tt.cred, entry); got != tt.want {
+				t.Fatalf("oauthCredentialMatchesStateEntry() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token"}, "email": "token@example.com"}`)
+	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access}}})
+
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("OAuth map missing access token key: %#v", got)
+	}
+	if setup.AccountID != "acct-token" || setup.Email != "token@example.com" {
+		t.Fatalf("setup metadata = (%q, %q), want token metadata", setup.AccountID, setup.Email)
+	}
+	if len(backfills) != 1 || backfills[0].AccountID != "acct-token" || backfills[0].Email != "token@example.com" {
+		t.Fatalf("backfills = %#v, want parsed metadata", backfills)
+	}
+}
+
+func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token"}, "email": "token@example.com"}`)
+	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-existing", Email: "existing@example.com"}}})
+
+	setup := got[access]
+	if setup.AccountID != "acct-existing" || setup.Email != "existing@example.com" {
+		t.Fatalf("setup metadata = (%q, %q), want existing metadata", setup.AccountID, setup.Email)
+	}
+	if len(backfills) != 0 {
+		t.Fatalf("backfills = %#v, want none", backfills)
+	}
+}
+
+func testUnsignedJWT(payload string) string {
+	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
+}
+
 func base64Payload(payload string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }

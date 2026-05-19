@@ -2,8 +2,9 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## 未发布
+## 0.6.0 - 2026-05-20
 
+- Build / 依赖：源码构建与 release artifact 现在要求 Go 1.26.3+，直接运行时依赖已更新到当前兼容最新版，并刷新了实际构建图中的间接依赖。CI 与 release workflow 都从 `go.mod` 读取 Go 版本，因此发布二进制会使用已修补的 Go toolchain 构建。
 - Runtime / 上下文：新增 `context.reduction` 下的确定性请求级上下文裁剪控制，包括陈旧工具结果剪裁阈值和专用 reduction 模型池预留配置；loop 模式仍保持不做请求级裁剪。
 - Auth / Runtime：将 OAuth 账号状态的权威来源迁移到 `auth.state.yaml`，新增 `invalidated` 状态与 `key_invalidated` 流式增量，并确保旧版 `status` 不再写入 `auth.yaml`。
 - Runtime / Fast mode：`/fast` 现在只在模型启用 `supports_fast` 能力时发送 provider 原生加速参数（OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`）；`preset: codex` 默认启用，其它模型需要显式开启。

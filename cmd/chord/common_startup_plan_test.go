@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/config"
 )
 
 func TestPlanInitAppStartupResolvesStorageAndProjectPaths(t *testing.T) {
@@ -59,5 +62,78 @@ func TestPlanInitAppStartupReturnsSessionPathError(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "resolve project storage paths") {
 		t.Fatalf("err = %v, want project storage path error", err)
+	}
+}
+
+func TestApplyInitAppStartupPlanCopiesResolvedState(t *testing.T) {
+	globalCfg := &config.Config{Proxy: "https://global.example"}
+	projectCfg := &config.Config{Proxy: "https://project.example"}
+	mergedCfg := &config.Config{Proxy: "https://merged.example"}
+	pathLocator := &config.PathLocator{ConfigHome: t.TempDir(), StateDir: t.TempDir(), CacheDir: t.TempDir(), LogsDir: t.TempDir()}
+	projectLocator := &config.ProjectLocator{ProjectRoot: t.TempDir(), ProjectSessionsDir: t.TempDir()}
+	plan := &initAppStartupPlan{
+		ProjectRoot:    projectLocator.ProjectRoot,
+		ChordDir:       filepath.Join(projectLocator.ProjectRoot, ".chord"),
+		PathLocator:    pathLocator,
+		ProjectLocator: projectLocator,
+		ConfigHome:     pathLocator.ConfigHome,
+		GlobalConfig:   globalCfg,
+		ProjectConfig:  projectCfg,
+		Config:         mergedCfg,
+	}
+
+	ac := &AppContext{}
+	applyInitAppStartupPlan(ac, plan)
+
+	if ac.ProjectRoot != plan.ProjectRoot || ac.ChordDir != plan.ChordDir || ac.ConfigHome != plan.ConfigHome {
+		t.Fatalf("basic paths not copied: ac=%+v plan=%+v", ac, plan)
+	}
+	if ac.PathLocator != pathLocator || ac.ProjectLocator != projectLocator || ac.GlobalCfg != globalCfg || ac.ProjectCfg != projectCfg || ac.Cfg != mergedCfg {
+		t.Fatalf("resolved pointers not copied: ac=%+v", ac)
+	}
+
+	applyInitAppStartupPlan(nil, plan)
+	applyInitAppStartupPlan(ac, nil)
+}
+
+func TestResolveInitialModelSelectionUsesRuntimePoolPolicy(t *testing.T) {
+	builder := &config.AgentConfig{
+		Name:    "builder",
+		Variant: "default",
+		Models: map[string][]string{
+			"base": {"openai/base"},
+			"fast": {"openai/fast@low", "anthropic/fast"},
+		},
+	}
+	policy := agent.NewRuntimeModelPoolPolicy()
+	policy.SetCurrentModelPool("fast")
+
+	providerModel, variant := resolveInitialModelSelection(map[string]*config.AgentConfig{"builder": builder}, policy)
+	if providerModel != "openai/fast" || variant != "low" {
+		t.Fatalf("selection = %q @ %q, want openai/fast @ low", providerModel, variant)
+	}
+}
+
+func TestResolveInitialModelSelectionFallsBackToFirstPoolAndAgentVariant(t *testing.T) {
+	builder := &config.AgentConfig{
+		Name:    "builder",
+		Variant: "default",
+		Models: map[string][]string{
+			"base": {"openai/base"},
+		},
+	}
+
+	providerModel, variant := resolveInitialModelSelection(map[string]*config.AgentConfig{"builder": builder}, agent.NewRuntimeModelPoolPolicy())
+	if providerModel != "openai/base" || variant != "default" {
+		t.Fatalf("selection = %q @ %q, want openai/base @ default", providerModel, variant)
+	}
+}
+
+func TestResolveInitialModelSelectionHandlesMissingBuilder(t *testing.T) {
+	if providerModel, variant := resolveInitialModelSelection(nil, agent.NewRuntimeModelPoolPolicy()); providerModel != "" || variant != "" {
+		t.Fatalf("nil configs selection = %q @ %q, want empty", providerModel, variant)
+	}
+	if providerModel, variant := resolveInitialModelSelection(map[string]*config.AgentConfig{}, agent.NewRuntimeModelPoolPolicy()); providerModel != "" || variant != "" {
+		t.Fatalf("missing builder selection = %q @ %q, want empty", providerModel, variant)
 	}
 }

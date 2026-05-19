@@ -34,13 +34,15 @@ Once you want to go further, Chord also supports these advanced workflows:
 
 ### 1. Install
 
-If you already have Go 1.26+ installed:
+If you already have Go 1.26.3+ installed:
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
 
-If you do not have Go 1.26+, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases). Pick the archive for your OS/architecture, extract it, put `chord` on your `PATH`, and run:
+Source builds require Go 1.26.3 or newer because earlier Go 1.26 patch releases contain reachable standard-library vulnerabilities. With the default `GOTOOLCHAIN=auto`, Go downloads the required toolchain automatically when needed.
+
+If you do not have Go 1.26.3+, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases). Pick the archive for your OS/architecture, extract it, put `chord` on your `PATH`, and run:
 
 ```bash
 chord --version

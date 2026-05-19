@@ -34,13 +34,15 @@
 
 ### 1. 安装
 
-已安装 Go 1.26+ 时：
+已安装 Go 1.26.3+ 时：
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
 
-未安装 Go 1.26+ 时，可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。选择与 OS/架构匹配的压缩包，解压后把 `chord` 放入 `PATH`，然后执行：
+源码构建要求 Go 1.26.3 或更新版本，因为更早的 Go 1.26 patch 版本存在可达的标准库漏洞。默认 `GOTOOLCHAIN=auto` 时，Go 会在需要时自动下载所需 toolchain。
+
+未安装 Go 1.26.3+ 时，可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。选择与 OS/架构匹配的压缩包，解压后把 `chord` 放入 `PATH`，然后执行：
 
 ```bash
 chord --version

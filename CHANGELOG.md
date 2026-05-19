@@ -2,8 +2,9 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.6.0 - 2026-05-20
 
+- Build / Dependencies: require Go 1.26.3+ for source builds and release artifacts, update direct runtime dependencies to their latest compatible versions, and refresh reachable build-graph indirect dependencies. CI and release workflows read the Go version from `go.mod`, so published binaries are built with the patched Go toolchain.
 - Runtime / Context: added deterministic request-time context reduction controls under `context.reduction`, including stale tool-result pruning thresholds and a dedicated reduction model-pool hook, while keeping loop mode unpruned.
 - Auth / Runtime: moved OAuth account status authority to `auth.state.yaml`, added the `invalidated` status and `key_invalidated` stream delta, and kept legacy `status` out of `auth.yaml`.
 - Runtime / Fast mode: `/fast` now uses provider-native acceleration parameters (`service_tier="fast"` for OpenAI Responses and `speed="fast"` for Anthropic) only when the model's `supports_fast` capability is enabled; `preset: codex` enables it by default, other models opt in explicitly.
