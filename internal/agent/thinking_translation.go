@@ -120,23 +120,9 @@ func (a *MainAgent) maybeTranslateLatestThinkingAfterIdle(turnID uint64) {
 	}
 
 	stableKey := fmt.Sprintf("msgidx:%d", lastIdx)
-	userLang := a.currentThinkingTranslationUserLang(svc.TargetLang)
 	for _, block := range extractThinkingTranslationBlocks(last) {
-		a.scheduleThinkingTranslation(svc, stableKey, userLang, block)
+		a.scheduleThinkingTranslation(svc, stableKey, svc.TargetLang, block)
 	}
-}
-
-func (a *MainAgent) currentThinkingTranslationUserLang(fallback string) string {
-	if a == nil || a.ctxMgr == nil {
-		return fallback
-	}
-	msgs := a.ctxMgr.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			return thinkingtranslate.GuessUserLang(msgs[i].Content, fallback)
-		}
-	}
-	return fallback
 }
 
 func (a *MainAgent) scheduleStreamingThinkingTranslation(messageIndex, blockIndex int, original string) {
@@ -148,8 +134,7 @@ func (a *MainAgent) scheduleStreamingThinkingTranslation(messageIndex, blockInde
 		return
 	}
 	messageKey := fmt.Sprintf("msgidx:%d", messageIndex)
-	userLang := a.currentThinkingTranslationUserLang(svc.TargetLang)
-	a.scheduleThinkingTranslation(svc, messageKey, userLang, thinkingTranslationBlock{BlockIndex: blockIndex, Original: original})
+	a.scheduleThinkingTranslation(svc, messageKey, svc.TargetLang, thinkingTranslationBlock{BlockIndex: blockIndex, Original: original})
 }
 
 func (a *MainAgent) resetThinkingTranslationSeen() {

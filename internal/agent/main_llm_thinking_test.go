@@ -131,7 +131,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 }
 func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.ctxMgr.Append(message.Message{Role: "user", Content: "请用中文回复。"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "hi"})
 	a.newTurn()
 	if a.turn == nil {
 		t.Fatal("expected active turn")
