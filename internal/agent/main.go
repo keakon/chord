@@ -297,6 +297,13 @@ type MainAgent struct {
 	evidenceCandidates   []evidenceItem
 	evidenceCandidateSet map[string]struct{}
 
+	// loopReductionMu protects the request-shape snapshot used when loop mode
+	// is enabled while an LLM request is already in flight. The event loop may
+	// read it from a busy /loop command while callLLM runs on a worker goroutine.
+	loopReductionMu              sync.Mutex
+	lastPreparedLLMTurnID        uint64
+	lastPreparedLLMRequestPrefix []message.Message
+
 	// Async durable compaction (pre-request gate): defer inbound events until commit.
 	compactionState      compactionState
 	sessionEpoch         uint64

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 type LoopState string
@@ -56,15 +58,20 @@ type loopRuntimeState struct {
 	// injection is suppressed until a terminal assistant stop_reason=done is
 	// observed, or a Done tool exit attempt is rejected.
 	DeferContinuationPromptUntilDone bool
-	ConsecutiveNoProgress            int
-	LastProgressSignature            string
-	LastAssessmentMessage            string
-	ProgressVersion                  uint64
-	VerificationVersion              uint64
-	LastAssessmentVersion            uint64
-	Iteration                        int
-	MaxIterations                    int
-	MaxIterationsSet                 bool
+	// FrozenReductionPrefix stores the already-sent request prefix when loop mode is
+	// enabled while a request is in flight. Loop requests reuse this prefix shape
+	// so old messages do not flip from pruned to unpruned, while later messages are
+	// left unpruned.
+	FrozenReductionPrefix []message.Message
+	ConsecutiveNoProgress int
+	LastProgressSignature string
+	LastAssessmentMessage string
+	ProgressVersion       uint64
+	VerificationVersion   uint64
+	LastAssessmentVersion uint64
+	Iteration             int
+	MaxIterations         int
+	MaxIterationsSet      bool
 }
 
 func (s *loopRuntimeState) enable() {
@@ -101,6 +108,7 @@ func (s *loopRuntimeState) disable() {
 	s.MaxIterations = 0
 	s.MaxIterationsSet = false
 	s.DeferContinuationPromptUntilDone = false
+	s.FrozenReductionPrefix = nil
 	s.Enabled = false
 }
 

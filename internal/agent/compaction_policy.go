@@ -51,7 +51,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 	prepared := make([]message.Message, len(messages))
 	copy(prepared, messages)
 	if a != nil && a.loopState.Enabled {
-		return prepared
+		return a.applyLoopFrozenReductionPrefix(prepared)
 	}
 	policy := a.contextReductionPolicy()
 
@@ -107,6 +107,92 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 	}
 
 	return prepared
+}
+
+func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message.Message) {
+	if a == nil || turnID == 0 {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	a.lastPreparedLLMTurnID = turnID
+	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(messages)
+}
+
+func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
+	if a == nil {
+		return
+	}
+	turnID := a.currentTurnID()
+	if turnID == 0 {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+		a.lastPreparedLLMRequestPrefix = nil
+		return
+	}
+	a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
+}
+
+func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message) []message.Message {
+	if a == nil || len(a.loopState.FrozenReductionPrefix) == 0 {
+		return prepared
+	}
+	prefix := a.loopState.FrozenReductionPrefix
+	limit := min(len(prefix), len(prepared))
+	for i := 0; i < limit; i++ {
+		prepared[i] = cloneMessageForRequestShape(prefix[i])
+	}
+	return prepared
+}
+
+func cloneMessageSliceForRequestShape(messages []message.Message) []message.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	cloned := make([]message.Message, len(messages))
+	for i := range messages {
+		cloned[i] = cloneMessageForRequestShape(messages[i])
+	}
+	return cloned
+}
+
+func cloneMessageForRequestShape(msg message.Message) message.Message {
+	cloned := msg
+	if len(msg.Parts) > 0 {
+		cloned.Parts = cloneContentParts(msg.Parts)
+	}
+	if len(msg.ToolCalls) > 0 {
+		cloned.ToolCalls = make([]message.ToolCall, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
+			cloned.ToolCalls[i] = tc
+			if len(tc.Args) > 0 {
+				cloned.ToolCalls[i].Args = append([]byte(nil), tc.Args...)
+			}
+		}
+	}
+	if len(msg.ThinkingBlocks) > 0 {
+		cloned.ThinkingBlocks = append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...)
+	}
+	if msg.FileState != nil {
+		cloned.FileState = msg.FileState.Clone()
+	}
+	if len(msg.LSPReviews) > 0 {
+		cloned.LSPReviews = append([]message.LSPReview(nil), msg.LSPReviews...)
+	}
+	if msg.Audit != nil {
+		cloned.Audit = msg.Audit.Clone()
+	}
+	if msg.Provenance != nil {
+		cloned.Provenance = cloneProvenance(msg.Provenance)
+	}
+	if msg.Usage != nil {
+		usage := *msg.Usage
+		cloned.Usage = &usage
+	}
+	return cloned
 }
 
 func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {

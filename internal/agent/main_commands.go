@@ -168,6 +168,9 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 			return true
 		}
 		a.EnableLoopMode(target)
+		if busy {
+			a.freezeLoopReductionPrefixForCurrentTurn()
+		}
 		if maxSet {
 			a.loopState.MaxIterations = maxIterations
 			a.loopState.MaxIterationsSet = true

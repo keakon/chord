@@ -739,7 +739,7 @@ purposes.
 | When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
-| Loop mode | Disabled | Disabled |
+| Loop mode | Disabled | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability |
 
 **How they work together**: Reduction is the lightweight first line of defense —
 it trims stale tool output before every request, slowing down context growth.
@@ -826,6 +826,13 @@ Before each LLM request, Chord applies a set of deterministic rules to inspect
 tool results in the conversation and trim large, stale output. **This only
 affects the prompt sent for the current request — it never rewrites session
 files on disk.**
+
+In loop mode, reduction is not applied to newly added messages. If you enable
+`/loop on` while an LLM request is already in flight, Chord freezes and reuses
+that request's already-prepared prefix for subsequent loop requests. This avoids
+flipping old history from a reduced form back to full raw tool output, preserving
+prompt-cache prefix stability; messages produced during the loop remain
+unreduced until loop mode is turned off.
 
 > **Most users do not need to configure this section.** The built-in defaults
 > are already tuned for common scenarios. The parameters below are only for

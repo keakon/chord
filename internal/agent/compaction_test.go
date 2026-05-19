@@ -284,6 +284,53 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningInLoop(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	largeOutput := strings.Repeat("test output line\n", 500)
+	newLargeOutput := strings.Repeat("new output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	firstPrepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(firstPrepared[2].Content, "Older Shell output omitted") {
+		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
+	}
+	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
+	a.EnableLoopMode("finish current task")
+	a.freezeLoopReductionPrefixForCurrentTurn()
+
+	loopMsgs := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc2", Name: "Shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
+		}},
+		message.Message{Role: "tool", ToolCallID: "tc2", Content: newLargeOutput},
+		message.Message{Role: "user", Content: "u5"},
+		message.Message{Role: "user", Content: "u6"},
+	)
+	loopPrepared := a.prepareMessagesForLLM(loopMsgs)
+	if loopPrepared[2].Content != firstPrepared[2].Content {
+		t.Fatalf("loop should reuse frozen pruned prefix, got %q want %q", loopPrepared[2].Content, firstPrepared[2].Content)
+	}
+	if loopPrepared[7].Content != newLargeOutput {
+		t.Fatalf("loop should not prune messages added after frozen prefix, got %q", loopPrepared[7].Content)
+	}
+
+	a.DisableLoopMode()
+	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
+	if !strings.Contains(afterLoopPrepared[7].Content, "Older Shell output omitted") {
+		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
+	}
+}
+
 func TestSplitMessagesForCompaction_BuildsSyntheticEvidenceArtifact(t *testing.T) {
 	diff := strings.Repeat("+ changed line\n", 30)
 	msgs := []message.Message{
