@@ -1088,6 +1088,83 @@ func TestResponsesProvider_NoPreviousIDOnFirstRound(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
+	var gotBody map[string]any
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.SetSessionID("session-123")
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "session-123" {
+		t.Fatalf("prompt_cache_key = %v, want session-123", got)
+	}
+	if got := gotHeader.Get("X-Session-Id"); got != "session-123" {
+		t.Fatalf("X-Session-Id = %q, want session-123", got)
+	}
+	if got := gotHeader.Get("session-id"); got != "session-123" {
+		t.Fatalf("session-id = %q, want session-123", got)
+	}
+}
+
+func TestOpenAIProvider_SendsSessionHeadersOnChatCompletions(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: server.URL + "/v1/chat/completions",
+	}, []string{"test-key"})
+	o, err := NewOpenAIProviderWithClient(providerCfg, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+	o.SetSessionID("session-456")
+
+	_, err = o.CompleteStream(
+		context.Background(), "test-key", "gpt-4", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotHeader.Get("X-Session-Id"); got != "session-456" {
+		t.Fatalf("X-Session-Id = %q, want session-456", got)
+	}
+	if got := gotHeader.Get("session-id"); got != "session-456" {
+		t.Fatalf("session-id = %q, want session-456", got)
+	}
+}
+
 func TestResponsesProvider_HTTPSendsFullInputOnSecondRound(t *testing.T) {
 	var requestBodies []map[string]any
 	var mu sync.Mutex

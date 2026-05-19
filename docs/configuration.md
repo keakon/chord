@@ -949,6 +949,18 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 ### Provider field reference
 
+Chord automatically propagates the current Chord session id to OpenAI-family
+providers as cache/routing affinity metadata: OpenAI Responses requests include
+`prompt_cache_key`, and OpenAI Chat Completions / Responses HTTP requests include
+`X-Session-Id` and `session-id` headers when a session id is available. These
+fields are not user-configurable; they follow the active Chord session and are
+cleared or changed on session switch/resume. Anthropic prompt caching is driven
+by `cache_control` blocks, and its optional `metadata.user_id` remains a stable
+anonymous user/provider id rather than a per-session id. Gemini does not have a
+simple per-request session-id cache key in Chord's `generateContent` transport;
+its cache signals come from provider-specific cached-content APIs/usage fields,
+not from a Chord session id header.
+
 | Field          | Type   | Description                                                                                                                                              |
 | -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |

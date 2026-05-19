@@ -831,6 +831,8 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
+Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；它的可选 `metadata.user_id` 仍是稳定的匿名用户 / provider 标识，而不是按 session 变化的 id。Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请求 session-id cache key；它的缓存信号来自 provider 专用 cached-content API / usage 字段，而不是 Chord session id header。
+
 | 字段          | 类型   | 说明                                                                                                                                                |
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |

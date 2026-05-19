@@ -384,6 +384,7 @@ func (r *ResponsesProvider) sendAndParse(
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("OpenAI-Beta", "responses=v1")
 	}
+	applySessionIDHeaders(req.Header, r.sessionID)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
