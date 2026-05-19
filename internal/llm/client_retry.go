@@ -288,6 +288,7 @@ type streamTargetAttemptResult struct {
 	resp                *message.Response
 	lastErr             error
 	pendingRoundWait    time.Duration
+	hadRequestAttempt   bool
 	roundHadUsableReply bool
 	skipProvider        bool
 }
@@ -417,6 +418,7 @@ func (c *Client) completeStreamTarget(
 		}
 		tracker := newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
 
+		result.hadRequestAttempt = true
 		resp, err = t.impl.CompleteStream(
 			ctx,
 			apiKey,
@@ -663,6 +665,10 @@ func (c *Client) completeStreamWithRetry(
 			}
 		}
 		pendingRoundWait = 0
+		// roundHadRequestAttempt tracks whether this round reached the provider API
+		// at least once. If every target fails key selection with NoUsableKeysError,
+		// a full-round retry cannot make progress without external state changes.
+		roundHadRequestAttempt := false
 		roundHadUsableReply := false
 
 		// Define the list of models to try in this round.
@@ -716,6 +722,9 @@ func (c *Client) completeStreamWithRetry(
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
 				pendingRoundWait = mergePendingRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
+				if targetResult.hadRequestAttempt {
+					roundHadRequestAttempt = true
+				}
 				if targetResult.roundHadUsableReply {
 					roundHadUsableReply = true
 				}
@@ -748,7 +757,11 @@ func (c *Client) completeStreamWithRetry(
 			return nil, lastErr
 		}
 		if _, ok := errors.AsType[*NoUsableKeysError](lastErr); ok {
-			return nil, lastErr
+			if fallbackEnabled && len(targets) > 1 && roundHadRequestAttempt {
+				log.Warnf("model pool exhausted with no usable keys after at least one request attempt; retrying full pool provider=%v model=%v error=%v", startProvider.Name(), startModelID, lastErr)
+			} else {
+				return nil, lastErr
+			}
 		}
 		if isTerminalModelPoolFailure(lastErr) {
 			return nil, lastErr

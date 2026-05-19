@@ -462,6 +462,116 @@ func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	}
 }
 
+func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("linux", "gpt-5.5", []string{"key-a"})
+	fallbackCfg := testProviderConfig("codex2", "gpt-5.5")
+	disabledCfg := testProviderConfigWithKeys("codex", "gpt-5.5", []string{"disabled-key"})
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporary primary failure"}},
+		{resp: &message.Response{Content: "ok after retry round"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{{err: &APIError{StatusCode: 503, Message: "temporary upstream failure"}}}
+	disabledImpl := &recordingProvider{}
+
+	disabledCfg.MarkInvalidated("disabled-key")
+	primaryCfg.retryDelayBase = -1
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		&Client{},
+		context.Background(),
+		primaryCfg,
+		primaryImpl,
+		"gpt-5.5",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{
+			ProviderConfig: fallbackCfg,
+			ProviderImpl:   fallbackImpl,
+			ModelID:        "gpt-5.5",
+			MaxTokens:      4096,
+			ContextLimit:   128000,
+		}, {
+			ProviderConfig: disabledCfg,
+			ProviderImpl:   disabledImpl,
+			ModelID:        "gpt-5.5",
+			MaxTokens:      4096,
+			ContextLimit:   128000,
+		}},
+		2,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after retry round" {
+		t.Fatalf("response = %#v, want second-round primary success", resp)
+	}
+	if got := len(primaryImpl.apiKeys); got != 2 {
+		t.Fatalf("primary calls = %d, want 2", got)
+	}
+	if got := len(fallbackImpl.apiKeys); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+	if got := len(disabledImpl.apiKeys); got != 0 {
+		t.Fatalf("disabled provider should not be called, got %d calls", got)
+	}
+}
+
+func TestClient_ModelPoolAllNoUsableKeysStopsWithoutEmptyRetryLoop(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary", "gpt-5.5", []string{"disabled-primary"})
+	fallbackCfg := testProviderConfigWithKeys("fallback", "gpt-5.5", []string{"disabled-fallback"})
+	primaryCfg.MarkInvalidated("disabled-primary")
+	fallbackCfg.MarkInvalidated("disabled-fallback")
+	primaryCfg.retryDelayBase = -1
+
+	primaryImpl := &recordingProvider{}
+	fallbackImpl := &recordingProvider{}
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		&Client{},
+		context.Background(),
+		primaryCfg,
+		primaryImpl,
+		"gpt-5.5",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{
+			ProviderConfig: fallbackCfg,
+			ProviderImpl:   fallbackImpl,
+			ModelID:        "gpt-5.5",
+			MaxTokens:      4096,
+			ContextLimit:   128000,
+		}},
+		-3,
+		&CallStatus{},
+	)
+	if err == nil {
+		t.Fatalf("completeStreamWithRetry returned nil error with response %#v, want NoUsableKeysError", resp)
+	}
+	if _, ok := errors.AsType[*NoUsableKeysError](err); !ok {
+		t.Fatalf("error = %T %[1]v, want NoUsableKeysError", err)
+	}
+	if got := len(primaryImpl.apiKeys); got != 0 {
+		t.Fatalf("primary provider should not be called, got %d calls", got)
+	}
+	if got := len(fallbackImpl.apiKeys); got != 0 {
+		t.Fatalf("fallback provider should not be called, got %d calls", got)
+	}
+}
+
 func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 	ctx := context.Background()
 	snapReset := time.Now().Add(3 * time.Minute)
