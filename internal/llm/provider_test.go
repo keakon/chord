@@ -137,7 +137,6 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
     expires: %d
     account_id: acc-2
     email: external@example.com
-    status: deactivated
 `, expires, expires)), 0o600); err != nil {
 		t.Fatalf("WriteFile(latest auth): %v", err)
 	}
@@ -163,11 +162,11 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	if got := updated["openai"][0].OAuth; got.CodexPrimaryResetAt != 333 || got.CodexSecondaryResetAt != 444 {
 		t.Fatalf("expected refreshed oauth credential to preserve codex reset hints, got %#v", got)
 	}
-	if got := updated["openai"][1].OAuth; got == nil || got.Email != "external@example.com" || got.Status != config.OAuthStatusDeactivated {
-		t.Fatalf("expected sibling oauth credential to keep latest file changes, got %#v", got)
+	if got := updated["openai"][1].OAuth; got == nil || got.Email != "external@example.com" || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected sibling oauth credential to keep latest auth.yaml fields without status, got %#v", got)
 	}
-	if got := auth["openai"][1].OAuth; got == nil || got.Email != "external@example.com" || got.Status != config.OAuthStatusDeactivated {
-		t.Fatalf("expected in-memory auth cache to refresh from latest file, got %#v", got)
+	if got := auth["openai"][1].OAuth; got == nil || got.Email != "external@example.com" || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected in-memory auth cache to refresh latest auth.yaml fields without status, got %#v", got)
 	}
 
 	data, err := os.ReadFile(authPath)
@@ -178,6 +177,9 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, string(data))
 		}
+	}
+	if strings.Contains(string(data), "status:") {
+		t.Fatalf("auth.yaml should not contain status, got:\n%s", string(data))
 	}
 }
 

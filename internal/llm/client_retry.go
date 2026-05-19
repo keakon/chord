@@ -469,6 +469,9 @@ func (c *Client) completeStreamTarget(
 			if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
 				cb(message.StreamDelta{Type: "key_deactivated", AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
 			}
+			if (cooldownResult.invalidatedAccountID != "" || cooldownResult.invalidatedEmail != "") && cb != nil {
+				cb(message.StreamDelta{Type: "key_invalidated", AccountID: cooldownResult.invalidatedAccountID, Email: cooldownResult.invalidatedEmail})
+			}
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
 				log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				return result, lastInputTokens, err

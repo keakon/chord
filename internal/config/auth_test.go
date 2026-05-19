@@ -140,7 +140,7 @@ func TestLoadAuthConfig_OAuth(t *testing.T) {
 	}
 }
 
-func TestLoadAuthConfig_OAuthDeactivated(t *testing.T) {
+func TestLoadAuthConfig_IgnoresLegacyOAuthStatus(t *testing.T) {
 	f, err := os.CreateTemp("", "auth-*.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -164,8 +164,8 @@ func TestLoadAuthConfig_OAuthDeactivated(t *testing.T) {
 	if len(creds) != 1 || creds[0].OAuth == nil {
 		t.Fatalf("expected one OAuth credential, got %#v", creds)
 	}
-	if creds[0].OAuth.Status != OAuthStatusDeactivated {
-		t.Fatal("expected OAuth credential deactivated=true")
+	if creds[0].OAuth.Status != OAuthStatusNormal {
+		t.Fatalf("auth.yaml status should be ignored, got %q", creds[0].OAuth.Status)
 	}
 }
 
@@ -438,8 +438,15 @@ func TestSaveAndLoadAuthConfig_RoundTrip(t *testing.T) {
 	if creds[1].OAuth.AccountID != "acc-1" {
 		t.Errorf("expected AccountID=acc-1, got %q", creds[1].OAuth.AccountID)
 	}
-	if creds[1].OAuth.Status != OAuthStatusDeactivated {
-		t.Error("expected Deactivated=true after round trip")
+	if creds[1].OAuth.Status != OAuthStatusNormal {
+		t.Errorf("expected auth.yaml status to be omitted on round trip, got %q", creds[1].OAuth.Status)
+	}
+	data, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), "status:") {
+		t.Fatalf("auth.yaml should not contain status, got:\n%s", string(data))
 	}
 }
 
@@ -457,6 +464,11 @@ func TestIsRefreshTokenInvalid(t *testing.T) {
 		{
 			name: "invalid_grant",
 			err:  &OAuthRefreshError{StatusCode: 400, Code: "invalid_grant", Message: "refresh token expired"},
+			want: true,
+		},
+		{
+			name: "missing_refresh_token",
+			err:  &OAuthRefreshError{Code: "missing_refresh_token", Message: "refresh token is empty"},
 			want: true,
 		},
 		{
@@ -512,6 +524,23 @@ func TestRefreshOAuthToken_ReusesExistingRefreshWhenResponseOmitsRefreshToken(t 
 	}
 	if updated.Access != "new-access-token" {
 		t.Fatalf("Access = %q, want new-access-token", updated.Access)
+	}
+}
+
+func TestRefreshOAuthToken_EmptyRefreshTokenDoesNotCallEndpoint(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	_, err := RefreshOAuthToken(context.Background(), server.Client(), server.URL, "client-123", &OAuthCredential{Access: "old-access"})
+	if !IsRefreshTokenInvalid(err) {
+		t.Fatalf("RefreshOAuthToken err = %v, want refresh-token-invalid error", err)
+	}
+	if called {
+		t.Fatal("token endpoint was called despite empty refresh token")
 	}
 }
 

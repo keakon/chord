@@ -212,6 +212,7 @@ type llmStreamReducer struct {
 	onRateLimits     func(message.StreamDelta)
 	onKeySwitched    func()
 	onKeyDeactivated func(email, accountID string)
+	onKeyInvalidated func(email, accountID string)
 	onKeyExpired     func(email, accountID string)
 	onKeyConfirmed   func(*message.StatusDelta)
 	onError          func(text string)
@@ -258,6 +259,10 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 	case "key_deactivated":
 		if r.onKeyDeactivated != nil {
 			r.onKeyDeactivated(delta.Email, delta.AccountID)
+		}
+	case "key_invalidated":
+		if r.onKeyInvalidated != nil {
+			r.onKeyInvalidated(delta.Email, delta.AccountID)
 		}
 	case "key_expired":
 		if r.onKeyExpired != nil {

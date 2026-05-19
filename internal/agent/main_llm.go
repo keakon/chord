@@ -358,6 +358,10 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", streamKeyIdentity(email, accountID)), Level: "error"})
 		a.emitToTUI(KeyPoolChangedEvent{})
 	}
+	streamReducer.onKeyInvalidated = func(email, accountID string) {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account invalidated: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error"})
+		a.emitToTUI(KeyPoolChangedEvent{})
+	}
 	streamReducer.onKeyExpired = func(email, accountID string) {
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error"})
 		a.emitToTUI(KeyPoolChangedEvent{})

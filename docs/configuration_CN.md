@@ -220,8 +220,8 @@ openai:
 
 这样拆分是有意为之：
 
-- `auth.yaml` 继续作为用户手动维护的凭据真相源，保存 `refresh`、`access`、`expires`、`account_id`、`email` 等相对稳定字段；
-- `auth.state.yaml` 作为机器维护的共享运行时状态，避免额度 / reset 更新频繁改动 `auth.yaml`，与用户手工编辑发生冲突。
+- `auth.yaml` 继续作为用户手动维护的凭据真相源，保存 `refresh`、`access`、`expires`、`account_id`、`email` 等相对稳定字段；不要在 `auth.yaml` 中写 OAuth `status`；
+- `auth.state.yaml` 作为机器维护的共享运行时状态，避免额度 / reset 更新以及 `expired`、`deactivated`、`invalidated` 等账号状态频繁改动 `auth.yaml`，与用户手工编辑发生冲突。
 
 典型的 `auth.state.yaml` 条目形态如下：
 
@@ -241,6 +241,8 @@ openai:
     codex_secondary_window_minutes: 10080
     codex_secondary_reset_at: 1774600000000
 ```
+
+`status` 字段只在 `auth.state.yaml` 中权威生效。刷新 token 不可用时 Chord 写入 `expired`，服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
 
 这些 Codex 缓存字段是跨重启保留的调度与展示提示，不是硬封禁：
 

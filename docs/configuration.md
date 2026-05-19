@@ -237,8 +237,8 @@ For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime
 
 That split is intentional:
 
-- `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`;
-- `auth.state.yaml` is machine-managed shared runtime state, so quota / reset updates do not constantly rewrite `auth.yaml` while the user may also be editing it.
+- `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; do not put OAuth `status` in `auth.yaml`;
+- `auth.state.yaml` is machine-managed shared runtime state, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
 
 A typical `auth.state.yaml` entry looks like:
 
@@ -258,6 +258,8 @@ openai:
     codex_secondary_window_minutes: 10080
     codex_secondary_reset_at: 1774600000000
 ```
+
+The `status` field is authoritative only in `auth.state.yaml`. Chord writes `expired` when a refresh token can no longer be used, `deactivated` when the service reports a disabled/banned account, and `invalidated` when the account must be re-authenticated. Any non-empty status makes that OAuth slot unselectable until it is cleaned up or replaced.
 
 These cached Codex quota/reset fields are restart-stable scheduling and display hints, not hard blocks by themselves:
 

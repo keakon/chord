@@ -103,13 +103,13 @@ chord auth codex --device-code
 
 ### `chord auth state clean`
 
-清理 `~/.config/chord/auth.state.yaml` 中已失效的 OAuth 运行时状态条目，并同步清理 `~/.config/chord/auth.yaml` 中匹配的过期 / 已停用 OAuth 凭据。
+清理 `~/.config/chord/auth.state.yaml` 中已失效的 OAuth 运行时状态条目，并同步清理 `~/.config/chord/auth.yaml` 中匹配的过期 / 已停用 / 已失效 OAuth 凭据。
 
 典型用途：
 
-- 清理过期 / 已停用账号残留的共享缓存状态和匹配凭据；
+- 清理过期 / 已停用 / 已失效账号残留的共享缓存状态和匹配凭据；
 - 在轮换或下线账号后让 `auth.state.yaml` 与 `auth.yaml` 保持同步；
-- 移除已被 Chord 标记为过期或已停用的不可用 OAuth 凭据。
+- 移除已被 Chord 标记为过期、已停用或已失效的不可用 OAuth 凭据。
 
 ```bash
 chord auth state clean

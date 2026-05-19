@@ -429,6 +429,58 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 	}
 }
 
+func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-token
+    access: oauth-token
+    expires: 32503680000000
+    account_id: acc-1
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	prov.SetOAuthRefresher(
+		config.OpenAIOAuthTokenURL,
+		config.OpenAIOAuthClientID,
+		authPath,
+		strings.TrimSuffix(authPath, ".yaml")+".state.yaml",
+		&auth,
+		&authMu,
+		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: 32503680000000}},
+		"",
+	)
+	pollHit := make(chan struct{}, 1)
+	prov.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		select {
+		case pollHit <- struct{}{}:
+		default:
+		}
+		return nil, &APIError{StatusCode: http.StatusUnauthorized, Code: "account_invalidated", Message: "account invalidated"}
+	})
+	defer prov.StopCodexRateLimitPolling()
+
+	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	select {
+	case <-pollHit:
+	case <-time.After(time.Second):
+		t.Fatal("polling did not run")
+	}
+	waitForOAuthStatusInAuth(t, authPath, "oauth-token", config.OAuthStatusInvalidated)
+	_, total := prov.AvailableKeyCount()
+	if total != 0 {
+		t.Fatalf("total = %d, want 0: invalidated OAuth key should be excluded", total)
+	}
+}
+
 func TestUpdatePolledRateLimitSnapshotCallsOnPolledUpdate(t *testing.T) {
 	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"k1"})
 

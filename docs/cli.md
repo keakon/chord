@@ -103,13 +103,13 @@ chord auth codex --device-code
 
 ### `chord auth state clean`
 
-Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml` and matching expired / deactivated OAuth credentials from `~/.config/chord/auth.yaml`.
+Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml` and matching expired / deactivated / invalidated OAuth credentials from `~/.config/chord/auth.yaml`.
 
 Typical use cases:
 
-- clear shared cached state and matching credentials for expired / deactivated accounts;
+- clear shared cached state and matching credentials for expired / deactivated / invalidated accounts;
 - keep `auth.state.yaml` and `auth.yaml` in sync after rotating or retiring accounts;
-- remove unusable OAuth credentials after Chord marks them expired or deactivated.
+- remove unusable OAuth credentials after Chord marks them expired, deactivated, or invalidated.
 
 ```bash
 chord auth state clean

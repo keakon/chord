@@ -27,13 +27,15 @@ const (
 
 // OAuthCredentialStatus indicates the usability status of an OAuth credential.
 // Empty string means the credential is normal/usable.
-// "deactivated" means the account has been permanently disabled.
+// "deactivated" means the account has been permanently disabled (e.g. banned).
+// "invalidated" means the account has been invalidated (e.g. needs re-auth).
 // "expired" means the refresh token has expired and cannot be refreshed.
 type OAuthCredentialStatus string
 
 const (
 	OAuthStatusNormal      OAuthCredentialStatus = ""
 	OAuthStatusDeactivated OAuthCredentialStatus = "deactivated"
+	OAuthStatusInvalidated OAuthCredentialStatus = "invalidated"
 	OAuthStatusExpired     OAuthCredentialStatus = "expired"
 )
 
@@ -50,7 +52,7 @@ type OAuthCredential struct {
 	Expires               int64                 `yaml:"expires"`
 	AccountID             string                `yaml:"account_id,omitempty"`
 	Email                 string                `yaml:"email,omitempty"`
-	Status                OAuthCredentialStatus `yaml:"status,omitempty"`
+	Status                OAuthCredentialStatus `yaml:"-"`
 	CodexPrimaryResetAt   int64                 `yaml:"codex_primary_reset_at,omitempty"`
 	CodexSecondaryResetAt int64                 `yaml:"codex_secondary_reset_at,omitempty"`
 }
@@ -340,7 +342,7 @@ func IsRefreshTokenInvalid(err error) bool {
 	if !errors.As(err, &refreshErr) {
 		return false
 	}
-	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" {
+	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" || refreshErr.Code == "missing_refresh_token" {
 		return true
 	}
 	msg := strings.ToLower(refreshErr.Message)
@@ -375,6 +377,10 @@ func refreshOAuthTokenWithFormat(
 	}
 	if cred == nil {
 		return nil, fmt.Errorf("oauth credential is nil")
+	}
+
+	if strings.TrimSpace(cred.Refresh) == "" {
+		return nil, &OAuthRefreshError{Code: "missing_refresh_token", Message: "refresh token is empty"}
 	}
 
 	var (

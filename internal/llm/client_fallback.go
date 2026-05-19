@@ -92,7 +92,9 @@ type markKeyCooldownResult struct {
 	refreshedKey         string
 	expiredAccountID     string // non-empty when a codex OAuth refresh token was marked expired
 	expiredEmail         string // email from the expired key's JWT, if available
-	deactivatedAccountID string // non-empty when a codex OAuth key was put into cooldown due to 401/403
+	invalidatedAccountID string // non-empty when a codex OAuth key was invalidated (401/403)
+	invalidatedEmail     string // email from the invalidated key's JWT, if available
+	deactivatedAccountID string // non-empty when a codex OAuth key was deactivated (401/403)
 	deactivatedEmail     string // email from the deactivated key's JWT, if available
 }
 
@@ -103,7 +105,18 @@ func isAccountDeactivated(apiErr *APIError) bool {
 		return true
 	}
 	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "deactivated") || strings.Contains(msg, "account has been disabled")
+	return strings.Contains(msg, "deactivated") ||
+		strings.Contains(msg, "account has been disabled")
+}
+
+// isAccountInvalidated reports whether the API error indicates an invalidated
+// account that typically requires re-auth (as opposed to a banned/deactivated account).
+func isAccountInvalidated(apiErr *APIError) bool {
+	if apiErr.Code == "account_invalidated" {
+		return true
+	}
+	msg := strings.ToLower(apiErr.Message)
+	return strings.Contains(msg, "invalidated")
 }
 
 // markKeyCooldown checks the error and puts the key into cooldown if the
@@ -138,6 +151,26 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		provider.MarkCooldown(key, cooldown)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 401:
+		if info := provider.oauthInfoForKey(key); info != nil {
+			if isAccountInvalidated(apiErr) {
+				log.Warnf("OAuth account invalidated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+				provider.MarkInvalidated(key)
+				return markKeyCooldownResult{
+					cooldownApplied:      true,
+					invalidatedAccountID: info.AccountID,
+					invalidatedEmail:     info.Email,
+				}
+			}
+			if isAccountDeactivated(apiErr) {
+				log.Warnf("OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+				provider.MarkDeactivated(key)
+				return markKeyCooldownResult{
+					cooldownApplied:      true,
+					deactivatedAccountID: info.AccountID,
+					deactivatedEmail:     info.Email,
+				}
+			}
+		}
 		// For OAuth keys, a 401 usually means the token expired. Attempt a
 		// refresh so the next key-loop iteration can reuse the credential slot
 		// with the fresh token.
@@ -155,19 +188,30 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 			}
 			return result
 		}
-		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
-			log.Warnf("OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
-			provider.MarkDeactivated(key)
-			return markKeyCooldownResult{
-				cooldownApplied:      true,
-				deactivatedAccountID: info.AccountID,
-				deactivatedEmail:     info.Email,
-			}
-		}
 		log.Warnf("API key authentication failed, marking cooldown key_suffix=%v", keySuffix(key))
 		provider.MarkCooldown(key, time.Minute)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 403:
+		if info := provider.oauthInfoForKey(key); info != nil {
+			if isAccountInvalidated(apiErr) {
+				log.Warnf("OAuth account invalidated (403), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+				provider.MarkInvalidated(key)
+				return markKeyCooldownResult{
+					cooldownApplied:      true,
+					invalidatedAccountID: info.AccountID,
+					invalidatedEmail:     info.Email,
+				}
+			}
+			if isAccountDeactivated(apiErr) {
+				log.Warnf("OAuth account deactivated (403), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+				provider.MarkDeactivated(key)
+				return markKeyCooldownResult{
+					cooldownApplied:      true,
+					deactivatedAccountID: info.AccountID,
+					deactivatedEmail:     info.Email,
+				}
+			}
+		}
 		// Same rationale as 401: OAuth token may have been revoked/expired.
 		if refreshedKey, ok, refreshErr := provider.TryRefreshOAuthKey(ctx, key); ok {
 			log.Infof("OAuth token refreshed after 403, key ready for retry key_suffix=%v", keySuffix(key))
@@ -182,15 +226,6 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				result.expiredEmail = info.Email
 			}
 			return result
-		}
-		if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
-			log.Warnf("OAuth account deactivated (403), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
-			provider.MarkDeactivated(key)
-			return markKeyCooldownResult{
-				cooldownApplied:      true,
-				deactivatedAccountID: info.AccountID,
-				deactivatedEmail:     info.Email,
-			}
 		}
 		log.Warnf("API key permission denied, marking cooldown key_suffix=%v", keySuffix(key))
 		provider.MarkCooldown(key, time.Minute)

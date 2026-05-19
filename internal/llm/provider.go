@@ -1735,6 +1735,13 @@ func (p *ProviderConfig) HealthyKeyCount() (healthy, total int) {
 	return healthy, total
 }
 
+// MarkInvalidated permanently marks an OAuth key as invalidated and persists that
+// state back to auth.yaml when possible. Unlike MarkExpired, this represents an
+// account invalidation signal that usually requires re-auth.
+func (p *ProviderConfig) MarkInvalidated(key string) {
+	p.markInvalid(key, config.OAuthStatusInvalidated)
+}
+
 // MarkDeactivated permanently marks an OAuth key as unusable for this session
 // and persists that state back to auth.yaml when possible. Unlike MarkCooldown,
 // this key will never be selected again and is excluded from the total key count
@@ -2043,10 +2050,17 @@ func (p *ProviderConfig) handleCodexWarmupAuthFailure(ctx context.Context, key s
 	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
 		return false
 	}
-	if info := p.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
-		log.Warnf("codex warmup detected OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
-		p.MarkDeactivated(key)
-		return true
+	if info := p.oauthInfoForKey(key); info != nil {
+		if isAccountInvalidated(apiErr) {
+			log.Warnf("codex warmup detected OAuth account invalidated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+			p.MarkInvalidated(key)
+			return true
+		}
+		if isAccountDeactivated(apiErr) {
+			log.Warnf("codex warmup detected OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+			p.MarkDeactivated(key)
+			return true
+		}
 	}
 	if refreshedKey, ok, refreshErr := p.TryRefreshOAuthKey(ctx, key); ok {
 		log.Infof("OAuth token refreshed during codex warmup key_suffix=%v", keySuffix(refreshedKey))
@@ -2122,7 +2136,11 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		}()
 		snaps, err := fetchFn(key, accountID)
 		if err != nil {
-			log.Debugf("codex usage poll failed provider=%v error=%v", providerName, err)
+			if p.handleCodexWarmupAuthFailure(context.Background(), key, err) {
+				log.Debugf("codex usage poll auth failure handled provider=%v error=%v", providerName, err)
+			} else {
+				log.Debugf("codex usage poll failed provider=%v error=%v", providerName, err)
+			}
 			return
 		}
 		for _, snap := range snaps {
