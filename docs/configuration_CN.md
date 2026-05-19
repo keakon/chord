@@ -327,7 +327,7 @@ chord auth codex --device-code
 
 Chord 通过命名模型池选择当前使用的模型。每个池条目建议写成完整的 `provider/model[@variant]`，这样 provider endpoint、认证、协议以及 variant tuning 都是明确的。
 
-模型池在 `config.yaml`（全局或项目级）中定义；agent 配置只能引用池名，不允许在 agent 中内联定义池。
+模型池在 `config.yaml`（全局或项目级）中定义；agent 配置可以引用池名来限制可用池，但不允许在 agent 中内联定义池。
 
 ### 在 config.yaml 中定义 model_pools
 
@@ -343,7 +343,10 @@ model_pools:
 
 项目级 `.chord/config.yaml` 的 `model_pools` 会合并到全局配置中（同名覆盖）。
 
-### 在 agent 中引用池名
+### 在 agent 中引用池名（可选）
+
+Agent 可以不设置 `model_pools`。省略时，该 agent 可使用合并后的
+`config.yaml` 顶层 `model_pools` 中的所有池，并按池名的字母顺序排序。只有在需要限制该 agent 可用池，或自定义 fallback 顺序时，才需要设置 `model_pools: [...]`。
 
 ```yaml
 # ~/.config/chord/agents/builder.yaml 或 .chord/agents/builder.yaml
@@ -359,9 +362,9 @@ mode: subagent
 model_pools: [thinking]
 ```
 
-未显式选择池时，Chord 回退到该 agent `model_pools: [...]` 列表中的第一个池。
+未显式选择池时，Chord 会回退到该 agent 的第一个可用池：如果配置了 `model_pools: [...]`，使用列表中的第一个；否则使用按字母顺序排序后的第一个顶层池。
 
-运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。切换池会更新后续 LLM 调用的整条 fallback 链；即使当前选中的 `provider/model` 同时存在于两个池中，也会按新池的顺序重新构建（已发起的 in-flight 请求仍使用其开始时快照到的 client）。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用 `model_pools` 列表中的第一个池；想恢复默认时切回第一个池即可。
+运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。切换池会更新后续 LLM 调用的整条 fallback 链；即使当前选中的 `provider/model` 同时存在于两个池中，也会按新池的顺序重新构建（已发起的 in-flight 请求仍使用其开始时快照到的 client）。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用第一个可用池；想恢复默认时切回该池即可。
 
 ## 用 YAML anchor 复用模型模板
 
@@ -603,7 +606,6 @@ Markdown agent 示例：
 name: backend-coder
 description: Backend developer
 mode: subagent
-model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -618,7 +620,6 @@ permission:
 name: backend-coder
 description: Backend developer
 mode: subagent
-model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -631,7 +632,7 @@ prompt: |
 - `name`：agent 名称。省略时使用不带扩展名的文件名。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
-- `model_pools`：该 agent 的可用池名列表（有序）。池定义位于 `config.yaml` 顶层 `model_pools`。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
+- `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。
 - `mcp`：作用域限定在该 agent 的 MCP 配置。

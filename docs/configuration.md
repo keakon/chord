@@ -344,8 +344,8 @@ chord auth codex --device-code
 
 Chord selects the active model via **named model pools**. Each pool entry should be a full `provider/model[@variant]` reference so the provider endpoint, auth, protocol, and variant tuning are unambiguous.
 
-Pool definitions live in `config.yaml` (global or project-level), and agent configs
-only *reference* pool names. Agent configs cannot define inline pools.
+Pool definitions live in `config.yaml` (global or project-level). Agent configs
+may reference pool names to restrict access; they cannot define inline pools.
 
 ### Define model pools in config.yaml
 
@@ -362,7 +362,12 @@ model_pools:
 Project-level `.chord/config.yaml` `model_pools` are merged into the global config
 (same-name pools override).
 
-### Reference pools from agents
+### Reference pools from agents (optional)
+
+Agents do not need to set `model_pools`. If omitted, the agent can use every
+pool defined in merged `config.yaml` `model_pools`, sorted by pool name. Add
+`model_pools: [...]` only when you want to restrict that agent to a subset or
+customize its fallback order.
 
 ```yaml
 # ~/.config/chord/agents/builder.yaml or .chord/agents/builder.yaml
@@ -378,8 +383,9 @@ mode: subagent
 model_pools: [thinking]
 ```
 
-When no pool is explicitly selected, Chord falls back to the agent's **first** pool
-in the `model_pools: [...]` list.
+When no pool is explicitly selected, Chord falls back to the agent's first
+allowed pool: the first entry in `model_pools: [...]` when configured, otherwise
+the alphabetically first top-level pool.
 
 At runtime, use `/models` to switch the pool for the **current view** (per project,
 persisted across restarts). In the main view this means the current main role; in a
@@ -388,8 +394,8 @@ the full fallback chain for subsequent LLM calls, even if the currently selected
 `provider/model` exists in both pools (in-flight requests keep using their starting
 snapshot). You can also set a named
 agent directly with `/models --agent <name> <pool>`. For SubAgents, the default behavior
-is simply to use the first pool listed in `model_pools: [...]`; switching back to that
-first pool restores the default behavior.
+is to use the first allowed pool; switching back to that pool restores the default
+behavior.
 
 ## Reusing model templates with YAML anchors
 
@@ -669,7 +675,6 @@ Markdown agent example:
 name: backend-coder
 description: Backend developer
 mode: subagent
-model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -684,7 +689,6 @@ Equivalent YAML agent example:
 name: backend-coder
 description: Backend developer
 mode: subagent
-model_pools: [default]
 permission:
   Write: ask
   Edit: ask
@@ -697,7 +701,7 @@ Common fields include:
 - `name`: agent name. If omitted, Chord uses the filename without extension.
 - `description`: short description shown to the main agent when delegation is available.
 - `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases.
-- `model_pools`: list of pool names this agent can use (ordered). Pool definitions live in `config.yaml` top-level `model_pools`.
+- `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
 - `permission`: per-tool permission policy for this agent.

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,7 +86,7 @@ prompt: hello
 	}
 }
 
-func TestLoadAgentConfigRejectsUnsupportedExtensionAndMissingModels(t *testing.T) {
+func TestLoadAgentConfigRejectsUnsupportedExtensionAndInlineModels(t *testing.T) {
 	dir := t.TempDir()
 	unsupported := filepath.Join(dir, "worker.txt")
 	if err := os.WriteFile(unsupported, []byte("name: worker"), 0o644); err != nil {
@@ -99,8 +100,12 @@ func TestLoadAgentConfigRejectsUnsupportedExtensionAndMissingModels(t *testing.T
 	if err := os.WriteFile(missingModels, []byte("name: worker\nmode: subagent\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile missingModels: %v", err)
 	}
-	if _, err := LoadAgentConfig(missingModels); err == nil || !strings.Contains(err.Error(), "must define at least one model pool via model_pools") {
-		t.Fatalf("LoadAgentConfig missing models err = %v, want missing model pool", err)
+	cfg, err := LoadAgentConfig(missingModels)
+	if err != nil {
+		t.Fatalf("LoadAgentConfig without model_pools: %v", err)
+	}
+	if cfg.Name != "worker" || len(cfg.ModelPools) != 0 {
+		t.Fatalf("agent without model_pools should load for default resolution, got %#v", cfg)
 	}
 
 	bothFields := filepath.Join(dir, "both.yaml")
@@ -212,6 +217,25 @@ func TestResolveAgentModelPools(t *testing.T) {
 		"fast":   {"provider/fast-model"},
 		"strong": {"provider/strong-model"},
 	}
+
+	t.Run("defaults to all global pools sorted by name", func(t *testing.T) {
+		agents := map[string]*AgentConfig{
+			"worker": {Name: "worker"},
+		}
+		if err := ResolveAgentModelPools(agents, globalPools); err != nil {
+			t.Fatalf("ResolveAgentModelPools: %v", err)
+		}
+		cfg := agents["worker"]
+		if got := cfg.PoolNames(); !reflect.DeepEqual(got, []string{"base", "fast", "strong"}) {
+			t.Fatalf("default PoolNames = %v, want sorted all pools", got)
+		}
+		if len(cfg.ModelPools) != 0 {
+			t.Fatalf("ModelPools should be cleared after default resolution, got %v", cfg.ModelPools)
+		}
+		if len(cfg.Models) != len(globalPools) {
+			t.Fatalf("Models len = %d, want %d", len(cfg.Models), len(globalPools))
+		}
+	})
 
 	t.Run("resolves references into Models", func(t *testing.T) {
 		agents := map[string]*AgentConfig{

@@ -237,8 +237,8 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 	}
 
 	// Inline models: { ... } definitions are deprecated and no longer supported.
-	// Model pools must be defined in config.yaml's top-level model_pools and referenced
-	// from agents via model_pools: [...].
+	// Model pools must be defined in config.yaml's top-level model_pools.
+	// Agents may optionally restrict usable pools via model_pools: [...].
 	if len(cfg.Models) > 0 {
 		return nil, fmt.Errorf("agent config %s: inline models are not supported; define pools in config.yaml model_pools and reference them via model_pools", path)
 	}
@@ -258,10 +258,6 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 			return nil, fmt.Errorf("agent config %s: model_pools contains duplicate entry %q", path, name)
 		}
 		seenPools[name] = struct{}{}
-	}
-
-	if len(cfg.ModelPools) == 0 {
-		return nil, fmt.Errorf("agent config %s: must define at least one model pool via model_pools", path)
 	}
 
 	cfg.poolOrder = append([]string(nil), cfg.ModelPools...)
@@ -350,7 +346,6 @@ Question: allow
 		Name:        "planner",
 		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
 		Mode:        AgentModeMain,
-		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}
 }
@@ -384,7 +379,6 @@ Delete: ask
 		Name:        "builder",
 		Description: "General-purpose coding agent — the default MainAgent role for implementing features, fixing bugs, writing tests, and refactoring code.",
 		Mode:        AgentModeMain,
-		ModelPools:  []string{"default"},
 		Permission:  inner,
 	}
 }
@@ -417,33 +411,42 @@ func ResolveAgentConfigs(projectDir, globalDir string) (map[string]*AgentConfig,
 	return merged, nil
 }
 
-// ResolveAgentModelPools resolves model_pools references in agent configs
-// using the global model_pools definitions from config.yaml.
-// Agents that use model_pools get their Models map populated from the global definitions.
-// Returns an error if any referenced pool name does not exist in globalPools.
+// ResolveAgentModelPools resolves agent model pool access using the global
+// model_pools definitions from config.yaml. Agents with model_pools configured
+// are restricted to that ordered list; agents without model_pools are allowed to
+// use every top-level pool, sorted by pool name for deterministic defaults.
+// Returns an error if any referenced/defaulted pool is missing, empty, or has an
+// invalid model reference.
 func ResolveAgentModelPools(agents map[string]*AgentConfig, globalPools map[string][]string) error {
 	for name := range globalPools {
 		if name == "" {
 			return fmt.Errorf("config model_pools: pool name must not be empty")
 		}
 	}
+	defaultOrder := make([]string, 0, len(globalPools))
+	for name := range globalPools {
+		defaultOrder = append(defaultOrder, name)
+	}
+	sort.Strings(defaultOrder)
 	for agentName, cfg := range agents {
 		if cfg == nil {
 			continue
 		}
-		if len(cfg.ModelPools) == 0 {
+		if len(cfg.Models) > 0 {
 			continue
 		}
+		order := append([]string(nil), cfg.ModelPools...)
+		if len(order) == 0 {
+			order = defaultOrder
+		}
 
-		order := make([]string, 0, len(cfg.ModelPools))
-		seen := make(map[string]struct{}, len(cfg.ModelPools))
-		resolved := make(map[string][]string, len(cfg.ModelPools))
-		for _, poolName := range cfg.ModelPools {
+		seen := make(map[string]struct{}, len(order))
+		resolved := make(map[string][]string, len(order))
+		for _, poolName := range order {
 			if _, dup := seen[poolName]; dup {
 				return fmt.Errorf("agent %q: model_pools contains duplicate entry %q", agentName, poolName)
 			}
 			seen[poolName] = struct{}{}
-			order = append(order, poolName)
 
 			refs, ok := globalPools[poolName]
 			if !ok {
