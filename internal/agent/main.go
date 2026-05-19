@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/keakon/golog/log"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
@@ -1733,33 +1735,19 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 		a.setIdleAndDrainPending()
 		return
 	}
-	execPrompt := a.buildExecuteSystemPrompt(planPath, string(planContent))
+	execPrompt := a.buildExecuteSystemPrompt(planPath)
 	a.setSystemPromptOverride(execPrompt)
 
 	// Notify TUI to wipe the viewport so planner-phase messages are cleared.
 	a.emitToTUI(SessionRestoredEvent{})
 
 	// Add initial execution instruction that drives LLM-based dispatch.
-	a.ctxMgr.Append(message.Message{
-		Role: "user",
-		Content: fmt.Sprintf(
-			"Execute the plan at %s. Analyse the plan content, identify all tasks and their dependencies, "+
-				a.executionStartInstruction()+
-				" "+a.executionPacingInstruction(),
-			planPath,
-		),
-	})
-	a.recordEvidenceFromMessage(message.Message{
-		Role: "user",
-		Content: fmt.Sprintf(
-			"Execute the plan at %s. Analyse the plan content, identify all tasks and their dependencies, "+
-				a.executionStartInstruction()+
-				" "+a.executionPacingInstruction(),
-			planPath,
-		),
-	})
+	executionMsg := a.buildPlanExecutionBootstrapMessage(planPath)
+	a.ctxMgr.Append(executionMsg)
+	a.recordEvidenceFromMessage(executionMsg)
 	if a.usageLedger != nil {
-		if err := a.usageLedger.SetFirstUserMessage(fmt.Sprintf("Execute the plan at %s", planPath)); err != nil {
+		firstUserMessage := message.UserPromptPlainText(executionMsg)
+		if err := a.usageLedger.SetFirstUserMessage(firstUserMessage); err != nil {
 			log.Warnf("failed to update usage summary first user message error=%v", err)
 		}
 		a.updateSessionSummary(func(summary *SessionSummary) {
@@ -1767,11 +1755,11 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 				return
 			}
 			if summary.FirstUserMessage == "" {
-				summary.FirstUserMessage = fmt.Sprintf("Execute the plan at %s", planPath)
+				summary.FirstUserMessage = firstUserMessage
 				summary.FirstUserMessageIsCompactionSummary = false
 			}
 			if summary.OriginalFirstUserMessage == "" {
-				summary.OriginalFirstUserMessage = fmt.Sprintf("Execute the plan at %s", planPath)
+				summary.OriginalFirstUserMessage = firstUserMessage
 			}
 		})
 	}
@@ -1802,11 +1790,34 @@ func (a *MainAgent) resolveAvailableAgents() []*config.AgentConfig {
 	return agents
 }
 
+func (a *MainAgent) buildPlanExecutionBootstrapMessage(planPath string) message.Message {
+	instruction := fmt.Sprintf(
+		"Execute the plan at @%s. Analyse the referenced plan content, identify all tasks and their dependencies, "+
+			a.executionStartInstruction()+
+			" "+a.executionPacingInstruction(),
+		escapePlanAtMentionPath(planPath),
+	)
+	parts := append([]message.ContentPart{{Type: "text", Text: instruction}}, filectx.BuildFileParts([]string{planPath}, func(path string) string { return path })...)
+	return message.Message{Role: "user", Content: instruction, Parts: parts}
+}
+
+func escapePlanAtMentionPath(path string) string {
+	var b strings.Builder
+	b.Grow(len(path))
+	for _, r := range path {
+		if unicode.IsSpace(r) || r == '\\' || r == '@' {
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // buildExecuteSystemPrompt constructs a system prompt for the plan execution
 // phase. It should identify the target plan and execution expectations without
 // pre-committing the current main role to a specific strategy such as direct
 // implementation or subagent orchestration.
-func (a *MainAgent) buildExecuteSystemPrompt(planPath, planContent string) string {
+func (a *MainAgent) buildExecuteSystemPrompt(planPath string) string {
 	base := a.buildSystemPrompt()
 	hasTodoWrite := a.hasTodoWriteAccess()
 
@@ -1889,12 +1900,6 @@ Path: %s
 9. **Finish**: when everything is done, give a concise final summary.
 `, planPath)
 	}
-
-	fmt.Fprintf(&sb, `
-
-### Plan Content
-%s
-`, planContent)
 
 	return sb.String()
 }

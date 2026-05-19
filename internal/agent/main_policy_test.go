@@ -288,6 +288,12 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 	if strings.Contains(last, "Delegate tool") || strings.Contains(last, "execute the tasks directly") {
 		t.Fatalf("bootstrap execution message should stay generic: %q", last)
 	}
+	if !strings.Contains(last, "Execute the plan at @") || !strings.Contains(last, planPath) {
+		t.Fatalf("bootstrap execution message should @-reference plan path %q: %q", planPath, last)
+	}
+	if len(msgs[len(msgs)-1].Parts) < 2 || !strings.Contains(msgs[len(msgs)-1].Parts[1].Text, `<file path="`+planPath+`">`) {
+		t.Fatalf("bootstrap execution message should include referenced plan file part, got %#v", msgs[len(msgs)-1].Parts)
+	}
 	if !strings.Contains(last, "execute the plan using the visible tools and coordination mechanisms available in this role") {
 		t.Fatalf("bootstrap execution message missing generic execution instruction: %q", last)
 	}
@@ -1311,8 +1317,8 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	// Execute-plan path should bootstrap a plan execution turn.
 	a.startPlanExecution(planPath, "builder")
 	msgs := a.GetMessages()
-	if len(msgs) == 0 || !strings.Contains(msgs[len(msgs)-1].Content, "Execute the plan at") {
-		t.Fatalf("expected execute-plan bootstrap message, got %#v", msgs)
+	if len(msgs) == 0 || !strings.Contains(msgs[len(msgs)-1].Content, "Execute the plan at @") {
+		t.Fatalf("expected execute-plan bootstrap message with @ plan reference, got %#v", msgs)
 	}
 
 	// Simulate a delegated worker still running (no Complete/Escalate/error/blocked signal yet).
