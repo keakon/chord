@@ -46,6 +46,7 @@ func TestHostRedrawPolicyForReason(t *testing.T) {
 		{reason: "scroll-flush", suppressPostFocusFallback: false, suppressPeriodicViewer: true, postHostFallbackReason: "scroll-flush-fallback", postHostFallbackDelay: scrollFlushFallbackRedrawDelay},
 		{reason: "content-boundary", suppressPostFocusFallback: false, postHostFallbackReason: "content-boundary-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
 		{reason: "live-append", suppressPostFocusFallback: false, postHostFallbackReason: "content-boundary-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
+		{reason: "toast-boundary", suppressPostFocusFallback: false, postHostFallbackReason: "content-boundary-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
 		{reason: "background-dirty-focus", suppressPostFocusFallback: false, postHostFallbackReason: "background-dirty-focus-fallback", postHostFallbackDelay: contentBoundaryFallbackRedrawDelay},
 		{reason: "content-boundary-fallback", suppressPostFocusFallback: true},
 		{reason: "debug-dump", suppressPostFocusFallback: true},
@@ -74,6 +75,44 @@ func TestHostRedrawPolicyForReason(t *testing.T) {
 	}
 }
 
+func TestToastBoundaryHostRedrawOnToastAppearAndDisappear(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.SetFocusResizeFreezeEnabled(true)
+	oldHeight := m.viewport.height
+
+	cmd := m.enqueueToast("diagnostics bundle exported", "info")
+	if cmd == nil {
+		t.Fatal("enqueueToast should schedule toast timer and boundary redraw")
+	}
+	if got, want := m.viewport.height, oldHeight-1; got != want {
+		t.Fatalf("viewport height after toast appear = %d, want %d", got, want)
+	}
+	if m.lastHostRedrawReason != "toast-boundary" {
+		t.Fatalf("lastHostRedrawReason after toast appear = %q, want toast-boundary", m.lastHostRedrawReason)
+	}
+	if !hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "toast-boundary", "active=true") {
+		t.Fatalf("recent events missing toast-boundary active=true marker: %#v", m.snapshotTUIDiagnosticEvents())
+	}
+
+	m.lastHostRedrawAt = time.Time{}
+	cmd = m.handleToastTick()
+	if cmd == nil {
+		t.Fatal("toast expiry should schedule boundary redraw")
+	}
+	if m.activeToast != nil {
+		t.Fatalf("activeToast = %#v, want nil", m.activeToast)
+	}
+	if got, want := m.viewport.height, oldHeight; got != want {
+		t.Fatalf("viewport height after toast disappear = %d, want %d", got, want)
+	}
+	if m.lastHostRedrawReason != "toast-boundary" {
+		t.Fatalf("lastHostRedrawReason after toast disappear = %q, want toast-boundary", m.lastHostRedrawReason)
+	}
+	if !hasDiagnosticEvent(m.snapshotTUIDiagnosticEvents(), "toast-boundary", "active=false") {
+		t.Fatalf("recent events missing toast-boundary active=false marker: %#v", m.snapshotTUIDiagnosticEvents())
+	}
+}
+
 func TestHostRedrawSequenceSkipsWindowSizeForPureRepairReasons(t *testing.T) {
 	tests := []string{
 		"stream-flush",
@@ -83,6 +122,7 @@ func TestHostRedrawSequenceSkipsWindowSizeForPureRepairReasons(t *testing.T) {
 		"content-boundary",
 		"content-boundary-fallback",
 		"live-append",
+		"toast-boundary",
 		"background-dirty-focus",
 		"background-dirty-focus-fallback",
 	}
@@ -125,7 +165,7 @@ func TestMaybePostHostRedrawFallbackCmdOnlyArmsNearFocusRestore(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	now := time.Now()
 
-	for _, reason := range []string{"scroll-flush", "content-boundary", "live-append", "background-dirty-focus"} {
+	for _, reason := range []string{"scroll-flush", "content-boundary", "live-append", "toast-boundary", "background-dirty-focus"} {
 		t.Run(reason, func(t *testing.T) {
 			m.lastForegroundAt = time.Time{}
 			if cmd := m.maybePostHostRedrawFallbackCmd(reason, 1, now); cmd != nil {

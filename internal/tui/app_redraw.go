@@ -129,7 +129,7 @@ func hostRedrawPolicyForReason(reason string) hostRedrawReasonPolicy {
 		policy.suppressPeriodicViewer = true
 		policy.postHostFallbackReason = "scroll-flush-fallback"
 		policy.postHostFallbackDelay = scrollFlushFallbackRedrawDelay
-	case "content-boundary", "live-append":
+	case "content-boundary", "live-append", "toast-boundary":
 		policy.suppressPostFocusFallback = false
 		policy.postHostFallbackReason = "content-boundary-fallback"
 		policy.postHostFallbackDelay = contentBoundaryFallbackRedrawDelay
@@ -265,7 +265,7 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 
 func isContentBoundaryClassRedrawReason(reason string) bool {
 	switch strings.TrimSpace(reason) {
-	case "content-boundary", "live-append":
+	case "content-boundary", "live-append", "toast-boundary":
 		return true
 	default:
 		return false

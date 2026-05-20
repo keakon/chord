@@ -77,6 +77,19 @@ func (m *Model) shouldPriorityFlushToast(level string) bool {
 	}
 }
 
+func (m *Model) recalcViewportSizeForToastBoundary() tea.Cmd {
+	if m == nil || m.viewport == nil {
+		return nil
+	}
+	oldW, oldH := m.viewport.width, m.viewport.height
+	m.recalcViewportSize()
+	if m.viewport.width == oldW && m.viewport.height == oldH {
+		return nil
+	}
+	m.recordTUIDiagnostic("toast-boundary", "viewport=%dx%d->%dx%d active=%t queue=%d", oldW, oldH, m.viewport.width, m.viewport.height, m.activeToast != nil, len(m.toastQueue))
+	return m.hostRedrawForContentBoundaryCmd("toast-boundary")
+}
+
 // enqueueToastWithCategory enqueues a toast. Same-category toasts in the queue are merged
 // (replaced by the newer one). Active toast is not merged — the new toast enters the queue
 // unless it can preempt (higher priority).
@@ -90,11 +103,12 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 	if m.activeToast == nil {
 		m.activeToast = &t
 		m.toastGeneration++
-		m.recalcViewportSize()
+		redrawCmd := m.recalcViewportSizeForToastBoundary()
+		tickCmd := toastTickCmdForLevel(t.Level, m.toastGeneration)
 		if m.shouldPriorityFlushToast(t.Level) {
-			return tea.Batch(m.requestStreamBoundaryFlush(), toastTickCmdForLevel(t.Level, m.toastGeneration))
+			return tea.Batch(m.requestStreamBoundaryFlush(), redrawCmd, tickCmd)
 		}
-		return toastTickCmdForLevel(t.Level, m.toastGeneration)
+		return tea.Batch(redrawCmd, tickCmd)
 	}
 
 	// Preempt: new toast has strictly higher priority than the active one.

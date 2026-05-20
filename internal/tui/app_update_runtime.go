@@ -158,8 +158,7 @@ func (m *Model) handleToastTick() tea.Cmd {
 		}
 		return toastTickCmdForLevel(next.Level, m.toastGeneration)
 	}
-	m.recalcViewportSize()
-	return nil
+	return m.recalcViewportSizeForToastBoundary()
 }
 
 func (m *Model) handleClipboardWriteResult(msg clipboardWriteResultMsg) tea.Cmd {
