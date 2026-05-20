@@ -12,7 +12,10 @@ import (
 	"github.com/keakon/chord/internal/llm"
 )
 
-var errEmptyTranslationResponse = errors.New("empty translation response")
+var (
+	errEmptyTranslationResponse   = errors.New("empty translation response")
+	errInvalidTranslationResponse = errors.New("invalid translation response")
+)
 
 type LLMTranslator struct {
 	NewClient func() (*llm.Client, error)
@@ -88,6 +91,9 @@ func (t *LLMTranslator) translateOnce(ctx context.Context, client *llm.Client, t
 	}
 	if translated == "" {
 		return "", errEmptyTranslationResponse
+	}
+	if IsClearlyInvalidTranslation(chunk, targetLang, translated) {
+		return "", errInvalidTranslationResponse
 	}
 	return translated, nil
 }

@@ -89,6 +89,71 @@ func TestLLMTranslatorFallsBackOnEmptyTranslation(t *testing.T) {
 	}
 }
 
+func TestLLMTranslatorFallsBackOnClearlyInvalidShortTranslation(t *testing.T) {
+	provider := &sequenceProvider{steps: []string{
+		"<TRANSLATION>**</TRANSLATION>",
+		"<TRANSLATION>需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。</TRANSLATION>",
+	}}
+	translator := &LLMTranslator{NewClient: func() (*llm.Client, error) {
+		return newTranslatorClient(t, provider), nil
+	}}
+	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
+
+	got, err := translator.TranslateChunk(context.Background(), "zh-Hans", original)
+	if err != nil {
+		t.Fatalf("TranslateChunk() error = %v, want nil", err)
+	}
+	if got != "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。" {
+		t.Fatalf("TranslateChunk() = %q, want %q", got, "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。")
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider.calls = %d, want 2", provider.calls)
+	}
+}
+
+func TestLLMTranslatorFallsBackOnWrongTargetLanguage(t *testing.T) {
+	provider := &sequenceProvider{steps: []string{
+		"<TRANSLATION>We need to inspect the cached restore path because the translated reasoning output is still English and therefore not the requested target language.</TRANSLATION>",
+		"<TRANSLATION>需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。</TRANSLATION>",
+	}}
+	translator := &LLMTranslator{NewClient: func() (*llm.Client, error) {
+		return newTranslatorClient(t, provider), nil
+	}}
+	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
+
+	got, err := translator.TranslateChunk(context.Background(), "zh-Hans", original)
+	if err != nil {
+		t.Fatalf("TranslateChunk() error = %v, want nil", err)
+	}
+	if got != "需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。" {
+		t.Fatalf("TranslateChunk() = %q, want %q", got, "需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。")
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider.calls = %d, want 2", provider.calls)
+	}
+}
+
+func TestClearlyInvalidTranslationAllowsShortOriginals(t *testing.T) {
+	if IsClearlyInvalidTranslation("OK", "zh-Hans", "好") {
+		t.Fatal("IsClearlyInvalidTranslation() rejected a short valid translation")
+	}
+}
+
+func TestClearlyInvalidTranslationRejectsSeverelyCompressedLongOriginal(t *testing.T) {
+	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning. The retry should happen before the broken translation is persisted or rendered to the user."
+	if !IsClearlyInvalidTranslation(original, "zh-Hans", "缓存路径异常") {
+		t.Fatal("IsClearlyInvalidTranslation() accepted a severely compressed long translation")
+	}
+}
+
+func TestClearlyInvalidTranslationAllowsReasonableCompression(t *testing.T) {
+	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
+	translated := "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原意。"
+	if IsClearlyInvalidTranslation(original, "zh-Hans", translated) {
+		t.Fatal("IsClearlyInvalidTranslation() rejected a reasonably compressed translation")
+	}
+}
+
 func TestTranslationPromptUsesConsistentStructuredTags(t *testing.T) {
 	msgs := translationPrompt("zh-Hans", "Hello")
 	if len(msgs) != 1 {
@@ -133,6 +198,32 @@ func TestServiceTranslateTextUsesConfiguredTranslator(t *testing.T) {
 	}
 	if got != "你好，世界" {
 		t.Fatalf("TranslateText() = %q, want %q", got, "你好，世界")
+	}
+}
+
+func TestServiceTranslateTextTranslatesOnlyPreview(t *testing.T) {
+	svc, err := NewService()
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	svc.MaxChars = 5
+	calls := 0
+	svc.SetTranslator(stubChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
+		calls++
+		if chunk != "abcde" {
+			t.Fatalf("chunk = %q, want abcde", chunk)
+		}
+		return "预览", nil
+	}})
+	got, err := svc.TranslateText(context.Background(), "abcdefghij", nil)
+	if err != nil {
+		t.Fatalf("TranslateText() error: %v", err)
+	}
+	if got != "预览" {
+		t.Fatalf("TranslateText() = %q, want 预览", got)
+	}
+	if calls != 1 {
+		t.Fatalf("translator calls = %d, want 1", calls)
 	}
 }
 

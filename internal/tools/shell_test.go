@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -376,5 +377,26 @@ func TestBashParametersCommandDescription(t *testing.T) {
 	desc, _ := cmdProp["description"].(string)
 	if !strings.Contains(desc, "shell command") {
 		t.Fatalf("command description should say 'shell command', got %q", desc)
+	}
+}
+
+func TestCappedWriterConcurrentWriteAndString(t *testing.T) {
+	w := &cappedWriter{maxBytes: 1 << 20}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if _, err := w.Write([]byte("abcdef")); err != nil {
+					t.Errorf("Write returned error: %v", err)
+				}
+				_ = w.String()
+			}
+		}()
+	}
+	wg.Wait()
+	if got := w.total; got != 32*200*6 {
+		t.Fatalf("total = %d, want %d", got, 32*200*6)
 	}
 }

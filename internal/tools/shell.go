@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -19,12 +20,15 @@ const maxOutputBytes = 10 * 1024 * 1024 // 10 MB cap
 // cappedWriter wraps a bytes.Buffer and stops accepting data after maxBytes,
 // but continues counting total bytes written so callers can report the overflow.
 type cappedWriter struct {
+	mu       sync.Mutex
 	buf      bytes.Buffer
 	total    int64
 	maxBytes int64
 }
 
 func (c *cappedWriter) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.total += int64(len(p))
 	if remaining := c.maxBytes - int64(c.buf.Len()); remaining > 0 {
 		if int64(len(p)) <= remaining {
@@ -37,6 +41,8 @@ func (c *cappedWriter) Write(p []byte) (int, error) {
 }
 
 func (c *cappedWriter) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	s := c.buf.String()
 	if c.total > c.maxBytes {
 		s += fmt.Sprintf("\n...(output truncated: showed %d of %d bytes total)", c.buf.Len(), c.total)
