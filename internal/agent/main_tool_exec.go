@@ -61,9 +61,9 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	}
 }
 
-// normalizeDenyReason trims and collapses newlines in a deny reason.
+// normalizeDenyReason trims surrounding whitespace in a deny reason while preserving
+// the user's full text, including internal newlines, for display and model context.
 func normalizeDenyReason(reason string) string {
 	reason = strings.TrimSpace(reason)
-	reason = strings.ReplaceAll(reason, "\n", " ")
 	return reason
 }

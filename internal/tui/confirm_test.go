@@ -440,7 +440,8 @@ func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-	m.confirm.denyReasonInput.SetValue("  not safe\nfor production  ")
+	longTail := strings.Repeat("长", 250) + " tail"
+	m.confirm.denyReasonInput.SetValue("  not safe\nfor production\n" + longTail + "  ")
 
 	_ = m.handleConfirmDenyReasonKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
@@ -449,8 +450,9 @@ func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 		if result.Action != ConfirmDeny {
 			t.Fatalf("action = %v, want %v", result.Action, ConfirmDeny)
 		}
-		if result.DenyReason != "not safe for production" {
-			t.Fatalf("deny reason = %q, want %q", result.DenyReason, "not safe for production")
+		wantReason := "not safe\nfor production\n" + longTail
+		if result.DenyReason != wantReason {
+			t.Fatalf("deny reason = %q, want %q", result.DenyReason, wantReason)
 		}
 	default:
 		t.Fatal("expected confirm result after pressing Enter")

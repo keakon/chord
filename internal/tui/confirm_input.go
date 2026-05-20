@@ -305,12 +305,7 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func normalizeConfirmDenyReason(reason string) string {
-	reason = strings.TrimSpace(reason)
-	reason = strings.ReplaceAll(reason, "\n", " ")
-	if len([]rune(reason)) > 200 {
-		reason = string([]rune(reason)[:200])
-	}
-	return reason
+	return strings.TrimSpace(reason)
 }
 
 // handleConfirmEditKey processes key events in the confirm-edit sub-mode.

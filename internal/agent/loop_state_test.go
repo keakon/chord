@@ -610,7 +610,7 @@ Done: ask
 	})
 	turn.PendingToolCalls.Store(1)
 
-	longReason := strings.Repeat("长", 250) + " tail that must be preserved"
+	longReason := strings.Repeat("长", 250) + "\nsecond line tail that must be preserved"
 	wantResult := "Done rejected: " + longReason
 
 	handled := make(chan struct{})
@@ -639,7 +639,7 @@ Done: ask
 				if payload.Result != wantResult {
 					t.Fatalf("ToolResultEvent.Result length/content mismatch: got %q, want %q", payload.Result, wantResult)
 				}
-				if !strings.Contains(payload.Result, "tail that must be preserved") {
+				if !strings.Contains(payload.Result, "second line tail that must be preserved") {
 					t.Fatalf("ToolResultEvent.Result lost long deny reason tail: %q", payload.Result)
 				}
 				select {
@@ -649,7 +649,7 @@ Done: ask
 				}
 				for _, msg := range a.ctxMgr.Snapshot() {
 					if msg.Role == "tool" && msg.ToolCallID == callID && msg.Content != wantResult {
-						t.Fatalf("persisted Done rejection = %q, want truncated %q", msg.Content, wantResult)
+						t.Fatalf("persisted Done rejection = %q, want full %q", msg.Content, wantResult)
 					}
 				}
 				return

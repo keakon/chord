@@ -54,7 +54,7 @@ func (m *Model) renderConfirmDialog() string {
 			fmt.Sprintf("Tool: %s — deny with reason:", req.ToolName),
 		)
 		inputView := m.confirm.denyReasonInput.View()
-		hint := ConfirmHintStyle.Render("[Enter] Deny  [Esc] Back")
+		hint := ConfirmHintStyle.Render("[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back")
 		lines := []string{title, "", header}
 		lines = append(lines, strings.Split(inputView, "\n")...)
 		lines = append(lines, "", hint)
