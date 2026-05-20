@@ -361,7 +361,7 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		{"/export --json", true},
 		{"/mcp", true},
 		{"/mcp enable exa", true},
-		{"/compact", false},
+		{"/compact", true},
 		{"/new", false},
 		{"/loop", false},
 		{"hello", false},

@@ -157,10 +157,6 @@ func (a *MainAgent) trySkipUsageDrivenCompactionAfterShrink(snapshot []message.M
 // foreground tools done, about to call LLM again). Unlike maybeRunAutoCompaction
 // it does not require the agent to be idle, and does not emit IdleEvent.
 func (a *MainAgent) handleCompactCommand() {
-	if a.turn != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/compact: context compaction requires idle state")})
-		return
-	}
 	a.scheduleCompaction(true)
 }
 

@@ -806,7 +806,11 @@ is `256000`, and automatic compaction triggers when context reaches
 from triggering too late due to tokenizer drift or tool-description overhead.
 
 Beyond automatic triggering, you can manually compact at any time with the
-`/compact` command in the TUI, or use `/compact --no` to temporarily disable
+`/compact` command in the TUI. Manual compaction uses the same background
+worker as automatic compaction: it can be started while the agent is already
+working, shows progress in the background compaction status slot, and applies
+at the next safe continuation/idle barrier rather than interrupting the active
+turn immediately. You can also use `/compact --no` to temporarily disable
 subsequent automatic compaction for the current session.
 
 When a provider publishes both a total context window and a separate input cap,

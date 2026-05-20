@@ -13,9 +13,10 @@ import (
 )
 
 // isTUILocalOnlySlashCommand reports whether content is a local-only slash
-// command (/export, /models) that must run on the main agent's event loop and
-// must never be routed to a focused SubAgent. Predicate only — execution lives
-// in executeLocalOnlySlashCommand, which the event-loop goroutine calls.
+// command (/export, /models, /compact) that must run on the main agent's event
+// loop and must never be routed to a focused SubAgent. Predicate only —
+// execution lives in executeLocalOnlySlashCommand, which the event-loop
+// goroutine calls.
 func isTUILocalOnlySlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
@@ -25,6 +26,8 @@ func isTUILocalOnlySlashCommand(content string) bool {
 		return true
 	case c == "/fast" || strings.HasPrefix(c, "/fast "):
 		return true
+	case c == "/compact":
+		return true
 	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
 		// MCP control affects the tool surface and must always be routed to the main agent.
 		return true
@@ -33,13 +36,13 @@ func isTUILocalOnlySlashCommand(content string) bool {
 	}
 }
 
-// executeLocalOnlySlashCommand runs /export or /models on the event-loop
+// executeLocalOnlySlashCommand runs local-only slash commands on the event-loop
 // goroutine. busy reports whether an active turn is in flight (a.turn != nil)
 // so handlers can skip setIdleAndDrainPending — clearing a.turn mid-retry
 // corrupts turn state and breaks esc-cancel.
 //
 // parts is accepted for API symmetry with the user-message dispatch path; the
-// current /export and /models handlers operate on the text form only.
+// current local-only handlers operate on the text form only.
 func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.ContentPart, busy bool) bool {
 	c := strings.TrimSpace(content)
 	switch {
@@ -51,6 +54,9 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 		return true
 	case c == "/fast" || strings.HasPrefix(c, "/fast "):
 		a.handleFastCommand(c, busy)
+		return true
+	case c == "/compact":
+		a.handleCompactCommand()
 		return true
 	default:
 		return false
@@ -79,8 +85,8 @@ func (a *MainAgent) focusedSubAgentControlContext(focused *SubAgent) context.Con
 //
 // If a SubAgent is currently focused (via Tab), the message is routed directly
 // to that SubAgent instead of the MainAgent's event loop. Local-only slash
-// commands (/export, /models) bypass SubAgent routing because they belong to
-// the main agent — they're sent to the main event loop unchanged.
+// commands bypass SubAgent routing because they belong to the main agent —
+// they're sent to the main event loop unchanged.
 func (a *MainAgent) SendUserMessage(content string) {
 	if isTUILocalOnlySlashCommand(content) {
 		a.sendEvent(Event{Type: EventUserMessage, Payload: content})

@@ -1225,8 +1225,9 @@ func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message
 
 // processPendingUserMessagesBeforeLLMInTurn appends queued user messages to the
 // conversation so the next LLM call sees tool results and user input together.
-// Slash commands that require idle (/loop*, /resume*, /new, /compact, /mcp*) are left on the
-// queue for the next idle drain.
+// Slash commands that require idle (/loop*, /resume*, /new, /mcp*) are left on the
+// queue for the next idle drain. /compact is local-only and schedules background
+// compaction immediately, even while a turn is active.
 func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	if len(a.pendingUserMessages) == 0 {
 		return
@@ -1243,7 +1244,7 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
 		c := strings.TrimSpace(content)
-		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/compact" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || isLoopSlashCommand(c) {
+		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || isLoopSlashCommand(c) {
 			deferred = append(deferred, p)
 			continue
 		}
@@ -1300,7 +1301,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 
 	log.Debugf("handling user message content_len=%v", len(content))
 
-	// /export and /models: never queue or send to the model.
+	// /export, /models, /fast, and /compact are local-only: never queue or send to the model.
 	// Pass busy = (a.turn != nil) so handlers skip setIdleAndDrainPending and
 	// don't clobber the active turn while it's mid-retry.
 	if a.handleLocalOnlySlashCommands(content, parts, a.turn != nil) {

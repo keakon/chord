@@ -521,7 +521,40 @@ func TestHandleCompactCommandSchedulesAsyncCompaction(t *testing.T) {
 		t.Fatal("pending continuation should be set for async manual compaction")
 	}
 	if pending.turnID != 0 {
-		t.Fatalf("pending.turnID = %d, want 0 for manual compaction", pending.turnID)
+		t.Fatalf("pending.turnID = %d, want 0 for idle manual compaction", pending.turnID)
+	}
+	if pending.continuation != compactionResumeIdle {
+		t.Fatalf("pending continuation = %q, want %q", pending.continuation, compactionResumeIdle)
+	}
+}
+
+func TestHandleCompactCommandSchedulesAsyncCompactionWhileBusy(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "four"})
+	a.newTurn()
+	turnID := a.turn.ID
+	turnEpoch := a.turn.Epoch
+
+	a.handleCompactCommand()
+	if !a.IsCompactionRunning() {
+		t.Fatal("compaction state should be running after busy /compact scheduling")
+	}
+	if a.turn == nil || a.turn.ID != turnID {
+		t.Fatal("busy /compact should not clear the active turn")
+	}
+	pending := a.currentCompactionPendingCall()
+	if pending == nil {
+		t.Fatal("pending continuation should be set for busy manual compaction")
+	}
+	if pending.turnID != 0 {
+		t.Fatalf("pending.turnID = %d, want 0 for manual idle continuation", pending.turnID)
+	}
+	if pending.turnEpoch != turnEpoch {
+		t.Fatalf("pending.turnEpoch = %d, want active epoch %d", pending.turnEpoch, turnEpoch)
 	}
 	if pending.continuation != compactionResumeIdle {
 		t.Fatalf("pending continuation = %q, want %q", pending.continuation, compactionResumeIdle)
