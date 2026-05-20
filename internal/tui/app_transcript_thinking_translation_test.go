@@ -7,15 +7,16 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 )
 
-func TestMessagesToBlocksRestoresThinkingTranslationsByHash(t *testing.T) {
+func TestMessagesToBlocksRestoresThinkingTranslationsByMessageBlock(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "thinking"}}, Content: "done"},
 	}
 	translations := map[string]ThinkingTranslationView{
-		thinkingTranslationTranscriptKey("msgidx:1", 0, recovery.ThinkingTranslationOriginalHash("thinking")): {
-			TargetLang: "zh-Hans",
-			Content:    "思考",
+		thinkingTranslationTranscriptKey("msgidx:1", 0): {
+			TargetLang:   "zh-Hans",
+			Content:      "思考",
+			OriginalHash: recovery.ThinkingTranslationOriginalHash("thinking"),
 		},
 	}
 	var nextID int
@@ -38,9 +39,10 @@ func TestMessagesToBlocksRestoresThinkingTranslationsByHash(t *testing.T) {
 func TestMessagesToBlocksSkipsStaleThinkingTranslationHash(t *testing.T) {
 	msgs := []message.Message{{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "new thinking"}}}}
 	translations := map[string]ThinkingTranslationView{
-		thinkingTranslationTranscriptKey("msgidx:0", 0, recovery.ThinkingTranslationOriginalHash("old thinking")): {
-			TargetLang: "zh-Hans",
-			Content:    "旧翻译",
+		thinkingTranslationTranscriptKey("msgidx:0", 0): {
+			TargetLang:   "zh-Hans",
+			Content:      "旧翻译",
+			OriginalHash: recovery.ThinkingTranslationOriginalHash("old thinking"),
 		},
 	}
 	var nextID int
@@ -50,5 +52,24 @@ func TestMessagesToBlocksSkipsStaleThinkingTranslationHash(t *testing.T) {
 	}
 	if len(blocks[0].ThinkingTranslations) != 0 {
 		t.Fatalf("stale translation should not be restored, got %#v", blocks[0].ThinkingTranslations)
+	}
+}
+
+func TestMessagesToBlocksReusesTranslationAfterTargetLangChange(t *testing.T) {
+	msgs := []message.Message{{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "thinking"}}}}
+	translations := map[string]ThinkingTranslationView{
+		thinkingTranslationTranscriptKey("msgidx:0", 0): {
+			TargetLang:   "ja",
+			Content:      "考え",
+			OriginalHash: recovery.ThinkingTranslationOriginalHash("thinking"),
+		},
+	}
+	var nextID int
+	blocks := messagesToBlocksWithThinkingTranslations(msgs, &nextID, translations)
+	if len(blocks) != 1 || blocks[0].Type != BlockThinking {
+		t.Fatalf("blocks = %#v, want one thinking block", blocks)
+	}
+	if len(blocks[0].ThinkingTranslations) != 1 || blocks[0].ThinkingTranslations[0].Content != "考え" {
+		t.Fatalf("expected restored translation regardless of target_lang, got %#v", blocks[0].ThinkingTranslations)
 	}
 }

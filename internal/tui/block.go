@@ -23,9 +23,13 @@ type BlockImagePart struct {
 
 // ThinkingTranslationView stores translated thinking content rendered below the
 // original thinking block using the same Markdown/code-highlighting pipeline.
+// OriginalHash records the content fingerprint of the thinking block at the
+// time the translation was generated, so a restored translation can be
+// discarded if the underlying thinking text has since changed.
 type ThinkingTranslationView struct {
-	TargetLang string
-	Content    string
+	TargetLang   string
+	Content      string
+	OriginalHash string
 }
 
 // BlockType enumerates the kinds of visual elements rendered in the message viewport.

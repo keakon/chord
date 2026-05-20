@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/thinkingtranslate"
 )
 
 const thinkingTranslationsFileName = "thinking_translations.json"
@@ -51,8 +53,8 @@ func SaveThinkingTranslation(sessionDir string, entry ThinkingTranslationEntry) 
 	sessionDir = normalizeThinkingTranslationsSessionDir(sessionDir)
 	entry.MessageID = strings.TrimSpace(entry.MessageID)
 	entry.TargetLang = strings.TrimSpace(entry.TargetLang)
-	entry.Translated = strings.TrimSpace(entry.Translated)
-	if sessionDir == "" || entry.MessageID == "" || entry.BlockIndex < 0 || entry.Translated == "" {
+	entry.Translated = thinkingtranslate.ExtractTranslationEnvelope(entry.Translated)
+	if sessionDir == "" || entry.MessageID == "" || entry.BlockIndex < 0 || strings.TrimSpace(entry.Translated) == "" {
 		return nil
 	}
 	if entry.UpdatedAt.IsZero() {
@@ -134,8 +136,7 @@ func thinkingTranslationsSessionLockFor(sessionDir string) *thinkingTranslations
 func thinkingTranslationSameSlot(a, b ThinkingTranslationEntry) bool {
 	return strings.TrimSpace(a.AgentID) == strings.TrimSpace(b.AgentID) &&
 		strings.TrimSpace(a.MessageID) == strings.TrimSpace(b.MessageID) &&
-		a.BlockIndex == b.BlockIndex &&
-		strings.TrimSpace(a.TargetLang) == strings.TrimSpace(b.TargetLang)
+		a.BlockIndex == b.BlockIndex
 }
 
 func thinkingTranslationsPath(sessionDir string) string {

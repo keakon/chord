@@ -86,3 +86,54 @@ func TestThinkingTranslationsConcurrentSavesSameSession(t *testing.T) {
 		}
 	}
 }
+
+func TestThinkingTranslationsSaveStripsOpenEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	entry := ThinkingTranslationEntry{
+		MessageID:    "msgidx:1",
+		BlockIndex:   0,
+		TargetLang:   "zh-Hans",
+		OriginalHash: ThinkingTranslationOriginalHash("thinking"),
+		Translated:   "<TRANSLATION>\n**评估代码路径**\n\n正文",
+	}
+	if err := SaveThinkingTranslation(dir, entry); err != nil {
+		t.Fatalf("SaveThinkingTranslation: %v", err)
+	}
+	entries, err := LoadThinkingTranslations(dir)
+	if err != nil {
+		t.Fatalf("LoadThinkingTranslations: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if got, want := entries[0].Translated, "**评估代码路径**\n\n正文"; got != want {
+		t.Fatalf("Translated = %q, want %q", got, want)
+	}
+}
+
+func TestThinkingTranslationsSlotIgnoresTargetLangChange(t *testing.T) {
+	dir := t.TempDir()
+	base := ThinkingTranslationEntry{
+		MessageID:    "msgidx:1",
+		BlockIndex:   0,
+		TargetLang:   "zh-Hans",
+		OriginalHash: ThinkingTranslationOriginalHash("thinking"),
+		Translated:   "思考",
+	}
+	if err := SaveThinkingTranslation(dir, base); err != nil {
+		t.Fatalf("SaveThinkingTranslation: %v", err)
+	}
+	switched := base
+	switched.TargetLang = "ja"
+	switched.Translated = "考え"
+	if err := SaveThinkingTranslation(dir, switched); err != nil {
+		t.Fatalf("SaveThinkingTranslation switched: %v", err)
+	}
+	entries, err := LoadThinkingTranslations(dir)
+	if err != nil {
+		t.Fatalf("LoadThinkingTranslations: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1 — slot must ignore target_lang", len(entries))
+	}
+}

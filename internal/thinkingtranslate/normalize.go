@@ -25,6 +25,9 @@ func ExtractTranslationEnvelope(s string) string {
 	if inner, ok := extractEnvelope(s, "TRANSLATION"); ok {
 		return inner
 	}
+	if inner, ok := extractOpenEnvelope(s, "TRANSLATION"); ok {
+		return inner
+	}
 	return s
 }
 
@@ -101,4 +104,13 @@ func extractEnvelope(s, tag string) (string, bool) {
 	}
 	end := contentStart + endRel
 	return strings.TrimSpace(s[contentStart:end]), true
+}
+
+func extractOpenEnvelope(s, tag string) (string, bool) {
+	open := "<" + tag + ">"
+	upper := strings.ToUpper(s)
+	if !strings.HasPrefix(upper, open) {
+		return "", false
+	}
+	return strings.TrimSpace(s[len(open):]), true
 }

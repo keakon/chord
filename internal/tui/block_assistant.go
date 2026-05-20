@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
@@ -810,7 +811,7 @@ func renderThinkingTranslationHeader(targetLang string, width int) string {
 }
 
 func renderThinkingTranslationLines(translation ThinkingTranslationView, contentWidth int) []string {
-	translated := strings.TrimSpace(translation.Content)
+	translated := strings.TrimSpace(thinkingtranslate.ExtractTranslationEnvelope(translation.Content))
 	if translated == "" {
 		return nil
 	}

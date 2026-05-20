@@ -509,6 +509,21 @@ func TestRenderThinkingPartsIncludesStructuredTranslationMarkdown(t *testing.T) 
 	}
 }
 
+func TestRenderThinkingTranslationStripsOpenEnvelopeBeforeMarkdown(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	lines := renderThinkingTranslationLines(ThinkingTranslationView{TargetLang: "zh-Hans", Content: "<TRANSLATION>\n**评估代码路径**\n\n正文"}, 70)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if strings.Contains(plain, "<TRANSLATION>") {
+		t.Fatalf("translation envelope marker should be stripped, got %q", plain)
+	}
+	if strings.Contains(plain, "**评估代码路径**") {
+		t.Fatalf("markdown should render after stripping envelope marker, got %q", plain)
+	}
+	if !strings.Contains(plain, "评估代码路径") || !strings.Contains(plain, "正文") {
+		t.Fatalf("expected translated markdown content, got %q", plain)
+	}
+}
+
 func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{

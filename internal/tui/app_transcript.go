@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -250,18 +251,22 @@ func (m *Model) loadThinkingTranslationsForTranscript() map[string]ThinkingTrans
 	}
 	out := make(map[string]ThinkingTranslationView, len(entries))
 	for _, entry := range entries {
-		translated := strings.TrimSpace(entry.Translated)
+		translated := thinkingtranslate.ExtractTranslationEnvelope(entry.Translated)
 		if strings.TrimSpace(entry.MessageID) == "" || entry.BlockIndex < 0 || translated == "" {
 			continue
 		}
-		key := thinkingTranslationTranscriptKey(entry.MessageID, entry.BlockIndex, entry.OriginalHash)
-		out[key] = ThinkingTranslationView{TargetLang: strings.TrimSpace(entry.TargetLang), Content: translated}
+		key := thinkingTranslationTranscriptKey(entry.MessageID, entry.BlockIndex)
+		out[key] = ThinkingTranslationView{
+			TargetLang:   strings.TrimSpace(entry.TargetLang),
+			Content:      translated,
+			OriginalHash: strings.TrimSpace(entry.OriginalHash),
+		}
 	}
 	return out
 }
 
-func thinkingTranslationTranscriptKey(messageID string, blockIndex int, originalHash string) string {
-	return fmt.Sprintf("%s:%d:%s", strings.TrimSpace(messageID), blockIndex, strings.TrimSpace(originalHash))
+func thinkingTranslationTranscriptKey(messageID string, blockIndex int) string {
+	return fmt.Sprintf("%s:%d", strings.TrimSpace(messageID), blockIndex)
 }
 
 func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
@@ -465,10 +470,11 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					}
 					if len(translations) > 0 {
 						messageID := fmt.Sprintf("msgidx:%d", msgIdx)
-						originalHash := recovery.ThinkingTranslationOriginalHash(tb.Thinking)
-						if view, ok := translations[thinkingTranslationTranscriptKey(messageID, blockIndex, originalHash)]; ok && strings.TrimSpace(view.Content) != "" {
-							block.ThinkingTranslations = make([]ThinkingTranslationView, blockIndex+1)
-							block.ThinkingTranslations[blockIndex] = view
+						if view, ok := translations[thinkingTranslationTranscriptKey(messageID, blockIndex)]; ok && strings.TrimSpace(view.Content) != "" {
+							if view.OriginalHash == "" || view.OriginalHash == recovery.ThinkingTranslationOriginalHash(tb.Thinking) {
+								block.ThinkingTranslations = make([]ThinkingTranslationView, blockIndex+1)
+								block.ThinkingTranslations[blockIndex] = view
+							}
 						}
 					}
 					blocks = append(blocks, block)
