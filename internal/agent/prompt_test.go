@@ -213,6 +213,13 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Do not narrate every routine action or restate obvious next steps",
 		"Do not over-explain routine actions",
 		"If multiple interpretations exist but one is clearly the best fit",
+		"Before implementing new logic, search for existing helpers, patterns, or utilities to reuse or extend",
+		"Do not introduce parallel helpers or duplicate logic when an existing local abstraction can be reused or slightly extended",
+		"Do not add error handling, fallbacks, validation, or defensive checks for scenarios that cannot happen",
+		"only validate at real trust boundaries",
+		"three similar lines is better than a premature abstraction",
+		"only comment a non-obvious WHY",
+		"Do not leave backwards-compatibility shims",
 		"Remove imports, variables, and functions that your own changes made unused",
 		"Do not remove pre-existing dead code unless asked",
 		"state a brief plan with verifiable success criteria per step",
@@ -228,6 +235,8 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Remove pleasantries, repeated phrasing, and long background setup that do not add information",
 		"Do not repeat code, commands, paths, or test results just to sound complete",
 		"Keep errors, limitations, unverified status, and risk clearly visible",
+		"even if small cross-file edits are required",
+		"Prefer small local extraction or adaptation over duplicating behavior",
 	} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("sharedCodingGuidelinesPrompt unexpectedly contains legacy guidance %q in %q", unwanted, got)
@@ -460,6 +469,7 @@ func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T
 		"required doc updates",
 		"Match the user's current language for all user-facing text",
 		"completion reports, confirmation content, tool arguments intended for display",
+		"Small cross-file extractions made to reuse an existing abstraction count as minimal",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedAgentValuesPrompt missing %q in %q", want, got)
