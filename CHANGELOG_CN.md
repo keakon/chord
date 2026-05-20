@@ -2,15 +2,41 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
+## 未发布
+
+- LSP / Python 诊断：Python 文件的 Edit / Write 完成后诊断新增 quick 回退后端。默认配置下，主诊断走 `pyright` LSP，quick 回退走 `ruff check ... --output-format json`；大文件（可配置 `diagnostics.python.large_file.line_threshold` / `byte_threshold`，默认 5000 行 / 250000 字节）会自动改走 quick 后端，避免阻塞在完整语义分析上；当 quick 后端不可用时，可通过 `run_semantic_when_quick_unavailable: true` 让大文件继续跑语义诊断。新增顶层 `diagnostics.*` 配置，包含分后端的命令/服务选择，以及 `diagnostics.python.output.*` 用于控制追加到工具结果中的诊断文本长度与裁剪窗口。完整字段见 `docs/configuration_CN.md`。
+- LSP / 诊断输出：追加的 LSP 诊断现在会附带一行 `Diagnostics status: ...` 概述；当 `include_info` / `include_hints` 过滤掉条目时，输出会显示 `Diagnostics hidden by output filters: N info/hint diagnostics omitted.`，避免模型看不到被静默隐藏的诊断。
+- TUI / 复制：在工具卡片上按 `yy` 会复制结构化的 Markdown 块（`# Tool call` / `## Arguments` / `## Result` / `## Diff`）；Done 拒绝卡片额外包含 `## Rejection reason` 段，方便粘贴到外部时保留 Chord 的展示结构。
+- Runtime / 压缩：`/compact` 现在与自动压缩共用同一个后台 worker；可以在 turn 进行中触发，进度显示在后台压缩状态槽，并在下一个安全的 continuation / idle 节点应用，而不要求先达到 idle barrier。
+- Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 在 loop 模式仍保持关闭以保证缓存稳定性。
+- Runtime / Fast mode：`/fast on` / `/fast off` 现在同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 fast-mode 状态。
+- Runtime / Delegate todo：当当前角色有 `Delegate` 工作流时，`TodoWrite` 允许多个 `in_progress` 条目，但每个 in_progress 条目必须有唯一的 `active_form`，明确对应一个真实的 live workstream。无 `Delegate` 的角色仍保持单 in_progress 限制。
+- TUI / Thinking 翻译：译文现在持久化到 `<session_dir>/thinking_translations.json`，按 `(message, block)` 定位、用内容 hash 校验；恢复会话后会直接复用。修改 `thinking_translation.target_language` 不会重新翻译已经存在的 block —— 同一个 thinking block 最多翻译一次。译文仅用于 UI，不会写回模型上下文。
+- TUI / Thinking 翻译：如果翻译模型误回显内部包装标记（包括只有开头 `<TRANSLATION>`、缺少闭合标签的情况），Chord 会在持久化、恢复和渲染前移除这些标记，避免它们被 Markdown 解析成 HTML block 导致翻译卡片格式失效。
+- Runtime / Thinking 翻译：翻译模型返回的空、明显截断或不是目标语言的结果会视为软失败，自动切到模型池下一个候选，而不是把破损的翻译卡片留在界面上。
+- Runtime / 拒绝原因：`Question` / 确认弹窗的 deny reason 现在完整保留用户原文（包括内部换行），同时影响给模型的 tool result 和 TUI 卡片。
+- TUI / 限额侧边栏：codex 限额侧边栏不再在切换 key 后复用 provider 范围的 inline snapshot；切换 key 后，侧边栏会显示新 key 的 inline snapshot、该 key / account 已 polled 的 `/wham/usage` 快照，或者在新数据到来前留空。
+- TUI / 导航：normal 模式下 `gg` / `G` 现在把焦点移动到第一个 / 最后一个可见卡片，而不再只是单纯滚动到底/顶，与 vim 风格的焦点导航一致。
+- TUI / 工具卡：header 截断时不会再丢掉运行中的进度后缀；已删除文件的 Delete 卡片在恢复会话后仍会显示拒绝 / 完成 reason；toast 边界变化会触发重绘，让边界标记保持同步。
+- TUI / 焦点恢复：延迟到达的 tail-window 焦点恢复事件会被重新应用，让聚焦的卡片在多次重绘后仍保持可见。
+- Runtime / 上下文 reduction 统计：info-panel 的 `Reduced` 行在 `/compact` 或自动压缩重写会话历史后会刷新，loop 模式下同样有效。
+- Runtime / 压缩摘要：持久化压缩摘要的小节标题从单一的 `## Goal` 拆为 `## Current User Request` / `## Active Objective` / `## Background Goals`。最新用户请求和最近一次 Done 拒绝原因现在被视为同等优先级的 latest-request anchor（按消息序号取最新），不会再被一条更早的约束反过来盖住新到的 Done 拒绝。`## Todo State` 显式使用 `Active/relevant to latest request` / `Completed/background` / `Stale/superseded` 三个子组，让压缩后的 agent 按最新请求重新评估旧 todo，而不是默认沿用。
+- Runtime / Plan 执行：开始执行 plan 时，prompt 现在通过 `@<plan-path>` file mention + 附带文件 part 的方式把 plan 内容传给 LLM，不再把 plan 文本直接内联进 system prompt；这样 plan 体积有界，引用方式与普通文件 mention 一致。
+- Runtime / SubAgent prompt：SubAgent 系统提示现在与 MainAgent 一致，platform 字段输出完整 `<goos>/<goarch>`，而不是只 `<goos>`。
+- CLI / Done 自动化：统一了自动 Done 拦截在启动、运行时和 TUI 中的行为。启动/TUI 创建/关闭路径现在更易测试，浏览器启动式 auth 规划也可以在不实际拉起浏览器命令的情况下验证，loop 模式的 Done 退出拦截文档也已保持一致。`CHORD_PPROF_PORT` 设置成非法值时，`--continue` / `--resume` / `--worktree` 及其它启动流程会继续生效（pprof 仅记一条 warn 后跳过），不再被静默丢弃。
+- TUI / Done 内部机制：集中收口了 Done 相关 UI effect 与流式渲染失效处理，拆分了更聚焦的回归测试，并保持 rejected 与 auto-rejected Done completion 的界面呈现一致。
+- Config / Auth 持久化：将 auth 持久化锁统一到共享的配置变更锁实现，并补充了写锁行为与 named pipe 测试可移植性的分平台回归覆盖。
+- **不兼容 / 权限：** 记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。迁移：先前写入 `<project>/.chord/permissions/<role>.yaml` 或 `~/.chord/permissions/<role>.yaml` 的规则在升级后不会再被自动加载。Chord 启动时会对每个仍存在的旧文件输出一次 warn 日志，请手动把规则合并到对应的 agent 配置文件中。
+- TUI / 性能：降低后台标签页和长对话的 CPU 与渲染开销，让大会话中的滚动和重新聚焦恢复更顺畅；权限判定与工具定义构造热路径也做了优化。
+- TUI / Delete：`Delete` 工具卡片现在会在实时会话和恢复后的会话中显示必填的 `reason`；恢复工具卡片也会优先使用已持久化的状态和耗时元数据，让继续会话后的历史展示与实时完成态保持一致。
+- Docs：明确 agent 权限保存在 `agents/<role>.yaml`，确认弹窗和 headless 记住规则都会更新对应 agent 配置文件；顶层配置 keys 表新增 `diagnostics` 条目；补充了 `thinking_translation.max_chars` 预览范围的说明。
+
 ## 0.6.0 - 2026-05-20
 
 - Build / 依赖：源码构建与 release artifact 现在要求 Go 1.26.3+，直接运行时依赖已更新到当前兼容最新版，并刷新了实际构建图中的间接依赖。CI 与 release workflow 都从 `go.mod` 读取 Go 版本，因此发布二进制会使用已修补的 Go toolchain 构建。
 - Runtime / 上下文：新增 `context.reduction` 下的确定性请求级上下文裁剪控制，包括陈旧工具结果剪裁阈值和专用 reduction 模型池预留配置；loop 模式仍保持不做请求级裁剪。
 - Auth / Runtime：将 OAuth 账号状态的权威来源迁移到 `auth.state.yaml`，新增 `invalidated` 状态与 `key_invalidated` 流式增量，并确保旧版 `status` 不再写入 `auth.yaml`。
 - Runtime / Fast mode：`/fast` 现在只在模型启用 `supports_fast` 能力时发送 provider 原生加速参数（OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`）；`preset: codex` 默认启用，其它模型需要显式开启。
-- CLI / Done 自动化：统一了自动 Done 拦截在启动、运行时和 TUI 中的行为。启动/TUI 创建/关闭路径现在更易测试，浏览器启动式 auth 规划也可以在不实际拉起浏览器命令的情况下验证，loop 模式的 Done 退出拦截文档也已保持一致。
-- TUI / Done 内部机制：集中收口了 Done 相关 UI effect 与流式渲染失效处理，拆分了更聚焦的回归测试，并保持 rejected 与 auto-rejected Done completion 的界面呈现一致。
-- Config / Auth 持久化：将 auth 持久化锁统一到共享的配置变更锁实现，并补充了写锁行为与 named pipe 测试可移植性的分平台回归覆盖。
 - **不兼容 / 配置：** 将 `context.compact_threshold` 重命名为 `context.compaction.threshold`；旧字段不再提供兼容别名。
 - **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compaction.threshold > 0` 时启用自动上下文压缩；设置 `context.compaction.threshold: 0` 可关闭。
 - **不兼容 / 配置：** 移除 `context.compact_model`。上下文压缩现在只接受 `context.compaction.model_pool` 来指定专用压缩模型池；未设置时，压缩会克隆当前 agent 的模型池，而不是回退到单个已选模型。
@@ -26,10 +52,7 @@
 - CLI / 导入：新增 `chord import`，支持从 Claude Code（`claude`）、Codex（`codex`）和 OpenCode（`opencode`）导入外部会话。导入会生成可恢复的 Chord session 和 `import-report.json`；Codex 默认使用保守的 `auto` 工具导入，OpenCode 默认以纯文本导入工具历史且现在能处理当前 `{info, parts}` 导出并以可读 fallback 保留不支持的工具，Claude 则在兼容时默认 `auto` 保留结构化工具调用。
 - TUI / 标题告警：确认 / 问题请求在 Chord 后台出现时，终端标题栏仍会闪烁以吸引注意；用户重新聚焦该标签页/窗口后，当前请求的告警会保持可见但停止闪烁。
 - TUI / 用量：usage/context 更新现在会让信息面板渲染缓存失效，修复上下文压缩或其它用量刷新事件后侧边栏 `TOKENS` 可能保持旧值的问题。
-- Runtime / 权限：记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。
-- TUI / 性能：降低后台标签页和长对话的 CPU 与渲染开销，让大会话中的滚动和重新聚焦恢复更顺畅。
-- TUI / Delete：`Delete` 工具卡片现在会在实时会话和恢复后的会话中显示必填的 `reason`；恢复工具卡片也会优先使用已持久化的状态和耗时元数据，让继续会话后的历史展示与实时完成态保持一致。
-- Docs：明确 agent 权限保存在 `agents/<role>.yaml`，确认弹窗和 headless 记住规则都会更新对应 agent 配置文件。
+- Docs：明确 `chord auth state clean` 会清理无效运行时状态和匹配的过期/已停用 OAuth 凭据，并更新 README 亮点，说明后台压缩与 `/loop` 可支撑长时间连续运行任务。
 
 ## 0.5.3 - 2026-05-11
 

@@ -194,11 +194,12 @@ thinking_translation:
 - 翻译走已配置的大模型 provider，`thinking_translation.model_pool` 必须指向一个顶层 `model_pools` 条目。
 - `target_language` 和 `model_pool` 都是必填；缺失任一项时该能力不会启用。
 - 建议为翻译单独配置低成本模型池。该池可包含多个 `provider/model[@variant]` ref；翻译会按模型池顺序执行**单轮 fallback**：若当前候选失败（含网络/5xx/超时等）会切到下一个候选继续尝试；此外，当返回为空、明显截断或不是目标语言的翻译结果时也会继续切换下一候选。
-- `max_chars` 限制送去翻译的 thinking 预览长度，默认 `1000`；如需更低延迟/成本可设为 `500`，如希望译文更完整可调大。
+- `max_chars` 限制送去翻译的 thinking 预览长度，默认 `1000`；如需更低延迟/成本可设为 `500`，如希望译文更完整可调大。只翻译开头 `max_chars` 个字符，超出部分会被直接丢弃、不会出现在翻译卡片中。
 - thinking 翻译层不再设置整体翻译超时，也不使用 circuit breaker。某个 thinking block 临时失败只会跳过该 block，不会阻塞后续 thinking 翻译，也不会影响主回答。
 - provider 请求、header、流式空闲等底层传输超时仍然生效。默认辅助 client 使用一分钟级别的超时，因此卡住的模型 / key 可以失败切换，同时仍允许模型池有机会完整运行。
 - 译文会附加到对应 thinking 卡片下方，使用中性的 `Translated · <target_language>` 分隔标题，并保留 Markdown / 代码高亮；不会写回模型上下文。
-- 译文会以 UI 侧映射形式持久化到会话目录的 `thinking_translations.json`，按 message / block / 内容 hash 绑定；恢复同一 session 时会重新显示。译文不会写回模型上下文。
+- 如果翻译模型误把内部 `<TRANSLATION>` 包装标记原样返回，Chord 会在持久化、恢复和渲染前移除该标记，避免它被 Markdown 当作 HTML block 解析而破坏后续格式。
+- 译文以 UI 侧映射形式持久化到会话目录的 `thinking_translations.json`，按 `(message, block)` 定位、绑定内容 hash 校验；恢复同一 session 时会直接复用。同一个 thinking block 最多翻译一次：之后修改 `thinking_translation.target_language` 也不会重新翻译已存在的块。译文不会写回模型上下文。
 
 更完整的字段说明见下文配置参考。
 
@@ -811,6 +812,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `Edit` / `Write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines, include_hints, include_info}` 控制追加文本的长度和裁剪窗口。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
