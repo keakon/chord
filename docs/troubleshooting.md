@@ -124,46 +124,41 @@ Session resume itself is fully supported. Internal transport cleanup does not af
 
 ## TUI cards show strange colors or broken layout when viewing logs / dumps / shell output
 
-If a tool card, local shell result, question dialog, or confirmation summary used to show unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:
+If a tool card, local shell result, question dialog, or confirmation summary shows unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:
 
-- upgrade to a build that includes the external-text rendering fix
 - retry the same `Read`, `Shell`, `WebFetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
-Recent builds now display ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.
+Chord displays ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.
 
 ## Screen corruption after switching tabs or refocusing the terminal
 
 If the TUI occasionally shows stale rows, horizontal line artifacts, or partially broken tool cards right after switching tabs or returning focus to the terminal window:
 
-- upgrade to a build that includes the latest post-focus redraw fix
 - if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
-- if it still reproduces on the latest build, capture a diagnostics bundle and a screenshot together
+- if it still reproduces, capture a diagnostics bundle and a screenshot together
 
-Recent builds add redraw protection for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord waits for focus to settle and forces a host redraw with a fallback pass, so terminals like Ghostty, cmux, or iTerm2 get reliable recovery even when host surface invalidation outlasts the first redraw. Diagnostics bundles now include background-dirty state so remaining cases can be compared against the final screen buffer.
+Chord protects redraws for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord waits for focus to settle and forces a host redraw with a fallback pass, so terminals like Ghostty, cmux, or iTerm2 get reliable recovery even when host surface invalidation outlasts the first redraw. Diagnostics bundles include background-dirty state so remaining cases can be compared against the final screen buffer.
 
-If you see corruption right after focus restore while the UI is streaming output, make sure you are on the latest build. Older builds could leave stale cells behind when a deferred frame was byte-identical after a host-side `ClearScreen`. Newer builds keep the redraw replay marker active for the full generation cycle without caching it, so the renderer always has a chance to recover.
+If you see corruption right after focus restore while the UI is streaming output, treat it as a host redraw/replay issue and capture the diagnostics bundle plus screenshot. Avoid working around it by changing component padding or ANSI handling.
 
-If diagnostics show normal internal rendering while the real terminal remains corrupted, treat it as a host redraw/replay issue. Avoid working around it by changing component padding or ANSI handling; include the diagnostics bundle and screenshot for investigation.
-
-Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated ANSI/OSC control sequence. Newer builds route window-title updates through the framework's `WindowTitle` API instead of writing directly to stdout, avoiding interleaving with renderer output.
+Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated ANSI/OSC control sequence. Chord routes window-title updates through the framework's `WindowTitle` API instead of writing directly to stdout, avoiding interleaving with renderer output.
 
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
 
-- upgrade to a build that includes the latest TUI transcript clipping fixes
 - pay special attention to whether the issue starts after long-running background jobs or durable status updates in a long session
-- if it still reproduces on the latest build, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
+- if it still reproduces, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
 
-Recent builds fix two transcript-height accounting bugs:
+Chord handles two transcript-height accounting risks:
 
 - Late updates to older status cards could leave the viewport shorter than the real transcript.
 - Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
 ## Edit reports `file ... has not been read in this conversation`
 
-Recent builds require `Edit` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
+Chord requires `Edit` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
 
 If you see this error:
 
@@ -179,15 +174,15 @@ Common causes:
 
 - the file was modified by another process (editor/formatter) between `Read` and `Edit`;
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
-- the provider sent tool arguments as a JSON string (wrapped arguments). Recent builds unwrap tool arguments consistently, but if you are on an older build, a wrapped `path` may not be tracked correctly and can trigger false staleness errors.
+- the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped `path` is not tracked correctly, capture logs and the session JSONL.
 
-If this persists on the latest build, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
+If this persists, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
 
 ## Edit reports `old_string not found` even though the file already contains the expected new content
 
 When troubleshooting a dev build with streaming tool execution enabled, you may see `Edit` report `old_string not found` while the target file already contains the expected content. This usually means a speculative `Write` / `Edit` / `Delete` executed before the LLM finalized, was later discarded due to args drift, filtering, or rollback, and the finalized path then tried to re-run before the speculative file change had finished rolling back.
 
-Recent builds synchronously roll back completed speculative file changes before allowing the finalized execution path to retry. If you still see this:
+Chord synchronously rolls back completed speculative file changes before allowing the finalized execution path to retry. If you still see this:
 
 - look for `args_drift`, `filtered`, `rollback`, `length_recovery` in the logs as speculative discard reasons
 - confirm the finalized `Edit` did not reuse a stale `old_string` from an earlier file snapshot

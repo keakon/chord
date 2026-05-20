@@ -6,6 +6,15 @@ This documentation is for end users: installation, configuration, daily usage, c
 
 Start with what works out of the box; move on to customization and advanced workflows when you need more.
 
+## Find docs by task
+
+- **Start quickly**: [Quickstart](./quickstart.md)
+- **Configure models**: [Configuration & Auth](./configuration.md) · [Examples](./examples/index.md)
+- **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
+- **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode)
+- **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
+- **Troubleshoot issues**: [Troubleshooting](./troubleshooting.md)
+
 ## Getting started
 
 - [Quickstart](./quickstart.md) — get running in minutes

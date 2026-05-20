@@ -6,6 +6,15 @@
 
 先从开箱即用的内容开始；需要更强能力时，再进入扩展与进阶工作流。
 
+## 按任务找文档
+
+- **快速启动**：[快速开始](./quickstart_CN.md)
+- **配置模型**：[配置与认证](./configuration_CN.md) · [示例配置库](./examples/index_CN.md)
+- **远程控制**：[Headless](./headless_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
+- **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式)
+- **扩展定制**：[扩展与定制](./customization_CN.md) · [Hooks](./hooks_CN.md)
+- **排障**：[常见问题排查](./troubleshooting_CN.md)
+
 ## 入门
 
 - [快速开始](./quickstart_CN.md) —— 几分钟跑起来

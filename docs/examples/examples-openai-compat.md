@@ -67,3 +67,20 @@ proxy: socks5://127.0.0.1:1080
 The main point of this example is the provider / key / pool failover chain, not custom agents.
 
 If your OpenAI-compatible backend supports provider-side thinking / reasoning (for example DeepSeek in thinking mode), some providers require the previous tool round's thinking/reasoning content to be included again in the next request. If that requirement is not met, the provider may reject the request with a 400 error. When you switch to a model with a different protocol family, Chord normalizes that hidden state for the target provider instead of replaying incompatible thinking/reasoning fields unchanged.
+
+## Credentials to prepare
+
+Set the gateway keys referenced by `auth.yaml` (`PRIMARY_KEY_A`, `PRIMARY_KEY_B`, `PRIMARY_KEY_C`, and `BACKUP_KEY`) in the environment where Chord runs, or replace them with your own secret references outside the repository.
+
+## Verify
+
+```bash
+chord doctor models --pool big
+chord doctor models --pool small
+```
+
+## Common failures
+
+- `401` / `403`: one of the gateway keys is missing, expired, or not allowed for the requested model.
+- `404` / model not found: the gateway exposes a different model ID than the example.
+- Failover never reaches backup: the primary endpoint is returning a successful provider-level error response rather than a retryable transport/provider failure.

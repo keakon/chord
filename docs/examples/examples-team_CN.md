@@ -138,6 +138,29 @@ permission:
 4. Use `reviewer` for final correctness review on substantial changes.
 ```
 
+## 需要准备的凭据
+
+为全局 provider 设置 `ANTHROPIC_API_KEY`。复制项目级 hook 配置前，请先在 `./scripts/chord-hooks/` 下创建对应脚本并设为可执行；如果团队还没有真实脚本，先删除这些 hook 条目。
+
+## 验证命令
+
+```bash
+chord doctor models --pool thinking
+chord doctor models --pool fast
+```
+
+在仓库根目录保留项目配置后，也可做一次无副作用启动检查：
+
+```bash
+chord --version
+```
+
+## 常见失败原因
+
+- Hook command not found：复制了 hook 条目，但没有创建 `./scripts/chord-hooks/*`。
+- 团队权限提示过宽：先把高风险 `Shell` 规则从 `ask` 改成 `deny`，只对工作流确需的命令逐步放开。
+- Agents 不出现：确认文件在 `<repo>/.chord/agents/` 或全局 agents 目录下，并包含合法 front matter。
+
 ## `<repo>/.chord/agents/coder.md`
 
 ```md

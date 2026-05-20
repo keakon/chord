@@ -138,7 +138,28 @@ permission:
 4. Use `reviewer` for final correctness review on substantial changes.
 ```
 
-## `<repo>/.chord/agents/coder.md`
+## Credentials to prepare
+
+Set `ANTHROPIC_API_KEY` for the global provider. Before copying the project-level hook config, create the referenced scripts under `./scripts/chord-hooks/` and make them executable, or remove those hook entries until your team has real scripts.
+
+## Verify
+
+```bash
+chord doctor models --pool thinking
+chord doctor models --pool fast
+```
+
+From the repository root, also run a dry startup with the project config present:
+
+```bash
+chord --version
+```
+
+## Common failures
+
+- Hook command not found: the project copied hook entries but did not create `./scripts/chord-hooks/*`.
+- Permission prompts are too broad for the team: start by changing risky `Shell` rules from `ask` to `deny`, then relax only the commands your workflow needs.
+- Agents do not appear: ensure files are under `<repo>/.chord/agents/` or the global agents directory and include valid front matter.
 
 ```md
 ---

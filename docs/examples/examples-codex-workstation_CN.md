@@ -122,3 +122,27 @@ permission:
 - 某些 GPT 模型还额外有单独的输入上限。这时要配置 `limit.input`，让 Chord 知道何时在 prompt 过大前压缩；否则它会从 `limit.context` 中扣除有效请求输出后推导输入预算。
 - `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 仍是 `32000`，所以实际请求会取更小的输出上限；修改这个请求上限不会把 provider 的 `272k` 输入上限变大。
 - 不同 provider 的同名模型仍会分别参与 fallback；Chord 不会仅因为模型名相同就直接跳过。
+
+## 需要准备的凭据
+
+为 `codex` provider 执行 `chord auth codex`。如果保留 `fast` 这个 OpenAI 兼容 provider，还需要在 `auth.yaml` 中为 `fast` 提供 OpenAI API key，或使用你选择的环境变量引用。
+
+依赖诊断前请先安装可选 LSP：
+
+```bash
+go install golang.org/x/tools/gopls@latest
+npm install -g pyright
+```
+
+## 验证命令
+
+```bash
+chord doctor models --pool thinking
+chord doctor models --pool fast
+```
+
+## 常见失败原因
+
+- OAuth 打开但无法完成：在能打开本地浏览器的环境中重新运行 `chord auth codex`，或改用 device-code 登录路径。
+- `thinking` 池正常但 `fast` 池失败：`fast` provider 的 OpenAI API key 缺失，或账号上的模型名不同。
+- LSP 状态不可用：`gopls` 或 `pyright-langserver` 未安装到 `PATH`。

@@ -6,7 +6,7 @@ This repository is intended for open-source contributors. Development can be don
 
 ## Prerequisites
 
-- Go 1.26+
+- Go 1.26.3+
 - Go quality tools:
 
 ```bash
@@ -37,17 +37,24 @@ go run ./cmd/chord/
 
 ## Test
 
-Before submitting a PR, please run:
+Before submitting a PR, run the same entry point CI uses locally:
 
 ```bash
-goimports -l -local github.com/keakon/chord .
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-# CI requires total coverage >= 65.0%.
-go test -race -count=1 -timeout=10m ./...
-go vet ./...
-staticcheck -checks 'all,-ST1000' ./...
-git ls-files '*.go' | xargs gopls check
+make ci
+# or, for the test/coverage job only:
+scripts/check_ci_local.sh
+```
+
+The Makefile targets mirror CI and should be preferred over copying individual commands by hand. Useful focused targets:
+
+```bash
+make fmt-check
+make test-cover    # CI requires total coverage >= 70.0%.
+make race
+make vet
+make staticcheck
+make gopls-check
+make docs-check
 ```
 
 If your changes touch TUI performance-critical paths, also run:

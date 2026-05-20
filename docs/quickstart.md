@@ -4,7 +4,7 @@ This page is for first-time Chord users. The goal is to complete a minimal worki
 
 ## 1. Install
 
-Requires Go 1.26+.
+Requires Go 1.26.3+.
 
 ```bash
 # Install from GitHub

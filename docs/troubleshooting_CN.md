@@ -117,74 +117,66 @@ curl -I https://api.openai.com/v1
 
 查看诊断 dump、原始命令输出或其他外部文本时，工具卡片、本地 shell 结果、问题对话框或确认摘要出现异常颜色、背景泄漏或换行错乱：
 
-- 升级到包含外部文本渲染修复的版本
 - 重新执行同样的 `Read`、`Shell`、`WebFetch` 或本地 shell 操作
-- 最新版仍能复现时，同时保留原始文件/输出和截图
+- 如果仍能复现，同时保留原始文件/输出和截图
 
-最近构建会在这些界面中按字面显示含 ANSI 的外部文本，不再次执行其中嵌入的终端 escape/control sequence；这也包括裸 `\r` 进度刷新文本。这样既能查看原始序列内容，也不会再让诊断 dump 或其他原始终端输出污染周围卡片的渲染。普通工具结果即使包含看起来像 Markdown 的标题、列表、表格或代码块，也会按纯文本处理，避免日志、diff、JSON/YAML 或抓取页面被意外重新排版。
+Chord 会在这些界面中按字面显示含 ANSI 的外部文本，不再次执行其中嵌入的终端 escape/control sequence；这也包括裸 `\r` 进度刷新文本。这样既能查看原始序列内容，也不会让诊断 dump 或其他原始终端输出污染周围卡片的渲染。普通工具结果即使包含看起来像 Markdown 的标题、列表、表格或代码块，也会按纯文本处理，避免日志、diff、JSON/YAML 或抓取页面被意外重新排版。
 
 ## 切换 tab 或重新获焦后画面错乱
 
 切换 tab、切回终端窗口或重新获得焦点后，TUI 偶发出现旧行残留、横线伪影或工具卡片局部错位：
 
-- 升级到包含最新焦点恢复 redraw 修复的版本
 - 画面已错乱时，轻微调整终端窗口尺寸或切走再切回，通常可强制触发一次完整重绘
-- 最新版仍能复现时，同时保留 diagnostics bundle 和截图
+- 如果仍能复现，同时保留 diagnostics bundle 和截图
 
-最近构建覆盖了两类焦点恢复 redraw 场景：获焦后立即到达的更新，以及终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，强制触发 host redraw 并附带 fallback 重绘，因此 Ghostty、cmux、iTerm2 等终端在宿主 surface invalidation 持续更久时仍能可靠恢复。diagnostics bundle 也会记录 background-dirty 状态，便于排查残留的 stale-display 现象。
+Chord 覆盖两类焦点恢复 redraw 场景：获焦后立即到达的更新，以及终端在后台期间已发生的转录区/布局变化。检测到后台变化后，Chord 会等待焦点稳定，强制触发 host redraw 并附带 fallback 重绘，因此 Ghostty、cmux、iTerm2 等终端在宿主 surface invalidation 持续更久时仍能可靠恢复。diagnostics bundle 也会记录 background-dirty 状态，便于排查残留的 stale-display 现象。
 
-如果现象主要发生在**获焦后的流式输出过程中**，请确认使用的是最新版本。旧版本可能在多次 `View()` 调用后出现 stale cells，因为 cached/deferred frame 在 host-side `ClearScreen` 后字节完全相同。新版本会让 redraw replay marker 在整个 generation 周期内持续有效且不存入 cached view，使渲染器始终有机会恢复。
+如果现象主要发生在**获焦后的流式输出过程中**，优先把它当作 host redraw/replay 问题排查。不要通过修改组件 padding 或 ANSI 处理来绕过；请同时保留 diagnostics bundle 和截图供调查。
 
-如果 diagnostics 显示内部渲染正常但真实终端仍错乱，优先把它当作 host redraw/replay 问题排查。不要通过修改组件 padding 或 ANSI 处理来绕过；请同时保留 diagnostics bundle 和截图供调查。
-
-补充：画面错乱时看到类似 `;250m pyright` 的残片，通常不是 LSP 内容，而是被截断的终端控制序列（ANSI/OSC）尾部字符。新版本已将窗口标题更新改为通过框架 `WindowTitle` API 输出，避免直接写 stdout 与渲染输出交错。
+补充：画面错乱时看到类似 `;250m pyright` 的残片，通常不是 LSP 内容，而是被截断的终端控制序列（ANSI/OSC）尾部字符。Chord 通过框架 `WindowTitle` API 输出窗口标题，避免直接写 stdout 与渲染输出交错。
 
 ## 恢复长会话后滚轮翻页时出现重复卡片
 
 如果问题主要出现在 `--resume` / `--continue` 后，向上滚动历史内容时，尾部刚完成的工具卡、状态卡或任务卡偶尔又在当前窗口里出现一张“重复卡片”：
 
-- 升级到包含 deferred transcript 去重修复的版本
 - 复现时尽量记录是否是“恢复长会话后 + 鼠标滚轮翻到历史窗口 + 随后工具/任务结果到达”这个组合
-- 最新版仍能复现时，保留 session dump / diagnostics bundle 和截图
+- 如果仍能复现，保留 session dump / diagnostics bundle 和截图
 
-这个问题的根因通常不是消息源真的重复，而是 startup deferred transcript 已切到历史窗口后，隐藏在尾部窗口里的 live 卡片收到更新时，被旧版本误当成“当前窗口里不存在的新卡片”重新追加了一次。新版本会同时在当前 viewport 和 deferred transcript 源数据中定位原卡片，并原位更新，避免滚轮翻页过程中出现重复工具卡、任务卡或状态卡。
+这个问题的根因通常不是消息源真的重复，而是 startup deferred transcript 切到历史窗口后，隐藏在尾部窗口里的 live 卡片收到更新时，被当成“当前窗口里不存在的新卡片”重新追加。Chord 会同时在当前 viewport 和 deferred transcript 源数据中定位原卡片，并原位更新，避免滚轮翻页过程中出现重复工具卡、任务卡或状态卡。
 
 ## 切回标签页后看似在底部，但向下滚轮还能翻出旧卡片
 
 如果长会话恢复后切到别的标签页，过一段时间再切回，画面看起来已经在最底部，但鼠标滚轮向下仍会翻出更老的卡片：
 
-- 升级到包含 deferred transcript 尾窗恢复修复的版本
 - 复现时尽量记录是否满足“切出标签页时正在跟随最新内容，切回后未手动上滚就能继续向下翻旧页”
-- 最新版仍能复现时，同时保留 diagnostics bundle、session dump 和截图
+- 如果仍能复现，同时保留 diagnostics bundle、session dump 和截图
 
-旧版本把“当前 deferred 窗口已经滚到底”误当成“全文已经在尾部”。当标签页失焦期间 startup deferred transcript 仍停留在历史窗口时，重新获焦后画面可能只恢复到“当前窗口底部”，而不是全文尾窗；这会让鼠标滚轮向下继续合法地翻到下一段旧窗口。新版本会在失焦前记录当前 deferred transcript 是否真正钉在尾窗并跟随最新内容；若是，则在回焦时先恢复真实尾窗，再应用后续滚动，从而避免“看起来已在底部却还能向下翻出旧页”。
+这通常表示“当前 deferred 窗口已经滚到底”被误当成“全文已经在尾部”。当标签页失焦期间 startup deferred transcript 仍停留在历史窗口时，重新获焦后画面可能只恢复到“当前窗口底部”，而不是全文尾窗；这会让鼠标滚轮向下继续合法地翻到下一段旧窗口。Chord 会在失焦前记录当前 deferred transcript 是否真正钉在尾窗并跟随最新内容；若是，则在回焦时先恢复真实尾窗，再应用后续滚动，从而避免“看起来已在底部却还能向下翻出旧页”。
 
 ## 长会话中的 `20jj` / `100kk` / `[count]↑↓` 跨窗口跳错
 
 如果恢复的大型会话启用了 deferred transcript，使用 `20jj`、`100kk`、`[count]up`、`[count]down` 等带计数的导航后，位置出现跳错、过早停住、不能稳定回到底部，或者感觉跨窗口后顺序不连续：
 
-- 升级到包含 deferred transcript counted navigation 修复的版本
 - 复现时记录具体按键序列、起始卡片以及预期应该停留的目标卡片
-- 最新版仍能复现时，保留截图和 diagnostics bundle，便于对照可见窗口与全文块顺序
+- 如果仍能复现，保留截图和 diagnostics bundle，便于对照可见窗口与全文块顺序
 
-旧版本只在操作开始前检查一次 deferred 窗口边界，后续剩余步数仍按当前窗口局部状态推进；一旦计数动作跨过多个 deferred 窗口，就可能出现跳页、少走、顺序错位或无法稳定饱和到边界。新版本会把带计数的卡片/行导航按全文逻辑位置逐步消费：每一步都先判断是否需要切换 deferred 窗口，再继续前进或后退，因此超过剩余范围时会稳定停在第一张/最后一张卡片，而不会丢失焦点或翻出重复窗口。
+带计数的卡片/行导航按全文逻辑位置逐步消费：每一步都先判断是否需要切换 deferred 窗口，再继续前进或后退，因此超过剩余范围时会稳定停在第一张/最后一张卡片，而不会丢失焦点或翻出重复窗口。
 
 ## 长会话里转录区底部内容滚不到
 
 看到最后几行转录内容像被裁掉、最后一个卡片几乎贴着输入分隔线，或已经滚到底但最新对话仍有一部分不可见：
 
-- 升级到包含最新 TUI 转录区裁剪修复的版本
 - 留意问题是否出现在长会话中的后台任务结束或状态卡更新之后
-- 最新版仍能复现时，同时保留截图和日志，便于比对转录状态与底部渲染结果
+- 如果仍能复现，同时保留截图和日志，便于比对转录状态与底部渲染结果
 
-最近修复解决了两类转录高度统计错误：
+Chord 会处理两类转录高度统计风险：
 
-- 较早的状态卡后续更新时，旧版本可能让 viewport 高度小于真实转录内容。
+- 较早的状态卡后续更新时，viewport 高度可能小于真实转录内容。
 - 后台缓存丢弃时可能漏算空行偏移，造成滚动逐步漂移。
 
 ## Edit 报 `file ... has not been read in this conversation`
 
-较新的构建会要求：当前会话里必须先对同一文件执行过一次被跟踪的 `Read`，`Edit` 才会继续。这样可以减少“盲改”导致的 stale edit 和无效重试。
+Chord 要求：当前会话里必须先对同一文件执行过一次被跟踪的 `Read`，`Edit` 才会继续。这样可以减少“盲改”导致的 stale edit 和无效重试。
 
 看到这个错误时：
 
@@ -200,15 +192,15 @@ curl -I https://api.openai.com/v1
 
 - 你在 `Read` 与 `Edit` 之间用编辑器/格式化器等外部进程改动了文件；
 - speculative 工具调用被丢弃/回滚，finalize 阶段的工具调用与其发生竞态；
-- provider 将 tool arguments 以 JSON 字符串形式包了一层（wrapped arguments）。新版会一致地对 tool arguments 做 unwrap；如果你在旧版上，`path` 可能没有被正确跟踪，从而触发“假 stale”。
+- provider 将 tool arguments 以 JSON 字符串形式包了一层（wrapped arguments）。Chord 会一致地对 tool arguments 做 unwrap；如果 `path` 没有被正确跟踪，请保留日志和 session JSONL。
 
-如果在最新版仍能复现，请同时提供 session JSONL 和当前文件 diff，便于检查 tool-call 的顺序与被跟踪的路径。
+如果仍能复现，请同时提供 session JSONL 和当前文件 diff，便于检查 tool-call 的顺序与被跟踪的路径。
 
 ## 流式工具卡片已改文件后，`Edit` 又报 `old_string not found`
 
 在排查启用了 streaming tool execution 的开发构建时，可能会看到 `Edit` 报错，但目标文件里已经包含预期的新内容。这通常表示某个 speculative `Write` / `Edit` / `Delete` 在 LLM finalize 前提前执行，随后因为 args drift、过滤或回滚被丢弃，而 finalized 路径在 speculative 文件变更完成回滚前又尝试正式重跑。
 
-较新的构建会在允许 finalized 执行路径重跑前，同步回滚已完成的 speculative 文件变更。如果仍然看到这类现象：
+Chord 会在允许 finalized 执行路径重跑前，同步回滚已完成的 speculative 文件变更。如果仍然看到这类现象：
 
 - 在日志中查找 `args_drift`、`filtered`、`rollback`、`length_recovery` 等 speculative discard 原因
 - 确认 finalized `Edit` 没有复用来自更早文件快照的 stale `old_string`

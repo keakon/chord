@@ -122,3 +122,27 @@ Two practical points matter here:
 - Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it derives the input budget from `limit.context` minus effective requested output.
 - `limit.output` is the model's own output capacity. Chord still defaults `max_output_tokens` to `32000`, so actual requests use the smaller output limit; changing that request cap does not increase the provider's `272k` input cap.
 - Same-named models on different providers are still tried independently in the fallback chain; Chord does not skip them just because the model name matches.
+
+## Credentials to prepare
+
+Run `chord auth codex` for the `codex` provider. If you keep the `fast` OpenAI-compatible provider, also provide an OpenAI API key under `fast` in `auth.yaml` or through the environment reference you choose.
+
+Install optional LSP servers before relying on diagnostics:
+
+```bash
+go install golang.org/x/tools/gopls@latest
+npm install -g pyright
+```
+
+## Verify
+
+```bash
+chord doctor models --pool thinking
+chord doctor models --pool fast
+```
+
+## Common failures
+
+- OAuth opens but never completes: rerun `chord auth codex` in a local browser-capable environment, or use the device-code login path.
+- `fast` pool fails while `thinking` works: the OpenAI API key for the `fast` provider is missing or the model name differs on your account.
+- LSP indicators stay unavailable: `gopls` or `pyright-langserver` is not installed on `PATH`.

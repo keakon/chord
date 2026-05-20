@@ -40,3 +40,19 @@ log_level: info
 ```
 
 Use this when you want to verify provider connectivity, credentials, basic chat flow, and conversation compaction with the smallest working config.
+
+## Credentials to prepare
+
+Set `ANTHROPIC_API_KEY` in your shell or replace the environment-variable reference in `auth.yaml` with a real key stored outside the repository.
+
+## Verify
+
+```bash
+chord doctor models --model anthropic/claude-opus-4.7
+```
+
+## Common failures
+
+- `401` / `403`: the key is missing, expired, or not visible in the environment where Chord runs.
+- `404` / model not found: the model name is not enabled on your Anthropic account.
+- Context-limit errors: update `limit.context`, `limit.input`, and `limit.output` to match your provider account's published limits.
