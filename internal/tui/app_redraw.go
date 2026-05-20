@@ -204,6 +204,45 @@ func (m *Model) hostRedrawForContentBoundaryCmd(reason string) tea.Cmd {
 	return m.hostRedrawCmd(reason)
 }
 
+func (m *Model) postHostRedrawFallbackAlreadyPending(reason string, generation uint64) bool {
+	if m == nil || generation == 0 {
+		return false
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	if m.pendingPostHostRedrawFallback == nil {
+		m.pendingPostHostRedrawFallback = make(map[string]uint64)
+	}
+	if m.pendingPostHostRedrawFallback[reason] == generation {
+		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d duplicate_pending=true", reason, generation)
+		return true
+	}
+	m.pendingPostHostRedrawFallback[reason] = generation
+	return false
+}
+
+func (m *Model) clearPostHostRedrawFallback(reason string, generation uint64) {
+	if m == nil || len(m.pendingPostHostRedrawFallback) == 0 {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	if m.pendingPostHostRedrawFallback[reason] == generation {
+		delete(m.pendingPostHostRedrawFallback, reason)
+	}
+}
+
+func (m *Model) clearAllPostHostRedrawFallbacks() {
+	if m == nil || len(m.pendingPostHostRedrawFallback) == 0 {
+		return
+	}
+	clear(m.pendingPostHostRedrawFallback)
+}
+
 func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64, now time.Time) tea.Cmd {
 	if m == nil || m.lastForegroundAt.IsZero() {
 		return nil
@@ -215,6 +254,9 @@ func (m *Model) maybePostHostRedrawFallbackCmd(reason string, generation uint64,
 	}
 	policy := hostRedrawPolicyForReason(reason)
 	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
+		return nil
+	}
+	if m.postHostRedrawFallbackAlreadyPending(reason, generation) {
 		return nil
 	}
 	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d since_focus=%s", reason, generation, sinceFocus.Truncate(time.Millisecond))
@@ -239,6 +281,9 @@ func (m *Model) maybePostThrottledContentBoundaryRedrawFallbackCmd(reason string
 	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
 		return nil
 	}
+	if m.postHostRedrawFallbackAlreadyPending(reason, generation) {
+		return nil
+	}
 	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d content_boundary_throttled=true risky_host=%t last_reason=%s", reason, generation, m.useFocusResizeFreeze, strings.TrimSpace(m.lastHostRedrawReason))
 	return postHostRedrawFallbackCmd(generation, reason, policy.postHostFallbackDelay)
 }
@@ -249,6 +294,9 @@ func (m *Model) maybePostThrottledScrollRedrawFallbackCmd(reason string, generat
 	}
 	policy := hostRedrawPolicyForReason(reason)
 	if policy.postHostFallbackReason == "" || policy.postHostFallbackDelay <= 0 {
+		return nil
+	}
+	if m.postHostRedrawFallbackAlreadyPending(reason, generation) {
 		return nil
 	}
 	m.recordTUIDiagnostic("post-host-redraw-fallback-arm", "reason=%s generation=%d throttled=true risky_host=%t", strings.TrimSpace(reason), generation, m.useFocusResizeFreeze)
@@ -297,6 +345,7 @@ func (m *Model) hostRedrawCmdWithOptions(reason string, bypassMinInterval bool) 
 		}
 	}
 	m.hostRedrawGeneration++
+	m.clearAllPostHostRedrawFallbacks()
 	m.markHostRedrawReplay()
 	m.lastHostRedrawAt = now
 	m.lastHostRedrawReason = reason

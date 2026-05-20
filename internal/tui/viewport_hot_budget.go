@@ -62,7 +62,7 @@ func (v *Viewport) visibleWindowBlockIDsCachedOnly() (map[int]struct{}, bool) {
 	if len(blocks) == 0 {
 		return ids, true
 	}
-	if len(v.blockSpansCache) != len(blocks) {
+	if !v.blockPositionCacheValid(blocks) {
 		return nil, false
 	}
 	windowStart := v.offset

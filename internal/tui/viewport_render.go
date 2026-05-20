@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -28,8 +29,21 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 	windowStart := v.offset
 	windowEnd := v.offset + v.height
 	currentLine := 0
+	startBlockIndex := 0
+	if v.blockPositionCacheValid(blocks) {
+		startBlockIndex = sort.Search(len(blocks), func(i int) bool {
+			return v.blockStartsCache[i]+v.blockSpansCache[i] > windowStart
+		})
+		if startBlockIndex >= len(blocks) {
+			startBlockIndex = len(blocks) - 1
+		}
+		if startBlockIndex > 0 {
+			currentLine = v.blockStartsCache[startBlockIndex]
+		}
+	}
 
-	for blockIndex, block := range blocks {
+	for blockIndex := startBlockIndex; blockIndex < len(blocks); blockIndex++ {
+		block := blocks[blockIndex]
 		if len(visible) >= v.height {
 			break
 		}
@@ -57,7 +71,7 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 		}
 		if block.spillCold {
 			blockCount := 0
-			if v.blockSpansCache != nil && blockIndex < len(v.blockSpansCache) {
+			if v.blockPositionCacheValid(blocks) && blockIndex < len(v.blockSpansCache) {
 				blockCount = v.blockSpansCache[blockIndex] - leadingSpacing
 			}
 			if blockCount <= 0 {

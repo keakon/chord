@@ -27,6 +27,7 @@
 - TUI / 标题告警：确认 / 问题请求在 Chord 后台出现时，终端标题栏仍会闪烁以吸引注意；用户重新聚焦该标签页/窗口后，当前请求的告警会保持可见但停止闪烁。
 - TUI / 用量：usage/context 更新现在会让信息面板渲染缓存失效，修复上下文压缩或其它用量刷新事件后侧边栏 `TOKENS` 可能保持旧值的问题。
 - Runtime / 权限：记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。
+- TUI / 性能：降低后台标签页和长对话的 CPU 与渲染开销，让大会话中的滚动和重新聚焦恢复更顺畅。
 - Docs：明确 agent 权限保存在 `agents/<role>.yaml`，确认弹窗和 headless 记住规则都会更新对应 agent 配置文件。
 
 ## 0.5.3 - 2026-05-11

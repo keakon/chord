@@ -50,7 +50,8 @@ type cadenceProfile struct {
 const (
 	foregroundContentFlushCadence       = 200 * time.Millisecond
 	backgroundActiveContentFlushCadence = 1 * time.Second
-	visualSpinnerCadence                = 200 * time.Millisecond // running tool/local-shell spinner tick (foreground + background-active)
+	visualSpinnerCadence                = 200 * time.Millisecond // running tool/local-shell spinner tick (foreground only)
+	backgroundActiveVisualAnimCadence   = 0                      // terminal is blurred; keep housekeeping but skip invisible visual frames
 	titleSpinnerCadence                 = 500 * time.Millisecond // terminal title spinner tick (foreground + background)
 	backgroundIdleAnimTickCadence       = 5 * time.Second
 )
@@ -68,8 +69,10 @@ var (
 	// Background-active: user switched focus away but agent is still busy.
 	// Keep state moving, but substantially reduce terminal output.
 	backgroundActiveCadence = cadenceProfile{
-		contentFlushDelay:   backgroundActiveContentFlushCadence,
-		visualAnimDelay:     visualSpinnerCadence,
+		contentFlushDelay: backgroundActiveContentFlushCadence,
+		// Background-active work still needs stale detection/progress housekeeping,
+		// but visual spinner frames are invisible while the terminal is blurred.
+		visualAnimDelay:     backgroundActiveVisualAnimCadence,
 		titleTickerDelay:    titleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
 		hostRedrawAllowed:   false,

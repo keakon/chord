@@ -31,13 +31,14 @@ type Viewport struct {
 	lastBlockDirty bool
 	workingDir     string
 
-	visibleBlocksCache []*Block
-	visibleBlocksDirty bool
-	hotBudgetDirty     bool
-	hotBytesDirty      bool
-	blockStartsCache   []int
-	blockSpansCache    []int
-	renderVersion      uint64
+	visibleBlocksCache        []*Block
+	visibleBlocksDirty        bool
+	hotBudgetDirty            bool
+	hotBytesDirty             bool
+	blockStartsCache          []int
+	blockSpansCache           []int
+	blockPositionCacheVersion uint64
+	renderVersion             uint64
 }
 
 func NewViewport(width, height int) *Viewport {

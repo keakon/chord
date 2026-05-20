@@ -120,7 +120,7 @@ func (m *Model) invalidateAnimTicks() {
 }
 
 func (m *Model) scheduleBackgroundHousekeeping() tea.Cmd {
-	if m == nil || m.displayState != stateBackground || m.hasActiveAnimation() {
+	if m == nil || m.displayState != stateBackground {
 		return nil
 	}
 	delay := m.currentCadence().housekeepingDelay
@@ -143,7 +143,7 @@ func (m *Model) startAnimTick() tea.Cmd {
 		m.animRunning = false
 		m.activitySpinnerFrameIndex = 0
 		m.invalidateAnimTicks()
-		return m.syncTerminalTitleState()
+		return tea.Batch(m.syncTerminalTitleState(), m.scheduleBackgroundHousekeeping())
 	}
 	m.invalidateAnimTicks()
 	m.animRunning = true

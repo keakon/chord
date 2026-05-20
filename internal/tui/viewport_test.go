@@ -122,6 +122,51 @@ func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
 	}
 }
 
+func TestViewportRenderWithBlockStartsCacheMatchesLinearPath(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(32, 6)
+	for i := 0; i < 80; i++ {
+		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("cached render equivalence ", 8)})
+	}
+	_ = v.Render("", nil, -1, -1, "")
+	for _, offset := range []int{0, 1, 5, 17, 61, v.totalLines / 2, max(0, v.totalLines-v.height)} {
+		v.offset = offset
+		cached := v.Render("", nil, -1, -1, "")
+		starts, spans := v.blockStartsCache, v.blockSpansCache
+		v.blockStartsCache, v.blockSpansCache = nil, nil
+		linear := v.Render("", nil, -1, -1, "")
+		v.blockStartsCache, v.blockSpansCache = starts, spans
+		if cached != linear {
+			t.Fatalf("render mismatch at offset %d", offset)
+		}
+	}
+}
+
+func TestViewportRenderIgnoresStaleBlockPositionCacheVersion(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(18, 3)
+	v.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "short"})
+	v.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("target ", 8)})
+	_ = v.Render("", nil, -1, -1, "")
+	staleStarts := append([]int(nil), v.blockStartsCache...)
+	staleSpans := append([]int(nil), v.blockSpansCache...)
+
+	v.blocks[0].Content = strings.Repeat("expanded ", 20)
+	v.blocks[0].InvalidateCache()
+	v.bumpRenderVersion()
+	v.offset = staleStarts[1]
+	v.blockStartsCache = staleStarts
+	v.blockSpansCache = staleSpans
+
+	got := v.Render("", nil, -1, -1, "")
+	if strings.Contains(got, "target") {
+		t.Fatalf("Render used stale block-position cache and jumped to block 2; output=%q", got)
+	}
+	if !strings.Contains(got, "expanded") {
+		t.Fatalf("Render did not recompute stale block-position cache; output=%q", got)
+	}
+}
+
 func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	v := NewViewport(80, 12)
 	mainBlock := &Block{ID: 1, Type: BlockAssistant, Content: "main"}
@@ -220,6 +265,55 @@ func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 		if block.spillCold && block.lineCache != nil {
 			t.Fatalf("spilled block %d should not be re-rendered for visibleWindowBlockIDs", block.ID)
 		}
+	}
+}
+
+func TestViewportVisibleWindowBlockIDsCachedOnlyRejectsStalePositionVersion(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := benchmarkViewportWithSpill()
+	v.ScrollToBottom()
+	_ = v.Render("", nil, -1, -1, "")
+	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
+		t.Fatal("expected render to populate block position caches")
+	}
+
+	v.bumpRenderVersion()
+	if ids, ok := v.visibleWindowBlockIDsCachedOnly(); ok {
+		t.Fatalf("cached-only visible window used stale block-position version, ids=%#v", ids)
+	}
+}
+
+func TestViewportRenderDoesNotUseStaleSpansForColdSpillBlocks(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := benchmarkViewportWithSpill()
+	v.ScrollToBottom()
+	_ = v.Render("", nil, -1, -1, "")
+	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
+		t.Fatal("expected render to populate block position caches")
+	}
+	spilled := false
+	for _, block := range v.blocks {
+		if block.spillCold {
+			spilled = true
+			break
+		}
+	}
+	if !spilled {
+		t.Fatal("expected at least one cold spilled block")
+	}
+
+	staleStarts := append([]int(nil), v.blockStartsCache...)
+	staleSpans := append([]int(nil), v.blockSpansCache...)
+	v.SetWidth(v.width / 2)
+	v.offset = 0
+	v.blockStartsCache = staleStarts
+	v.blockSpansCache = staleSpans
+
+	got := v.Render("", nil, -1, -1, "")
+	v.blockStartsCache, v.blockSpansCache = nil, nil
+	linear := v.Render("", nil, -1, -1, "")
+	if got != linear {
+		t.Fatal("render used stale spans for cold spilled blocks")
 	}
 }
 

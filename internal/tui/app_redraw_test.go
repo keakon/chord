@@ -405,6 +405,27 @@ func TestPostFocusSettleFallbackTriggersStrongHostRedraw(t *testing.T) {
 	}
 }
 
+func TestPostHostRedrawFallbackDedupesSameReasonAndGeneration(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.SetFocusResizeFreezeEnabled(true)
+	now := time.Now()
+	m.lastForegroundAt = now.Add(-time.Second)
+
+	first := m.maybePostHostRedrawFallbackCmd("scroll-flush", 7, now)
+	if first == nil {
+		t.Fatal("first fallback should be armed")
+	}
+	if second := m.maybePostHostRedrawFallbackCmd("scroll-flush", 7, now); second != nil {
+		t.Fatalf("duplicate fallback should be suppressed, got %#v", second)
+	}
+	if different := m.maybePostHostRedrawFallbackCmd("content-boundary", 7, now); different == nil {
+		t.Fatal("different fallback reason should still be armed")
+	}
+	if nextGeneration := m.maybePostHostRedrawFallbackCmd("scroll-flush", 8, now); nextGeneration == nil {
+		t.Fatal("new fallback generation should be armed")
+	}
+}
+
 func TestPostHostRedrawFallbackSkipsWhenNewerRedrawExists(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.SetFocusResizeFreezeEnabled(true)

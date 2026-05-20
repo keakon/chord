@@ -63,6 +63,17 @@ func benchmarkAssistantStreamingBlock() *Block {
 	}
 }
 
+func benchmarkLargeViewport(blocks int) *Viewport {
+	v := NewViewport(100, 24)
+	content := strings.Repeat("long transcript block ", 40)
+	for i := 0; i < blocks; i++ {
+		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: content})
+	}
+	v.ScrollToBottom()
+	_ = v.Render("", nil, -1, -1, "")
+	return v
+}
+
 func benchmarkModelForView() Model {
 	m := NewModel(&sessionControlAgent{providerModelRef: "anthropic/claude-opus-4.7"})
 	m.width = 120
@@ -461,6 +472,29 @@ func BenchmarkFindMatchesAtWidth(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = FindMatchesAtWidth(blocks, "needle", 100)
+	}
+}
+
+func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	v := benchmarkLargeViewport(5000)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = v.Render("", nil, -1, -1, "")
+	}
+}
+
+func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	v := benchmarkLargeViewport(5000)
+	v.offset = 1000
+	_ = v.Render("", nil, -1, -1, "")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		v.offset = 1000
+		_ = v.Render("", nil, -1, -1, "")
 	}
 }
 

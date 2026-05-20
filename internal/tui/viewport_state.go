@@ -108,9 +108,14 @@ func (v *Viewport) markHotBudgetDirty() {
 
 func (v *Viewport) markHotBudgetNeedsEnforcement() { v.hotBudgetDirty = true }
 
+func (v *Viewport) blockPositionCacheValid(blocks []*Block) bool {
+	return v.blockPositionCacheVersion == v.renderVersion && len(v.blockStartsCache) == len(blocks) && len(v.blockSpansCache) == len(blocks)
+}
+
 func (v *Viewport) invalidateBlockPositionCache() {
 	v.blockStartsCache = nil
 	v.blockSpansCache = nil
+	v.blockPositionCacheVersion = 0
 }
 
 func (v *Viewport) invalidateCachesForLineCountChange() {
@@ -197,6 +202,7 @@ func (v *Viewport) recalcTotalLines() {
 	v.totalLines = total
 	v.blockStartsCache = starts
 	v.blockSpansCache = spans
+	v.blockPositionCacheVersion = v.renderVersion
 	if len(spans) > 0 {
 		v.lastBlockSpan = spans[len(spans)-1]
 	} else {
@@ -209,7 +215,7 @@ func (v *Viewport) blockStarts() []int {
 	if len(blocks) == 0 {
 		return nil
 	}
-	if len(v.blockStartsCache) != len(blocks) || len(v.blockSpansCache) != len(blocks) {
+	if !v.blockPositionCacheValid(blocks) {
 		v.recalcTotalLines()
 	}
 	return v.blockStartsCache

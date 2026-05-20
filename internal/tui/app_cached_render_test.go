@@ -100,6 +100,31 @@ func TestSetThemePreservesDeferredStartupTranscriptRuntimeState(t *testing.T) {
 	}
 }
 
+func BenchmarkApplyWheelScrollDeltaLargeTranscript(b *testing.B) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.viewport = benchmarkLargeViewport(5000)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		m.viewport.offset = 1000
+		m.applyWheelScrollDelta(600)
+	}
+}
+
+func TestApplyWheelScrollDeltaBulkPathMatchesDirectViewportScroll(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 40)
+	m.viewport = benchmarkLargeViewport(200)
+	m.viewport.offset = 50
+	m.applyWheelScrollDelta(37)
+	if got, want := m.viewport.offset, 87; got != want {
+		t.Fatalf("offset after bulk scroll down = %d, want %d", got, want)
+	}
+	m.applyWheelScrollDelta(-25)
+	if got, want := m.viewport.offset, 62; got != want {
+		t.Fatalf("offset after bulk scroll up = %d, want %d", got, want)
+	}
+}
+
 func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t *testing.T) {
 	m := NewModel(nil)
 	width := 20

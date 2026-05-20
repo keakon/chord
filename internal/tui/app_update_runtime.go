@@ -277,6 +277,7 @@ func (m *Model) handlePostFocusSettleRedraw(msg postFocusSettleRedrawMsg) tea.Cm
 
 func (m *Model) handlePostHostRedrawFallback(msg postHostRedrawFallbackMsg) tea.Cmd {
 	reason := strings.TrimSpace(msg.reason)
+	defer m.clearPostHostRedrawFallback(reason, msg.generation)
 	if msg.generation != m.hostRedrawGeneration {
 		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d current=%d", reason, msg.generation, m.hostRedrawGeneration)
 		return nil

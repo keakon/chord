@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,6 +310,22 @@ func (m *Model) attachmentsFingerprint() string {
 	return b.String()
 }
 
+func appendIntKeyPart(b *strings.Builder, scratch *[20]byte, value int) {
+	b.Write(strconv.AppendInt(scratch[:0], int64(value), 10))
+}
+
+func appendUint64KeyPart(b *strings.Builder, scratch *[20]byte, value uint64) {
+	b.Write(strconv.AppendUint(scratch[:0], value, 10))
+}
+
+func appendBoolKeyPart(b *strings.Builder, value bool) {
+	if value {
+		b.WriteByte('1')
+	} else {
+		b.WriteByte('0')
+	}
+}
+
 func (m *Model) toastFingerprint() string {
 	if m.activeToast == nil {
 		return ""
@@ -317,8 +334,35 @@ func (m *Model) toastFingerprint() string {
 }
 
 func (m *Model) mainRenderKey(mode Mode, viewportWidth int) string {
-	return fmt.Sprintf("%d|%d|%d|%d|%t|%t|%d|%d|%d|%q|%t|%d|%s", mode, viewportWidth, m.viewport.height, m.viewport.offset,
-		m.animRunning, m.rightPanelVisible, len(m.viewport.blocks), m.focusedBlockID, m.search.State.Current, m.search.State.Query, m.startupRestorePending, m.viewport.RenderVersion(), m.focusedAgentID)
+	var b strings.Builder
+	var scratch [20]byte
+	b.Grow(128 + len(m.search.State.Query) + len(m.focusedAgentID))
+	appendIntKeyPart(&b, &scratch, int(mode))
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, viewportWidth)
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, m.viewport.height)
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, m.viewport.offset)
+	b.WriteByte('|')
+	appendBoolKeyPart(&b, m.animRunning)
+	b.WriteByte('|')
+	appendBoolKeyPart(&b, m.rightPanelVisible)
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, len(m.viewport.blocks))
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, m.focusedBlockID)
+	b.WriteByte('|')
+	appendIntKeyPart(&b, &scratch, m.search.State.Current)
+	b.WriteByte('|')
+	b.Write(strconv.AppendQuote(scratch[:0], m.search.State.Query))
+	b.WriteByte('|')
+	appendBoolKeyPart(&b, m.startupRestorePending)
+	b.WriteByte('|')
+	appendUint64KeyPart(&b, &scratch, m.viewport.RenderVersion())
+	b.WriteByte('|')
+	b.WriteString(m.focusedAgentID)
+	return b.String()
 }
 
 func (m *Model) scheduleScrollFlush(delay time.Duration) tea.Cmd {
@@ -352,6 +396,14 @@ func (m *Model) consumeScrollFlush(msg scrollFlushTickMsg) tea.Cmd {
 
 func (m *Model) applyWheelScrollDelta(delta int) {
 	if m == nil || m.viewport == nil || delta == 0 {
+		return
+	}
+	if !m.hasDeferredStartupTranscript() {
+		if delta > 0 {
+			m.viewport.ScrollDown(delta)
+		} else {
+			m.viewport.ScrollUp(-delta)
+		}
 		return
 	}
 	step := 1

@@ -389,7 +389,8 @@ type Model struct {
 	tuiDiagnosticNext   int
 	tuiDiagnosticCount  int
 
-	pendingLocalStatusCards []localStatusCard
+	pendingPostHostRedrawFallback map[string]uint64
+	pendingLocalStatusCards       []localStatusCard
 }
 
 type localStatusCard struct {
@@ -503,9 +504,10 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 			displayState:     stateForeground,
 			lastForegroundAt: time.Now(),
 		},
-		infoPanelCollapsedSections: make(map[infoPanelSectionID]bool),
-		runtimeCacheMgr:            newRuntimeCacheManager(),
-		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
+		infoPanelCollapsedSections:    make(map[infoPanelSectionID]bool),
+		pendingPostHostRedrawFallback: make(map[string]uint64),
+		runtimeCacheMgr:               newRuntimeCacheManager(),
+		renderCacheState:              renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
 	if a != nil {
@@ -828,7 +830,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.scheduleKeyPoolTick())
 		}
 		cmds = append(cmds, m.restartStatusBarTick())
-		if !m.renderFreezeActive {
+		if !m.renderFreezeActive && m.currentCadence().contentFlushDelay > 0 {
 			cmds = append(cmds, m.scheduleStreamFlush(0))
 		}
 		return m, tea.Batch(cmds...)

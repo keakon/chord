@@ -50,14 +50,15 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenBusy(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.currentAssistantBlock = &Block{ID: 1, Type: BlockAssistant, Streaming: true}
 	m.backgroundIdleSince = time.Now().Add(-time.Minute)
 
 	c := m.currentCadence()
 	if c.contentFlushDelay != backgroundActiveContentFlushCadence {
 		t.Fatalf("background-active contentFlushDelay = %v, want %v", c.contentFlushDelay, backgroundActiveContentFlushCadence)
 	}
-	if c.visualAnimDelay != visualSpinnerCadence {
-		t.Fatalf("background-active visualAnimDelay = %v, want %v", c.visualAnimDelay, visualSpinnerCadence)
+	if c.visualAnimDelay != backgroundActiveVisualAnimCadence {
+		t.Fatalf("background-active visualAnimDelay = %v, want %v", c.visualAnimDelay, backgroundActiveVisualAnimCadence)
 	}
 	if c.titleTickerDelay != titleSpinnerCadence {
 		t.Fatalf("background-active titleTickerDelay = %v, want %v", c.titleTickerDelay, titleSpinnerCadence)
@@ -461,6 +462,42 @@ func TestBackgroundIdleTransitionSchedulesFreshHousekeepingAfterStoppingAnimatio
 
 	if staleCmd := m.handleAnimTick(animTickMsg{generation: 7, source: animTickSourceVisual}); staleCmd != nil {
 		t.Fatal("stale visual tick from stopped generation should be ignored")
+	}
+}
+
+func TestBackgroundActiveStartAnimationSchedulesHousekeepingNotVisualTick(t *testing.T) {
+	oldCadence := backgroundActiveCadence
+	backgroundActiveCadence.housekeepingDelay = time.Nanosecond
+	t.Cleanup(func() { backgroundActiveCadence = oldCadence })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.currentAssistantBlock = &Block{ID: 1, Type: BlockAssistant, Streaming: true}
+
+	cmd := m.startActiveAnimation()
+	if cmd == nil {
+		t.Fatal("background-active animation start should keep housekeeping scheduled")
+	}
+	if m.animRunning {
+		t.Fatal("background-active should not run invisible visual animation")
+	}
+	messages := collectCommandMessages(cmd)
+	var foundHousekeeping bool
+	for _, msg := range messages {
+		tick, ok := msg.(animTickMsg)
+		if !ok {
+			continue
+		}
+		if tick.source == animTickSourceVisual {
+			t.Fatalf("background-active scheduled visual tick: %+v", tick)
+		}
+		if tick.source == animTickSourceHousekeeping {
+			foundHousekeeping = true
+		}
+	}
+	if !foundHousekeeping {
+		t.Fatalf("background-active start did not schedule housekeeping; messages=%#v", messages)
 	}
 }
 
