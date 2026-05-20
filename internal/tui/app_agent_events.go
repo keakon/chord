@@ -89,24 +89,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	return block, true
 }
 
-type agentEventEffects struct {
-	followup        tea.Cmd
-	refreshSidebar  bool
-	invalidateUsage bool
-}
-
-func (e *agentEventEffects) addFollowup(cmd tea.Cmd) {
-	if cmd == nil {
-		return
-	}
-	e.followup = tea.Batch(e.followup, cmd)
-}
-
-func (e *agentEventEffects) merge(other agentEventEffects) {
-	e.addFollowup(other.followup)
-	e.refreshSidebar = e.refreshSidebar || other.refreshSidebar
-	e.invalidateUsage = e.invalidateUsage || other.invalidateUsage
-}
+type agentEventEffects = uiEffects
 
 func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 	if !msg.closed {
@@ -163,18 +146,7 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 		effects.merge(sub)
 	}
 
-	if effects.refreshSidebar {
-		effects.invalidateUsage = true
-		m.refreshSidebar()
-	}
-	if effects.invalidateUsage {
-		m.invalidateStatusBarAgentSnapshot()
-		m.invalidateUsageStatsCache()
-		m.cachedInfoPanelFP = ""
-		m.cachedInfoPanelOut = ""
-	}
-
-	return effects.followup
+	return m.applyUIEffects(effects)
 }
 
 func (m *Model) currentMainAssistantMsgIndex() int {
@@ -314,9 +286,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 				m.markBlockSettled(m.currentThinkingBlock)
 				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
 			}
-			m.streamRenderForceView = true
-			m.streamRenderDeferred = false
-			m.streamRenderDeferNext = false
+			m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 			// Detach the settled block so the next round of thinking starts
 			// a fresh card. Without this, subsequent thinking deltas would
 			// be appended to an already-frozen block and the footer would
@@ -349,9 +319,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if strings.TrimSpace(evt.Reason) != "" {
 			effects.addFollowup(m.enqueueToast(evt.Reason, "warn"))
 		}
-		m.streamRenderForceView = true
-		m.streamRenderDeferred = false
-		m.streamRenderDeferNext = false
+		m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 		effects.addFollowup(m.requestStreamBoundaryFlush())
 		return true, effects
 	case agent.ThinkingTranslatedEvent:
@@ -854,9 +822,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
 	}
-	m.streamRenderForceView = true
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	effects.addFollowup(m.requestStreamBoundaryFlush())
 	return effects
 }

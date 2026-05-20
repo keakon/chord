@@ -103,9 +103,7 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 		return nil
 	}
 	m.exitRenderFreeze()
-	m.streamRenderForceView = true
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	// Do NOT issue ClearScreen during streaming. On cmux/libghostty,
 	// rapid ClearScreen (~250ms) creates a race between "clear" and
 	// "repaint" that leaves ghost cells (e.g. a second separator line).

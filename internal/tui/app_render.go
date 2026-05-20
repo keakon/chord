@@ -395,9 +395,7 @@ func (m *Model) View() tea.View {
 		v.Content = "Goodbye!\n"
 		m.cachedFullView = v
 		m.cachedFullViewValid = true
-		m.streamRenderForceView = false
-		m.streamRenderDeferred = false
-		m.streamRenderDeferNext = false
+		m.setStreamRenderInvalidation(streamRenderInvalidateClear)
 		return v
 	}
 

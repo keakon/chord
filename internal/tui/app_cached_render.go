@@ -35,9 +35,7 @@ func (m *Model) exitRenderFreeze() {
 	m.renderFreezeEnteredAt = time.Time{}
 	m.cachedFrozenView = tea.View{}
 	m.cachedFrozenViewValid = false
-	m.streamRenderForceView = true
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 }
 
 func (m *Model) tryEnterRenderFreeze(reason string) bool {
@@ -70,9 +68,7 @@ func (m *Model) tryEnterRenderFreeze(reason string) bool {
 	m.renderFreezeEnteredAt = time.Now()
 	m.cachedFrozenView = m.cachedFullView
 	m.cachedFrozenViewValid = true
-	m.streamRenderForceView = false
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateClear)
 	m.stopTerminalTitleTicker()
 	return true
 }
@@ -119,9 +115,7 @@ func (m *Model) markStreamRenderDirty() {
 		return
 	}
 	m.markBackgroundDirty("stream-render")
-	m.streamRenderDeferNext = true
-	m.streamRenderDeferred = true
-	m.streamRenderForceView = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateDefer)
 }
 
 func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
@@ -129,9 +123,7 @@ func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
 		return nil
 	}
 	m.exitRenderFreeze()
-	m.streamRenderDeferNext = false
-	m.streamRenderForceView = true
-	m.streamRenderDeferred = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	return tea.Batch(
 		m.scheduleStreamFlush(1*time.Millisecond),
 		m.hostRedrawForContentBoundaryCmd("content-boundary"),

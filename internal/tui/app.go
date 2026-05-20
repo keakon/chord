@@ -209,33 +209,7 @@ type Model struct {
 	scrollFlushScheduled     bool
 	pendingScrollDelta       int
 
-	// Block selection state
-	focusedBlockID int // ID of the block selected by mouse/keyboard
-	zone           *ZoneManager
-
-	// In-app mouse text selection (drag to select, release to copy)
-	mouseDown              bool
-	selStartBlockID        int
-	selStartLine           int
-	selStartCol            int
-	selEndBlockID          int
-	selEndLine             int
-	selEndCol              int
-	selEndInclusiveForCopy bool
-	inputMouseDown         bool
-
-	// Status bar copy targets (working directory / session ID).
-	statusPathLastClickTime time.Time
-	statusPathLastClickX    int
-	statusPathLastClickY    int
-	statusPathClickCount    int
-	statusSession           statusBarCopyRegionState
-
-	// Double/triple click for word/line selection
-	lastClickTime time.Time
-	lastClickY    int
-	lastClickX    int
-	clickCount    int
+	selectionState
 
 	// Lifecycle
 	quitting bool
@@ -291,20 +265,7 @@ type Model struct {
 	// Pending image attachments (shown above input box, sent with next message)
 	attachments []Attachment
 
-	// File reference completion ("@path" in composer)
-	atMentionOpen       bool
-	atMentionLine       int
-	atMentionTriggerCol int
-	atMentionQuery      string
-	atMentionLoaded     bool
-	atMentionLoading    bool
-	atMentionFiles      []string
-	atMentionList       *OverlayList
-
-	// Slash command completion (when input starts with "/")
-	slashCompleteSelected int            // index into current completion list
-	customCommands        []slashCommand // extra commands injected from config
-
+	completionState
 	activityRuntimeState
 	renderRuntimeState
 	renderCacheState
@@ -349,29 +310,8 @@ type Model struct {
 	oscNotifyOut                 io.Writer
 	terminalNotificationProtocol terminalNotificationProtocol
 
-	// -- Visibility / idle background throttling ----------------------------------
-	// displayState tracks whether the terminal is considered focused (foreground)
-	// or blurred (background). This is best-effort only: driven by BlurMsg/FocusMsg.
-	displayState displayState
-	// lastForegroundAt records when we last received a FocusMsg.
-	lastForegroundAt time.Time
-	// lastBackgroundAt records when we last received a BlurMsg.
-	lastBackgroundAt time.Time
-	// lastSweepAt records when the last idle sweep ran.
-	lastSweepAt time.Time
-	// idleSweepScheduled is set when an idle sweep tick generation is live.
-	idleSweepScheduled bool
-	// idleSweepGeneration guards against stale idle sweep tick messages.
-	idleSweepGeneration uint64
+	visibilityState
 	startupRestoreState
-	// backgroundIdleSince tracks when the currently focused view last became idle
-	// while the terminal was in background mode. Zero means no active idle window.
-	backgroundIdleSince time.Time
-	// deferredResumeTailOnFocus records whether the focused deferred transcript was
-	// logically pinned to the tail when the terminal blurred, so focus recovery can
-	// restore the true tail window instead of leaving the user at a stale page bottom.
-	deferredResumeTailOnFocus bool
-
 	infoPanelCollapsedSections map[infoPanelSectionID]bool
 	infoPanelHitBoxes          []infoPanelSectionHitBox
 	infoPanelRenderCursorY     int
@@ -543,25 +483,29 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 			turnBusyStartedAt:   make(map[string]time.Time),
 			streamLastDeltaAt:   make(map[string]time.Time),
 		},
-		toolArgRenderState:           make(map[string]toolArgRenderState),
-		focusedBlockID:               -1,
-		zone:                         z,
-		selStartBlockID:              -1,
-		selEndBlockID:                -1,
+		toolArgRenderState: make(map[string]toolArgRenderState),
+		selectionState: selectionState{
+			focusedBlockID:  -1,
+			zone:            z,
+			selStartBlockID: -1,
+			selEndBlockID:   -1,
+			statusSession:   statusBarCopyRegionState{},
+		},
 		workingDir:                   wd,
 		homeDir:                      homeDir,
 		imageCaps:                    caps,
 		kittyImageCache:              make(map[int]struct{}),
 		kittyPlacementCache:          make(map[int]struct{}),
 		statusPath:                   statusPathState{},
-		statusSession:                statusBarCopyRegionState{},
 		terminalAppFocused:           true,
 		terminalNotificationProtocol: detectTerminalNotificationProtocolFromProcessEnv(),
-		displayState:                 stateForeground,
-		lastForegroundAt:             time.Now(),
-		infoPanelCollapsedSections:   make(map[infoPanelSectionID]bool),
-		runtimeCacheMgr:              newRuntimeCacheManager(),
-		renderCacheState:             renderCacheState{statusBarAgentSnapshotDirty: true},
+		visibilityState: visibilityState{
+			displayState:     stateForeground,
+			lastForegroundAt: time.Now(),
+		},
+		infoPanelCollapsedSections: make(map[infoPanelSectionID]bool),
+		runtimeCacheMgr:            newRuntimeCacheManager(),
+		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
 	if a != nil {

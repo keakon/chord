@@ -109,9 +109,7 @@ func (m *Model) handleBlurMsg() tea.Cmd {
 	m.deferredResumeTailOnFocus = m.startupDeferredTranscriptPinnedToTail()
 	m.lastForegroundAt = time.Time{}
 	m.exitRenderFreeze()
-	m.streamRenderForceView = false
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateClear)
 	titleCmd := m.syncTerminalTitleState()
 	idleCmd := m.updateBackgroundIdleSweepState()
 	if titleCmd != nil || idleCmd != nil {
@@ -173,9 +171,7 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 		m.terminalTitleRequestSeen = true
 	}
 	m.exitRenderFreeze()
-	m.streamRenderForceView = true
-	m.streamRenderDeferred = false
-	m.streamRenderDeferNext = false
+	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	m.terminalTitleBackgroundCompletedAgentID = ""
 	if m.deferredResumeTailOnFocus {
 		m.maybeSwitchStartupDeferredTranscriptWindow(startupTranscriptWindowTail, "focus_restore_tail")

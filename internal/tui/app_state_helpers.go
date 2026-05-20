@@ -40,6 +40,74 @@ type renderRuntimeState struct {
 	startupDeferredPreheatGeneration uint64
 }
 
+type selectionState struct {
+	focusedBlockID int // ID of the block selected by mouse/keyboard
+	zone           *ZoneManager
+
+	// In-app mouse text selection (drag to select, release to copy)
+	mouseDown              bool
+	selStartBlockID        int
+	selStartLine           int
+	selStartCol            int
+	selEndBlockID          int
+	selEndLine             int
+	selEndCol              int
+	selEndInclusiveForCopy bool
+	inputMouseDown         bool
+
+	// Status bar copy targets (working directory / session ID).
+	statusPathLastClickTime time.Time
+	statusPathLastClickX    int
+	statusPathLastClickY    int
+	statusPathClickCount    int
+	statusSession           statusBarCopyRegionState
+
+	// Double/triple click for word/line selection
+	lastClickTime time.Time
+	lastClickY    int
+	lastClickX    int
+	clickCount    int
+}
+
+type completionState struct {
+	// File reference completion ("@path" in composer)
+	atMentionOpen       bool
+	atMentionLine       int
+	atMentionTriggerCol int
+	atMentionQuery      string
+	atMentionLoaded     bool
+	atMentionLoading    bool
+	atMentionFiles      []string
+	atMentionList       *OverlayList
+
+	// Slash command completion (when input starts with "/")
+	slashCompleteSelected int            // index into current completion list
+	customCommands        []slashCommand // extra commands injected from config
+}
+
+type visibilityState struct {
+	// displayState tracks whether the terminal is considered focused (foreground)
+	// or blurred (background). This is best-effort only: driven by BlurMsg/FocusMsg.
+	displayState displayState
+	// lastForegroundAt records when we last received a FocusMsg.
+	lastForegroundAt time.Time
+	// lastBackgroundAt records when we last received a BlurMsg.
+	lastBackgroundAt time.Time
+	// lastSweepAt records when the last idle sweep ran.
+	lastSweepAt time.Time
+	// idleSweepScheduled is set when an idle sweep tick generation is live.
+	idleSweepScheduled bool
+	// idleSweepGeneration guards against stale idle sweep tick messages.
+	idleSweepGeneration uint64
+	// backgroundIdleSince tracks when the currently focused view last became idle
+	// while the terminal was in background mode. Zero means no active idle window.
+	backgroundIdleSince time.Time
+	// deferredResumeTailOnFocus records whether the focused deferred transcript was
+	// logically pinned to the tail when the terminal blurred, so focus recovery can
+	// restore the true tail window instead of leaving the user at a stale page bottom.
+	deferredResumeTailOnFocus bool
+}
+
 // slashRenderCache memoizes the rendered slash-completion popup so identical
 // composer state reuses the previous output. All zero values mean "miss".
 type slashRenderCache struct {

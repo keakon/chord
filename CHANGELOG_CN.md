@@ -8,6 +8,9 @@
 - Runtime / 上下文：新增 `context.reduction` 下的确定性请求级上下文裁剪控制，包括陈旧工具结果剪裁阈值和专用 reduction 模型池预留配置；loop 模式仍保持不做请求级裁剪。
 - Auth / Runtime：将 OAuth 账号状态的权威来源迁移到 `auth.state.yaml`，新增 `invalidated` 状态与 `key_invalidated` 流式增量，并确保旧版 `status` 不再写入 `auth.yaml`。
 - Runtime / Fast mode：`/fast` 现在只在模型启用 `supports_fast` 能力时发送 provider 原生加速参数（OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`）；`preset: codex` 默认启用，其它模型需要显式开启。
+- CLI / Done 自动化：统一了自动 Done 拦截在启动、运行时和 TUI 中的行为。启动/TUI 创建/关闭路径现在更易测试，浏览器启动式 auth 规划也可以在不实际拉起浏览器命令的情况下验证，loop 模式的 Done 退出拦截文档也已保持一致。
+- TUI / Done 内部机制：集中收口了 Done 相关 UI effect 与流式渲染失效处理，拆分了更聚焦的回归测试，并保持 rejected 与 auto-rejected Done completion 的界面呈现一致。
+- Config / Auth 持久化：将 auth 持久化锁统一到共享的配置变更锁实现，并补充了写锁行为与 named pipe 测试可移植性的分平台回归覆盖。
 - **不兼容 / 配置：** 将 `context.compact_threshold` 重命名为 `context.compaction.threshold`；旧字段不再提供兼容别名。
 - **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compaction.threshold > 0` 时启用自动上下文压缩；设置 `context.compaction.threshold: 0` 可关闭。
 - **不兼容 / 配置：** 移除 `context.compact_model`。上下文压缩现在只接受 `context.compaction.model_pool` 来指定专用压缩模型池；未设置时，压缩会克隆当前 agent 的模型池，而不是回退到单个已选模型。
