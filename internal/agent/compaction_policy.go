@@ -215,6 +215,20 @@ func (a *MainAgent) resetContextReductionStats() {
 	a.setContextReductionStats(ContextReductionStats{})
 }
 
+func (a *MainAgent) clearLoopFrozenReductionPrefix() {
+	if a == nil {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	a.loopState.FrozenReductionPrefix = nil
+	a.loopState.FrozenReductionStats = ContextReductionStats{}
+	a.lastPreparedLLMTurnID = 0
+	a.lastPreparedLLMRequestPrefix = nil
+	a.lastPreparedReductionStats = ContextReductionStats{}
+	a.contextReductionStats = ContextReductionStats{}
+}
+
 func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
 	if a == nil {
 		return ContextReductionStats{}

@@ -159,6 +159,8 @@ Export the current session as Markdown (default) or JSON.
 
 The export includes every conversation message plus the current session usage statistics. On success, the TUI displays the saved path.
 
+The TUI info panel's `Reduced` line is request-level context reduction, not persistent compaction. After `/compact` or automatic compaction rewrites the session history, Chord refreshes that value, including while loop mode is active.
+
 ### `/stats` — usage statistics overlay
 
 Opens an overlay to browse usage data along two axes:

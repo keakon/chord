@@ -680,6 +680,53 @@ func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
 	}
 }
 
+func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
+	a.EnableLoopMode("finish")
+	a.loopReductionMu.Lock()
+	a.loopState.FrozenReductionPrefix = []message.Message{{Role: "tool", Content: "old reduced prefix"}}
+	a.loopState.FrozenReductionStats = ContextReductionStats{Messages: 3, Bytes: 4096}
+	a.lastPreparedLLMTurnID = 99
+	a.lastPreparedLLMRequestPrefix = []message.Message{{Role: "tool", Content: "old prepared prefix"}}
+	a.lastPreparedReductionStats = ContextReductionStats{Messages: 3, Bytes: 4096}
+	a.contextReductionStats = ContextReductionStats{Messages: 3, Bytes: 4096}
+	a.loopReductionMu.Unlock()
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.compactionState.headSplit = 2
+
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+		HeadSplit:      2,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		RelHistoryPath: "history-1.md",
+		SummaryMode:    "truncate_only",
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+		Manual:         true,
+	}
+
+	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: draft})
+
+	if got := a.GetContextReductionStats(); got != (ContextReductionStats{}) {
+		t.Fatalf("context reduction stats after compaction = %+v, want zero", got)
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if len(a.loopState.FrozenReductionPrefix) != 0 {
+		t.Fatalf("FrozenReductionPrefix after compaction = %#v, want nil/empty", a.loopState.FrozenReductionPrefix)
+	}
+	if a.loopState.FrozenReductionStats != (ContextReductionStats{}) {
+		t.Fatalf("FrozenReductionStats after compaction = %+v, want zero", a.loopState.FrozenReductionStats)
+	}
+	if len(a.lastPreparedLLMRequestPrefix) != 0 || a.lastPreparedReductionStats != (ContextReductionStats{}) || a.lastPreparedLLMTurnID != 0 {
+		t.Fatalf("last prepared reduction snapshot not cleared: turn=%d prefix=%#v stats=%+v", a.lastPreparedLLMTurnID, a.lastPreparedLLMRequestPrefix, a.lastPreparedReductionStats)
+	}
+}
+
 func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
