@@ -106,6 +106,71 @@ func ToolResultLabel(toolName string) string {
 	return "TOOL RESULT (" + toolName + "):"
 }
 
+// ToolCallMarkdown formats a tool call as Markdown with optional arguments,
+// result, and diff sections.
+func ToolCallMarkdown(toolName, args, result, diff string) string {
+	name := strings.TrimSpace(toolName)
+	if name == "" {
+		name = "unknown"
+	}
+	parts := []string{"# Tool call: " + name}
+	if args = strings.TrimSpace(args); args != "" && args != "{}" {
+		parts = append(parts, "## Arguments\n\n```json\n"+args+"\n```")
+	}
+	if result = strings.TrimSpace(result); result != "" {
+		parts = append(parts, "## Result\n\n"+result)
+	}
+	if diff = strings.TrimSpace(diff); diff != "" {
+		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// ToolResultMarkdown formats a standalone tool result as Markdown.
+func ToolResultMarkdown(toolName, result, diff string) string {
+	name := strings.TrimSpace(toolName)
+	if name == "" {
+		name = "unknown"
+	}
+	parts := []string{"# Tool result: " + name}
+	if result = strings.TrimSpace(result); result != "" {
+		parts = append(parts, "## Result\n\n"+result)
+	}
+	if diff = strings.TrimSpace(diff); diff != "" {
+		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// DoneToolCallMarkdown formats the Done tool copy/export representation. When
+// result is a rejection, the reason is shown in a separate paragraph without the
+// raw "Done rejected:" prefix.
+func DoneToolCallMarkdown(report, result string) string {
+	parts := []string{"# Tool call: Done"}
+	if report = strings.TrimSpace(report); report != "" {
+		parts = append(parts, "## Report\n\n"+report)
+	}
+	if reason := DoneRejectedReason(result); reason != "" {
+		parts = append(parts, "## Rejection reason\n\n"+reason)
+	} else if result = strings.TrimSpace(result); result != "" && !strings.EqualFold(result, "Done") && !strings.EqualFold(result, "Done approved") {
+		parts = append(parts, "## Result\n\n"+result)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// DoneRejectedReason extracts the user/model-facing reason from a Done rejection.
+func DoneRejectedReason(result string) string {
+	trimmed := strings.TrimSpace(result)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "done rejected automatically:") {
+		return strings.TrimSpace(trimmed[len("Done rejected automatically:"):])
+	}
+	if strings.HasPrefix(lower, "done rejected:") {
+		return strings.TrimSpace(trimmed[len("Done rejected:"):])
+	}
+	return ""
+}
+
 // BlockString returns a single block string "label\n\ncontent" for export/copy.
 func BlockString(label, content string) string {
 	return label + "\n\n" + content

@@ -260,6 +260,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 ## 复制文本
 
 - 可在转录区内用鼠标拖选 TUI 里的文本
+- `yy` 复制当前聚焦的消息卡片；工具卡片会按 Markdown 复制，包含 `# Tool call`、`## Arguments`、`## Result`、`## Diff` 等段落。Done 的拒绝理由会单独放在 `## Rejection reason` 段落中。
 - `Cmd+C`：在会把这个按键转发给 Chord 的 macOS 终端中，复制当前转录区选中的文本；若焦点在权限确认弹窗的输入框，则复制该输入框内容
 - `Ctrl+C`：仍用于取消/退出，不用于复制转录区文本
 

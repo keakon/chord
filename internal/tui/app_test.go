@@ -6644,6 +6644,49 @@ func TestNormalModeEscDisablesLoopBeforeCancellingBusyTurn(t *testing.T) {
 	}
 }
 
+func TestToolCallCopyContentFormatsDoneAsMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "Done",
+		DoneReport:    "## 完成状态\n已完成\n\n- 验证通过",
+		ResultContent: "Done rejected: 覆盖率不足\n需要达到 80%",
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: Done",
+		"## Report\n\n## 完成状态\n已完成",
+		"## Rejection reason\n\n覆盖率不足\n需要达到 80%",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Done rejected:") {
+		t.Fatalf("Done copy content should omit raw rejection prefix, got %q", got)
+	}
+}
+
+func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "Shell",
+		Content:       `{"command":"echo hi"}`,
+		ResultContent: "hi",
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: Shell",
+		"## Arguments\n\n```json\n{\"command\":\"echo hi\"}\n```",
+		"## Result\n\nhi",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestCopyFocusedBlockHydratesSpilledContent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 6)
 	m.mode = ModeNormal

@@ -629,11 +629,11 @@ func TestExportToMarkdownToolCall(t *testing.T) {
 
 	md := ExportToMarkdown(session)
 
-	if !strings.Contains(md, "TOOL CALL (Read):") {
-		t.Error("missing tool call summary")
+	if !strings.Contains(md, "# Tool call: Read") {
+		t.Error("missing tool call heading")
 	}
-	if !strings.Contains(md, `"path":"/tmp/test.go"`) {
-		t.Error("missing tool call args")
+	if !strings.Contains(md, "## Arguments\n\n```json\n{\"path\":\"/tmp/test.go\"}\n```") {
+		t.Error("missing markdown tool call args")
 	}
 }
 
@@ -645,11 +645,11 @@ func TestExportToMarkdownToolResult(t *testing.T) {
 
 	md := ExportToMarkdown(session)
 
-	if !strings.Contains(md, "TOOL RESULT (Read):") {
+	if !strings.Contains(md, "# Tool result: Read") {
 		t.Error("missing tool result heading with tool name")
 	}
-	if !strings.Contains(md, "package main") {
-		t.Error("missing tool result content")
+	if !strings.Contains(md, "## Result\n\npackage main") {
+		t.Error("missing markdown tool result content")
 	}
 }
 
@@ -810,8 +810,8 @@ func TestExportToMarkdownToolResultUnknownTool(t *testing.T) {
 
 	md := ExportToMarkdown(session)
 
-	if !strings.Contains(md, "TOOL RESULT (unknown):") {
-		t.Error("orphan tool result should show (unknown)")
+	if !strings.Contains(md, "# Tool result: unknown") {
+		t.Error("orphan tool result should show unknown")
 	}
 }
 
@@ -840,11 +840,11 @@ func TestExportToMarkdownShortToolResult(t *testing.T) {
 
 	md := ExportToMarkdown(session)
 
-	if !strings.Contains(md, "TOOL RESULT (Shell):") {
+	if !strings.Contains(md, "# Tool result: Shell") {
 		t.Error("missing tool result heading")
 	}
-	if !strings.Contains(md, "hi") {
-		t.Error("missing tool result content")
+	if !strings.Contains(md, "## Result\n\nhi") {
+		t.Error("missing markdown tool result content")
 	}
 }
 

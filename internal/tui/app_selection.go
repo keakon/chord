@@ -440,11 +440,7 @@ func (m *Model) copyFocusedBlock() tea.Cmd {
 		if !isCopyableBlockType(b.Type) {
 			return m.enqueueToast("This card type cannot be copied", "info")
 		}
-		if b.IsUserLocalShell() {
-			body := userLocalShellCopyBody(b)
-			return writeClipboardCmd(convformat.BlockString(convformat.LabelUser, body), "Message card copied to clipboard")
-		}
-		return writeClipboardCmd(blockPlainContent(b), "Message card copied to clipboard")
+		return writeClipboardCmd(blockCopyContent(b), "Message card copied to clipboard")
 	}
 	return nil
 }
@@ -474,7 +470,7 @@ func (m *Model) copyFocusedBlocks(count int) tea.Cmd {
 		if b == nil || !isCopyableBlockType(b.Type) {
 			continue
 		}
-		c := blockPlainContent(b)
+		c := blockCopyContent(b)
 		if c == "" {
 			continue
 		}
@@ -575,6 +571,34 @@ func blockPlainContent(b *Block) string {
 	}
 }
 
+func blockCopyContent(b *Block) string {
+	if b == nil {
+		return ""
+	}
+	if b.IsUserLocalShell() {
+		return convformat.BlockString(convformat.LabelUser, userLocalShellCopyBody(b))
+	}
+	if b.Type == BlockToolCall {
+		return toolCallMarkdownContent(b)
+	}
+	return blockPlainContent(b)
+}
+
+func toolCallMarkdownContent(b *Block) string {
+	if b == nil {
+		return ""
+	}
+	toolName := strings.TrimSpace(b.ToolName)
+	if toolName == "" {
+		toolName = "unknown"
+	}
+	if strings.EqualFold(toolName, "Done") {
+		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
+	}
+
+	return convformat.ToolCallMarkdown(b.ToolName, b.Content, toolExpandedResultContent(b.ToolName, b.ResultContent), b.Diff)
+}
+
 func (m *Model) handleSuperCopy() tea.Cmd {
 	// In confirm sub-modes, the focused textarea isn't m.input, so copy from it.
 	if m.mode == ModeConfirm {
@@ -601,7 +625,7 @@ func (m *Model) handleSuperCopy() tea.Cmd {
 				if !isCopyableBlockType(b.Type) {
 					return m.enqueueToast("This card type cannot be copied", "info")
 				}
-				return writeClipboardCmd(blockPlainContent(b), "Message card copied to clipboard")
+				return writeClipboardCmd(blockCopyContent(b), "Message card copied to clipboard")
 			}
 		}
 	}

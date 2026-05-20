@@ -158,9 +158,9 @@ func ExportToFile(session *ExportedSession, path string) error {
 // Plain-text export (unified with TUI card copy via convformat)
 // ---------------------------------------------------------------------------
 
-// ExportToMarkdown converts an ExportedSession to plain text with the same
-// label style as TUI card copy (User:, Assistant:, Thinking:, TOOL CALL (name):,
-// TOOL RESULT (name):). No emoji or Markdown — one format for both people and models.
+// ExportToMarkdown converts an ExportedSession to Markdown for both people and models.
+// Conversation blocks are separated with convformat.BlockSep; tool calls and
+// tool results use Markdown headings and sections instead of raw label-only text.
 func ExportToMarkdown(session *ExportedSession) string {
 	if session == nil {
 		return ""
@@ -230,12 +230,8 @@ func ExportToMarkdown(session *ExportedSession) string {
 				sb.WriteString("\n\n")
 			}
 			for _, tc := range em.ToolCalls {
-				sb.WriteString(convformat.ToolCallLabel(tc.Name))
+				sb.WriteString(convformat.ToolCallMarkdown(tc.Name, tc.Args, "", ""))
 				sb.WriteString("\n\n")
-				if tc.Args != "" && tc.Args != "{}" {
-					sb.WriteString(tc.Args)
-					sb.WriteString("\n\n")
-				}
 			}
 			needSep = true
 
@@ -247,19 +243,7 @@ func ExportToMarkdown(session *ExportedSession) string {
 			if toolName == "" {
 				toolName = "unknown"
 			}
-			sb.WriteString(convformat.ToolResultLabel(toolName))
-			sb.WriteString("\n\n")
-			sb.WriteString(em.Content)
-			if em.Content != "" && !strings.HasSuffix(em.Content, "\n") {
-				sb.WriteString("\n")
-			}
-			if em.ToolDiff != "" {
-				sb.WriteString("\nDiff:\n")
-				sb.WriteString(em.ToolDiff)
-				if !strings.HasSuffix(em.ToolDiff, "\n") {
-					sb.WriteString("\n")
-				}
-			}
+			sb.WriteString(convformat.ToolResultMarkdown(toolName, em.Content, em.ToolDiff))
 			sb.WriteString("\n")
 			needSep = true
 		}
