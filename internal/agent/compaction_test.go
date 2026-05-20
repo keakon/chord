@@ -1842,6 +1842,24 @@ func TestCollectEvidenceItemsPreservesLatestDoneRejectedReason(t *testing.T) {
 	}
 }
 
+func TestCollectEvidenceItemsLatestDoneRejectionOutranksOlderCorrection(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "no, please do not touch the public API"},
+		{Role: "assistant", Content: "ok, sticking to CLI"},
+		{Role: "tool", Content: "Done rejected: 改成只压缩相邻消息，先把锁拆开"},
+	}
+	items := selectEvidenceItems(msgs, 4096)
+	if len(items) == 0 {
+		t.Fatal("expected ranked evidence items")
+	}
+	if items[0].Kind != evidenceDoneRejected {
+		t.Fatalf("first item = %q, want %q (latest Done rejection should outrank older correction)", items[0].Kind, evidenceDoneRejected)
+	}
+	if !strings.Contains(items[0].Excerpt, "改成只压缩相邻消息") {
+		t.Fatalf("latest done rejection text not preserved: %+v", items[0])
+	}
+}
+
 func TestCollectEvidenceItemsPreservesLatestOrdinaryUserRequest(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "继续调查 rate limit"},

@@ -2,8 +2,12 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
@@ -35,6 +39,7 @@ func (a *MainAgent) initOverlay() {
 	a.overlay.SetBase(base)
 	a.overlay.SetProjectPath(projectPath)
 	a.overlay.SetUserGlobalPath(userGlobalPath)
+	warnLegacyPermissionOverlayOnce(projectRoot, roleName, projectPath, userGlobalPath)
 
 	a.stateMu.Lock()
 	a.ruleset = a.overlay.MergedRuleset()
@@ -96,4 +101,42 @@ func agentPermissionRulePaths(projectRoot, roleName string) (projectPath, userGl
 		userGlobalPath = filepath.Join(configHome, "agents", roleName+".yaml")
 	}
 	return projectPath, userGlobalPath
+}
+
+// legacyPermissionOverlayWarned guards the one-shot warning emitted when stale
+// per-role files under the removed permissions overlay directory are still
+// present. The map is keyed by the legacy path so each location warns at most
+// once per process.
+var legacyPermissionOverlayWarned sync.Map
+
+// warnLegacyPermissionOverlayOnce inspects the locations that previously held
+// per-role overlay rules and emits a single warning per location so users
+// upgrading from before the permissions/ → agents/ move discover stale files
+// instead of being silently ignored.
+func warnLegacyPermissionOverlayOnce(projectRoot, roleName, projectAgentPath, userGlobalAgentPath string) {
+	roleName = strings.TrimSpace(roleName)
+	if roleName == "" {
+		return
+	}
+	if projectRoot = strings.TrimSpace(projectRoot); projectRoot != "" {
+		legacy := filepath.Join(projectRoot, ".chord", "permissions", roleName+".yaml")
+		warnLegacyPermissionPathIfPresent(legacy, projectAgentPath, "project")
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		legacy := filepath.Join(home, ".chord", "permissions", roleName+".yaml")
+		warnLegacyPermissionPathIfPresent(legacy, userGlobalAgentPath, "user-global")
+	}
+}
+
+func warnLegacyPermissionPathIfPresent(legacyPath, currentPath, scope string) {
+	if strings.TrimSpace(legacyPath) == "" {
+		return
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		return
+	}
+	if _, loaded := legacyPermissionOverlayWarned.LoadOrStore(legacyPath, struct{}{}); loaded {
+		return
+	}
+	log.Warnf("ignoring legacy %s permission overlay file %q; rules now live in %q — merge any remembered rules manually", scope, legacyPath, currentPath)
 }

@@ -120,22 +120,12 @@ func (m *Manager) pythonQuickBackendAvailable(pyCfg config.PythonDiagnosticsConf
 	if cmd == "" {
 		cmd = "ruff"
 	}
-	if m == nil {
-		_, err := lookPath(cmd)
-		return err == nil
-	}
-	m.quickBackendMu.Lock()
-	defer m.quickBackendMu.Unlock()
-	if m.quickBackendCache == nil {
-		m.quickBackendCache = make(map[string]bool)
-	}
-	if available, ok := m.quickBackendCache[cmd]; ok {
-		return available
-	}
+	// Resolve on every call so a binary that is installed (or uninstalled)
+	// mid-session is picked up without restarting Chord. exec.LookPath only
+	// stat's PATH entries, so it is cheap relative to the Edit/Write tool
+	// invocation that triggers this check.
 	_, err := lookPath(cmd)
-	available := err == nil
-	m.quickBackendCache[cmd] = available
-	return available
+	return err == nil
 }
 
 func runRuffDiagnostics(ctx context.Context, path string, pyCfg config.PythonDiagnosticsConfig) ([]Diagnostic, error) {

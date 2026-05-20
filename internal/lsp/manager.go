@@ -84,9 +84,6 @@ type Manager struct {
 	// session. Successful Delete removes a file from this set.
 	touchedMu    sync.RWMutex
 	touchedPaths map[string]struct{}
-
-	quickBackendMu    sync.Mutex
-	quickBackendCache map[string]bool
 }
 
 // diagCounts tracks error/warning counts for a single URI.
@@ -102,17 +99,16 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		broadcast = func(string, interface{}) {}
 	}
 	return &Manager{
-		projectRoot:       projectRoot,
-		cfg:               cfg,
-		broadcast:         broadcast,
-		clients:           make(map[string]*Client),
-		starting:          make(map[string]bool),
-		waiters:           make(map[string][]chan []Diagnostic),
-		startFail:         make(map[string]string),
-		diagByServer:      make(map[string]map[string]diagCounts),
-		reviewByServer:    make(map[string]map[string]reviewCounts),
-		touchedPaths:      make(map[string]struct{}),
-		quickBackendCache: make(map[string]bool),
+		projectRoot:    projectRoot,
+		cfg:            cfg,
+		broadcast:      broadcast,
+		clients:        make(map[string]*Client),
+		starting:       make(map[string]bool),
+		waiters:        make(map[string][]chan []Diagnostic),
+		startFail:      make(map[string]string),
+		diagByServer:   make(map[string]map[string]diagCounts),
+		reviewByServer: make(map[string]map[string]reviewCounts),
+		touchedPaths:   make(map[string]struct{}),
 	}
 }
 

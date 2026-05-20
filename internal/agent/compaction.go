@@ -198,7 +198,11 @@ func evidencePriority(kind evidenceKind) int {
 	case evidenceUserCorrection:
 		return 100
 	case evidenceDoneRejected:
-		return 98
+		// Treat a Done rejection as equal-weight user feedback: when both a
+		// user correction and a Done rejection exist, the later one (by
+		// message Sequence) wins as the latest request anchor, instead of
+		// always preferring an older correction.
+		return 100
 	case evidenceToolError:
 		return 95
 	case evidenceToolDiff:

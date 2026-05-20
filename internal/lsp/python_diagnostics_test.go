@@ -153,7 +153,7 @@ func TestIsPythonPathIncludesStubs(t *testing.T) {
 	}
 }
 
-func TestPythonQuickBackendAvailableCachesLookPath(t *testing.T) {
+func TestPythonQuickBackendAvailableResolvesEveryCall(t *testing.T) {
 	origLookPath := lookPath
 	t.Cleanup(func() { lookPath = origLookPath })
 	calls := 0
@@ -167,9 +167,32 @@ func TestPythonQuickBackendAvailableCachesLookPath(t *testing.T) {
 		t.Fatal("expected quick backend available on first check")
 	}
 	if !mgr.pythonQuickBackendAvailable(cfg) {
-		t.Fatal("expected quick backend available on cached check")
+		t.Fatal("expected quick backend available on second check")
 	}
-	if calls != 1 {
-		t.Fatalf("lookPath calls = %d, want 1", calls)
+	// No cache: each call must re-resolve so a binary installed (or removed)
+	// mid-session is reflected without restarting Chord.
+	if calls != 2 {
+		t.Fatalf("lookPath calls = %d, want 2 (no permanent cache)", calls)
+	}
+}
+
+func TestPythonQuickBackendAvailablePicksUpLateInstall(t *testing.T) {
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	available := false
+	lookPath = func(string) (string, error) {
+		if available {
+			return "/bin/ruff", nil
+		}
+		return "", exec.ErrNotFound
+	}
+	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	cfg := config.DefaultDiagnosticsConfig().Python
+	if mgr.pythonQuickBackendAvailable(cfg) {
+		t.Fatal("expected quick backend unavailable before install")
+	}
+	available = true
+	if !mgr.pythonQuickBackendAvailable(cfg) {
+		t.Fatal("expected quick backend available after install without cache invalidation")
 	}
 }
