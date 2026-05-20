@@ -158,12 +158,26 @@ func formatDiagnosticsBlock(file string, diags []Diagnostic, max int, thisFile b
 		file, strings.Join(lines, "\n"), suffix)
 }
 
+func formatHiddenDiagnosticsBlock(file string, hidden int, thisFile bool) string {
+	if hidden <= 0 {
+		return ""
+	}
+	line := fmt.Sprintf("Diagnostics hidden by output filters: %d info/hint diagnostics omitted.", hidden)
+	if thisFile {
+		return "\n\n" + line
+	}
+	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, line)
+}
+
 func formatDiagnosticsBlockWithRanges(file string, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange, thisFile bool) string {
 	if len(diags) == 0 {
 		return ""
 	}
 	if len(ranges) == 0 {
 		filtered := filterDiagnosticsByOutput(diags, output)
+		if len(filtered) == 0 {
+			return formatHiddenDiagnosticsBlock(file, len(diags), thisFile)
+		}
 		max := output.MaxTotalDiagnostics
 		if max <= 0 {
 			max = ToolOutputMaxErrorsPerFile
@@ -193,6 +207,9 @@ func formatDiagnosticsBlockWithRanges(file string, diags []Diagnostic, output co
 	}
 
 	filtered := filterDiagnosticsByOutput(diags, output)
+	if len(filtered) == 0 {
+		return formatHiddenDiagnosticsBlock(file, len(diags), thisFile)
+	}
 	near, outside := splitDiagnosticsByRange(filtered, ranges, before, after)
 	sort.SliceStable(near, func(i, j int) bool { return diagnosticNearLess(near[i], near[j], ranges) })
 	sort.SliceStable(outside, func(i, j int) bool { return diagnosticNearLess(outside[i], outside[j], ranges) })

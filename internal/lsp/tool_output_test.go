@@ -117,6 +117,61 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesApplyOutputFilter(t *testing
 	}
 }
 
+func TestFormatDiagnosticsBlockWithRangesReportsWhenOnlyInfoHintsRemain(t *testing.T) {
+	diags := []Diagnostic{
+		{Severity: 3, Line: 10, Message: "info"},
+		{Severity: 4, Line: 11, Message: "hint"},
+	}
+	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{
+		MaxNearDiagnostics:   10,
+		MaxTotalDiagnostics:  10,
+		NearRangeAfterLines:  1,
+		NearRangeBeforeLines: 1,
+	}, []EditRange{{StartLine: 10, EndLine: 10}}, true)
+	if !strings.Contains(out, "Diagnostics hidden by output filters: 2 info/hint diagnostics omitted.") {
+		t.Fatalf("expected hidden diagnostics explanation, got %q", out)
+	}
+	if strings.Contains(out, "[I]") || strings.Contains(out, "[H]") {
+		t.Fatalf("expected info/hint details hidden, got %q", out)
+	}
+}
+
+func TestFormatDiagnosticsBlockWithoutRangesReportsWhenOnlyInfoHintsRemain(t *testing.T) {
+	diags := []Diagnostic{
+		{Severity: 3, Line: 1, Message: "info"},
+		{Severity: 4, Line: 2, Message: "hint"},
+	}
+	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil, true)
+	if !strings.Contains(out, "Diagnostics hidden by output filters: 2 info/hint diagnostics omitted.") {
+		t.Fatalf("expected hidden diagnostics explanation, got %q", out)
+	}
+	if strings.Contains(out, "[I]") || strings.Contains(out, "[H]") {
+		t.Fatalf("expected info/hint details hidden, got %q", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutput_ShowsHiddenFilterExplanation(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	mgr.clientsMu.Lock()
+	mgr.clients["test"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {
+			{Severity: protocol.SeverityInformation, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "info"},
+			{Severity: protocol.SeverityHint, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "hint"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, false, []EditRange{{StartLine: 0, EndLine: 0}}, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	if !strings.Contains(out, "Used LSP diagnostics.") {
+		t.Fatalf("expected LSP diagnostics header, got %q", out)
+	}
+	if !strings.Contains(out, "Diagnostics hidden by output filters: 2 info/hint diagnostics omitted.") {
+		t.Fatalf("expected hidden diagnostics explanation, got %q", out)
+	}
+}
+
 func TestEditRangesForReplacement(t *testing.T) {
 	ranges := EditRangesForReplacement("a\nb\nc\nb\n", "b", "bb\ncc", true)
 	if len(ranges) != 2 {
