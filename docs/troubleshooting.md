@@ -209,7 +209,7 @@ What to check:
 3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
 
-Note: loop mode fully disables automatic compaction so long-running tasks can retain their full state.
+Note: loop mode does not disable automatic compaction. It only disables request-level context reduction for newly added messages.
 
 ## Reduction trimming important content
 

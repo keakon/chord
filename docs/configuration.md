@@ -748,7 +748,7 @@ purposes.
 | When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
-| Loop mode | Disabled | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability |
+| Loop mode | Enabled; automatic and manual compaction can still run so long sessions can continue after the context budget is spent | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability |
 
 **How they work together**: Reduction is the lightweight first line of defense —
 it trims stale tool output before every request, slowing down context growth.

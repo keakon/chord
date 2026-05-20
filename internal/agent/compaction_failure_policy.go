@@ -113,9 +113,6 @@ func (a *MainAgent) recordUsageDrivenCompactionFailureClassified(err error, clas
 
 func (a *MainAgent) compactionTriggerForMainLLM() compactionTrigger {
 	trigger := compactionTrigger{}
-	if a.loopState.Enabled {
-		return trigger
-	}
 	if a.autoCompactRequested.Load() && !a.isUsageDrivenAutoCompactSuppressed() {
 		trigger.UsageDriven = true
 	}

@@ -1496,21 +1496,21 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 	}
 }
 
-func TestUsageDrivenCompactionDisabledInLoop(t *testing.T) {
+func TestUsageDrivenCompactionEnabledInLoop(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
 	a.loopState.Enabled = true
 	a.autoCompactRequested.Store(true)
 
-	if a.shouldDurableCompactBeforeMainLLM() {
-		t.Fatal("loop mode should disable usage-driven durable compaction")
+	if !a.shouldDurableCompactBeforeMainLLM() {
+		t.Fatal("loop mode should allow usage-driven durable compaction")
 	}
 	if a.trySkipUsageDrivenCompactionAfterShrink([]message.Message{{Role: "user", Content: strings.Repeat("old output ", 1000)}}) {
 		t.Fatal("loop mode should not use request pruning to clear durable compaction")
 	}
 	if !a.autoCompactRequested.Load() {
-		t.Fatal("loop mode should leave pending auto compaction request armed for later decision")
+		t.Fatal("expected auto compact request to remain armed")
 	}
 }
 

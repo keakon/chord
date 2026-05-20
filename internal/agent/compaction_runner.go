@@ -19,13 +19,6 @@ import (
 )
 
 func (a *MainAgent) scheduleCompaction(manual bool) bool {
-	if a.loopState.Enabled {
-		log.Debugf("context compaction skipped while loop mode is enabled manual=%v", manual)
-		if manual {
-			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/compact: context compaction is disabled while loop mode is enabled")})
-		}
-		return false
-	}
 	if a.IsCompactionRunning() {
 		log.Debugf("context compaction already in progress; skipping duplicate schedule manual=%v", manual)
 		if manual {
@@ -102,9 +95,6 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 }
 
 func (a *MainAgent) maybeRunAutoCompaction() {
-	if a.loopState.Enabled {
-		return
-	}
 	if !a.autoCompactRequested.Load() {
 		return
 	}
