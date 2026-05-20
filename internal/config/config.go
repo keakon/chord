@@ -39,6 +39,7 @@ type Config struct {
 	Paths               PathsConfig                `json:"paths,omitempty" yaml:"paths,omitempty"`                               // user-level state/cache/logs path overrides
 	Maintenance         MaintenanceConfig          `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`                   // optional cleanup/status checks
 	LSP                 LSPConfig                  `json:"lsp" yaml:"lsp"`                                                       // LSP server config
+	Diagnostics         DiagnosticsConfig          `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`                   // post-tool diagnostics config
 	MCP                 MCPConfig                  `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
 	Hooks               HookConfig                 `json:"hooks,omitempty" yaml:"hooks,omitempty"`                               // lifecycle hook configs
 	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
@@ -653,6 +654,7 @@ func DefaultConfig() *Config {
 				Profile:   CompactionProfileAuto,
 			},
 		},
+		Diagnostics: DefaultDiagnosticsConfig(),
 		Maintenance: MaintenanceConfig{SizeCheckOnStartup: false, SizeCheckIntervalHours: 24, WarnStateBytes: 10 * 1024 * 1024 * 1024, WarnCacheBytes: 5 * 1024 * 1024 * 1024},
 	}
 }
@@ -726,6 +728,9 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if err := ValidateDiagnosticsConfig(cfg); err != nil {
+		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}
 	return cfg, nil
 }

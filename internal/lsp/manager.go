@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +29,7 @@ type Diagnostic struct {
 	Severity int    `json:"severity"`
 	Line     int    `json:"line"`
 	Col      int    `json:"col"`
+	Code     string `json:"code,omitempty"`
 	Message  string `json:"message"`
 	Source   string `json:"source,omitempty"`
 }
@@ -82,6 +84,9 @@ type Manager struct {
 	// session. Successful Delete removes a file from this set.
 	touchedMu    sync.RWMutex
 	touchedPaths map[string]struct{}
+
+	quickBackendMu    sync.Mutex
+	quickBackendCache map[string]bool
 }
 
 // diagCounts tracks error/warning counts for a single URI.
@@ -97,16 +102,17 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		broadcast = func(string, interface{}) {}
 	}
 	return &Manager{
-		projectRoot:    projectRoot,
-		cfg:            cfg,
-		broadcast:      broadcast,
-		clients:        make(map[string]*Client),
-		starting:       make(map[string]bool),
-		waiters:        make(map[string][]chan []Diagnostic),
-		startFail:      make(map[string]string),
-		diagByServer:   make(map[string]map[string]diagCounts),
-		reviewByServer: make(map[string]map[string]reviewCounts),
-		touchedPaths:   make(map[string]struct{}),
+		projectRoot:       projectRoot,
+		cfg:               cfg,
+		broadcast:         broadcast,
+		clients:           make(map[string]*Client),
+		starting:          make(map[string]bool),
+		waiters:           make(map[string][]chan []Diagnostic),
+		startFail:         make(map[string]string),
+		diagByServer:      make(map[string]map[string]diagCounts),
+		reviewByServer:    make(map[string]map[string]reviewCounts),
+		touchedPaths:      make(map[string]struct{}),
+		quickBackendCache: make(map[string]bool),
 	}
 }
 
@@ -173,11 +179,32 @@ func convertDiagnostics(diags []pnprotocol.Diagnostic) []Diagnostic {
 			Severity: int(d.Severity),
 			Line:     line,
 			Col:      col,
+			Code:     diagnosticCodeString(d.Code),
 			Message:  d.Message,
 			Source:   d.Source,
 		})
 	}
 	return out
+}
+
+func diagnosticCodeString(code any) string {
+	switch v := code.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprint(v)
+	case int:
+		return fmt.Sprint(v)
+	case int64:
+		return fmt.Sprint(v)
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func uriToPath(uri string) string {

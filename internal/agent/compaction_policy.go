@@ -100,6 +100,16 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			noteReduction(original, prepared[i].Content)
 			continue
 		}
+		if age >= 1 {
+			meta := callMeta[prepared[i].ToolCallID]
+			if (strings.TrimSpace(meta.Name) == tools.NameEdit || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
+				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
+					prepared[i].Content = compacted
+					noteReduction(original, prepared[i].Content)
+					continue
+				}
+			}
+		}
 		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
 			meta := callMeta[prepared[i].ToolCallID]
 			if strings.TrimSpace(meta.Name) == "Shell" {
@@ -132,6 +142,53 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		a.setContextReductionStats(stats)
 	}
 	return prepared
+}
+
+func compactDiagnosticsToolOutput(content string) (string, bool) {
+	idx := strings.Index(content, "\n\nDiagnostics:\n")
+	sepLen := len("\n\nDiagnostics:\n")
+	if idx < 0 {
+		idx = strings.Index(content, "\nDiagnostics:\n")
+		sepLen = len("\nDiagnostics:\n")
+	}
+	if idx < 0 {
+		return content, false
+	}
+	prefix := strings.TrimRight(content[:idx], "\n")
+	diagnostics := strings.TrimSpace(content[idx+sepLen:])
+	if diagnostics == "" {
+		return content, false
+	}
+	lines := strings.Split(diagnostics, "\n")
+	summary := preferredDiagnosticsSummaryLine(lines)
+	if summary == "" {
+		summary = "diagnostics were present"
+	}
+	return prefix + "\n\nDiagnostics summary:\n[Older diagnostics details omitted; latest tool results should be trusted over this stale output.]\n" + summary, true
+}
+
+func preferredDiagnosticsSummaryLine(lines []string) string {
+	preferredPrefixes := []string{
+		"Diagnostics status:",
+		"Python diagnostics skipped:",
+		"Ruff quick diagnostics failed:",
+		"Full Python semantic diagnostics were skipped.",
+	}
+	for _, prefix := range preferredPrefixes {
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, prefix) {
+				return trimmed
+			}
+		}
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message.Message) {

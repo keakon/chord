@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 const diagnosticsWaitTimeout = 3 * time.Second
@@ -47,6 +49,13 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 	if !pathUnderDir(absPath, m.projectRoot) {
 		m.logLSPServiceNote(absPath, "File is outside project root; language servers were not notified.")
 		return base
+	}
+	if isPythonPath(absPath) && config.DiagnosticsEnabled(m.cfg) {
+		var ranges []EditRange
+		if strings.HasPrefix(base, "Replaced ") {
+			ranges = EditRangesForReplacement(content, "", "", false)
+		}
+		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges)
 	}
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.anyServerMatchesPath(absPath) {

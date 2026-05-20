@@ -221,6 +221,46 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
+	a := &MainAgent{}
+	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Edit", Args: json.RawMessage(`{"path":"a.py"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Diagnostics summary:") {
+		t.Fatalf("expected diagnostics summary, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "Undefined name") || strings.Contains(prepared[2].Content, "another diagnostic") {
+		t.Fatalf("expected old diagnostics details omitted, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersStatusLine(t *testing.T) {
+	a := &MainAgent{}
+	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed LSP diagnostics.\nDiagnostics status: Used Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Edit", Args: json.RawMessage(`{"path":"a.py"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Diagnostics status: Used Ruff quick diagnostics because this Python file exceeds the configured threshold.") {
+		t.Fatalf("expected prioritized status line kept, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "Used LSP diagnostics.\nDiagnostics summary:") {
+		t.Fatalf("expected generic header not selected as summary line, got %q", prepared[2].Content)
+	}
+}
+
 func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	a := &MainAgent{}
 	largeOutput := strings.Repeat("test output line\n", 500)
