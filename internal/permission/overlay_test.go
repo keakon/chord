@@ -120,6 +120,48 @@ func TestOverlay_SessionRulesAreRoleScoped(t *testing.T) {
 	}
 }
 
+func TestOverlay_DirectLookupsMatchMergedRuleset(t *testing.T) {
+	o := NewOverlay()
+	o.SetActiveRole("builder")
+	o.SetBase(Ruleset{
+		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "Read", Pattern: "*", Action: ActionAllow},
+	})
+	if err := o.AddPersistentRule("builder", Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}, ScopeUserGlobal, "user.yaml"); err != nil {
+		t.Fatalf("AddPersistentRule user-global failed: %v", err)
+	}
+	if err := o.AddPersistentRule("builder", Rule{Permission: "Shell", Pattern: "git push *", Action: ActionDeny}, ScopeProject, "project.yaml"); err != nil {
+		t.Fatalf("AddPersistentRule project failed: %v", err)
+	}
+	o.AddSessionRule("builder", Rule{Permission: "Shell", Pattern: "git push origin main", Action: ActionAllow})
+
+	queries := []struct {
+		permission string
+		pattern    string
+	}{
+		{"Shell", "git push origin main"},
+		{"Shell", "git push origin dev"},
+		{"Shell", "git status"},
+		{"Read", "README.md"},
+		{"Write", "README.md"},
+	}
+	merged := o.MergedRuleset()
+	for _, q := range queries {
+		if got, want := o.Evaluate(q.permission, q.pattern), merged.Evaluate(q.permission, q.pattern); got != want {
+			t.Fatalf("Evaluate(%q, %q) = %s, want merged %s", q.permission, q.pattern, got, want)
+		}
+		if got, want := o.LastMatch(q.permission, q.pattern), merged.LastMatch(q.permission, q.pattern); got != want {
+			t.Fatalf("LastMatch(%q, %q) = %+v, want merged %+v", q.permission, q.pattern, got, want)
+		}
+		if got, want := o.LastExactPatternMatch(q.permission, q.pattern), merged.LastExactPatternMatch(q.permission, q.pattern); got != want {
+			t.Fatalf("LastExactPatternMatch(%q, %q) = %+v, want merged %+v", q.permission, q.pattern, got, want)
+		}
+	}
+	if got, want := o.IsDisabled("Shell"), merged.IsDisabled("Shell"); got != want {
+		t.Fatalf("IsDisabled(Shell) = %v, want merged %v", got, want)
+	}
+}
+
 func TestOverlay_AddedRulesPreserveRemovalIndexOrder(t *testing.T) {
 	o := NewOverlay()
 	o.SetActiveRole("builder")

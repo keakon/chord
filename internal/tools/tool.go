@@ -329,11 +329,20 @@ func toolDescription(t Tool, visible map[string]struct{}) string {
 	return t.Description()
 }
 
+func visibleToolNamesIfNeeded(tools []Tool) map[string]struct{} {
+	for _, t := range tools {
+		if _, ok := t.(DescriptiveTool); ok {
+			return toolNamesSet(tools)
+		}
+	}
+	return nil
+}
+
 // ListDefinitions converts every registered tool into a message.ToolDefinition
 // suitable for sending to an LLM API.
 func (r *Registry) ListDefinitions() []message.ToolDefinition {
 	tools := r.ListTools()
-	visible := toolNamesSet(tools)
+	visible := visibleToolNamesIfNeeded(tools)
 	defs := make([]message.ToolDefinition, len(tools))
 	for i, t := range tools {
 		defs[i] = message.ToolDefinition{

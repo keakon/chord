@@ -136,24 +136,59 @@ func (o *Overlay) activeSessionLocked() Ruleset {
 	return o.sessionByRole[role]
 }
 
-// Evaluate resolves the action using merged rulesets with last-match-wins.
+// Evaluate resolves the action using overlay layers with last-match-wins semantics.
 func (o *Overlay) Evaluate(permission, pattern string) Action {
-	return o.MergedRuleset().Evaluate(permission, pattern)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, rs := range o.rulesetsHighToLowLocked() {
+		if result := rs.LastMatch(permission, pattern); result.Found {
+			return result.Rule.Action
+		}
+	}
+	return ActionDeny
 }
 
 // IsDisabled checks if a tool is completely unavailable.
 func (o *Overlay) IsDisabled(toolName string) bool {
-	return o.MergedRuleset().IsDisabled(toolName)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, rs := range o.rulesetsHighToLowLocked() {
+		for i := len(rs) - 1; i >= 0; i-- {
+			r := rs[i]
+			if globMatch(toolName, r.Permission) {
+				return r.Pattern == "*" && r.Action == ActionDeny
+			}
+		}
+	}
+	return false
 }
 
 // LastMatch finds the last matching rule.
 func (o *Overlay) LastMatch(permission, pattern string) MatchResult {
-	return o.MergedRuleset().LastMatch(permission, pattern)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, rs := range o.rulesetsHighToLowLocked() {
+		if result := rs.LastMatch(permission, pattern); result.Found {
+			return result
+		}
+	}
+	return MatchResult{}
 }
 
 // LastExactPatternMatch finds the last exact pattern match.
 func (o *Overlay) LastExactPatternMatch(permission, pattern string) MatchResult {
-	return o.MergedRuleset().LastExactPatternMatch(permission, pattern)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, rs := range o.rulesetsHighToLowLocked() {
+		if result := rs.LastExactPatternMatch(permission, pattern); result.Found {
+			return result
+		}
+	}
+	return MatchResult{}
+}
+
+func (o *Overlay) rulesetsHighToLowLocked() [4]Ruleset {
+	return [4]Ruleset{o.activeSessionLocked(), o.project, o.userGlobal, o.base}
 }
 
 // AddSessionRule adds a rule to the session overlay (memory only).

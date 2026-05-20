@@ -78,8 +78,17 @@ func toolNamesFromVisibleTools(visibleTools []toolpkg.Tool) map[string]struct{} 
 	return visible
 }
 
+func visibleToolNamesIfNeeded(visibleTools []toolpkg.Tool) map[string]struct{} {
+	for _, tool := range visibleTools {
+		if _, ok := tool.(toolpkg.DescriptiveTool); ok {
+			return toolNamesFromVisibleTools(visibleTools)
+		}
+	}
+	return nil
+}
+
 func llmToolDefinitionsFromVisibleTools(visibleTools []toolpkg.Tool) []message.ToolDefinition {
-	visibleNames := toolNamesFromVisibleTools(visibleTools)
+	visibleNames := visibleToolNamesIfNeeded(visibleTools)
 	defs := make([]message.ToolDefinition, len(visibleTools))
 	for i, tool := range visibleTools {
 		description := tool.Description()
