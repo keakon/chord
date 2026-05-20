@@ -2778,6 +2778,208 @@ func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T)
 	}
 }
 
+func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBounded(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
+	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for live-append focus-restore test")
+	}
+
+	m.handleNormalKey(modelSelectKey("G"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should be at bottom after G")
+	}
+
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "live tail reply"}})
+	applyTestCmd(t, &m, cmd)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after live append")
+	}
+	if state.windowEnd != len(state.allBlocks) {
+		t.Fatalf("tail window after live append should remain synced to allBlocks, got [%d,%d) total=%d", state.windowStart, state.windowEnd, len(state.allBlocks))
+	}
+	wantStart, wantEnd := state.windowStart, state.windowEnd
+
+	_ = m.handleBlurMsg()
+	cmd = m.handleFocusMsg()
+	applyTestCmd(t, &m, cmd)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after focus restore")
+	}
+	if state.windowStart != wantStart || state.windowEnd != wantEnd {
+		t.Fatalf("tail window after focus restore = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, wantEnd)
+	}
+
+	m.applyWheelScrollDelta(-2 * m.viewport.height)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after wheel-up from restored tail")
+	}
+	if state.windowStart != wantStart || state.windowEnd != wantEnd {
+		t.Fatalf("tail window changed after wheel-up from restored tail: got [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, wantEnd)
+	}
+
+	steps := 0
+	for !m.viewport.atBottom() {
+		prevOffset := m.viewport.offset
+		m.applyWheelScrollDelta(1)
+		steps++
+		state = m.startupDeferredTranscript
+		if state == nil {
+			t.Fatal("startup deferred transcript missing during wheel-down after live append/focus restore")
+		}
+		if state.windowStart != wantStart || state.windowEnd != wantEnd {
+			t.Fatalf("tail window changed during wheel-down after live append/focus restore at step %d: got [%d,%d), want [%d,%d)", steps, state.windowStart, state.windowEnd, wantStart, wantEnd)
+		}
+		if m.viewport.offset < prevOffset {
+			t.Fatalf("wheel-down regressed offset from %d to %d", prevOffset, m.viewport.offset)
+		}
+		if m.viewport.offset == prevOffset && !m.viewport.atBottom() {
+			t.Fatalf("wheel-down made no progress at step %d before reaching bottom; offset=%d", steps, m.viewport.offset)
+		}
+		if steps > 200 {
+			t.Fatalf("unexpectedly needed more than 200 wheel-down steps to return to bottom; offset=%d", m.viewport.offset)
+		}
+	}
+}
+
+func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
+	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for mouse-wheel tail round-trip test")
+	}
+
+	m.handleNormalKey(modelSelectKey("G"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	beforeStart, beforeEnd := state.windowStart, state.windowEnd
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should be at bottom after G")
+	}
+
+	m.applyWheelScrollDelta(-2 * m.viewport.height)
+	if m.viewport.offset == 0 {
+		t.Fatal("setup failed: mouse wheel up should move above bottom within tail window")
+	}
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after wheel up")
+	}
+	if state.windowStart != beforeStart || state.windowEnd != beforeEnd {
+		t.Fatalf("tail window changed after wheel-up within tail window: got [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, beforeStart, beforeEnd)
+	}
+
+	steps := 0
+	for !m.viewport.atBottom() {
+		prevOffset := m.viewport.offset
+		m.applyWheelScrollDelta(1)
+		steps++
+		if m.viewport.offset < prevOffset {
+			t.Fatalf("wheel-down regressed offset from %d to %d", prevOffset, m.viewport.offset)
+		}
+		if state = m.startupDeferredTranscript; state == nil {
+			t.Fatal("startup deferred transcript missing during wheel-down round-trip")
+		}
+		if state.windowStart != beforeStart || state.windowEnd != beforeEnd {
+			t.Fatalf("tail window changed during wheel-down round-trip at step %d: got [%d,%d), want [%d,%d)", steps, state.windowStart, state.windowEnd, beforeStart, beforeEnd)
+		}
+		if m.viewport.offset == prevOffset && !m.viewport.atBottom() {
+			t.Fatalf("wheel-down made no progress at step %d before reaching bottom; offset=%d", steps, m.viewport.offset)
+		}
+		if steps > 200 {
+			t.Fatalf("unexpectedly needed more than 200 wheel-down steps to return to bottom; offset=%d", m.viewport.offset)
+		}
+	}
+}
+
+func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTailWindow(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
+	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for jump-bottom partial scroll test")
+	}
+
+	m.handleNormalKey(modelSelectKey("G"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	wantStart := len(messages) - startupTranscriptTailBlocks
+	if state.windowStart != wantStart || state.windowEnd != len(messages) {
+		t.Fatalf("tail window after G = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, len(messages))
+	}
+
+	for i := 0; i < 2; i++ {
+		m.viewport.ScrollUp(m.viewport.height)
+	}
+	beforeStart, beforeEnd := state.windowStart, state.windowEnd
+	beforeOffset := m.viewport.offset
+	if beforeOffset == 0 {
+		t.Fatal("setup failed: offset after two page-up moves should be above top within tail window")
+	}
+
+	m.viewport.ScrollDown(m.viewport.height)
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after partial scroll down")
+	}
+	if state.windowStart != beforeStart || state.windowEnd != beforeEnd {
+		t.Fatalf("tail window changed after scrolling down within same tail window: got [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, beforeStart, beforeEnd)
+	}
+	if m.viewport.offset <= beforeOffset {
+		t.Fatalf("viewport offset after page-down = %d, want > %d", m.viewport.offset, beforeOffset)
+	}
+
+	pageDowns := 0
+	for !m.viewport.atBottom() {
+		prevOffset := m.viewport.offset
+		m.viewport.ScrollDown(m.viewport.height)
+		pageDowns++
+		if m.viewport.offset <= prevOffset {
+			break
+		}
+	}
+	if state = m.startupDeferredTranscript; state == nil {
+		t.Fatal("startup deferred transcript missing after paging back to bottom")
+	}
+	if state.windowStart != beforeStart || state.windowEnd != beforeEnd {
+		t.Fatalf("tail window changed while paging back to bottom: got [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, beforeStart, beforeEnd)
+	}
+	if !m.viewport.atBottom() {
+		t.Fatalf("viewport should reach bottom again within same tail window after %d page-downs; offset=%d", pageDowns, m.viewport.offset)
+	}
+}
+
 func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {

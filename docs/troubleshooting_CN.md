@@ -94,6 +94,32 @@ curl -I https://api.openai.com/v1
 - 检查本机是否安装了对应语言服务器
 - 检查 `lsp` 配置格式是否正确
 - 确认目标文件类型与 `file_types` 是否匹配
+- 检查是否通过 `diagnostics.enabled: false` 关闭了工具后诊断
+
+Python 还需要注意：
+
+- 小文件使用 `diagnostics.python.semantic_backend`，通常是 `lsp.pyright`。请确认 `diagnostics.python.semantic_backend.server` 与 `lsp` 下的 server key 一致。
+- 大 Python 文件在 `PATH` 中能找到 `ruff` 时使用 Ruff quick diagnostics。
+- 如果大 Python 文件提示因为 Ruff 不可用而跳过诊断，可以安装 Ruff，或设置 `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true`，强制大文件也运行 Pyright。
+- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `Edit`/`Write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
+
+推荐 Python 配置骨架：
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+
+diagnostics:
+  python:
+    quick_backend:
+      type: command
+      command: ruff
+```
+
+完整推荐配置见 [配置 — Edit/Write 后诊断](./configuration_CN.md#editwrite-后诊断)。
 
 ## 会话恢复异常
 
@@ -152,6 +178,8 @@ Chord 覆盖两类焦点恢复 redraw 场景：获焦后立即到达的更新，
 - 如果仍能复现，同时保留 diagnostics bundle、session dump 和截图
 
 这通常表示“当前 deferred 窗口已经滚到底”被误当成“全文已经在尾部”。当标签页失焦期间 startup deferred transcript 仍停留在历史窗口时，重新获焦后画面可能只恢复到“当前窗口底部”，而不是全文尾窗；这会让鼠标滚轮向下继续合法地翻到下一段旧窗口。Chord 会在失焦前记录当前 deferred transcript 是否真正钉在尾窗并跟随最新内容；若是，则在回焦时先恢复真实尾窗，再应用后续滚动，从而避免“看起来已在底部却还能向下翻出旧页”。
+
+如果失焦期间尾部又追加了新消息，回焦后还需要保持当前尾窗宽度，而不是把尾窗重新裁成固定最新块数；否则尾窗起点会前移，随后向下滚轮时就可能看到“之前没出现过的新旧内容”，视觉上像是又多滚了几屏才真正到底。当前修复已覆盖这条 `live append + focus restore + mouse wheel` 路径。
 
 ## 长会话中的 `20jj` / `100kk` / `[count]↑↓` 跨窗口跳错
 
