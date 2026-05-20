@@ -6721,7 +6721,6 @@ func TestCopyFocusedBlockRejectsErrorCard(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("copyFocusedBlock should return toast command for BlockError")
 	}
-	_ = cmd()
 	if m.activeToast == nil {
 		t.Fatal("copyFocusedBlock should enqueue toast for non-copyable block")
 	}
@@ -6788,7 +6787,6 @@ func TestSuperCopyRejectsErrorCard(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("handleSuperCopy should return toast command for BlockError")
 	}
-	_ = cmd()
 	if m.activeToast == nil {
 		t.Fatal("handleSuperCopy should enqueue toast for non-copyable block")
 	}

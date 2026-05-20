@@ -184,7 +184,7 @@ func TestLoadAtMentionFilesIncludesDeeperRepoPaths(t *testing.T) {
 
 func TestLoadAtMentionFilesCapsAtNewLimit(t *testing.T) {
 	wd := t.TempDir()
-	for i := 0; i < atMentionMaxFiles+50; i++ {
+	for i := 0; i < 8; i++ {
 		mustWriteFile(t, filepath.Join(wd, "files", fmt.Sprintf("file-%05d.txt", i)), "x")
 	}
 
@@ -199,15 +199,15 @@ func TestLoadAtMentionFilesCapsAtNewLimit(t *testing.T) {
 		t.Fatalf("Chdir(%q) error = %v", wd, err)
 	}
 
-	msg := loadAtMentionFiles()()
+	msg := loadAtMentionFilesWithLimit(3)()
 	loaded, ok := msg.(atMentionFilesLoadedMsg)
 	if !ok {
 		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
 	}
-	if got := len(loaded.files); got != atMentionMaxFiles {
-		t.Fatalf("len(files) = %d, want %d", got, atMentionMaxFiles)
+	if got := len(loaded.files); got != 3 {
+		t.Fatalf("len(files) = %d, want %d", got, 3)
 	}
-	if slices.Contains(loaded.files, fmt.Sprintf("files/file-%05d.txt", atMentionMaxFiles+49)) {
+	if slices.Contains(loaded.files, "files/file-00007.txt") {
 		t.Fatalf("expected files beyond limit to be omitted, but found tail entry")
 	}
 }

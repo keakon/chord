@@ -22,6 +22,10 @@ type atMentionFilesLoadedMsg struct {
 }
 
 func loadAtMentionFiles() tea.Cmd {
+	return loadAtMentionFilesWithLimit(atMentionMaxFiles)
+}
+
+func loadAtMentionFilesWithLimit(limit int) tea.Cmd {
 	return func() tea.Msg {
 		var files []string
 		ignore := tools.NewGitIgnoreMatcher(".")
@@ -65,7 +69,7 @@ func loadAtMentionFiles() tea.Cmd {
 				return nil
 			}
 			files = append(files, rel)
-			if len(files) >= atMentionMaxFiles {
+			if len(files) >= limit {
 				return filepath.SkipAll
 			}
 			return nil

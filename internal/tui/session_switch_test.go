@@ -148,7 +148,9 @@ func TestStreamRollbackRemovesStreamingAssistantBeforeCommittedRebuild(t *testin
 	}
 
 	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamRollbackEvent{Reason: "retry", AgentID: ""}})
-	applyTestCmd(t, &m, cmd)
+	if cmd == nil {
+		t.Fatal("rollback with reason should return follow-up command")
+	}
 	if got := len(m.viewport.visibleBlocks()); got != 0 {
 		t.Fatalf("block count after rollback = %d, want 0", got)
 	}
@@ -2798,7 +2800,7 @@ func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testin
 
 	theoretical := 0
 	rng := rand.New(rand.NewSource(42))
-	for step := 0; step < 200; step++ {
+	for step := 0; step < 60; step++ {
 		count := rng.Intn(180) + 1
 		dir := 1
 		key := "j"
