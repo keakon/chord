@@ -54,10 +54,12 @@ func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testin
 	client := llm.NewClient(prov, stubProvider{}, "gpt-5.5", 1024, "")
 	a.SwapLLMClient(client, "gpt-5.5", 128000)
 
+	prov.UpdateKeySnapshot("oauth-token", inline)
 	a.updateRateLimitSnapshot(inline)
 	if got := a.CurrentRateLimitSnapshot(); got != inline {
 		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want inline %#v", got, inline)
 	}
+	prov.ClearInlineDisplayRateLimitSnapshot()
 	a.clearCurrentRateLimitSnapshot()
 	if got := a.CurrentRateLimitSnapshot(); got != polled {
 		t.Fatalf("after clear CurrentRateLimitSnapshot() = %#v, want polled %#v", got, polled)

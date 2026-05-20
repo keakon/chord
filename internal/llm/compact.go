@@ -66,15 +66,12 @@ func (c *Client) Compact(
 		return nil, fmt.Errorf("provider does not support compact endpoint")
 	}
 
-	apiKey, keySwitched, err := provider.SelectKeyWithContext(ctx)
+	apiKey, _, err := provider.SelectKeyWithContext(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("LLM request aborted: %w", ctx.Err())
 		}
 		return nil, err
-	}
-	if keySwitched {
-		provider.ClearInlineDisplayRateLimitSnapshot()
 	}
 
 	resp, err := cp.Compact(ctx, apiKey, modelID, systemPrompt, messages, tools, maxTokens, tuning)

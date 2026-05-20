@@ -979,6 +979,8 @@ func (p *ProviderConfig) postSelectLocked(selectedKS *KeyState, selectedIdx int,
 	}
 	if selectedKS.RateLimit != nil {
 		p.inlineDisplaySnap = selectedKS.RateLimit
+	} else if selectedIdx != p.lastSelectedSlot {
+		p.inlineDisplaySnap = nil
 	}
 	selectedKey := selectedKS.Key
 	// Suppress the switched flag when only one key is selectable to avoid

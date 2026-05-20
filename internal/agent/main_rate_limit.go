@@ -2,7 +2,6 @@ package agent
 
 import (
 	"strings"
-	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -135,42 +134,24 @@ func (a *MainAgent) updateRateLimitSnapshot(snap *ratelimit.KeyRateLimitSnapshot
 }
 
 // CurrentRateLimitSnapshot returns the latest rate-limit snapshot for the
-// active provider when that provider uses preset: codex. Otherwise it returns nil.
-// Display precedence is:
-//  1. current provider-scoped inline snapshot cache (cleared on key switch)
-//  2. client-selected key inline snapshot
-//  3. provider/account-scoped polled usage snapshot
+// active provider's currently selected key/account when that provider uses
+// preset: codex. Otherwise it returns nil.
+//
+// The sidebar must not reuse provider-scoped snapshots across key switches: once
+// a different key is selected, it should show that key's cached inline snapshot,
+// that key/account's polled /wham/usage snapshot, or nothing until fresh data is
+// available.
 func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 	providerName := a.currentRateLimitProviderName()
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
 		return nil
 	}
 
-	now := time.Now()
-	a.rateLimitMu.RLock()
-	snap := a.rateLimitSnaps[providerName]
-	a.rateLimitMu.RUnlock()
-	if snap != nil {
-		// Inline snapshots can become stale across a reset window. When we know the
-		// reset timestamp has been reached, fall back to provider/client selection
-		// so a fresh /wham/usage snapshot can be displayed.
-		if snap.Source != ratelimit.SnapshotSourceInlineKey || !ratelimit.SnapshotExpiredAt(snap, now) {
-			// If the inline snapshot is old enough, prefer client selection so a newer
-			// polled /wham/usage snapshot can surface even when the window hasn't reset.
-			const staleAfter = time.Minute
-			if snap.Source != ratelimit.SnapshotSourceInlineKey || snap.CapturedAt.IsZero() || now.Sub(snap.CapturedAt) < staleAfter {
-				return snap
-			}
-		}
-	}
 	client, ref := a.tuiFocusedLLMAndRef()
 	if client == nil {
-		return snap
+		return nil
 	}
-	if out := client.CurrentRateLimitSnapshotForRef(ref); out != nil {
-		return out
-	}
-	return snap
+	return client.CurrentRateLimitSnapshotForRef(ref)
 }
 
 // WakeCodexRateLimitPolling triggers an on-demand /wham/usage poll for the

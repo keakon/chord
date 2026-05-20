@@ -400,7 +400,7 @@ func TestCurrentRateLimitSnapshotHidesNonCodexProvider(t *testing.T) {
 	}
 }
 
-func TestCurrentRateLimitSnapshotReusesCodexSnapshotAcrossSwitchBack(t *testing.T) {
+func TestCurrentRateLimitSnapshotDoesNotReuseProviderCacheAcrossSwitchBack(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
@@ -415,8 +415,8 @@ func TestCurrentRateLimitSnapshotReusesCodexSnapshotAcrossSwitchBack(t *testing.
 	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"sample": snap}
 
 	a.SetProviderModelRef("sample/model-a")
-	if got := a.CurrentRateLimitSnapshot(); got != snap {
-		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want %#v on codex provider", got, snap)
+	if got := a.CurrentRateLimitSnapshot(); got != nil {
+		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want nil without current-key snapshot", got)
 	}
 
 	a.llmMu.Lock()
@@ -431,8 +431,8 @@ func TestCurrentRateLimitSnapshotReusesCodexSnapshotAcrossSwitchBack(t *testing.
 	a.providerModelRef = "sample/model-c"
 	a.runningModelRef = "sample/model-c"
 	a.llmMu.Unlock()
-	if got := a.CurrentRateLimitSnapshot(); got != snap {
-		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want reused snapshot %#v after switching back", got, snap)
+	if got := a.CurrentRateLimitSnapshot(); got != nil {
+		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want nil after switching back without current-key snapshot", got)
 	}
 }
 
@@ -546,8 +546,8 @@ func TestEnsureMainModelPolicyKeepsRateLimitSnapshotWithinSameProvider(t *testin
 	if err := a.SwitchModel("oauth/model-b"); err != nil {
 		t.Fatalf("SwitchModel: %v", err)
 	}
-	if got := a.CurrentRateLimitSnapshot(); got != snap {
-		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want original snapshot %#v", got, snap)
+	if got := a.CurrentRateLimitSnapshot(); got != nil {
+		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want nil without current-key snapshot", got)
 	}
 
 	for {

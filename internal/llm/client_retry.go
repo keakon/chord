@@ -374,7 +374,6 @@ func (c *Client) completeStreamTarget(
 			return result, lastInputTokens, err
 		}
 		if keySwitched {
-			t.provider.ClearInlineDisplayRateLimitSnapshot()
 			if cb != nil {
 				cb(message.StreamDelta{Type: "key_switched"})
 			}

@@ -345,6 +345,49 @@ func TestSelectKey_CodexSmartTreatsSnapshotAsHeadroomNotSoftCooldown(t *testing.
 	}
 }
 
+func TestSelectKey_UpdatesInlineDisplayToSelectedKeySnapshot(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	snapA := &ratelimit.KeyRateLimitSnapshot{
+		Provider: "openai",
+		Primary:  &ratelimit.RateLimitWindow{UsedPct: 20},
+		Source:   ratelimit.SnapshotSourceInlineKey,
+	}
+	p.UpdateKeySnapshot("key-a", snapA)
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-a" {
+		t.Fatalf("selected key = %q, want key-a", key)
+	}
+	if got := p.CurrentInlineRateLimitSnapshot(); got != snapA {
+		t.Fatalf("CurrentInlineRateLimitSnapshot() = %#v, want key-a snapshot %#v", got, snapA)
+	}
+
+	p.MarkCooldown("key-a", time.Minute)
+	key, _, err = p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext after cooldown: %v", err)
+	}
+	if key != "key-b" {
+		t.Fatalf("selected key = %q, want key-b", key)
+	}
+	if got := p.CurrentInlineRateLimitSnapshot(); got != nil {
+		t.Fatalf("CurrentInlineRateLimitSnapshot() = %#v, want nil for selected key without snapshot", got)
+	}
+
+	snapB := &ratelimit.KeyRateLimitSnapshot{
+		Provider: "openai",
+		Primary:  &ratelimit.RateLimitWindow{UsedPct: 40},
+		Source:   ratelimit.SnapshotSourceInlineKey,
+	}
+	p.UpdateKeySnapshot("key-b", snapB)
+	if got := p.CurrentInlineRateLimitSnapshot(); got != snapB {
+		t.Fatalf("CurrentInlineRateLimitSnapshot() = %#v, want key-b snapshot %#v", got, snapB)
+	}
+}
+
 func TestSelectKey_CodexSmartPrefersNonSoftCooledKey(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	p.mu.Lock()
