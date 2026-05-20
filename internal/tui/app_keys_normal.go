@@ -219,12 +219,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 
 	// -- jump to top / bottom --------------------------------------------
 	case keyMatches(key, m.keyMap.ScrollToBottom):
-		prevOffset := m.viewport.offset
-		if m.hasDeferredStartupTranscript() {
-			m.maybeSwitchStartupDeferredTranscriptWindow(startupTranscriptWindowTail, "jump_bottom")
-		}
-		m.viewport.ScrollToBottom()
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		return m.jumpToLastVisibleBlock()
 	case keyMatches(key, m.keyMap.ScrollToTopSeq):
 		return m.startChordOp(chordG)
 

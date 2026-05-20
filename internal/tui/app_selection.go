@@ -342,6 +342,39 @@ func (m *Model) clearFocusedBlock() {
 	m.refreshBlockFocus()
 }
 
+func (m *Model) focusDirectoryEntryBlock(entries []DirectoryEntry, index, dir int) {
+	if len(entries) == 0 {
+		m.clearFocusedBlock()
+		return
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(entries) {
+		index = len(entries) - 1
+	}
+	if dir == 0 {
+		dir = 1
+	}
+	for i := index; i >= 0 && i < len(entries); i += dir {
+		entry := entries[i]
+		if isSelectableBlockType(entry.Type) {
+			m.focusedBlockID = entry.BlockID
+			m.refreshBlockFocus()
+			return
+		}
+	}
+	for i := index - dir; i >= 0 && i < len(entries); i -= dir {
+		entry := entries[i]
+		if isSelectableBlockType(entry.Type) {
+			m.focusedBlockID = entry.BlockID
+			m.refreshBlockFocus()
+			return
+		}
+	}
+	m.clearFocusedBlock()
+}
+
 func (m *Model) jumpToVisibleBlockOrdinal(ordinal int) tea.Cmd {
 	prevOffset := m.viewport.offset
 	if m.hasDeferredStartupTranscript() {
@@ -360,9 +393,32 @@ func (m *Model) jumpToVisibleBlockOrdinal(ordinal int) tea.Cmd {
 	if ordinal > len(entries) {
 		ordinal = len(entries)
 	}
-	m.clearFocusedBlock()
-	m.viewport.offset = entries[ordinal-1].LineOffset
+	entry := entries[ordinal-1]
+	m.viewport.offset = entry.LineOffset
 	m.viewport.clampOffset()
+	m.focusDirectoryEntryBlock(entries, ordinal-1, 1)
+	m.viewport.sticky = m.viewport.atBottom()
+	return m.refreshInlineImagesIfViewportMoved(prevOffset)
+}
+
+func (m *Model) jumpToLastVisibleBlock() tea.Cmd {
+	prevOffset := m.viewport.offset
+	if m.hasDeferredStartupTranscript() {
+		state := m.startupDeferredTranscript
+		if state != nil && len(state.allBlocks) > 0 {
+			return m.jumpToVisibleBlockOrdinal(len(state.allBlocks))
+		}
+		m.maybeSwitchStartupDeferredTranscriptWindow(startupTranscriptWindowTail, "jump_bottom")
+	}
+	entries := m.viewport.MessageDirectory()
+	if len(entries) == 0 {
+		m.clearFocusedBlock()
+		return nil
+	}
+	entry := entries[len(entries)-1]
+	m.viewport.offset = entry.LineOffset
+	m.viewport.clampOffset()
+	m.focusDirectoryEntryBlock(entries, len(entries)-1, -1)
 	m.viewport.sticky = m.viewport.atBottom()
 	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }

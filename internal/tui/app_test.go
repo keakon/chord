@@ -7046,8 +7046,8 @@ func TestNormalModeCountedTopJumpsToVisibleBlock(t *testing.T) {
 	if m.viewport.offset != entries[1].LineOffset {
 		t.Fatalf("viewport offset = %d, want %d", m.viewport.offset, entries[1].LineOffset)
 	}
-	if m.focusedBlockID != -1 {
-		t.Fatalf("focusedBlockID = %d, want -1 after absolute jump", m.focusedBlockID)
+	if m.focusedBlockID != 2 {
+		t.Fatalf("focusedBlockID = %d, want 2 after absolute jump", m.focusedBlockID)
 	}
 	if m.chord.active() {
 		t.Fatal("2gg should clear chord state")
@@ -7082,6 +7082,57 @@ func TestNormalModeCountedGMatchesCountedGG(t *testing.T) {
 	}
 	if m.viewport.offset != want {
 		t.Fatalf("3gg offset = %d, want %d", m.viewport.offset, want)
+	}
+}
+
+func TestNormalModeGGFocusesFirstVisibleBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: strings.Repeat("first\n", 4)})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("second\n", 4)})
+	m.viewport.ScrollToBottom()
+	m.focusedBlockID = 2
+	m.refreshBlockFocus()
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "g", Code: 'g'}))
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "g", Code: 'g'})); cmd != nil {
+		t.Fatalf("gg should move synchronously without extra cmd, got %#v", cmd)
+	}
+	if m.viewport.offset != 0 {
+		t.Fatalf("viewport offset after gg = %d, want 0", m.viewport.offset)
+	}
+	if m.focusedBlockID != 1 {
+		t.Fatalf("focusedBlockID after gg = %d, want 1", m.focusedBlockID)
+	}
+	if block := m.viewport.GetFocusedBlock(1); block == nil || !block.Focused {
+		t.Fatalf("first block focus flag not set: %#v", block)
+	}
+}
+
+func TestNormalModeGFocusesLastVisibleBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: strings.Repeat("first\n", 4)})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("second\n", 4)})
+	entries := m.viewport.MessageDirectory()
+	if len(entries) < 2 {
+		t.Fatalf("visible entries = %d, want >=2", len(entries))
+	}
+	m.viewport.ScrollToTop()
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "G", Code: 'G'})); cmd != nil {
+		t.Fatalf("G should move synchronously without extra cmd, got %#v", cmd)
+	}
+	if m.viewport.offset != entries[len(entries)-1].LineOffset {
+		t.Fatalf("viewport offset after G = %d, want %d", m.viewport.offset, entries[len(entries)-1].LineOffset)
+	}
+	if m.focusedBlockID != 2 {
+		t.Fatalf("focusedBlockID after G = %d, want 2", m.focusedBlockID)
+	}
+	if block := m.viewport.GetFocusedBlock(2); block == nil || !block.Focused {
+		t.Fatalf("last block focus flag not set: %#v", block)
 	}
 }
 
