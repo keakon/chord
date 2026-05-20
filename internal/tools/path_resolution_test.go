@@ -148,6 +148,54 @@ func TestWriteAndReadToolSupportTildePaths(t *testing.T) {
 	}
 }
 
+func TestWriteToolRejectsBlockedDevicePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("device path blacklist is unix-specific")
+	}
+
+	_, err := (WriteTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
+		"path":    "/dev/stdout",
+		"content": "must not be written",
+	}))
+	if err == nil {
+		t.Fatal("WriteTool.Execute error = nil, want blocked device path error")
+	}
+	if !strings.Contains(err.Error(), "cannot write blocked device path") {
+		t.Fatalf("WriteTool.Execute error = %q, want blocked device path error", err)
+	}
+}
+
+func TestWriteToolRejectsSymlinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink overwrite protection is platform-specific")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	link := filepath.Join(dir, "link.txt")
+	if err := os.WriteFile(target, []byte("before"), 0o644); err != nil {
+		t.Fatalf("WriteFile target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	_, err := (WriteTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
+		"path":    link,
+		"content": "after",
+	}))
+	if err == nil {
+		t.Fatal("WriteTool.Execute error = nil, want symlink write error")
+	}
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("ReadFile target: %v", readErr)
+	}
+	if string(data) != "before" {
+		t.Fatalf("target content = %q, want unchanged", string(data))
+	}
+}
+
 func TestEditToolSupportsTildePaths(t *testing.T) {
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)

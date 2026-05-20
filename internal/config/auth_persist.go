@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -386,8 +387,10 @@ func writeAuthYAMLFile(path string, data []byte) error {
 	if err := f.Chmod(0o600); err != nil {
 		return fmt.Errorf("set auth config tmp permissions: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
+	if n, err := f.Write(data); err != nil {
 		return fmt.Errorf("write auth config tmp: %w", err)
+	} else if n != len(data) {
+		return fmt.Errorf("write auth config tmp: %w", io.ErrShortWrite)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close auth config tmp: %w", err)

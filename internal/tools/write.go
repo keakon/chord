@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -64,6 +65,22 @@ func writtenLineCount(content string) int {
 	return lineCount
 }
 
+func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
+	f, err := openFileNoFollow(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	n, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return closeErr
+}
+
 func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a writeArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -75,6 +92,9 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	resolvedPath, err := resolveToolPath(a.Path)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	if isBlockedDevicePath(resolvedPath) {
+		return "", fmt.Errorf("cannot write blocked device path: %s", a.Path)
 	}
 
 	content, err := decodeToolStringArg(a.Content)
@@ -98,7 +118,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		byteLabel = "byte"
 	}
 	invalidatePathCache(resolvedPath)
-	if err := os.WriteFile(resolvedPath, data, 0644); err != nil {
+	if err := writeFileNoFollow(resolvedPath, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
 	warmDecodedFileCacheAsync(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
