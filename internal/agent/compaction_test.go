@@ -236,14 +236,14 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	if !strings.Contains(prepared[2].Content, "Diagnostics summary:") {
 		t.Fatalf("expected diagnostics summary, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "Undefined name") || strings.Contains(prepared[2].Content, "another diagnostic") {
-		t.Fatalf("expected old diagnostics details omitted, got %q", prepared[2].Content)
+	if !strings.Contains(prepared[2].Content, "[E] 10:1 [F821] Undefined name `x`") || strings.Contains(prepared[2].Content, "another diagnostic") {
+		t.Fatalf("expected only first actionable diagnostic kept, got %q", prepared[2].Content)
 	}
 }
 
-func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersStatusLine(t *testing.T) {
+func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLine(t *testing.T) {
 	a := &MainAgent{}
-	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed LSP diagnostics.\nDiagnostics status: Used Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`"
+	content := "Replaced 1 occurrence\n\nDiagnostics:\nDiagnostics status: backend=LSP, new=1, resolved=0, current=1 errors, 0 warnings (best effort).\n[E] 10:1 [F821] Undefined name `x`"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Edit", Args: json.RawMessage(`{"path":"a.py"}`)}}},
@@ -253,11 +253,11 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersStatusLine(t
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Diagnostics status: Used Ruff quick diagnostics because this Python file exceeds the configured threshold.") {
-		t.Fatalf("expected prioritized status line kept, got %q", prepared[2].Content)
+	if !strings.Contains(prepared[2].Content, "[E] 10:1 [F821] Undefined name `x`") {
+		t.Fatalf("expected actionable diagnostic line kept, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "Used LSP diagnostics.\nDiagnostics summary:") {
-		t.Fatalf("expected generic header not selected as summary line, got %q", prepared[2].Content)
+	if strings.Contains(prepared[2].Content, "Diagnostics status:") {
+		t.Fatalf("expected status line not prioritized, got %q", prepared[2].Content)
 	}
 }
 

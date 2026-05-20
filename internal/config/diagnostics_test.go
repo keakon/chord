@@ -25,8 +25,8 @@ func TestDefaultDiagnosticsConfig(t *testing.T) {
 	if got := py.LargeFile.ByteThreshold; got != 250000 {
 		t.Fatalf("byte threshold = %d, want 250000", got)
 	}
-	if got := py.Output.MaxTotalDiagnostics; got != 20 {
-		t.Fatalf("max total diagnostics = %d, want 20", got)
+	if got := py.Output.MaxTotalDiagnostics; got != 10 {
+		t.Fatalf("max total diagnostics = %d, want 10", got)
 	}
 }
 

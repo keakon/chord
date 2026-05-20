@@ -41,13 +41,11 @@ type PythonLargeFileDiagnosticsConfig struct {
 
 // DiagnosticOutputConfig limits diagnostic text appended to tool results.
 type DiagnosticOutputConfig struct {
-	MaxNearDiagnostics    int  `json:"max_near_diagnostics,omitempty" yaml:"max_near_diagnostics,omitempty"`
-	MaxOutsideDiagnostics int  `json:"max_outside_diagnostics,omitempty" yaml:"max_outside_diagnostics,omitempty"`
-	MaxTotalDiagnostics   int  `json:"max_total_diagnostics,omitempty" yaml:"max_total_diagnostics,omitempty"`
-	NearRangeBeforeLines  int  `json:"near_range_before_lines,omitempty" yaml:"near_range_before_lines,omitempty"`
-	NearRangeAfterLines   int  `json:"near_range_after_lines,omitempty" yaml:"near_range_after_lines,omitempty"`
-	IncludeHints          bool `json:"include_hints,omitempty" yaml:"include_hints,omitempty"`
-	IncludeInfo           bool `json:"include_info,omitempty" yaml:"include_info,omitempty"`
+	MaxNearDiagnostics    int `json:"max_near_diagnostics,omitempty" yaml:"max_near_diagnostics,omitempty"`
+	MaxOutsideDiagnostics int `json:"max_outside_diagnostics,omitempty" yaml:"max_outside_diagnostics,omitempty"`
+	MaxTotalDiagnostics   int `json:"max_total_diagnostics,omitempty" yaml:"max_total_diagnostics,omitempty"`
+	NearRangeBeforeLines  int `json:"near_range_before_lines,omitempty" yaml:"near_range_before_lines,omitempty"`
+	NearRangeAfterLines   int `json:"near_range_after_lines,omitempty" yaml:"near_range_after_lines,omitempty"`
 }
 
 func DefaultDiagnosticsConfig() DiagnosticsConfig {
@@ -67,9 +65,9 @@ func DefaultDiagnosticsConfig() DiagnosticsConfig {
 				Strategy:      DiagnosticLargeFileStrategyQuick,
 			},
 			Output: DiagnosticOutputConfig{
-				MaxNearDiagnostics:    12,
+				MaxNearDiagnostics:    10,
 				MaxOutsideDiagnostics: 5,
-				MaxTotalDiagnostics:   20,
+				MaxTotalDiagnostics:   10,
 				NearRangeBeforeLines:  20,
 				NearRangeAfterLines:   80,
 			},

@@ -21,11 +21,11 @@ func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, conte
 	selection := selectPythonDiagnosticBackend(pyCfg, metrics, availability)
 	switch selection.Backend {
 	case pythonDiagnosticBackendQuick:
-		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, metrics, selection, base, ranges)
+		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, base, ranges)
 	case pythonDiagnosticBackendSemantic:
 		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges)
 	default:
-		return appendPythonDiagnosticsSkipped(base, metrics, selection)
+		return appendPythonDiagnosticsSkipped(base, selection)
 	}
 }
 
@@ -70,35 +70,35 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 		if isPythonPath(absPath) {
 			pyCfg := m.cfg.Diagnostics.Python
 			if m.pythonQuickBackendAvailable(pyCfg) {
-				fallbackBase := base + "\n\nDiagnostics:\nPython semantic diagnostics did not complete successfully; showing Ruff quick diagnostics instead."
+				fallbackBase := base
 				selection := pythonDiagnosticSelection{Backend: pythonDiagnosticBackendQuick, Reason: "semantic-timeout", SkipFullTypeCheck: true}
-				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, measureContent(content), selection, fallbackBase, ranges)
+				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges)
 			}
 		}
 	}
 
 	m.recordReviewSnapshot(absPath)
 	current := m.currentFileDiagnostics(absPath)
-	out := m.appendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, notified, ranges, diagnosticsOutputConfig(m.cfg, absPath))
-	return appendDiagnosticComparisonStatus(out, baseline, current, "LSP")
+	out := m.appendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath))
+	return appendDiagnosticChangeSummary(out, baseline, current)
 }
 
-func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, metrics fileMetrics, selection pythonDiagnosticSelection, base string, ranges []EditRange) string {
+func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange) string {
 	diags, err := runRuffDiagnostics(ctx, absPath, pyCfg)
 	if err != nil {
 		if pyCfg.LargeFile.RunSemanticWhenQuickUnavailable && selection.Reason == "large-file" {
-			fallbackBase := appendRuffDiagnosticsFailure(base, metrics, selection, err) + "\nFalling back to Python semantic diagnostics because run_semantic_when_quick_unavailable=true."
+			fallbackBase := appendRuffDiagnosticsFailure(base, selection, err) + "\nFalling back to Python semantic diagnostics."
 			return m.afterWriteLSPToolResult(ctx, absPath, content, fallbackBase, false, ranges)
 		}
-		return appendRuffDiagnosticsFailure(base, metrics, selection, err)
+		return appendRuffDiagnosticsFailure(base, selection, err)
 	}
-	return appendRuffDiagnostics(base, metrics, selection, diags, pyCfg.Output, ranges)
+	return appendRuffDiagnostics(base, selection, diags, pyCfg.Output, ranges)
 }
 
-func appendPythonDiagnosticsSkipped(base string, metrics fileMetrics, selection pythonDiagnosticSelection) string {
+func appendPythonDiagnosticsSkipped(base string, selection pythonDiagnosticSelection) string {
 	switch selection.Reason {
 	case "large-file-quick-unavailable":
-		return fmt.Sprintf("%s\n\nDiagnostics:\nPython diagnostics skipped: this file exceeds the configured large-file threshold (lines=%d, bytes=%d) and Ruff quick diagnostics are unavailable.\nFull Python semantic diagnostics were not run to avoid blocking Edit/Write. Set run_semantic_when_quick_unavailable=true to force semantic diagnostics on large files.", base, metrics.Lines, metrics.Bytes)
+		return base + "\n\nDiagnostics:\nPython diagnostics skipped: large file and Ruff unavailable."
 	case "no-backend":
 		return base + "\n\nDiagnostics:\nPython diagnostics skipped: no configured checker available."
 	default:
@@ -106,16 +106,15 @@ func appendPythonDiagnosticsSkipped(base string, metrics fileMetrics, selection 
 	}
 }
 
-func appendRuffDiagnosticsFailure(base string, metrics fileMetrics, selection pythonDiagnosticSelection, err error) string {
+func appendRuffDiagnosticsFailure(base string, selection pythonDiagnosticSelection, err error) string {
 	var b strings.Builder
 	b.WriteString(base)
 	b.WriteString("\n\nDiagnostics:\n")
-	fmt.Fprintf(&b, "Ruff quick diagnostics failed: %v.\n", err)
+	fmt.Fprintf(&b, "Ruff diagnostics failed: %v.", err)
 	if selection.Reason == "large-file" {
-		fmt.Fprintf(&b, "Full Python semantic diagnostics were skipped because this file exceeds the configured large-file threshold (lines=%d, bytes=%d).\n", metrics.Lines, metrics.Bytes)
-		b.WriteString("Fix Ruff, or set run_semantic_when_quick_unavailable=true to force semantic diagnostics on large files.")
+		b.WriteString("\nPython semantic diagnostics skipped for large file.")
 	} else {
-		b.WriteString("Full Python semantic diagnostics are unavailable.")
+		b.WriteString("\nPython semantic diagnostics unavailable.")
 	}
 	return b.String()
 }
@@ -130,28 +129,7 @@ func diagnosticsOutputConfig(cfg *config.Config, path string) config.DiagnosticO
 	return config.DiagnosticOutputConfig{}
 }
 
-func diagnosticErrorWarningCounts(diags []Diagnostic) (errors, warnings int) {
-	for _, d := range diags {
-		switch d.Severity {
-		case 1:
-			errors++
-		case 2:
-			warnings++
-		}
-	}
-	return errors, warnings
-}
-
-func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
-	if m == nil {
-		return nil
-	}
-	path := normalizeWaiterPath(absPath)
-	diags := m.allDiagnosticsByAbsPath()[path]
-	return append([]Diagnostic(nil), diags...)
-}
-
-func appendDiagnosticComparisonStatus(out string, baseline, current []Diagnostic, backend string) string {
+func appendDiagnosticChangeSummary(out string, baseline, current []Diagnostic) string {
 	if !strings.Contains(out, "Diagnostics:") {
 		return out
 	}
@@ -175,15 +153,26 @@ func appendDiagnosticComparisonStatus(out string, baseline, current []Diagnostic
 			resolvedCount++
 		}
 	}
-	errs, warns := diagnosticErrorWarningCounts(current)
-	return fmt.Sprintf("%s\nDiagnostics status: backend=%s, new=%d, resolved=%d, current=%d errors, %d warnings (best effort).", out, backend, newCount, resolvedCount, errs, warns)
+	if newCount == 0 && resolvedCount == 0 {
+		return out
+	}
+	return fmt.Sprintf("%s\nDiagnostics changed: %d new, %d resolved.", out, newCount, resolvedCount)
+}
+
+func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
+	if m == nil {
+		return nil
+	}
+	path := normalizeWaiterPath(absPath)
+	diags := m.allDiagnosticsByAbsPath()[path]
+	return append([]Diagnostic(nil), diags...)
 }
 
 func diagnosticComparisonKey(d Diagnostic) string {
 	return fmt.Sprintf("%d:%d:%d:%s:%s:%s", d.Severity, d.Line, d.Col, d.Code, d.Source, d.Message)
 }
 
-func appendRuffDiagnostics(base string, metrics fileMetrics, selection pythonDiagnosticSelection, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {
+func appendRuffDiagnostics(base string, selection pythonDiagnosticSelection, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {
 	var b strings.Builder
 	b.WriteString(base)
 	if strings.Contains(base, "Diagnostics:") {
@@ -191,25 +180,21 @@ func appendRuffDiagnostics(base string, metrics fileMetrics, selection pythonDia
 	} else {
 		b.WriteString("\n\nDiagnostics:\n")
 	}
-	if selection.Reason == "large-file" {
-		fmt.Fprintf(&b, "Used Ruff quick diagnostics because this Python file exceeds the configured threshold (lines=%d, bytes=%d).\n", metrics.Lines, metrics.Bytes)
-	} else if selection.Reason == "semantic-timeout" {
-		b.WriteString("Used Ruff quick diagnostics because Python semantic diagnostics did not complete successfully.\n")
-	} else {
-		b.WriteString("Used Ruff quick diagnostics because Python semantic diagnostics are unavailable.\n")
+	if output.MaxTotalDiagnostics <= 0 || output.MaxTotalDiagnostics > ruffDiagnosticsOutputMax {
+		output.MaxTotalDiagnostics = ruffDiagnosticsOutputMax
 	}
-	if len(diags) == 0 {
-		b.WriteString("No Ruff diagnostics found.\n")
-		b.WriteString("Diagnostics status: current: 0 errors, 0 warnings.\n")
-	} else {
-		block := strings.TrimPrefix(formatDiagnosticsBlockWithRanges("", diags, output, ranges, true), "\n\n")
-		if block != "" {
-			b.WriteString(block)
-			b.WriteByte('\n')
-		}
-		errs, warns := diagnosticErrorWarningCounts(diags)
-		fmt.Fprintf(&b, "Diagnostics status: current Ruff diagnostics: %d errors, %d warnings.\n", errs, warns)
+	selected, omitted := selectDiagnosticsByOutput(diags, output, ranges)
+	if len(selected) == 0 {
+		b.WriteString("No Ruff diagnostics found.")
+		return b.String()
 	}
-	b.WriteString("Full Python semantic diagnostics were skipped.")
+	block := strings.TrimPrefix(formatSelectedDiagnosticsBlock("", selected, true), "\n\n")
+	if block != "" {
+		b.WriteString(block)
+	}
+	if omitted > 0 {
+		b.WriteByte('\n')
+		b.WriteString(diagnosticsOmittedLine(omitted))
+	}
 	return b.String()
 }

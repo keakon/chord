@@ -169,10 +169,9 @@ func compactDiagnosticsToolOutput(content string) (string, bool) {
 
 func preferredDiagnosticsSummaryLine(lines []string) string {
 	preferredPrefixes := []string{
-		"Diagnostics status:",
 		"Python diagnostics skipped:",
+		"Ruff diagnostics failed:",
 		"Ruff quick diagnostics failed:",
-		"Full Python semantic diagnostics were skipped.",
 	}
 	for _, prefix := range preferredPrefixes {
 		for _, line := range lines {
@@ -184,11 +183,24 @@ func preferredDiagnosticsSummaryLine(lines []string) string {
 	}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !isNoisyDiagnosticsSummaryLine(trimmed) {
+			return trimmed
+		}
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
 			return trimmed
 		}
 	}
 	return ""
+}
+
+func isNoisyDiagnosticsSummaryLine(line string) bool {
+	return strings.HasPrefix(line, "Diagnostics status:") ||
+		strings.HasPrefix(line, "Used LSP diagnostics") ||
+		strings.HasPrefix(line, "Used Ruff quick diagnostics") ||
+		strings.HasPrefix(line, "Full Python semantic diagnostics")
 }
 
 func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message.Message) {

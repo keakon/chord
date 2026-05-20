@@ -144,6 +144,80 @@ func TestRunRuffDiagnosticsReturnsContextError(t *testing.T) {
 	}
 }
 
+func TestAppendDiagnosticChangeSummaryOmitsUnchangedStatus(t *testing.T) {
+	diags := []Diagnostic{{Severity: 1, Line: 2, Col: 3, Code: "E", Message: "boom"}}
+	out := appendDiagnosticChangeSummary("ok\n\nDiagnostics:\n[E] 3:4 [E] boom", diags, diags)
+	if strings.Contains(out, "Diagnostics changed:") || strings.Contains(out, "Diagnostics status:") {
+		t.Fatalf("expected no unchanged diagnostics status, got %q", out)
+	}
+}
+
+func TestAppendDiagnosticChangeSummaryReportsOnlyChanges(t *testing.T) {
+	baseline := []Diagnostic{{Severity: 1, Line: 0, Col: 0, Code: "E1", Message: "old"}}
+	current := []Diagnostic{{Severity: 1, Line: 1, Col: 0, Code: "E2", Message: "new"}}
+	out := appendDiagnosticChangeSummary("ok\n\nDiagnostics:\n[E] 2:1 [E2] new", baseline, current)
+	if !strings.Contains(out, "Diagnostics changed: 1 new, 1 resolved.") {
+		t.Fatalf("expected concise diagnostics change summary, got %q", out)
+	}
+	if strings.Contains(out, "backend=") || strings.Contains(out, "current=") || strings.Contains(out, "best effort") {
+		t.Fatalf("expected backend/current status omitted, got %q", out)
+	}
+}
+
+func TestAppendPythonDiagnosticsSkippedIsConcise(t *testing.T) {
+	out := appendPythonDiagnosticsSkipped("ok", pythonDiagnosticSelection{Reason: "large-file-quick-unavailable"})
+	if want := "ok\n\nDiagnostics:\nPython diagnostics skipped: large file and Ruff unavailable."; out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if strings.Contains(out, "lines=") || strings.Contains(out, "bytes=") || strings.Contains(out, "run_semantic_when_quick_unavailable") {
+		t.Fatalf("expected large-file skip output to stay concise, got %q", out)
+	}
+}
+
+func TestAppendRuffDiagnosticsFailureIsConcise(t *testing.T) {
+	out := appendRuffDiagnosticsFailure("ok", pythonDiagnosticSelection{Reason: "large-file"}, errors.New("missing ruff"))
+	if !strings.Contains(out, "Ruff diagnostics failed: missing ruff.") || !strings.Contains(out, "Python semantic diagnostics skipped for large file.") {
+		t.Fatalf("expected concise Ruff failure, got %q", out)
+	}
+	if strings.Contains(out, "lines=") || strings.Contains(out, "bytes=") || strings.Contains(out, "run_semantic_when_quick_unavailable") || strings.Contains(out, "Full Python semantic") {
+		t.Fatalf("expected Ruff failure output to stay concise, got %q", out)
+	}
+}
+
+func TestAppendRuffDiagnosticsOmitsBackendStatusAndLimitsOutput(t *testing.T) {
+	diags := make([]Diagnostic, 12)
+	for i := range diags {
+		diags[i] = Diagnostic{Severity: 2, Line: i, Col: 26, Code: "B005", Message: "Using `.strip()` with multi-character strings is misleading", Source: "ruff"}
+	}
+
+	out := appendRuffDiagnostics("Replaced 1 occurrence", pythonDiagnosticSelection{Reason: "large-file"}, diags, config.DiagnosticOutputConfig{}, nil)
+	if strings.Contains(out, "Used Ruff quick diagnostics") || strings.Contains(out, "Diagnostics status:") || strings.Contains(out, "Full Python semantic diagnostics") {
+		t.Fatalf("output should omit backend/status lines, got %q", out)
+	}
+	if got := strings.Count(out, "[W]"); got != ruffDiagnosticsOutputMax {
+		t.Fatalf("warning lines = %d, want %d\n%s", got, ruffDiagnosticsOutputMax, out)
+	}
+	if !strings.Contains(out, "2 diagnostics not shown due to output limits; they may still need fixing.") {
+		t.Fatalf("expected truncated diagnostics warning, got %q", out)
+	}
+}
+
+func TestAppendRuffDiagnosticsHonorsSmallerConfiguredLimit(t *testing.T) {
+	diags := []Diagnostic{
+		{Severity: 2, Line: 0, Message: "first"},
+		{Severity: 2, Line: 1, Message: "second"},
+		{Severity: 2, Line: 2, Message: "third"},
+	}
+
+	out := appendRuffDiagnostics("ok", pythonDiagnosticSelection{}, diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2}, nil)
+	if got := strings.Count(out, "[W]"); got != 2 {
+		t.Fatalf("warning lines = %d, want 2\n%s", got, out)
+	}
+	if !strings.Contains(out, "1 diagnostics not shown due to output limits; they may still need fixing.") {
+		t.Fatalf("expected configured truncation warning, got %q", out)
+	}
+}
+
 func TestIsPythonPathIncludesStubs(t *testing.T) {
 	if !isPythonPath("x.py") || !isPythonPath("x.PYI") {
 		t.Fatal("expected .py and .pyi to be Python paths")

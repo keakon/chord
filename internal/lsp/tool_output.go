@@ -13,18 +13,18 @@ import (
 
 // Limits for tool result text appended to the model (aligned with opencode).
 const (
-	ToolOutputMaxErrorsPerFile   = 20
-	ToolOutputMaxOtherErrorFiles = 5
+	ToolOutputMaxDiagnosticsPerFile = 10
+	ToolOutputMaxOtherErrorFiles    = 5
 )
 
 // AppendLSPDiagnosticsToToolOutput appends all LSP diagnostics (severity 1-4)
 // to the tool result string so the model can act on them. Diagnostics for the
 // edited file are listed first; optionally include diagnostics from other files.
 func (m *Manager) AppendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool) string {
-	return m.appendLSPDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, false, nil, config.DiagnosticOutputConfig{})
+	return m.appendLSPDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, nil, config.DiagnosticOutputConfig{})
 }
 
-func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, showCleanStatus bool, ranges []EditRange, output config.DiagnosticOutputConfig) string {
+func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig) string {
 	if m == nil {
 		return base
 	}
@@ -38,39 +38,43 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 
 	byPath := m.allDiagnosticsByAbsPath()
 
-	primary := byPath[edited]
+	primary, _ := selectDiagnosticsByOutput(byPath[edited], output, ranges)
 	hasDiagnostics := len(primary) > 0
-	if !hasDiagnostics && includeOtherFiles {
+	type otherDiagnostics struct {
+		path  string
+		diags []Diagnostic
+	}
+	var others []otherDiagnostics
+	if includeOtherFiles {
 		for p, diags := range byPath {
-			if p != edited && len(diags) > 0 {
-				hasDiagnostics = true
-				break
+			if p == edited || len(diags) == 0 {
+				continue
 			}
+			selected, _ := selectDiagnosticsByOutput(diags, output, nil)
+			if len(selected) == 0 {
+				continue
+			}
+			hasDiagnostics = true
+			others = append(others, otherDiagnostics{path: p, diags: selected})
 		}
 	}
 	if !hasDiagnostics {
-		if showCleanStatus {
-			return base + "\n\nDiagnostics:\nUsed LSP diagnostics.\nNo diagnostics found."
-		}
 		return base
 	}
 
 	var b strings.Builder
 	b.WriteString(base)
-	b.WriteString("\n\nDiagnostics:\nUsed LSP diagnostics.")
+	b.WriteString("\n\nDiagnostics:")
 
-	sort.SliceStable(primary, func(i, j int) bool {
-		return diagnosticLess(primary[i], primary[j])
-	})
 	appendDiagBlock := func(file string, diags []Diagnostic, thisFile bool) {
 		if len(diags) == 0 {
 			return
 		}
 		if thisFile {
-			b.WriteString(formatDiagnosticsBlockWithRanges(file, diags, output, ranges, true))
+			b.WriteString(formatSelectedDiagnosticsBlock(file, diags, true))
 			return
 		}
-		b.WriteString(formatDiagnosticsBlockWithRanges(file, diags, output, nil, false))
+		b.WriteString(formatSelectedDiagnosticsBlock(file, diags, false))
 	}
 	appendDiagBlock(edited, primary, true)
 
@@ -78,25 +82,12 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 		return b.String()
 	}
 
-	var others []string
-	for p, diags := range byPath {
-		if p == edited || len(diags) == 0 {
-			continue
-		}
-		sort.SliceStable(diags, func(i, j int) bool {
-			return diagnosticLess(diags[i], diags[j])
-		})
-		others = append(others, p)
-	}
-	sort.Strings(others)
-
-	n := 0
-	for _, p := range others {
-		if n >= ToolOutputMaxOtherErrorFiles {
+	sort.SliceStable(others, func(i, j int) bool { return others[i].path < others[j].path })
+	for i, other := range others {
+		if i >= ToolOutputMaxOtherErrorFiles {
 			break
 		}
-		appendDiagBlock(p, byPath[p], false)
-		n++
+		appendDiagBlock(other.path, other.diags, false)
 	}
 
 	return b.String()
@@ -135,56 +126,50 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 	return merged
 }
 
-func formatDiagnosticsBlock(file string, diags []Diagnostic, max int, thisFile bool) string {
+func diagnosticsOmittedLine(count int) string {
+	return fmt.Sprintf("... %d diagnostics not shown due to output limits; they may still need fixing.", count)
+}
+
+func formatSelectedDiagnosticsBlock(file string, diags []Diagnostic, thisFile bool) string {
 	if len(diags) == 0 {
 		return ""
 	}
 
 	var lines []string
-	lim := len(diags)
-	suffix := ""
-	if lim > max {
-		lim = max
-		suffix = fmt.Sprintf("\n... and %d more", len(diags)-max)
-	}
-	for i := 0; i < lim; i++ {
-		lines = append(lines, formatDiagLine(diags[i]))
+	for _, d := range diags {
+		lines = append(lines, formatDiagLine(d))
 	}
 
 	if thisFile {
-		return fmt.Sprintf("\n\n%s%s", strings.Join(lines, "\n"), suffix)
+		return fmt.Sprintf("\n%s", strings.Join(lines, "\n"))
 	}
-	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s%s",
-		file, strings.Join(lines, "\n"), suffix)
-}
-
-func formatHiddenDiagnosticsBlock(file string, hidden int, thisFile bool) string {
-	if hidden <= 0 {
-		return ""
-	}
-	line := fmt.Sprintf("Diagnostics hidden by output filters: %d info/hint diagnostics omitted.", hidden)
-	if thisFile {
-		return "\n\n" + line
-	}
-	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, line)
+	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, strings.Join(lines, "\n"))
 }
 
 func formatDiagnosticsBlockWithRanges(file string, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange, thisFile bool) string {
-	if len(diags) == 0 {
+	selected, omitted := selectDiagnosticsByOutput(diags, output, ranges)
+	if len(selected) == 0 {
 		return ""
 	}
-	if len(ranges) == 0 {
-		filtered := filterDiagnosticsByOutput(diags, output)
-		if len(filtered) == 0 {
-			return formatHiddenDiagnosticsBlock(file, len(diags), thisFile)
-		}
-		max := output.MaxTotalDiagnostics
-		if max <= 0 {
-			max = ToolOutputMaxErrorsPerFile
-		}
-		sort.SliceStable(filtered, func(i, j int) bool { return diagnosticLess(filtered[i], filtered[j]) })
-		return formatDiagnosticsBlock(file, filtered, max, thisFile)
+	out := formatSelectedDiagnosticsBlock(file, selected, thisFile)
+	if omitted > 0 {
+		out += "\n" + diagnosticsOmittedLine(omitted)
 	}
+	return out
+}
+
+func selectDiagnosticsByOutput(diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) ([]Diagnostic, int) {
+	if len(diags) == 0 {
+		return nil, 0
+	}
+	maxTotal := output.MaxTotalDiagnostics
+	if maxTotal <= 0 {
+		maxTotal = ToolOutputMaxDiagnosticsPerFile
+	}
+	if len(ranges) == 0 {
+		return selectDiagnosticsByLimit(diags, maxTotal)
+	}
+
 	before := output.NearRangeBeforeLines
 	if before <= 0 {
 		before = 20
@@ -195,67 +180,72 @@ func formatDiagnosticsBlockWithRanges(file string, diags []Diagnostic, output co
 	}
 	maxNear := output.MaxNearDiagnostics
 	if maxNear <= 0 {
-		maxNear = 12
+		maxNear = 10
 	}
 	maxOutside := output.MaxOutsideDiagnostics
 	if maxOutside <= 0 {
 		maxOutside = 5
 	}
-	maxTotal := output.MaxTotalDiagnostics
-	if maxTotal <= 0 {
-		maxTotal = ToolOutputMaxErrorsPerFile
-	}
 
-	filtered := filterDiagnosticsByOutput(diags, output)
-	if len(filtered) == 0 {
-		return formatHiddenDiagnosticsBlock(file, len(diags), thisFile)
-	}
-	near, outside := splitDiagnosticsByRange(filtered, ranges, before, after)
+	near, outside := splitDiagnosticsByRange(diags, ranges, before, after)
 	sort.SliceStable(near, func(i, j int) bool { return diagnosticNearLess(near[i], near[j], ranges) })
 	sort.SliceStable(outside, func(i, j int) bool { return diagnosticNearLess(outside[i], outside[j], ranges) })
-
-	selected := make([]Diagnostic, 0, min(maxTotal, len(filtered)))
-	selected = appendLimitedDiagnostics(selected, near, min(maxNear, maxTotal))
+	selected := make([]Diagnostic, 0, min(maxTotal, len(diags)))
+	nearSelected := 0
+	outsideSelected := 0
+	selected, nearSelected = appendLimitedDiagnosticsBySeverity(selected, near, min(maxNear, maxTotal), true)
 	remainingSlots := maxTotal - len(selected)
 	if remainingSlots > 0 {
-		selected = appendLimitedDiagnostics(selected, outside, min(maxOutside, remainingSlots))
+		selected, outsideSelected = appendLimitedDiagnosticsBySeverity(selected, outside, min(maxOutside, remainingSlots), true)
 	}
-	if len(selected) == 0 {
-		return ""
+	remainingSlots = maxTotal - len(selected)
+	if remainingSlots > 0 && nearSelected < maxNear {
+		var appended int
+		selected, appended = appendLimitedDiagnosticsBySeverity(selected, near, min(maxNear-nearSelected, remainingSlots), false)
+		nearSelected += appended
 	}
-	omitted := len(filtered) - len(selected)
-	var lines []string
-	for _, d := range selected {
-		lines = append(lines, formatDiagLine(d))
+	remainingSlots = maxTotal - len(selected)
+	if remainingSlots > 0 && outsideSelected < maxOutside {
+		selected, _ = appendLimitedDiagnosticsBySeverity(selected, outside, min(maxOutside-outsideSelected, remainingSlots), false)
 	}
-	if omitted > 0 {
-		lines = append(lines, fmt.Sprintf("... and %d more diagnostics omitted.", omitted))
-	}
-	if thisFile {
-		return "\n\n" + strings.Join(lines, "\n")
-	}
-	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, strings.Join(lines, "\n"))
+	return selected, len(diags) - len(selected)
 }
 
-func appendLimitedDiagnostics(dst, src []Diagnostic, limit int) []Diagnostic {
-	for i := 0; i < len(src) && i < limit; i++ {
-		dst = append(dst, src[i])
+func selectDiagnosticsByLimit(diags []Diagnostic, limit int) ([]Diagnostic, int) {
+	if limit <= 0 {
+		limit = ToolOutputMaxDiagnosticsPerFile
+	}
+	sorted := append([]Diagnostic(nil), diags...)
+	sort.SliceStable(sorted, func(i, j int) bool { return diagnosticLess(sorted[i], sorted[j]) })
+	selected := appendLimitedDiagnosticsByPriority(nil, sorted, limit)
+	return selected, len(sorted) - len(selected)
+}
+
+func appendLimitedDiagnosticsByPriority(dst, src []Diagnostic, limit int) []Diagnostic {
+	var appended int
+	dst, appended = appendLimitedDiagnosticsBySeverity(dst, src, limit, true)
+	if appended < limit {
+		dst, _ = appendLimitedDiagnosticsBySeverity(dst, src, limit-appended, false)
 	}
 	return dst
 }
 
-func filterDiagnosticsByOutput(diags []Diagnostic, output config.DiagnosticOutputConfig) []Diagnostic {
-	out := make([]Diagnostic, 0, len(diags))
-	for _, d := range diags {
-		if d.Severity == 3 && !output.IncludeInfo {
-			continue
-		}
-		if d.Severity == 4 && !output.IncludeHints {
-			continue
-		}
-		out = append(out, d)
+func appendLimitedDiagnosticsBySeverity(dst, src []Diagnostic, limit int, majorOnly bool) ([]Diagnostic, int) {
+	if limit <= 0 {
+		return dst, 0
 	}
-	return out
+	appended := 0
+	for _, d := range src {
+		if majorOnly != (d.Severity <= 2) {
+			continue
+		}
+		dst = append(dst, d)
+		appended++
+		if appended >= limit {
+			return dst, appended
+		}
+	}
+	return dst, appended
 }
 
 func splitDiagnosticsByRange(diags []Diagnostic, ranges []EditRange, before, after int) (near, outside []Diagnostic) {

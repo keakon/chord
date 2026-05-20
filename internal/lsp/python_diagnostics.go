@@ -13,7 +13,10 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-const ruffDiagnosticsTimeout = 5 * time.Second
+const (
+	ruffDiagnosticsTimeout   = 5 * time.Second
+	ruffDiagnosticsOutputMax = 10
+)
 
 type pythonDiagnosticBackend string
 

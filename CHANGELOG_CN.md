@@ -5,7 +5,7 @@
 ## 未发布
 
 - LSP / Python 诊断：Python 文件的 Edit / Write 完成后诊断新增 quick 回退后端。默认配置下，主诊断走 `pyright` LSP，quick 回退走 `ruff check ... --output-format json`；大文件（可配置 `diagnostics.python.large_file.line_threshold` / `byte_threshold`，默认 5000 行 / 250000 字节）会自动改走 quick 后端，避免阻塞在完整语义分析上；当 quick 后端不可用时，可通过 `run_semantic_when_quick_unavailable: true` 让大文件继续跑语义诊断。新增顶层 `diagnostics.*` 配置，包含分后端的命令/服务选择，以及 `diagnostics.python.output.*` 用于控制追加到工具结果中的诊断文本长度与裁剪窗口。完整字段见 `docs/configuration_CN.md`。
-- LSP / 诊断输出：追加的 LSP 诊断现在会附带一行 `Diagnostics status: ...` 概述；当 `include_info` / `include_hints` 过滤掉条目时，输出会显示 `Diagnostics hidden by output filters: N info/hint diagnostics omitted.`，避免模型看不到被静默隐藏的诊断。
+- LSP / 诊断输出：追加到工具结果中的 LSP 与 Ruff 诊断现在会按优先级裁剪为更简洁的块（错误和警告优先；还有剩余名额时再显示 info 和 hint）。无诊断时不再追加冗余状态行；只有诊断集合确实变化时，才追加简短的 `Diagnostics changed: N new, M resolved.` 摘要。
 - TUI / 复制：在工具卡片上按 `yy` 会复制结构化的 Markdown 块（`# Tool call` / `## Arguments` / `## Result` / `## Diff`）；Done 拒绝卡片额外包含 `## Rejection reason` 段，方便粘贴到外部时保留 Chord 的展示结构。
 - Runtime / 压缩：`/compact` 现在与自动压缩共用同一个后台 worker；可以在 turn 进行中触发，进度显示在后台压缩状态槽，并在下一个安全的 continuation / idle 节点应用，而不要求先达到 idle barrier。
 - Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 在 loop 模式仍保持关闭以保证缓存稳定性。
