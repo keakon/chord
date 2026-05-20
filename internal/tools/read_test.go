@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -199,7 +198,7 @@ func TestReadToolRejectsNamedPipePath(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "input.pipe")
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
+	if err := makeNamedPipeForTest(path); err != nil {
 		t.Fatalf("Mkfifo: %v", err)
 	}
 

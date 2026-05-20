@@ -1,7 +1,22 @@
 package config
 
-import "os"
-
 type authYAMLLock struct {
-	file *os.File
+	lock *configMutationLock
+}
+
+func lockAuthYAMLFile(path string) (*authYAMLLock, error) {
+	lock, err := LockConfigMutation(path)
+	if err != nil {
+		return nil, err
+	}
+	return &authYAMLLock{lock: lock}, nil
+}
+
+func (l *authYAMLLock) Close() error {
+	if l == nil || l.lock == nil {
+		return nil
+	}
+	err := l.lock.Close()
+	l.lock = nil
+	return err
 }
