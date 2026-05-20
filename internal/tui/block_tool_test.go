@@ -1283,6 +1283,9 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	if !strings.Contains(joined, "Delete internal/tui/obsolete.go") {
 		t.Fatalf("expected delete header to show file path; got:\n%s", joined)
 	}
+	if !strings.Contains(joined, "remove obsolete file") {
+		t.Fatalf("expected delete header to show reason; got:\n%s", joined)
+	}
 }
 
 func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {

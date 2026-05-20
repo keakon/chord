@@ -349,6 +349,19 @@ func toolResultStatusFromRestoredContent(content string) agent.ToolResultStatus 
 	return agent.ToolResultStatusSuccess
 }
 
+func toolResultStatusFromRestoredMessage(msg message.Message) agent.ToolResultStatus {
+	switch strings.TrimSpace(msg.ToolStatus) {
+	case string(agent.ToolResultStatusError):
+		return agent.ToolResultStatusError
+	case string(agent.ToolResultStatusCancelled):
+		return agent.ToolResultStatusCancelled
+	case string(agent.ToolResultStatusSuccess):
+		return agent.ToolResultStatusSuccess
+	default:
+		return toolResultStatusFromRestoredContent(msg.Content)
+	}
+}
+
 // messagesToBlocks converts a slice of conversation messages into viewport
 // blocks (user, assistant, tool call/result). Updates nextID for block IDs.
 func contentOrPartsText(msg message.Message) string {
@@ -496,7 +509,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		case "tool":
 			if b, ok := toolIDToBlock[msg.ToolCallID]; ok {
 				b.ResultContent = msg.Content
-				b.ResultStatus = toolResultStatusFromRestoredContent(msg.Content)
+				b.ResultStatus = toolResultStatusFromRestoredMessage(msg)
 				b.ResultDone = true // so restored tool cards stop spinning and render terminal state
 				b.ToolExecutionState = ""
 				b.Audit = msg.Audit.Clone()

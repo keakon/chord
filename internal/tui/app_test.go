@@ -4320,6 +4320,59 @@ func TestMessagesToBlocksCompactionSummaryCollapsedByDefaultAndExpandable(t *tes
 	}
 }
 
+func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "del-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`)}}},
+		{Role: "tool", ToolCallID: "del-1", Content: "Deleted (1):\n- /tmp/obsolete.go", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDurationMs: 1234},
+	}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var block *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockToolCall && b.ToolName == tools.NameDelete {
+			block = b
+			break
+		}
+	}
+	if block == nil {
+		t.Fatal("expected restored Delete tool block")
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Delete /tmp/obsolete.go") {
+		t.Fatalf("expected restored Delete header to show path; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "remove obsolete file") {
+		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
+	}
+	if block.PersistedDuration != 1234*time.Millisecond {
+		t.Fatalf("PersistedDuration = %v, want 1234ms", block.PersistedDuration)
+	}
+}
+
+func TestSessionRestoredToolStatusUsesPersistedStatus(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "sh-1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"false","description":"verify failure"}`)}}},
+		{Role: "tool", ToolCallID: "sh-1", Content: "plain hook-modified failure", ToolStatus: string(agent.ToolResultStatusError)},
+	}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var block *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockToolCall && b.ToolName == tools.NameShell {
+			block = b
+			break
+		}
+	}
+	if block == nil {
+		t.Fatal("expected restored Shell tool block")
+	}
+	if block.ResultStatus != agent.ToolResultStatusError {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusError)
+	}
+}
+
 func TestSessionRestoredRebuildClearsStaleFocusedBlock(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md"}}}
 	m := NewModel(backend)

@@ -311,10 +311,11 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 		if len(filePaths) == 0 {
 			return "", ""
 		}
+		gray := deleteReasonHeaderGray(vals)
 		if len(filePaths) == 1 {
-			return filePaths[0], ""
+			return filePaths[0], gray
 		}
-		return fmt.Sprintf("%d files", len(filePaths)), ""
+		return fmt.Sprintf("%d files", len(filePaths)), gray
 	case "Skill":
 		name := strings.TrimSpace(vals["name"])
 		if name == "" {
@@ -342,10 +343,11 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 		if len(filePaths) == 0 {
 			return "", ""
 		}
+		gray := deleteReasonHeaderGray(vals)
 		if len(filePaths) == 1 {
-			return b.displayToolPath(filePaths[0]), ""
+			return b.displayToolPath(filePaths[0]), gray
 		}
-		return fmt.Sprintf("%d files", len(filePaths)), ""
+		return fmt.Sprintf("%d files", len(filePaths)), gray
 	case "Grep", "Glob", "Shell", "Spawn", "Lsp":
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 	default:
@@ -382,10 +384,19 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 		if len(filePaths) == 0 {
 			return ""
 		}
+		gray := deleteReasonHeaderGray(vals)
 		if len(filePaths) == 1 {
-			return b.displayToolPath(filePaths[0])
+			path := b.displayToolPath(filePaths[0])
+			if gray != "" {
+				return path + " " + gray
+			}
+			return path
 		}
-		return fmt.Sprintf("%d files", len(filePaths))
+		summary := fmt.Sprintf("%d files", len(filePaths))
+		if gray != "" {
+			return summary + " " + gray
+		}
+		return summary
 	case "Grep":
 		pattern := vals["pattern"]
 		if pattern == "" {
@@ -420,6 +431,14 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 	}
 }
 
+func deleteReasonHeaderGray(vals map[string]string) string {
+	reason := firstDisplayLine(vals["reason"])
+	if reason == "" {
+		return ""
+	}
+	return "(" + reason + ")"
+}
+
 func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[string]string) string {
 	if len(keys) == 0 {
 		return ""
@@ -446,10 +465,18 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 		if len(filePaths) == 0 {
 			return ""
 		}
+		gray := deleteReasonHeaderGray(vals)
 		if len(filePaths) == 1 {
+			if gray != "" {
+				return filePaths[0] + " " + gray
+			}
 			return filePaths[0]
 		}
-		return fmt.Sprintf("%d files", len(filePaths))
+		summary := fmt.Sprintf("%d files", len(filePaths))
+		if gray != "" {
+			return summary + " " + gray
+		}
+		return summary
 	case "Grep":
 		pattern := vals["pattern"]
 		if pattern == "" {
