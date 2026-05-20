@@ -42,7 +42,9 @@ const (
 )
 
 var compactionRequiredHeadings = []string{
-	"## Goal",
+	"## Current User Request",
+	"## Active Objective",
+	"## Background Goals",
 	"## User Constraints",
 	"## Progress",
 	"## Key Decisions",
@@ -86,15 +88,20 @@ const compactionSystemPrompt = `You summarize earlier coding-agent conversation 
 Write only the summary. Do not answer the user. Do not invent facts.
 
 First, privately think through the transcript and anchors to identify:
-- the current coding objective
+- the latest user request that should be answered next, including the latest Done rejected reason when it asks for more work, asks a question, changes scope, or corrects the agent
+- the single active coding objective that serves that latest user request
+- historical or completed goals that are background only
 - user constraints and corrections that still matter
+- whether existing TODO items still serve the latest user request, are completed/background, or are stale/superseded
 - concrete progress already made
 - important decisions and why they were made
 - key files, commands, errors, and evidence needed for continuation
 - unresolved blockers and the most likely next step
 
 Then write the final summary using the exact Markdown section headings below, in order:
-## Goal
+## Current User Request
+## Active Objective
+## Background Goals
 ## User Constraints
 ## Progress
 ## Key Decisions
@@ -106,9 +113,16 @@ Then write the final summary using the exact Markdown section headings below, in
 
 Requirements:
 - Every section must be present.
+- The latest user request is authoritative. Identify it explicitly and prioritize it over older goals.
+- Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
+- If the user changed topics after previous todos were created, do not treat stale todos as active work.
+- Separate active todos that directly serve the latest user request from historical, completed, or superseded todos.
+- Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
+- Under "Todo State", use these subgroups exactly: "Active/relevant to latest request", "Completed/background", and "Stale/superseded". If a subgroup has no items, write "(none)".
 - Use concise bullet-style prose under each heading.
 - Include concrete files, commands, errors, and decisions when known.
 - Under "Files and Evidence", first include the archived history file path from the prompt header, then list the most important repository file paths needed for continuation as standalone bullet lines.
+- The checkpoint wrapper may also list all archived history files for the full session history chain; preserve that distinction and do not imply the current compaction file is the only historical archive.
 - Prefer workspace-relative file paths such as internal/... or docs/... .
 - Keep each file path on its own bullet line. Do not add inline explanation text on the same line as a file path.
 - Focus on durable continuation context, not narrative recap.
@@ -119,6 +133,7 @@ type evidenceKind string
 
 const (
 	evidenceUserCorrection evidenceKind = "user_correction"
+	evidenceDoneRejected   evidenceKind = "done_rejected"
 	evidenceUserRequest    evidenceKind = "user_request"
 	evidenceToolError      evidenceKind = "tool_error"
 	evidenceToolDiff       evidenceKind = "tool_diff"
@@ -135,6 +150,7 @@ type evidenceItem struct {
 	Priority  int
 	TokenCost int
 	Key       string
+	Sequence  int
 }
 
 type compactionHistoryMeta struct {
@@ -181,6 +197,8 @@ func evidencePriority(kind evidenceKind) int {
 	switch kind {
 	case evidenceUserCorrection:
 		return 100
+	case evidenceDoneRejected:
+		return 98
 	case evidenceToolError:
 		return 95
 	case evidenceToolDiff:
@@ -218,6 +236,63 @@ func looksLikeUserCorrection(text string) bool {
 		}
 	}
 	return false
+}
+
+func extractDoneRejectedReason(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false
+	}
+	prefixes := []string{"Done rejected:", "Done rejected automatically:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			reason := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+			return reason, reason != ""
+		}
+	}
+	return "", false
+}
+
+func buildDoneRejectedEvidence(source, reason string) evidenceItem {
+	return buildEvidenceItem(
+		evidenceDoneRejected,
+		"Latest Done rejection",
+		"The rejection reason is recent user feedback/request and may supersede older todos.",
+		source,
+		compactTextSnippet(reason, 700),
+	)
+}
+
+func buildLatestUserRequestEvidence(source, text string) evidenceItem {
+	return buildEvidenceItem(
+		evidenceUserRequest,
+		"Latest user request",
+		"This is the latest ordinary user request and should anchor the current objective unless superseded by a later correction or Done rejection.",
+		source,
+		compactTextSnippet(text, 700),
+	)
+}
+
+func isCompactionSummaryText(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "[Context Summary]")
+}
+
+func isNonActionUserUtterance(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	lower = strings.Trim(lower, ".!。！~～ ")
+	switch lower {
+	case "thanks", "thank you", "thx", "ty", "ok", "okay", "好的", "好", "谢谢", "多谢", "收到", "明白", "了解":
+		return true
+	}
+	return false
+}
+
+func isPlainUserRequestForCompaction(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || isCompactionSummaryText(text) || isNonActionUserUtterance(text) || isEscalateMessage(text) || isSubAgentDoneMessage(text) {
+		return false
+	}
+	return true
 }
 
 func buildEvidenceItem(kind evidenceKind, title, whyNeeded, source, excerpt string) evidenceItem {
@@ -283,22 +358,60 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 	if len(candidates) == 0 {
 		return nil
 	}
-	items := append([]evidenceItem(nil), candidates...)
+	latestDoneRejected := -1
+	latestDoneRejectedSeq := -1
+	latestUserRequest := -1
+	latestUserRequestSeq := -1
+	for i, item := range candidates {
+		seq := item.Sequence
+		if seq == 0 {
+			seq = i + 1
+		}
+		switch item.Kind {
+		case evidenceDoneRejected:
+			if seq > latestDoneRejectedSeq {
+				latestDoneRejectedSeq = seq
+				latestDoneRejected = i
+			}
+		case evidenceUserRequest:
+			if seq > latestUserRequestSeq {
+				latestUserRequestSeq = seq
+				latestUserRequest = i
+			}
+		}
+	}
+	items := make([]evidenceItem, 0, len(candidates))
+	for i, item := range candidates {
+		if item.Kind == evidenceDoneRejected && i != latestDoneRejected {
+			continue
+		}
+		if item.Kind == evidenceUserRequest && i != latestUserRequest {
+			continue
+		}
+		items = append(items, item)
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Priority != items[j].Priority {
 			return items[i].Priority > items[j].Priority
+		}
+		if items[i].Sequence != items[j].Sequence {
+			return items[i].Sequence > items[j].Sequence
 		}
 		return items[i].TokenCost < items[j].TokenCost
 	})
 	budget := evidencePackTokenBudget(contextLimit)
 	selected := make([]evidenceItem, 0, len(items))
 	used := 0
-	var haveCorrection, haveError, haveDiff bool
+	var haveCorrection, haveDoneRejected, haveUserRequest, haveError, haveDiff bool
 	for _, item := range items {
 		required := false
 		switch item.Kind {
 		case evidenceUserCorrection:
 			required = !haveCorrection
+		case evidenceDoneRejected:
+			required = !haveDoneRejected
+		case evidenceUserRequest:
+			required = !haveUserRequest
 		case evidenceToolError:
 			required = !haveError
 		case evidenceToolDiff:
@@ -312,6 +425,10 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 		switch item.Kind {
 		case evidenceUserCorrection:
 			haveCorrection = true
+		case evidenceDoneRejected:
+			haveDoneRejected = true
+		case evidenceUserRequest:
+			haveUserRequest = true
 		case evidenceToolError:
 			haveError = true
 		case evidenceToolDiff:
@@ -322,7 +439,10 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 		return nil
 	}
 	sort.SliceStable(selected, func(i, j int) bool {
-		return selected[i].Priority > selected[j].Priority
+		if selected[i].Priority != selected[j].Priority {
+			return selected[i].Priority > selected[j].Priority
+		}
+		return selected[i].Sequence > selected[j].Sequence
 	})
 	return selected
 }
@@ -330,8 +450,10 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 func collectEvidenceItems(messages []message.Message) []evidenceItem {
 	items := make([]evidenceItem, 0, 8)
 	seen := make(map[string]bool)
+	capturedLatestUserRequest := false
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
+		sourceSeq := i + 1
 		switch msg.Role {
 		case "user":
 			text := strings.TrimSpace(msg.Content)
@@ -367,9 +489,13 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					fmt.Sprintf("message %d (user)", i+1),
 					compactTextSnippet(text, 600),
 				)
+			case isPlainUserRequestForCompaction(text) && !capturedLatestUserRequest:
+				item = buildLatestUserRequestEvidence(fmt.Sprintf("message %d (user)", i+1), text)
+				capturedLatestUserRequest = true
 			default:
 				continue
 			}
+			item.Sequence = sourceSeq
 			if seen[item.Key] {
 				continue
 			}
@@ -377,6 +503,14 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 			items = append(items, item)
 		case "tool":
 			text := strings.TrimSpace(msg.Content)
+			if reason, ok := extractDoneRejectedReason(text); ok {
+				item := buildDoneRejectedEvidence(fmt.Sprintf("message %d (tool result)", i+1), reason)
+				item.Sequence = sourceSeq
+				if !seen[item.Key] {
+					seen[item.Key] = true
+					items = append(items, item)
+				}
+			}
 			if text == "" && strings.TrimSpace(msg.ToolDiff) == "" {
 				continue
 			}
@@ -388,6 +522,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					fmt.Sprintf("message %d (tool result)", i+1),
 					compactTextSnippet(text, 800),
 				)
+				item.Sequence = sourceSeq
 				if !seen[item.Key] {
 					seen[item.Key] = true
 					items = append(items, item)
@@ -401,6 +536,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					fmt.Sprintf("message %d (tool diff)", i+1),
 					compactTextSnippet(msg.ToolDiff, 700),
 				)
+				item.Sequence = sourceSeq
 				if !seen[item.Key] {
 					seen[item.Key] = true
 					items = append(items, item)

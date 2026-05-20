@@ -1104,15 +1104,26 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				compactTextSnippet(text, 700),
 			))
 		case looksLikeUserCorrection(text):
-			a.addEvidenceCandidate(buildEvidenceItem(
+			item := buildEvidenceItem(
 				evidenceUserCorrection,
 				"User correction / constraint",
 				"This explicitly constrains the next code change and should be preserved verbatim.",
 				"runtime user message",
 				compactTextSnippet(text, 600),
-			))
+			)
+			item.Sequence = len(a.evidenceCandidates) + 1
+			a.addEvidenceCandidate(item)
+		case isPlainUserRequestForCompaction(text):
+			item := buildLatestUserRequestEvidence("runtime user message", text)
+			item.Sequence = len(a.evidenceCandidates) + 1
+			a.addEvidenceCandidate(item)
 		}
 	case "tool":
+		if reason, ok := extractDoneRejectedReason(text); ok {
+			item := buildDoneRejectedEvidence("runtime tool result", reason)
+			item.Sequence = len(a.evidenceCandidates) + 1
+			a.addEvidenceCandidate(item)
+		}
 		if strings.Contains(text, "Error:") || isToolErrorContent(text) {
 			a.addEvidenceCandidate(buildEvidenceItem(
 				evidenceToolError,

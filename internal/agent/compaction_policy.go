@@ -690,12 +690,19 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 }
 
 func buildGoalAnchor(messages []message.Message) string {
-	for _, msg := range messages {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
 		if msg.Role != "user" {
 			continue
 		}
 		text := strings.TrimSpace(msg.Content)
-		if text == "" {
+		if len(msg.Parts) > 0 {
+			normalized := normalizeMessagesForSummary([]message.Message{msg})
+			if len(normalized) > 0 {
+				text = strings.TrimSpace(normalized[0].Content)
+			}
+		}
+		if !isPlainUserRequestForCompaction(text) {
 			continue
 		}
 		return "- " + strings.ReplaceAll(compactTextSnippet(text, 300), "\n", " ")
@@ -772,10 +779,10 @@ func buildProgressAnchor(messages []message.Message, items []evidenceItem) strin
 
 func formatCompactionAnchorsForPrompt(input *compactionInput) string {
 	if input == nil {
-		return "Goal anchor:\n- (none)\n\nConstraint anchor:\n- (none)\n\nDecision anchor:\n- (none)\n\nRecent progress anchor:\n- (none)"
+		return "Latest user request anchor:\n- (none)\n\nConstraint anchor:\n- (none)\n\nDecision anchor:\n- (none)\n\nRecent progress anchor:\n- (none)"
 	}
 	return strings.Join([]string{
-		"Goal anchor:\n" + input.GoalAnchor,
+		"Latest user request anchor:\n" + input.GoalAnchor,
 		"Constraint anchor:\n" + input.ConstraintAnchor,
 		"Decision anchor:\n" + input.DecisionAnchor,
 		"Recent progress anchor:\n" + input.ProgressAnchor,
@@ -796,10 +803,10 @@ func validateCompactionSummary(summary string) error {
 			matched++
 		}
 	}
-	if matched < len(compactionRequiredHeadings)-1 {
-		return fmt.Errorf("compaction summary missing required sections (%d/%d)", matched, len(compactionRequiredHeadings))
+	if matched >= len(compactionRequiredHeadings)-1 {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("compaction summary missing required sections (%d/%d)", matched, len(compactionRequiredHeadings))
 }
 
 func renderEvidenceItemsForPrompt(items []evidenceItem) string {
@@ -913,16 +920,32 @@ func renderFallbackSummarySections(sections []fallbackSummarySection, background
 
 func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	return renderFallbackSummarySections([]fallbackSummarySection{
-		{"## Goal", "- Continue the active coding task using the archived history and preserved recent context."},
+		{"## Current User Request", fallbackCurrentUserRequestSection(input)},
+		{"## Active Objective", "- Continue from the latest preserved user request in the recent context; if unavailable, consult the archived history before acting."},
+		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
 		{"## User Constraints", renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
 		{"## Progress", fallbackProgressSection(input)},
 		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, input, keyFiles)},
-		{"## Todo State", formatTodosAsBullets(todos)},
+		{"## Todo State", formatTodosAsRelevanceBullets(todos)},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
 		{"## Next Step", fallbackNextStepSection(input)},
 	}, backgroundObjects)
+}
+
+func fallbackCurrentUserRequestSection(input *compactionInput) string {
+	if input != nil {
+		for _, item := range input.EvidenceItems {
+			if item.Kind == evidenceDoneRejected {
+				return "- Latest Done rejected reason: " + strings.ReplaceAll(item.Excerpt, "\n", " ")
+			}
+		}
+		if strings.TrimSpace(input.RecentTailAnchor) != "" && input.RecentTailAnchor != "- (none)" {
+			return "- Continue from the latest preserved user request in the recent tail below:\n" + input.RecentTailAnchor
+		}
+	}
+	return "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."
 }
 
 func renderEvidenceKindForFallback(input *compactionInput, kind evidenceKind, empty string) string {
@@ -957,7 +980,10 @@ func fallbackProgressSection(input *compactionInput) string {
 }
 
 func fallbackFilesAndEvidenceSection(relHistoryPath string, input *compactionInput, keyFiles []string) string {
-	lines := []string{"- Archived history: " + relHistoryPath}
+	lines := []string{
+		"- Archived history for this compaction: " + relHistoryPath,
+		"- Checkpoint wrapper may list additional archived history files for the full session history chain.",
+	}
 	for _, path := range keyFiles {
 		lines = append(lines, "- "+path)
 	}
@@ -996,13 +1022,20 @@ func fallbackNextStepSection(input *compactionInput) string {
 	return "- Continue from the preserved recent context below:\n" + input.RecentTailAnchor
 }
 
-func formatTodosAsBullets(todos []tools.TodoItem) string {
-	if len(todos) == 0 {
-		return "- (none)"
+func formatTodosAsRelevanceBullets(todos []tools.TodoItem) string {
+	lines := []string{
+		"- Active/relevant to latest request: not relevance-filtered because model summarization was unavailable.",
+		"- Completed/background:",
+		"  - (none classified)",
+		"- Stale/superseded:",
+		"  - (none classified)",
 	}
-	var lines []string
+	if len(todos) == 0 {
+		lines[0] = "- Active/relevant to latest request: (none)"
+		return strings.Join(lines, "\n")
+	}
 	for _, todo := range todos {
-		lines = append(lines, fmt.Sprintf("- [%s] %s: %s", todo.Status, todo.ID, todo.Content))
+		lines = append(lines, fmt.Sprintf("  - [%s] %s: %s", todo.Status, todo.ID, todo.Content))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1108,7 +1141,8 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, relHistoryPath st
 	sb.WriteString("Summarize the earlier conversation transcript below so the main coding agent can continue work.\n")
 	sb.WriteString("Treat this as a durable checkpoint for the next coding turn, not as a narrative recap. Focus on current objective, constraints, decisions, progress, blockers, and concrete next steps.\n")
 	sb.WriteString("A small raw evidence pack and recent raw tail may be kept after this summary, so focus on durable context from the archived head rather than duplicating those verbatim excerpts.\n\n")
-	fmt.Fprintf(&sb, "Full archived history file: %s\n", relHistoryPath)
+	fmt.Fprintf(&sb, "Full archived history file for this compaction: %s\n", relHistoryPath)
+	sb.WriteString("If this is not the first compaction, the checkpoint wrapper also lists all archived history files for the full session history chain.\n")
 	if input != nil && input.OmittedMessages > 0 {
 		fmt.Fprintf(&sb, "Compression note: the earliest %d archived message(s) were omitted from the summary input to fit the utility model budget. The archived history file is authoritative for those details.\n", input.OmittedMessages)
 	}
@@ -1128,7 +1162,7 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, relHistoryPath st
 	} else {
 		sb.WriteString("- (none)")
 	}
-	sb.WriteString("\n\nCurrent todo list:\n")
+	sb.WriteString("\n\nCurrent todo list from the pre-compaction agent. These todos are not automatically authoritative after compaction. Evaluate each item against the latest user request and classify it as active/relevant, completed/background, or stale/superseded in the summary:\n")
 	sb.WriteString(formatTodosForPrompt(todos))
 	sb.WriteString("\n\nCurrent sub-agent state:\n")
 	sb.WriteString(formatSubAgentsForPrompt(subAgents))
@@ -1194,14 +1228,16 @@ func blankToDefault(value, fallback string) string {
 
 func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	return renderFallbackSummarySections([]fallbackSummarySection{
-		{"## Goal", "- Continue the active coding task using the archived history and preserved recent context."},
+		{"## Current User Request", "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."},
+		{"## Active Objective", "- Continue from the latest preserved user request; do not assume older todos remain active without checking relevance."},
+		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
 		{"## User Constraints", "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
 		{"## Progress", "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
 		{"## Key Decisions", "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, nil, keyFiles)},
-		{"## Todo State", formatTodosAsBullets(todos)},
+		{"## Todo State", formatTodosAsRelevanceBullets(todos)},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},
-		{"## Next Step", "- Continue from the archived history and listed key files."},
+		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},
 	}, backgroundObjects)
 }

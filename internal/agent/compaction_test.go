@@ -135,7 +135,7 @@ func (p *countingSummaryOnlyProvider) Complete(
 
 func validCompactionSummaryForTest(history string) string {
 	return fmt.Sprintf(
-		"## Goal\n- continue current task\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- internal/agent/compaction.go\n\n## Todo State\n- none\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
+		"## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- internal/agent/compaction.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
 		history,
 	)
 }
@@ -469,6 +469,39 @@ func TestSplitMessagesForCompaction_PreservesRecentRawTailOutsideArchive(t *test
 func TestValidateCompactionSummaryRejectsWeakOneLiner(t *testing.T) {
 	if err := validateCompactionSummary("Keep improving extraction quality."); err == nil {
 		t.Fatal("expected weak one-line summary to be rejected")
+	}
+}
+
+func TestValidateCompactionSummaryRejectsLegacySections(t *testing.T) {
+	summary := `## Goal
+- Continue work with enough detail to pass the minimum summary length requirement for validation.
+
+## User Constraints
+- Keep changes focused and do not accept older compaction section names.
+
+## Progress
+- Legacy summaries are intentionally rejected after upgrading section names.
+
+## Key Decisions
+- Require the active-objective heading set instead of the previous goal heading set.
+
+## Files and Evidence
+- history-1.md
+- internal/agent/compaction.go
+
+## Todo State
+- Existing todo state is preserved from the legacy summary.
+
+## SubAgent State
+- none
+
+## Open Problems
+- none
+
+## Next Step
+- Continue from the legacy checkpoint safely.`
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("expected legacy summary to be rejected")
 	}
 }
 
@@ -891,7 +924,29 @@ func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 		nil,
 		nil,
 	)
-	for _, want := range []string{"Durable anchors extracted before summarization:", "Goal anchor:", "Constraint anchor:", "Decision anchor:", "Recent progress anchor:"} {
+	for _, want := range []string{"Durable anchors extracted before summarization:", "Latest user request anchor:", "Constraint anchor:", "Decision anchor:", "Recent progress anchor:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildCompactionPromptIncludesActiveObjectivePreservationRules(t *testing.T) {
+	prompt := buildCompactionPromptWithKeyFiles(
+		&compactionInput{Transcript: "transcript"},
+		"history-2.md",
+		[]string{"internal/agent/compaction.go"},
+		[]tools.TodoItem{{ID: "old", Content: "continue investigating rate limit", Status: "pending"}},
+		nil,
+		nil,
+	)
+	for _, want := range []string{
+		"Full archived history file for this compaction: history-2.md",
+		"checkpoint wrapper also lists all archived history files",
+		"These todos are not automatically authoritative after compaction",
+		"classify it as active/relevant, completed/background, or stale/superseded",
+		"continue investigating rate limit",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
@@ -1232,6 +1287,20 @@ func TestBuildTruncateOnlySummaryIncludesFilesAndEvidenceSection(t *testing.T) {
 	}
 	if !strings.Contains(summary, "- internal/agent/compaction.go") {
 		t.Fatalf("truncate-only summary missing key file bullet:\n%s", summary)
+	}
+}
+
+func TestBuildCompactionCheckpointMessageListsAllHistoryRefs(t *testing.T) {
+	content := buildCompactionCheckpointMessage(
+		"## Current User Request\n- continue\n\n## Active Objective\n- continue\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history for this compaction: history-3.md\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
+		[]string{".chord/sessions/test/history-1.md", ".chord/sessions/test/history-2.md", ".chord/sessions/test/history-3.md"},
+		"model_summary",
+		nil,
+	)
+	for _, want := range []string{"Archived history files:", "history-1.md", "history-2.md", "history-3.md"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("checkpoint missing %q:\n%s", want, content)
+		}
 	}
 }
 
@@ -1755,7 +1824,119 @@ func TestRecordEvidenceFromMessageCapturesToolErrorAndDiff(t *testing.T) {
 	}
 }
 
-func TestSplitMessagesForCompaction_AllowsSummaryOnlyWhenNoEvidence(t *testing.T) {
+func TestCollectEvidenceItemsPreservesLatestDoneRejectedReason(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "tool", Content: "Done rejected: older request"},
+		{Role: "assistant", Content: "working"},
+		{Role: "tool", Content: "Done rejected: 把这个方案生成一个plan文档"},
+	}
+	items := selectEvidenceItems(msgs, 4096)
+	if len(items) == 0 {
+		t.Fatal("expected done rejection evidence")
+	}
+	if items[0].Kind != evidenceDoneRejected {
+		t.Fatalf("first evidence kind = %q, want %q", items[0].Kind, evidenceDoneRejected)
+	}
+	if !strings.Contains(items[0].Excerpt, "plan文档") {
+		t.Fatalf("latest done rejection not preserved first: %+v", items)
+	}
+}
+
+func TestCollectEvidenceItemsPreservesLatestOrdinaryUserRequest(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "继续调查 rate limit"},
+		{Role: "assistant", Content: "working"},
+		{Role: "user", Content: "生成压缩目标保持方案 plan"},
+		{Role: "user", Content: "[Context Summary]\nold summary", IsCompactionSummary: true},
+	}
+	items := selectEvidenceItems(msgs, 4096)
+	found := false
+	for _, item := range items {
+		if item.Kind == evidenceUserRequest {
+			found = true
+			if !strings.Contains(item.Excerpt, "plan") || strings.Contains(item.Excerpt, "rate limit") {
+				t.Fatalf("latest user request evidence mismatch: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("selected evidence missing latest user request: %+v", items)
+	}
+}
+
+func TestBuildGoalAnchorUsesLatestOrdinaryUserRequest(t *testing.T) {
+	got := buildGoalAnchor([]message.Message{
+		{Role: "user", Content: "继续调查 rate limit"},
+		{Role: "assistant", Content: "working"},
+		{Role: "user", Content: "[SubAgent agent-2 requests intervention]\n\nReason: merge conflict"},
+		{Role: "user", Content: "生成压缩目标保持方案 plan"},
+		{Role: "user", Content: "[Context Summary]\nold summary", IsCompactionSummary: true},
+	})
+	if !strings.Contains(got, "plan") || strings.Contains(got, "rate limit") {
+		t.Fatalf("buildGoalAnchor() = %q, want latest ordinary user request", got)
+	}
+}
+
+func TestCompactionPromptAnchorsLatestRequestAgainstStaleTodo(t *testing.T) {
+	input := &compactionInput{
+		Transcript:       "transcript",
+		GoalAnchor:       buildGoalAnchor([]message.Message{{Role: "user", Content: "继续调查 rate limit"}, {Role: "user", Content: "生成压缩目标保持方案 plan"}}),
+		EvidenceItems:    []evidenceItem{{Kind: evidenceDoneRejected, Title: "Latest Done rejection", WhyNeeded: "The rejection reason is recent user feedback/request and may supersede older todos.", Excerpt: "把这个方案生成一个plan文档"}},
+		ConstraintAnchor: "- (none extracted)",
+		DecisionAnchor:   "- (none explicitly extracted; infer from progress and evidence)",
+		ProgressAnchor:   "- (none extracted)",
+	}
+	prompt := buildCompactionPromptWithKeyFiles(
+		input,
+		"history-3.md",
+		nil,
+		[]tools.TodoItem{{ID: "old", Content: "继续调查 rate limit", Status: "pending"}},
+		nil,
+		nil,
+	)
+	for _, want := range []string{
+		"Latest user request anchor:\n- 生成压缩目标保持方案 plan",
+		"Latest Done rejection",
+		"把这个方案生成一个plan文档",
+		"These todos are not automatically authoritative after compaction",
+		"stale/superseded",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestSelectEvidenceItemsKeepsDoneRejectedUnderTightBudget(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "tool", Content: "Error: " + strings.Repeat("long failing output ", 300)},
+		{Role: "tool", Content: "Done rejected: 如果连接不上，为什么会推送用量呢？"},
+	}
+	items := selectEvidenceItems(msgs, 1)
+	found := false
+	for _, item := range items {
+		if item.Kind == evidenceDoneRejected && strings.Contains(item.Excerpt, "推送用量") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("selected evidence missing done rejection: %+v", items)
+	}
+}
+
+func TestRecordEvidenceFromMessageCapturesDoneRejected(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: "Done rejected: 分析应该怎么保留正确的工作目标"})
+	if got := len(a.evidenceCandidates); got != 1 {
+		t.Fatalf("len(evidenceCandidates) = %d, want 1", got)
+	}
+	if a.evidenceCandidates[0].Kind != evidenceDoneRejected {
+		t.Fatalf("candidate kind = %q, want %q", a.evidenceCandidates[0].Kind, evidenceDoneRejected)
+	}
+}
+
+func TestSplitMessagesForCompaction_PreservesLatestActionableUserRequestEvidence(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "Implement feature X."},
 		{Role: "assistant", Content: "Done."},
@@ -1767,8 +1948,11 @@ func TestSplitMessagesForCompaction_AllowsSummaryOnlyWhenNoEvidence(t *testing.T
 	if len(head) == 0 {
 		t.Fatal("expected non-empty archived head")
 	}
-	if len(evidence) != 0 {
-		t.Fatalf("expected no evidence artifact, got %+v", evidence)
+	if len(evidence) != 1 {
+		t.Fatalf("len(evidence) = %d, want 1", len(evidence))
+	}
+	if !strings.Contains(evidence[0].Content, "Latest user request") || !strings.Contains(evidence[0].Content, "Implement feature X") || strings.Contains(evidence[0].Content, "Thanks") {
+		t.Fatalf("latest actionable request evidence mismatch: %q", evidence[0].Content)
 	}
 }
 
