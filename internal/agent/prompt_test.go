@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1493,6 +1494,9 @@ func TestSubAgentBuildSystemPrompt_IncludesVenv(t *testing.T) {
 	}
 
 	got := s.buildSystemPrompt()
+	if !strings.Contains(got, "Platform: "+runtime.GOOS+"/"+runtime.GOARCH) {
+		t.Fatalf("SubAgent buildSystemPrompt() missing full platform, got:\n%s", got)
+	}
 	if !strings.Contains(got, "Python virtual environment: /tmp/project/.venv") {
 		t.Fatalf("SubAgent buildSystemPrompt() missing venv line when venvPath is set, got:\n%s", got)
 	}

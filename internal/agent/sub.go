@@ -746,7 +746,7 @@ func (s *SubAgent) buildSystemPrompt() string {
   Working directory: %s
   Platform: %s
   Today's date: %s%s
-</env>`, s.workDir, runtime.GOOS, time.Now().Format("Mon Jan 2 2006"), venvLine))
+</env>`, s.workDir, runtime.GOOS+"/"+runtime.GOARCH, time.Now().Format("Mon Jan 2 2006"), venvLine))
 
 	// Task description (core difference from MainAgent).
 	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, s.taskCompletionInstruction()))
