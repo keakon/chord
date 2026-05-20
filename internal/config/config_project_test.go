@@ -96,6 +96,7 @@ confirm_timeout: 0
 thinking_translation:
   target_language: zh-Hans
   model_pool: fast
+  max_chars: 500
 desktop_notification: true
 prevent_sleep: true
 commands:
@@ -139,6 +140,9 @@ keymap:
 	}
 	if mergedCfg.ThinkingTranslation.ModelPool != "fast" {
 		t.Fatalf("merged thinking_translation.model_pool = %q, want fast", mergedCfg.ThinkingTranslation.ModelPool)
+	}
+	if mergedCfg.ThinkingTranslation.MaxChars != 500 {
+		t.Fatalf("merged thinking_translation.max_chars = %d, want 500", mergedCfg.ThinkingTranslation.MaxChars)
 	}
 	if mergedCfg.Context.Compaction.Threshold != 0 {
 		t.Fatalf("merged compaction.threshold = %v, want explicit project override 0", mergedCfg.Context.Compaction.Threshold)

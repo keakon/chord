@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -222,13 +224,53 @@ func (m *Model) rebuildBlocksFromAgentMessages() []*Block {
 	return m.rebuildBlocksFromMessages(msgs)
 }
 
+func (m *Model) loadThinkingTranslationsForTranscript() map[string]ThinkingTranslationView {
+	if m == nil || m.agent == nil {
+		return nil
+	}
+	summary := m.agent.GetSessionSummary()
+	if summary == nil || strings.TrimSpace(summary.ID) == "" {
+		return nil
+	}
+	sessionDirProvider, ok := m.agent.(interface{ SessionDir() string })
+	if !ok {
+		return nil
+	}
+	sessionDir := strings.TrimSpace(sessionDirProvider.SessionDir())
+	if sessionDir == "" {
+		return nil
+	}
+	entries, err := recovery.LoadThinkingTranslations(sessionDir)
+	if err != nil {
+		log.Debugf("load thinking translations failed session=%s err=%v", summary.ID, err)
+		return nil
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make(map[string]ThinkingTranslationView, len(entries))
+	for _, entry := range entries {
+		translated := strings.TrimSpace(entry.Translated)
+		if strings.TrimSpace(entry.MessageID) == "" || entry.BlockIndex < 0 || translated == "" {
+			continue
+		}
+		key := thinkingTranslationTranscriptKey(entry.MessageID, entry.BlockIndex, entry.OriginalHash)
+		out[key] = ThinkingTranslationView{TargetLang: strings.TrimSpace(entry.TargetLang), Content: translated}
+	}
+	return out
+}
+
+func thinkingTranslationTranscriptKey(messageID string, blockIndex int, originalHash string) string {
+	return fmt.Sprintf("%s:%d:%s", strings.TrimSpace(messageID), blockIndex, strings.TrimSpace(originalHash))
+}
+
 func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
 	if len(msgs) == 0 {
 		return nil
 	}
 
 	var nextID int
-	blocks := messagesToBlocks(msgs, &nextID)
+	blocks := messagesToBlocksWithThinkingTranslations(msgs, &nextID, m.loadThinkingTranslationsForTranscript())
 	for _, block := range blocks {
 		if block != nil {
 			block.displayWorkingDir = m.workingDir
@@ -317,6 +359,10 @@ func contentOrPartsText(msg message.Message) string {
 }
 
 func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
+	return messagesToBlocksWithThinkingTranslations(msgs, nextID, nil)
+}
+
+func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *int, translations map[string]ThinkingTranslationView) []*Block {
 	var blocks []*Block
 	toolIDToBlock := make(map[string]*Block)
 
@@ -395,14 +441,24 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 			// Emit each thinking block as an independent BlockThinking so they
 			// can be focused / copied individually.
 			for blockIndex, tb := range msg.ThinkingBlocks {
-				if strings.TrimSpace(tb.Thinking) != "" {
-					blocks = append(blocks, &Block{
+				thinking := strings.TrimSpace(tb.Thinking)
+				if thinking != "" {
+					block := &Block{
 						ID:                 *nextID,
 						Type:               BlockThinking,
 						Content:            tb.Thinking,
 						MsgIndex:           msgIdx,
 						ThinkingBlockIndex: blockIndex,
-					})
+					}
+					if len(translations) > 0 {
+						messageID := fmt.Sprintf("msgidx:%d", msgIdx)
+						originalHash := recovery.ThinkingTranslationOriginalHash(tb.Thinking)
+						if view, ok := translations[thinkingTranslationTranscriptKey(messageID, blockIndex, originalHash)]; ok && strings.TrimSpace(view.Content) != "" {
+							block.ThinkingTranslations = make([]ThinkingTranslationView, blockIndex+1)
+							block.ThinkingTranslations[blockIndex] = view
+						}
+					}
+					blocks = append(blocks, block)
 					*nextID++
 				}
 			}

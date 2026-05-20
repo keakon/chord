@@ -2,6 +2,17 @@ package thinkingtranslate
 
 import "strings"
 
+func truncateForTranslation(s string, maxChars int) string {
+	if maxChars <= 0 {
+		maxChars = DefaultMaxChars
+	}
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s
+	}
+	return string(runes[:maxChars])
+}
+
 func splitIntoChunks(s string, maxChars int) []string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	if maxChars <= 0 {

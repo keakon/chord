@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 )
 
@@ -53,6 +54,9 @@ func (a *MainAgent) thinkingTranslationService() *thinkingtranslate.Service {
 	}
 	svc.TargetLang = targetLang
 	svc.ModelPool = modelPool
+	if cfg.MaxChars > 0 {
+		svc.MaxChars = cfg.MaxChars
+	}
 	svc.SetTranslator(translator)
 	svc.DetectLang = func(s string) (lang string, confidence float64) {
 		info := whatlanggo.Detect(s)
@@ -224,6 +228,16 @@ func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoc
 		if ctx.Err() != nil || a.sessionEpoch != sessionEpoch {
 			log.Debugf("thinking translation dropped stale event message=%s block=%d session_epoch=%d current_session_epoch=%d", messageKey, blockIndex, sessionEpoch, a.sessionEpoch)
 			return
+		}
+		if err := recovery.SaveThinkingTranslation(a.sessionDir, recovery.ThinkingTranslationEntry{
+			AgentID:      "",
+			MessageID:    messageKey,
+			BlockIndex:   blockIndex,
+			TargetLang:   meta.TargetLang,
+			OriginalHash: recovery.ThinkingTranslationOriginalHash(original),
+			Translated:   out,
+		}); err != nil {
+			log.Debugf("thinking translation persist failed message=%s block=%d err=%v", messageKey, blockIndex, err)
 		}
 		a.emitToTUI(ThinkingTranslatedEvent{AgentID: "", MessageID: messageKey, BlockIndex: blockIndex, Translated: out, TargetLang: meta.TargetLang})
 	}()

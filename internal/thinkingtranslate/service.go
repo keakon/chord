@@ -8,6 +8,8 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const DefaultMaxChars = 1000
+
 type ChunkTranslator interface {
 	TranslateChunk(ctx context.Context, targetLang, chunk string) (string, error)
 }
@@ -18,7 +20,7 @@ type Service struct {
 
 	MinConfidence     float64
 	LatinRatioTrigger float64
-	MaxCharsPerChunk  int
+	MaxChars          int
 
 	DetectLang DetectFunc
 
@@ -30,7 +32,7 @@ func NewService() (*Service, error) {
 		TargetLang:        "zh-Hans",
 		MinConfidence:     0.70,
 		LatinRatioTrigger: 0.70,
-		MaxCharsPerChunk:  1800,
+		MaxChars:          DefaultMaxChars,
 		DetectLang:        nil,
 	}
 	return s, nil
@@ -82,7 +84,8 @@ func (s *Service) TranslateText(ctx context.Context, original string, meta *Deci
 	if s.translator == nil {
 		return "", fmt.Errorf("translation backend not configured")
 	}
-	chunks := splitIntoChunks(original, s.MaxCharsPerChunk)
+	chunk := truncateForTranslation(original, s.MaxChars)
+	chunks := splitIntoChunks(chunk, s.MaxChars)
 	if meta != nil {
 		meta.Chunks = len(chunks)
 	}

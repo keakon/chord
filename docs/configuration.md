@@ -202,6 +202,7 @@ model_pools:
 thinking_translation:
   target_language: zh-Hans
   model_pool: translation
+  max_chars: 1000
 ```
 
 Notes:
@@ -209,11 +210,12 @@ Notes:
 - This feature only translates **thinking / reasoning**. It does not translate the assistant final answer.
 - Translation uses an LLM provider you already configured. `thinking_translation.model_pool` must point to a top-level `model_pools` entry.
 - `target_language` and `model_pool` are both required. If either is missing, the feature is disabled.
-- Use a separate low-cost translation pool when possible. The pool can contain multiple `provider/model[@variant]` refs; translation runs a **single fallback round** across pool entries in order: if one candidate fails (including network/5xx/timeout), it moves to the next candidate, and an empty translation result also triggers trying the next candidate.
+- Use a separate low-cost translation pool when possible. The pool can contain multiple `provider/model[@variant]` refs; translation runs a **single fallback round** across pool entries in order: if one candidate fails (including network/5xx/timeout), it moves to the next candidate, and empty, clearly truncated, or wrong-target-language translation results also trigger trying the next candidate.
+- `max_chars` limits the thinking preview sent for translation. The default is `1000`; set a smaller value such as `500` for lower latency/cost, or a larger value when you prefer more complete translated thinking.
 - The thinking-translation layer does not impose its own whole-translation timeout and does not use a circuit breaker. A temporary failure for one thinking block only skips that block; it does not block later thinking translations or the main response.
 - Per-provider request/header/stream idle timeouts still apply at the LLM transport layer. With the default auxiliary client settings, these are one-minute-class timeouts, so a stalled model/key can fail over while the pool still gets a chance to run.
 - The translated content is appended under the corresponding thinking card, separated by a neutral header like `Translated · <target_language>`. The translation is rendered with the same Markdown / code-highlighting pipeline and is not written back into model context.
-- Translations are reused **only within the current process** (in-memory). They are not persisted to disk and are not replayed across sessions.
+- Translations are persisted in the session directory (`thinking_translations.json`) as a UI-side mapping keyed by message/block/content hash, and restored when the same session is resumed. They are not written back into model context.
 
 More detailed fields are described in the config reference below.
 
@@ -932,7 +934,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `key_rotation`, `key_order`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
-| `thinking_translation`  | object                | disabled                         | global / project         | Optional appended translation for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
+| `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
 | `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](#context-compaction) and [Context reduction](#context-reduction). |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |

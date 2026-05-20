@@ -185,6 +185,7 @@ model_pools:
 thinking_translation:
   target_language: zh-Hans
   model_pool: translation
+  max_chars: 1000
 ```
 
 要点：
@@ -192,11 +193,12 @@ thinking_translation:
 - 该能力只翻译 **thinking / reasoning**，不翻译 assistant 正文。
 - 翻译走已配置的大模型 provider，`thinking_translation.model_pool` 必须指向一个顶层 `model_pools` 条目。
 - `target_language` 和 `model_pool` 都是必填；缺失任一项时该能力不会启用。
-- 建议为翻译单独配置低成本模型池。该池可包含多个 `provider/model[@variant]` ref；翻译会按模型池顺序执行**单轮 fallback**：若当前候选失败（含网络/5xx/超时等）会切到下一个候选继续尝试；此外，当返回为空翻译结果时也会继续切换下一候选。
+- 建议为翻译单独配置低成本模型池。该池可包含多个 `provider/model[@variant]` ref；翻译会按模型池顺序执行**单轮 fallback**：若当前候选失败（含网络/5xx/超时等）会切到下一个候选继续尝试；此外，当返回为空、明显截断或不是目标语言的翻译结果时也会继续切换下一候选。
+- `max_chars` 限制送去翻译的 thinking 预览长度，默认 `1000`；如需更低延迟/成本可设为 `500`，如希望译文更完整可调大。
 - thinking 翻译层不再设置整体翻译超时，也不使用 circuit breaker。某个 thinking block 临时失败只会跳过该 block，不会阻塞后续 thinking 翻译，也不会影响主回答。
 - provider 请求、header、流式空闲等底层传输超时仍然生效。默认辅助 client 使用一分钟级别的超时，因此卡住的模型 / key 可以失败切换，同时仍允许模型池有机会完整运行。
 - 译文会附加到对应 thinking 卡片下方，使用中性的 `Translated · <target_language>` 分隔标题，并保留 Markdown / 代码高亮；不会写回模型上下文。
-- 译文只在当前会话进程内复用，不跨 session 持久化或 replay。
+- 译文会以 UI 侧映射形式持久化到会话目录的 `thinking_translations.json`，按 message / block / 内容 hash 绑定；恢复同一 session 时会重新显示。译文不会写回模型上下文。
 
 更完整的字段说明见下文配置参考。
 
@@ -807,7 +809,7 @@ chord doctor models --pool thinking
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`key_rotation`、`key_order`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
-| `thinking_translation`  | object                | 关闭                            | global / project         | 可选的 thinking / reasoning 卡片附加翻译。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
+| `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
