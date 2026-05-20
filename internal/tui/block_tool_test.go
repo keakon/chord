@@ -13,6 +13,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
@@ -70,6 +71,19 @@ func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
 	h := newCodeHighlighter("sample.go", "package main\n// comment\n")
 	if got := h.chromaStyle.Get(chroma.CommentSingle).Colour.String(); got != darkThemeSyntaxCommentColour {
 		t.Fatalf("highlighter comment colour = %q, want %q", got, darkThemeSyntaxCommentColour)
+	}
+}
+
+func TestToolHeaderProgressSuffixSurvivesANSITruncateFallback(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	header := "🔧 \x1b[1mVeryLongToolNameWithArguments\x1b[0m /tmp/very/long/path"
+	got := appendToolProgressSuffix(header, &agent.ToolProgressSnapshot{Text: "42 chars received"}, 24)
+	plain := stripANSI(got)
+	if !strings.Contains(plain, "42 chars received") {
+		t.Fatalf("progress suffix missing after truncate fallback: %q", plain)
+	}
+	if runewidth.StringWidth(plain) > 24 {
+		t.Fatalf("header width = %d, want <= 24: %q", runewidth.StringWidth(plain), plain)
 	}
 }
 

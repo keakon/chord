@@ -64,7 +64,8 @@ func appendToolProgressSuffix(headerLine string, progress *agent.ToolProgressSna
 	if runewidth.StringWidth(stripANSI(truncatedHeader+suffix)) <= maxWidth {
 		return truncatedHeader + suffix
 	}
-	return headerLine
+	plainHeader := runewidth.Truncate(stripANSI(headerLine), headerBudget, "…")
+	return plainHeader + suffix
 }
 
 func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot, cardWidth int, queuedByExecutionEvent bool, isRunning bool) string {
