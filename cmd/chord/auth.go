@@ -989,15 +989,8 @@ func exchangeOpenAICodeForTokensWithParams(
 }
 
 func openBrowser(target string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", target)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
-	default:
-		cmd = exec.Command("xdg-open", target)
-	}
+	name, args := openBrowserCommand(runtime.GOOS, target)
+	cmd := exec.Command(name, args...)
 	if cmd.Stdout == nil {
 		cmd.Stdout = io.Discard
 	}
@@ -1005,6 +998,17 @@ func openBrowser(target string) error {
 		cmd.Stderr = io.Discard
 	}
 	return cmd.Start()
+}
+
+func openBrowserCommand(goos, target string) (string, []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{target}
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", target}
+	default:
+		return "xdg-open", []string{target}
+	}
 }
 
 func startAuthBrowserPrompt(in *os.File) (*authBrowserPrompt, error) {

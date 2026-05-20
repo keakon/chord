@@ -22,7 +22,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/ratelimit"
-	"github.com/keakon/chord/internal/tui"
 	"github.com/keakon/chord/internal/worktree"
 )
 
@@ -190,12 +188,16 @@ func main() {
 // runRoot is the main execution path for TUI mode. In local mode, the TUI
 // runs in-process with the MainAgent — no IPC, no socket, no server spawn.
 func runRoot(cmd *cobra.Command, _ []string) error {
-	resumeID := strings.TrimSpace(flagResumeSession)
-	if flagContinueSession && resumeID != "" {
-		return fmt.Errorf("--continue and --resume are mutually exclusive")
+	plan, err := planRootStartup(cmd, flagContinueSession, flagResumeSession, flagWorktree)
+	if err != nil {
+		if strings.Contains(err.Error(), "CHORD_PPROF_PORT") {
+			log.Warnf("invalid CHORD_PPROF_PORT; pprof disabled error=%v", err)
+		} else {
+			return err
+		}
 	}
 
-	if cmd != nil && cmd.Parent() == nil {
+	if plan.RunSetupWizard {
 		if err := maybeRunInitialSetupWizard(cmd); err != nil {
 			return err
 		}
@@ -205,40 +207,35 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	// the startup sees it as the project root. flagWorktreeStartupInfo is
 	// nil when entered via the worktree resume subcommand or another path
 	// that has already prepared the worktree.
-	if cmd != nil && cmd.Flags().Changed("worktree") && flagWorktreeStartupInfo == nil {
+	if plan.PrepareWorktree {
 		wtCtx := cmd.Context()
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		info, err := prepareStartupWorktree(wtCtx, flagWorktree)
+		info, err := prepareStartupWorktree(wtCtx, plan.WorktreeName)
 		if err != nil {
 			return err
 		}
 		flagWorktreeStartupInfo = info
 		flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+		plan.SessionOptions.NewSessionMeta = flagWorktreeStartupMeta
 	}
 
 	// pprof: enabled only when CHORD_PPROF_PORT is set (e.g. "6060").
 	// It always binds to 127.0.0.1 for local-only diagnostics.
 	// The import of _ "net/http/pprof" registers handlers on http.DefaultServeMux
 	// at init time but has no runtime overhead unless a server is started here.
-	if addr, err := resolvePprofListenAddr(); err != nil {
-		log.Warnf("invalid CHORD_PPROF_PORT; pprof disabled error=%v", err)
-	} else if addr != "" {
+	if plan.PprofListenAddr != "" {
 		go func() {
-			log.Infof("pprof listening addr=%v", addr)
-			if err := http.ListenAndServe(addr, nil); err != nil {
+			log.Infof("pprof listening addr=%v", plan.PprofListenAddr)
+			if err := http.ListenAndServe(plan.PprofListenAddr, nil); err != nil {
 				log.Warnf("pprof server exited error=%v", err)
 			}
 		}()
 	}
 
 	// Initialize the full application context (config, auth, LLM, agent, tools, etc.).
-	ac, err := initAppRunner(true, "local", sessionStartupOptions{
-		ContinueLatest: flagContinueSession,
-		ResumeID:       resumeID,
-		NewSessionMeta: flagWorktreeStartupMeta,
-	})
+	ac, err := initAppRunner(true, "local", plan.SessionOptions)
 	if err != nil {
 		return err
 	}
@@ -257,52 +254,11 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	// Prepare the TUI model against the current MainAgent state before the
 	// runtime consumes startup-resume pending state. This keeps the first frame's
 	// loading/disabled UI accurate for --continue/--resume startup.
-	var opts []tea.ProgramOption
-	terminalOut := os.Stdout
-	if !term.IsTerminal(os.Stdin.Fd()) {
-		ttyIn, ttyOut, err := tea.OpenTTY()
-		if err != nil {
-			return fmt.Errorf("chord requires a terminal (TTY): %w", err)
-		}
-		terminalOut = ttyOut
-		opts = append(opts, tea.WithInput(ttyIn))
+	programPlan, err := defaultTUIProgramFactory().build(ac)
+	if err != nil {
+		return err
 	}
-	if term.IsTerminal(terminalOut.Fd()) {
-		opts = append(opts, tea.WithOutput(tui.WrapTerminalImageOutput(terminalOut)))
-	}
-
-	initialWidth, initialHeight := 80, 24
-	if term.IsTerminal(terminalOut.Fd()) {
-		if w, h, err := term.GetSize(terminalOut.Fd()); err == nil && w > 0 && h > 0 {
-			initialWidth, initialHeight = w, h
-		}
-	}
-	model := tui.NewModelWithSize(ac.MainAgent, initialWidth, initialHeight)
-	tuiModel := model
-	tuiModel.SetInstanceID(ac.InstanceID)
-	if ac.Cfg != nil {
-		if len(ac.Cfg.KeyMap) > 0 {
-			tuiModel.SetKeyMap(tui.KeyMapFromConfig(ac.Cfg.KeyMap))
-		}
-		if ac.Cfg.IMESwitchTarget != "" {
-			tuiModel.SetIMESwitchTarget(ac.Cfg.IMESwitchTarget)
-		}
-		tui.SetSingleLineDiffColumnsLimit(ac.Cfg.Diff.InlineMaxColumns)
-		if len(ac.LoadedCommands) > 0 {
-			tuiCmds := make([]tui.CustomCommand, len(ac.LoadedCommands))
-			for i, d := range ac.LoadedCommands {
-				tuiCmds[i] = tui.CustomCommand{Cmd: "/" + d.Name, Desc: d.Description}
-			}
-			tuiModel.SetCustomCommands(tuiCmds)
-		}
-	}
-	if term.IsTerminal(terminalOut.Fd()) {
-		osc9 := false
-		if ac.Cfg != nil && ac.Cfg.DesktopNotification != nil {
-			osc9 = *ac.Cfg.DesktopNotification
-		}
-		tuiModel.SetDesktopNotification(osc9, terminalOut)
-	}
+	tuiModel := programPlan.model
 
 	// Wire up confirmFn, questionFn, QuestionTool, LSP/MCP status, and start the event loop.
 	rt, err = createRuntime(ac)
@@ -311,15 +267,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Run the TUI directly against the in-process MainAgent.
-	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))
-
-	p := tea.NewProgram(&tuiModel, opts...)
 	go func() {
 		<-ac.Ctx.Done()
-		p.Quit()
+		programPlan.runner.Quit()
 	}()
 
-	_, tuiErr := p.Run()
+	_, tuiErr := programPlan.runner.Run()
 	if err := tuiModel.Close(); err != nil {
 		log.Warnf("tui runtime cache cleanup failed error=%v", err)
 	}

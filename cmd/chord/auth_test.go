@@ -759,6 +759,29 @@ func TestParseAuthBrowserPromptByte(t *testing.T) {
 	}
 }
 
+func TestOpenBrowserCommandPlansPerPlatform(t *testing.T) {
+	tests := []struct {
+		goos     string
+		wantName string
+		wantArgs []string
+	}{
+		{goos: "darwin", wantName: "open", wantArgs: []string{"https://example.test"}},
+		{goos: "windows", wantName: "rundll32", wantArgs: []string{"url.dll,FileProtocolHandler", "https://example.test"}},
+		{goos: "linux", wantName: "xdg-open", wantArgs: []string{"https://example.test"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			name, args := openBrowserCommand(tt.goos, "https://example.test")
+			if name != tt.wantName {
+				t.Fatalf("name = %q, want %q", name, tt.wantName)
+			}
+			if !reflect.DeepEqual(args, tt.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", args, tt.wantArgs)
+			}
+		})
+	}
+}
+
 func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 	entry := config.RemovedOAuthStateEntry{AccountID: "acct-1", Email: "user@example.com", Access: "access-token"}
 	tests := []struct {
