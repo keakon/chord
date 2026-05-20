@@ -52,8 +52,26 @@ func TestPlanRootStartupWorktreeChanged(t *testing.T) {
 	if !plan.PrepareWorktree || plan.WorktreeName != "feat-auth" {
 		t.Fatalf("worktree plan = %+v", plan)
 	}
-	if plan.ResumeID != "sid-123" || plan.SessionOptions.ResumeID != "sid-123" {
+	if plan.SessionOptions.ResumeID != "sid-123" {
 		t.Fatalf("resume plan = %+v", plan)
+	}
+}
+
+func TestPlanRootStartupInvalidPprofKeepsSessionOptions(t *testing.T) {
+	t.Setenv("CHORD_PPROF_PORT", "not-a-port")
+	cmd := newRootCmd()
+	plan, err := planRootStartup(cmd, false, " sid-abc ", "")
+	if err == nil || !errors.Is(err, ErrInvalidPprofPort) {
+		t.Fatalf("planRootStartup err = %v, want wrapped ErrInvalidPprofPort", err)
+	}
+	if plan.PprofListenAddr != "" {
+		t.Fatalf("PprofListenAddr = %q, want empty when port invalid", plan.PprofListenAddr)
+	}
+	if plan.SessionOptions.ResumeID != "sid-abc" {
+		t.Fatalf("SessionOptions.ResumeID = %q, want sid-abc preserved even on pprof error", plan.SessionOptions.ResumeID)
+	}
+	if !plan.RunSetupWizard {
+		t.Fatal("RunSetupWizard should remain true when pprof port is invalid")
 	}
 }
 

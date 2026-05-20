@@ -190,7 +190,7 @@ func main() {
 func runRoot(cmd *cobra.Command, _ []string) error {
 	plan, err := planRootStartup(cmd, flagContinueSession, flagResumeSession, flagWorktree)
 	if err != nil {
-		if strings.Contains(err.Error(), "CHORD_PPROF_PORT") {
+		if errors.Is(err, ErrInvalidPprofPort) {
 			log.Warnf("invalid CHORD_PPROF_PORT; pprof disabled error=%v", err)
 		} else {
 			return err
