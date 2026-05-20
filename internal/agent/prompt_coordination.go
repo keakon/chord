@@ -164,6 +164,17 @@ func (a *MainAgent) todoWorkflowPromptBlock() string {
 	if !a.hasTodoWriteAccess() {
 		return ""
 	}
+	if a.hasDelegateWorkflowAccess() {
+		return "## Todo workflow\n" +
+			"- For multi-step investigations or bug triage, TodoWrite may be used as a checklist when the task benefits from explicit step tracking.\n" +
+			"- If you use TodoWrite, keep it aligned with real progress; before your final response, sync it (all completed or cancelled).\n" +
+			"- Keep at most one main-agent todo item in_progress at a time for work you are executing directly.\n" +
+			"- If you dispatch multiple active Delegate tasks, their corresponding todo items may also be in_progress when each item clearly maps to a live delegated workstream and uses a unique active_form.\n" +
+			"- Do not mark multiple todos in_progress unless they correspond to distinct active delegated workstreams or one direct main-agent workstream plus delegated work.\n" +
+			"- When multiple todos are in_progress, keep each one scoped to a distinct owner/workstream and update them as delegates complete, block, or get cancelled.\n" +
+			"- Do not finish with pending/in_progress items unless you say what is left and why.\n" +
+			"- Before the final message: verify the outcome; if you used TodoWrite, update it first.\n"
+	}
 	return "## Todo workflow\n" +
 		"- For multi-step investigations or bug triage, TodoWrite may be used as a checklist when the task benefits from explicit step tracking.\n" +
 		"- If you use TodoWrite, keep it aligned with real progress; before your final response, sync it (all completed or cancelled).\n" +

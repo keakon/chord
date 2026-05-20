@@ -241,6 +241,9 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 在 SubAgent 视图中可查看该 agent 的上下文与输出；已结束的 SubAgent 视图只读。
 
+当启用 `TodoWrite` 但没有可用的 `Delegate` workflow 时，todo 列表默认只保留一个 `in_progress`，表示 MainAgent 当前直接执行的焦点工作。
+当 `Delegate` workflow 可用且确实派出了多个活跃的 delegated workstreams 时，todo 列表可以同时存在多个 `in_progress`，但每一项都应清楚映射到一个真实活跃的委派工作流，并使用唯一的 `active_form`；不要把尚未开始、仅计划中或只是等待条件的事项也标成 `in_progress`。
+
 ## 图片输入与查看
 
 当前支持：

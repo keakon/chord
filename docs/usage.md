@@ -241,6 +241,9 @@ Chord supports cooperation between MainAgent and SubAgents.
 
 In a SubAgent view, you can inspect that agent's context and output. Finished SubAgent views are read-only.
 
+When `TodoWrite` is enabled but no `Delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
+When `Delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
+
 ## Images
 
 Currently supported:

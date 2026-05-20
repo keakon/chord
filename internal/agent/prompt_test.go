@@ -108,6 +108,9 @@ TodoWrite: allow
 `)}
 	a.rebuildRuleset()
 
+	if a.AllowMultipleInProgressTodos() {
+		t.Fatal("AllowMultipleInProgressTodos() = true, want false without Delegate workflow")
+	}
 	got := a.todoWorkflowPromptBlock()
 	if !strings.Contains(got, "## Todo workflow") {
 		t.Fatalf("todoWorkflowPromptBlock() missing title: %q", got)
@@ -117,6 +120,44 @@ TodoWrite: allow
 	}
 	if !strings.Contains(got, "bug triage") {
 		t.Fatalf("todoWorkflowPromptBlock() missing investigation guidance: %q", got)
+	}
+	if !strings.Contains(got, "Keep at most one todo item in_progress at a time.") {
+		t.Fatalf("todoWorkflowPromptBlock() missing single in_progress guidance without Delegate workflow: %q", got)
+	}
+	if strings.Contains(got, "distinct active delegated workstreams") {
+		t.Fatalf("todoWorkflowPromptBlock() unexpectedly included Delegate-specific multi in_progress guidance without Delegate workflow: %q", got)
+	}
+}
+
+func TestTodoWorkflowPromptBlock_DelegateWorkflowAllowsMultipleInProgress(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.NewTodoWriteTool(nil))
+	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "General coding"}}}))
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"coder": {Name: "coder", Description: "General coding", Mode: "subagent"},
+	}
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+`)}
+	a.rebuildRuleset()
+	a.rebuildCachedSubAgents()
+
+	if !a.AllowMultipleInProgressTodos() {
+		t.Fatal("AllowMultipleInProgressTodos() = false, want true when Delegate workflow is available")
+	}
+	got := a.todoWorkflowPromptBlock()
+	for _, want := range []string{
+		"Keep at most one main-agent todo item in_progress at a time for work you are executing directly.",
+		"their corresponding todo items may also be in_progress when each item clearly maps to a live delegated workstream and uses a unique active_form.",
+		"Do not mark multiple todos in_progress unless they correspond to distinct active delegated workstreams",
+		"keep each one scoped to a distinct owner/workstream",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("todoWorkflowPromptBlock() missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "Keep at most one todo item in_progress at a time.") {
+		t.Fatalf("todoWorkflowPromptBlock() should not use single in_progress wording when Delegate workflow is available: %q", got)
 	}
 }
 

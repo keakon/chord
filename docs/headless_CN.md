@@ -182,7 +182,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
-| `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}` |
+| `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；当启用 Delegate workflow 且各项分别对应不同的活跃委派工作流、并使用唯一 `active_form` 时，允许同时存在多个 `in_progress`。 |
 | `error`              | 运行时错误                                   | `agent_id`、`message` |
 
 `assistant_message.text` 只有在非常异常的情况下才会为空。Chord 遇到这种情况会记 warning；gateway 集成通常应跳过空消息，而不是继续向下游转发空文本。
