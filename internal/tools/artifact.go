@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,17 @@ func NormalizeArtifactRefs(refs []ArtifactRef) []ArtifactRef {
 		return nil
 	}
 	return out
+}
+
+func writeArtifactString(f *os.File, content string) error {
+	n, err := f.WriteString(content)
+	if err != nil {
+		return err
+	}
+	if n != len(content) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // SaveArtifactTool writes a runtime artifact under the active session artifacts dir.
@@ -167,35 +179,43 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	var writeErr error
 	switch mode {
 	case "create":
-		f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err != nil {
 			if os.IsExist(err) {
 				return "", fmt.Errorf("artifact already exists; use mode=append or mode=overwrite to update it")
 			}
 			return "", err
 		}
-		_, writeErr = f.WriteString(content + "\n")
+		writeErr = writeArtifactString(f, content+"\n")
 		closeErr := f.Close()
 		if writeErr == nil {
 			writeErr = closeErr
 		}
 	case "append":
-		f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
 			return "", err
 		}
 		if info, err := f.Stat(); err == nil && info.Size() > 0 {
-			_, writeErr = f.WriteString("\n")
+			writeErr = writeArtifactString(f, "\n")
 		}
 		if writeErr == nil {
-			_, writeErr = f.WriteString(content + "\n")
+			writeErr = writeArtifactString(f, content+"\n")
 		}
 		closeErr := f.Close()
 		if writeErr == nil {
 			writeErr = closeErr
 		}
 	case "overwrite":
-		writeErr = os.WriteFile(abs, []byte(content+"\n"), 0o644)
+		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return "", err
+		}
+		writeErr = writeArtifactString(f, content+"\n")
+		closeErr := f.Close()
+		if writeErr == nil {
+			writeErr = closeErr
+		}
 	default:
 		return "", fmt.Errorf("invalid mode %q: expected create, append, or overwrite", args.Mode)
 	}

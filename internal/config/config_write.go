@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -66,8 +67,10 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 	if err := f.Chmod(mode); err != nil {
 		return fmt.Errorf("set config temp permissions: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
+	if n, err := f.Write(data); err != nil {
 		return fmt.Errorf("write config temp file: %w", err)
+	} else if n != len(data) {
+		return fmt.Errorf("write config temp file: %w", io.ErrShortWrite)
 	}
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("sync config temp file: %w", err)
@@ -109,8 +112,10 @@ func writeConfigFileAtomicallyReplace(path string, data []byte, mode os.FileMode
 	if err := f.Chmod(mode); err != nil {
 		return fmt.Errorf("set config temp permissions: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
+	if n, err := f.Write(data); err != nil {
 		return fmt.Errorf("write config temp file: %w", err)
+	} else if n != len(data) {
+		return fmt.Errorf("write config temp file: %w", io.ErrShortWrite)
 	}
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("sync config temp file: %w", err)

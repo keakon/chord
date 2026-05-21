@@ -242,6 +242,28 @@ Cancel: allow
 	}
 }
 
+func TestEvaluateToolPermissionWebFetchMatchesURL(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": allow
+WebFetch:
+  "http://localhost:8000/*": deny
+`)
+	ruleset := permission.ParsePermission(&node)
+
+	got := evaluateToolPermission(ruleset, "WebFetch", mustWebFetchPermissionArgs(t, "http://localhost:8000/docs/index.html"))
+	if got.Action != permission.ActionDeny {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
+	}
+	if got.MatchArgument != "http://localhost:8000/docs/index.html" {
+		t.Fatalf("match argument = %q", got.MatchArgument)
+	}
+
+	got = evaluateToolPermission(ruleset, "WebFetch", mustWebFetchPermissionArgs(t, "http://localhost:9000/docs/index.html"))
+	if got.Action != permission.ActionAllow {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
+	}
+}
+
 func mustDeletePermissionArgs(t *testing.T, paths []string) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(map[string]any{
@@ -258,6 +280,17 @@ func mustBashPermissionArgs(t *testing.T, command string) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(map[string]any{
 		"command": command,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	return message.ToolCall{Args: b}.Args
+}
+
+func mustWebFetchPermissionArgs(t *testing.T, url string) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"url": url,
 	})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

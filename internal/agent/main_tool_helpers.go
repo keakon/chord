@@ -75,6 +75,13 @@ func extractToolArgument(toolName string, args []byte) string {
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Path != "" {
 			return parsed.Path
 		}
+	case "WebFetch":
+		var parsed struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(args, &parsed); err == nil && parsed.URL != "" {
+			return parsed.URL
+		}
 	case "Skill":
 		var parsed struct {
 			Name string `json:"name"`

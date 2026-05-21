@@ -338,8 +338,7 @@ func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 	return saturatingDoublingDuration(baseDelay, maxRetryDelay, attempt-1)
 }
 
-// KeyCount returns the number of API keys configured for this provider,
-// excluding permanently deactivated keys.
+// EffectiveProxyURL returns the effective proxy URL configured for this provider.
 func (p *ProviderConfig) EffectiveProxyURL() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()

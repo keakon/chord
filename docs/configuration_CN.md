@@ -653,6 +653,8 @@ permission:
   Read: allow
   Grep: allow
   Glob: allow
+  WebFetch:
+    "http://localhost:8000/*": ask
   Shell: allow
   Edit: ask
   Write: ask

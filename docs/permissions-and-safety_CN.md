@@ -27,6 +27,9 @@ permission:
   Handoff: deny
   Delegate: deny
   Delete: ask
+  WebFetch:
+    "http://localhost:8000/*": ask
+    "http://169.254.169.254/*": deny
   Shell:
     "sudo *": ask
     "rm *": ask
@@ -42,7 +45,7 @@ permission:
     "git tag *": ask
 ```
 
-这套配置的含义：默认允许大多数工具；禁用 `Handoff` 与 `Delegate`；删除文件和常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `Shell` 下更具体的 `ask` 会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
+这套配置的含义：默认允许大多数工具；禁用 `Handoff` 与 `Delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `WebFetch` 和 `Shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
 
 > 权限属于 Agent 级配置，不是简单的全局开关。
 
@@ -68,6 +71,7 @@ permission:
 建议：
 
 - 默认把文件删除、批量改写、网络下载、数据库操作保留为 `ask` 或 `deny`
+- 如需管控本地/内网服务或敏感 endpoint，使用 `WebFetch` URL pattern，例如 `WebFetch: { "http://localhost:8000/*": ask }`
 - 仅对少量可预期的开发命令设置 `allow`
 - 不要把权限匹配理解为安全沙箱
 

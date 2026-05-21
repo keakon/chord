@@ -95,7 +95,7 @@ func TestHTMLToMarkdownResolvesRelativeLinks(t *testing.T) {
 }
 
 func TestWebFetchRejectsUnsupportedScheme(t *testing.T) {
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": "file:///etc/passwd"})
 	if err == nil || !strings.Contains(err.Error(), "url must start with http:// or https://") {
 		t.Fatalf("expected unsupported scheme error, got %v", err)
@@ -108,7 +108,7 @@ func TestWebFetchStopsRedirectLoop(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
 	if err == nil || !strings.Contains(err.Error(), "stopped after 5 redirects") {
 		t.Fatalf("expected redirect loop error, got %v", err)
@@ -121,7 +121,7 @@ func TestWebFetchRejectsRedirectToUnsupportedScheme(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
 	if err == nil || !strings.Contains(err.Error(), "redirect to non-http scheme") {
 		t.Fatalf("expected unsupported redirect scheme error, got %v", err)
@@ -140,7 +140,7 @@ func TestWebFetchHonorsParentContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err = tool.Execute(ctx, raw)
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("expected context canceled error, got %v", err)
@@ -160,7 +160,7 @@ func TestWebFetchMalformedHTMLFallsBackBestEffort(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Title: Broken\n")
 	mustContain(t, out, "Broken page")
@@ -174,7 +174,7 @@ func TestWebFetchRejectsBinaryResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
 	if err == nil || !strings.Contains(err.Error(), "response content is not decodable text") {
 		t.Fatalf("expected binary response error, got %v", err)
@@ -192,7 +192,7 @@ func TestWebFetchUsesDefaultHeadersAndMetadata(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 
 	if gotUA != webFetchDefaultUserAgent {
@@ -261,7 +261,7 @@ func TestWebFetchReportsFinalURLAfterRedirect(t *testing.T) {
 		_, _ = io.WriteString(w, "done")
 	})
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL + "/start"})
 	mustContain(t, out, "Final-URL: "+server.URL+"/final\n")
 }
@@ -274,7 +274,7 @@ func TestWebFetchDecodesCharsetDeclaredText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Charset: shift-jis\n")
 	mustContain(t, out, "こんにちは")
@@ -291,7 +291,7 @@ func TestWebFetchHTMLPrefersDeclaredCharset(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Charset: shift-jis\n")
 	mustContain(t, out, "こんにちは")
@@ -306,7 +306,7 @@ func TestWebFetchHTMLUsesMetaCharsetFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Charset: shift-jis\n")
 	mustContain(t, out, "こんにちは")
@@ -319,7 +319,7 @@ func TestWebFetchHTMLWithoutCharsetKeepsUTF8(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Charset: utf-8\n")
 	mustContain(t, out, "中文标题")
@@ -347,7 +347,7 @@ func TestWebFetchHTMLIncludesMetadataHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Title: Structured Title\n")
 	mustContain(t, out, "Byline: Jane Doe\n")
@@ -363,7 +363,7 @@ func TestWebFetchResultIsHardCappedAtOutputLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	if len([]byte(out)) > webFetchTextOutputBytes {
 		t.Fatalf("final output size = %d, want <= %d", len([]byte(out)), webFetchTextOutputBytes)
@@ -381,7 +381,7 @@ func TestWebFetchInputTruncationForTextResources(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Truncated: input,output\n")
 	mustContain(t, out, "Read-Bytes: "+strconv.Itoa(webFetchTextInputBytes)+"/"+strconv.Itoa(webFetchTextInputBytes)+"\n")
@@ -413,7 +413,7 @@ func TestWebFetchSuspectShellIsReportedWithoutBrowserFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Content-Quality: suspect-shell\n")
 	if strings.Contains(out, "Browser-Fallback:") {
@@ -433,7 +433,7 @@ func TestWebFetchReadabilityResolvesRelativeLinks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL + "/articles/readable"})
 	mustContain(t, out, "Extraction-Mode: html-readability\n")
 	mustContain(t, out, "[Start]("+server.URL+"/docs/start)")
@@ -447,7 +447,7 @@ func TestWebFetchRawHTMLKeepsOriginalHTML(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL, "raw": true})
 	mustContain(t, out, "Extraction-Mode: html-raw\n")
 	mustContain(t, out, "<h1>Raw Title</h1>")
@@ -460,7 +460,7 @@ func TestWebFetchNonHTMLContentStaysRaw(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	mustContain(t, out, "Extraction-Mode: raw\n")
 	mustContain(t, out, `{"ok":true,"message":"hello"}`)
@@ -472,7 +472,7 @@ func TestWebFetchNon2xxReturnsError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{}, "")
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
 		t.Fatalf("expected HTTP 404 error, got %v", err)
@@ -504,6 +504,10 @@ func TestTruncateValidUTF8DoesNotBreakRune(t *testing.T) {
 	if got != "你" {
 		t.Fatalf("truncateValidUTF8 returned %q, want %q", got, "你")
 	}
+}
+
+func webFetchTestConfig() config.WebFetchConfig {
+	return config.WebFetchConfig{}
 }
 
 func executeWebFetchForTest(t *testing.T, tool WebFetchTool, args map[string]any) string {

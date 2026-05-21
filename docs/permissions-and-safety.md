@@ -27,6 +27,9 @@ permission:
   Handoff: deny
   Delegate: deny
   Delete: ask
+  WebFetch:
+    "http://localhost:8000/*": ask
+    "http://169.254.169.254/*": deny
   Shell:
     "sudo *": ask
     "rm *": ask
@@ -42,7 +45,7 @@ permission:
     "git tag *": ask
 ```
 
-This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `Shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
+This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `WebFetch` and `Shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
@@ -68,6 +71,7 @@ Common rewrites:
 Recommendations:
 
 - Keep file deletion, bulk rewrites, network downloads, and database operations as `ask` or `deny` by default
+- Use `WebFetch` URL patterns when you want to gate local/private services or sensitive endpoints, for example `WebFetch: { "http://localhost:8000/*": ask }`
 - Set `allow` only for a small set of predictable development commands
 - Do not treat permission matching as a security sandbox
 

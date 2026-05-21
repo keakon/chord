@@ -196,6 +196,43 @@ func TestWriteToolRejectsSymlinkTarget(t *testing.T) {
 	}
 }
 
+func TestSaveArtifactToolRejectsSymlinkOverwrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink overwrite protection is platform-specific")
+	}
+
+	sessionDir := t.TempDir()
+	artifactDir := filepath.Join(sessionDir, "artifacts", "subagents", "agent", "task")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll artifactDir: %v", err)
+	}
+	target := filepath.Join(sessionDir, "target.txt")
+	link := filepath.Join(artifactDir, "report.md")
+	if err := os.WriteFile(target, []byte("before"), 0o644); err != nil {
+		t.Fatalf("WriteFile target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	ctx := WithSessionDir(context.Background(), sessionDir)
+	_, err := (SaveArtifactTool{}).Execute(ctx, mustMarshal(t, map[string]any{
+		"filename": "report.md",
+		"content":  "after",
+		"mode":     "overwrite",
+	}))
+	if err == nil {
+		t.Fatal("SaveArtifactTool.Execute error = nil, want symlink write error")
+	}
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("ReadFile target: %v", readErr)
+	}
+	if string(data) != "before" {
+		t.Fatalf("target content = %q, want unchanged", string(data))
+	}
+}
+
 func TestEditToolSupportsTildePaths(t *testing.T) {
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)

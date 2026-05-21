@@ -130,12 +130,13 @@ func (t WebFetchTool) effectiveProxy() string {
 
 func newHTTPClientWithProxy(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
+	dialer := &net.Dialer{
+		Timeout:   60 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   60 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
 		ResponseHeaderTimeout: 60 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
