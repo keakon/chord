@@ -11,6 +11,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/buildinfo"
 )
 
 // Draw draws the TUI onto the given screen using layered rendering: base layer
@@ -88,7 +90,7 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 		if len(m.viewport.blocks) == 0 {
 			welcomeHints := []string{
 				DimStyle.Render("Press ? for help · /help for commands"),
-				DimStyle.Render("i: insert  /: search  ctrl+p: model  ctrl+t: directory"),
+				DimStyle.Render("i: insert  /: search  ctrl+p: model pool  ctrl+t: directory"),
 				DimStyle.Render("enter: send  ctrl+v/cmd+v: paste image or text"),
 			}
 			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")
@@ -99,6 +101,8 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 				lipgloss.Center, lipgloss.Center,
 				lipgloss.JoinVertical(lipgloss.Center,
 					HeaderStyle.Render(" CHORD "),
+					"",
+					DimStyle.Render(buildinfo.Current().Short()),
 					"",
 					emptyMessage,
 					"",

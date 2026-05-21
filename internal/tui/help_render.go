@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/buildinfo"
 )
 
 func (m Model) helpLines(width int) []string {
@@ -17,11 +20,15 @@ func (m Model) helpLines(width int) []string {
 
 	lines := []string{
 		DialogTitleStyle.Render("Keyboard Help"),
+	}
+	lines = append(lines, renderAboutHelpLines(buildinfo.Current())...)
+	lines = append(lines,
+		"",
 		DimStyle.Render("Press ? or Esc to close. /help also opens this view."),
 		DimStyle.Render("In the local main-agent view, Enter completes a visible / command suggestion, otherwise it sends, queues (when busy), or continues (when idle with empty input). Ctrl+C starts quit confirmation; normal-mode Esc stops the current run, and queued drafts are committed without auto-resuming on that cancel."),
 		DimStyle.Render("Click a queued draft to edit it, or click [del] to remove it before send."),
 		"",
-	}
+	)
 
 	var blocks [][]string
 	for _, group := range m.keyMap.HelpGroups() {
@@ -32,6 +39,18 @@ func (m Model) helpLines(width int) []string {
 
 	lines = append(lines, layoutHelpBlocks(blocks, contentWidth)...)
 	return lines
+}
+
+func renderAboutHelpLines(info buildinfo.Info) []string {
+	return []string{
+		DialogTitleStyle.Render("About"),
+		fmt.Sprintf("  %-12s %s", "Chord", info.Short()),
+		fmt.Sprintf("  %-12s %s", "Commit", info.Commit),
+		fmt.Sprintf("  %-12s %s", "Build time", info.BuildTime),
+		fmt.Sprintf("  %-12s %s", "VCS time", info.VCSTime),
+		fmt.Sprintf("  %-12s %s", "Go", info.GoVersion),
+		fmt.Sprintf("  %-12s %s/%s", "Platform", info.GOOS, info.GOARCH),
+	}
 }
 
 func (m *Model) renderHelpView() string {

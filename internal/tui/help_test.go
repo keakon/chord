@@ -180,6 +180,30 @@ func TestHelpLinesUseColumnsWhenWide(t *testing.T) {
 	}
 }
 
+func TestHelpLinesIncludeAboutBuildInfo(t *testing.T) {
+	m := NewModel(nil)
+	text := strings.Join(m.helpLines(120), "\n")
+
+	for _, want := range []string{"About", "Chord", "Commit", "Build time", "VCS time", "Go", "Platform"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("help text should contain %q, got:\n%s", want, text)
+		}
+	}
+}
+
+func TestHelpViewShowsAboutOnShortFirstScreen(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeHelp
+	m.help = helpState{prevMode: ModeNormal}
+
+	plain := ansi.Strip(m.renderHelpView())
+	for _, want := range []string{"Keyboard Help", "About", "Chord"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("short help first screen should contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestFindMatchesAtWidthUsesRenderedBlockOffsets(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockUser, Content: "first"},

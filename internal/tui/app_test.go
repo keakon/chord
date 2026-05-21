@@ -19,6 +19,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -4017,6 +4018,33 @@ func TestApplyResizeMsgIgnoresSupersededVersion(t *testing.T) {
 	if model.width != 150 || model.height != 40 {
 		t.Fatalf("superseded resize changed size to %dx%d, want 150x40", model.width, model.height)
 	}
+}
+
+func TestViewShowsWelcomeVersionOnEmptySession(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.layout = m.generateLayout(m.width, m.height)
+
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "CHORD") {
+		t.Fatalf("View() should show welcome title, got %q", got)
+	}
+	wantVersion := buildinfo.Current().Short()
+	if !strings.Contains(got, wantVersion) {
+		t.Fatalf("View() should show welcome version %q, got %q", wantVersion, got)
+	}
+	if !strings.Contains(got, "ctrl+p: model pool") {
+		t.Fatalf("View() should describe Ctrl+P as model pool selection, got %q", got)
+	}
+	lines := strings.Split(got, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "CHORD") {
+			if i+2 >= len(lines) || strings.TrimSpace(lines[i+1]) != "" || !strings.Contains(lines[i+2], wantVersion) {
+				t.Fatalf("View() should leave one blank line between welcome title and version, got:\n%s", got)
+			}
+			return
+		}
+	}
+	// The title presence is checked above; this is unreachable unless that check changes.
 }
 
 func TestViewShowsRestoringSessionPlaceholderDuringStartupRestore(t *testing.T) {
