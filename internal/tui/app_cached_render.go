@@ -413,23 +413,11 @@ func (m *Model) applyWheelScrollDelta(delta int) {
 		steps = -steps
 	}
 	for range steps {
-		if step < 0 && m.hasDeferredStartupTranscript() &&
-			m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
-			if m.maybeStepStartupDeferredTranscriptWindow(-1, "mouse_wheel_up") {
-				continue
-			}
-			m.maybeHydrateStartupDeferredTranscript("mouse_wheel_up")
+		trigger := "mouse_wheel_down"
+		if step < 0 {
+			trigger = "mouse_wheel_up"
 		}
-		if step > 0 && m.hasDeferredStartupTranscript() && m.viewport.atBottom() {
-			if m.maybeStepStartupDeferredTranscriptWindow(1, "mouse_wheel_down") {
-				continue
-			}
-		}
-		if step > 0 {
-			m.viewport.ScrollDown(1)
-		} else {
-			m.viewport.ScrollUp(1)
-		}
+		m.deferredScrollOneLine(step, trigger)
 	}
 }
 

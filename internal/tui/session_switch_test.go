@@ -2627,6 +2627,59 @@ func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBo
 	}
 }
 
+func TestDeferredStartupTranscriptMouseWheelDownAt197CardTailDoesNotJumpToWindowStart(t *testing.T) {
+	messages := make([]message.Message, 0, 197)
+	for i := 0; i < 197; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for 197-card mouse-wheel regression test")
+	}
+	m.handleNormalKey(modelSelectKey("G"))
+
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	wantStart := len(messages) - startupTranscriptTailBlocks
+	if state.windowStart != wantStart || state.windowEnd != len(messages) {
+		t.Fatalf("tail window after G = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, len(messages))
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("viewport should be at bottom before wheel down")
+	}
+
+	beforeOffset := m.viewport.offset
+	beforeTop := m.viewport.GetBlockAtOffset()
+	if beforeTop == nil {
+		t.Fatal("top block before wheel down is nil")
+	}
+	m.applyWheelScrollDelta(mouseWheelScrollStep)
+
+	state = m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after wheel down at tail")
+	}
+	if state.windowStart != wantStart || state.windowEnd != len(messages) {
+		t.Fatalf("tail window after wheel down = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, len(messages))
+	}
+	if m.viewport.offset != beforeOffset {
+		t.Fatalf("offset after wheel down at tail = %d, want unchanged %d", m.viewport.offset, beforeOffset)
+	}
+	afterTop := m.viewport.GetBlockAtOffset()
+	if afterTop == nil {
+		t.Fatal("top block after wheel down is nil")
+	}
+	if afterTop.ID != beforeTop.ID {
+		t.Fatalf("top block after wheel down at tail = %q, want unchanged %q", afterTop.Content, beforeTop.Content)
+	}
+}
+
 func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
 	for i := 0; i < startupTranscriptWindowMinBlocks+40; i++ {
