@@ -2856,6 +2856,45 @@ func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBou
 	}
 }
 
+func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+80)
+	for i := 0; i < startupTranscriptWindowMinBlocks+79; i++ {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	messages = append(messages, message.Message{Role: "assistant", Content: strings.Repeat("tail line\n", 80)})
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 18)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should be deferred")
+	}
+
+	m.handleNormalKey(modelSelectKey("G"))
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup deferred transcript missing after G")
+	}
+	if state.windowEnd != len(state.allBlocks) {
+		t.Fatalf("window end after G = %d, want tail end %d", state.windowEnd, len(state.allBlocks))
+	}
+	if !m.viewport.atBottom() {
+		t.Fatalf("viewport should be at bottom after G, offset=%d total=%d height=%d", m.viewport.offset, m.viewport.TotalLines(), m.viewport.height)
+	}
+	lastBlock := state.allBlocks[len(state.allBlocks)-1]
+	if m.focusedBlockID != lastBlock.ID {
+		t.Fatalf("focusedBlockID after G = %d, want last block %d", m.focusedBlockID, lastBlock.ID)
+	}
+	lastStart, ok := m.viewport.LineOffsetForBlockID(lastBlock.ID)
+	if !ok {
+		t.Fatal("last block should be present in tail window")
+	}
+	if m.viewport.offset <= lastStart {
+		t.Fatalf("G stopped at last card top offset=%d, want below last card start %d", m.viewport.offset, lastStart)
+	}
+}
+
 func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {

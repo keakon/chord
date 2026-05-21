@@ -404,10 +404,6 @@ func (m *Model) jumpToVisibleBlockOrdinal(ordinal int) tea.Cmd {
 func (m *Model) jumpToLastVisibleBlock() tea.Cmd {
 	prevOffset := m.viewport.offset
 	if m.hasDeferredStartupTranscript() {
-		state := m.startupDeferredTranscript
-		if state != nil && len(state.allBlocks) > 0 {
-			return m.jumpToVisibleBlockOrdinal(len(state.allBlocks))
-		}
 		m.maybeSwitchStartupDeferredTranscriptWindow(startupTranscriptWindowTail, "jump_bottom")
 	}
 	entries := m.viewport.MessageDirectory()
@@ -417,6 +413,7 @@ func (m *Model) jumpToLastVisibleBlock() tea.Cmd {
 	}
 	m.viewport.ScrollToBottom()
 	m.focusDirectoryEntryBlock(entries, len(entries)-1, -1)
+	m.viewport.ScrollToBottom()
 	m.viewport.sticky = true
 	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }
