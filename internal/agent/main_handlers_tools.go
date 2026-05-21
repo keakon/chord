@@ -9,7 +9,6 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -356,14 +355,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 	// Track malformed and empty-args calls. Both malformed sentinel args and
 	// empty "{}" args for tools with required parameters count as abnormal.
-	if llm.IsMalformedArgs(json.RawMessage(payload.ArgsJSON)) {
+	if isAbnormalToolArgs(a.tools, payload.Name, json.RawMessage(payload.ArgsJSON)) {
 		a.turn.malformedInBatch++
-	} else if llm.IsEmptyArgs(json.RawMessage(payload.ArgsJSON)) {
-		if tool, ok := a.tools.Get(payload.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				a.turn.malformedInBatch++
-			}
-		}
 	}
 
 	remaining := a.turn.PendingToolCalls.Add(-1)

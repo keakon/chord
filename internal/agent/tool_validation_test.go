@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -24,6 +25,91 @@ func (agentValidationTool) Execute(context.Context, json.RawMessage) (string, er
 	return "", nil
 }
 func (agentValidationTool) IsReadOnly() bool { return true }
+
+func TestClassifyToolArgsAbnormality(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(agentValidationTool{
+		name: "RequiredTool",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"path"},
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+		},
+	})
+	registry.Register(agentValidationTool{
+		name: "OptionalTool",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+		},
+	})
+
+	tests := []struct {
+		name                string
+		registry            *tools.Registry
+		toolName            string
+		args                json.RawMessage
+		wantMalformed       bool
+		wantEmptyRequired   bool
+		wantRequiredFields  []string
+		wantAbnormalToolArg bool
+	}{
+		{
+			name:                "malformed args sentinel",
+			registry:            registry,
+			toolName:            "RequiredTool",
+			args:                json.RawMessage(llm.MalformedArgsSentinel),
+			wantMalformed:       true,
+			wantAbnormalToolArg: true,
+		},
+		{
+			name:                "empty args with required fields",
+			registry:            registry,
+			toolName:            "RequiredTool",
+			args:                json.RawMessage(`{}`),
+			wantEmptyRequired:   true,
+			wantRequiredFields:  []string{"path"},
+			wantAbnormalToolArg: true,
+		},
+		{
+			name:     "empty args without required fields",
+			registry: registry,
+			toolName: "OptionalTool",
+			args:     json.RawMessage(`{}`),
+		},
+		{
+			name:     "empty args with missing tool",
+			registry: registry,
+			toolName: "MissingTool",
+			args:     json.RawMessage(`{}`),
+		},
+		{
+			name:     "empty args with nil registry",
+			registry: nil,
+			toolName: "RequiredTool",
+			args:     json.RawMessage(`{}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyToolArgsAbnormality(tt.registry, tt.toolName, tt.args)
+			if got.Malformed != tt.wantMalformed || got.EmptyRequired != tt.wantEmptyRequired {
+				t.Fatalf("classifyToolArgsAbnormality() = %#v, want Malformed=%v EmptyRequired=%v", got, tt.wantMalformed, tt.wantEmptyRequired)
+			}
+			if strings.Join(got.RequiredFields, ",") != strings.Join(tt.wantRequiredFields, ",") {
+				t.Fatalf("RequiredFields = %v, want %v", got.RequiredFields, tt.wantRequiredFields)
+			}
+			if isAbnormalToolArgs(tt.registry, tt.toolName, tt.args) != tt.wantAbnormalToolArg {
+				t.Fatalf("isAbnormalToolArgs() = %v, want %v", isAbnormalToolArgs(tt.registry, tt.toolName, tt.args), tt.wantAbnormalToolArg)
+			}
+		})
+	}
+}
 
 func TestApplyConfirmedArgsEditsRejectsInvalidJSON(t *testing.T) {
 	registry := tools.NewRegistry()

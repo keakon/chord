@@ -22,6 +22,35 @@ func validateToolArgsAgainstSchema(registry *tools.Registry, toolName string, ar
 	return tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(args))
 }
 
+type toolArgsAbnormality struct {
+	Malformed      bool
+	EmptyRequired  bool
+	RequiredFields []string
+}
+
+func classifyToolArgsAbnormality(registry *tools.Registry, toolName string, args json.RawMessage) toolArgsAbnormality {
+	if llm.IsMalformedArgs(args) {
+		return toolArgsAbnormality{Malformed: true}
+	}
+	if !llm.IsEmptyArgs(args) || registry == nil {
+		return toolArgsAbnormality{}
+	}
+	tool, ok := registry.Get(toolName)
+	if !ok {
+		return toolArgsAbnormality{}
+	}
+	required := llm.RequiredFields(tool.Parameters())
+	if len(required) == 0 {
+		return toolArgsAbnormality{}
+	}
+	return toolArgsAbnormality{EmptyRequired: true, RequiredFields: required}
+}
+
+func isAbnormalToolArgs(registry *tools.Registry, toolName string, args json.RawMessage) bool {
+	abnormality := classifyToolArgsAbnormality(registry, toolName, args)
+	return abnormality.Malformed || abnormality.EmptyRequired
+}
+
 func applyConfirmedArgsEdits(registry *tools.Registry, ruleset permission.Ruleset, toolName string, original json.RawMessage, modifiedArgs string) (json.RawMessage, error) {
 	if strings.TrimSpace(modifiedArgs) == "" {
 		return original, nil

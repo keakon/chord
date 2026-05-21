@@ -10,7 +10,6 @@ import (
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/hook"
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -337,14 +336,8 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 
 	s.turn.PendingToolCalls.Add(-1)
 	// Track malformed and empty-args calls (improvement 3 + 4).
-	if llm.IsMalformedArgs(json.RawMessage(result.ArgsJSON)) {
+	if isAbnormalToolArgs(s.tools, result.Name, json.RawMessage(result.ArgsJSON)) {
 		s.turn.malformedInBatch++
-	} else if llm.IsEmptyArgs(json.RawMessage(result.ArgsJSON)) {
-		if tool, ok := s.tools.Get(result.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				s.turn.malformedInBatch++
-			}
-		}
 	}
 
 	if s.turn.PendingToolCalls.Load() > 0 {

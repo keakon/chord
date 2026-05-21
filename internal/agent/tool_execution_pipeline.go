@@ -260,7 +260,8 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 }
 
 func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, logPrefix, agentID string) error {
-	if llm.IsMalformedArgs(tc.Args) {
+	abnormality := classifyToolArgsAbnormality(registry, tc.Name, tc.Args)
+	if abnormality.Malformed {
 		if logPrefix != "" {
 			log.Warnf("%s tool call has malformed args, returning guidance error agent=%v tool=%v", logPrefix, agentID, tc.Name)
 		} else {
@@ -274,23 +275,19 @@ func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, lo
 			tc.Name,
 		)
 	}
-	if llm.IsEmptyArgs(tc.Args) {
-		if tool, ok := registry.Get(tc.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				if logPrefix != "" {
-					log.Warnf("%s tool call has empty args but tool requires parameters agent=%v tool=%v required=%v", logPrefix, agentID, tc.Name, req)
-				} else {
-					log.Warnf("tool call has empty args but tool requires parameters tool=%v required=%v", tc.Name, req)
-				}
-				return fmt.Errorf(
-					"tool %q was called with empty arguments {}. This typically "+
-						"happens when the model's output was truncated at max_tokens. "+
-						"Please reduce the number of parallel tool calls and retry "+
-						"with the complete required parameters: %v",
-					tc.Name, req,
-				)
-			}
+	if abnormality.EmptyRequired {
+		if logPrefix != "" {
+			log.Warnf("%s tool call has empty args but tool requires parameters agent=%v tool=%v required=%v", logPrefix, agentID, tc.Name, abnormality.RequiredFields)
+		} else {
+			log.Warnf("tool call has empty args but tool requires parameters tool=%v required=%v", tc.Name, abnormality.RequiredFields)
 		}
+		return fmt.Errorf(
+			"tool %q was called with empty arguments {}. This typically "+
+				"happens when the model's output was truncated at max_tokens. "+
+				"Please reduce the number of parallel tool calls and retry "+
+				"with the complete required parameters: %v",
+			tc.Name, abnormality.RequiredFields,
+		)
 	}
 	return validateToolArgsAgainstSchema(registry, tc.Name, tc.Args)
 }

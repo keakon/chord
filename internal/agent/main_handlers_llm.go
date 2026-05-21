@@ -46,17 +46,7 @@ func sanitizeToolCallArgs(calls []message.ToolCall) []message.ToolCall {
 // empty arguments — either the sentinel from the streaming parser (invalid JSON)
 // or an empty "{}" for tools that declare required parameters (truncation artifact).
 func isMalformedToolCall(tc message.ToolCall, registry *tools.Registry) bool {
-	if llm.IsMalformedArgs(tc.Args) {
-		return true
-	}
-	if llm.IsEmptyArgs(tc.Args) {
-		if tool, ok := registry.Get(tc.Name); ok {
-			if req := llm.RequiredFields(tool.Parameters()); len(req) > 0 {
-				return true
-			}
-		}
-	}
-	return false
+	return isAbnormalToolArgs(registry, tc.Name, tc.Args)
 }
 
 // handleLLMResponse processes a completed LLM response. If the response
