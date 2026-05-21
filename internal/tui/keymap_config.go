@@ -12,7 +12,7 @@ package tui
 //	scroll_down, scroll_up, full_page_down, full_page_up, scroll_to_bottom, scroll_to_top_seq
 //	next_block, prev_block, toggle_collapse, fork_session, directory, usage_stats
 //	search_start, search_next, search_prev
-//	switch_agent, switch_role, switch_model
+//	switch_agent, switch_role, switch_model, fast_mode
 //
 // Example config.yaml snippet:
 //
@@ -63,6 +63,7 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.SwitchAgent, "switch_agent")
 	apply(&km.SwitchRole, "switch_role")
 	apply(&km.SwitchModel, "switch_model")
+	apply(&km.FastMode, "fast_mode")
 	apply(&km.Diagnostics, "diagnostics")
 	apply(&km.MCP, "mcp")
 

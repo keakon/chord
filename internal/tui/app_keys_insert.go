@@ -74,6 +74,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
+	if m.maybeFastModeShortcut(key) {
+		return nil
+	}
 	if m.maybeMCPShortcut(key) {
 		return nil
 	}

@@ -1155,6 +1155,24 @@ func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
 	}
 }
 
+func TestFastModeShortcutSendsToggleCommand(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/fast on" {
+		t.Fatalf("sentMessages = %#v, want [/fast on]", backend.sentMessages)
+	}
+
+	backend.fastMode = true
+	m.mode = ModeNormal
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if len(backend.sentMessages) != 2 || backend.sentMessages[1] != "/fast off" {
+		t.Fatalf("sentMessages = %#v, want second /fast off", backend.sentMessages)
+	}
+}
+
 func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
@@ -1170,14 +1188,12 @@ func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
 	}
 }
 
-func TestSlashCompletionHidesFastCommandWhenSubAgentFocused(t *testing.T) {
+func TestSlashCompletionShowsFastCommandWhenSubAgentFocused(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	m.focusedAgentID = "sub-1"
 	matches := m.getSlashCompletions("/f")
-	for _, item := range matches {
-		if strings.HasPrefix(item.Cmd, "/fast") {
-			t.Fatalf("slash completions = %#v, should hide /fast commands when subagent is focused", matches)
-		}
+	if len(matches) != 1 || matches[0].Cmd != "/fast on" {
+		t.Fatalf("matches = %#v, want /fast on when subagent is focused", matches)
 	}
 }
 

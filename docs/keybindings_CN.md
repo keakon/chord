@@ -77,6 +77,7 @@ TUI 有两种模式：
 | `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
 | `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
+| `Ctrl+R`      | 切换所有 agent 的 fast responses                                                                                |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 
@@ -97,6 +98,20 @@ keymap:
   quit: ["Q"]                  # 退出要求大写 Q（防误触）
   switch_model: ["ctrl+t"]     # 如果你更喜欢，也可以改成别的键
 ```
+
+### 终端兼容性注意事项
+
+自定义键位只有在终端模拟器、操作系统，以及 tmux 等中间层把该按键序列转发给 Chord 时才会生效。优先选择 Normal 模式下的普通可打印键，或没有强终端语义的简单 `ctrl+字母` 组合。
+
+除非你已经在自己的终端环境里验证过，否则不建议把这些组合设为默认/自定义快捷键：
+
+- macOS 上的 `alt+字母` / Option 组合：Ghostty 等终端可能把 Option 用于字符输入、菜单快捷键或应用级 keybind，例如 `alt+f` 可能根本不会传给 Chord。
+- `ctrl+i`、`ctrl+m`、`ctrl+[`：传统终端会分别把它们编码成和 `Tab`、`Enter`、`Esc` 相同的输入。
+- `ctrl+s` 和 `ctrl+q`：可能被软件流控截获。
+- `ctrl+c`、`ctrl+z`、`ctrl+\\`：在终端里有中断/挂起等信号语义。
+- 功能键或 `ctrl+shift+...` 组合：在不同终端、键盘布局、SSH 和 tmux 中支持不一致。
+
+如果某个自定义键位不生效，先按 `?` 确认 Chord 已加载该映射，再用 `showkey`、`cat` 或终端自带的 key-event inspector 检查该按键是否真的传到了终端应用。
 
 action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go)的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
 
@@ -135,6 +150,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `switch_agent`             | `["shift+tab"]`                   |
 | `switch_role`              | `["tab"]`                         |
 | `switch_model`             | `["ctrl+p"]`                      |
+| `fast_mode`                | `["ctrl+r"]`                      |
 | `mcp`                      | `["ctrl+o"]`                      |
 | `diagnostics`              | `["ctrl+g"]`                      |
 

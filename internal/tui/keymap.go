@@ -50,6 +50,7 @@ type KeyMap struct {
 
 	// Both Insert and Normal modes
 	SwitchModel []string // open model pool selector
+	FastMode    []string // toggle fast responses for all agents
 	Diagnostics []string // export diagnostics bundle
 	MCP         []string // open MCP server selector
 }
@@ -101,6 +102,7 @@ func DefaultKeyMap() KeyMap {
 
 		// Both Insert and Normal modes
 		SwitchModel: []string{"ctrl+p"},
+		FastMode:    []string{"ctrl+r"},
 		Diagnostics: []string{"ctrl+g"},
 		MCP:         []string{"ctrl+o"},
 	}

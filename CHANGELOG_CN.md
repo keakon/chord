@@ -15,7 +15,7 @@
 - TUI / 复制：在工具卡片上按 `yy` 会复制结构化的 Markdown 块（`# Tool call` / `## Arguments` / `## Result` / `## Diff`）；Done 拒绝卡片额外包含 `## Rejection reason` 段，方便粘贴到外部时保留 Chord 的展示结构。
 - Runtime / 压缩：`/compact` 现在与自动压缩共用同一个后台 worker；可以在 turn 进行中触发，进度显示在后台压缩状态槽，并在下一个安全的 continuation / idle 节点应用，而不要求先达到 idle barrier。
 - Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 在 loop 模式仍保持关闭以保证缓存稳定性。
-- Runtime / Fast mode：`/fast on` / `/fast off` 现在同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 fast-mode 状态。
+- Runtime / Fast mode：`/fast on` / `/fast off` 现在同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 fast-mode 状态。TUI 同时新增默认快捷键 `Ctrl+R`，可在 Insert 或 Normal 模式直接切换 fast mode。
 - Runtime / Delegate todo：当当前角色有 `Delegate` 工作流时，`TodoWrite` 允许多个 `in_progress` 条目，但每个 in_progress 条目必须有唯一的 `active_form`，明确对应一个真实的 live workstream。无 `Delegate` 的角色仍保持单 in_progress 限制。
 - TUI / Thinking 翻译：译文现在持久化到 `<session_dir>/thinking_translations.json`，按 `(message, block)` 定位、用内容 hash 校验；恢复会话后会直接复用。修改 `thinking_translation.target_language` 不会重新翻译已经存在的 block —— 同一个 thinking block 最多翻译一次。译文仅用于 UI，不会写回模型上下文。
 - TUI / Thinking 翻译：如果翻译模型误回显内部包装标记（包括只有开头 `<TRANSLATION>`、缺少闭合标签的情况），Chord 会在持久化、恢复和渲染前移除这些标记，避免它们被 Markdown 解析成 HTML block 导致翻译卡片格式失效。

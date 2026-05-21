@@ -77,6 +77,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
+| `Ctrl+R`     | Toggle fast responses for all agents                                                                                  |
 | `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
@@ -97,6 +98,20 @@ keymap:
   quit: ["Q"]                  # require shift for quit
   switch_model: ["ctrl+t"]     # choose a different key if you prefer
 ```
+
+### Terminal compatibility notes
+
+Custom key bindings only work when your terminal emulator, OS, and any multiplexer such as tmux forward that key sequence to Chord. Prefer plain printable keys in Normal mode or simple `ctrl+letter` combinations that do not already have strong terminal meanings.
+
+Avoid these as default/custom bindings unless you have tested them in your exact terminal setup:
+
+- `alt+letter` / Option combinations on macOS: terminals such as Ghostty may use Option for text input, menu shortcuts, or app-level bindings, so combinations like `alt+f` may never reach Chord.
+- `ctrl+i`, `ctrl+m`, and `ctrl+[`: traditional terminals encode these the same as `Tab`, `Enter`, and `Esc`.
+- `ctrl+s` and `ctrl+q`: these can be intercepted by software flow control.
+- `ctrl+c`, `ctrl+z`, and `ctrl+\\`: these have signal/cancel/suspend meanings in terminals.
+- Function keys or `ctrl+shift+...` combinations: support varies across terminals, keyboard layouts, SSH, and tmux.
+
+If a custom binding does not work, press `?` to confirm Chord loaded the mapping, then check whether the terminal receives the key with tools such as `showkey`, `cat`, or your terminal's key-event inspector.
 
 Action names are lower snake_case mirrors of the [`KeyMap` fields](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) in `internal/tui/keymap.go`. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
 
@@ -135,6 +150,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `switch_agent`             | `["shift+tab"]`                  |
 | `switch_role`              | `["tab"]`                        |
 | `switch_model`             | `["ctrl+p"]`                     |
+| `fast_mode`                | `["ctrl+r"]`                     |
 | `mcp`                      | `["ctrl+o"]`                     |
 | `diagnostics`              | `["ctrl+g"]`                     |
 

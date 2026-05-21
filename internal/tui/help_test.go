@@ -13,9 +13,10 @@ func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
 	km := KeyMapFromConfig(map[string][]string{
 		"help_toggle":  {"f1"},
 		"search_start": {"?"},
+		"fast_mode":    {"ctrl+r"},
 	})
 
-	var foundHelp, foundSearch bool
+	var foundHelp, foundSearch, foundFast bool
 	for _, group := range km.HelpGroups() {
 		if group.Title != "Normal Mode" {
 			continue
@@ -26,6 +27,8 @@ func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
 				foundHelp = len(binding.Keys) == 1 && binding.Keys[0] == "f1"
 			case "start search":
 				foundSearch = len(binding.Keys) == 1 && binding.Keys[0] == "?"
+			case "toggle fast responses for all agents":
+				foundFast = len(binding.Keys) == 1 && binding.Keys[0] == "ctrl+r"
 			}
 		}
 	}
@@ -35,6 +38,9 @@ func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
 	}
 	if !foundSearch {
 		t.Fatal("expected search binding to use configured key")
+	}
+	if !foundFast {
+		t.Fatal("expected fast binding to use configured key")
 	}
 }
 

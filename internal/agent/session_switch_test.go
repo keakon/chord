@@ -77,6 +77,49 @@ func TestResetSessionRuntimeStateClearsLoopControllerState(t *testing.T) {
 	}
 }
 
+func TestResetSessionRuntimeStateKeepsFastMode(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	client, _, _, _ := a.llmSnapshot()
+	client.SetFastMode(true)
+
+	a.resetSessionRuntimeState()
+
+	if !a.FastModeEnabled() {
+		t.Fatal("fast mode should stay enabled after session runtime reset")
+	}
+}
+
+func TestActivateLoadedSessionKeepsFastModeForMainAndRestoredSubAgents(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 1)
+	client, _, _, _ := a.llmSnapshot()
+	client.SetFastMode(true)
+	loaded := &loadedSessionState{
+		SessionPath: a.sessionDir,
+		SubAgentStates: []loadedSubAgentState{{
+			InstanceID:   "worker-restored",
+			TaskID:       "task-restored",
+			AgentDefName: "worker",
+			TaskDesc:     "restored work",
+			State:        SubAgentStateIdle,
+		}},
+	}
+
+	a.activateLoadedSession(loaded)
+
+	if !a.FastModeEnabled() {
+		t.Fatal("fast mode should stay enabled after loaded session activation")
+	}
+	sub := a.subAgentByTaskID("task-restored")
+	if sub == nil {
+		t.Fatal("expected restored SubAgent")
+	}
+	subClient, _ := sub.llmSnapshot()
+	if subClient == nil || !subClient.FastMode() {
+		t.Fatal("expected restored SubAgent client to inherit fast mode")
+	}
+}
+
 func TestSendUserMessageWithPartsRoutesImagesToFocusedSubAgent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
