@@ -900,6 +900,35 @@ func TestViewportUpdateBlockRecalcForNonLastBlock(t *testing.T) {
 	}
 }
 
+func TestViewportScrollDownNoopAtBottomPreservesManualNonStickyState(t *testing.T) {
+	v := NewViewport(20, 4)
+	for i := 0; i < 6; i++ {
+		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("gamma ", 12)})
+	}
+
+	v.ScrollToBottom()
+	bottomOffset := v.offset
+	v.sticky = false
+
+	v.ScrollDown(1)
+	if v.offset != bottomOffset {
+		t.Fatalf("offset after no-op ScrollDown at bottom = %d, want %d", v.offset, bottomOffset)
+	}
+	if v.sticky {
+		t.Fatal("no-op ScrollDown at bottom should preserve non-sticky manual scroll state")
+	}
+
+	v.offset = bottomOffset - 1
+	v.sticky = false
+	v.ScrollDown(1)
+	if v.offset != bottomOffset {
+		t.Fatalf("offset after ScrollDown reaching bottom = %d, want %d", v.offset, bottomOffset)
+	}
+	if !v.sticky {
+		t.Fatal("ScrollDown that actually reaches bottom should enable sticky follow")
+	}
+}
+
 func TestVisibleBlocksCacheInvalidatesOnMutationAndFilter(t *testing.T) {
 	v := NewViewport(40, 10)
 	v.ReplaceBlocks([]*Block{

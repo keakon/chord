@@ -2,9 +2,12 @@ package tui
 
 // ScrollDown moves the viewport down by n lines.
 func (v *Viewport) ScrollDown(n int) {
+	prevOffset := v.offset
 	v.offset += n
 	v.clampOffset()
-	v.sticky = v.atBottom()
+	if v.offset != prevOffset {
+		v.sticky = v.atBottom()
+	}
 }
 
 // ScrollUp moves the viewport up by n lines.
