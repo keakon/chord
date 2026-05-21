@@ -25,8 +25,8 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		ShellSuccessAgeTurns: 2,
 		ReadLikeAgeTurns:     1,
 		StaleAgeTurns:        4,
-		ShellSuccessBytes:    4000,
-		ReadLikeOutputBytes:  2500,
+		ShellSuccessBytes:    8000,
+		ReadLikeOutputBytes:  4000,
 		StaleOutputBytes:     1500,
 		MinToolResultsPrune:  8,
 	}

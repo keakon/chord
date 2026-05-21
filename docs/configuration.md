@@ -851,8 +851,33 @@ prompt-cache prefix stability; messages produced during the loop remain
 unreduced until loop mode is turned off.
 
 > **Most users do not need to configure this section.** The built-in defaults
-> are already tuned for common scenarios. The parameters below are only for
-> fine-grained control.
+> are conservative and work well for common scenarios. In empirical local-session
+> analysis, reduction produced meaningful savings without systematically
+> breaking prompt-cache reuse; if you want a cache-friendlier balance, use the
+> recommended profile below.
+
+**Recommended default profile** (keeps recent medium-sized reads/logs intact while
+still trimming large stale output):
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 8000
+    read_like_age_turns: 1
+    read_like_output_bytes: 4000
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+Use the defaults when prompt-cache stability matters and your sessions commonly
+reuse the same active files across several turns. If your main problem is
+hitting context limits quickly in tool-heavy sessions, you can lower the byte
+thresholds toward the older aggressive values (`shell_success_bytes: 4000`,
+`read_like_output_bytes: 2500`).
 
 **Reduction categories**: Tool results are classified into five categories,
 each with its own age and size thresholds.
@@ -861,8 +886,8 @@ each with its own age and size thresholds.
 |----------|-----------------|---------------|----------------|-----------|
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
-| Shell success | `git`, `go test`, `npm run` output | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 4000) | Build/test output can be important context but is usually reproducible |
-| Read / search | `Read`, `Grep`, `Glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 2500) | File contents can always be re-read; most aggressive trimming |
+| Shell success | `git`, `go test`, `npm run` output | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 8000) | Build/test output can be important context but is usually reproducible |
+| Read / search | `Read`, `Grep`, `Glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; most aggressive trimming |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
 How to read the age and size parameters:
@@ -881,9 +906,10 @@ How to read the age and size parameters:
 
 | If you see this... | Try this... |
 |--------------------|-------------|
+| Prompt-cache reuse is good but medium reads/logs still change the request prefix too often | Raise `read_like_output_bytes` and `shell_success_bytes` further |
 | Short conversations with many tool results hitting limits | Lower `min_tool_results_prune` (e.g. `4`) |
 | Permission confirmations dominating the prompt | Lower `confirm_age_turns` (e.g. `1`) |
-| Build/test logs are important context to keep | Raise `shell_success_bytes` (e.g. `16000`) |
+| Build/test logs are important context to keep | Raise `shell_success_bytes` further (e.g. `16000`) |
 | File contents often need to be revisited | Raise `read_like_age_turns` (e.g. `3`) and `read_like_output_bytes` (e.g. `8000`) |
 | All tool output is important, nothing should be dropped | Raise all `*_age_turns` and `*_bytes` globally |
 
@@ -895,9 +921,9 @@ context:
     confirm_age_turns: 2
     error_age_turns: 3
     shell_success_age_turns: 2
-    shell_success_bytes: 4000
+    shell_success_bytes: 8000
     read_like_age_turns: 1
-    read_like_output_bytes: 2500
+    read_like_output_bytes: 4000
     stale_age_turns: 4
     stale_output_bytes: 1500
     min_tool_results_prune: 8

@@ -737,7 +737,25 @@ providers:
 
 在 loop 模式下，新增消息不会再应用剪裁。如果你在某个 LLM 请求仍在进行时启用 `/loop on`，Chord 会冻结并复用该请求已经准备好的前缀，避免旧历史从“已剪裁形态”翻回完整原始工具输出，从而保持 prompt cache 前缀稳定；loop 期间产生的新消息会保持未剪裁，直到退出 loop 后再恢复普通剪裁策略。
 
-> **大多数用户不需要配置这一节。** 内置默认值已适配常见场景，以下参数仅在需要精细控制时调整。
+> **大多数用户不需要配置这一节。** 内置默认值偏保守，已适配常见场景。基于本地真实会话的统计，剪裁能带来可观节省，且没有系统性破坏 prompt cache 复用；如果你希望在节省上下文和缓存稳定性之间更均衡，可使用下面的推荐配置。
+
+**推荐的默认配置**（保留中等大小的近期读取/日志，同时继续剪掉大型旧输出）：
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 8000
+    read_like_age_turns: 1
+    read_like_output_bytes: 4000
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+```
+
+当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，默认配置是推荐选择。如果主要问题是工具密集型会话很快顶到上下文上限，可以把字节阈值下调到更激进的旧取值（`shell_success_bytes: 4000`、`read_like_output_bytes: 2500`）。
 
 **剪裁规则**：按工具输出的类型和时效分五类处理，类别不同，裁剪激进程度也不同。
 
@@ -745,8 +763,8 @@ providers:
 |------|----------|----------|----------|----------|
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
-| Shell 成功 | `git`、`go test`、`npm run` 等命令输出 | `shell_success_age_turns`（默认 2 轮后） | `shell_success_bytes`（默认 4000 字节以上才剪） | 构建/测试输出有时是关键上下文，但通常可重新执行 |
-| 读取/搜索 | `Read`、`Grep`、`Glob` 等工具输出 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 2500 字节以上才剪） | 文件内容可随时重新读取，裁剪最激进 |
+| Shell 成功 | `git`、`go test`、`npm run` 等命令输出 | `shell_success_age_turns`（默认 2 轮后） | `shell_success_bytes`（默认 8000 字节以上才剪） | 构建/测试输出有时是关键上下文，但通常可重新执行 |
+| 读取/搜索 | `Read`、`Grep`、`Glob` 等工具输出 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 4000 字节以上才剪） | 文件内容可随时重新读取，裁剪最激进 |
 | 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 4 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
 
 年龄参数说明：
@@ -759,9 +777,10 @@ providers:
 
 | 你遇到的情况 | 建议 |
 |--------------|------|
+| Prompt cache 复用良好，但中等大小的读取/日志仍然太容易改变请求前缀 | 进一步调高 `read_like_output_bytes` 和 `shell_success_bytes` |
 | 每次对话很短但工具输出特别多 | 降低 `min_tool_results_prune`（如 `4`） |
 | Prompt 中权限确认信息过多 | 降低 `confirm_age_turns`（如 `1`） |
-| 构建/测试日志经常需要回头看 | 调高 `shell_success_bytes`（如 `16000`） |
+| 构建/测试日志经常需要回头看 | 进一步调高 `shell_success_bytes`（如 `16000`） |
 | 文件内容经常需要回头查阅 | 调高 `read_like_age_turns`（如 `3`）和 `read_like_output_bytes`（如 `8000`） |
 | 工具输出都很重要不想丢 | 整体调高各 `*_age_turns` 和 `*_bytes` |
 
@@ -773,9 +792,9 @@ context:
     confirm_age_turns: 2
     error_age_turns: 3
     shell_success_age_turns: 2
-    shell_success_bytes: 4000
+    shell_success_bytes: 8000
     read_like_age_turns: 1
-    read_like_output_bytes: 2500
+    read_like_output_bytes: 4000
     stale_age_turns: 4
     stale_output_bytes: 1500
     min_tool_results_prune: 8

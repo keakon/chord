@@ -27,8 +27,8 @@ const (
 	compactBashSuccessAgeTurns   = 2
 	compactReadLikeAgeTurns      = 1
 	compactStaleAgeTurns         = 4
-	compactBashSuccessBytes      = 4000
-	compactReadLikeOutputBytes   = 2500
+	compactBashSuccessBytes      = 8000
+	compactReadLikeOutputBytes   = 4000
 	compactReadSnippetChars      = 500
 	compactStaleOutputBytes      = 1500
 	compactMinToolResultsPrune   = 8

@@ -357,7 +357,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 	largeOutput := strings.Repeat("test output line\n", 500)
-	newLargeOutput := strings.Repeat("new output line\n", 500)
+	newLargeOutput := strings.Repeat("new output line\n", 600)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
