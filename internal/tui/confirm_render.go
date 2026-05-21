@@ -87,9 +87,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 	lines := []string{title, ""}
 	if strings.EqualFold(summary.ToolName, "Done") {
 		if strings.TrimSpace(summary.DoneReport) != "" {
-			// Done report uses rich markdown which may emit ANSI resets; re-insert the dialog background
-			// after resets so trailing padding stays visually consistent.
-			lines = append(lines, preserveCardBg(renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil), currentTheme.AssistantCardBg)...)
+			lines = append(lines, renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil)...)
 		}
 		return lines
 	}
