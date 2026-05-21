@@ -143,7 +143,7 @@ func TestRenderUserPlainDoesNotInsertSyntheticBlankLineInIndentedYAML(t *testing
 	block := &Block{
 		ID:   1,
 		Type: BlockUser,
-		Content: "我是这样配置的：\n" +
+		Content: "Here is my config:\n" +
 			"  codex:\n" +
 			"    preset: \"codex\"\n" +
 			"\tproxy: \"socks5://127.0.0.1:1080\"",
@@ -187,7 +187,7 @@ func TestRenderUserPlainPreservesCodeIndentationForPreformattedContent(t *testin
 	block := &Block{
 		ID:      1,
 		Type:    BlockUser,
-		Content: "这是卡片内容：\n--- a/file.go\n+++ b/file.go\n@@ -1,3 +1,3 @@\n \tswitch providerType {\n-\t\tif llm.IsResponsesModel(modelID) || normalizedCfg.Preset == \"codex\" {\n+\t\tif llm.IsResponsesAPIURL(apiURL) || normalizedCfg.Preset == \"codex\" {",
+		Content: "Here is the card content:\n--- a/file.go\n+++ b/file.go\n@@ -1,3 +1,3 @@\n \tswitch providerType {\n-\t\tif llm.IsResponsesModel(modelID) || normalizedCfg.Preset == \"codex\" {\n+\t\tif llm.IsResponsesAPIURL(apiURL) || normalizedCfg.Preset == \"codex\" {",
 	}
 	lines := block.renderUserPlain(120)
 	plain := strings.Join(stripANSILines(lines), "\n")
@@ -207,7 +207,7 @@ func TestRenderUserPlainSessionLikePastedEditDiffUsesPreformattedPath(t *testing
 	block := &Block{
 		ID:   1,
 		Type: BlockUser,
-		Content: "这是卡片内容：\n" +
+		Content: "Here is the card content:\n" +
 			`{"path": "cmd/chord/common_provider_cache.go", "new_string": "\tcase \"chat-completions\":\n\t\t// Auto-switch to responses provider if needed"}` +
 			"\n\nDiff:\n" +
 			"--- cmd/chord/common_provider_cache.go\n" +
@@ -220,7 +220,7 @@ func TestRenderUserPlainSessionLikePastedEditDiffUsesPreformattedPath(t *testing
 	}
 	lines := block.renderUserPlain(110)
 	plain := strings.Join(stripANSILines(lines), "\n")
-	if !strings.Contains(plain, "  这是卡片内容：") {
+	if !strings.Contains(plain, "  Here is the card content:") {
 		t.Fatalf("rendered user card missing intro text: %q", plain)
 	}
 	if !strings.Contains(plain, `  {"path": "cmd/chord/common_provider_cache.go"`) {

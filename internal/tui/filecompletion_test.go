@@ -372,16 +372,16 @@ func TestAtMentionFuzzyMatchesMultiStepPath(t *testing.T) {
 	}
 }
 
-func TestAtMentionFuzzyMatchesKeepsNegativeScoreMatches(t *testing.T) {
+func TestAtMentionFuzzyMatchesKeepsLowScoreMatches(t *testing.T) {
 	matches := atMentionFuzzyMatches([]string{
-		"交付报告/stage1_stage2_技术文档.md",
+		"reports/stage1_stage2_design_doc.md",
 		"docs/other-file.md",
-	}, "技术")
+	}, "s1s2doc")
 	if len(matches) != 1 {
 		t.Fatalf("len(matches) = %d, want 1", len(matches))
 	}
-	if got := matches[0].Path; got != "交付报告/stage1_stage2_技术文档.md" {
-		t.Fatalf("top fuzzy match = %q, want %q", got, "交付报告/stage1_stage2_技术文档.md")
+	if got := matches[0].Path; got != "reports/stage1_stage2_design_doc.md" {
+		t.Fatalf("top fuzzy match = %q, want %q", got, "reports/stage1_stage2_design_doc.md")
 	}
 }
 
@@ -432,20 +432,20 @@ func TestAtMentionPathMatchesHideHiddenEntriesUntilPrefixIncludesDot(t *testing.
 	}
 }
 
-func TestRefreshAtMentionListFindsChineseFuzzyMatchWithNegativeScore(t *testing.T) {
+func TestRefreshAtMentionListFindsLowScoreFuzzyMatch(t *testing.T) {
 	m := NewModel(nil)
 	m.atMentionLoaded = true
 	m.atMentionFiles = []string{
-		"交付报告/stage1_stage2_技术文档.md",
+		"reports/stage1_stage2_design_doc.md",
 		"docs/other-file.md",
 	}
 	m.atMentionOpen = true
-	m.atMentionQuery = "技术"
+	m.atMentionQuery = "s1s2doc"
 
 	m.refreshAtMentionList()
 
 	if m.atMentionList == nil {
-		t.Fatal("atMentionList = nil, want Chinese fuzzy result")
+		t.Fatal("atMentionList = nil, want fuzzy result")
 	}
 	if got := m.atMentionList.Len(); got != 1 {
 		t.Fatalf("atMentionList.Len() = %d, want 1", got)
@@ -455,8 +455,8 @@ func TestRefreshAtMentionListFindsChineseFuzzyMatchWithNegativeScore(t *testing.
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
 	match, _ := item.Value.(atMentionOption)
-	if got := match.Path; got != "交付报告/stage1_stage2_技术文档.md" {
-		t.Fatalf("selected match = %q, want %q", got, "交付报告/stage1_stage2_技术文档.md")
+	if got := match.Path; got != "reports/stage1_stage2_design_doc.md" {
+		t.Fatalf("selected match = %q, want %q", got, "reports/stage1_stage2_design_doc.md")
 	}
 }
 
@@ -611,18 +611,18 @@ func TestAtMentionFileRefsHandlesEscapedSpacesAndDedupes(t *testing.T) {
 func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
-	mustWriteFile(t, filepath.Join(wd, "docs", "需求，第一版.md"), "doc")
+	mustWriteFile(t, filepath.Join(wd, "docs", "requirements,first-draft.md"), "doc")
 	mustWriteFile(t, filepath.Join(wd, "docs", "a"), "short")
-	mustWriteFile(t, filepath.Join(wd, "docs", "a，b.md"), "long")
+	mustWriteFile(t, filepath.Join(wd, "docs", "a,b.md"), "long")
 
 	text := strings.Join([]string{
-		`参考 @AGENTS.md，分析哪些内容应该纳入。`,
-		`再看 @docs/需求，第一版.md，帮我总结`,
-		`最后 @docs/a，b.md，分析`,
+		`Review @AGENTS.md, then summarize.`,
+		`Also read @docs/requirements,first-draft.md, then summarize`,
+		`Finally inspect @docs/a,b.md, then analyze`,
 	}, "\n")
 
 	got := atMentionFileRefs([]string{text}, wd)
-	want := []string{`AGENTS.md`, `docs/需求，第一版.md`, `docs/a，b.md`}
+	want := []string{`AGENTS.md`, `docs/requirements,first-draft.md`, `docs/a,b.md`}
 	if !slices.Equal(got, want) {
 		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
 	}
@@ -630,11 +630,11 @@ func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
 
 func TestAtMentionFileRefsPrefersFullCandidateBeforeProseDelimiterFallback(t *testing.T) {
 	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "docs", "note，分析"), "full")
+	mustWriteFile(t, filepath.Join(wd, "docs", "note,analysis"), "full")
 	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "short")
 
-	got := atMentionFileRefs([]string{`参考 @docs/note，分析`}, wd)
-	want := []string{`docs/note，分析`}
+	got := atMentionFileRefs([]string{`Review @docs/note,analysis`}, wd)
+	want := []string{`docs/note,analysis`}
 	if !slices.Equal(got, want) {
 		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
 	}

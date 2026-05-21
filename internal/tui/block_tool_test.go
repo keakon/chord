@@ -2043,14 +2043,15 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		ToolName:      "Done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusCancelled,
-		ResultContent: "Done rejected: 达到100%通过才能调用，调用时需要汇报结果",
+		ResultContent: "Done rejected: require all checks to pass before exit and include verification results",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(plain, "✗ Done") {
 		t.Fatalf("expected rejected Done to use failure icon, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "rejected reason: 达到100%通过才能调用，调用时需要汇报结果") {
+	if !strings.Contains(plain, "rejected reason: require all checks to pass before exit and include") ||
+		!strings.Contains(plain, "verification results") {
 		t.Fatalf("expected simplified rejected reason text, got:\n%s", plain)
 	}
 	for _, unwanted := range []string{"Status:", "Done rejected:"} {
@@ -2594,7 +2595,7 @@ func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
 		Type:                       BlockToolCall,
 		ToolName:                   "Question",
 		Collapsed:                  false,
-		Content:                    `{"questions":[{"header":"确认","question":"继续吗？","multiple":false,"options":[{"label":"继续","description":"继续执行"}]}]}`,
+		Content:                    `{"questions":[{"header":"Confirm","question":"Continue?","multiple":false,"options":[{"label":"Continue","description":"Continue execution"}]}]}`,
 		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
 		ToolQueuedByExecutionEvent: true,
 	}

@@ -12,7 +12,7 @@ func TestConfirmDialogDoneMarkdownPreservesBackgroundAcrossANSIGaps(t *testing.T
 	m := NewModelWithSize(nil, 120, 40)
 	req := &ConfirmRequest{
 		ToolName:   "Done",
-		DoneReport: "**标题**：`list[str]` → JSON\n\n- item1\n- item2",
+		DoneReport: "**Title**: `list[str]` → JSON\n\n- item1\n- item2",
 	}
 	m.confirm.request = req
 
@@ -21,7 +21,7 @@ func TestConfirmDialogDoneMarkdownPreservesBackgroundAcrossANSIGaps(t *testing.T
 		t.Fatal("expected non-empty confirm dialog")
 	}
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "标题") {
+	if !strings.Contains(plain, "Title") {
 		t.Fatalf("missing rendered done report text in dialog: %q", plain)
 	}
 
@@ -33,7 +33,7 @@ func TestConfirmDialogDoneMarkdownPreservesBackgroundAcrossANSIGaps(t *testing.T
 	lines := m.renderConfirmSummary("title", summary, 118)
 	for _, line := range lines[2:] {
 		plainLine := stripANSI(line)
-		if !strings.Contains(plainLine, "标题") && !strings.Contains(plainLine, "item") {
+		if !strings.Contains(plainLine, "Title") && !strings.Contains(plainLine, "item") {
 			continue
 		}
 		for _, reset := range []string{"\x1b[m", "\x1b[0m", "\x1b[39m", "\x1b[49m"} {

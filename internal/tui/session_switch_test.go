@@ -3556,7 +3556,7 @@ func TestRebuildViewportFromMessagesRestoresRejectedDoneIntoSingleToolCard(t *te
 				Args: []byte(`{"report":"## Completion status\ndone\n\n**Verification**: passed"}`),
 			}},
 		},
-		{Role: "tool", ToolCallID: "done-1", Content: "Done rejected: 按需更新文档，分析当前实现是否能正确实现 loop 和 done 的意图，提交所有改动"},
+		{Role: "tool", ToolCallID: "done-1", Content: "Done rejected: update docs as needed, verify loop exit behavior, and commit all changes"},
 	}}
 	m := NewModel(backend)
 
@@ -3580,7 +3580,7 @@ func TestRebuildViewportFromMessagesRestoresRejectedDoneIntoSingleToolCard(t *te
 	if !strings.Contains(plain, "✗ Done") {
 		t.Fatalf("rendered Done card = %q, want rejected Done failure header", plain)
 	}
-	if !strings.Contains(plain, "按需更新文档") {
+	if !strings.Contains(plain, "update docs as needed") {
 		t.Fatalf("rendered Done card = %q, want visible rejected reason text", plain)
 	}
 }

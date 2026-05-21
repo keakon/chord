@@ -177,14 +177,14 @@ func TestOSC9IdleNotificationUsesLastAssistantMessage(t *testing.T) {
 	m.terminalAppFocused = false
 	m.oscNotifyOut = &buf
 	m.terminalNotificationProtocol = terminalNotificationOSC9
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "模型回复内容"})
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "model reply content"})
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
 	if cmd == nil {
 		t.Fatal("expected idle followup command")
 	}
 	_ = cmd()
-	if got := buf.String(); got != "\x1b]9;模型回复内容\x07" {
+	if got := buf.String(); got != "\x1b]9;model reply content\x07" {
 		t.Fatalf("osc sequence = %q, want assistant content", got)
 	}
 }
@@ -197,13 +197,13 @@ func TestOSC9IdleNotificationUsesLastErrorMessage(t *testing.T) {
 	m.oscNotifyOut = &buf
 	m.terminalNotificationProtocol = terminalNotificationOSC9
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ErrorEvent{Err: errors.New("请求中断：网络错误")}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ErrorEvent{Err: errors.New("request interrupted: network error")}})
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
 	if cmd == nil {
 		t.Fatal("expected idle followup command")
 	}
 	_ = cmd()
-	if got := buf.String(); got != "\x1b]9;请求中断：网络错误\x07" {
+	if got := buf.String(); got != "\x1b]9;request interrupted: network error\x07" {
 		t.Fatalf("osc sequence = %q, want error content", got)
 	}
 }

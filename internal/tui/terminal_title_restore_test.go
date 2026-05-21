@@ -65,7 +65,7 @@ func TestUpdateTerminalTitleFromRestoredSession_PrefersOriginalWhenClean(t *test
 		},
 		messages: []message.Message{
 			{Role: "user", Content: "[Context Summary]\n…", IsCompactionSummary: true},
-			{Role: "user", Content: "更近的请求"},
+			{Role: "user", Content: "newer request"},
 		},
 	}
 	m := NewModelWithSize(stub, 80, 24)

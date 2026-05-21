@@ -2707,7 +2707,7 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
-	questionArgs := `{"questions":[{"header":"Provider兼容性确认","question":"continue?","options":[{"label":"yes"}]}]}`
+	questionArgs := `{"questions":[{"header":"Provider compatibility","question":"continue?","options":[{"label":"yes"}]}]}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-question-stream-1",
 		Name:     "Question",
@@ -2728,7 +2728,7 @@ func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 		Name:     "Question",
 		AgentID:  "",
 		ArgsJSON: questionArgs,
-		Result:   `[{"header":"Provider兼容性确认","selected":["yes"]}]`,
+		Result:   `[{"header":"Provider compatibility","selected":["yes"]}]`,
 		Status:   agent.ToolResultStatusSuccess,
 	}})
 
@@ -6701,15 +6701,15 @@ func TestToolCallCopyContentFormatsDoneAsMarkdown(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
 		ToolName:      "Done",
-		DoneReport:    "## 完成状态\n已完成\n\n- 验证通过",
-		ResultContent: "Done rejected: 覆盖率不足\n需要达到 80%",
+		DoneReport:    "## Completion status\nDone\n\n- Verification passed",
+		ResultContent: "Done rejected: coverage is too low\nrequired minimum is 80%",
 	}
 
 	got := blockCopyContent(block)
 	for _, want := range []string{
 		"# Tool call: Done",
-		"## Report\n\n## 完成状态\n已完成",
-		"## Rejection reason\n\n覆盖率不足\n需要达到 80%",
+		"## Report\n\n## Completion status\nDone",
+		"## Rejection reason\n\ncoverage is too low\nrequired minimum is 80%",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("blockCopyContent = %q, want %q", got, want)

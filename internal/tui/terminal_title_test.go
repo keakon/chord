@@ -7,8 +7,8 @@ import (
 )
 
 func TestDeriveTerminalTitle_PlainText(t *testing.T) {
-	got := deriveTerminalTitle("帮我重构这个模块")
-	want := "帮我重构这个模块"
+	got := deriveTerminalTitle("refactor this module")
+	want := "refactor this module"
 	if got != want {
 		t.Errorf("deriveTerminalTitle = %q, want %q", got, want)
 	}
@@ -23,7 +23,7 @@ func TestDeriveTerminalTitle_CollapsesWhitespace(t *testing.T) {
 }
 
 func TestDeriveTerminalTitle_TruncatesLongText(t *testing.T) {
-	long := "这是一条非常非常非常非常非常非常非常非常非常非常非常非常长的消息"
+	long := "this is a very very very very very very very very very very very long message"
 	got := deriveTerminalTitle(long)
 	if len([]rune(got)) > terminaltitle.MaxTitleRunes+1 { // +1 for ellipsis
 		t.Errorf("deriveTerminalTitle produced %d runes, want <= %d", len([]rune(got)), terminaltitle.MaxTitleRunes+1)

@@ -14,7 +14,7 @@ import (
 )
 
 func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
-	text := "mv docs/plans/DELETE_MULTI_FILE_TOOL_PLAN.md docs/plans/archive/DELETE_MULTI_FILE_TOOL_PLAN.md"
+	text := "mv docs/plans/example-plan.md docs/plans/archive/example-plan.md"
 	got := wrapConfirmLiteralText(text, 44)
 	if len(got) < 2 {
 		t.Fatalf("expected wrapped output, got %v", got)
@@ -36,7 +36,7 @@ func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
 func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"mv docs/plans/DELETE_MULTI_FILE_TOOL_PLAN.md docs/plans/archive/DELETE_MULTI_FILE_TOOL_PLAN.md","workdir":"/tmp/project","timeout":30}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout":30}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Command:") {
@@ -53,7 +53,7 @@ func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t
 func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm internal/tui/usage_stats_state.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout":45}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout":45}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Tool: Shell") {
@@ -62,7 +62,7 @@ func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	if !strings.Contains(plain, "Action: Execute shell command") {
 		t.Fatalf("expected action line in confirm dialog, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "Command:") || !strings.Contains(plain, "rm internal/tui/usage_stats_state.go") {
+	if !strings.Contains(plain, "Command:") || !strings.Contains(plain, "rm internal/tui/example_obsolete.go") {
 		t.Fatalf("expected command to be visible in summary view, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "Tool: Shell({") {
@@ -440,7 +440,7 @@ func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-	longTail := strings.Repeat("长", 250) + " tail"
+	longTail := strings.Repeat("long", 250) + " tail"
 	m.confirm.denyReasonInput.SetValue("  not safe\nfor production\n" + longTail + "  ")
 
 	_ = m.handleConfirmDenyReasonKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
