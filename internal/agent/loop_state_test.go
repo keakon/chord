@@ -18,7 +18,7 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
@@ -52,7 +52,7 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 func TestNextLoopAssessmentFromAssistantRequiresDoneToolWhenEnabled(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
@@ -92,7 +92,7 @@ func TestNextLoopAssessmentFromAssistantAcceptsDoneToolWhenEnabled(t *testing.T)
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
@@ -129,7 +129,7 @@ Done: allow
 	}
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.newTurn()
 	turn := a.turn
 	callID := "done-confirm-1"
@@ -356,7 +356,7 @@ Done: allow
 	}
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "unfinished cleanup", Status: "pending"}}
 	a.newTurn()
 	turn := a.turn
@@ -502,7 +502,7 @@ Done: ask
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.newTurn()
 	turn := a.turn
 	callID := "done-user-deny-1"
@@ -595,7 +595,7 @@ Done: ask
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.newTurn()
 	turn := a.turn
 	callID := "done-user-deny-long-1"
@@ -660,83 +660,11 @@ Done: ask
 	}
 }
 
-func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenVerificationMissing(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools.Register(tools.NewDoneTool())
-	a.activeConfig = &config.AgentConfig{
-		Permission: parsePermissionNode(t, `
-"*": deny
-Done: allow
-`),
-	}
-	a.rebuildRuleset()
-	a.loopState.enableWithTarget("finish current task")
-	a.newTurn()
-	turn := a.turn
-	callID := "done-no-verify-1"
-	a.ctxMgr.Append(message.Message{
-		Role:    "assistant",
-		Content: "implemented but not verified",
-		ToolCalls: []message.ToolCall{{
-			ID:   callID,
-			Name: tools.NameDone,
-			Args: json.RawMessage(`{"reason":"implemented but not verified"}`),
-		}},
-	})
-	turn.PendingToolCalls.Store(1)
-
-	handled := make(chan struct{})
-	go func() {
-		a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
-			CallID:   callID,
-			Name:     tools.NameDone,
-			ArgsJSON: `{"reason":"implemented but not verified"}`,
-			Result:   "implemented but not verified",
-			TurnID:   turn.ID,
-		}})
-		close(handled)
-	}()
-
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case evt := <-a.outputCh:
-			switch payload := evt.(type) {
-			case ConfirmRequestEvent:
-				t.Fatal("unexpected Done confirmation request when verification is still required")
-			case LoopNoticeEvent:
-				if payload.Title != "LOOP CONTINUE" {
-					continue
-				}
-				t.Fatal("unexpected LoopNoticeEvent for Done tool-call continuation with missing verification; runtime must not inject user continuation after tool calls")
-			case ToolResultEvent:
-				if payload.CallID != callID || payload.Name != tools.NameDone {
-					continue
-				}
-				if !strings.Contains(payload.Result, "Done rejected automatically: loop exit conditions are not satisfied yet") {
-					continue
-				}
-				select {
-				case <-handled:
-				case <-time.After(2 * time.Second):
-					t.Fatal("timed out waiting for verification-missing rejection handling to finish")
-				}
-				if a.loopState.Iteration != 1 {
-					t.Fatalf("loop iteration = %d, want 1 after automatic Done rejection", a.loopState.Iteration)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for Done rejection events")
-		}
-	}
-}
-
 func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
@@ -808,7 +736,7 @@ func TestNextLoopAssessmentFromAssistantRejectsDoneMixedWithOtherToolCalls(t *te
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.tools.Register(tools.NewDoneTool())
 	a.tools.Register(tools.ReadTool{})
 	a.activeConfig = &config.AgentConfig{
@@ -1049,7 +977,7 @@ func TestNextLoopAssessmentFromAssistantRequiresDoneToolBeforeCompleted(t *testi
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
@@ -1072,27 +1000,6 @@ Done: allow
 	}
 	if !strings.Contains(assessment.Message, "Done") {
 		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
-	}
-}
-
-func TestNextLoopAssessmentFromAssistantRequiresVerificationStatusBeforeCompleted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	a.loopState.markProgress()
-
-	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
-		Role:       "assistant",
-		Content:    "done",
-		StopReason: "stop",
-	})
-	if assessment == nil {
-		t.Fatal("assessment = nil, want continue assessment")
-	}
-	if assessment.Action != LoopAssessmentActionContinue {
-		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
-	}
-	if !strings.Contains(assessment.Message, "<verify-not-run>reason</verify-not-run>") {
-		t.Fatalf("assessment.Message = %q, want verification-status guidance", assessment.Message)
 	}
 }
 
@@ -1176,29 +1083,6 @@ func TestIsVerificationLikeToolResultMatchesShortVerificationCommandsWithWordBou
 	}
 }
 
-func TestCurrentLoopContinuationReasonsOmitVerificationRequiredForVerifyNotRunTag(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	reasons := a.currentLoopContinuationReasonsForContent("<verify-not-run>network sandbox blocked tests</verify-not-run>")
-	for _, reason := range reasons {
-		if reason == "verification_required" {
-			t.Fatalf("reasons = %v, should omit verification_required when verify-not-run tag is present", reasons)
-		}
-	}
-}
-
-func TestBuildLoopContinuationNoteOmitsVerificationRequiredForVerifyNotRunTag(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: a.currentLoopContinuationReasonsForContent("<verify-not-run>network sandbox blocked tests</verify-not-run>", "missing_done_tool")})
-	if note == nil {
-		t.Fatal("expected continuation note")
-	}
-	if strings.Contains(note.Text, "verification is required before completion") {
-		t.Fatalf("continuation note should omit verification_required when verify-not-run tag is present, got: %q", note.Text)
-	}
-}
-
 func TestHandleToolResult_DoneInLoopAllowsExitAfterPytestVerification(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
@@ -1221,10 +1105,6 @@ Done: allow
 		Result:   "2 passed in 0.10s",
 		TurnID:   turn.ID,
 	}})
-	if a.loopState.VerificationVersion == 0 {
-		t.Fatal("pytest verification should mark loop verification progress")
-	}
-
 	a.newTurn()
 	turn = a.turn
 	callID := "done-after-pytest-1"
@@ -1721,7 +1601,7 @@ Done: ask
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	a.newTurn()
 	turn := a.turn
 	callID := "done-user-deny-count-1"
@@ -1785,6 +1665,7 @@ Done: allow
 	}
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
+	a.todoItems = []tools.TodoItem{{ID: "1", Content: "finish current task", Status: "pending"}}
 	a.loopState.MaxIterations = 1
 	a.newTurn()
 	turn := a.turn
@@ -2273,24 +2154,5 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 		if r == "subagents_active" {
 			t.Fatalf("should not report subagents_active for completed subagent, reasons: %v", reasons)
 		}
-	}
-}
-
-func TestBuildLoopVerificationContinuationNote(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	a.loopState.Iteration = 7
-	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionVerify, Reasons: []string{"verification_required"}})
-	if note == nil {
-		t.Fatal("expected verification continuation note")
-	}
-	if note.Title != "LOOP VERIFY" {
-		t.Fatalf("note.Title = %q, want LOOP VERIFY", note.Title)
-	}
-	if !strings.Contains(note.Text, "Verification required") || !strings.Contains(note.Text, "Run the smallest relevant verification now") {
-		t.Fatalf("verification note text missing verification instruction: %q", note.Text)
-	}
-	if !strings.Contains(note.Text, "Automatic Done interceptions 7 (unlimited).") {
-		t.Fatalf("verification note iteration text = %q, want verification iteration without decrement", note.Text)
 	}
 }

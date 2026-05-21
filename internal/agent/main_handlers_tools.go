@@ -247,7 +247,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	a.loopState.markProgress()
 	if payload.Error == nil {
 		if isVerificationLikeToolResult(payload, rawToolResultForVerification(payload)) {
-			a.loopState.markVerificationProgress()
+			a.loopState.markProgress()
 		}
 		if payload.Name == "Skill" {
 			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {

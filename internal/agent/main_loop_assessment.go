@@ -42,17 +42,6 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.loopState.disable()
 		a.emitLoopStateChanged()
 		a.setIdleAndDrainPending()
-	case LoopAssessmentActionVerify:
-		a.loopState.State = LoopStateVerifying
-		a.emitLoopStateChanged()
-		a.emitActivity("main", ActivityVerifying, "loop")
-		if a.shouldEmitLoopContinuationForAssessment(payload) {
-			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
-			if a.pendingLoopContinuation != nil {
-				a.emitLoopContinuationNote(a.pendingLoopContinuation, true)
-			}
-		}
-		a.handleContinueFromContext(Event{Type: EventContinue})
 	case LoopAssessmentActionBlocked:
 		a.loopState.State = LoopStateBlocked
 		a.emitLoopStateChanged()
@@ -99,7 +88,7 @@ func (a *MainAgent) loopKeepsMainBusy() bool {
 		return false
 	}
 	switch a.loopState.State {
-	case LoopStateExecuting, LoopStateVerifying, LoopStateAssessing:
+	case LoopStateExecuting, LoopStateAssessing:
 		return true
 	default:
 		return false
@@ -131,13 +120,6 @@ func (a *MainAgent) hasActiveSubAgents() bool {
 		return true
 	}
 	return false
-}
-
-func (a *MainAgent) loopVerificationSatisfied(content string) bool {
-	if a.loopState.VerificationVersion > 0 {
-		return true
-	}
-	return extractLoopVerifyNotRunReason(content) != ""
 }
 
 func inferLoopBlockerCategory(reason string) string {
@@ -248,15 +230,6 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "subagents_active", "terminal_reply"))
 		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: active subagents must finish before completion.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 	}
-	if !a.loopVerificationSatisfied(msg.Content) {
-		reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_verification_status", "terminal_reply"))
-		return &LoopAssessment{
-			Action:            LoopAssessmentActionContinue,
-			Message:           "Loop continuing: report verification status or include <verify-not-run>reason</verify-not-run> before finishing.",
-			Reasons:           reasons,
-			TriggerStopReason: strings.TrimSpace(msg.StopReason),
-		}
-	}
 	if len(msg.ToolCalls) > 0 {
 		doneCount := 0
 		mixedWithOtherTools := false
@@ -361,9 +334,6 @@ func (a *MainAgent) currentLoopContinuationReasonsForContent(content string, ext
 	if a.hasActiveSubAgents() {
 		add("subagents_active")
 	}
-	if a.loopState.VerificationVersion == 0 && extractLoopVerifyNotRunReason(content) == "" {
-		add("verification_required")
-	}
 	return reasons
 }
 
@@ -414,15 +384,12 @@ func (a *MainAgent) activeSubAgentContinuationLines() []string {
 }
 
 func loopContinuationTitle(action LoopAssessmentAction) string {
-	if action == LoopAssessmentActionVerify {
-		return "LOOP VERIFY"
-	}
 	return "LOOP CONTINUE"
 }
 
 // buildLoopContinuationNote constructs the continuation notice injected into the next LLM request.
 func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopContinuationNote {
-	if assessment == nil || (assessment.Action != LoopAssessmentActionContinue && assessment.Action != LoopAssessmentActionVerify) {
+	if assessment == nil || assessment.Action != LoopAssessmentActionContinue {
 		return nil
 	}
 	reasons := assessment.Reasons
@@ -430,11 +397,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		reasons = a.currentLoopContinuationReasons()
 	}
 	sections := make([]string, 0, 10)
-	if assessment.Action == LoopAssessmentActionVerify {
-		sections = append(sections, "<loop-continuation>", "Verification required.")
-	} else {
-		sections = append(sections, "<loop-continuation>", "Continue required.")
-	}
+	sections = append(sections, "<loop-continuation>", "Continue required.")
 
 	// Automatic Done interception budget. Continue notices are emitted after an
 	// automatic rejection, so show the current counter as the number already used.
@@ -485,14 +448,10 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("end the round with a final `Done` tool call after writing the completion response")
 		case "done_mixed_with_other_tools":
 			addGap("`Done` must be the only tool call in the final exit-request batch")
-		case "missing_verification_status":
-			addGap("verification status is missing; run verification or include <verify-not-run>reason</verify-not-run>")
 		case "progress_continuation":
 			addGap("the task made progress and should continue toward completion")
 		case "context_continue":
 			addGap("continue from the existing context to complete the current goal")
-		case "verification_required":
-			addGap("verification is required before completion")
 		case "open_todos":
 			addGap("open TODO items remain")
 		case "subagents_active":
@@ -526,9 +485,6 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		"- If the task is truly blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}",
 		"- Choose the best reasonable path unless a real user decision is required",
 		"- Only ask the user when a material ambiguity, permission boundary, or major tradeoff requires it",
-	}
-	if assessment.Action == LoopAssessmentActionVerify {
-		instructionLines = append(instructionLines, "- Run the smallest relevant verification now, or include <verify-not-run>reason</verify-not-run> only if verification cannot be run")
 	}
 	if maxIter > 0 && maxIter-iter <= 2 {
 		instructionLines = append(instructionLines, "- You are near the automatic Done interception limit: avoid marginal work and prepare for a user decision if Done is rejected again")

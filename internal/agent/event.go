@@ -626,7 +626,6 @@ const (
 	ActivityRetrying       ActivityType = "retrying"
 	ActivityRetryingKey    ActivityType = "retrying_key"
 	ActivityCooling        ActivityType = "cooling"
-	ActivityVerifying      ActivityType = "verifying"
 )
 
 // AgentActivityEvent is emitted to the TUI to show real-time progress.

@@ -21,7 +21,7 @@ func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
 	if a.hasActiveSubAgents() {
 		return false
 	}
-	return a.loopVerificationSatisfied(content)
+	return true
 }
 
 func (a *MainAgent) loopExitRejectionToolResult() string {

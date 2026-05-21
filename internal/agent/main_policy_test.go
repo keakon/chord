@@ -1371,7 +1371,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.mu.Unlock()
 
 	a.loopState.markProgress()
-	a.loopState.markVerificationProgress()
+	a.loopState.markProgress()
 	assessment = a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:       "assistant",
 		Content:    "all delegated work finished",

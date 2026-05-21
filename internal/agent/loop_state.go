@@ -14,7 +14,6 @@ type LoopState string
 const (
 	LoopStateIdle            LoopState = "idle"
 	LoopStateExecuting       LoopState = "executing"
-	LoopStateVerifying       LoopState = "verifying"
 	LoopStateAssessing       LoopState = "assessing"
 	LoopStateCompleted       LoopState = "completed"
 	LoopStateBlocked         LoopState = "blocked"
@@ -22,7 +21,6 @@ const (
 )
 
 var loopBlockedTagRE = regexp.MustCompile(`(?is)<blocked>\s*(.*?)\s*</blocked>`)
-var loopVerifyNotRunTagRE = regexp.MustCompile(`(?is)<verify-not-run>\s*(.*?)\s*</verify-not-run>`)
 var verificationWordTokenRE = regexp.MustCompile(`(^|[^a-z0-9_])(tox|nox|ava)([^a-z0-9_]|$)`)
 
 type LoopAssessmentAction string
@@ -30,7 +28,6 @@ type LoopAssessmentAction string
 const (
 	LoopAssessmentActionNone            LoopAssessmentAction = "none"
 	LoopAssessmentActionContinue        LoopAssessmentAction = "continue_from_context"
-	LoopAssessmentActionVerify          LoopAssessmentAction = "verify"
 	LoopAssessmentActionCompleted       LoopAssessmentAction = "completed"
 	LoopAssessmentActionBlocked         LoopAssessmentAction = "blocked"
 	LoopAssessmentActionBudgetExhausted LoopAssessmentAction = "budget_exhausted"
@@ -71,7 +68,6 @@ type loopRuntimeState struct {
 	LastProgressSignature string
 	LastAssessmentMessage string
 	ProgressVersion       uint64
-	VerificationVersion   uint64
 	LastAssessmentVersion uint64
 	Iteration             int
 	MaxIterations         int
@@ -121,11 +117,6 @@ func (s *loopRuntimeState) markProgress() {
 	s.ProgressVersion++
 }
 
-func (s *loopRuntimeState) markVerificationProgress() {
-	s.VerificationVersion++
-	s.markProgress()
-}
-
 func (s *loopRuntimeState) recordAutoExitIntercept() int {
 	s.Iteration++
 	return s.Iteration
@@ -163,24 +154,6 @@ func normalizeLoopProgressSignature(parts ...string) string {
 
 func extractLoopBlockedReason(content string) string {
 	matches := loopBlockedTagRE.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	for i := len(matches) - 1; i >= 0; i-- {
-		if len(matches[i]) < 2 {
-			continue
-		}
-		reason := strings.Join(strings.Fields(matches[i][1]), " ")
-		if reason == "" {
-			continue
-		}
-		return reason
-	}
-	return ""
-}
-
-func extractLoopVerifyNotRunReason(content string) string {
-	matches := loopVerifyNotRunTagRE.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
 		return ""
 	}

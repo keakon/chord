@@ -63,7 +63,6 @@ func (a *MainAgent) loopWorkflowPromptBlock() string {
 		"- Loop mode is active. Keep driving toward the current loop target until it is completed, blocked, the automatic Done interception limit is reached, or it is explicitly disabled.\n" +
 		completionClause +
 		finalCompletionLine +
-		"- If verification is not run, include <verify-not-run>reason</verify-not-run> in the terminal response.\n" +
 		"- If the task is genuinely blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}.\n" +
 		"- Do not mark completion merely because you produced a summary or reached a natural stopping point in reasoning.\n" +
 		"- Default to making ordinary engineering decisions yourself. Do not stop to ask the user to choose between normal implementation options.\n" +

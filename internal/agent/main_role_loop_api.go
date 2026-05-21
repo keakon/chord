@@ -167,7 +167,7 @@ func (a *MainAgent) loopCompletionRequirementLines() []string {
 	lines := []string{
 		"- All requested work is finished",
 		"- Required verification is completed, or explicitly reported as not run",
-		"- If verification is not run, include <verify-not-run>single-line reason</verify-not-run> in the terminal response",
+		"- If verification cannot be run, state why in the final report.",
 		"- If the task is blocked, use <blocked>category: reason</blocked> instead of stopping the loop",
 		a.loopCompletionDecisionRequirementLine(),
 	}
@@ -201,7 +201,7 @@ func (a *MainAgent) loopFinalCompletionResponseLines() []string {
 		"- Clearly state that the requested task is complete",
 		"- Summarize the completed work",
 		"- Report verification status explicitly",
-		"- If verification was not run, include <verify-not-run>reason</verify-not-run>",
+		"- If verification was not run, state why",
 		"- Call the `Done` tool to request loop exit once those conditions are satisfied",
 		"- List any remaining limitations or unverified areas",
 	}
