@@ -105,7 +105,7 @@ func TestFieldsSubstitutesUnknownForEmpty(t *testing.T) {
 	}
 }
 
-func TestShortIncludesDirtyOnlyWhenTrue(t *testing.T) {
+func TestShortMarksDirtyVersionOnlyWhenTrue(t *testing.T) {
 	cases := []struct {
 		name string
 		info Info
@@ -114,7 +114,7 @@ func TestShortIncludesDirtyOnlyWhenTrue(t *testing.T) {
 		{
 			name: "dirty true",
 			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: "true"},
-			want: "dev abcdef123456 dirty",
+			want: "dev* abcdef123456",
 		},
 		{
 			name: "dirty false omitted",
@@ -134,7 +134,7 @@ func TestShortIncludesDirtyOnlyWhenTrue(t *testing.T) {
 		{
 			name: "short commit not truncated",
 			info: Info{Version: "v1.0.0", Commit: "abc123", Dirty: "true"},
-			want: "v1.0.0 abc123 dirty",
+			want: "v1.0.0* abc123",
 		},
 		{
 			name: "empty version becomes unknown",

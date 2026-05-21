@@ -32,7 +32,10 @@ import (
 // build info when the build is performed inside a Git checkout with buildvcs
 // enabled, so Commit and Dirty remain populated even without ldflags.
 var (
-	Version   = "dev"
+	// The default Version is the next development version after the latest release
+	// tag, so plain `go build ./cmd/chord` produces a useful local development
+	// identity without requiring ldflags. Bump it immediately after each release.
+	Version   = DefaultDevVersion
 	Commit    = ""
 	BuildTime = ""
 	Dirty     = ""
@@ -63,7 +66,11 @@ type Field struct {
 	Value string
 }
 
-const unknown = "unknown"
+const (
+	unknown               = "unknown"
+	DefaultDevVersion     = "v0.6.1-dev"
+	historicalMainVersion = "dev"
+)
 
 // current is the cached result of [computeCurrent]. The build identity does
 // not change during a process's lifetime, so we read os.Stat / debug.ReadBuildInfo
@@ -109,18 +116,31 @@ func computeCurrent() Info {
 	return info
 }
 
+// IsDefaultDevVersion reports whether version is the source default used for
+// plain local development builds.
+func IsDefaultDevVersion(version string) bool {
+	return strings.TrimSpace(version) == DefaultDevVersion
+}
+
+// IsHistoricalMainVersion reports whether version is the historical cmd/chord
+// default used before buildinfo owned the default development version.
+func IsHistoricalMainVersion(version string) bool {
+	return strings.TrimSpace(version) == historicalMainVersion
+}
+
 // Short returns a compact one-line identity intended for human-facing
 // surfaces (e.g. a `chord version --verbose` output). It includes the version,
-// short commit (when known), and a `dirty` marker only when the working tree
-// was modified at build time. A clean or unknown dirty state is omitted to
-// keep the line concise.
+// a trailing `*` on the version when the working tree was modified at build
+// time, and the short commit when known. A clean or unknown dirty state is
+// omitted to keep the line concise.
 func (i Info) Short() string {
-	parts := []string{valueOrUnknown(i.Version)}
+	version := valueOrUnknown(i.Version)
+	if i.Dirty == "true" {
+		version += "*"
+	}
+	parts := []string{version}
 	if commit := shortCommit(i.Commit); commit != "" && commit != unknown {
 		parts = append(parts, commit)
-	}
-	if i.Dirty == "true" {
-		parts = append(parts, "dirty")
 	}
 	return strings.Join(parts, " ")
 }

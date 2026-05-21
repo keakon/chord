@@ -7,6 +7,15 @@ import (
 	"github.com/keakon/chord/internal/buildinfo"
 )
 
+func TestDefaultMainVersionMatchesBuildinfoDefaultDevVersion(t *testing.T) {
+	if Version != buildinfo.DefaultDevVersion {
+		t.Fatalf("Version = %q, want %q", Version, buildinfo.DefaultDevVersion)
+	}
+	if buildinfo.Version != buildinfo.DefaultDevVersion {
+		t.Fatalf("buildinfo.Version = %q, want %q", buildinfo.Version, buildinfo.DefaultDevVersion)
+	}
+}
+
 func TestFormatCLIVersionTemplateIncludesBuildMetadata(t *testing.T) {
 	info := buildinfo.Info{
 		Version:         "v1.2.3",
@@ -22,7 +31,7 @@ func TestFormatCLIVersionTemplateIncludesBuildMetadata(t *testing.T) {
 	}
 	out := formatCLIVersionTemplate(info)
 
-	if !strings.HasPrefix(out, "chord version v1.2.3 abc123def456 dirty\n") {
+	if !strings.HasPrefix(out, "chord version v1.2.3* abc123def456\n") {
 		t.Fatalf("version output header mismatch: %q", out)
 	}
 	for _, want := range []string{

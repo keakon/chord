@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/buildinfo"
 )
 
 func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
@@ -186,24 +188,41 @@ func TestHelpLinesUseColumnsWhenWide(t *testing.T) {
 	}
 }
 
-func TestHelpLinesIncludeAboutBuildInfo(t *testing.T) {
+func TestHelpLinesIncludeCenteredBuildVersion(t *testing.T) {
 	m := NewModel(nil)
-	text := strings.Join(m.helpLines(120), "\n")
+	lines := m.helpLines(120)
+	text := strings.Join(lines, "\n")
 
-	for _, want := range []string{"About", "Chord", "Commit", "Build time", "VCS time", "Go", "Platform"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("help text should contain %q, got:\n%s", want, text)
+	want := "Chord " + buildinfo.Current().Short()
+	if !strings.Contains(lines[0], want) {
+		t.Fatalf("first help line should contain %q, got %q", want, lines[0])
+	}
+	if !strings.HasPrefix(lines[0], " ") {
+		t.Fatalf("first help line should be centered with leading padding, got %q", lines[0])
+	}
+	for _, notWant := range []string{"About", "Commit:", "Build time:", "VCS time:", "Platform:"} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("help text should not contain %q, got:\n%s", notWant, text)
 		}
 	}
 }
 
-func TestHelpViewShowsAboutOnShortFirstScreen(t *testing.T) {
+func TestCenterHelpLine(t *testing.T) {
+	if got := centerHelpLine("Chord v1", 14); got != "   Chord v1" {
+		t.Fatalf("centerHelpLine = %q, want %q", got, "   Chord v1")
+	}
+	if got := centerHelpLine("Chord v1", 4); got != "Chord v1" {
+		t.Fatalf("centerHelpLine should not truncate, got %q", got)
+	}
+}
+
+func TestHelpViewShowsVersionOnShortFirstScreen(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeHelp
 	m.help = helpState{prevMode: ModeNormal}
 
 	plain := ansi.Strip(m.renderHelpView())
-	for _, want := range []string{"Keyboard Help", "About", "Chord"} {
+	for _, want := range []string{"Chord", buildinfo.Current().Short(), "Press ? or Esc"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("short help first screen should contain %q, got:\n%s", want, plain)
 		}

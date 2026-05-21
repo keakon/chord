@@ -25,7 +25,7 @@ import (
 //
 // init() below mirrors whichever side was set so MCP, startup logs, diagnostics
 // dumps, and CLI version output always agree on the version.
-var Version = "dev"
+var Version = buildinfo.DefaultDevVersion
 
 func init() {
 	// init() runs after package-level var initialization for both this file
@@ -33,10 +33,10 @@ func init() {
 	// buildinfo.Current() (which is sync.OnceValue-cached). This is the
 	// correct time to bridge the two ldflags paths.
 	switch {
-	case Version != "dev" && buildinfo.Version == "dev":
+	case !buildinfo.IsHistoricalMainVersion(Version) && buildinfo.IsDefaultDevVersion(buildinfo.Version):
 		// Only the historical -X main.Version=... path was used.
 		buildinfo.Version = Version
-	case Version == "dev" && buildinfo.Version != "dev":
+	case buildinfo.IsHistoricalMainVersion(Version) && !buildinfo.IsDefaultDevVersion(buildinfo.Version):
 		// Only the new -X .../buildinfo.Version=... path was used.
 		Version = buildinfo.Version
 	}
