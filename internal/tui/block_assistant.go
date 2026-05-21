@@ -616,7 +616,7 @@ func (b *Block) renderAssistant(width int) []string {
 		var assistantLines []string
 		var assistantSynthetic []int
 		var assistantSoftWraps []bool
-		assistantLines = append(assistantLines, AssistantLabelStyle.Render("ASSISTANT"))
+		assistantLines = append(assistantLines, AssistantLabelStyle.Render(blockLabelWithID("ASSISTANT", b.ID)))
 		assistantSynthetic = append(assistantSynthetic, 0)
 		assistantSoftWraps = append(assistantSoftWraps, false)
 
@@ -853,7 +853,7 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	}
 	for i, part := range b.ThinkingParts {
 		if i == 0 {
-			rawLines = append(rawLines, ThinkingLabelStyle.Render("THINKING"))
+			rawLines = append(rawLines, ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.ID)))
 			rawLines = append(rawLines, "") // gap
 		} else if i > 0 {
 			rawLines = append(rawLines, "") // small gap between distinct thinking segments
@@ -909,7 +909,7 @@ func (b *Block) renderThinking(width int) []string {
 	mdLines, settledLineCount := b.renderThinkingMarkdownPart(content, 0, contentWidth)
 
 	var rawLines []string
-	rawLines = append(rawLines, ThinkingLabelStyle.Render("THINKING"))
+	rawLines = append(rawLines, ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.ID)))
 	rawLines = append(rawLines, "") // internal gap
 
 	if b.Streaming {

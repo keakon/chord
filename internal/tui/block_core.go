@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -108,6 +109,13 @@ func (b *Block) toolElapsedLabel() string {
 // IsUserLocalShell reports a merged USER + local !shell block.
 func (b *Block) IsUserLocalShell() bool {
 	return b != nil && b.Type == BlockUser && b.UserLocalShellCmd != ""
+}
+
+func blockLabelWithID(label string, id int) string {
+	if id < 0 {
+		return label
+	}
+	return fmt.Sprintf("%s #%d", label, id+1)
 }
 
 // Render produces the styled lines for this block, word-wrapped to width.

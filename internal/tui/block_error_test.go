@@ -8,6 +8,29 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	blocks := []*Block{
+		{ID: 0, Type: BlockUser, Content: "hello"},
+		{ID: 1, Type: BlockAssistant, Content: "hi"},
+		{ID: 2, Type: BlockThinking, Content: "reasoning"},
+		{ID: 3, Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`},
+		{ID: 4, Type: BlockToolResult, Content: "ok"},
+		{ID: 5, Type: BlockError, Content: "boom"},
+		{ID: 6, Type: BlockStatus, StatusTitle: "STATUS", Content: "body"},
+		{ID: 7, Type: BlockCompactionSummary, Content: "summary"},
+	}
+	want := []string{"USER #1", "ASSISTANT #2", "THINKING #3", "TOOL CALL #4", "TOOL RESULT #5", "ERROR #6", "STATUS #7", "CONTEXT SUMMARY #8"}
+
+	for i, block := range blocks {
+		got := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		if !strings.Contains(got, want[i]) {
+			t.Fatalf("block type %v render missing label %q:\n%s", block.Type, want[i], got)
+		}
+	}
+}
+
 func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 

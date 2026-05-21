@@ -13,22 +13,22 @@ func (b *Block) renderError(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	lines := wrapText(b.Content, innerWidth)
-	var innerLines []string
-	for i, line := range lines {
+	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.ID)), ""}
+	wrapped := wrapText(b.Content, innerWidth)
+	for i, line := range wrapped {
 		if i == 0 {
-			innerLines = append(innerLines, ErrorStyle.Render("✗ "+line))
+			lines = append(lines, ErrorStyle.Render("✗ "+line))
 		} else {
-			innerLines = append(innerLines, ErrorStyle.Render("  "+line))
+			lines = append(lines, ErrorStyle.Render("  "+line))
 		}
 	}
-	if len(innerLines) == 0 {
-		innerLines = append(innerLines, ErrorStyle.Render("✗ unknown error"))
+	if len(wrapped) == 0 {
+		lines = append(lines, ErrorStyle.Render("✗ unknown error"))
 	}
 
 	cardBg := currentTheme.ErrorCardBg
-	innerLines = preserveCardBg(innerLines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, innerLines, cardBg, "")
+	lines = preserveCardBg(lines, cardBg)
+	return renderPrewrappedCard(style, innerWidth, lines, cardBg, "")
 }
 
 func (b *Block) renderStatus(width int) []string {
@@ -49,7 +49,7 @@ func (b *Block) renderStatus(width int) []string {
 			title = strings.TrimSpace(b.Content[:idx])
 		}
 	}
-	label := ThinkingLabelStyle.Render(title)
+	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.ID))
 
 	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth-2, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
@@ -96,7 +96,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	label := ThinkingLabelStyle.Render("CONTEXT SUMMARY")
+	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.ID))
 	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}

@@ -138,6 +138,10 @@ func normalizedCompactToolPreviewText(s string) string {
 	return strings.Join(strings.Fields(trimmed), " ")
 }
 
+func toolCardTitle(label string, id int) string {
+	return ToolLabelStyle.Render(blockLabelWithID(label, id))
+}
+
 func compactToolPreviewDuplicatesResult(previewLine string, resultLines []string) bool {
 	previewNorm := normalizedCompactToolPreviewText(previewLine)
 	if previewNorm == "" || len(resultLines) == 0 {
