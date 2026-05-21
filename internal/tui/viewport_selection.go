@@ -6,8 +6,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/keakon/chord/internal/tools"
 )
 
 // SelectionRange represents a contiguous selection from (BlockID, Line, Col) to end.
@@ -24,14 +22,6 @@ type SelectionRange struct {
 // plus a rendered line-number column. Submatch 1=digits, 2=suffix after the
 // line number (still includes visual separator spaces, if any).
 var lineNumPrefixRe = regexp.MustCompile(`^\s{2}\s*(\d+)(.*)$`)
-
-// editDiffClipLineTab matches Edit tool diff rows after normalizeLineNumberPrefix
-// (e.g. "4655\t-    # comment"). Submatch 1 = source code after the +/- marker.
-var editDiffClipLineTab = regexp.MustCompile(`^\s*\d+\t([-+])(.*)$`)
-
-// editDiffClipLineSpace matches the same rows before tab-normalization, with spaces
-// between the line number and the diff marker (e.g. "  4655 -    # ...").
-var editDiffClipLineSpace = regexp.MustCompile(`^\s*\d+ +([-+])\s*(.*)$`)
 
 // ansiSGRRegex matches SGR styling sequences only (ending with 'm').
 var ansiSGRRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -173,9 +163,6 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 					}
 				}
 				segment = strings.TrimRight(segment, " ")
-				if block.Type == BlockToolCall && block.ToolName == tools.NameEdit && block.Diff != "" {
-					segment = stripEditDiffClipboardLine(segment)
-				}
 				if segment != "" {
 					if sb.Len() > 0 {
 						sb.WriteByte('\n')
@@ -291,20 +278,6 @@ func selectionImagePlaceholder(block *Block, lineInBlock int) string {
 		return "[image: " + name + "]"
 	}
 	return ""
-}
-
-func stripEditDiffClipboardLine(line string) string {
-	s := strings.TrimRight(line, " ")
-	if s == "" {
-		return s
-	}
-	if m := editDiffClipLineTab.FindStringSubmatch(s); len(m) == 3 {
-		return m[2]
-	}
-	if m := editDiffClipLineSpace.FindStringSubmatch(s); len(m) == 3 {
-		return m[2]
-	}
-	return line
 }
 
 func selectionColRange(blockID, lineInBlock int, sel *SelectionRange) (colStart, colEnd int, inRange bool) {

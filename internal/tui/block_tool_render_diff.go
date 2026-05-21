@@ -224,7 +224,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					content = content[1:]
 				}
 				code := truncateLineToDisplayWidth(content, diffWidth)
-				rendered = DimStyle.Render(formatLineNum(oldLineNum)) + DimStyle.Render(" "+code)
+				displayLineNum := newLineNum
+				if newLineNum < oldLineNum {
+					displayLineNum = oldLineNum
+				}
+				rendered = DimStyle.Render(formatLineNum(displayLineNum)) + DimStyle.Render(" "+code)
 				oldLineNum++
 				newLineNum++
 			}

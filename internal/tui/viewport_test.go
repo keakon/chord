@@ -619,14 +619,18 @@ func TestExtractSelectionTextStripsRenderedIndentForReadBlock(t *testing.T) {
 	}
 }
 
-func TestExtractSelectionTextEditDiffStripsLineNumAndMarker(t *testing.T) {
+func TestExtractSelectionTextEditDiffPreservesLineNumAndMarker(t *testing.T) {
 	v := NewViewport(120, 24)
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: "Edit",
-		Content:  `{"path":"stage2.py"}`,
-		Diff:     "--- a/stage2.py\n+++ b/stage2.py\n@@ -4655,1 +4655,1 @@\n-    # category ctx\n",
+		Content:  `{"path":"example.py"}`,
+		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
+			" def build_items():\n" +
+			"     items = [\n" +
+			"+        \"added\",\n" +
+			"         \"existing\",\n",
 	}
 	v.AppendBlock(block)
 
@@ -634,13 +638,13 @@ func TestExtractSelectionTextEditDiffStripsLineNumAndMarker(t *testing.T) {
 	target := -1
 	for i, line := range lines {
 		plain := stripANSI(line)
-		if strings.Contains(plain, "# category ctx") && strings.Contains(plain, "4655") {
+		if strings.Contains(plain, "added") && strings.Contains(plain, "10") && strings.Contains(plain, "+") {
 			target = i
 			break
 		}
 	}
 	if target < 0 {
-		t.Fatalf("failed to find rendered delete line in %#v", lines)
+		t.Fatalf("failed to find rendered add line in %#v", lines)
 	}
 
 	got := v.ExtractSelectionText(SelectionRange{
@@ -651,7 +655,7 @@ func TestExtractSelectionTextEditDiffStripsLineNumAndMarker(t *testing.T) {
 		EndLine:      target,
 		EndCol:       999,
 	})
-	want := "# category ctx"
+	want := "10\t+        \"added\","
 	if got != want {
 		t.Fatalf("ExtractSelectionText() Edit diff\n got %q\nwant %q", got, want)
 	}

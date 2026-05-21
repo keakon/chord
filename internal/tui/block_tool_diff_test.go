@@ -304,6 +304,52 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	}
 }
 
+func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "Edit",
+		Content:  `{"path":"example.py"}`,
+		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
+			" def build_items():\n" +
+			"     items = [\n" +
+			"+        \"added\",\n" +
+			"         \"existing\",\n",
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
+	}
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "  10 +        \"added\",") {
+		t.Fatalf("expected inserted line to use new line number 10, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "  11          \"existing\",") {
+		t.Fatalf("expected following context line to use new line number 11, got:\n%s", plain)
+	}
+}
+
+func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.T) {
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "Edit",
+		Content:  `{"path":"example.py"}`,
+		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,5 +8,4 @@\n" +
+			" def build_items():\n" +
+			"     items = [\n" +
+			"-        \"removed\",\n" +
+			"         \"existing\",\n",
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
+	}
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "  10 -        \"removed\",") {
+		t.Fatalf("expected deleted line to use old line number 10, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "  11          \"existing\",") {
+		t.Fatalf("expected following context line to avoid decreasing from deleted line number 10, got:\n%s", plain)
+	}
+}
+
 func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testing.T) {
 	old := "\t\t// separator(1) + content(lines) + bottom margin(1) + extra bars\n\t\treturn lines + 2 + extraBars\n"
 	new := "\t\t// separator(1) + content(lines) + bottom margin(1)\n\t\treturn lines + 2\n"
