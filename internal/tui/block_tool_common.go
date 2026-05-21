@@ -36,6 +36,35 @@ var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
 const queuedToolGlyph = "⏸"
 
+type toolCardMetrics struct {
+	blockStyle   lipgloss.Style
+	toolCardBg   string
+	cardWidth    int
+	contentWidth int
+}
+
+func newToolCardMetrics(width int) toolCardMetrics {
+	blockStyle := ToolBlockStyle
+	boxWidth := width - blockStyle.GetHorizontalMargins()
+	if boxWidth < 10 {
+		boxWidth = 10
+	}
+	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
+	if cardWidth < 10 {
+		cardWidth = 10
+	}
+	contentWidth := cardWidth - 4
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	return toolCardMetrics{
+		blockStyle:   blockStyle,
+		toolCardBg:   currentTheme.ToolCallBg,
+		cardWidth:    cardWidth,
+		contentWidth: contentWidth,
+	}
+}
+
 // pendingToolGlyph is used for speculative tool cards that have finished
 // streaming their arguments but have not yet transitioned into an explicit
 // execution-state (running/queued) event.

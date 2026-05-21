@@ -83,16 +83,10 @@ func appendEditToolUnifiedDiffPair(result *[]string, oldLine, newLine string, ol
 
 // renderFileDiffCall renders an Edit tool call with a unified diff view.
 func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
 	var filePath string
 	var parsed struct {
 		Path string `json:"path"`

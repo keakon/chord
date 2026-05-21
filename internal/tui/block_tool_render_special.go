@@ -11,20 +11,11 @@ import (
 )
 
 func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 
 	args := parseTaskToolArgs(b.Content)
 	_, hasHandle := parseTaskToolHandle(b.ResultContent)
@@ -108,16 +99,10 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 
 // renderTodoCall renders a TodoWrite tool call as a todo list with status markers.
 func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
 	contentWidth := cardWidth - 6
 	if contentWidth < 10 {
 		contentWidth = 10
@@ -155,16 +140,10 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 
 // renderQuestionCall renders a Question tool call showing the question text and options.
 func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
 	contentWidth := cardWidth - 6
 	if contentWidth < 10 {
 		contentWidth = 10
@@ -306,20 +285,11 @@ func splitQuestionSelections(question tools.QuestionItem, answer tools.QuestionA
 // Collapsed view shows: target (readable), reason (if any), result status.
 // Expanded view shows more structured details but avoids raw JSON.
 func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 
 	args := parseCancelToolArgs(b.Content)
 	prefix := b.renderToolPrefix(spinnerFrame)
@@ -406,20 +376,11 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 // Collapsed view shows: target (readable), kind (if any), message summary, result status.
 // Expanded view shows more structured details but avoids raw JSON.
 func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 
 	args := parseNotifyToolArgs(b.Content)
 	prefix := b.renderToolPrefix(spinnerFrame)

@@ -221,20 +221,11 @@ func bashCollapsedCommandHiddenLines(command string, contentWidth int) int {
 }
 
 func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 
 	if b.ToolName == "TodoWrite" {
 		return b.renderTodoCall(width, spinnerFrame)
@@ -367,20 +358,11 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 }
 
 func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
@@ -567,19 +549,7 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 }
 
 func compactToolContentWidthForRenderWidth(width int) int {
-	boxWidth := width - ToolBlockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - ToolBlockStyle.GetHorizontalPadding() - ToolBlockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	return contentWidth
+	return newToolCardMetrics(width).contentWidth
 }
 
 func (b *Block) compactToolResultForceExpandedForRenderWidth(width int) bool {
@@ -590,16 +560,10 @@ func (b *Block) compactToolResultForceExpandedForRenderWidth(width int) bool {
 }
 
 func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
 	contentWidth := compactToolContentWidthForRenderWidth(width)
 	collapsedPreviewLine := ""
 	expandHintAdded := false
@@ -832,20 +796,11 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 func (b *Block) renderToolResult(width int) []string {
 	contentLines := strings.Split(b.Content, "\n")
 	lineCount := len(contentLines)
-	style := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	style := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
 	if b.Collapsed {
 		prefix := "✓"
 		if b.IsError || b.toolResultIsError() {

@@ -8,16 +8,10 @@ import (
 // renderWriteCall renders a Write tool call result with a syntax-highlighted
 // preview of the written file content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
-	blockStyle := ToolBlockStyle
-	toolCardBg := currentTheme.ToolCallBg
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	metrics := newToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
 	contentWidth, codeWidth := numberedToolPreviewWidths(cardWidth)
 
 	var filePath string
