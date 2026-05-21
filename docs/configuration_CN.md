@@ -783,8 +783,6 @@ context:
 
 未设置或非正数的字段使用默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
 
-> `context.reduction.model_pool` 保留用于未来可能的 cache-aware 剪裁判定。当前确定性剪裁不依赖此字段，不设置不会调用模型。
-
 ## Provider/model 诊断
 
 ```bash
@@ -825,7 +823,7 @@ chord doctor models --pool thinking
 | `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |
 | `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 输出较多。                                                              |
 | `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
-| `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`size_check_interval_hours`、`warn_state_bytes`、`warn_cache_bytes`。                       |
+| `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`warn_state_bytes`、`warn_cache_bytes`。                       |
 | `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |

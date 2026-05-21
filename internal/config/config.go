@@ -62,10 +62,9 @@ type WebFetchConfig struct {
 }
 
 type MaintenanceConfig struct {
-	SizeCheckOnStartup     bool  `json:"size_check_on_startup" yaml:"size_check_on_startup"`
-	SizeCheckIntervalHours int   `json:"size_check_interval_hours" yaml:"size_check_interval_hours"`
-	WarnStateBytes         int64 `json:"warn_state_bytes" yaml:"warn_state_bytes"`
-	WarnCacheBytes         int64 `json:"warn_cache_bytes" yaml:"warn_cache_bytes"`
+	SizeCheckOnStartup bool  `json:"size_check_on_startup" yaml:"size_check_on_startup"`
+	WarnStateBytes     int64 `json:"warn_state_bytes" yaml:"warn_state_bytes"`
+	WarnCacheBytes     int64 `json:"warn_cache_bytes" yaml:"warn_cache_bytes"`
 }
 
 // SkillsConfig configures additional skill directories.
@@ -607,21 +606,17 @@ type ContextConfig struct {
 	Reduction  ContextReductionConfig `json:"reduction,omitempty" yaml:"reduction,omitempty"`
 }
 
-// ContextReductionConfig controls request-level context pruning and future
-// cache-aware reduction advisors. The model pool is optional; when set it must
-// refer to a top-level model_pools entry and is used for pruning/reduction
-// decisions rather than durable compaction summaries.
+// ContextReductionConfig controls request-level context pruning.
 type ContextReductionConfig struct {
-	ModelPool            string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
-	ConfirmAgeTurns      int    `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
-	ErrorAgeTurns        int    `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
-	ShellSuccessAgeTurns int    `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
-	ShellSuccessBytes    int    `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
-	ReadLikeAgeTurns     int    `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
-	ReadLikeOutputBytes  int    `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
-	StaleAgeTurns        int    `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
-	StaleOutputBytes     int    `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
-	MinToolResultsPrune  int    `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
+	ConfirmAgeTurns      int `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
+	ErrorAgeTurns        int `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
+	ShellSuccessAgeTurns int `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
+	ShellSuccessBytes    int `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
+	ReadLikeAgeTurns     int `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
+	ReadLikeOutputBytes  int `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
+	StaleAgeTurns        int `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
+	StaleOutputBytes     int `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
+	MinToolResultsPrune  int `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
@@ -655,7 +650,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Diagnostics: DefaultDiagnosticsConfig(),
-		Maintenance: MaintenanceConfig{SizeCheckOnStartup: false, SizeCheckIntervalHours: 24, WarnStateBytes: 10 * 1024 * 1024 * 1024, WarnCacheBytes: 5 * 1024 * 1024 * 1024},
+		Maintenance: MaintenanceConfig{SizeCheckOnStartup: false, WarnStateBytes: 10 * 1024 * 1024 * 1024, WarnCacheBytes: 5 * 1024 * 1024 * 1024},
 	}
 }
 

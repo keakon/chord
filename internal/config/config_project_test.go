@@ -39,8 +39,6 @@ context:
     threshold: 0.8
     profile: archival
     reserved: 128
-  reduction:
-    model_pool: global-reducer
 skills:
   paths: [/global-skill]
 confirm_timeout: 45
@@ -88,8 +86,6 @@ context:
     threshold: 0
     profile: continuation
     reserved: 0
-  reduction:
-    model_pool: project-reducer
 skills:
   paths: [/project-skill]
 confirm_timeout: 0
@@ -152,9 +148,6 @@ keymap:
 	}
 	if mergedCfg.Context.Compaction.Reserved != 0 {
 		t.Fatalf("merged reserved = %d, want explicit project override 0", mergedCfg.Context.Compaction.Reserved)
-	}
-	if mergedCfg.Context.Reduction.ModelPool != "project-reducer" {
-		t.Fatalf("merged context.reduction.model_pool = %q, want project-reducer", mergedCfg.Context.Reduction.ModelPool)
 	}
 	if len(mergedCfg.Skills.Paths) != 2 || mergedCfg.Skills.Paths[0] != "/global-skill" || mergedCfg.Skills.Paths[1] != "/project-skill" {
 		t.Fatalf("merged skills.paths = %#v, want global then project", mergedCfg.Skills.Paths)

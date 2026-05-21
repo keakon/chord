@@ -1,12 +1,6 @@
 package agent
 
-import (
-	"strings"
-	"time"
-
-	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/llm"
-)
+import "github.com/keakon/chord/internal/config"
 
 type ContextReductionStats struct {
 	Messages int
@@ -81,50 +75,4 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	if cfg.MinToolResultsPrune > 0 {
 		p.MinToolResultsPrune = cfg.MinToolResultsPrune
 	}
-}
-
-func (a *MainAgent) configuredContextReductionModelRefs() ([]string, bool, error) {
-	if a == nil {
-		return nil, false, nil
-	}
-	if a.projectConfig != nil {
-		if pool := strings.TrimSpace(a.projectConfig.Context.Reduction.ModelPool); pool != "" {
-			refs, err := a.resolveConfiguredModelPool(pool)
-			if err != nil {
-				return nil, true, err
-			}
-			return refs, true, nil
-		}
-	}
-	if a.globalConfig != nil {
-		if pool := strings.TrimSpace(a.globalConfig.Context.Reduction.ModelPool); pool != "" {
-			refs, err := a.resolveConfiguredModelPool(pool)
-			if err != nil {
-				return nil, true, err
-			}
-			return refs, true, nil
-		}
-	}
-	return nil, false, nil
-}
-
-func (a *MainAgent) contextReductionModelRefs() []string {
-	refs, _, err := a.configuredContextReductionModelRefs()
-	if err != nil {
-		return nil
-	}
-	return refs
-}
-
-func (a *MainAgent) newContextReductionClient() (*llm.Client, bool, error) {
-	refs, configured, err := a.configuredContextReductionModelRefs()
-	if err != nil || !configured {
-		return nil, configured, err
-	}
-	client, err := a.newAuxModelPoolClient(refs, 1*time.Minute, 1024)
-	if err != nil {
-		return nil, true, err
-	}
-	client.SetStreamRetryRounds(1)
-	return client, true, nil
 }

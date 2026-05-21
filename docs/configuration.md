@@ -906,10 +906,6 @@ context:
 Unset or non-positive threshold fields use the defaults above. Project-level
 `.chord/config.yaml` can override global config field by field.
 
-> `context.reduction.model_pool` is reserved for future cache-aware reduction
-> decisions. The current deterministic pruning does not require this field and
-> does not call an auxiliary model when it is omitted.
-
 ## Provider/model diagnostics
 
 ```bash
@@ -950,7 +946,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `ime_switch_target`     | string                | empty                            | global / project         | IM identifier passed to `im-select` / `im-select.exe` when entering Normal mode. Linux/macOS/Windows.                    |
 | `log_level`             | string                | `info`                           | global / project         | `debug` / `info` / `warn` / `error`. `debug` is verbose.                                                                |
 | `paths`                 | object                | XDG defaults                     | global only              | `state_dir`, `cache_dir`, `sessions_dir`, `logs_dir`. CLI flags and `CHORD_*` env vars override.                         |
-| `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `size_check_interval_hours`, `warn_state_bytes`, `warn_cache_bytes`.                            |
+| `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `warn_state_bytes`, `warn_cache_bytes`.                            |
 | `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization — LSP](./customization.md#lsp).                                          |
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
