@@ -4320,6 +4320,38 @@ func TestMessagesToBlocksCompactionSummaryCollapsedByDefaultAndExpandable(t *tes
 	}
 }
 
+func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	m.viewport.AppendBlock(&Block{ID: 98, Type: BlockUser, Content: "old prompt"})
+	m.viewport.AppendBlock(&Block{ID: 99, Type: BlockAssistant, Content: "old response"})
+	m.nextBlockID = 100
+	backend.messages = []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md"},
+		{Role: "assistant", Content: "continue after compaction"},
+	}
+
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("visible blocks after rebuild = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != BlockCompactionSummary {
+		t.Fatalf("blocks[0].Type = %v, want BlockCompactionSummary", blocks[0].Type)
+	}
+	if blocks[0].ID != 0 || blocks[1].ID != 1 {
+		t.Fatalf("rebuilt block IDs = [%d, %d], want [0, 1]", blocks[0].ID, blocks[1].ID)
+	}
+	if m.nextBlockID != 2 {
+		t.Fatalf("nextBlockID = %d, want 2", m.nextBlockID)
+	}
+	joined := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	if !strings.Contains(joined, "CONTEXT SUMMARY #1") {
+		t.Fatalf("compaction summary header should restart at #1, got:\n%s", joined)
+	}
+}
+
 func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "del-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`)}}},

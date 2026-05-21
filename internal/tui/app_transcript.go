@@ -282,6 +282,14 @@ func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
 		}
 	}
 	oldBlocks := m.viewport.blocks
+	if shouldResetRebuiltBlockIDsAfterCompaction(oldBlocks, blocks) {
+		limit := min(len(blocks), len(oldBlocks))
+		for i := range limit {
+			preserveRebuiltBlockState(oldBlocks[i], blocks[i])
+		}
+		m.nextBlockID = highestBlockID(blocks) + 1
+		return blocks
+	}
 	limit := min(len(blocks), len(oldBlocks))
 	for i := range limit {
 		blocks[i].ID = oldBlocks[i].ID
@@ -297,6 +305,14 @@ func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
 		m.nextBlockID = nextFreshID
 	}
 	return blocks
+}
+
+func shouldResetRebuiltBlockIDsAfterCompaction(oldBlocks, newBlocks []*Block) bool {
+	if len(oldBlocks) == 0 || len(newBlocks) == 0 {
+		return false
+	}
+	return newBlocks[0] != nil && newBlocks[0].Type == BlockCompactionSummary &&
+		(oldBlocks[0] == nil || oldBlocks[0].Type != BlockCompactionSummary)
 }
 
 func highestBlockID(blocks []*Block) int {
