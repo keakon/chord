@@ -481,10 +481,10 @@ func bashCollapsedShortDetailHiddenLines(b *Block, vals map[string]string, conte
 	if b == nil || contentWidth <= 0 || !b.ResultDone {
 		return 0
 	}
-	// Collapsed short Shell output already shows all stdout/stderr and (often)
-	// the full command. Expanded view adds meta lines and an exit/stdout/stderr
-	// framing.
-	hidden := 0
+	// Collapsed short Shell output already shows all stdout/stderr. Expanded
+	// view adds any command lines hidden by the collapsed preview, meta lines,
+	// and exit/stdout/stderr framing.
+	hidden := bashCollapsedCommandHiddenLines(vals["command"], contentWidth)
 	meta := bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)
 	hidden += len(meta)
 	if exitLabel := bashExpandedExitLine(b); exitLabel != "" {
@@ -596,8 +596,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	result = append(result, toolHeaderLine)
 
 	if b.ToolName == "Shell" {
-		shortResult := shellCollapsedResultIsShort(b, contentWidth)
-		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded || shortResult, expanded)
+		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded, expanded)
 		if expanded {
 			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {

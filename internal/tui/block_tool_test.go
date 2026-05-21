@@ -742,11 +742,49 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "echo third") {
-		t.Fatalf("expected collapsed Shell with short output to show full command; got:\n%s", joined)
+	if strings.Contains(joined, "echo third") {
+		t.Fatalf("did not expect collapsed Shell with short output to show hidden command lines; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "ok") {
 		t.Fatalf("expected collapsed Shell with short output to show result inline; got:\n%s", joined)
+	}
+}
+
+func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *testing.T) {
+	cmd := "git add internal/tui/app_cached_render.go && cat <<'PATCH' | git apply --cached\n" +
+		"--- a/internal/tui/session_switch_test.go\n" +
+		"+++ b/internal/tui/session_switch_test.go\n" +
+		"@@ -1,2 +1,8 @@\n" +
+		"+func TestExample(t *testing.T) {\n" +
+		"+\tt.Fatal(\"one\")\n" +
+		"+\tt.Fatal(\"two\")\n" +
+		"+}\n" +
+		"PATCH"
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "Shell",
+		Content:                fmt.Sprintf(`{"command":%q,"description":"暂存滚轮修复相关改动","timeout":30}`, cmd),
+		ResultContent:          "(Shell completed with no output)",
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "git add internal/tui/app_cached_render.go") {
+		t.Fatalf("expected collapsed Shell to show command preview; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--- a/internal/tui/session_switch_test.go") {
+		t.Fatalf("expected collapsed Shell to show second command preview line; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "+++ b/internal/tui/session_switch_test.go") || strings.Contains(joined, "TestExample") {
+		t.Fatalf("did not expect collapsed Shell to show long heredoc body; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "(Shell completed with no output)") {
+		t.Fatalf("expected collapsed Shell to show no-output result inline; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+		t.Fatalf("expected collapsed Shell to show expand hint for hidden command lines; got:\n%s", joined)
 	}
 }
 
@@ -768,8 +806,8 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	if !strings.Contains(joined, "[space] toggle expand/collapse") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "echo third") {
-		t.Fatalf("expected full command to be shown for short output; got:\n%s", joined)
+	if strings.Contains(joined, "echo third") {
+		t.Fatalf("did not expect full command to be shown for short output; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
 		t.Fatalf("expected all output lines to be shown inline for short output; got:\n%s", joined)
