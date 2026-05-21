@@ -415,11 +415,9 @@ func (m *Model) jumpToLastVisibleBlock() tea.Cmd {
 		m.clearFocusedBlock()
 		return nil
 	}
-	entry := entries[len(entries)-1]
-	m.viewport.offset = entry.LineOffset
-	m.viewport.clampOffset()
+	m.viewport.ScrollToBottom()
 	m.focusDirectoryEntryBlock(entries, len(entries)-1, -1)
-	m.viewport.sticky = m.viewport.atBottom()
+	m.viewport.sticky = true
 	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }
 

@@ -7203,7 +7203,7 @@ func TestNormalModeGGFocusesFirstVisibleBlock(t *testing.T) {
 	}
 }
 
-func TestNormalModeGFocusesLastVisibleBlock(t *testing.T) {
+func TestNormalModeGScrollsToBottomAndFocusesLastCard(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: strings.Repeat("first\n", 4)})
@@ -7219,8 +7219,8 @@ func TestNormalModeGFocusesLastVisibleBlock(t *testing.T) {
 	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "G", Code: 'G'})); cmd != nil {
 		t.Fatalf("G should move synchronously without extra cmd, got %#v", cmd)
 	}
-	if m.viewport.offset != entries[len(entries)-1].LineOffset {
-		t.Fatalf("viewport offset after G = %d, want %d", m.viewport.offset, entries[len(entries)-1].LineOffset)
+	if !m.viewport.atBottom() {
+		t.Fatalf("viewport should be at bottom after G, offset=%d total=%d height=%d", m.viewport.offset, m.viewport.TotalLines(), m.viewport.height)
 	}
 	if m.focusedBlockID != 2 {
 		t.Fatalf("focusedBlockID after G = %d, want 2", m.focusedBlockID)
