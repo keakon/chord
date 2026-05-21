@@ -23,7 +23,7 @@ func (m *Model) nextEscHint() string {
 	case m.chord.active():
 		return ""
 	case m.agent != nil && m.agent.CurrentLoopState() != "":
-		return ""
+		return "exit loop"
 	case m.isAgentBusy():
 		return "cancel turn"
 	default:

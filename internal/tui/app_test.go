@@ -1084,9 +1084,7 @@ func TestRenderInfoPanelShowsFastModeState(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarLoopPillNotSqueezedByEscHint(t *testing.T) {
-	// When loop is active, nextEscHint() returns "" so the LOOP pill is not
-	// pushed past the activity center and clipped by renderStatusBarPlacedLine.
+func TestRenderStatusBarShowsLoopEscHintWithoutSqueezingLoopPill(t *testing.T) {
 	backend := &sessionControlAgent{currentRole: "builder", loopState: agent.LoopStateExecuting, loopIteration: 1, loopMaxIterations: 10}
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeNormal
@@ -1096,8 +1094,8 @@ func TestRenderStatusBarLoopPillNotSqueezedByEscHint(t *testing.T) {
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want LOOP pill visible", plain)
 	}
-	if strings.Contains(plain, "disable loop") {
-		t.Fatalf("status bar = %q, should not contain esc hint 'disable loop' that would squeeze LOOP pill", plain)
+	if !strings.Contains(plain, "esc ⇢ exit loop") {
+		t.Fatalf("status bar = %q, want loop esc hint", plain)
 	}
 }
 
@@ -6702,6 +6700,20 @@ func TestNormalModeEscClearsChordBeforeCancellingBusyTurn(t *testing.T) {
 	}
 	if backend.cancelCalls != 1 {
 		t.Fatalf("CancelCurrentTurn calls = %d, want 1", backend.cancelCalls)
+	}
+}
+
+func TestInsertModeEscReturnsToNormalWithoutDisablingLoop(t *testing.T) {
+	backend := &sessionControlAgent{loopState: agent.LoopStateExecuting}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want %v", m.mode, ModeNormal)
+	}
+	if backend.loopDisableCalls != 0 {
+		t.Fatalf("DisableLoopMode calls = %d, want 0", backend.loopDisableCalls)
 	}
 }
 

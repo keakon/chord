@@ -128,11 +128,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case keyMatches(key, m.keyMap.InsertEscape):
-		if m.agent != nil && m.agent.CurrentLoopState() != "" {
-			m.agent.DisableLoopMode()
-			m.recalcViewportSize()
-			return tea.Batch(m.switchModeWithIME(ModeNormal), m.enqueueToast("Loop disabled.", "info"))
-		}
 		cmd := m.switchModeWithIME(ModeNormal)
 		m.recalcViewportSize()
 		return cmd

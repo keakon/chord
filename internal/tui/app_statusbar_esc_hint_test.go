@@ -80,8 +80,8 @@ func TestNextEscHint(t *testing.T) {
 	t.Run("loop", func(t *testing.T) {
 		m := NewModelWithSize(&sessionControlAgent{loopState: agent.LoopStateExecuting}, 120, 24)
 		m.mode = ModeNormal
-		if got := m.nextEscHint(); got != "" {
-			t.Fatalf("nextEscHint() = %q, want empty when LOOP pill is visible", got)
+		if got := m.nextEscHint(); got != "exit loop" {
+			t.Fatalf("nextEscHint() = %q, want %q", got, "exit loop")
 		}
 	})
 
