@@ -56,6 +56,46 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 	return nil
 }
 
+func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
+	if evt.Status == agent.ToolResultStatusError {
+		return false
+	}
+	switch evt.Name {
+	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+		return true
+	case tools.NameShell:
+		var args struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal([]byte(evt.ArgsJSON), &args); err != nil {
+			return false
+		}
+		return shellCommandMayRunGit(args.Command)
+	default:
+		return false
+	}
+}
+
+func shellCommandMayRunGit(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	if strings.HasPrefix(command, "git ") || command == "git" {
+		return true
+	}
+	for _, sep := range []string{"&&", ";", "||", "\n"} {
+		needle := sep + " git"
+		if strings.Contains(command, needle+" ") || strings.HasSuffix(command, needle) {
+			return true
+		}
+		if sep == "\n" && (strings.Contains(command, "\ngit ") || strings.HasSuffix(command, "\ngit")) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
 	var effects agentEventEffects
 	if evt.Name == "Delegate" && evt.AgentID == "" {
@@ -113,6 +153,9 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 					effects.invalidateUsage = true
 				}
 			}
+		}
+		if shouldRefreshGitStatusAfterToolResult(evt) {
+			effects.addFollowup(m.requestGitStatusRefresh())
 		}
 		if evt.Name == "Delegate" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
 			if handle, ok := parseTaskToolHandle(evt.Result); ok {

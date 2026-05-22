@@ -290,6 +290,42 @@ func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
+func (m *Model) buildInfoPanelGitBlock(lineW int) string {
+	info := m.gitStatus.Info
+	if !info.Present {
+		return ""
+	}
+	summary := gitStatusSummary(info)
+	if summary == "" {
+		return ""
+	}
+	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionGit)
+	headerSummary := summary
+	if expanded {
+		headerSummary = ""
+	}
+	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "GIT", headerSummary)}
+	if !expanded {
+		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	}
+	ref := info.Branch
+	if ref == "" {
+		ref = info.Commit
+	}
+	if ref == "" {
+		ref = "detached"
+	}
+	lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Branch", InfoPanelValue.Render(truncateOneLine(ref, lineW-8-infoPanelCollapsibleContentInset))))
+	if info.WorktreeName != "" {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree", InfoPanelValue.Render(truncateOneLine(info.WorktreeName, lineW-10-infoPanelCollapsibleContentInset))))
+	}
+	lines = append(lines,
+		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))),
+		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", InfoPanelValue.Render(fmt.Sprintf("↑%d ↓%d", info.Ahead, info.Behind))),
+	)
+	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+}
+
 func (m *Model) buildInfoPanelTodoBlock(lineW int) string {
 	todos := m.agent.GetTodos()
 	if len(todos) == 0 {
@@ -518,6 +554,12 @@ func contextValueStyle(percent float64) lipgloss.Style {
 		return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
 	}
 	return InfoPanelValue
+}
+
+func renderInfoPanelIndentedKVLine(lineW, inset int, key, value string) string {
+	prefix := InfoPanelDim.Render(key + ": ")
+	line := lipgloss.JoinHorizontal(lipgloss.Left, prefix, value)
+	return renderInfoPanelIndentedLine(lineW, inset, line)
 }
 
 func renderInfoPanelKVLine(lineW int, key, value string) string {

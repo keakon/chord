@@ -635,6 +635,50 @@ func TestRenderInfoPanelCollapsedTodosShowsHeaderOnly(t *testing.T) {
 	}
 }
 
+func TestInfoPanelGitBlockHiddenWhenNoRepo(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	plain := stripANSI(m.renderInfoPanel(48, 24))
+	if strings.Contains(plain, "GIT") {
+		t.Fatalf("git block should be hidden when no git info is present, got:\n%s", plain)
+	}
+}
+
+func TestInfoPanelGitBlockCollapsedByDefault(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 14, ChangedFiles: 2}
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▶ GIT")
+	if len(section) != 0 {
+		t.Fatalf("collapsed git section should not render body lines, got %#v", section)
+	}
+	plain := stripANSI(m.renderInfoPanel(48, 24))
+	if !strings.Contains(plain, "▶ GIT") || !strings.Contains(plain, "main ↑14 !2") {
+		t.Fatalf("git summary missing from collapsed header, got:\n%s", plain)
+	}
+}
+
+func TestInfoPanelGitBlockExpanded(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3}
+	m.toggleInfoPanelSection(infoPanelSectionGit)
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
+	joined := strings.Join(section, "\n")
+	for _, want := range []string{"Branch: main", "Worktree: fix-ui", "Changes: 3 files", "Sync: ↑2 ↓1"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
+		}
+	}
+	plain := stripANSI(m.renderInfoPanel(48, 24))
+	if strings.Contains(plain, "main@fix-ui ↑2 ↓1 !3") {
+		t.Fatalf("expanded git header should omit summary, got:\n%s", plain)
+	}
+	rawSection := infoPanelSectionLines(infoPanelRawLines(m.renderInfoPanel(48, 24)), "▼ GIT")
+	for _, line := range rawSection {
+		if strings.HasPrefix(line, "Branch:") || strings.HasPrefix(line, "Worktree:") || strings.HasPrefix(line, "Changes:") || strings.HasPrefix(line, "Sync:") {
+			t.Fatalf("expanded git content should be indented, got raw section %#v", rawSection)
+		}
+	}
+}
+
 func TestRenderInfoPanelCollapsedLSPShowsCountOnly(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}, {Name: "pyright", Pending: true}}
@@ -1415,6 +1459,8 @@ func normalizeInfoPanelSectionTitle(line string) string {
 		return "USAGE"
 	case strings.HasPrefix(line, "MCP"):
 		return "MCP"
+	case strings.HasPrefix(line, "GIT"):
+		return "GIT"
 	case line == "AGENTS" || strings.HasPrefix(line, "AGENTS"):
 		return "AGENTS"
 	case strings.HasPrefix(line, "LSP"):

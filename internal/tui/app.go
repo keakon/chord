@@ -136,6 +136,7 @@ type infoPanelSectionID string
 const (
 	infoPanelSectionLSP    infoPanelSectionID = "lsp"
 	infoPanelSectionMCP    infoPanelSectionID = "mcp"
+	infoPanelSectionGit    infoPanelSectionID = "git"
 	infoPanelSectionTodos  infoPanelSectionID = "todos"
 	infoPanelSectionFiles  infoPanelSectionID = "files"
 	infoPanelSectionSkills infoPanelSectionID = "skills"
@@ -298,6 +299,9 @@ type Model struct {
 
 	// Multi-agent sidebar.
 	sidebar Sidebar
+
+	// Git status shown in the right info panel.
+	gitStatus gitStatusState
 
 	// Toast notifications
 	toastQueue      []toastItem
@@ -616,6 +620,9 @@ func (m *Model) Init() tea.Cmd {
 		cmds = append(cmds, m.scheduleKeyPoolTick())
 		cmds = append(cmds, m.scheduleStatusBarTick())
 	}
+	if cmd := m.requestGitStatusRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	cmds = append(cmds, waitForConfirmRequest(m.confirmCh))
 	cmds = append(cmds, waitForQuestionRequest(m.questionCh))
 	return tea.Batch(cmds...)
@@ -870,6 +877,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusBarTickScheduled = false
 		return m, m.scheduleStatusBarTick()
+
+	case gitStatusRefreshedMsg:
+		return m, m.handleGitStatusRefreshed(msg)
+
+	case gitStatusTickMsg:
+		return m, m.handleGitStatusTick(msg)
 
 	case reconnectedMsg:
 		return m, m.handleReconnected(msg)

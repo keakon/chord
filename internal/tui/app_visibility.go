@@ -115,8 +115,9 @@ func (m *Model) handleBlurMsg() tea.Cmd {
 	m.setStreamRenderInvalidation(streamRenderInvalidateClear)
 	titleCmd := m.syncTerminalTitleState()
 	idleCmd := m.updateBackgroundIdleSweepState()
-	if titleCmd != nil || idleCmd != nil {
-		return tea.Batch(titleCmd, idleCmd)
+	gitCmd := m.switchGitStatusToBackgroundRefresh()
+	if titleCmd != nil || idleCmd != nil || gitCmd != nil {
+		return tea.Batch(titleCmd, idleCmd, gitCmd)
 	}
 	return nil
 }
@@ -188,6 +189,9 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if cmd := m.syncTerminalTitleState(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := m.switchGitStatusToForegroundRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 

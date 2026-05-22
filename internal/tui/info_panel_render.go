@@ -133,6 +133,24 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionMCP))
 	appendSep()
 
+	// Git status
+	gitInfo := m.gitStatus.Info
+	appendBool(gitInfo.Present)
+	b.WriteString(gitInfo.Branch)
+	appendSep()
+	b.WriteString(gitInfo.Commit)
+	appendSep()
+	b.WriteString(gitInfo.WorktreeName)
+	appendSep()
+	appendInt(gitInfo.ChangedFiles)
+	appendSep()
+	appendInt(gitInfo.Ahead)
+	appendSep()
+	appendInt(gitInfo.Behind)
+	appendSep()
+	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionGit))
+	appendSep()
+
 	// TODOs
 	for _, t := range m.agent.GetTodos() {
 		b.WriteByte('T')
@@ -247,6 +265,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 	appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
 	appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))
 	appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
+	appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
 	appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))
 	if agentBlock, agentRows := m.buildInfoPanelAgentListBlockWithHits(lineW); agentBlock != "" {
 		baseY := m.infoPanelRenderCursorY

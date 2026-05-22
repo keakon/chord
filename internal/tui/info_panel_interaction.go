@@ -7,18 +7,26 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+func defaultInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
+	return section == infoPanelSectionGit
+}
+
 func (m *Model) isInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
 	if m.infoPanelCollapsedSections == nil {
-		return false
+		return defaultInfoPanelSectionCollapsed(section)
 	}
-	return m.infoPanelCollapsedSections[section]
+	collapsed, ok := m.infoPanelCollapsedSections[section]
+	if !ok {
+		return defaultInfoPanelSectionCollapsed(section)
+	}
+	return collapsed
 }
 
 func (m *Model) toggleInfoPanelSection(section infoPanelSectionID) {
 	if m.infoPanelCollapsedSections == nil {
 		m.infoPanelCollapsedSections = make(map[infoPanelSectionID]bool)
 	}
-	m.infoPanelCollapsedSections[section] = !m.infoPanelCollapsedSections[section]
+	m.infoPanelCollapsedSections[section] = !m.isInfoPanelSectionCollapsed(section)
 	m.cachedInfoPanelW = 0
 	m.cachedInfoPanelH = 0
 	m.cachedInfoPanelFP = ""
