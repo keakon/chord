@@ -526,6 +526,26 @@ func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 	}
 }
 
+func TestHandleConfirmDoneViewOpensContentViewer(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", DoneReport: "# Finished\n\nAll done."}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'}))
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.mode != ModeContentViewer {
+		t.Fatalf("mode after Done view = %v, want ModeContentViewer", m.mode)
+	}
+	if m.contentViewer.prevMode != ModeConfirm {
+		t.Fatalf("viewer prevMode = %v, want ModeConfirm", m.contentViewer.prevMode)
+	}
+	if !strings.Contains(m.contentViewer.content, "All done.") {
+		t.Fatalf("viewer content = %q", m.contentViewer.content)
+	}
+}
+
 func TestHandleConfirmDoneIgnoresEditShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.mode = ModeConfirm

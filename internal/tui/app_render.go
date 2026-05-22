@@ -72,6 +72,8 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 		mainContent = m.renderDirectory()
 	case ModeHelp:
 		mainContent = m.renderHelpView()
+	case ModeContentViewer:
+		mainContent = m.renderContentViewer()
 	default:
 		needMainRender := m.cachedMainKey != mainKey || m.cachedMainSpinnerFrame != spinnerFrame || m.cachedMainSearchBlockIndex != searchBlockIndex
 		if selection == nil {

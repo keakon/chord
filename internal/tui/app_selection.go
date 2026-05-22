@@ -595,6 +595,9 @@ func toolCallMarkdownContent(b *Block) string {
 }
 
 func (m *Model) handleSuperCopy() tea.Cmd {
+	if m.mode == ModeContentViewer {
+		return m.copyContentViewerSelection()
+	}
 	// In confirm sub-modes, the focused textarea isn't m.input, so copy from it.
 	if m.mode == ModeConfirm {
 		if input, label, ok := m.activeConfirmTextarea(); ok {

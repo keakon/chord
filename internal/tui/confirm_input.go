@@ -120,6 +120,9 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		if msg.String() == "v" || msg.String() == "V" {
+			return m.openContentViewer("Done report", m.confirm.request.DoneReport)
+		}
 		if m.confirm.request.ForceDenyReason {
 			switch msg.String() {
 			case "r", "R", "n", "N", "esc":

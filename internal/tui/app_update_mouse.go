@@ -103,14 +103,16 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp:
-			if m.handoffSelect.selector.list != nil {
-				m.handoffSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+			m.handoffSelect.scroll -= mouseWheelScrollStep
+			if m.handoffSelect.scroll < 0 {
+				m.handoffSelect.scroll = 0
 			}
 			return nil, true
 		case tea.MouseWheelDown:
-			if m.handoffSelect.selector.list != nil {
-				m.handoffSelect.selector.list.HandleWheel(mouseWheelScrollStep)
-			}
+			m.handoffSelect.scroll += mouseWheelScrollStep
+			return nil, true
+		}
+		if m.handoffSelect.denyingWithReason {
 			return nil, true
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
@@ -119,6 +121,31 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 					m.handoffSelect.selector.list.SetCursor(idx)
 				}
 				return m.confirmHandoff(), true
+			}
+		}
+		return nil, true
+	}
+
+	if m.mode == ModeContentViewer {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			m.scrollContentViewer(-mouseWheelScrollStep)
+			return nil, true
+		case tea.MouseWheelDown:
+			m.scrollContentViewer(mouseWheelScrollStep)
+			return nil, true
+		}
+		switch msg.(type) {
+		case tea.MouseClickMsg:
+			if mouse.Button == tea.MouseLeft {
+				m.startContentViewerSelection(mouse)
+			}
+		case tea.MouseMotionMsg:
+			m.updateContentViewerSelection(mouse)
+		case tea.MouseReleaseMsg:
+			if mouse.Button == tea.MouseLeft {
+				m.contentViewer.selecting = false
 			}
 		}
 		return nil, true

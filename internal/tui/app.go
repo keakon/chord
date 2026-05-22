@@ -40,6 +40,7 @@ const (
 	ModeUsageStats                       // stats panel overlay ($, /stats)
 	ModeHelp                             // full-screen help overlay
 	ModeImageViewer                      // fullscreen image viewer overlay
+	ModeContentViewer                    // fullscreen markdown content viewer overlay
 	ModeRules                            // /rules overlay
 )
 
@@ -262,6 +263,9 @@ type Model struct {
 
 	// Handoff agent selector state
 	handoffSelect handoffSelectState
+
+	// Fullscreen Markdown content viewer state
+	contentViewer contentViewerState
 
 	// Pending image attachments (shown above input box, sent with next message)
 	attachments []Attachment
@@ -765,6 +769,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == ModeConfirm && m.confirm.denyingWithReason {
 			m.confirm.denyReasonInput.InsertString(string(msg))
+			m.recalcViewportSize()
+			return m, nil
+		}
+		if m.mode == ModeHandoffSelect && m.handoffSelect.denyingWithReason {
+			m.handoffSelect.denyReasonInput.InsertString(string(msg))
 			m.recalcViewportSize()
 			return m, nil
 		}

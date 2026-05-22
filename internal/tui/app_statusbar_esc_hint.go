@@ -10,6 +10,8 @@ func (m *Model) nextEscHint() string {
 	switch m.mode {
 	case ModeSearch:
 		return "cancel search"
+	case ModeContentViewer:
+		return "close view"
 	case ModeInsert:
 		return "normal mode"
 	case ModeNormal:

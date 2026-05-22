@@ -3819,6 +3819,7 @@ type sessionControlAgent struct {
 	contextLimit            int
 	todos                   []tools.TodoItem
 	sentMessages            []string
+	contextMessages         []message.Message
 	sentMultipart           [][]message.ContentPart
 	queuedDraftIDs          []string
 	queuedDrafts            [][]message.ContentPart
@@ -3845,6 +3846,9 @@ type sessionControlAgent struct {
 	canUseLoop              bool
 	canUseLoopSet           bool
 	fastMode                bool
+	executePlanCalls        int
+	executePlanPath         string
+	executePlanAgent        string
 }
 
 func (s *sessionControlAgent) Events() <-chan agent.AgentEvent { return s.events }
@@ -3855,7 +3859,10 @@ func (s *sessionControlAgent) SendUserMessageWithParts(parts []message.ContentPa
 	cp := append([]message.ContentPart(nil), parts...)
 	s.sentMultipart = append(s.sentMultipart, cp)
 }
-func (s *sessionControlAgent) AppendContextMessage(msg message.Message) {}
+func (s *sessionControlAgent) AppendContextMessage(msg message.Message) {
+	s.contextMessages = append(s.contextMessages, msg)
+}
+
 func (s *sessionControlAgent) CancelCurrentTurn() bool {
 	s.cancelCalls++
 	return s.cancelResult
@@ -4066,6 +4073,9 @@ func (s *sessionControlAgent) ForkSession(msgIndex int) {
 	s.forkMsgIndices = append(s.forkMsgIndices, msgIndex)
 }
 func (s *sessionControlAgent) ExecutePlan(planPath, agentName string) {
+	s.executePlanCalls++
+	s.executePlanPath = planPath
+	s.executePlanAgent = agentName
 }
 func (s *sessionControlAgent) AvailableAgents() []string {
 	return append([]string(nil), s.availableAgents...)

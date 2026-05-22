@@ -29,6 +29,16 @@ func TestNextEscHint(t *testing.T) {
 		}
 	})
 
+	t.Run("content viewer", func(t *testing.T) {
+		m := NewModelWithSize(nil, 120, 24)
+		m.mode = ModeContentViewer
+		m.search.State.Active = true
+		m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
+		if got := m.nextEscHint(); got != "close view" {
+			t.Fatalf("nextEscHint() = %q, want %q", got, "close view")
+		}
+	})
+
 	nonNormalModes := []struct {
 		name string
 		mode Mode

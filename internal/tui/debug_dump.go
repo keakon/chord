@@ -504,6 +504,8 @@ func debugModeString(mode Mode) string {
 		return "usage-stats"
 	case ModeHelp:
 		return "help"
+	case ModeContentViewer:
+		return "content-viewer"
 	case ModeImageViewer:
 		return "image-viewer"
 	default:

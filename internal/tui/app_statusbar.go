@@ -348,6 +348,8 @@ func (m *Model) statusBarModeText() string {
 		return "STATS"
 	case ModeHelp:
 		return "HELP"
+	case ModeContentViewer:
+		return "VIEW"
 	case ModeImageViewer:
 		return "IMAGE"
 	case ModeRules:

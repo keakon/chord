@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,7 +24,7 @@ func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + 3 // title + blank + prefix line
+	y := dialogRect.Min.Y + 1 + m.handoffSelect.selector.listBaseRow
 	idx, ok := m.handoffSelectOptionIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first list row")
@@ -59,7 +60,7 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + 3 // first visible row
+	y := dialogRect.Min.Y + 1 + m.handoffSelect.selector.listBaseRow
 	idx, ok := m.handoffSelectOptionIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first visible list row")
@@ -69,10 +70,12 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	}
 }
 
-func TestHandoffSelectModalMouseWheelMovesCursor(t *testing.T) {
+func TestHandoffSelectModalMouseWheelScrollsPlanPreview(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.openHandoffSelect("docs/plans/example.md")
+	m.handoffSelect.planErr = ""
+	m.handoffSelect.planText = strings.Repeat("This handoff plan preview should wrap into several visible lines. ", 40)
 	m.layout = m.generateLayout(m.width, m.height)
 
 	cmd, handled := m.handleModalMouseMsg(tea.MouseWheelMsg{X: 1, Y: 1, Button: tea.MouseWheelDown})
@@ -82,8 +85,149 @@ func TestHandoffSelectModalMouseWheelMovesCursor(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("wheel returned cmd %#v, want nil", cmd)
 	}
-	if got := m.handoffSelect.selector.list.CursorAt(); got != 2 {
-		t.Fatalf("cursor after wheel down = %d, want 2", got)
+	if got := m.handoffSelect.scroll; got != mouseWheelScrollStep {
+		t.Fatalf("plan scroll after wheel down = %d, want %d", got, mouseWheelScrollStep)
+	}
+	if got := m.handoffSelect.selector.list.CursorAt(); got != 0 {
+		t.Fatalf("cursor after plan wheel = %d, want unchanged 0", got)
+	}
+
+	_ = m.renderHandoffSelectDialog()
+	if got := m.handoffSelect.scroll; got != 3 {
+		t.Fatalf("clamped plan scroll = %d, want 3", got)
+	}
+}
+
+func TestHandoffSelectViewOpensContentViewer(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	m.handoffSelect.planErr = ""
+	m.handoffSelect.planText = "# Plan\n\nDo the work."
+
+	cmd := m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'}))
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.mode != ModeContentViewer {
+		t.Fatalf("mode after Handoff view = %v, want ModeContentViewer", m.mode)
+	}
+	if m.contentViewer.prevMode != ModeHandoffSelect {
+		t.Fatalf("viewer prevMode = %v, want ModeHandoffSelect", m.contentViewer.prevMode)
+	}
+	if !strings.Contains(m.contentViewer.content, "Do the work.") {
+		t.Fatalf("viewer content = %q", m.contentViewer.content)
+	}
+}
+
+func TestHandoffSelectEscClosesWithoutExecutingPlan(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+	m.openHandoffSelect("docs/plans/example.md")
+
+	cmd := m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode after close = %v, want ModeNormal", m.mode)
+	}
+	if backend.executePlanCalls != 0 {
+		t.Fatalf("ExecutePlan calls = %d, want 0", backend.executePlanCalls)
+	}
+	if backend.continueCalls != 0 || len(backend.contextMessages) != 0 {
+		t.Fatalf("Esc should not continue or append context, continue=%d messages=%d", backend.continueCalls, len(backend.contextMessages))
+	}
+}
+
+func TestHandoffSelectDenyWithReasonContinuesFromContext(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+	m.openHandoffSelect("docs/plans/example.md")
+
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	if !m.handoffSelect.denyingWithReason {
+		t.Fatal("expected handoff deny reason mode")
+	}
+	m.handoffSelect.denyReasonInput.SetValue("use reviewer first")
+	cmd := m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil {
+		_ = cmd()
+	}
+
+	if backend.executePlanCalls != 0 {
+		t.Fatalf("ExecutePlan calls = %d, want 0", backend.executePlanCalls)
+	}
+	if backend.continueCalls != 1 {
+		t.Fatalf("ContinueFromContext calls = %d, want 1", backend.continueCalls)
+	}
+	if len(backend.contextMessages) != 1 {
+		t.Fatalf("context messages = %d, want 1", len(backend.contextMessages))
+	}
+	msg := backend.contextMessages[0]
+	if msg.Role != "user" || !strings.Contains(msg.Content, "Handoff rejected: use reviewer first") || !strings.Contains(msg.Content, "Plan path: docs/plans/example.md") {
+		t.Fatalf("unexpected context message: %+v", msg)
+	}
+}
+
+func TestHandoffSelectConfirmExecutesSelectedPlan(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	m.handoffSelect.selector.list.SetCursor(1)
+
+	cmd := m.confirmHandoff()
+	if cmd != nil {
+		_ = cmd()
+	}
+	if backend.executePlanCalls != 1 {
+		t.Fatalf("ExecutePlan calls = %d, want 1", backend.executePlanCalls)
+	}
+	if backend.executePlanPath != "docs/plans/example.md" || backend.executePlanAgent != "reviewer" {
+		t.Fatalf("ExecutePlan = (%q, %q), want plan path and reviewer", backend.executePlanPath, backend.executePlanAgent)
+	}
+}
+
+func TestHandoffSelectDenyReasonMouseClickDoesNotApprove(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	_ = m.renderHandoffSelectDialog()
+	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
+	clickX := dialogRect.Min.X + 2
+	clickY := dialogRect.Min.Y + 1 + m.handoffSelect.selector.listBaseRow + 1
+
+	cmd, handled := m.handleModalMouseMsg(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("handoff deny reason click was not handled")
+	}
+	if cmd != nil {
+		t.Fatalf("deny reason click returned cmd %#v, want nil", cmd)
+	}
+	if backend.executePlanCalls != 0 {
+		t.Fatalf("ExecutePlan calls = %d, want 0", backend.executePlanCalls)
+	}
+	if !m.handoffSelect.denyingWithReason {
+		t.Fatal("deny reason mode should remain active")
+	}
+}
+
+func TestHandoffDenyReasonAcceptsPasteMsg(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.openHandoffSelect("docs/plans/example.md")
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+
+	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "because pasted\nwith details"})
+	if cmd != nil {
+		t.Fatalf("PasteMsg returned cmd %#v, want nil", cmd)
+	}
+	if got := m.handoffSelect.denyReasonInput.Value(); got != "because pasted\nwith details" {
+		t.Fatalf("deny reason input = %q", got)
 	}
 }
 
@@ -104,5 +248,8 @@ func TestHandoffSelectModalMouseClickUpdatesCursorAndReturnsCommand(t *testing.T
 	_ = cmd
 	if got := m.handoffSelect.selector.list.CursorAt(); got != 1 {
 		t.Fatalf("cursor after click = %d, want 1", got)
+	}
+	if backend.executePlanCalls != 1 {
+		t.Fatalf("ExecutePlan calls after click = %d, want 1", backend.executePlanCalls)
 	}
 }
