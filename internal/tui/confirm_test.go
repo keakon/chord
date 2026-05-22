@@ -433,6 +433,34 @@ func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.denyingWithReason = true
+	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+	m.confirm.denyReasonInput.SetValue("first line\nsecond line")
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if strings.Contains(plain, "> first line") {
+		t.Fatalf("deny-reason input should not render a primary prompt, got:\n%s", plain)
+	}
+	var firstCol, secondCol = -1, -1
+	for _, line := range strings.Split(plain, "\n") {
+		if col := strings.Index(line, "first line"); col >= 0 {
+			firstCol = col
+		}
+		if col := strings.Index(line, "second line"); col >= 0 {
+			secondCol = col
+		}
+	}
+	if firstCol < 0 || secondCol < 0 {
+		t.Fatalf("expected deny-reason lines in dialog, got:\n%s", plain)
+	}
+	if firstCol != secondCol {
+		t.Fatalf("deny-reason continuation line column = %d, want %d; dialog:\n%s", secondCol, firstCol, plain)
+	}
+}
+
 func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)

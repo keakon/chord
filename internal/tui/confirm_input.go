@@ -80,11 +80,8 @@ func newConfirmTextarea(width, height int, value string) textarea.Model {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	ta.SetStyles(newTextareaStyles())
-	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "> "
-		}
-		return "  "
+	ta.SetPromptFunc(0, func(textarea.PromptInfo) string {
+		return ""
 	})
 	km := ta.KeyMap
 	km.InsertNewline.SetKeys("shift+enter", "ctrl+j")
