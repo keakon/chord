@@ -41,6 +41,7 @@ type gitStatusInfo struct {
 	Commit       string
 	WorktreeName string
 	ChangedFiles int
+	Stashes      int
 	Ahead        int
 	Behind       int
 	CapturedAt   time.Time
@@ -155,6 +156,7 @@ func gitStatusInfoEqual(a, b gitStatusInfo) bool {
 		a.Commit == b.Commit &&
 		a.WorktreeName == b.WorktreeName &&
 		a.ChangedFiles == b.ChangedFiles &&
+		a.Stashes == b.Stashes &&
 		a.Ahead == b.Ahead &&
 		a.Behind == b.Behind
 }
@@ -206,7 +208,12 @@ func collectGitStatus(workDir string) gitStatusResult {
 		return gitStatusResult{Disable: isGitExecutableMissing(err)}
 	}
 	info := parseGitStatusPorcelainV2(out)
+	stashOut, err := gitCommand(ctx, workDir, "stash", "list", "--format=%gd")
+	if err != nil {
+		return gitStatusResult{Disable: isGitExecutableMissing(err)}
+	}
 	info.Present = true
+	info.Stashes = countGitStashEntries(stashOut)
 	info.WorktreeName = linkedWorktreeName(root, gitDir)
 	info.CapturedAt = time.Now()
 	return gitStatusResult{Info: info}
@@ -271,6 +278,16 @@ func gitCommand(ctx context.Context, workDir string, args ...string) (string, er
 		return "", err
 	}
 	return string(out), nil
+}
+
+func countGitStashEntries(out string) int {
+	count := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func parseGitStatusPorcelainV2(out string) gitStatusInfo {
@@ -363,6 +380,9 @@ func gitStatusSummary(info gitStatusInfo) string {
 	}
 	if info.ChangedFiles > 0 {
 		parts = append(parts, fmt.Sprintf("!%d", info.ChangedFiles))
+	}
+	if info.Stashes > 0 {
+		parts = append(parts, fmt.Sprintf("*%d", info.Stashes))
 	}
 	return strings.Join(parts, " ")
 }

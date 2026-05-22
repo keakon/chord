@@ -84,9 +84,16 @@ func TestParseGitStatusPorcelainV2(t *testing.T) {
 	}
 }
 
+func TestCountGitStashEntries(t *testing.T) {
+	got := countGitStashEntries("stash@{0}\nstash@{1}\n\n")
+	if got != 2 {
+		t.Fatalf("stash entries = %d, want 2", got)
+	}
+}
+
 func TestGitStatusSummary(t *testing.T) {
-	got := gitStatusSummary(gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2})
-	if got != "main@fix-ui ↑3 ↓1 !2" {
+	got := gitStatusSummary(gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, Stashes: 4})
+	if got != "main@fix-ui ↑3 ↓1 !2 *4" {
 		t.Fatalf("summary = %q", got)
 	}
 }

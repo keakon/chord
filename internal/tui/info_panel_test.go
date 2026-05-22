@@ -645,24 +645,24 @@ func TestInfoPanelGitBlockHiddenWhenNoRepo(t *testing.T) {
 
 func TestInfoPanelGitBlockCollapsedByDefault(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 14, ChangedFiles: 2}
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 14, ChangedFiles: 2, Stashes: 3}
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▶ GIT")
 	if len(section) != 0 {
 		t.Fatalf("collapsed git section should not render body lines, got %#v", section)
 	}
 	plain := stripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "▶ GIT") || !strings.Contains(plain, "main ↑14 !2") {
+	if !strings.Contains(plain, "▶ GIT") || !strings.Contains(plain, "main ↑14 !2 *3") {
 		t.Fatalf("git summary missing from collapsed header, got:\n%s", plain)
 	}
 }
 
 func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3}
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, Stashes: 2}
 	m.toggleInfoPanelSection(infoPanelSectionGit)
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
 	joined := strings.Join(section, "\n")
-	for _, want := range []string{"Branch: main", "Worktree: fix-ui", "Changes: 3 files", "Sync: ↑2 ↓1"} {
+	for _, want := range []string{"Branch: main", "Worktree: fix-ui", "Changes: 3 files", "Stash: 2 entries", "Sync: ↑2 ↓1"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
@@ -673,7 +673,7 @@ func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	}
 	rawSection := infoPanelSectionLines(infoPanelRawLines(m.renderInfoPanel(48, 24)), "▼ GIT")
 	for _, line := range rawSection {
-		if strings.HasPrefix(line, "Branch:") || strings.HasPrefix(line, "Worktree:") || strings.HasPrefix(line, "Changes:") || strings.HasPrefix(line, "Sync:") {
+		if strings.HasPrefix(line, "Branch:") || strings.HasPrefix(line, "Worktree:") || strings.HasPrefix(line, "Changes:") || strings.HasPrefix(line, "Stash:") || strings.HasPrefix(line, "Sync:") {
 			t.Fatalf("expanded git content should be indented, got raw section %#v", rawSection)
 		}
 	}

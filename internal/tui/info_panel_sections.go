@@ -321,6 +321,7 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	}
 	lines = append(lines,
 		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))),
+		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Stash", InfoPanelValue.Render(fmt.Sprintf("%d entries", info.Stashes))),
 		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", InfoPanelValue.Render(fmt.Sprintf("↑%d ↓%d", info.Ahead, info.Behind))),
 	)
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
