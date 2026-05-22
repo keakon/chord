@@ -22,6 +22,8 @@ var (
 
 	// lspSeverityRe matches "[E]", "[W]", "[I]", "[H]" prefixes in LSP diagnostic output.
 	lspSeverityRe = regexp.MustCompile(`^\s*\[(E|W|I|H)\]`)
+
+	lspDiagnosticsOmittedLineRe = regexp.MustCompile(`^\s*\.\.\. \d+ diagnostics not shown due to output limits; they may still need fixing\.$`)
 )
 
 // maxToolCallCompactResultLines is the default visible height for generic tool output until space expands.
@@ -756,6 +758,8 @@ func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 			default:
 				st = LSPHintStyle
 			}
+		} else if lspDiagnosticsOmittedLineRe.MatchString(line) {
+			st = DimStyle
 		} else if strings.Contains(line, "LSP:") || strings.Contains(line, "LSP errors detected") || strings.Contains(line, "<diagnostics") || lspDiagLineRe.MatchString(strings.TrimSpace(line)) {
 			st = LSPErrorStyle
 		} else {

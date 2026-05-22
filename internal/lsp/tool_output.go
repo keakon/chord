@@ -64,7 +64,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 
 	var b strings.Builder
 	b.WriteString(base)
-	b.WriteString("\n\nDiagnostics:")
+	b.WriteString("\n\nDiagnostics:\n")
 
 	appendDiagBlock := func(file string, diags []Diagnostic, thisFile bool) {
 		if len(diags) == 0 {
@@ -141,7 +141,7 @@ func formatSelectedDiagnosticsBlock(file string, diags []Diagnostic, thisFile bo
 	}
 
 	if thisFile {
-		return fmt.Sprintf("\n%s", strings.Join(lines, "\n"))
+		return strings.Join(lines, "\n")
 	}
 	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, strings.Join(lines, "\n"))
 }

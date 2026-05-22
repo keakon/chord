@@ -188,7 +188,7 @@ func appendRuffDiagnostics(base string, selection pythonDiagnosticSelection, dia
 		b.WriteString("No Ruff diagnostics found.")
 		return b.String()
 	}
-	block := strings.TrimPrefix(formatSelectedDiagnosticsBlock("", selected, true), "\n\n")
+	block := formatSelectedDiagnosticsBlock("", selected, true)
 	if block != "" {
 		b.WriteString(block)
 	}

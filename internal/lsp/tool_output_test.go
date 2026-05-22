@@ -163,6 +163,9 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAva
 	if !strings.Contains(out, "edited warning") {
 		t.Fatalf("expected edited file diagnostics kept, got %q", out)
 	}
+	if strings.Contains(out, "Diagnostics:\n\n[W]") {
+		t.Fatalf("expected no blank line after Diagnostics header, got %q", out)
+	}
 	if !strings.Contains(out, "other error") {
 		t.Fatalf("expected other-file error kept, got %q", out)
 	}

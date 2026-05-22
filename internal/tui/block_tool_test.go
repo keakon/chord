@@ -168,17 +168,26 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 		ResultContent: strings.Join([]string{
 			"Successfully wrote 66 lines, 1976 bytes",
 			"",
-			"LSP diagnostics in other files:",
-			"<project-root>/internal/tools/shell_test.go",
-			"[H] 259:23 Ranging over SplitSeq is more efficient",
+			"Diagnostics:",
+			"[W] 1:1 warning",
+			"... 13 diagnostics not shown due to output limits; they may still need fixing.",
 		}, "\n"),
 		displayWorkingDir: wd,
 	}
 
 	raw := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(raw)
-	if !strings.Contains(plain, "LSP diagnostics in other files:") {
+	if !strings.Contains(plain, "Diagnostics:") {
 		t.Fatalf("expected diagnostics text to render; got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "... 13 diagnostics not shown due to output limits; they may still need fixing.") {
+		t.Fatalf("expected omitted diagnostics line to render; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Diagnostics:\n\n") {
+		t.Fatalf("expected no blank line after Diagnostics header; got:\n%s", plain)
+	}
+	if !strings.Contains(raw, DimStyle.Render("    ... 13 diagnostics not shown due to output limits; they may still need fixing.")) {
+		t.Fatalf("expected omitted diagnostics line to use dim style; got:\n%s", raw)
 	}
 	for i, line := range strings.Split(plain, "\n") {
 		trimmed := strings.TrimSpace(line)
