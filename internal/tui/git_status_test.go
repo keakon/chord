@@ -69,7 +69,7 @@ func TestGitStatusDisablesAfterMissingExecutable(t *testing.T) {
 }
 
 func TestParseGitStatusPorcelainV2(t *testing.T) {
-	info := parseGitStatusPorcelainV2("# branch.oid 1234567890abcdef\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +14 -2\n1 .M N... 100644 100644 100644 abc abc file.go\n? new.txt\n")
+	info := parseGitStatusPorcelainV2("# branch.oid 1234567890abcdef\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +14 -2\n1 M. N... 100644 100644 100644 abc abc staged.go\n1 .M N... 100644 100644 100644 abc abc file.go\n? new.txt\n")
 	if info.Branch != "main" {
 		t.Fatalf("Branch = %q, want main", info.Branch)
 	}
@@ -79,8 +79,11 @@ func TestParseGitStatusPorcelainV2(t *testing.T) {
 	if info.Ahead != 14 || info.Behind != 2 {
 		t.Fatalf("ahead/behind = %d/%d, want 14/2", info.Ahead, info.Behind)
 	}
-	if info.ChangedFiles != 2 {
-		t.Fatalf("ChangedFiles = %d, want 2", info.ChangedFiles)
+	if info.ChangedFiles != 3 {
+		t.Fatalf("ChangedFiles = %d, want 3", info.ChangedFiles)
+	}
+	if info.StagedFiles != 1 {
+		t.Fatalf("StagedFiles = %d, want 1", info.StagedFiles)
 	}
 }
 
@@ -92,8 +95,8 @@ func TestCountGitStashEntries(t *testing.T) {
 }
 
 func TestGitStatusSummary(t *testing.T) {
-	got := gitStatusSummary(gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, Stashes: 4})
-	if got != "main@fix-ui ↑3 ↓1 !2 *4" {
+	got := gitStatusSummary(gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, StagedFiles: 1, Stashes: 4})
+	if got != "main@fix-ui ↑3 ↓1 +1 !2 *4" {
 		t.Fatalf("summary = %q", got)
 	}
 }

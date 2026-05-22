@@ -41,6 +41,7 @@ type gitStatusInfo struct {
 	Commit       string
 	WorktreeName string
 	ChangedFiles int
+	StagedFiles  int
 	Stashes      int
 	Ahead        int
 	Behind       int
@@ -156,6 +157,7 @@ func gitStatusInfoEqual(a, b gitStatusInfo) bool {
 		a.Commit == b.Commit &&
 		a.WorktreeName == b.WorktreeName &&
 		a.ChangedFiles == b.ChangedFiles &&
+		a.StagedFiles == b.StagedFiles &&
 		a.Stashes == b.Stashes &&
 		a.Ahead == b.Ahead &&
 		a.Behind == b.Behind
@@ -312,7 +314,16 @@ func parseGitStatusPorcelainV2(out string) gitStatusInfo {
 				info.Ahead = parseGitAB(fields[0], '+')
 				info.Behind = parseGitAB(fields[1], '-')
 			}
-		case strings.HasPrefix(line, "1 "), strings.HasPrefix(line, "2 "), strings.HasPrefix(line, "u "), strings.HasPrefix(line, "? "):
+		case strings.HasPrefix(line, "1 "), strings.HasPrefix(line, "2 "):
+			info.ChangedFiles++
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && len(fields[1]) >= 1 && fields[1][0] != '.' {
+				info.StagedFiles++
+			}
+		case strings.HasPrefix(line, "u "):
+			info.ChangedFiles++
+			info.StagedFiles++
+		case strings.HasPrefix(line, "? "):
 			info.ChangedFiles++
 		}
 	}
@@ -377,6 +388,9 @@ func gitStatusSummary(info gitStatusInfo) string {
 	}
 	if info.Behind > 0 {
 		parts = append(parts, fmt.Sprintf("↓%d", info.Behind))
+	}
+	if info.StagedFiles > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", info.StagedFiles))
 	}
 	if info.ChangedFiles > 0 {
 		parts = append(parts, fmt.Sprintf("!%d", info.ChangedFiles))
