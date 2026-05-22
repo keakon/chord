@@ -205,6 +205,138 @@ Done: allow
 	}
 }
 
+func TestRepeatedToolCallInLoopAutoRejectsOnThirdAndFourthAttempt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.tools.Register(tools.ReadTool{})
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Read: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.newTurn()
+
+	call := message.ToolCall{ID: "read-repeat-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
+
+	for i := 0; i < 2; i++ {
+		result, err := a.executeToolCall(context.Background(), call)
+		if err == nil {
+			t.Fatalf("attempt %d err = nil, want file-not-found or execution error before interception", i+1)
+		}
+		if result.Result != "" {
+			t.Fatalf("attempt %d result = %q, want empty result before interception", i+1, result.Result)
+		}
+	}
+
+	result3, err := a.executeToolCall(context.Background(), call)
+	if err != nil {
+		t.Fatalf("third attempt err = %v, want nil auto-reject result", err)
+	}
+	if !strings.Contains(result3.Result, "Tool call rejected automatically") {
+		t.Fatalf("third attempt result = %q, want automatic rejection", result3.Result)
+	}
+	if !strings.Contains(result3.Result, "detected 3 consecutive identical `Read` tool calls") {
+		t.Fatalf("third attempt result = %q, want repeated-call explanation", result3.Result)
+	}
+	if a.loopState.Iteration != 1 {
+		t.Fatalf("loop iteration after third attempt = %d, want 1", a.loopState.Iteration)
+	}
+
+	result4, err := a.executeToolCall(context.Background(), call)
+	if err != nil {
+		t.Fatalf("fourth attempt err = %v, want nil auto-reject result", err)
+	}
+	if !strings.Contains(result4.Result, "Tool call rejected automatically") {
+		t.Fatalf("fourth attempt result = %q, want automatic rejection", result4.Result)
+	}
+	if a.loopState.Iteration != 2 {
+		t.Fatalf("loop iteration after fourth attempt = %d, want 2", a.loopState.Iteration)
+	}
+}
+
+func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.MaxIterations = 1
+	a.loopState.MaxIterationsSet = true
+	a.loopState.Iteration = 1
+	a.newTurn()
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
+		return a.AwaitConfirm(ctx, toolName, args, 0, needsApproval, alreadyAllowed)
+	}
+
+	call := message.ToolCall{ID: "read-repeat-confirm", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
+	for i := 0; i < 2; i++ {
+		if _, ok := a.maybeInterceptRepeatedToolCall(context.Background(), call); ok {
+			t.Fatalf("attempt %d intercepted early, want no intercept before third repeated call", i+1)
+		}
+	}
+
+	type confirmPayload struct {
+		Reason string `json:"reason"`
+		Report string `json:"report"`
+	}
+	handled := make(chan struct{})
+	var gotResult ToolExecutionResult
+	var gotErr error
+	go func() {
+		gotResult, gotErr = a.executeToolCall(context.Background(), call)
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	confirmed := false
+	for !confirmed {
+		select {
+		case evt := <-a.outputCh:
+			req, ok := evt.(ConfirmRequestEvent)
+			if !ok {
+				continue
+			}
+			if req.ToolName != tools.NameDone {
+				t.Fatalf("confirm tool = %q, want %q", req.ToolName, tools.NameDone)
+			}
+			var payload confirmPayload
+			if err := json.Unmarshal([]byte(req.ArgsJSON), &payload); err != nil {
+				t.Fatalf("unmarshal confirm args: %v", err)
+			}
+			if !strings.Contains(payload.Reason, "automatic loop interception limit reached (1)") {
+				t.Fatalf("confirm reason = %q, want iteration-limit explanation", payload.Reason)
+			}
+			if !strings.Contains(payload.Report, "Tool call rejected automatically") {
+				t.Fatalf("confirm report = %q, want rejection guidance", payload.Report)
+			}
+			if !req.ForceDenyReason {
+				t.Fatal("confirmation should require denial with a reason")
+			}
+			if strings.Contains(payload.Reason, "Approve") || strings.Contains(payload.Reason, "continue") {
+				t.Fatalf("confirm reason = %q, should not offer approve/continue", payload.Reason)
+			}
+			confirmed = true
+			a.ResolveConfirm("deny", req.ArgsJSON, "", "I am stuck repeating the same read; inspect previous output instead.", req.RequestID)
+		case <-deadline:
+			t.Fatal("timed out waiting for repeated-tool-call confirmation request")
+		}
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for repeated-tool-call handling to finish")
+	}
+	if gotErr != nil {
+		t.Fatalf("executeToolCall err = %v, want nil after deny/continue", gotErr)
+	}
+	if !strings.Contains(gotResult.Result, "Tool call rejected automatically") {
+		t.Fatalf("executeToolCall result = %q, want auto rejection guidance", gotResult.Result)
+	}
+	if a.loopState.Iteration != 0 {
+		t.Fatalf("loop iteration after deny/continue = %d, want 0 reset", a.loopState.Iteration)
+	}
+}
+
 func TestHandleToolResult_DoneOutsideLoopEntersIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())

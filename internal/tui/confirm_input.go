@@ -120,6 +120,20 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		if m.confirm.request.ForceDenyReason {
+			switch msg.String() {
+			case "r", "R", "n", "N", "esc":
+				m.confirm.denyingWithReason = true
+				m.confirm.editError = ""
+				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+				m.recalcViewportSize()
+				return textareaBlinkCmd()
+			case "y", "Y":
+				m.confirm.editError = "This repeated tool call must be denied with a reason."
+				m.recalcViewportSize()
+			}
+			return nil
+		}
 		switch msg.String() {
 		case "y", "Y":
 			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
@@ -152,6 +166,11 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "y", "Y":
+		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
+			m.confirm.editError = "This repeated tool call must be denied with a reason."
+			m.recalcViewportSize()
+			return nil
+		}
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 
 	case "n", "N":
@@ -287,6 +306,9 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 		})
 
 	case "esc":
+		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
+			return nil
+		}
 		// Back to main confirm dialog.
 		m.confirm.denyingWithReason = false
 		m.confirm.denyReasonInput.Blur()

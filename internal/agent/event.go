@@ -588,6 +588,8 @@ type ConfirmRequestEvent struct {
 	AlreadyAllowed []string
 	// DoneReport is the completion report content for Done tool confirmation.
 	DoneReport string
+	// ForceDenyReason means the dialog must only allow denial with a non-empty reason.
+	ForceDenyReason bool
 }
 
 func (ConfirmRequestEvent) agentEvent() {}

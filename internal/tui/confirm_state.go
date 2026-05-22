@@ -33,13 +33,14 @@ type ConfirmRuleIntent struct {
 // (ConfirmRequestEvent); the TUI then calls ResolveConfirm with this ID when
 // the user responds.
 type ConfirmRequest struct {
-	ToolName       string
-	ArgsJSON       string
-	DoneReport     string
-	RequestID      string
-	Timeout        time.Duration
-	NeedsApproval  []string
-	AlreadyAllowed []string
+	ToolName        string
+	ArgsJSON        string
+	DoneReport      string
+	RequestID       string
+	Timeout         time.Duration
+	NeedsApproval   []string
+	AlreadyAllowed  []string
+	ForceDenyReason bool
 }
 
 // ConfirmResult is the user's response to a ConfirmRequest.

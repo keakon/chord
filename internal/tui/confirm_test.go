@@ -493,6 +493,39 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "[R] Deny+Reason required") {
+		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
+	}
+	if strings.Contains(plain, "[Y] Allow") || strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") {
+		t.Fatalf("forced deny confirm should not show allow or generic actions:\n%s", plain)
+	}
+}
+
+func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd != nil {
+		t.Fatalf("forced deny allow shortcut should be ignored, got %T", cmd)
+	}
+	select {
+	case result := <-m.confirmResultCh:
+		t.Fatalf("unexpected confirm result from forced deny allow shortcut: %#v", result)
+	default:
+	}
+	if !strings.Contains(m.confirm.editError, "must be denied") {
+		t.Fatalf("editError = %q, want forced deny explanation", m.confirm.editError)
+	}
+}
+
 func TestHandleConfirmDoneIgnoresEditShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.mode = ModeConfirm

@@ -23,5 +23,9 @@ func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *
 // path: we sometimes need to run a tool call after running the on_tool_call hook
 // ourselves (e.g. hook-induced args drift) and must avoid firing the hook twice.
 func (a *MainAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
+	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
+		execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: intercept.toolResult}
+		return execResult, intercept.confirmErr
+	}
 	return a.toolExecutionPipeline().execute(ctx, tc, fireHook)
 }

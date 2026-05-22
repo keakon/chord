@@ -63,15 +63,21 @@ type loopRuntimeState struct {
 	// FrozenReductionStats is the request-level reduction effect of the frozen
 	// prefix. It remains stable while loop mode is enabled because later loop
 	// messages are appended unreduced.
-	FrozenReductionStats  ContextReductionStats
-	ConsecutiveNoProgress int
-	LastProgressSignature string
-	LastAssessmentMessage string
-	ProgressVersion       uint64
-	LastAssessmentVersion uint64
-	Iteration             int
-	MaxIterations         int
-	MaxIterationsSet      bool
+	FrozenReductionStats   ContextReductionStats
+	ConsecutiveNoProgress  int
+	LastProgressSignature  string
+	LastAssessmentMessage  string
+	ProgressVersion        uint64
+	LastAssessmentVersion  uint64
+	Iteration              int
+	MaxIterations          int
+	MaxIterationsSet       bool
+	RepeatedToolCallStreak []loopToolCallFingerprint
+}
+
+type loopToolCallFingerprint struct {
+	Name string
+	Args string
 }
 
 func (s *loopRuntimeState) enable() {
@@ -107,6 +113,7 @@ func (s *loopRuntimeState) disable() {
 	s.Iteration = 0
 	s.MaxIterations = 0
 	s.MaxIterationsSet = false
+	s.RepeatedToolCallStreak = nil
 	s.DeferContinuationPromptUntilDone = false
 	s.FrozenReductionPrefix = nil
 	s.FrozenReductionStats = ContextReductionStats{}

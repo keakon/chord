@@ -16,6 +16,10 @@ import (
 // executeToolCall runs a single tool invocation with permission checks,
 // output truncation.
 func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
+		execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: intercept.toolResult}
+		return execResult, intercept.confirmErr
+	}
 	return a.toolExecutionPipeline().execute(ctx, tc, true)
 }
 

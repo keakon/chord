@@ -460,6 +460,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 			addGap("the previous Done request was rejected; address the rejection reason before trying Done again")
 		case "suspected_stall":
 			addGap("no hard progress detected for the last two rounds — take concrete action instead of summarizing")
+		case "repeated_tool_call":
+			addGap("the same tool call was repeated three times with identical arguments — do not repeat it unchanged again")
 		default:
 			addGap(reason)
 		}

@@ -16,6 +16,14 @@ import (
 // and returns the resolved response. Only one confirm flow may be active at a
 // time because the TUI supports a single modal dialog.
 func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, summary ...string) (ConfirmResponse, error) {
+	return a.awaitConfirm(ctx, toolName, argsJSON, timeout, needsApproval, alreadyAllowed, false, summary...)
+}
+
+func (a *MainAgent) AwaitForceDenyConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, summary ...string) (ConfirmResponse, error) {
+	return a.awaitConfirm(ctx, toolName, argsJSON, timeout, needsApproval, alreadyAllowed, true, summary...)
+}
+
+func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
 	a.confirmFlowMu.Lock()
 	defer a.confirmFlowMu.Unlock()
 
@@ -48,13 +56,14 @@ func (a *MainAgent) AwaitConfirm(ctx context.Context, toolName, argsJSON string,
 	}
 
 	if err := a.emitInteractiveToTUI(ctx, ConfirmRequestEvent{
-		ToolName:       toolName,
-		ArgsJSON:       argsJSON,
-		RequestID:      requestID,
-		Timeout:        timeout,
-		NeedsApproval:  append([]string(nil), needsApproval...),
-		AlreadyAllowed: append([]string(nil), alreadyAllowed...),
-		DoneReport:     summaryVal,
+		ToolName:        toolName,
+		ArgsJSON:        argsJSON,
+		RequestID:       requestID,
+		Timeout:         timeout,
+		NeedsApproval:   append([]string(nil), needsApproval...),
+		AlreadyAllowed:  append([]string(nil), alreadyAllowed...),
+		DoneReport:      summaryVal,
+		ForceDenyReason: forceDenyReason,
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}

@@ -54,9 +54,19 @@ func (m *Model) renderConfirmDialog() string {
 			fmt.Sprintf("Tool: %s — deny with reason:", req.ToolName),
 		)
 		inputView := m.confirm.denyReasonInput.View()
-		hint := ConfirmHintStyle.Render("[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back")
+		hintText := "[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back"
+		if req.ForceDenyReason {
+			hintText = "[Enter] Deny  [Shift+Enter/Ctrl+J] New line"
+		}
+		hint := ConfirmHintStyle.Render(hintText)
 		lines := []string{title, "", header}
 		lines = append(lines, strings.Split(inputView, "\n")...)
+		if strings.TrimSpace(m.confirm.editError) != "" {
+			lines = append(lines, "")
+			for _, line := range wrapText(m.confirm.editError, max(10, innerWidth-2)) {
+				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
+			}
+		}
 		lines = append(lines, "", hint)
 		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 		body := strings.Join(lines, "\n")
@@ -147,6 +157,9 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 
 func (m Model) renderConfirmOptions() string {
 	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		if m.confirm.request.ForceDenyReason {
+			return ConfirmDenyStyle.Render("[R] Deny+Reason required")
+		}
 		parts := []string{
 			ConfirmAllowStyle.Render("[Y] Allow"),
 			ConfirmDenyStyle.Render("[R] Deny+Reason"),

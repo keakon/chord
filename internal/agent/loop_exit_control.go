@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,119 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+const repeatedToolCallInterceptThreshold = 3
+
+type repeatedToolCallInterceptResult struct {
+	toolResult string
+	confirmErr error
+}
+
+func canonicalRepeatedToolCallArgs(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "{}"
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return trimmed
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return trimmed
+	}
+	return string(encoded)
+}
+
+func (a *MainAgent) recordRepeatedToolCall(tc message.ToolCall) int {
+	if a == nil || !a.loopState.Enabled {
+		return 0
+	}
+	fingerprint := loopToolCallFingerprint{
+		Name: strings.TrimSpace(tc.Name),
+		Args: canonicalRepeatedToolCallArgs(tc.Args),
+	}
+	a.loopState.RepeatedToolCallStreak = append(a.loopState.RepeatedToolCallStreak, fingerprint)
+	if len(a.loopState.RepeatedToolCallStreak) > repeatedToolCallInterceptThreshold {
+		a.loopState.RepeatedToolCallStreak = a.loopState.RepeatedToolCallStreak[len(a.loopState.RepeatedToolCallStreak)-repeatedToolCallInterceptThreshold:]
+	}
+	if len(a.loopState.RepeatedToolCallStreak) < repeatedToolCallInterceptThreshold {
+		return 0
+	}
+	for i := 1; i < len(a.loopState.RepeatedToolCallStreak); i++ {
+		if a.loopState.RepeatedToolCallStreak[i] != a.loopState.RepeatedToolCallStreak[0] {
+			return 0
+		}
+	}
+	return len(a.loopState.RepeatedToolCallStreak)
+}
+
+func (a *MainAgent) clearRepeatedToolCallStreak() {
+	if a == nil {
+		return
+	}
+	a.loopState.RepeatedToolCallStreak = nil
+}
+
+func (a *MainAgent) repeatedToolCallRejectResult(tc message.ToolCall, streak int) string {
+	parts := []string{fmt.Sprintf("Tool call rejected automatically: detected %d consecutive identical `%s` tool calls with the same arguments.", streak, strings.TrimSpace(tc.Name))}
+	reasons := a.currentLoopContinuationReasons("repeated_tool_call", "context_continue")
+	if len(reasons) > 0 {
+		parts = append(parts, "Loop exit conditions are not satisfied yet ("+strings.Join(reasons, ", ")+").")
+	}
+	if target := strings.TrimSpace(a.loopState.Target); target != "" {
+		parts = append(parts, "Continue working toward the current loop target: "+target+".")
+	} else {
+		parts = append(parts, "Continue working toward the current loop target.")
+	}
+	parts = append(parts, "Do not repeat the same tool call unchanged again; explain why it did not make progress and choose a different concrete action.")
+	return strings.Join(parts, " ")
+}
+
+func (a *MainAgent) repeatedToolCallConfirmResult(tc message.ToolCall, streak int) string {
+	if a.loopState.MaxIterations > 0 {
+		return fmt.Sprintf("Tool call requires user decision: detected %d consecutive identical `%s` tool calls with the same arguments and the automatic loop interception limit reached (%d). Deny this repeated call with a reason so the model can recover.", streak, strings.TrimSpace(tc.Name), a.loopState.MaxIterations)
+	}
+	return fmt.Sprintf("Tool call requires user decision: detected %d consecutive identical `%s` tool calls with the same arguments and automatic loop interception is disabled. Deny this repeated call with a reason so the model can recover.", streak, strings.TrimSpace(tc.Name))
+}
+
+func (a *MainAgent) maybeInterceptRepeatedToolCall(ctx context.Context, tc message.ToolCall) (*repeatedToolCallInterceptResult, bool) {
+	if a == nil || !a.loopState.Enabled || strings.TrimSpace(tc.Name) == "" || tc.Name == tools.NameDone {
+		return nil, false
+	}
+	streak := a.recordRepeatedToolCall(tc)
+	if streak < repeatedToolCallInterceptThreshold {
+		return nil, false
+	}
+	if a.shouldAutoInterceptLoopExit() {
+		a.loopState.recordAutoExitIntercept()
+		a.emitLoopStateChanged()
+		return &repeatedToolCallInterceptResult{toolResult: a.repeatedToolCallRejectResult(tc, streak)}, true
+	}
+	if a.confirmFn == nil {
+		return &repeatedToolCallInterceptResult{confirmErr: context.Canceled}, true
+	}
+	payload := struct {
+		Reason string `json:"reason,omitempty"`
+		Report string `json:"report"`
+	}{
+		Reason: a.repeatedToolCallConfirmResult(tc, streak),
+		Report: strings.TrimSpace(a.repeatedToolCallRejectResult(tc, streak)),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return &repeatedToolCallInterceptResult{confirmErr: err}, true
+	}
+	resp, err := a.AwaitForceDenyConfirm(ctx, tools.NameDone, string(encoded), 0, nil, nil, payload.Report)
+	if err != nil {
+		return &repeatedToolCallInterceptResult{confirmErr: err}, true
+	}
+	if resp.Approved || strings.TrimSpace(resp.DenyReason) == "" {
+		return &repeatedToolCallInterceptResult{confirmErr: wrapToolRejectedByUser(tc.Name, a.repeatedToolCallConfirmResult(tc, streak))}, true
+	}
+	a.loopState.Iteration = 0
+	return &repeatedToolCallInterceptResult{toolResult: a.repeatedToolCallRejectResult(tc, streak)}, true
+}
 
 func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
 	if !a.loopState.Enabled {
