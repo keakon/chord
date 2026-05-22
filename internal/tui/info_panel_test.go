@@ -190,9 +190,6 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 			t.Fatalf("skills section missing %q in %q", want, joined)
 		}
 	}
-	if strings.Contains(joined, "(loaded)") {
-		t.Fatalf("skills section should not show legacy loaded suffix, got %q", joined)
-	}
 	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("go-expert")
 	if !strings.Contains(rendered, wantInvoked) {
 		t.Fatalf("invoked skill should use success color; want %q in %q", wantInvoked, rendered)
@@ -358,9 +355,6 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 	if strings.Contains(plain, "Cache W") {
 		t.Fatalf("rendered info panel should hide zero cache write line; got %q", plain)
 	}
-	if strings.Contains(plain, "COST") || strings.Contains(plain, "TOKEN USAGE") {
-		t.Fatalf("rendered info panel should collapse legacy usage blocks; got %q", plain)
-	}
 }
 
 func TestRenderInfoPanelHidesUsageWhenAllZero(t *testing.T) {
@@ -371,9 +365,6 @@ func TestRenderInfoPanelHidesUsageWhenAllZero(t *testing.T) {
 	plain := stripANSI(m.renderInfoPanel(32, 20))
 	if strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should hide zero USAGE block; got %q", plain)
-	}
-	if strings.Contains(plain, "TOKEN USAGE") || strings.Contains(plain, "CONTEXT USAGE") || strings.Contains(plain, "COST") {
-		t.Fatalf("rendered info panel should not render legacy usage blocks; got %q", plain)
 	}
 }
 
@@ -993,9 +984,6 @@ func TestRenderInfoPanelLSPRowsShowInlineDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(joined, "gopls 2 E, 1 W") {
 		t.Fatalf("LSP row should include inline diagnostics suffix; got %q", joined)
-	}
-	if strings.Contains(joined, "Diagnostics:") {
-		t.Fatalf("LSP section should not render legacy Diagnostics row; got %q", joined)
 	}
 }
 

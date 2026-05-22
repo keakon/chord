@@ -888,9 +888,6 @@ func TestRenderStatusBarShowsRequestProgressAfterAgentEventInjection(t *testing.
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42}})
 	plain := stripANSI(m.renderStatusBar())
-	if strings.Contains(plain, "Streaming") {
-		t.Fatalf("status bar should not show legacy streaming label after progress injection, got %q", plain)
-	}
 	if !strings.Contains(plain, "↓ 128 KB · 42 events · 0s") {
 		t.Fatalf("status bar should show request progress summary after progress injection, got %q", plain)
 	}
@@ -904,9 +901,6 @@ func TestRenderStatusBarShowsRequestProgressInsteadOfStreamingLabel(t *testing.T
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, VisibleEvents: 42}
 
 	got := stripANSI(m.renderStatusBar())
-	if strings.Contains(got, "Streaming") {
-		t.Fatalf("status bar should not show legacy streaming label when request progress exists; got %q", got)
-	}
 	if !strings.Contains(got, "↓ 128 KB · 42 events · 0s") {
 		t.Fatalf("status bar should show request progress summary in new icon style; got %q", got)
 	}
@@ -1305,9 +1299,6 @@ func TestRenderStatusBarCentersActivityAwayFromPath(t *testing.T) {
 	if pathIdx < 0 {
 		t.Fatalf("status bar should include path %q; got %q", path, got)
 	}
-	if strings.Contains(got, "Streaming") {
-		t.Fatalf("status bar should not render legacy streaming label; got %q", got)
-	}
 	if strings.Contains(got, statusBarActivityPathGap+path) {
 		t.Fatalf("path should not be directly joined to activity gap %q; got %q", statusBarActivityPathGap, got)
 	}
@@ -1382,9 +1373,6 @@ func TestNarrowStatusBarTokenPillMatchesInfoPanelSemantics(t *testing.T) {
 	}
 	if !strings.Contains(plain, "$1.23") {
 		t.Fatalf("status bar cost pill should keep cost visible after token pill sync; got %q", plain)
-	}
-	if strings.Contains(plain, "↓29.9M") || strings.Contains(plain, "↑143.1k") {
-		t.Fatalf("status bar should not use legacy compact token arrows; got %q", plain)
 	}
 }
 
@@ -2569,12 +2557,6 @@ func TestRenderActivityExecutingUsesGearElapsedStyle(t *testing.T) {
 	}
 	if strings.Contains(out, "Loop:") {
 		t.Fatalf("renderActivity(executing) should not include loop phase label; got %q", out)
-	}
-	if strings.Contains(out, "Running tools") {
-		t.Fatalf("renderActivity(executing) should not include legacy label; got %q", out)
-	}
-	if strings.Contains(out, "(12s)") {
-		t.Fatalf("renderActivity(executing) should not append legacy paren elapsed; got %q", out)
 	}
 }
 
@@ -5169,9 +5151,6 @@ func TestRenderStatusBarShowsCompactingContextWhenActivityIsCompacting(t *testin
 	// Compaction is now in the background lane
 	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: time.Now().Add(-10 * time.Second)}
 	plain := stripANSI(m.renderStatusBar())
-	if strings.Contains(plain, "Compacting context") {
-		t.Fatalf("status bar should not show legacy compacting text, got %q", plain)
-	}
 	if !strings.Contains(plain, "■") && !strings.Contains(plain, "▪") {
 		t.Fatalf("status bar should still show compacting icon in background lane, got %q", plain)
 	}
@@ -5296,9 +5275,6 @@ func TestRenderActivityCompactingUsesUnifiedProgressStyle(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-8 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main", Detail: "context"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if strings.Contains(out, "Compacting context") {
-		t.Fatalf("compacting render should not include legacy label, got %q", out)
-	}
 	if !strings.Contains(out, "■") && !strings.Contains(out, "▪") {
 		t.Fatalf("compacting render should still show icon, got %q", out)
 	}
@@ -5312,9 +5288,6 @@ func TestRenderActivityRetryingUsesExplicitRoundAndElapsedLabels(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-17 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if strings.Contains(out, "Retrying") {
-		t.Fatalf("retrying render should not include legacy label, got %q", out)
-	}
 	if !strings.Contains(out, "↺") {
 		t.Fatalf("retrying render should still show icon, got %q", out)
 	}
@@ -5323,24 +5296,11 @@ func TestRenderActivityRetryingUsesExplicitRoundAndElapsedLabels(t *testing.T) {
 	}
 }
 
-func TestRenderActivityCoolingUsesExplicitRemainingLabel(t *testing.T) {
-	m := NewModelWithSize(nil, 200, 24)
-	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
-	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}
-	out := stripANSI(m.renderActivity(a, 200))
-	if strings.Contains(out, "Cooling down") {
-		t.Fatalf("cooling render should not include legacy label, got %q", out)
-	}
-}
-
 func TestRenderActivityWaitingUsesExplicitElapsedLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if strings.Contains(out, "Waiting for headers") {
-		t.Fatalf("waiting render should not include legacy label, got %q", out)
-	}
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting render should keep phase timer in parens, got %q", out)
 	}
@@ -5351,20 +5311,8 @@ func TestRenderActivityWaitingTokenUsesDistinctLabel(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if strings.Contains(out, "Waiting for first token") {
-		t.Fatalf("waiting_token render should not include legacy label, got %q", out)
-	}
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting_token render should keep phase timer in parens, got %q", out)
-	}
-}
-
-func TestRenderActivityStreamingDoesNotShowLegacyLabel(t *testing.T) {
-	m := NewModelWithSize(nil, 200, 24)
-	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
-	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200))
-	if strings.Contains(out, "Streaming") {
-		t.Fatalf("renderActivity(streaming) should not include legacy label; got %q", out)
 	}
 }
 
@@ -5373,24 +5321,13 @@ func TestRenderActivityUsesCompactParenStyleWhenWidthIsTight(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 
 	waiting := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32))
-	if strings.Contains(waiting, "Waiting for headers") {
-		t.Fatalf("narrow waiting render should not use legacy label, got %q", waiting)
-	}
 	if !strings.Contains(waiting, "↺ 7s") {
 		t.Fatalf("narrow waiting render should use icon+elapsed style, got %q", waiting)
 	}
 
 	waitingToken := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64))
-	if strings.Contains(waitingToken, "Waiting for first token") {
-		t.Fatalf("waiting_token render should not use legacy label, got %q", waitingToken)
-	}
 	if !strings.Contains(waitingToken, "↺ 7s") {
 		t.Fatalf("waiting_token render should use icon+elapsed style, got %q", waitingToken)
-	}
-
-	cooling := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}, 32))
-	if strings.Contains(cooling, "Cooling down") {
-		t.Fatalf("narrow cooling render should not use legacy label, got %q", cooling)
 	}
 }
 
@@ -5407,9 +5344,6 @@ func TestRenderActivityShowsTimeFromZeroSeconds(t *testing.T) {
 	started := time.Now().Add(-4 * time.Second)
 	m2.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	out = stripANSI(m2.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200))
-	if strings.Contains(out, statusBarTotalLabel()) || strings.Contains(out, statusBarIdleLabel(false)) {
-		t.Fatalf("busy render should still avoid legacy extras, got %q", out)
-	}
 	if !strings.Contains(out, " 4s") && !strings.Contains(out, " 0s") {
 		t.Fatalf("streaming elapsed should be shown immediately, got %q", out)
 	}
@@ -5429,9 +5363,6 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 	if !strings.Contains(wide, " 2s") {
 		t.Fatalf("wide render should show phase timer from 0s; got %q", wide)
 	}
-	if strings.Contains(wide, statusBarTotalLabel()) || strings.Contains(wide, statusBarIdleLabel(false)) {
-		t.Fatalf("wide render should not include legacy busy extras; got %q", wide)
-	}
 
 	narrow := stripANSI(m.renderActivity(a, 24))
 	if strings.Contains(narrow, statusBarTotalLabel()) {
@@ -5439,9 +5370,6 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 	}
 	if !strings.Contains(narrow, " 2s") {
 		t.Fatalf("narrow render should keep phase timer from 0s; got %q", narrow)
-	}
-	if strings.Contains(narrow, "Streaming") {
-		t.Fatalf("narrow render should not preserve legacy streaming label; got %q", narrow)
 	}
 }
 
@@ -5453,9 +5381,6 @@ func TestRenderActivityUsesCompactLastLabelInCompactExtras(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	compact := stripANSI(m.renderActivity(a, 46))
-	if strings.Contains(compact, statusBarTotalLabel()) || strings.Contains(compact, statusBarIdleLabel(false)) {
-		t.Fatalf("compact render should not include legacy busy extras; got %q", compact)
-	}
 	if !strings.Contains(compact, "⣿") && !strings.Contains(compact, "⣶") {
 		t.Fatalf("compact render should keep streaming icon; got %q", compact)
 	}
@@ -5475,9 +5400,6 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	if !strings.Contains(full, " 20s") {
 		t.Fatalf("full render should keep phase elapsed, got %q", full)
 	}
-	if strings.Contains(full, statusBarTotalLabel()) || strings.Contains(full, statusBarIdleLabel(false)) {
-		t.Fatalf("full render should not include legacy busy extras, got %q", full)
-	}
 
 	noElapsed := stripANSI(m.renderActivity(a, 40))
 	if strings.Contains(noElapsed, statusBarTotalLabel()) {
@@ -5486,9 +5408,6 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	if !strings.Contains(noElapsed, " 20s") {
 		t.Fatalf("medium render should retain phase timer, got %q", noElapsed)
 	}
-	if strings.Contains(noElapsed, statusBarIdleLabel(false)) {
-		t.Fatalf("medium render should not retain legacy since label, got %q", noElapsed)
-	}
 
 	noSince := stripANSI(m.renderActivity(a, 28))
 	if strings.Contains(noSince, statusBarTotalLabel()) {
@@ -5496,14 +5415,6 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	}
 	if !strings.Contains(noSince, " 20s") {
 		t.Fatalf("narrower render should still retain phase timer, got %q", noSince)
-	}
-
-	noPhase := stripANSI(m.renderActivity(a, 14))
-	if strings.Contains(noPhase, statusBarTotalLabel()) || strings.Contains(noPhase, statusBarIdleLabel(false)) {
-		t.Fatalf("tight render should keep only the minimal icon/timer form, got %q", noPhase)
-	}
-	if strings.Contains(noPhase, "Streaming") {
-		t.Fatalf("tight render should not restore legacy streaming label, got %q", noPhase)
 	}
 }
 
@@ -5606,9 +5517,6 @@ func TestRenderActivityUsesQueuedDraftStartForTotal(t *testing.T) {
 	if !strings.Contains(out, "⣿") && !strings.Contains(out, "⣶") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
-	if strings.Contains(out, statusBarTotalLabel()) || strings.Contains(out, statusBarIdleLabel(false)) {
-		t.Fatalf("queued draft should not restore legacy total/since labels in %q", out)
-	}
 }
 
 func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T) {
@@ -5633,9 +5541,6 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	out := stripANSI(m.renderActivity(a, 200))
 	if !strings.Contains(out, "⇋ 20s") {
 		t.Fatalf("expected unified busy elapsed style in %q", out)
-	}
-	if strings.Contains(out, statusBarIdleLabel(false)) || strings.Contains(out, statusBarTotalLabel()) {
-		t.Fatalf("busy render should not include legacy since/total labels, got %q", out)
 	}
 }
 

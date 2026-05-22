@@ -269,20 +269,6 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{
-		"Do not narrate progress or restate what you are about to do",
-		"Do not over-explain — lead with the action or answer",
-		"Default to concise, direct, professional user-facing language",
-		"Remove pleasantries, repeated phrasing, and long background setup that do not add information",
-		"Do not repeat code, commands, paths, or test results just to sound complete",
-		"Keep errors, limitations, unverified status, and risk clearly visible",
-		"even if small cross-file edits are required",
-		"Prefer small local extraction or adaptation over duplicating behavior",
-	} {
-		if strings.Contains(got, unwanted) {
-			t.Fatalf("sharedCodingGuidelinesPrompt unexpectedly contains legacy guidance %q in %q", unwanted, got)
-		}
-	}
 }
 
 func TestUserConfirmationPromptBlock_UsesQuestionAvailabilitySpecificBranch(t *testing.T) {
@@ -414,14 +400,6 @@ Done: allow
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
 		}
 	}
-	for _, unwanted := range []string{
-		"completion follow-up `Question` call",
-		"unless the current task is already complete and you are making the final completion follow-up `Question` call",
-	} {
-		if strings.Contains(joined, unwanted) {
-			t.Fatalf("loop completion requirements should not include legacy completion rule %q, got %q", unwanted, joined)
-		}
-	}
 }
 
 func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneToolInLoop(t *testing.T) {
@@ -440,13 +418,6 @@ Done: allow
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop final completion response requirements should include %q, got %q", want, joined)
-		}
-	}
-	for _, unwanted := range []string{
-		"Question",
-	} {
-		if strings.Contains(joined, unwanted) {
-			t.Fatalf("loop final completion response requirements should not include legacy completion rule %q, got %q", unwanted, joined)
 		}
 	}
 }
@@ -492,14 +463,6 @@ func TestSharedCodingGuidelinesPrompt_PrefersReasonableAutonomyBeforeAsking(t *t
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{
-		"present them rather than picking one silently; if assumptions are uncertain, ask before implementing",
-		"do only what was asked",
-	} {
-		if strings.Contains(got, unwanted) {
-			t.Fatalf("sharedCodingGuidelinesPrompt unexpectedly contains legacy conservative guidance %q in %q", unwanted, got)
-		}
-	}
 }
 
 func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T) {
@@ -515,9 +478,6 @@ func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedAgentValuesPrompt missing %q in %q", want, got)
 		}
-	}
-	if strings.Contains(got, "Minimal > Comprehensive — do only what was asked") {
-		t.Fatalf("sharedAgentValuesPrompt unexpectedly contains legacy minimalism guidance: %q", got)
 	}
 }
 

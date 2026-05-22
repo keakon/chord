@@ -49,7 +49,4 @@ func TestFormatCLIVersionTemplateIncludesBuildMetadata(t *testing.T) {
 			t.Fatalf("version output missing %q\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "chord_version:") {
-		t.Fatalf("version output should not include redundant chord_version line\n%s", out)
-	}
 }

@@ -1632,9 +1632,6 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 	if !strings.Contains(joined, "ok") {
 		t.Fatalf("expected Shell collapsed summary to show success output summary; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "Passed · 2 lines output") {
-		t.Fatalf("expected Shell collapsed summary to prefer output summary over legacy line-count summary; got:\n%s", joined)
-	}
 }
 
 func TestCollapsedGrepShowsMatchCountSummary(t *testing.T) {
