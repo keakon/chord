@@ -85,6 +85,23 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 `Ctrl+O` opens the MCP server selector in both Insert and Normal mode. You can open it while the agent is running to inspect server status, but the panel is read-only until the agent returns to idle. Only servers configured with `manual: true` can be toggled; auto-start servers are always read-only in the selector.
 
+### Content viewer — Done reports and Handoff plans
+
+Done confirmation dialogs and Handoff plan selectors can open a read-only Markdown viewer with `V`. The viewer keeps the right sidebar visible, supports mouse-wheel scrolling, and shows `esc ⇢ close view` in the status bar.
+
+| Key / Mouse              | Action                                                                    |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `Esc` / `q`              | Close the viewer and return to the previous Done or Handoff dialog        |
+| `j` / `k`, `↓` / `↑`     | Scroll one line                                                           |
+| `Ctrl+F` / `Ctrl+B`      | Scroll one page down / up                                                 |
+| `g` / `G`                | Jump to top / bottom                                                      |
+| Mouse drag               | Select and highlight text in the viewer                                   |
+| `Cmd+C` / `Super+C`      | Copy the highlighted range only                                           |
+| `y`                      | Copy the highlighted range and clear the highlight                        |
+| `yy`                     | Copy the full raw Markdown content                                        |
+
+Handoff plan views include the plan path at the top so it can be selected and copied with the same controls.
+
 ## Customizing key bindings
 
 You can override any binding in `config.yaml`:

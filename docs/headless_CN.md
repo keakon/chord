@@ -52,7 +52,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`error`、`agent_done`、`info`、`toast`、`done_completion`、`assistant_rollback`、`todos`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`error`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`。
 
 ### `status`
 
@@ -90,7 +90,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "send", "content": "请总结一下项目结构。"}
 ```
 
-如果当前有待处理的 `confirm_request` 或 `question_request`，而用户发送了普通消息（不是下面的 `confirm` / `question`），Chord 会先自动关闭该待处理交互，再消费这条新消息。
+如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。
 
 ### `models`
 
@@ -147,6 +147,32 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 多选题时可在 `answers` 里传多个字符串。若只想关闭问题而不作答，传 `"cancelled": true`。
 
+### `handoff`
+
+处理一个待决的 `handoff_request`。批准会用选定 agent 执行已保存的 plan；拒绝会把拒绝原因追加到对话上下文，并让 planner 基于该上下文继续。
+
+```json
+{"type": "handoff", "request_id": "handoff-…", "action": "accept", "agent": "builder", "pool": "thinking"}
+```
+
+```json
+{"type": "handoff", "request_id": "handoff-…", "action": "deny", "deny_reason": "请先补充发布步骤。"}
+```
+
+`action` 可用 `accept` / `allow`（或空 action）表示批准，`deny` / `reject` / `cancel` 表示拒绝。`agent` 默认使用请求里的默认 agent；可选的 `pool` 会在执行前切换该 agent 的模型池。
+
+### `local_shell`
+
+从 headless client 侧执行本地 shell 命令，并收到一个 `local_shell_result` 事件。该命令主要用于 gateway 暴露 `!` 风格本地命令的场景。
+
+```json
+{"type": "local_shell", "command": "git status --short"}
+```
+
+也可以用 `content` 字段作为后备命令内容。输出会合并 stdout 和 stderr，并带有输出上限和超时。
+
+> 安全说明：`local_shell` 会在 `chord headless` 进程环境中执行 `bash -c`。它是直接的本地命令执行协议能力，不是模型工具请求，也不能替代沙箱。任何向用户暴露该能力的 gateway 都必须自行实现认证、授权、审计、命令过滤和租户隔离。
+
 ### `cancel`
 
 取消当前 turn（等价于在 TUI 里按两次 `Esc`）。
@@ -179,6 +205,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `done_completion`   | 非 loop 模式下 Done 工具完成并给出最终报告 | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`timeout_ms` |
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
+| `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}` |
+| `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`summary` |
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
@@ -230,7 +258,7 @@ send({"type": "subscribe",
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 
-生产环境中还需要处理 `confirm_request`（通过 `confirm` 回答）和 `question_request`（通过 `question` 回答）；在它们得到答复前，agent 会阻塞等待。
+生产环境中还需要处理 `confirm_request`（通过 `confirm` 回答）、`question_request`（通过 `question` 回答）和 `handoff_request`（通过 `handoff` 回答）；在它们得到答复前，agent 会阻塞等待。
 
 ## chord-gateway：推荐的 headless 消费方式
 

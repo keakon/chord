@@ -85,6 +85,23 @@ TUI 有两种模式：
 
 `Ctrl+O` 在 Insert 和 Normal 模式下都会打开 MCP server 选择器。Agent 运行中也可以打开它查看 server 状态，但面板会保持只读，直到 agent 回到 idle。只有配置了 `manual: true` 的 server 才能切换启用/禁用；自动启动的 server 在选择器里始终只读。
 
+### Content viewer — Done report 与 Handoff plan
+
+Done 确认弹窗和 Handoff plan 选择器中可按 `V` 打开只读 Markdown viewer。Viewer 会保留右侧侧边栏，支持鼠标滚轮滚动，并在状态栏显示 `esc ⇢ close view`。
+
+| 按键 / 鼠标              | 动作                                                                     |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `Esc` / `q`              | 关闭 viewer，回到之前的 Done 或 Handoff 弹窗                              |
+| `j` / `k`、`↓` / `↑`     | 行滚动                                                                   |
+| `Ctrl+F` / `Ctrl+B`      | 整页向下 / 向上                                                          |
+| `g` / `G`                | 跳到顶部 / 底部                                                          |
+| 鼠标拖拽                 | 在 viewer 内选中文本并高亮                                               |
+| `Cmd+C` / `Super+C`      | 只复制当前高亮选区                                                       |
+| `y`                      | 复制当前高亮选区并取消高亮                                               |
+| `yy`                     | 复制完整原始 Markdown 内容                                               |
+
+Handoff plan 的 viewer 顶部会显示 plan 路径，可用同样的选中/复制操作复制。
+
 ## 自定义键位
 
 可在 `config.yaml` 中覆盖任意键位：

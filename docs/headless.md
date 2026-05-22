@@ -52,7 +52,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `error`, `agent_done`, `info`, `toast`, `done_completion`, `assistant_rollback`, `todos`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`.
 
 ### `status`
 
@@ -90,7 +90,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "content": "Please summarize the project structure."}
 ```
 
-If a `confirm_request` or `question_request` is pending and the user sends a regular message (not via `confirm` / `question` below), Chord auto-dismisses the pending interaction so the new message is consumed.
+If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed.
 
 ### `models`
 
@@ -147,6 +147,32 @@ Answer a pending `question_request`.
 
 For multi-select questions, pass multiple strings in `answers`. Pass `"cancelled": true` to dismiss the question without answering.
 
+### `handoff`
+
+Resolve a pending `handoff_request`. Approving starts executing the saved plan with the selected agent; denying appends the rejection reason to the conversation and lets the planner continue from that context.
+
+```json
+{"type": "handoff", "request_id": "handoff-…", "action": "accept", "agent": "builder", "pool": "thinking"}
+```
+
+```json
+{"type": "handoff", "request_id": "handoff-…", "action": "deny", "deny_reason": "Please add rollout steps first."}
+```
+
+`action` accepts `accept` / `allow` (or an empty action) to approve and `deny` / `reject` / `cancel` to reject. `agent` defaults to the request's default agent, and optional `pool` switches that agent's model pool before execution.
+
+### `local_shell`
+
+Execute a local shell command from the headless client side and receive a `local_shell_result` event. This is intended for gateway features that expose `!`-style local commands.
+
+```json
+{"type": "local_shell", "command": "git status --short"}
+```
+
+`content` is also accepted as a fallback command field. Output combines stdout and stderr, is capped, and the command has a timeout.
+
+> Security: `local_shell` runs `bash -c` in the `chord headless` process environment. It is a direct local command-execution protocol feature, not a model tool request and not a substitute for sandboxing. Gateways that expose it to users must provide their own authentication, authorization, auditing, command filtering, and tenant isolation.
+
 ### `cancel`
 
 Cancel the current turn (equivalent to pressing `Esc` twice in the TUI).
@@ -179,6 +205,8 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `done_completion`      | Done tool completed with a final report outside loop mode                                         | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `timeout_ms`                    |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
+| `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}` |
+| `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `summary`                                                                             |
 | `assistant_rollback`    | Discard in-flight streamed assistant output (mostly relevant for streaming UIs)                   | `agent_id`, `reason`                                                                                         |
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
@@ -230,7 +258,7 @@ send({"type": "subscribe",
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 
-In production, also handle `confirm_request` (reply via `confirm`) and `question_request` (reply via `question`); the agent will block waiting for those replies.
+In production, also handle `confirm_request` (reply via `confirm`), `question_request` (reply via `question`), and `handoff_request` (reply via `handoff`); the agent will block waiting for those replies.
 
 ## chord-gateway — recommended way to consume headless
 
