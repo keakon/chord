@@ -14,7 +14,7 @@
 - LSP / 诊断输出：追加到工具结果中的 LSP 与 Ruff 诊断现在会按优先级裁剪为更简洁的块（错误和警告优先；还有剩余名额时再显示 info 和 hint）。无诊断时不再追加冗余状态行；只有诊断集合确实变化时，才追加简短的 `Diagnostics changed: N new, M resolved.` 摘要。
 - TUI / 复制：在工具卡片上按 `yy` 会复制结构化的 Markdown 块（`# Tool call` / `## Arguments` / `## Result` / `## Diff`）；Done 拒绝卡片额外包含 `## Rejection reason` 段，方便粘贴到外部时保留 Chord 的展示结构。
 - Runtime / 压缩：`/compact` 现在与自动压缩共用同一个后台 worker；可以在 turn 进行中触发，进度显示在后台压缩状态槽，并在下一个安全的 continuation / idle 节点应用，而不要求先达到 idle barrier。
-- Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 在 loop 模式仍保持关闭以保证缓存稳定性。
+- Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 现在只会在 `preset: codex` provider 且 5h 或 7d 任一配额窗口剩余不足 10% 时关闭；其它情况下，loop 模式仍保持正常上下文剪裁。
 - Runtime / Fast mode：`/fast on` / `/fast off` 现在同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 fast-mode 状态。TUI 同时新增默认快捷键 `Ctrl+R`，可在 Insert 或 Normal 模式直接切换 fast mode。
 - Runtime / Delegate todo：当当前角色有 `Delegate` 工作流时，`TodoWrite` 允许多个 `in_progress` 条目，但每个 in_progress 条目必须有唯一的 `active_form`，明确对应一个真实的 live workstream。无 `Delegate` 的角色仍保持单 in_progress 限制。
 - TUI / Thinking 翻译：译文现在持久化到 `<session_dir>/thinking_translations.json`，按 `(message, block)` 定位、用内容 hash 校验；恢复会话后会直接复用。修改 `thinking_translation.target_language` 不会重新翻译已经存在的 block —— 同一个 thinking block 最多翻译一次。译文仅用于 UI，不会写回模型上下文。

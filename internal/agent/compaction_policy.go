@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/session"
 	"github.com/keakon/chord/internal/tools"
@@ -278,11 +279,41 @@ func (a *MainAgent) loopReductionSnapshot() (enabled bool, frozenPrefix []messag
 		return false, nil, ContextReductionStats{}
 	}
 	a.loopReductionMu.Lock()
+	loopEnabled := a.loopState.Enabled
+	a.loopReductionMu.Unlock()
+	if !loopEnabled || !a.shouldDisableContextReductionInLoop() {
+		return false, nil, ContextReductionStats{}
+	}
+	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	if !a.loopState.Enabled {
 		return false, nil, ContextReductionStats{}
 	}
 	return true, cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix), a.loopState.FrozenReductionStats
+}
+
+func (a *MainAgent) shouldDisableContextReductionInLoop() bool {
+	providerName := a.mainRateLimitProviderName()
+	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
+		return false
+	}
+	return codexQuotaRemainingUnderTenPercent(a.mainRateLimitSnapshot())
+}
+
+func codexQuotaRemainingUnderTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bool {
+	if snap == nil {
+		return false
+	}
+	for _, window := range []*ratelimit.RateLimitWindow{snap.Primary, snap.Secondary} {
+		if window == nil {
+			continue
+		}
+		used := window.UsedPercent()
+		if used > 90 {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, prefix []message.Message, stats ContextReductionStats) []message.Message {

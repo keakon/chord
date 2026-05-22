@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -329,9 +330,7 @@ func TestPrepareMessagesForLLM_UsesReductionThresholdConfig(t *testing.T) {
 	}
 }
 
-func TestPrepareMessagesForLLM_DisablesRequestPruningInLoop(t *testing.T) {
-	a := &MainAgent{}
-	a.loopState.Enabled = true
+func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing.T) {
 	largeOutput := strings.Repeat("test output line\n", 500)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
@@ -344,17 +343,171 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningInLoop(t *testing.T) {
 		{Role: "user", Content: "u4"},
 	}
 
+	tests := []struct {
+		name  string
+		agent *MainAgent
+	}{
+		{
+			name: "codex quota available",
+			agent: &MainAgent{
+				projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}},
+				providerModelRef: "codex/gpt-5.5",
+				rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+					Primary:   &ratelimit.RateLimitWindow{UsedPct: 90},
+					Secondary: &ratelimit.RateLimitWindow{UsedPct: 10},
+				}},
+			},
+		},
+		{
+			name: "non-codex provider",
+			agent: &MainAgent{
+				projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"other": {Preset: ""}}},
+				providerModelRef: "other/model",
+				rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"other": {
+					Primary: &ratelimit.RateLimitWindow{UsedPct: 100},
+				}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.agent.loopState.Enabled = true
+			prepared := tt.agent.prepareMessagesForLLM(msgs)
+			if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+				t.Fatalf("loop mode should keep context pruning enabled, got %q", prepared[2].Content)
+			}
+			if msgs[2].Content != largeOutput {
+				t.Fatalf("prepareMessagesForLLM mutated original messages in loop mode")
+			}
+		})
+	}
+}
+
+func TestPrepareMessagesForLLM_DisablesRequestPruningInLoopWhenCodexQuotaLow(t *testing.T) {
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+	a := &MainAgent{
+		projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}},
+		providerModelRef: "codex/gpt-5.5",
+		rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+			Primary: &ratelimit.RateLimitWindow{UsedPct: 100},
+		}},
+	}
+	a.loopState.Enabled = true
+
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != largeOutput {
-		t.Fatalf("loop mode should preserve full tool output, got %q", prepared[2].Content)
+		t.Fatalf("low codex quota in loop mode should preserve full tool output, got %q", prepared[2].Content)
 	}
 	if msgs[2].Content != largeOutput {
 		t.Fatalf("prepareMessagesForLLM mutated original messages in loop mode")
 	}
 }
 
+func TestPrepareMessagesForLLM_LoopGateIgnoresFocusedSubAgentProvider(t *testing.T) {
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	t.Run("focused low-quota codex subagent does not disable non-codex main pruning", func(t *testing.T) {
+		a := newTestMainAgent(t, t.TempDir())
+		a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{
+			"main":     {Preset: ""},
+			"subcodex": {Preset: config.ProviderPresetCodex},
+		}}
+		a.providerModelRef = "main/model"
+		a.llmMu.Lock()
+		a.runningModelRef = "main/model"
+		a.llmMu.Unlock()
+		a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"subcodex": {
+			Primary: &ratelimit.RateLimitWindow{UsedPct: 100},
+		}}
+		a.loopState.Enabled = true
+		focusTestSubAgent(t, a, "sub-1", "subcodex", config.ProviderPresetCodex)
+
+		prepared := a.prepareMessagesForLLM(msgs)
+		if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+			t.Fatalf("focused subagent quota should not disable main pruning, got %q", prepared[2].Content)
+		}
+	})
+
+	t.Run("focused non-codex subagent does not enable low-quota codex main pruning", func(t *testing.T) {
+		a := newTestMainAgent(t, t.TempDir())
+		a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{
+			"codex": {Preset: config.ProviderPresetCodex},
+			"sub":   {Preset: ""},
+		}}
+		a.providerModelRef = "codex/gpt-5.5"
+		a.llmMu.Lock()
+		a.runningModelRef = "codex/gpt-5.5"
+		a.llmMu.Unlock()
+		a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+			Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+		}}
+		a.loopState.Enabled = true
+		focusTestSubAgent(t, a, "sub-1", "sub", "")
+
+		prepared := a.prepareMessagesForLLM(msgs)
+		if prepared[2].Content != largeOutput {
+			t.Fatalf("low codex main quota should disable main pruning regardless of focused subagent, got %q", prepared[2].Content)
+		}
+	})
+}
+
+func focusTestSubAgent(t *testing.T, a *MainAgent, instanceID, providerName, preset string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	providerCfg := llm.NewProviderConfig(providerName, config.ProviderConfig{
+		Preset: preset,
+		Type:   config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	sub := &SubAgent{
+		instanceID: instanceID,
+		llmClient:  llm.NewClient(providerCfg, stubProvider{}, "model", 1024, ""),
+		parent:     a,
+		parentCtx:  ctx,
+		cancel:     cancel,
+		recovery:   a.recovery,
+		ctxMgr:     ctxmgr.NewManager(100, 0),
+	}
+	a.mu.Lock()
+	a.subAgents[instanceID] = sub
+	a.mu.Unlock()
+	a.focusedAgent.Store(sub)
+}
+
 func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+	}}
 	a.newTurn()
 	largeOutput := strings.Repeat("test output line\n", 500)
 	newLargeOutput := strings.Repeat("new output line\n", 600)
