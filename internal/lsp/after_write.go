@@ -12,6 +12,7 @@ import (
 
 const diagnosticsWaitTimeout = 3 * time.Second
 const coldStartDiagnosticsWaitTimeout = 8 * time.Second
+const diagnosticsSettleDuration = 300 * time.Millisecond
 
 var (
 	afterWriteHasReadyClient = func(m *Manager, path string) bool {
@@ -29,11 +30,11 @@ var (
 	afterWriteWaitForClient = func(m *Manager, ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
 		return m.waitForClientForPath(ctx, path, timeout)
 	}
-	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) error {
-		return m.DidChangeErr(ctx, path, content)
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, error) {
+		return m.DidChangeVersions(ctx, path, content)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan []Diagnostic, timeout time.Duration) ([]Diagnostic, bool) {
-		return m.AwaitWaiter(ctx, path, ch, timeout)
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
+		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
 	}
 )
 
@@ -79,7 +80,9 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	if err := afterWriteDidChange(m, ctx, absPath, content); err != nil {
+	after := time.Now()
+	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
+	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
 	}
 
@@ -88,7 +91,7 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, waitTimeout)
+	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: serverVersions, after: after}, waitTimeout)
 	if !notified && ctx.Err() == nil {
 		// Keep diagnostics wait timeouts out of the tool output so the model only sees
 		// actionable diagnostics; log the timeout for troubleshooting instead.

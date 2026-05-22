@@ -53,7 +53,9 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 	baseline := m.currentFileDiagnostics(absPath)
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	if err := afterWriteDidChange(m, ctx, absPath, content); err != nil {
+	after := time.Now()
+	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
+	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
 	}
 
@@ -62,7 +64,7 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, waitTimeout)
+	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: serverVersions, after: after}, waitTimeout)
 	if !notified && ctx.Err() == nil {
 		// Keep diagnostics wait timeouts out of the tool output so the model only sees
 		// actionable diagnostics; log the timeout for troubleshooting instead.

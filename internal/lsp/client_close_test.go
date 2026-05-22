@@ -287,7 +287,7 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	client.diagnostics[uri] = []protocol.Diagnostic{{Message: "boom"}}
 	mgr := &Manager{
 		clients: map[string]*Client{"gopls": client},
-		waiters: map[string][]chan []Diagnostic{normalizeWaiterPath(path): {make(chan []Diagnostic, 1)}},
+		waiters: map[string][]chan diagnosticsEvent{normalizeWaiterPath(path): {make(chan diagnosticsEvent, 1)}},
 		diagByServer: map[string]map[string]diagCounts{
 			"gopls": {string(uri): {errors: 1}},
 		},

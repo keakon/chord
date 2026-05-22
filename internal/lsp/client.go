@@ -56,7 +56,7 @@ type Client struct {
 	diagnosticsMu sync.RWMutex
 
 	// onDiagnostics is called when diagnostics are received (manager sets it to broadcast + notify waiters).
-	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic)
+	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic, version int32)
 }
 
 // NewClient creates an LSP client and starts the server process. Call Initialize next.
@@ -102,7 +102,7 @@ func (c *Client) createPowernapClient() error {
 }
 
 // SetOnDiagnostics sets the callback invoked when textDocument/publishDiagnostics is received.
-func (c *Client) SetOnDiagnostics(fn func(uri string, serverID string, diags []protocol.Diagnostic)) {
+func (c *Client) SetOnDiagnostics(fn func(uri string, serverID string, diags []protocol.Diagnostic, version int32)) {
 	c.onDiagnostics = fn
 }
 
@@ -126,11 +126,13 @@ func (c *Client) registerHandlers() {
 			log.Errorf("lsp: unmarshal publishDiagnostics error=%v", err)
 			return
 		}
+		// Optional the version number of the document the diagnostics are published for.
+		version := par.Version
 		c.diagnosticsMu.Lock()
 		c.diagnostics[par.URI] = par.Diagnostics
 		c.diagnosticsMu.Unlock()
 		if c.onDiagnostics != nil {
-			c.onDiagnostics(string(par.URI), c.name, par.Diagnostics)
+			c.onDiagnostics(string(par.URI), c.name, par.Diagnostics, version)
 		}
 	})
 	c.client.RegisterHandler("workspace/applyEdit", handleApplyEdit)
@@ -364,8 +366,10 @@ func (c *Client) pathToURI(path string) string {
 	return string(protocol.URIFromPath(abs))
 }
 
-// DidOpen sends didOpen for the file; if already open, no-op. Version is maintained by client.
-func (c *Client) DidOpen(ctx context.Context, path string, content string) error {
+// DidOpen sends didOpen for the file; if already open, sends didChange instead.
+// Version is maintained by client. The returned version is the document version
+// used for the LSP notification.
+func (c *Client) DidOpen(ctx context.Context, path string, content string) (int32, error) {
 	c.openFilesMu.Lock()
 	if _, ok := c.openFiles[path]; ok {
 		c.openFilesMu.Unlock()
@@ -380,13 +384,14 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) error
 		lang = "plaintext"
 	}
 	if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
-		return err
+		return 1, err
 	}
-	return nil
+	return 1, nil
 }
 
-// DidChange sends didChange for the file. Caller may pass version 0 to let client use its own counter.
-func (c *Client) DidChange(ctx context.Context, path string, content string) error {
+// DidChange sends didChange for the file. The returned version is the document
+// version used for the LSP notification.
+func (c *Client) DidChange(ctx context.Context, path string, content string) (int32, error) {
 	uri := c.pathToURI(path)
 	c.openFilesMu.Lock()
 	v, ok := c.openFiles[path]
@@ -401,7 +406,7 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) err
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+	return v, c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
 }
 
 // DidClose sends didClose for the file if it is open, then forgets the local open-file version.
@@ -466,7 +471,8 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	return c.DidOpen(ctx, path, string(content))
+	_, err = c.DidOpen(ctx, path, string(content))
+	return err
 }
 
 // NotifyChange reads the file and sends didChange (file must already be open).
@@ -475,7 +481,8 @@ func (c *Client) NotifyChange(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	return c.DidChange(ctx, path, string(content))
+	_, err = c.DidChange(ctx, path, string(content))
+	return err
 }
 
 func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {

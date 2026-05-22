@@ -59,6 +59,13 @@ type SidebarServerEntry struct {
 	Warnings int    `json:"warnings,omitempty"`
 }
 
+type diagnosticsEvent struct {
+	diagnostics []Diagnostic
+	serverID    string
+	version     int32
+	receivedAt  time.Time
+}
+
 // Manager manages multiple LSP clients and aggregates diagnostics.
 type Manager struct {
 	projectRoot string
@@ -68,7 +75,7 @@ type Manager struct {
 	clientsMu   sync.RWMutex
 	starting    map[string]bool // servers currently being initialized (guarded by clientsMu)
 
-	waiters   map[string][]chan []Diagnostic
+	waiters   map[string][]chan diagnosticsEvent
 	waitersMu sync.Mutex
 
 	startFailMu sync.Mutex
@@ -104,7 +111,7 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		broadcast:      broadcast,
 		clients:        make(map[string]*Client),
 		starting:       make(map[string]bool),
-		waiters:        make(map[string][]chan []Diagnostic),
+		waiters:        make(map[string][]chan diagnosticsEvent),
 		startFail:      make(map[string]string),
 		diagByServer:   make(map[string]map[string]diagCounts),
 		reviewByServer: make(map[string]map[string]reviewCounts),
@@ -112,8 +119,9 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 	}
 }
 
-func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diags []pnprotocol.Diagnostic) {
-	return func(uri string, _ string, diags []pnprotocol.Diagnostic) {
+func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
+	return func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
+		receivedAt := time.Now()
 		chordDiags := convertDiagnostics(diags)
 		path := normalizeWaiterPath(uriToPath(uri))
 		payload := DiagnosticsPayload{
@@ -158,11 +166,10 @@ func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diag
 		m.waitersMu.Lock()
 		for _, ch := range m.waiters[path] {
 			select {
-			case ch <- chordDiags:
+			case ch <- diagnosticsEvent{diagnostics: chordDiags, serverID: serverID, version: version, receivedAt: receivedAt}:
 			default:
 			}
 		}
-		delete(m.waiters, path)
 		m.waitersMu.Unlock()
 	}
 }
@@ -522,7 +529,7 @@ func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 	defer m.clientsMu.RUnlock()
 	for _, c := range m.clients {
 		if c.HandlesFile(path) {
-			_ = c.DidOpen(ctx, path, content)
+			_, _ = c.DidOpen(ctx, path, content)
 		}
 	}
 }
@@ -534,20 +541,33 @@ func (m *Manager) DidChange(ctx context.Context, path string, content string) {
 
 // DidChangeErr is like DidChange but returns the first notify error from any client.
 func (m *Manager) DidChangeErr(ctx context.Context, path string, content string) error {
+	_, err := m.DidChangeVersions(ctx, path, content)
+	return err
+}
+
+// DidChangeVersions sends didChange to all matching clients and returns the
+// document versions used by each server notification. The versions are used to
+// ignore stale publishDiagnostics snapshots when servers include diagnostic
+// versions.
+func (m *Manager) DidChangeVersions(ctx context.Context, path string, content string) (map[string]int32, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
+	versions := make(map[string]int32)
 	var first error
-	for _, c := range m.clients {
+	for name, c := range m.clients {
 		if c.HandlesFile(path) {
-			if err := c.DidChange(ctx, path, content); err != nil && first == nil {
+			version, err := c.DidChange(ctx, path, content)
+			if err == nil {
+				versions[name] = version
+			} else if first == nil {
 				first = err
 			}
 		}
 	}
-	return first
+	return versions, first
 }
 
 // DidClose sends didClose to all clients that handle path, clears cached diagnostics for that path,
@@ -613,9 +633,9 @@ func (m *Manager) Diagnostics(path string) []Diagnostic {
 // PrepareWaiter registers a diagnostics waiter for path and returns a channel to pass to
 // AwaitWaiter. Call this BEFORE sending didChange/didOpen so that notifications from
 // fast LSP servers are never missed.
-func (m *Manager) PrepareWaiter(path string) chan []Diagnostic {
+func (m *Manager) PrepareWaiter(path string) chan diagnosticsEvent {
 	path = normalizeWaiterPath(path)
-	ch := make(chan []Diagnostic, 1)
+	ch := make(chan diagnosticsEvent, 8)
 	m.waitersMu.Lock()
 	m.waiters[path] = append(m.waiters[path], ch)
 	m.waitersMu.Unlock()
@@ -624,24 +644,69 @@ func (m *Manager) PrepareWaiter(path string) chan []Diagnostic {
 
 // AwaitWaiter waits on a channel obtained from PrepareWaiter.
 // Returns (diags, true) if publishDiagnostics arrived; (cached diags, false) on timeout/cancel.
-func (m *Manager) AwaitWaiter(ctx context.Context, path string, ch chan []Diagnostic, timeout time.Duration) ([]Diagnostic, bool) {
+func (m *Manager) AwaitWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, timeout time.Duration) ([]Diagnostic, bool) {
+	return m.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{}, timeout)
+}
+
+type diagnosticsWaitRequest struct {
+	serverVersions map[string]int32
+	after          time.Time
+	settle         time.Duration
+}
+
+// AwaitFreshWaiter waits for diagnostics that match the current edit. If an LSP
+// server publishes diagnostics with a document version, stale versions are
+// ignored. Otherwise, only diagnostics published after the edit notification are
+// accepted. Once a fresh event arrives, the function waits briefly for additional
+// diagnostics to settle so multi-phase servers such as gopls do not expose a
+// transient first snapshot as final tool output.
+func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
 	path = normalizeWaiterPath(path)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case diags := <-ch:
-		return diags, true
-	case <-ctx.Done():
-		m.waitersMu.Lock()
-		m.removeWaiter(path, ch)
-		m.waitersMu.Unlock()
-		return nil, false
-	case <-timer.C:
-		m.waitersMu.Lock()
-		m.removeWaiter(path, ch)
-		m.waitersMu.Unlock()
-		return m.Diagnostics(path), false
+	if req.settle <= 0 {
+		req.settle = diagnosticsSettleDuration
 	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	defer func() {
+		m.waitersMu.Lock()
+		m.removeWaiter(path, ch)
+		m.waitersMu.Unlock()
+	}()
+
+	var gotFresh bool
+	var last []Diagnostic
+	var settle <-chan time.Time
+	for {
+		select {
+		case ev := <-ch:
+			if !diagnosticsEventFresh(ev, req) {
+				continue
+			}
+			gotFresh = true
+			last = ev.diagnostics
+			settleTimer := time.NewTimer(req.settle)
+			defer settleTimer.Stop()
+			settle = settleTimer.C
+		case <-settle:
+			return last, true
+		case <-ctx.Done():
+			return nil, false
+		case <-deadline.C:
+			return m.Diagnostics(path), gotFresh
+		}
+	}
+}
+
+func diagnosticsEventFresh(ev diagnosticsEvent, req diagnosticsWaitRequest) bool {
+	if len(req.serverVersions) > 0 {
+		if want, ok := req.serverVersions[ev.serverID]; ok && ev.version != 0 && ev.version != want {
+			return false
+		}
+	}
+	if !req.after.IsZero() && ev.version == 0 && ev.receivedAt.Before(req.after) {
+		return false
+	}
+	return true
 }
 
 // WaitDiagnostics blocks until diagnostics for path are received or timeout.
@@ -656,12 +721,15 @@ func (m *Manager) WaitDiagnosticsNotify(ctx context.Context, path string, timeou
 	return m.AwaitWaiter(ctx, path, ch, timeout)
 }
 
-func (m *Manager) removeWaiter(path string, ch chan []Diagnostic) {
+func (m *Manager) removeWaiter(path string, ch chan diagnosticsEvent) {
 	for i, c := range m.waiters[path] {
 		if c == ch {
 			m.waiters[path] = append(m.waiters[path][:i], m.waiters[path][i+1:]...)
 			break
 		}
+	}
+	if len(m.waiters[path]) == 0 {
+		delete(m.waiters, path)
 	}
 }
 

@@ -44,6 +44,62 @@ func TestClientHandlesFileRejectsOutsideRoot(t *testing.T) {
 	}
 }
 
+func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
+	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	path := filepath.Join(mgr.projectRoot, "main.go")
+	ch := mgr.PrepareWaiter(path)
+
+	go func() {
+		ch <- diagnosticsEvent{
+			diagnostics: []Diagnostic{{Severity: 1, Message: "stale"}},
+			serverID:    "gopls",
+			version:     1,
+			receivedAt:  time.Now(),
+		}
+		time.Sleep(20 * time.Millisecond)
+		ch <- diagnosticsEvent{
+			diagnostics: []Diagnostic{{Severity: 1, Message: "fresh"}},
+			serverID:    "gopls",
+			version:     2,
+			receivedAt:  time.Now(),
+		}
+	}()
+
+	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+		serverVersions: map[string]int32{"gopls": 2},
+		settle:         10 * time.Millisecond,
+	}, time.Second)
+	if !ok {
+		t.Fatal("AwaitFreshWaiter did not report fresh diagnostics")
+	}
+	if len(diags) != 1 || diags[0].Message != "fresh" {
+		t.Fatalf("diagnostics = %+v, want fresh only", diags)
+	}
+}
+
+func TestAwaitFreshWaiterUsesLatestEventDuringSettleWindow(t *testing.T) {
+	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	path := filepath.Join(mgr.projectRoot, "main.go")
+	ch := mgr.PrepareWaiter(path)
+
+	go func() {
+		ch <- diagnosticsEvent{diagnostics: []Diagnostic{{Severity: 1, Message: "first"}}, serverID: "gopls", version: 2, receivedAt: time.Now()}
+		time.Sleep(10 * time.Millisecond)
+		ch <- diagnosticsEvent{diagnostics: []Diagnostic{{Severity: 1, Message: "second"}}, serverID: "gopls", version: 2, receivedAt: time.Now()}
+	}()
+
+	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+		serverVersions: map[string]int32{"gopls": 2},
+		settle:         25 * time.Millisecond,
+	}, time.Second)
+	if !ok {
+		t.Fatal("AwaitFreshWaiter did not report fresh diagnostics")
+	}
+	if len(diags) != 1 || diags[0].Message != "second" {
+		t.Fatalf("diagnostics = %+v, want latest settled event", diags)
+	}
+}
+
 func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(&config.Config{

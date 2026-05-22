@@ -78,7 +78,7 @@ func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.
 
 	var didChangeErr error
 	var awaitErr error
-	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) error {
+	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
 		}
@@ -86,9 +86,9 @@ func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.
 			t.Fatalf("didChange content = %q, want package main", content)
 		}
 		didChangeErr = gotCtx.Err()
-		return nil
+		return nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan []Diagnostic, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
 		if gotPath != path {
 			t.Fatalf("await path = %q, want %q", gotPath, path)
 		}
