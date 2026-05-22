@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/keakon/chord/internal/buildinfo"
 )
 
@@ -111,6 +114,62 @@ func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
 	sb.WriteByte('\n')
 }
 
+func writeDiagnosticBottomLines(sb *strings.Builder, content string, startRow int) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.TrimRight(content, "\n")
+	if strings.TrimSpace(content) == "" {
+		fmt.Fprintf(sb, "(empty)\n")
+		return
+	}
+	lines := strings.Split(content, "\n")
+	if startRow < 0 {
+		startRow = 0
+	}
+	if startRow > len(lines) {
+		startRow = len(lines)
+	}
+	for i := startRow; i < len(lines); i++ {
+		line := lines[i]
+		fmt.Fprintf(sb, "y=%d width=%d raw=%q\n", i, ansi.StringWidth(line), line)
+	}
+}
+
+func writeDiagnosticScreenBufferBottom(sb *strings.Builder, scr uv.ScreenBuffer, startRow, height int) {
+	if scr.RenderBuffer == nil || height <= 0 {
+		fmt.Fprintf(sb, "(empty)\n")
+		return
+	}
+	if startRow < 0 {
+		startRow = 0
+	}
+	if startRow > height {
+		startRow = height
+	}
+	for y := startRow; y < height; y++ {
+		line := scr.Line(y)
+		plain, occupied, cells := debugScreenBufferLineSummary(line)
+		fmt.Fprintf(sb, "y=%d plain_width=%d occupied=%d cells=%d plain=%q\n", y, ansi.StringWidth(plain), occupied, cells, plain)
+	}
+}
+
+func debugScreenBufferLineSummary(line uv.Line) (plain string, occupied, cells int) {
+	cells = len(line)
+	var b strings.Builder
+	for _, cell := range line {
+		if cell.IsZero() {
+			b.WriteByte(' ')
+			continue
+		}
+		occupied++
+		content := cell.Content
+		if content == "" {
+			content = " "
+		}
+		b.WriteString(content)
+	}
+	return strings.TrimRight(b.String(), " "), occupied, cells
+}
+
 func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath string, sanitize bool) (string, error) {
 	baseDir := strings.TrimSpace(m.workingDir)
 	if baseDir == "" {
@@ -166,8 +225,14 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	}
 
 	screenRender := ""
+	frameRender := ""
 	if scratch.RenderBuffer != nil {
 		screenRender = strings.ReplaceAll(scratch.Render(), "\r\n", "\n")
+		if m.useFocusResizeFreeze {
+			frameRender = strings.ReplaceAll(renderScreenBufferFullFrame(scratch, m.hostSafeFullFrameWidth(), height), "\r\n", "\n")
+		} else {
+			frameRender = screenRender
+		}
 	}
 
 	safe := func(s string) string {
@@ -338,6 +403,12 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 
 	fmt.Fprintf(&sb, "\n[viewport_render]\n")
 	writeDiagnosticDumpSection(&sb, safe(viewportRender))
+
+	fmt.Fprintf(&sb, "\n[frame_bottom]\n")
+	writeDiagnosticBottomLines(&sb, safe(frameRender), max(0, height-8))
+
+	fmt.Fprintf(&sb, "\n[screen_buffer_bottom]\n")
+	writeDiagnosticScreenBufferBottom(&sb, scratch, max(0, height-8), height)
 
 	fmt.Fprintf(&sb, "\n[screen_buffer]\n")
 	writeDiagnosticDumpSection(&sb, safe(screenRender))

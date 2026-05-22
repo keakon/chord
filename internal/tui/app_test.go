@@ -454,6 +454,8 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"[blocks.visible]",
 		"[blocks.rendered]",
 		"[viewport_render]",
+		"[frame_bottom]",
+		"[screen_buffer_bottom]",
 		"[screen_buffer]",
 		"something happened",
 		"hello",
