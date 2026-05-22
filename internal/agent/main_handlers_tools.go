@@ -424,6 +424,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v", pc.PlanPath)
 			a.lastPlanPath = pc.PlanPath
 			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath})
+			a.emitActivity("main", ActivityIdle, "")
+			a.pausePendingUserDrainOnce = true
+			a.setIdleAndDrainPending()
 			return
 		}
 		if len(a.pendingLoopExitResults) > 0 {
