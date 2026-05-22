@@ -58,13 +58,6 @@ func (a *MainAgent) recordRepeatedToolCall(tc message.ToolCall) int {
 	return len(a.loopState.RepeatedToolCallStreak)
 }
 
-func (a *MainAgent) clearRepeatedToolCallStreak() {
-	if a == nil {
-		return
-	}
-	a.loopState.RepeatedToolCallStreak = nil
-}
-
 func (a *MainAgent) repeatedToolCallRejectResult(tc message.ToolCall, streak int) string {
 	parts := []string{fmt.Sprintf("Tool call rejected automatically: detected %d consecutive identical `%s` tool calls with the same arguments.", streak, strings.TrimSpace(tc.Name))}
 	reasons := a.currentLoopContinuationReasons("repeated_tool_call", "context_continue")
@@ -122,6 +115,7 @@ func (a *MainAgent) maybeInterceptRepeatedToolCall(ctx context.Context, tc messa
 		return &repeatedToolCallInterceptResult{confirmErr: wrapToolRejectedByUser(tc.Name, a.repeatedToolCallConfirmResult(tc, streak))}, true
 	}
 	a.loopState.Iteration = 0
+	a.loopState.RepeatedToolCallStreak = nil
 	return &repeatedToolCallInterceptResult{toolResult: a.repeatedToolCallRejectResult(tc, streak)}, true
 }
 

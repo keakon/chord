@@ -335,6 +335,79 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 	if a.loopState.Iteration != 0 {
 		t.Fatalf("loop iteration after deny/continue = %d, want 0 reset", a.loopState.Iteration)
 	}
+	if len(a.loopState.RepeatedToolCallStreak) != 0 {
+		t.Fatalf("repeated tool call streak after deny/continue len = %d, want 0 reset", len(a.loopState.RepeatedToolCallStreak))
+	}
+	if _, ok := a.maybeInterceptRepeatedToolCall(context.Background(), call); ok {
+		t.Fatal("next identical tool call after deny/continue intercepted immediately, want fresh streak")
+	}
+}
+
+func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.MaxIterations = 1
+	a.loopState.MaxIterationsSet = true
+	a.loopState.Iteration = 1
+	a.newTurn()
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
+		return a.AwaitConfirm(ctx, toolName, args, 0, needsApproval, alreadyAllowed)
+	}
+
+	call := message.ToolCall{ID: "read-repeat-confirm-approve", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
+	for i := 0; i < 2; i++ {
+		if _, ok := a.maybeInterceptRepeatedToolCall(context.Background(), call); ok {
+			t.Fatalf("attempt %d intercepted early, want no intercept before third repeated call", i+1)
+		}
+	}
+
+	handled := make(chan struct{})
+	var gotResult ToolExecutionResult
+	var gotErr error
+	go func() {
+		gotResult, gotErr = a.executeToolCall(context.Background(), call)
+		close(handled)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	confirmed := false
+	for !confirmed {
+		select {
+		case evt := <-a.outputCh:
+			req, ok := evt.(ConfirmRequestEvent)
+			if !ok {
+				continue
+			}
+			if !req.ForceDenyReason {
+				t.Fatal("confirmation should require denial with a reason")
+			}
+			confirmed = true
+			a.ResolveConfirm("allow", req.ArgsJSON, "", "", req.RequestID)
+		case <-deadline:
+			t.Fatal("timed out waiting for repeated-tool-call confirmation request")
+		}
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for repeated-tool-call handling to finish")
+	}
+	if gotErr == nil {
+		t.Fatal("executeToolCall err = nil, want approval rejected")
+	}
+	if !strings.Contains(strings.ToLower(gotErr.Error()), "rejected by user") {
+		t.Fatalf("executeToolCall err = %v, want rejection error", gotErr)
+	}
+	if gotResult.Result != "" {
+		t.Fatalf("executeToolCall result = %q, want empty result after invalid approval", gotResult.Result)
+	}
+	if a.loopState.Iteration != 1 {
+		t.Fatalf("loop iteration after invalid approval = %d, want unchanged", a.loopState.Iteration)
+	}
+	if len(a.loopState.RepeatedToolCallStreak) != repeatedToolCallInterceptThreshold {
+		t.Fatalf("repeated tool call streak after invalid approval len = %d, want retained threshold", len(a.loopState.RepeatedToolCallStreak))
+	}
 }
 
 func TestHandleToolResult_DoneOutsideLoopEntersIdle(t *testing.T) {

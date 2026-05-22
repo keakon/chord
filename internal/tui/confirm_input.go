@@ -129,8 +129,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 				m.recalcViewportSize()
 				return textareaBlinkCmd()
 			case "y", "Y":
-				m.confirm.editError = "This repeated tool call must be denied with a reason."
-				m.recalcViewportSize()
+				return nil
 			}
 			return nil
 		}
@@ -167,8 +166,6 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "y", "Y":
 		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
-			m.confirm.editError = "This repeated tool call must be denied with a reason."
-			m.recalcViewportSize()
 			return nil
 		}
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})

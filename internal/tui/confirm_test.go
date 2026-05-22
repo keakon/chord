@@ -521,8 +521,8 @@ func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 		t.Fatalf("unexpected confirm result from forced deny allow shortcut: %#v", result)
 	default:
 	}
-	if !strings.Contains(m.confirm.editError, "must be denied") {
-		t.Fatalf("editError = %q, want forced deny explanation", m.confirm.editError)
+	if m.confirm.editError != "" {
+		t.Fatalf("editError = %q, want no prompt for ignored allow shortcut", m.confirm.editError)
 	}
 }
 
