@@ -27,6 +27,7 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 	if trimmed == "" {
 		return nil
 	}
+	trimmed = stripHereDocBodies(trimmed)
 	tokens := shellTokens(trimmed)
 	if len(tokens) == 0 {
 		return nil
@@ -34,16 +35,16 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 	if hasDirectTTYRedirection(tokens) {
 		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "Shell and Spawn run without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
 	}
-	commands := splitShellCommandTokens(tokens)
+	commands := splitShellCommandTokensWithContext(tokens)
 	for _, cmd := range commands {
-		if finding := detectInteractiveCommandTokens(cmd); finding != nil {
+		if finding := detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput); finding != nil {
 			return finding
 		}
 	}
 	return nil
 }
 
-func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding {
+func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool) *InteractiveCommandFinding {
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -81,7 +82,7 @@ func detectInteractiveCommandTokens(tokens []string) *InteractiveCommandFinding 
 	case "sftp", "ftp", "telnet", "su", "passwd":
 		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Run this manually in a terminal or use a non-interactive authentication method.")
 	case "git":
-		return detectInteractiveGit(tokens, env)
+		return detectInteractiveGit(tokens, env, hasPipelineInput)
 	case "docker", "podman":
 		return detectInteractiveContainerCommand(name, tokens)
 	case "kubectl":
@@ -141,7 +142,7 @@ func sshOptionConsumesValue(arg string) bool {
 		arg == "-R" || arg == "-S" || arg == "-W" || arg == "-w"
 }
 
-func detectInteractiveGit(tokens []string, env map[string]string) *InteractiveCommandFinding {
+func detectInteractiveGit(tokens []string, env map[string]string, hasPipelineInput bool) *InteractiveCommandFinding {
 	sub, args, ok := gitSubcommand(tokens)
 	if !ok {
 		return nil
@@ -156,13 +157,13 @@ func detectInteractiveGit(tokens []string, env map[string]string) *InteractiveCo
 		}
 	case "rebase":
 		if hasOption(args, "-i", "--interactive") || hasOption(args, "", "--edit-todo") {
-			if gitSequenceEditorAvoidsPrompt(env) {
+			if gitEditorAvoidsPrompt(env) {
 				return nil
 			}
 			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Run it manually in a terminal, or use non-interactive git commands.")
 		}
 	case "add", "checkout", "restore", "reset", "stash":
-		if hasOption(args, "-p", "--patch") {
+		if hasOption(args, "-p", "--patch") && !hasPipelineInput {
 			return interactiveFinding("git "+sub+" -p", fmt.Sprintf("`git %s -p` is an interactive patch workflow", sub), "Run it manually in a terminal or use non-interactive pathspecs/options.")
 		}
 		if sub == "add" && hasOption(args, "-i", "--interactive") {
@@ -334,9 +335,14 @@ func gitCommitAvoidsEditor(args []string) bool {
 		if arg == "-m" || arg == "-F" || arg == "--message" || arg == "--file" || arg == "-C" || arg == "--reuse-message" || arg == "--no-edit" {
 			return true
 		}
+		if arg == "--fixup" {
+			if i+1 < len(args) && isNonInteractiveGitFixupValue(args[i+1]) {
+				return true
+			}
+			continue
+		}
 		if strings.HasPrefix(arg, "--fixup=") {
-			value := strings.TrimPrefix(arg, "--fixup=")
-			if value != "" && !strings.HasPrefix(value, "amend:") && !strings.HasPrefix(value, "reword:") {
+			if isNonInteractiveGitFixupValue(strings.TrimPrefix(arg, "--fixup=")) {
 				return true
 			}
 		}
@@ -353,9 +359,37 @@ func gitCommitAvoidsEditor(args []string) bool {
 	return false
 }
 
-func gitSequenceEditorAvoidsPrompt(env map[string]string) bool {
-	value := strings.TrimSpace(env["GIT_SEQUENCE_EDITOR"])
-	return value == ":" || value == "true"
+func isNonInteractiveGitFixupValue(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.HasPrefix(value, "amend:") && !strings.HasPrefix(value, "reword:")
+}
+
+func gitEditorAvoidsPrompt(env map[string]string) bool {
+	for _, name := range []string{"GIT_SEQUENCE_EDITOR", "GIT_EDITOR"} {
+		if shellCommandAvoidsPrompt(env[name]) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandAvoidsPrompt(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	value = stripHereDocBodies(value)
+	tokens := shellTokens(value)
+	if len(tokens) == 0 {
+		return false
+	}
+	commands := splitShellCommandTokensWithContext(tokens)
+	for _, cmd := range commands {
+		if detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func hasTTYOptionBeforeContainerCommand(args []string) bool {
@@ -443,9 +477,24 @@ func hasOption(args []string, short, long string) bool {
 	return false
 }
 
+type shellCommandTokens struct {
+	tokens           []string
+	hasPipelineInput bool
+}
+
 func splitShellCommandTokens(tokens []string) [][]string {
-	var commands [][]string
+	commandsWithContext := splitShellCommandTokensWithContext(tokens)
+	commands := make([][]string, 0, len(commandsWithContext))
+	for _, cmd := range commandsWithContext {
+		commands = append(commands, cmd.tokens)
+	}
+	return commands
+}
+
+func splitShellCommandTokensWithContext(tokens []string) []shellCommandTokens {
+	var commands []shellCommandTokens
 	var current []string
+	hasPipelineInput := false
 	skipNext := false
 	for _, tok := range tokens {
 		if skipNext {
@@ -453,21 +502,28 @@ func splitShellCommandTokens(tokens []string) [][]string {
 			continue
 		}
 		switch tok {
-		case "|", "&&", "||", ";", "&", "(", ")":
+		case "|":
 			if len(current) > 0 {
-				commands = append(commands, current)
+				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
 				current = nil
 			}
+			hasPipelineInput = true
+		case "&&", "||", ";", "&", "(", ")":
+			if len(current) > 0 {
+				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
+				current = nil
+			}
+			hasPipelineInput = false
 		case "<", ">", ">>", "2>", "2>>", "&>", "&>>", "<<<", "<<":
 			if len(current) > 0 {
-				commands = append(commands, current)
+				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
 			}
 			current = nil
 			skipNext = true
 		default:
 			if isRedirectionToken(tok) {
 				if len(current) > 0 {
-					commands = append(commands, current)
+					commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
 				}
 				current = nil
 				continue
@@ -476,7 +532,7 @@ func splitShellCommandTokens(tokens []string) [][]string {
 		}
 	}
 	if len(current) > 0 {
-		commands = append(commands, current)
+		commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
 	}
 	return commands
 }
@@ -541,6 +597,54 @@ func isAssignment(tok string) bool {
 		}
 	}
 	return true
+}
+
+func stripHereDocBodies(s string) string {
+	lines := strings.SplitAfter(s, "\n")
+	out := make([]string, 0, len(lines))
+	pending := make([]string, 0, 1)
+	for _, line := range lines {
+		if len(pending) > 0 {
+			trimmed := strings.TrimSpace(line)
+			for len(pending) > 0 && trimmed == pending[0] {
+				pending = pending[1:]
+			}
+			if len(pending) > 0 {
+				continue
+			}
+			continue
+		}
+		out = append(out, line)
+		pending = append(pending, hereDocDelimiters(line)...)
+	}
+	return strings.Join(out, "")
+}
+
+func hereDocDelimiters(line string) []string {
+	tokens := shellTokens(line)
+	var delimiters []string
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok != "<<" && !strings.HasPrefix(tok, "<<") {
+			continue
+		}
+		var delimiter string
+		if tok == "<<" {
+			if i+1 >= len(tokens) {
+				continue
+			}
+			delimiter = tokens[i+1]
+			i++
+		} else {
+			delimiter = strings.TrimPrefix(tok, "<<")
+		}
+		delimiter = strings.TrimPrefix(delimiter, "-")
+		delimiter = strings.Trim(delimiter, "'\"")
+		if delimiter != "" {
+			delimiters = append(delimiters, delimiter)
+		}
+	}
+	return delimiters
 }
 
 func shellTokens(s string) []string {

@@ -19,6 +19,7 @@ func TestDetectInteractiveShellCommandAllowsNonInteractiveCommands(t *testing.T)
 		"git commit --amend --reuse-message=HEAD",
 		"git commit -qam msg",
 		"git commit --fixup=HEAD",
+		"git commit --fixup HEAD",
 		"GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~2",
 		"GIT_SEQUENCE_EDITOR=true git rebase -i HEAD~2",
 		"git -C repo commit -m 'msg'",
@@ -58,6 +59,14 @@ func TestDetectInteractiveShellCommandAllowsNonInteractiveCommands(t *testing.T)
 		"git show HEAD:path/to/file",
 		"git diff -- README.md",
 		"git branch --show-current",
+		"python - <<'PY'\nprint('watch')\nPY",
+		"python - <<'PY'\nprint('top')\nPY",
+		"python - <<'PY'\nwatch = 'value'\nprint(watch)\nPY",
+		"GIT_EDITOR=true git rebase -i HEAD~2",
+		"GIT_SEQUENCE_EDITOR='python - <<\"PY\"\nprint(\"edit todo\")\nPY' git rebase -i HEAD~2",
+		"GIT_SEQUENCE_EDITOR='sed -i s/pick/fixup/' git rebase -i HEAD~2",
+		"printf 'y\nn\n' | git add -p",
+		"printf 'y\nn\n' | git checkout -p",
 	}
 	for _, command := range cases {
 		t.Run(command, func(t *testing.T) {
@@ -81,7 +90,9 @@ func TestDetectInteractiveShellCommandRejectsHighConfidenceInteractiveCommands(t
 		{"git commit --amend -c HEAD", "without an explicit message"},
 		{"git commit --amend --reedit-message HEAD", "without an explicit message"},
 		{"git commit --fixup=amend:HEAD", "without an explicit message"},
+		{"git commit --fixup amend:HEAD", "without an explicit message"},
 		{"git commit --fixup=reword:HEAD", "without an explicit message"},
+		{"git commit --fixup reword:HEAD", "without an explicit message"},
 		{"git commit --squash=HEAD", "without an explicit message"},
 		{"git commit -p -m 'msg'", "interactive patch"},
 		{"git commit --patch --message=msg", "interactive patch"},
@@ -115,7 +126,13 @@ func TestDetectInteractiveShellCommandRejectsHighConfidenceInteractiveCommands(t
 		{"podman --connection remote run -t alpine sh", "allocates a TTY"},
 		{"kubectl --context prod exec -it pod -- sh", "allocates a TTY"},
 		{"kubectl attach --tty pod", "allocates a TTY"},
-		{"PATH=/tmp vim file", "interactive terminal UI"},
+		{"watch date", "interactive terminal UI"},
+		{"top", "interactive terminal UI"},
+		{"git add -p", "interactive patch workflow"},
+		{"git checkout -p", "interactive patch workflow"},
+		{"git rebase -i HEAD~2", "requires an editor"},
+		{"GIT_SEQUENCE_EDITOR=vim git rebase -i HEAD~2", "requires an editor"},
+		{"GIT_SEQUENCE_EDITOR='vim \"$1\"' git rebase -i HEAD~2", "requires an editor"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.command, func(t *testing.T) {
