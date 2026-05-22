@@ -148,58 +148,58 @@ func TestShouldFallback400CodexRequiresStreaming(t *testing.T) {
 	}
 }
 
-func TestShouldNotFallback400RequestShapeError(t *testing.T) {
+func TestShouldFallback400RequestShapeError(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "invalid_request_error: missing required parameter: input"}
-	if shouldFallback(err) {
-		t.Fatal("request-shape 400 should not be fallback-eligible")
+	if !shouldFallback(err) {
+		t.Fatal("request-shape 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("request-shape 400 should not be retriable")
+		t.Fatal("request-shape 400 should not rotate keys on same model")
 	}
-	if !isPermanentFailure(err) {
-		t.Fatal("request-shape 400 should be permanent")
+	if !isTerminalModelPoolFailure(err) {
+		t.Fatal("request-shape 400 should stop after model pool exhaustion")
 	}
 }
 
-func TestReasoningReplay400IsPermanentRequestShapeError(t *testing.T) {
+func TestReasoningReplay400FallsBackToAnotherModel(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."}
-	if shouldFallback(err) {
-		t.Fatal("reasoning replay 400 should not be fallback-eligible")
+	if !shouldFallback(err) {
+		t.Fatal("reasoning replay 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("reasoning replay 400 should not be retriable")
+		t.Fatal("reasoning replay 400 should not rotate keys on same model")
 	}
-	if !isPermanentFailure(err) {
-		t.Fatal("reasoning replay 400 should be permanent")
+	if !isTerminalModelPoolFailure(err) {
+		t.Fatal("reasoning replay 400 should stop after model pool exhaustion")
 	}
 }
 
-func TestAnthropicThinkingReplay400IsPermanentRequestShapeError(t *testing.T) {
+func TestAnthropicThinkingReplay400FallsBackToAnotherModel(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}
-	if shouldFallback(err) {
-		t.Fatal("anthropic thinking replay 400 should not be fallback-eligible")
+	if !shouldFallback(err) {
+		t.Fatal("anthropic thinking replay 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("anthropic thinking replay 400 should not be retriable")
+		t.Fatal("anthropic thinking replay 400 should not rotate keys on same model")
 	}
-	if !isPermanentFailure(err) {
-		t.Fatal("anthropic thinking replay 400 should be permanent")
+	if !isTerminalModelPoolFailure(err) {
+		t.Fatal("anthropic thinking replay 400 should stop after model pool exhaustion")
 	}
 }
 
-func TestAssistantMessageShape400IsPermanentRequestShapeError(t *testing.T) {
+func TestAssistantMessageShape400FallsBackToAnotherModel(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "Invalid assistant message: content or tool_calls must be set"}
-	if shouldFallback(err) {
-		t.Fatal("assistant-message-shape 400 should not be fallback-eligible")
+	if !shouldFallback(err) {
+		t.Fatal("assistant-message-shape 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("assistant-message-shape 400 should not be retriable")
+		t.Fatal("assistant-message-shape 400 should not rotate keys on same model")
 	}
-	if !isPermanentFailure(err) {
-		t.Fatal("assistant-message-shape 400 should be permanent")
+	if !isTerminalModelPoolFailure(err) {
+		t.Fatal("assistant-message-shape 400 should stop after model pool exhaustion")
 	}
 }

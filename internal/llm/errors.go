@@ -262,10 +262,10 @@ func shouldFallback(err error) bool {
 	case 403:
 		return true // Key permission denied → try fallback model
 	case 400:
-		// Some gateways return 400 for target-model transport incompatibility
-		// (e.g. "Store must be set to false"). Those should move to the next
-		// model immediately instead of getting stuck in round retries.
-		return isModelIncompatible400(apiErr.Message)
+		// A 400 can be request-shape/provider-protocol specific. Another
+		// configured model may accept the same conversation history, so advance
+		// through the model pool instead of stopping at the first candidate.
+		return true
 	default:
 		return apiErr.StatusCode >= 500 // Other 5xx → fallback
 	}
@@ -448,21 +448,6 @@ func isConcurrentRequestLimit429(err error) bool {
 		(strings.Contains(msg, "concurrent") && strings.Contains(msg, "requests") && strings.Contains(msg, "model"))
 }
 
-// isPermanentFailure reports whether err is unrecoverable and should not be retried
-// on any key or fallback model. Only malformed requests (400 with bad params) qualify;
-// 401/403 are key-level errors that should be retried with another key or fallback model.
-func isPermanentFailure(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
-		return false
-	}
-	switch apiErr.StatusCode {
-	case 400:
-		return isRequestOrParamError(apiErr.Message)
-	}
-	return false
-}
-
 // isRequestOrParamError returns true if the API message indicates a client/request
 // error (e.g. missing parameter, invalid request, or missing required replayed
 // thinking/reasoning content). Such errors are not retriable.
@@ -504,5 +489,8 @@ func isTerminalModelPoolFailure(err error) bool {
 	if !errors.As(err, &apiErr) || apiErr == nil {
 		return false
 	}
-	return apiErr.StatusCode == 400 && isModelIncompatible400(apiErr.Message)
+	// Any 400 is deterministic for the request sent to that candidate. It should
+	// not stop the pool early, but once every candidate has failed there is no
+	// value in retrying the same malformed/provider-incompatible requests forever.
+	return apiErr.StatusCode == 400
 }

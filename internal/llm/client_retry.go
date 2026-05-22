@@ -734,11 +734,6 @@ func (c *Client) completeStreamWithRetry(
 					return targetResult.resp, nil
 				}
 			}
-			// Stop immediately only for permanent failures (auth, permission, malformed request).
-			if isPermanentFailure(lastErr) {
-				log.Errorf("LLM permanent failure, giving up provider=%v model=%v error=%v", startProvider.Name(), startModelID, lastErr)
-				return nil, lastErr
-			}
 		} // end targets loop
 		// Track that the full model pool was tried and all failed.
 		if fallbackEnabled && status != nil && status.FallbackTriggered {

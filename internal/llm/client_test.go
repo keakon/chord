@@ -415,6 +415,55 @@ func TestClient_RetriableErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	}
 }
 
+func TestClient_400ErrorTriesFallbackModel(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("strict", "strict-model", []string{"key-a", "key-b"})
+	fallbackCfg := testProviderConfig("compatible", "compatible-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{{resp: &message.Response{Content: "ok from fallback"}}}
+
+	client := NewClient(primaryCfg, primaryImpl, "strict-model", 512, "")
+	client.SetModelPool([]FallbackModel{{
+		ProviderConfig: primaryCfg,
+		ProviderImpl:   primaryImpl,
+		ModelID:        "strict-model",
+		MaxTokens:      512,
+		ContextLimit:   128000,
+	}, {
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "compatible-model",
+		MaxTokens:      512,
+		ContextLimit:   128000,
+	}}, 0)
+
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hello"}}, nil, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+
+	if got := len(primaryImpl.apiKeys); got != 1 {
+		t.Fatalf("primary call count = %d, want 1", got)
+	}
+	if got := len(fallbackImpl.apiKeys); got != 1 {
+		t.Fatalf("fallback call count = %d, want 1", got)
+	}
+	st := client.LastCallStatus()
+	if !st.FallbackTriggered {
+		t.Fatal("expected FallbackTriggered=true")
+	}
+	if st.RunningModelRef != "compatible/compatible-model" {
+		t.Fatalf("RunningModelRef = %q, want compatible/compatible-model", st.RunningModelRef)
+	}
+}
+
 func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("freemodel", "gpt-5.4", []string{"key-a", "key-b", "key-c"})
 	fallbackCfg := testProviderConfig("qt", "glm-5.1")
