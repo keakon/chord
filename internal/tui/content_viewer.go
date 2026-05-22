@@ -310,13 +310,6 @@ func (m *Model) selectedContentViewerText() string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (m *Model) contentViewerCopyContent() string {
-	if selected := m.selectedContentViewerText(); selected != "" {
-		return selected
-	}
-	return strings.TrimSpace(m.contentViewer.content)
-}
-
 func (m *Model) copyContentViewerSelection() tea.Cmd {
 	content := m.selectedContentViewerText()
 	if content == "" {
@@ -326,18 +319,6 @@ func (m *Model) copyContentViewerSelection() tea.Cmd {
 	return writeClipboardCmd(content, "Selection copied to clipboard")
 }
 
-func (m *Model) copyContentViewerSelectionOrAll() tea.Cmd {
-	content := m.contentViewerCopyContent()
-	if content == "" {
-		return m.enqueueToast("View content is empty", "info")
-	}
-	if m.selectedContentViewerText() != "" {
-		m.clearContentViewerSelection()
-		return writeClipboardCmd(content, "Selection copied to clipboard")
-	}
-	return writeClipboardCmd(content, "View content copied to clipboard")
-}
-
 func (m *Model) copyContentViewerAll() tea.Cmd {
 	content := strings.TrimSpace(m.contentViewer.content)
 	if content == "" {
@@ -345,10 +326,6 @@ func (m *Model) copyContentViewerAll() tea.Cmd {
 	}
 	m.clearContentViewerSelection()
 	return writeClipboardCmd(content, "View content copied to clipboard")
-}
-
-func (m *Model) copyContentViewer() tea.Cmd {
-	return m.copyContentViewerSelectionOrAll()
 }
 
 func (m *Model) handleContentViewerKey(msg tea.KeyMsg) tea.Cmd {

@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- Headless / Handoff：`Handoff` 现在会在 headless 模式下发出结构化的 `handoff_request` 事件，包含完整已保存 plan 以及可选 agent / model pool；headless 也新增 `handoff` 命令，可批准执行或拒绝后继续规划。
 - **不兼容 / 配置：** 移除未使用的 `context.reduction.model_pool` 配置项和未使用的 `maintenance.size_check_interval_hours` 配置项。Context reduction 仍是确定性剪裁，不会调用辅助模型；需要 LLM 参与的持久化上下文压缩请使用 `context.compaction.model_pool`。
 - Runtime / 上下文剪裁：将默认字节阈值调成更偏 prompt cache 友好的配置，同时继续剪掉大型旧输出。`shell_success_bytes` 现在是 `8000`（之前 `4000`），`read_like_output_bytes` 现在是 `4000`（之前 `2500`）；age gate 和 `min_tool_results_prune` 保持不变。
 - Runtime / Loop：loop 模式下的 `Done` 退出请求不再有机器强制的验证状态门槛。未完成 TODO、活跃 subagent、blocked 状态以及格式错误/混用的 `Done` 批次仍会阻止自动完成；类似验证的工具结果仍会作为 stall 检测的进展信号。

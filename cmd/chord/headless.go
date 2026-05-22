@@ -18,9 +18,18 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/protocol"
 )
+
+type headlessHandoffPayload struct {
+	RequestID string                     `json:"request_id"`
+	PlanPath  string                     `json:"plan_path"`
+	PlanText  string                     `json:"plan_text,omitempty"`
+	PlanError string                     `json:"plan_error,omitempty"`
+	Agents    []agent.HandoffAgentOption `json:"agents"`
+}
 
 // headlessState holds mutex-protected state for the headless protocol.
 type headlessState struct {
@@ -30,6 +39,7 @@ type headlessState struct {
 	phaseDetail     string
 	pendingConfirm  *protocol.ConfirmRequestPayload
 	pendingQuestion *protocol.QuestionRequestPayload
+	pendingHandoff  *headlessHandoffPayload
 	lastError       string
 	pendingOutcome  string // "completed" / "cancelled" / "error" / ""
 	lastOutcome     string // persists across idle; set from pendingOutcome on idle
@@ -153,6 +163,7 @@ var headlessEventTypes = map[string]bool{
 	"idle":               true,
 	"confirm_request":    true,
 	"question_request":   true,
+	"handoff_request":    true,
 	"error":              true,
 	"agent_done":         true,
 	"info":               true,
@@ -164,7 +175,11 @@ var headlessEventTypes = map[string]bool{
 
 // filterHeadlessEvent converts an AgentEvent to one or more headlessEnvelopes.
 // Returns nil if the event should be filtered out (not subscribed).
-func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessEnvelope {
+func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...headlessBackend) []*headlessEnvelope {
+	var backend headlessBackend
+	if len(backends) > 0 {
+		backend = backends[0]
+	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
@@ -265,6 +280,27 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState) []*headlessE
 				"request_id":     e.RequestID,
 				"timeout_ms":     e.Timeout.Milliseconds(),
 			}})
+		}
+	case agent.HandoffEvent:
+		payload := &headlessHandoffPayload{
+			RequestID: fmt.Sprintf("handoff-%d", time.Now().UnixNano()),
+			PlanPath:  e.PlanPath,
+			Agents:    []agent.HandoffAgentOption{{Name: "builder", Default: true}},
+		}
+		if hb, ok := backend.(headlessHandoffBackend); ok {
+			if options := hb.HandoffAgentOptions(); len(options) > 0 {
+				payload.Agents = options
+			}
+		}
+		if b, err := os.ReadFile(e.PlanPath); err == nil {
+			payload.PlanText = string(b)
+		} else {
+			payload.PlanError = err.Error()
+		}
+		state.pendingHandoff = payload
+		state.updatedAt = time.Now()
+		if state.isSubscribed("handoff_request") {
+			out = append(out, &headlessEnvelope{Type: "handoff_request", Payload: payload})
 		}
 	case agent.AgentDoneEvent:
 		if state.isSubscribed("agent_done") {
@@ -529,10 +565,11 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	})
 
 	// Event loop: forward filtered events to stdout.
+	backend := rt.Backend()
 	events := rt.Events()
 	go func() {
 		for ev := range events {
-			envs := filterHeadlessEvent(ev, state)
+			envs := filterHeadlessEvent(ev, state, backend)
 			for _, env := range envs {
 				out.emit(env)
 			}
@@ -559,7 +596,6 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 		}
 	}()
 
-	backend := rt.Backend()
 	for {
 		select {
 		case <-ac.Ctx.Done():
@@ -628,6 +664,14 @@ type headlessBackend interface {
 	CancelCurrentTurn() bool
 	ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string)
 	ResolveQuestion(answers []string, cancelled bool, requestID string)
+}
+
+type headlessHandoffBackend interface {
+	HandoffAgentOptions() []agent.HandoffAgentOption
+	SetAgentModelPool(agentName, pool string) error
+	ExecutePlan(planPath, agentName string)
+	AppendContextMessage(msg message.Message)
+	ContinueFromContext()
 }
 
 type headlessModelsBackend interface {
@@ -701,6 +745,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"phase_detail":     state.phaseDetail,
 				"pending_confirm":  state.pendingConfirm,
 				"pending_question": state.pendingQuestion,
+				"pending_handoff":  state.pendingHandoff,
 				"last_error":       state.lastError,
 				"last_outcome":     state.lastOutcome,
 				"updated_at":       state.updatedAt.Format(time.RFC3339),
@@ -723,15 +768,16 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			})
 			return
 		}
-		// In headless mode, if a confirm_request or question_request is pending
-		// and the user sends a regular message (not /allow, /deny, or /answer),
-		// auto-dismiss the pending interaction so the agent can continue
-		// processing the new user message. Without this, the interaction
-		// blocks forever (default timeout is 0 = infinite) and the user
+		// In headless mode, if a confirm_request, question_request, or handoff_request
+		// is pending and the user sends a regular message (not /allow, /deny,
+		// /answer, or handoff), auto-dismiss the pending interaction so the agent
+		// can continue processing the new user message. Without this, the
+		// interaction blocks forever (default timeout is 0 = infinite) and the user
 		// message is queued but never consumed.
 		state.mu.Lock()
 		pendingConfirm := state.pendingConfirm
 		pendingQuestion := state.pendingQuestion
+		pendingHandoff := state.pendingHandoff
 		state.mu.Unlock()
 		if pendingConfirm != nil {
 			log.Infof("headless: auto-denying pending confirm for new user message request_id=%v tool_name=%v", pendingConfirm.RequestID, pendingConfirm.ToolName)
@@ -753,6 +799,15 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			state.updatedAt = time.Now()
 			state.mu.Unlock()
 		}
+		if pendingHandoff != nil {
+			log.Infof("headless: auto-cancelling pending handoff for new user message request_id=%v plan_path=%v", pendingHandoff.RequestID, pendingHandoff.PlanPath)
+			state.mu.Lock()
+			if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pendingHandoff.RequestID {
+				state.pendingHandoff = nil
+			}
+			state.updatedAt = time.Now()
+			state.mu.Unlock()
+		}
 		backend.SendUserMessage(content)
 
 	case "models":
@@ -762,6 +817,50 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			return
 		}
 		handleHeadlessModelsCommand(cmd, modelsBackend, out)
+
+	case "handoff":
+		handoffBackend, ok := backend.(headlessHandoffBackend)
+		if !ok {
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "handoff command is not supported by this backend"}})
+			return
+		}
+		state.mu.Lock()
+		pending := state.pendingHandoff
+		state.mu.Unlock()
+		if pending == nil || strings.TrimSpace(pending.RequestID) == "" || (cmd.RequestID != "" && cmd.RequestID != pending.RequestID) {
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "no matching pending handoff"}})
+			return
+		}
+		switch strings.TrimSpace(cmd.Action) {
+		case "", "accept", "allow":
+			agentName := strings.TrimSpace(cmd.Agent)
+			if agentName == "" {
+				agentName = defaultHandoffAgent(pending.Agents)
+			}
+			if pool := strings.TrimSpace(cmd.Pool); pool != "" {
+				if err := handoffBackend.SetAgentModelPool(agentName, pool); err != nil {
+					out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": err.Error()}})
+					return
+				}
+			}
+			handoffBackend.ExecutePlan(pending.PlanPath, agentName)
+		case "deny", "reject", "cancel":
+			reason := strings.TrimSpace(cmd.DenyReason)
+			if reason == "" {
+				reason = "Handoff rejected from headless client."
+			}
+			handoffBackend.AppendContextMessage(message.Message{Role: "user", Content: fmt.Sprintf("Handoff rejected: %s\n\nPlan path: %s", reason, pending.PlanPath)})
+			handoffBackend.ContinueFromContext()
+		default:
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "unsupported handoff action: " + cmd.Action}})
+			return
+		}
+		state.mu.Lock()
+		if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pending.RequestID {
+			state.pendingHandoff = nil
+		}
+		state.updatedAt = time.Now()
+		state.mu.Unlock()
 
 	case "confirm":
 		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleScope)
@@ -814,6 +913,20 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			},
 		})
 	}
+}
+
+func defaultHandoffAgent(options []agent.HandoffAgentOption) string {
+	for _, opt := range options {
+		if opt.Default && strings.TrimSpace(opt.Name) != "" {
+			return strings.TrimSpace(opt.Name)
+		}
+	}
+	for _, opt := range options {
+		if strings.TrimSpace(opt.Name) != "" {
+			return strings.TrimSpace(opt.Name)
+		}
+	}
+	return "builder"
 }
 
 func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, error) {

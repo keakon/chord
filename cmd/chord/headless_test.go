@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/protocol"
 )
@@ -117,6 +119,13 @@ type mockBackend struct {
 	confirmCalls  []confirmCall
 	questionCalls []questionCall
 	cancelCalls   int
+	executeCalls  []executePlanCall
+	continueCalls int
+}
+
+type executePlanCall struct {
+	planPath  string
+	agentName string
 }
 
 type confirmCall struct {
@@ -195,6 +204,29 @@ func (m *mockBackend) SetAgentModelPool(agentName, pool string) error {
 	return nil
 }
 
+func (m *mockBackend) HandoffAgentOptions() []agent.HandoffAgentOption {
+	return []agent.HandoffAgentOption{
+		{Name: "builder", Default: true, ModelPools: []string{"fast", "smart"}, CurrentModelPool: "fast"},
+		{Name: "reviewer", ModelPools: []string{"smart"}, CurrentModelPool: "smart"},
+	}
+}
+
+func (m *mockBackend) ExecutePlan(planPath, agentName string) {
+	m.mu.Lock()
+	m.executeCalls = append(m.executeCalls, executePlanCall{planPath: planPath, agentName: agentName})
+	m.mu.Unlock()
+}
+
+func (m *mockBackend) AppendContextMessage(msg message.Message) {
+	m.SendUserMessage(msg.Content)
+}
+
+func (m *mockBackend) ContinueFromContext() {
+	m.mu.Lock()
+	m.continueCalls++
+	m.mu.Unlock()
+}
+
 func findHeadlessEnvelope(envs []*headlessEnvelope, typ string) *headlessEnvelope {
 	for _, env := range envs {
 		if env != nil && env.Type == typ {
@@ -239,6 +271,66 @@ func TestHeadlessSendCommandRejectsBareMCP(t *testing.T) {
 	defer backend.mu.Unlock()
 	if len(backend.sentMessages) != 0 {
 		t.Fatalf("SendUserMessage should not be called, got %v", backend.sentMessages)
+	}
+}
+
+func TestHeadlessHandoffEventAndCommand(t *testing.T) {
+	planPath := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(planPath, []byte("# Plan\n\nDo the work."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := &headlessState{subscriptions: map[string]bool{"handoff_request": true}}
+	backend := &mockBackend{}
+
+	envs := filterHeadlessEvent(agent.HandoffEvent{PlanPath: planPath}, state, backend)
+	env := findHeadlessEnvelope(envs, "handoff_request")
+	if env == nil {
+		t.Fatalf("handoff_request envelope not emitted: %v", envs)
+	}
+	payload, ok := env.Payload.(*headlessHandoffPayload)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload.PlanPath != planPath || payload.PlanText != "# Plan\n\nDo the work." {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if len(payload.Agents) != 2 || payload.Agents[0].Name != "builder" || payload.Agents[0].CurrentModelPool != "fast" {
+		t.Fatalf("unexpected agents: %+v", payload.Agents)
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: payload.RequestID, Action: "accept", Agent: "reviewer", Pool: "smart"}, backend, state, to.writer(), "sess")
+
+	state.mu.Lock()
+	pending := state.pendingHandoff
+	state.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("pending handoff not cleared: %+v", pending)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.executeCalls) != 1 || backend.executeCalls[0].planPath != planPath || backend.executeCalls[0].agentName != "reviewer" {
+		t.Fatalf("execute calls = %+v", backend.executeCalls)
+	}
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "set-agent:reviewer:smart" {
+		t.Fatalf("sent messages = %+v", backend.sentMessages)
+	}
+}
+
+func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
+	state := &headlessState{pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"}}
+	backend := &mockBackend{}
+	to := newTestOut()
+
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "deny", DenyReason: "needs more detail"}, backend, state, to.writer(), "sess")
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.continueCalls != 1 {
+		t.Fatalf("continue calls = %d, want 1", backend.continueCalls)
+	}
+	if len(backend.sentMessages) != 1 || !strings.Contains(backend.sentMessages[0], "needs more detail") {
+		t.Fatalf("sent messages = %+v", backend.sentMessages)
 	}
 }
 
@@ -423,6 +515,41 @@ func TestHeadlessAutoCancelQuestionOnUserMessage(t *testing.T) {
 	}
 }
 
+func TestHeadlessAutoCancelHandoffOnUserMessage(t *testing.T) {
+	state := &headlessState{
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	cmd := headlessCommand{
+		Type:    "send",
+		Content: "revise the plan instead",
+	}
+	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+
+	state.mu.Lock()
+	pending := state.pendingHandoff
+	state.mu.Unlock()
+	if pending != nil {
+		t.Errorf("pendingHandoff should be nil after send command auto-cancelled it, got %+v", pending)
+	}
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.continueCalls != 0 {
+		t.Errorf("ContinueFromContext calls = %d, want 0", backend.continueCalls)
+	}
+	if len(backend.executeCalls) != 0 {
+		t.Errorf("execute calls = %v, want none", backend.executeCalls)
+	}
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "revise the plan instead" {
+		t.Errorf("sent messages = %v, want [revise the plan instead]", backend.sentMessages)
+	}
+}
 func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &protocol.ConfirmRequestPayload{
@@ -1165,6 +1292,10 @@ func TestHeadlessStatusCommand(t *testing.T) {
 			ToolName:  "Shell",
 			RequestID: "req-1",
 		},
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
 		lastError: "",
 		updatedAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}
@@ -1202,6 +1333,13 @@ func TestHeadlessStatusCommand(t *testing.T) {
 	}
 	if payload["last_outcome"] != "completed" {
 		t.Errorf("last_outcome = %v, want completed", payload["last_outcome"])
+	}
+	pendingHandoff, ok := payload["pending_handoff"].(map[string]any)
+	if !ok {
+		t.Fatalf("pending_handoff = %#v, want object", payload["pending_handoff"])
+	}
+	if pendingHandoff["request_id"] != "handoff-1" || pendingHandoff["plan_path"] != "/tmp/plan.md" {
+		t.Errorf("pending_handoff = %#v, want handoff-1 /tmp/plan.md", pendingHandoff)
 	}
 }
 

@@ -85,6 +85,35 @@ func (a *MainAgent) AvailableAgents() []string {
 	return names
 }
 
+type HandoffAgentOption struct {
+	Name             string   `json:"name"`
+	Default          bool     `json:"default"`
+	ModelPools       []string `json:"model_pools,omitempty"`
+	CurrentModelPool string   `json:"current_model_pool,omitempty"`
+}
+
+// HandoffAgentOptions returns the agents available for plan handoff with their
+// selectable model pools and effective current pool.
+func (a *MainAgent) HandoffAgentOptions() []HandoffAgentOption {
+	names := a.AvailableAgents()
+	options := make([]HandoffAgentOption, 0, len(names))
+	for _, name := range names {
+		cfg := a.agentConfigs[name]
+		opt := HandoffAgentOption{Name: name, Default: name == "builder"}
+		if cfg != nil {
+			opt.ModelPools = cfg.PoolNames()
+			if a.modelPoolPolicy != nil {
+				opt.CurrentModelPool = a.modelPoolPolicy.EffectivePool(name, cfg)
+			}
+		}
+		options = append(options, opt)
+	}
+	if len(options) == 0 {
+		options = append(options, HandoffAgentOption{Name: "builder", Default: true})
+	}
+	return options
+}
+
 // CurrentRole returns the active role name. Goroutine-safe.
 func (a *MainAgent) CurrentRole() string {
 	if cfg := a.currentActiveConfig(); cfg != nil {

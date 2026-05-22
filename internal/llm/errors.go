@@ -462,22 +462,6 @@ func isRequestOrParamError(message string) bool {
 		strings.Contains(msg, "content[].thinking") && strings.Contains(msg, "must be passed back")
 }
 
-// isModelIncompatible400 reports 400-class errors that indicate the current
-// model/provider transport cannot serve this request shape, so routing should
-// try the next model in the pool rather than repeating rounds on the same one.
-func isModelIncompatible400(message string) bool {
-	msg := strings.ToLower(strings.TrimSpace(message))
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "store must be set to false") ||
-		strings.Contains(msg, "stream must be set to true") ||
-		strings.Contains(msg, "not supported for this model") ||
-		strings.Contains(msg, "model does not support") ||
-		strings.Contains(msg, "unsupported parameter") ||
-		strings.Contains(msg, "unsupported value")
-}
-
 // isTerminalModelPoolFailure reports errors that should stop after the current
 // model pool (current cursor-head entry + all remaining configured entries) is exhausted, rather than
 // continuing full retry rounds forever.

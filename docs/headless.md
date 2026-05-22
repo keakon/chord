@@ -74,6 +74,7 @@ Response:
     "phase_detail": "",
     "pending_confirm": null,
     "pending_question": null,
+    "pending_handoff": null,
     "last_error": "",
     "last_outcome": "completed",
     "updated_at": "2026-05-08T12:00:00Z"

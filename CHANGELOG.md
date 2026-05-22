@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Headless / Handoff: `Handoff` now emits a structured `handoff_request` event in headless mode with the full saved plan and available agent/model-pool choices, and accepts a `handoff` command to approve execution or deny and continue planning.
 - **Breaking / Config:** removed the unused `context.reduction.model_pool` setting and the unused `maintenance.size_check_interval_hours` setting. Context reduction remains deterministic and does not call an auxiliary model; use `context.compaction.model_pool` for LLM-backed durable compaction.
 - Runtime / Context reduction: tuned the default byte thresholds to be more prompt-cache friendly while still trimming large stale output. `shell_success_bytes` is now `8000` (was `4000`) and `read_like_output_bytes` is now `4000` (was `2500`); age gates and `min_tool_results_prune` are unchanged.
 - Runtime / Loop: loop-mode `Done` exit requests no longer have a machine-enforced verification-status gate. Open TODOs, active subagents, blocked states, and malformed/mixed `Done` batches still prevent automatic completion; verification-like tool results continue to count as progress for stall detection.
