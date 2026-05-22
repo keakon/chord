@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- Headless / 本地 shell：新增 `local_shell` stdin 命令和 `local_shell_result` 事件，让 headless 集成可以执行 `!` 风格的本地 shell 命令，并接收带超时和输出大小限制的 stdout/stderr 合并结果。
 - Headless / Handoff：`Handoff` 现在会在 headless 模式下发出结构化的 `handoff_request` 事件，包含完整已保存 plan 以及可选 agent / model pool；headless 也新增 `handoff` 命令，可批准执行或拒绝后继续规划。
 - **不兼容 / 配置：** 移除未使用的 `context.reduction.model_pool` 配置项和未使用的 `maintenance.size_check_interval_hours` 配置项。Context reduction 仍是确定性剪裁，不会调用辅助模型；需要 LLM 参与的持久化上下文压缩请使用 `context.compaction.model_pool`。
 - Runtime / 上下文剪裁：将默认字节阈值调成更偏 prompt cache 友好的配置，同时继续剪掉大型旧输出。`shell_success_bytes` 现在是 `8000`（之前 `4000`），`read_like_output_bytes` 现在是 `4000`（之前 `2500`）；age gate 和 `min_tool_results_prune` 保持不变。

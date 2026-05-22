@@ -990,6 +990,57 @@ func TestHeadlessAssistantMessageEventFromSubAgent(t *testing.T) {
 	}
 }
 
+func TestHeadlessLocalShellCommandEmitsResult(t *testing.T) {
+	to := newTestOut()
+	backend := &mockBackend{}
+	state := &headlessState{}
+
+	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "printf chord-local-shell"}, backend, state, to.writer(), "test-session")
+
+	items := to.drain()
+	env := findHeadlessEnvelopeValue(items, "local_shell_result")
+	if env == nil {
+		t.Fatalf("missing local_shell_result in %#v", items)
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload["command"] != "printf chord-local-shell" {
+		t.Fatalf("command = %q", payload["command"])
+	}
+	if payload["output"] != "chord-local-shell" {
+		t.Fatalf("output = %q", payload["output"])
+	}
+	if payload["failed"] != false {
+		t.Fatalf("failed = %v", payload["failed"])
+	}
+}
+
+func TestHeadlessLocalShellEmptyCommandEmitsFailure(t *testing.T) {
+	to := newTestOut()
+	backend := &mockBackend{}
+	state := &headlessState{}
+
+	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "   "}, backend, state, to.writer(), "test-session")
+
+	items := to.drain()
+	env := findHeadlessEnvelopeValue(items, "local_shell_result")
+	if env == nil {
+		t.Fatalf("missing local_shell_result in %#v", items)
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload["failed"] != true {
+		t.Fatalf("failed = %v", payload["failed"])
+	}
+	if !strings.Contains(payload["error"].(string), "empty local shell command") {
+		t.Fatalf("error = %q", payload["error"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests for subscribe command
 // ---------------------------------------------------------------------------

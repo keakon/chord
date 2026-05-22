@@ -5,9 +5,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,6 +23,11 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/protocol"
+)
+
+const (
+	headlessLocalShellTimeout  = 120 * time.Second
+	headlessLocalShellMaxBytes = 512 * 1024
 )
 
 type headlessHandoffPayload struct {
@@ -142,6 +149,7 @@ func (w *stdoutWriter) close() {
 type headlessCommand struct {
 	Type          string   `json:"type"`
 	Content       string   `json:"content,omitempty"`
+	Command       string   `json:"command,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
 	Action        string   `json:"action,omitempty"`
 	Agent         string   `json:"agent,omitempty"`
@@ -169,6 +177,7 @@ var headlessEventTypes = map[string]bool{
 	"info":               true,
 	"toast":              true,
 	"done_completion":    true,
+	"local_shell_result": true,
 	"assistant_rollback": true,
 	"todos":              true,
 }
@@ -714,6 +723,60 @@ func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBack
 	}
 }
 
+type headlessCappedWriter struct {
+	buf      []byte
+	total    int64
+	maxBytes int64
+}
+
+func (c *headlessCappedWriter) Write(p []byte) (int, error) {
+	c.total += int64(len(p))
+	if remaining := c.maxBytes - int64(len(c.buf)); remaining > 0 {
+		if int64(len(p)) <= remaining {
+			c.buf = append(c.buf, p...)
+		} else {
+			c.buf = append(c.buf, p[:remaining]...)
+		}
+	}
+	return len(p), nil
+}
+
+func (c *headlessCappedWriter) String() string {
+	s := string(c.buf)
+	if c.total > c.maxBytes {
+		s += fmt.Sprintf("\n...(output truncated: showed %d of %d bytes total)", len(c.buf), c.total)
+	}
+	return s
+}
+
+func runHeadlessLocalShell(ctx context.Context, command string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, headlessLocalShellTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	buf := &headlessCappedWriter{maxBytes: headlessLocalShellMaxBytes}
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+	err := cmd.Run()
+	out := buf.String()
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, fmt.Errorf("timed out after %ds", int(headlessLocalShellTimeout/time.Second))
+	}
+	return out, err
+}
+
+func emitHeadlessLocalShellResult(out *stdoutWriter, command, output string, err error) {
+	payload := map[string]any{
+		"command": command,
+		"output":  output,
+		"failed":  err != nil,
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	out.emit(headlessEnvelope{Type: "local_shell_result", Payload: payload})
+}
+
 // handleHeadlessCommand processes a single command from stdin.
 func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter, sessionID string) {
 	switch cmd.Type {
@@ -752,6 +815,18 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			},
 		})
 		state.mu.Unlock()
+
+	case "local_shell":
+		command := strings.TrimSpace(cmd.Command)
+		if command == "" {
+			command = strings.TrimSpace(cmd.Content)
+		}
+		if command == "" {
+			emitHeadlessLocalShellResult(out, command, "", fmt.Errorf("empty local shell command"))
+			return
+		}
+		output, err := runHeadlessLocalShell(context.Background(), command)
+		emitHeadlessLocalShellResult(out, command, output, err)
 
 	case "send":
 		content := cmd.Content
