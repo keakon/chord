@@ -183,7 +183,42 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	}
 }
 
-func TestSelectKeyOnDemandInvalidRefreshMarksExpiredWithoutAccountID(t *testing.T) {
+func TestSelectKeyWithExpiredLocalExpiresUsesAccessToken(t *testing.T) {
+	expires := time.Now().Add(-time.Minute).UnixMilli()
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:    "access-token",
+		Expires:   expires,
+		AccountID: "acc-1",
+	}}}}
+	var authMu sync.Mutex
+	refreshHit := false
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshHit = true
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer refreshServer.Close()
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"access-token"})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"access-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+	}, "")
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "access-token" {
+		t.Fatalf("selected key = %q, want access-token", key)
+	}
+	if refreshHit {
+		t.Fatal("refresh endpoint was called based only on local expires")
+	}
+	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusNormal {
+		t.Fatalf("OAuth status = %q, want normal", got)
+	}
+}
+
+func TestSelectKeyDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
@@ -199,30 +234,32 @@ func TestSelectKeyOnDemandInvalidRefreshMarksExpiredWithoutAccountID(t *testing.
 	}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"old-access"})
+	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		refreshHit = true
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		"old-access": {CredentialIndex: 0, Expires: expires},
 	}, "")
 
-	_, _, err = p.SelectKeyWithContext(context.Background())
-	if err == nil {
-		t.Fatal("expected invalid refresh token error")
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if !strings.Contains(err.Error(), "OAuth refresh token invalid") {
-		t.Fatalf("unexpected error: %v", err)
+	if key != "old-access" {
+		t.Fatalf("selected key = %q, want old-access", key)
 	}
-
-	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
-		t.Fatalf("expected in-memory auth OAuth credential status=expired, got %#v", got)
+	if refreshHit {
+		t.Fatal("refresh endpoint was called based only on local expires")
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected in-memory auth OAuth credential status=normal, got %#v", got)
 	}
 }
 
-func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
+func TestSelectKeyDoesNotSkipCredentialFromLocalExpires(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expired := time.Now().Add(-time.Minute).UnixMilli()
 	valid := time.Now().Add(time.Hour).UnixMilli()
@@ -242,10 +279,10 @@ func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
 	}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex, KeyOrder: config.KeyOrderSequential}, []string{"old-access", "valid-access"})
+	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		refreshHit = true
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `{"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`)
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
@@ -257,11 +294,14 @@ func TestSelectKeyOnDemandInvalidRefreshSkipsExpiredCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if key != "valid-access" {
-		t.Fatalf("selected key = %q, want valid-access", key)
+	if key != "old-access" {
+		t.Fatalf("selected key = %q, want old-access", key)
 	}
-	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
-		t.Fatalf("expected first OAuth credential status=expired, got %#v", got)
+	if refreshHit {
+		t.Fatal("refresh endpoint was called based only on local expires")
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected first OAuth credential status=normal, got %#v", got)
 	}
 	if got := auth["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected second OAuth credential to remain normal, got %#v", got)

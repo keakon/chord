@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -469,7 +470,7 @@ func TestIsRefreshTokenInvalid(t *testing.T) {
 		{
 			name: "missing_refresh_token",
 			err:  &OAuthRefreshError{Code: "missing_refresh_token", Message: "refresh token is empty"},
-			want: true,
+			want: false,
 		},
 		{
 			name: "other oauth error",
@@ -536,8 +537,12 @@ func TestRefreshOAuthToken_EmptyRefreshTokenDoesNotCallEndpoint(t *testing.T) {
 	defer server.Close()
 
 	_, err := RefreshOAuthToken(context.Background(), server.Client(), server.URL, "client-123", &OAuthCredential{Access: "old-access"})
-	if !IsRefreshTokenInvalid(err) {
-		t.Fatalf("RefreshOAuthToken err = %v, want refresh-token-invalid error", err)
+	var refreshErr *OAuthRefreshError
+	if !errors.As(err, &refreshErr) || refreshErr.Code != "missing_refresh_token" {
+		t.Fatalf("RefreshOAuthToken err = %v, want missing_refresh_token error", err)
+	}
+	if IsRefreshTokenInvalid(err) {
+		t.Fatalf("missing_refresh_token should not be classified as invalid refresh token")
 	}
 	if called {
 		t.Fatal("token endpoint was called despite empty refresh token")

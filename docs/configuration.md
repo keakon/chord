@@ -243,6 +243,8 @@ That split is intentional:
 - `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; do not put OAuth `status` in `auth.yaml`;
 - `auth.state.yaml` is machine-managed shared runtime state, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
 
+For OAuth credentials, `expires` is the access-token expiry timestamp in Unix milliseconds. If an OAuth entry has an `access` token but no `refresh` token, Chord can still use that access token; it simply cannot refresh the slot afterward. A local `expires` value is metadata and is not used by itself to mark an OAuth slot `expired`; Chord only writes `expired` after an actual provider/token-endpoint authentication failure confirms the credential is no longer usable.
+
 A typical `auth.state.yaml` entry looks like:
 
 ```yaml

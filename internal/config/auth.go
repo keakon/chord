@@ -342,7 +342,7 @@ func IsRefreshTokenInvalid(err error) bool {
 	if !errors.As(err, &refreshErr) {
 		return false
 	}
-	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" || refreshErr.Code == "missing_refresh_token" {
+	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" {
 		return true
 	}
 	msg := strings.ToLower(refreshErr.Message)

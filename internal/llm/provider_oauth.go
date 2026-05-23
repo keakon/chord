@@ -432,13 +432,6 @@ func (p *ProviderConfig) isOpenAIOAuthKey(key string) bool {
 // use x-codex-* rate-limit snapshots when choosing 429 cooldown after Retry-After
 // is absent or zero; all other providers fall back to the default duration.
 
-func isExpiringSoon(expires int64) bool {
-	if expires == 0 {
-		return false
-	}
-	return time.Until(time.UnixMilli(expires)) < 60*time.Second
-}
-
 // refreshOAuthKey refreshes the OAuth token for ks.
 // Must be called with p.mu held; it temporarily releases p.mu during the HTTP call.
 

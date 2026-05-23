@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Auth / OAuth: stopped treating local access-token `expires` metadata as proof that a credential is expired. OAuth slots are now marked `expired` only after provider or token-endpoint authentication failures confirm they are unusable.
 - LSP / Diagnostics: post-Write/Edit diagnostics now wait for fresh publishDiagnostics snapshots and a short settle window before tool output is generated. Diagnostics with stale document versions are ignored when servers provide versions, and versionless diagnostics must arrive after the edit notification, reducing transient false positives from asynchronous servers such as gopls.
 - Headless / Local shell: added a `local_shell` stdin command and `local_shell_result` event so headless integrations can execute `!`-style local shell commands and receive combined stdout/stderr results with timeout and output limits.
 - Headless / Handoff: `Handoff` now emits a structured `handoff_request` event in headless mode with the full saved plan and available agent/model-pool choices, and accepts a `handoff` command to approve execution or deny and continue planning.

@@ -889,7 +889,7 @@ func TestMarkKeyCooldown401OAuthInvalidatedSkipsRefreshAndDeactivatesKey(t *test
 	}
 }
 
-func TestMarkKeyCooldown401OAuthEmptyRefreshTokenMarksExpiredWithoutHTTP(t *testing.T) {
+func TestMarkKeyCooldown401OAuthEmptyRefreshTokenOnlyCooldownsWithoutHTTP(t *testing.T) {
 	ctx := context.Background()
 	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -918,12 +918,12 @@ func TestMarkKeyCooldown401OAuthEmptyRefreshTokenMarksExpiredWithoutHTTP(t *test
 	if refreshHit {
 		t.Fatal("refresh endpoint was called despite empty refresh token")
 	}
-	if auth["openai"][0].OAuth.Status != config.OAuthStatusExpired {
-		t.Fatalf("OAuth status = %q, want expired", auth["openai"][0].OAuth.Status)
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusNormal {
+		t.Fatalf("OAuth status = %q, want normal: missing refresh token should not be persisted as expired", auth["openai"][0].OAuth.Status)
 	}
-	_, total := p.AvailableKeyCount()
-	if total != 0 {
-		t.Fatalf("total = %d, want 0: OAuth key without refresh token should be excluded after auth failure", total)
+	available, total := p.AvailableKeyCount()
+	if available != 0 || total != 1 {
+		t.Fatalf("AvailableKeyCount = %d/%d, want 0/1: key should be temporarily cooled down but not permanently excluded", available, total)
 	}
 }
 

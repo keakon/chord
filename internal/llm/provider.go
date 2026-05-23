@@ -372,6 +372,3 @@ func (p *ProviderConfig) Type() string {
 func (p *ProviderConfig) APIURL() string {
 	return p.apiURL
 }
-
-// isExpiringSoon reports whether the OAuth token with the given expiry timestamp
-// (millisecond-precision Unix time) expires within 60 seconds.

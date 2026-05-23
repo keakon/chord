@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1170,6 +1171,51 @@ func TestRunDoctorModelsNoAuthProviderStillRequests(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestRunDoctorModelsUsesAccessTokenDespiteExpiredLocalExpires(t *testing.T) {
+	var responseRequests atomic.Int32
+	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		responseRequests.Add(1)
+		defer r.Body.Close()
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		writeDoctorResponsesSSE(t, w)
+	}))
+	defer responseServer.Close()
+
+	var refreshRequests atomic.Int32
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshRequests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(-time.Hour).UnixMilli()
+	setupDoctorModelsConfigHome(t, "providers:\n"+
+		"  openai:\n"+
+		"    type: responses\n"+
+		"    api_url: "+responseServer.URL+"/v1/responses\n"+
+		"    token_url: "+refreshServer.URL+"\n"+
+		"    client_id: client-id\n"+
+		"    models:\n"+
+		"      gpt:\n"+
+		"        limit:\n"+
+		"          context: 1000\n"+
+		"          output: 128\n",
+		fmt.Sprintf("openai:\n  - access: access-token\n    expires: %d\n    account_id: acc-1\n", expires))
+
+	var out bytes.Buffer
+	if err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "openai/gpt", Timeout: 5 * time.Second, JSON: true, Out: &out}); err != nil {
+		t.Fatalf("runDoctorModels: %v\noutput: %s", err, out.String())
+	}
+	if responseRequests.Load() != 1 {
+		t.Fatalf("responseRequests = %d, want 1", responseRequests.Load())
+	}
+	if refreshRequests.Load() != 0 {
+		t.Fatalf("refreshRequests = %d, want 0", refreshRequests.Load())
 	}
 }
 

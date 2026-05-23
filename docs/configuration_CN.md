@@ -226,6 +226,8 @@ openai:
 - `auth.yaml` 继续作为用户手动维护的凭据真相源，保存 `refresh`、`access`、`expires`、`account_id`、`email` 等相对稳定字段；不要在 `auth.yaml` 中写 OAuth `status`；
 - `auth.state.yaml` 作为机器维护的共享运行时状态，避免额度 / reset 更新以及 `expired`、`deactivated`、`invalidated` 等账号状态频繁改动 `auth.yaml`，与用户手工编辑发生冲突。
 
+对于 OAuth 凭据，`expires` 表示 access token 的过期时间，单位为 Unix 毫秒。如果某个 OAuth 条目有 `access` token 但没有 `refresh` token，Chord 仍会直接使用该 access token；只是之后无法自动刷新。`expires` 本地字段只是元数据，不能单独作为写入 `expired` 的依据；只有实际 provider / token endpoint 认证失败确认凭据不可用后，Chord 才会写入 `expired`。
+
 典型的 `auth.state.yaml` 条目形态如下：
 
 ```yaml

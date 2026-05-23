@@ -369,29 +369,29 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		return "", false, &AllKeysCoolingError{RetryAfter: retryAfter}
 	}
 
-	// Refresh OAuth token if it's about to expire (<60s).
-	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil {
-		if selectedKS.Key == "" || isExpiringSoon(selectedKS.OAuthInfo.Expires) {
-			if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
-				if config.IsRefreshTokenInvalid(err) {
-					persist := p.markInvalidKeyStateLocked(selectedKS, config.OAuthStatusExpired)
-					hasRemaining := false
-					for _, ks := range p.keyStates {
-						if !ks.Invalid {
-							hasRemaining = true
-							break
-						}
+	// Refresh OAuth only when no access token is available. Do not use the local
+	// expires timestamp as proof that a token is expired; only an actual provider
+	// authentication failure may invalidate or expire an OAuth slot.
+	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil && selectedKS.Key == "" {
+		if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
+			if config.IsRefreshTokenInvalid(err) {
+				persist := p.markInvalidKeyStateLocked(selectedKS, config.OAuthStatusExpired)
+				hasRemaining := false
+				for _, ks := range p.keyStates {
+					if !ks.Invalid {
+						hasRemaining = true
+						break
 					}
-					p.mu.Unlock()
-					p.persistInvalidOAuthCredential(persist)
-					if hasRemaining {
-						return p.SelectKeyWithContext(ctx)
-					}
-					return "", false, fmt.Errorf("OAuth refresh token invalid provider=%v: %w", p.name, err)
 				}
-				// Log warning but continue with the old token (might still work).
-				log.Warnf("failed to refresh OAuth token on-demand provider=%v error=%v", p.name, err)
+				p.mu.Unlock()
+				p.persistInvalidOAuthCredential(persist)
+				if hasRemaining {
+					return p.SelectKeyWithContext(ctx)
+				}
+				return "", false, fmt.Errorf("OAuth refresh token invalid provider=%v: %w", p.name, err)
 			}
+			// Log warning but continue with the old token (might still work).
+			log.Warnf("failed to refresh OAuth token on-demand provider=%v error=%v", p.name, err)
 		}
 	}
 
