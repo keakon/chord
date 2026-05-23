@@ -471,6 +471,10 @@ func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 }
 
 func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
+	if !m.anyServerMatchesPath(path) {
+		return nil, false
+	}
+
 	m.Start(ctx, path)
 
 	check := func() (*Client, bool, bool) {

@@ -137,6 +137,32 @@ func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
 	}
 }
 
+func TestWaitForClientForPathReturnsImmediatelyWhenMatchingServerDisabled(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+				Disabled:  true,
+			},
+		},
+	}, root, nil)
+
+	path := filepath.Join(root, "main.go")
+	mgr.clientsMu.Lock()
+	mgr.starting["gopls"] = true
+	mgr.clientsMu.Unlock()
+
+	start := time.Now()
+	if _, ok := mgr.waitForClientForPath(context.Background(), path, time.Second); ok {
+		t.Fatal("waitForClientForPath unexpectedly found a client")
+	}
+	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
+		t.Fatalf("waitForClientForPath should not wait for disabled gopls, took %v", elapsed)
+	}
+}
+
 func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(&config.Config{

@@ -108,6 +108,51 @@ func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.
 	}
 }
 
+func TestAfterWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+				Disabled:  true,
+			},
+		},
+	}, root, nil)
+	path := filepath.Join(root, "main.go")
+
+	origStart := afterWriteStart
+	origWait := afterWriteWaitForClient
+	origDidChange := afterWriteDidChange
+	origAwait := afterWriteAwaitWaiter
+	t.Cleanup(func() {
+		afterWriteStart = origStart
+		afterWriteWaitForClient = origWait
+		afterWriteDidChange = origDidChange
+		afterWriteAwaitWaiter = origAwait
+	})
+	afterWriteStart = func(_ *Manager, _ context.Context, _ string) {
+		t.Fatal("disabled gopls should not be started after write")
+	}
+	afterWriteWaitForClient = func(_ *Manager, _ context.Context, _ string, _ time.Duration) (*Client, bool) {
+		t.Fatal("disabled gopls should not be waited on after write")
+		return nil, false
+	}
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, error) {
+		t.Fatal("disabled gopls should not receive didChange after write")
+		return nil, nil
+	}
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+		t.Fatal("disabled gopls diagnostics should not be awaited after write")
+		return nil, false
+	}
+
+	out := mgr.AfterWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false)
+	if out != "Successfully wrote 12 bytes" {
+		t.Fatalf("AfterWriteToolResult output = %q", out)
+	}
+}
+
 func TestAfterWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T) {
 	mgr, path, _ := newAfterWriteTestManager(t)
 
