@@ -465,6 +465,34 @@ func TestSharedCodingGuidelinesPrompt_PrefersReasonableAutonomyBeforeAsking(t *t
 	}
 }
 
+func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLevelAmbiguity(t *testing.T) {
+	got := sharedCodingGuidelinesPrompt
+	for _, want := range []string{
+		"desired product behavior or feature surface genuinely ambiguous in ways the user would directly perceive",
+		"surface the open product decisions to the user before implementing rather than silently picking the simplest interpretation",
+		"follow the confirmation quality requirements stated in the user confirmation guidance",
+		"If the user has explicitly indicated a minimal or specific scope",
+		"treat that as the resolved product decision and proceed without re-asking",
+		"When the request admits more than one reasonable implementation path with no externally visible behavior difference",
+		"pick the one with the smallest blast radius on existing code",
+		"proceed without bringing routine implementation choices back to the user",
+		"If a blocker of this kind appears mid-execution, raise it then rather than continuing on a guess or pretending the task is complete",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"if assumptions are uncertain, ask before implementing",
+		"if anything is unclear, stop and ask",
+		"do only what was asked",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("sharedCodingGuidelinesPrompt unexpectedly reintroduced anti-pattern phrasing %q in %q", unwanted, got)
+		}
+	}
+}
+
 func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T) {
 	got := sharedAgentValuesPrompt
 	for _, want := range []string{
