@@ -50,6 +50,19 @@ func TestHookPureHelpers(t *testing.T) {
 	}
 }
 
+func TestHookOutputBufferCapsOutput(t *testing.T) {
+	buf := &hookOutputBuffer{maxBytes: 5}
+	if n, err := buf.Write([]byte("hello world")); n != len("hello world") || err != nil {
+		t.Fatalf("Write = (%d, %v), want full accept", n, err)
+	}
+	if got := buf.String(); got != "hello" {
+		t.Fatalf("buffer content = %q, want capped hello", got)
+	}
+	if !buf.Truncated() {
+		t.Fatal("buffer should report truncation")
+	}
+}
+
 func TestHookFiltersAndEnvHelpers(t *testing.T) {
 	env := testEnv(OnToolBatchComplete, map[string]any{
 		"tool_name":  "Shell",

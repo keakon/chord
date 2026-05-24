@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -86,6 +87,18 @@ func TestBashExecuteForegroundTimeoutUsesConfiguredValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out after 1s") {
 		t.Fatalf("expected effective timeout in error, got %v", err)
+	}
+}
+
+func TestShellExitErrorReportsSignal(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	err := cmd.Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("Run error = %T %v, want *exec.ExitError", err, err)
+	}
+	if got := shellExitError(exitErr).Error(); !strings.Contains(got, "signal:") || !strings.Contains(got, "terminated") {
+		t.Fatalf("shellExitError = %q, want signal termination", got)
 	}
 }
 

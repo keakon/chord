@@ -1723,6 +1723,27 @@ func TestRunHeadlessWithDepsReportsScannerError(t *testing.T) {
 	}
 }
 
+func TestReadHeadlessStdinLinesReportsTooLongAndContinues(t *testing.T) {
+	input := strings.Repeat("x", headlessStdinMaxLineBytes+1) + "\n{}\n"
+	lines := make(chan headlessStdinLine, 4)
+	readHeadlessStdinLines(context.Background(), strings.NewReader(input), lines)
+
+	first, ok := <-lines
+	if !ok {
+		t.Fatal("expected too-long error")
+	}
+	if first.code != "stdin_line_too_long" || first.err == nil || first.fatal {
+		t.Fatalf("first line = %+v, want recoverable stdin_line_too_long", first)
+	}
+	second, ok := <-lines
+	if !ok {
+		t.Fatal("expected reader to continue after too-long line")
+	}
+	if string(second.line) != "{}" || second.err != nil {
+		t.Fatalf("second line = %+v, want valid JSON line", second)
+	}
+}
+
 func TestHeadlessParentWatcherCancelsOnParentChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

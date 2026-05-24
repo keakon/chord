@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -291,7 +292,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 				return output, FormatNonInteractiveRuntimeError("Shell", a.Command, err, output)
 			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				return output, fmt.Errorf("exit code %d", exitErr.ExitCode())
+				return output, shellExitError(exitErr)
 			}
 			return output, fmt.Errorf("command error: %w", err)
 		}
@@ -311,6 +312,16 @@ func resolveShellExecution(shellType, command string) (string, []string) {
 	st := shell.ParseShellType(shellType)
 	binary, args := shell.GetShellCommand(st, command)
 	return binary, args
+}
+
+func shellExitError(exitErr *exec.ExitError) error {
+	if exitErr == nil {
+		return fmt.Errorf("command failed")
+	}
+	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		return fmt.Errorf("signal: %s", status.Signal())
+	}
+	return fmt.Errorf("exit code %d", exitErr.ExitCode())
 }
 
 // killProcessGroup sends SIGTERM (then SIGKILL) to the process group and

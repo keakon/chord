@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,7 +29,15 @@ import (
 const (
 	headlessLocalShellTimeout  = 120 * time.Second
 	headlessLocalShellMaxBytes = 512 * 1024
+	headlessStdinMaxLineBytes  = 1024 * 1024
 )
+
+type headlessStdinLine struct {
+	line  []byte
+	code  string
+	err   error
+	fatal bool
+}
 
 type headlessHandoffPayload struct {
 	RequestID string                     `json:"request_id"`
@@ -586,45 +595,35 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	}()
 
 	// Command loop: read stdin JSON lines.
-	lines := make(chan []byte, 16)
-	scanErr := make(chan error, 1)
-	go func() {
-		defer close(lines)
-		scanner := bufio.NewScanner(deps.stdin)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			b := append([]byte(nil), scanner.Bytes()...)
-			select {
-			case lines <- b:
-			case <-ac.Ctx.Done():
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			scanErr <- err
-		}
-	}()
+	stdinLines := make(chan headlessStdinLine, 16)
+	go readHeadlessStdinLines(ac.Ctx, deps.stdin, stdinLines)
 
 	for {
 		select {
 		case <-ac.Ctx.Done():
 			return nil
-		case err := <-scanErr:
-			out.emit(headlessEnvelope{
-				Type: "error",
-				Payload: map[string]string{
-					"message": "stdin read error: " + err.Error(),
-				},
-			})
-			ac.Cancel()
-			return nil
-		case line, ok := <-lines:
+		case item, ok := <-stdinLines:
 			if !ok {
 				// stdin closed (parent/gateway exited) → exit.
 				ac.Cancel()
 				return nil
 			}
+			if item.err != nil {
+				payload := map[string]string{
+					"message": "stdin read error: " + item.err.Error(),
+				}
+				if item.code != "" {
+					payload["code"] = item.code
+				}
+				out.emit(headlessEnvelope{Type: "error", Payload: payload})
+				if item.fatal {
+					ac.Cancel()
+					return nil
+				}
+				continue
+			}
 
+			line := item.line
 			if len(line) == 0 {
 				continue
 			}
@@ -641,6 +640,65 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 			}
 			handleHeadlessCommand(hcmd, backend, state, out, sessionID)
 		}
+	}
+}
+
+func readHeadlessStdinLines(ctx context.Context, r io.Reader, out chan<- headlessStdinLine) {
+	defer close(out)
+	reader := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(chunk) > 0 {
+			line = append(line, chunk...)
+			if len(line) > headlessStdinMaxLineBytes {
+				discardHeadlessStdinLine(reader, err)
+				line = nil
+				if !sendHeadlessStdinLine(ctx, out, headlessStdinLine{code: "stdin_line_too_long", err: fmt.Errorf("line exceeds %d bytes", headlessStdinMaxLineBytes)}) {
+					return
+				}
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				continue
+			}
+		}
+		if err == nil {
+			line = bytes.TrimSuffix(line, []byte("\n"))
+			line = bytes.TrimSuffix(line, []byte("\r"))
+			if !sendHeadlessStdinLine(ctx, out, headlessStdinLine{line: append([]byte(nil), line...)}) {
+				return
+			}
+			line = nil
+			continue
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if len(line) > 0 {
+				line = bytes.TrimSuffix(line, []byte("\r"))
+				_ = sendHeadlessStdinLine(ctx, out, headlessStdinLine{line: append([]byte(nil), line...)})
+			}
+			return
+		}
+		_ = sendHeadlessStdinLine(ctx, out, headlessStdinLine{err: err, fatal: true})
+		return
+	}
+}
+
+func discardHeadlessStdinLine(reader *bufio.Reader, err error) {
+	for err == bufio.ErrBufferFull {
+		_, err = reader.ReadSlice('\n')
+	}
+}
+
+func sendHeadlessStdinLine(ctx context.Context, out chan<- headlessStdinLine, line headlessStdinLine) bool {
+	select {
+	case out <- line:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

@@ -40,6 +40,7 @@ const (
 
 	DefaultMaxResultLines = 50
 	DefaultMaxResultBytes = 4096
+	MaxHookOutputBytes    = 10 * 1024 * 1024
 )
 
 const (
@@ -455,6 +456,48 @@ func normalizeJoin(join string) string {
 	return JoinBackground
 }
 
+type hookOutputBuffer struct {
+	buf       bytes.Buffer
+	maxBytes  int
+	truncated bool
+}
+
+func (b *hookOutputBuffer) Write(p []byte) (int, error) {
+	if b == nil {
+		return len(p), nil
+	}
+	remaining := b.maxBytes - b.buf.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		_, _ = b.buf.Write(p[:remaining])
+		b.truncated = true
+		return len(p), nil
+	}
+	_, _ = b.buf.Write(p)
+	return len(p), nil
+}
+
+func (b *hookOutputBuffer) Bytes() []byte {
+	if b == nil {
+		return nil
+	}
+	return b.buf.Bytes()
+}
+
+func (b *hookOutputBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	return b.buf.String()
+}
+
+func (b *hookOutputBuffer) Truncated() bool {
+	return b != nil && b.truncated
+}
+
 func executeHook(ctx context.Context, h HookDef, env Envelope) ([]byte, time.Duration, bool, error) {
 	timeout := h.Timeout
 	if timeout <= 0 {
@@ -479,17 +522,25 @@ func executeHook(ctx context.Context, h HookDef, env Envelope) ([]byte, time.Dur
 	}
 	cmd.Stdin = bytes.NewReader(inputJSON)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &hookOutputBuffer{maxBytes: MaxHookOutputBytes}
+	stderr := &hookOutputBuffer{maxBytes: MaxHookOutputBytes}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	start := time.Now()
 	runErr := cmd.Run()
 	duration := time.Since(start)
 	timedOut := errors.Is(hookCtx.Err(), context.DeadlineExceeded)
 	if runErr != nil {
+		stderrText := strings.TrimSpace(stderr.String())
+		if stderr.Truncated() {
+			stderrText += fmt.Sprintf("\n[stderr truncated at %d bytes]", MaxHookOutputBytes)
+		}
+		if stdout.Truncated() {
+			stderrText += fmt.Sprintf("\n[stdout truncated at %d bytes]", MaxHookOutputBytes)
+		}
 		return stdout.Bytes(), duration, timedOut, fmt.Errorf("hook %q failed: %w (stderr: %s)",
-			h.Name, runErr, strings.TrimSpace(stderr.String()))
+			h.Name, runErr, stderrText)
 	}
 	return stdout.Bytes(), duration, false, nil
 }
