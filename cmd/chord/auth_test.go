@@ -696,7 +696,6 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	}
 	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusExpired
-		record.Email = "expired@example.com"
 		return true, nil
 	})
 	if err != nil {
@@ -725,8 +724,8 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll(stdout): %v", err)
 	}
-	if !strings.Contains(string(output), "expired@example.com") {
-		t.Fatalf("expected output to contain removed email, got %q", string(output))
+	if !strings.Contains(string(output), "acc-1") {
+		t.Fatalf("expected output to contain removed account_id, got %q", string(output))
 	}
 }
 
@@ -821,13 +820,33 @@ func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	}
 }
 
+func TestOAuthCredentialMapRefreshOnlyUsesKeySlot(t *testing.T) {
+	got, backfills := oauthCredentialMap([]config.ProviderCredential{
+		{APIKey: "", ExplicitEmpty: true},
+		{OAuth: &config.OAuthCredential{Refresh: "refresh-only", AccountID: "acc-refresh"}},
+	})
+	if _, ok := got["key_slot:0"]; ok {
+		t.Fatalf("explicit empty API key slot should not be mapped as OAuth: %#v", got)
+	}
+	setup, ok := got["key_slot:1"]
+	if !ok {
+		t.Fatalf("refresh-only OAuth setup missing key_slot:1: %#v", got)
+	}
+	if setup.CredentialIndex != 1 || setup.AccountID != "acc-refresh" {
+		t.Fatalf("unexpected refresh-only setup: %#v", setup)
+	}
+	if len(backfills) != 0 {
+		t.Fatalf("backfills = %#v, want none", backfills)
+	}
+}
+
 func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.T) {
-	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token"}, "email": "token@example.com"}`)
+	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-existing"}, "email": "token@example.com"}`)
 	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-existing", Email: "existing@example.com"}}})
 
 	setup := got[access]
-	if setup.AccountID != "acct-existing" || setup.Email != "existing@example.com" {
-		t.Fatalf("setup metadata = (%q, %q), want existing metadata", setup.AccountID, setup.Email)
+	if setup.AccountID != "acct-existing" || setup.Email != "token@example.com" {
+		t.Fatalf("setup metadata = (%q, %q), want token-compatible metadata", setup.AccountID, setup.Email)
 	}
 	if len(backfills) != 0 {
 		t.Fatalf("backfills = %#v, want none", backfills)

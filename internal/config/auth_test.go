@@ -307,7 +307,7 @@ func TestLoadAuthConfig_Mixed(t *testing.T) {
 func TestExtractAPIKeys(t *testing.T) {
 	creds := []ProviderCredential{
 		{APIKey: "key1"},
-		{OAuth: &OAuthCredential{Refresh: "r", Access: "a", Expires: 123}},
+		{OAuth: &OAuthCredential{Refresh: "r", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 123}},
 		{APIKey: "key2"},
 		{APIKey: ""},
 	}
@@ -316,22 +316,22 @@ func TestExtractAPIKeys(t *testing.T) {
 	if len(keys) != 3 {
 		t.Fatalf("expected 3 keys, got %d: %v", len(keys), keys)
 	}
-	if keys[0] != "key1" || keys[1] != "a" || keys[2] != "key2" {
+	if keys[0] != "key1" || keys[1] == "" || keys[2] != "key2" {
 		t.Errorf("unexpected keys: %v", keys)
 	}
 }
 
 func TestExtractAPIKeys_OAuth(t *testing.T) {
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: "access-tok", Expires: 9999999999000}},
+		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 9999999999000}},
 		{APIKey: "plain-key"},
 	}
 	keys := ExtractAPIKeys(creds)
 	if len(keys) != 2 {
 		t.Fatalf("expected 2 keys, got %d: %v", len(keys), keys)
 	}
-	if keys[0] != "access-tok" {
-		t.Errorf("expected keys[0]=access-tok, got %q", keys[0])
+	if keys[0] == "" {
+		t.Errorf("expected keys[0] to be OAuth access token, got empty")
 	}
 	if keys[1] != "plain-key" {
 		t.Errorf("expected keys[1]=plain-key, got %q", keys[1])
@@ -340,10 +340,10 @@ func TestExtractAPIKeys_OAuth(t *testing.T) {
 
 func TestExtractAPIKeys_OAuthDeactivatedStillIncludedForDeferredFiltering(t *testing.T) {
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: "access-tok", Expires: 9999999999000, Status: OAuthStatusDeactivated}},
+		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 9999999999000, Status: OAuthStatusDeactivated}},
 	}
 	keys := ExtractAPIKeys(creds)
-	if len(keys) != 1 || keys[0] != "access-tok" {
+	if len(keys) != 1 || keys[0] == "" {
 		t.Fatalf("expected deactivated OAuth access token to remain in extracted keys for runtime filtering, got %v", keys)
 	}
 }
@@ -354,11 +354,11 @@ func TestExtractAPIKeys_OAuthEmptyAccess(t *testing.T) {
 		{APIKey: "plain-key"},
 	}
 	keys := ExtractAPIKeys(creds)
-	if len(keys) != 1 {
-		t.Fatalf("expected 1 key (OAuth with empty Access skipped), got %d: %v", len(keys), keys)
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys (refresh-only OAuth plus plain key), got %d: %v", len(keys), keys)
 	}
-	if keys[0] != "plain-key" {
-		t.Errorf("expected keys[0]=plain-key, got %q", keys[0])
+	if keys[0] != "" || keys[1] != "plain-key" {
+		t.Errorf("unexpected keys: %v", keys)
 	}
 }
 

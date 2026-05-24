@@ -87,6 +87,13 @@ codex:
     account_id: acc-1
 ```
 
+Chord can also start from a refresh-only entry and populate `access`, `expires`, and identity metadata after the first refresh:
+
+```yaml
+codex:
+  - refresh: "..."
+```
+
 ## `~/.config/chord/agents/reviewer.md`
 
 ```md

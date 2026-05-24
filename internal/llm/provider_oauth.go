@@ -49,20 +49,17 @@ func (r *OAuthRefresher) persistCredentialStatus(match config.OAuthCredentialMat
 }
 
 func (r *OAuthRefresher) persistOAuthStateStatus(cred *config.OAuthCredential, status config.OAuthCredentialStatus) error {
-	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil {
+	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil || strings.TrimSpace(cred.AccountID) == "" {
 		return nil
 	}
-	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID, Email: cred.Email, Access: cred.Access}
+	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID}
 	_, _, _, err := config.UpsertOAuthStateRecord(r.authStatePath, key, func(record *config.OAuthStateRecord) (bool, error) {
+		before := *record
 		record.AccountID = cred.AccountID
-		record.Email = cred.Email
-		record.Access = cred.Access
-		if record.Status == status {
-			return false, nil
-		}
+		record.Expires = cred.Expires
 		record.Status = status
 		record.UpdatedAt = time.Now().UnixMilli()
-		return true, nil
+		return !config.EqualOAuthStateRecord(before, *record), nil
 	})
 	if err != nil {
 		return fmt.Errorf("persist oauth state status: %w", err)
@@ -270,8 +267,11 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath st
 	}
 	p.authStatePath = authStatePath
 	p.effectiveProxyURL = proxyURL
-	for _, ks := range p.keyStates {
+	for keySlot, ks := range p.keyStates {
 		setup, ok := oauthKeys[ks.Key]
+		if !ok && ks.Key == "" {
+			setup, ok = oauthKeys[fmt.Sprintf("key_slot:%d", keySlot)]
+		}
 		if !ok {
 			continue
 		}
@@ -465,6 +465,9 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 		log.Warnf("OAuth token refresh failed provider=%v error=%v", p.name, err)
 		return err
 	}
+	if persistedAccountID := strings.TrimSpace(newCred.AccountID); persistedAccountID == "" || strings.TrimSpace(newCred.Access) == "" || config.ExtractOAuthAccountIDFromToken(newCred.Access) != persistedAccountID {
+		return fmt.Errorf("refreshed OAuth access token missing matching account_id provider=%v", p.name)
+	}
 
 	credentialIndex := credIdx
 	match := config.OAuthCredentialMatch{AccountID: credCopy.AccountID, Access: credCopy.Access, CredentialIndex: &credentialIndex}
@@ -494,6 +497,12 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	// Update in-memory key state.
 	ks.Key = persistedCred.Access
 	ks.OAuthInfo.Expires = persistedCred.Expires
+	if persistedCred.Access != "" {
+		ks.OAuthInfo.Expires = config.ExtractOAuthExpiresAtFromToken(persistedCred.Access)
+		if ks.OAuthInfo.Expires == 0 {
+			ks.OAuthInfo.Expires = persistedCred.Expires
+		}
+	}
 	ks.OAuthInfo.CodexPrimaryResetAt = persistedCred.CodexPrimaryResetAt
 	ks.OAuthInfo.CodexSecondaryResetAt = persistedCred.CodexSecondaryResetAt
 	ks.SoftCooldownUntil = codexSoftCooldownUntilFromMillis(persistedCred.CodexPrimaryResetAt, persistedCred.CodexSecondaryResetAt, time.Now())

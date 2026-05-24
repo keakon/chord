@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/keakon/chord/internal/config"
@@ -8,6 +9,7 @@ import (
 )
 
 type oauthMetadataBackfill struct {
+	Match     config.OAuthCredentialMatch
 	AccountID string
 	Email     string
 }
@@ -15,19 +17,35 @@ type oauthMetadataBackfill struct {
 func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuthKeySetup, []oauthMetadataBackfill) {
 	result := make(map[string]llm.OAuthKeySetup)
 	var backfills []oauthMetadataBackfill
+	keySlot := 0
 	for credIdx, cred := range creds {
-		if cred.OAuth == nil || cred.OAuth.Access == "" {
+		if cred.OAuth == nil {
+			if cred.APIKey != "" || cred.ExplicitEmpty {
+				keySlot++
+			}
 			continue
 		}
-		accountID := cred.OAuth.AccountID
+		access := cred.OAuth.Access
+		accountID := ""
+		email := ""
+		if access != "" {
+			accountID = config.ExtractOAuthAccountIDFromToken(access)
+			if accountID == "" || (cred.OAuth.AccountID != "" && cred.OAuth.AccountID != accountID) {
+				continue
+			}
+			email = config.ExtractOAuthEmailFromToken(access)
+			if cred.OAuth.Expires == 0 {
+				cred.OAuth.Expires = config.ExtractOAuthExpiresAtFromToken(access)
+			}
+		} else if cred.OAuth.Refresh == "" {
+			continue
+		}
 		if accountID == "" {
-			accountID = config.ExtractOAuthAccountIDFromToken(cred.OAuth.Access)
+			accountID = cred.OAuth.AccountID
 		}
-		email := cred.OAuth.Email
 		if email == "" {
-			email = config.ExtractOAuthEmailFromToken(cred.OAuth.Access)
+			email = cred.OAuth.Email
 		}
-		// Write back parsed fields to the credential so they get persisted on next save.
 		needsBackfill := false
 		if cred.OAuth.AccountID == "" && accountID != "" {
 			cred.OAuth.AccountID = accountID
@@ -39,15 +57,21 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 		}
 		if needsBackfill && accountID != "" {
 			backfills = append(backfills, oauthMetadataBackfill{
+				Match:     config.OAuthCredentialMatch{AccountID: accountID, Access: access, CredentialIndex: &credIdx},
 				AccountID: accountID,
 				Email:     email,
 			})
 		}
-		result[cred.OAuth.Access] = llm.OAuthKeySetup{
+		key := access
+		if key == "" {
+			key = fmt.Sprintf("key_slot:%d", keySlot)
+		}
+		keySlot++
+		result[key] = llm.OAuthKeySetup{
 			CredentialIndex:       credIdx,
 			AccountID:             accountID,
 			Email:                 email,
-			Access:                cred.OAuth.Access,
+			Access:                access,
 			Expires:               cred.OAuth.Expires,
 			Status:                cred.OAuth.Status,
 			CodexPrimaryResetAt:   cred.OAuth.CodexPrimaryResetAt,
@@ -68,8 +92,7 @@ func persistOAuthMetadataBackfills(
 		if backfill.AccountID == "" {
 			continue
 		}
-		match := config.OAuthCredentialMatch{AccountID: backfill.AccountID}
-		updatedAuth, _, changed, err := config.UpdateOAuthCredentialInFile(authPath, provider, match, func(cred *config.OAuthCredential) (bool, error) {
+		updatedAuth, _, changed, err := config.UpdateOAuthCredentialInFile(authPath, provider, backfill.Match, func(cred *config.OAuthCredential) (bool, error) {
 			dirty := false
 			if cred.AccountID == "" && backfill.AccountID != "" {
 				cred.AccountID = backfill.AccountID

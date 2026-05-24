@@ -1022,16 +1022,18 @@ func TestRunDoctorModelsUnsupportedProviderTypeIsConfigError(t *testing.T) {
 
 func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	if err := os.WriteFile(authPath, []byte(`openai:
+	accessA := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
+	accessB := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: refresh-a
-    access: access-a
+    access: %s
     expires: 32503680000000
     account_id: acc-a
   - refresh: refresh-b
-    access: access-b
+    access: %s
     expires: 32503680000000
     account_id: acc-b
-`), 0o600); err != nil {
+`, accessA, accessB)), 0o600); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -1055,7 +1057,7 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 		t.Fatalf("configureDoctorModelsOAuthRefresher: %v", err)
 	}
 
-	llmProviderCfg.MarkExpired("access-a")
+	llmProviderCfg.MarkExpired(accessA)
 
 	runtimeCfg.AuthMu.Lock()
 	gotFirst := runtimeCfg.Auth["openai"][0].OAuth.Status
@@ -1076,16 +1078,19 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 
 func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	if err := os.WriteFile(authPath, []byte(`openai:
+	oldAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
+	siblingAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
+	newAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: old-refresh
-    access: old-access
+    access: %s
     expires: 32503680000000
     account_id: acc-a
   - refresh: sibling-refresh
-    access: sibling-access
+    access: %s
     expires: 32503680000000
     account_id: acc-b
-`), 0o600); err != nil {
+`, oldAccess, siblingAccess)), 0o600); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -1096,7 +1101,7 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		refreshRequests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`))
+		_, _ = w.Write([]byte(`{"access_token":"` + newAccess + `","refresh_token":"new-refresh","expires_in":3600}`))
 	}))
 	defer refreshServer.Close()
 
@@ -1112,15 +1117,15 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	oauthMap, _ := oauthCredentialMap(creds)
 	llmProviderCfg.SetOAuthRefresher(refreshServer.URL, "client-id", runtimeCfg.AuthPath, "", &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, "")
 
-	refreshedKey, ok, err := llmProviderCfg.TryRefreshOAuthKey(context.Background(), "old-access")
+	refreshedKey, ok, err := llmProviderCfg.TryRefreshOAuthKey(context.Background(), oldAccess)
 	if err != nil {
 		t.Fatalf("TryRefreshOAuthKey: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected ok=true for OAuth refresh")
 	}
-	if refreshedKey != "new-access" {
-		t.Fatalf("refreshedKey = %q, want new-access", refreshedKey)
+	if refreshedKey != newAccess {
+		t.Fatalf("refreshedKey = %q, want refreshed access", refreshedKey)
 	}
 	if refreshRequests.Load() != 1 {
 		t.Fatalf("refreshRequests = %d, want 1", refreshRequests.Load())
@@ -1130,18 +1135,18 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	gotFirst := runtimeCfg.Auth["openai"][0].OAuth
 	gotSecond := runtimeCfg.Auth["openai"][1].OAuth
 	runtimeCfg.AuthMu.Unlock()
-	if gotFirst == nil || gotFirst.Access != "new-access" || gotFirst.Refresh != "new-refresh" {
+	if gotFirst == nil || gotFirst.Access != newAccess || gotFirst.Refresh != "new-refresh" {
 		t.Fatalf("runtime auth first credential = %#v, want refreshed tokens", gotFirst)
 	}
-	if gotSecond == nil || gotSecond.Access != "sibling-access" || gotSecond.Refresh != "sibling-refresh" {
+	if gotSecond == nil || gotSecond.Access != siblingAccess || gotSecond.Refresh != "sibling-refresh" {
 		t.Fatalf("runtime auth sibling credential = %#v, want unchanged sibling", gotSecond)
 	}
 
 	credsAfter := runtimeCfg.providerCredentials("openai")
-	if credsAfter[0].OAuth == nil || credsAfter[0].OAuth.Access != "new-access" || credsAfter[0].OAuth.Refresh != "new-refresh" {
+	if credsAfter[0].OAuth == nil || credsAfter[0].OAuth.Access != newAccess || credsAfter[0].OAuth.Refresh != "new-refresh" {
 		t.Fatalf("next target credentials did not observe refreshed token: %#v", credsAfter[0].OAuth)
 	}
-	if credsAfter[1].OAuth == nil || credsAfter[1].OAuth.Access != "sibling-access" {
+	if credsAfter[1].OAuth == nil || credsAfter[1].OAuth.Access != siblingAccess {
 		t.Fatalf("next target sibling credential changed unexpectedly: %#v", credsAfter[1].OAuth)
 	}
 }

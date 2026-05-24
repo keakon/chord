@@ -558,9 +558,9 @@ func newOAuthCredentialNode(cred *OAuthCredential) *yaml.Node {
 
 func updateOAuthMappingNode(node *yaml.Node, cred *OAuthCredential) bool {
 	changed := false
-	changed = setMappingString(node, "refresh", cred.Refresh, false) || changed
-	changed = setMappingString(node, "access", cred.Access, false) || changed
-	changed = setMappingInt64(node, "expires", cred.Expires) || changed
+	changed = setMappingString(node, "refresh", cred.Refresh, true) || changed
+	changed = setMappingString(node, "access", cred.Access, true) || changed
+	changed = setMappingOptionalInt64(node, "expires", cred.Expires) || changed
 	changed = setMappingString(node, "account_id", cred.AccountID, true) || changed
 	changed = setMappingString(node, "email", cred.Email, true) || changed
 	changed = removeMappingKey(node, "status") || changed

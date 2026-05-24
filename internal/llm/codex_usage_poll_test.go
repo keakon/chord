@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -78,16 +79,18 @@ func TestResolveCodexUsageURL(t *testing.T) {
 
 func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	if err := os.WriteFile(authPath, []byte(`openai:
+	accessA := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`)
+	accessB := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-b","exp":4102444800}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: refresh-a
-    access: access-a
+    access: %s
     expires: 32503680000000
     account_id: acc-a
   - refresh: refresh-b
-    access: access-b
+    access: %s
     expires: 32503680000000
     account_id: acc-b
-`), 0o600); err != nil {
+`, accessA, accessB)), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -124,8 +127,8 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
 	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, strings.TrimSuffix(authPath, ".yaml")+".state.yaml", &auth, &authMu, map[string]OAuthKeySetup{
-		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
-		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
+		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
+		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
@@ -141,7 +144,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		t.Fatal("warmup did not probe deactivated account")
 	}
 
-	waitForOAuthStatusInAuth(t, authPath, "access-a", config.OAuthStatusDeactivated)
+	waitForOAuthStatusInAuth(t, authPath, accessA, config.OAuthStatusDeactivated)
 	updated, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		t.Fatalf("LoadAuthConfig(updated): %v", err)
@@ -153,16 +156,18 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 
 func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	if err := os.WriteFile(authPath, []byte(`openai:
+	accessA := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`)
+	accessB := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-b","exp":4102444800}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: refresh-a
-    access: access-a
+    access: %s
     expires: 32503680000000
     account_id: acc-a
   - refresh: refresh-b
-    access: access-b
+    access: %s
     expires: 32503680000000
     account_id: acc-b
-`), 0o600); err != nil {
+`, accessA, accessB)), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -211,8 +216,8 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
 	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, strings.TrimSuffix(authPath, ".yaml")+".state.yaml", &auth, &authMu, map[string]OAuthKeySetup{
-		"access-a": {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
-		"access-b": {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
+		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
+		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
@@ -233,7 +238,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 		t.Fatal("warmup did not attempt OAuth refresh after 401")
 	}
 
-	waitForOAuthStatusInAuth(t, authPath, "access-a", config.OAuthStatusExpired)
+	waitForOAuthStatusInAuth(t, authPath, accessA, config.OAuthStatusExpired)
 	updated, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		t.Fatalf("LoadAuthConfig(updated): %v", err)
@@ -246,6 +251,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 func waitForOAuthStatusInAuth(t *testing.T, authPath, access string, want config.OAuthCredentialStatus) {
 	t.Helper()
 	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
+	accountID := config.ExtractOAuthAccountIDFromToken(access)
 	deadline := time.Now().Add(2 * time.Second)
 	var lastStatus config.OAuthCredentialStatus
 	for time.Now().Before(deadline) {
@@ -254,12 +260,8 @@ func waitForOAuthStatusInAuth(t *testing.T, authPath, access string, want config
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		for _, records := range state {
-			for _, rec := range records {
-				if rec.Access == access {
-					lastStatus = rec.Status
-				}
-			}
+		if rec, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: accountID}); ok {
+			lastStatus = rec.Status
 		}
 		if lastStatus == want {
 			return
@@ -270,11 +272,12 @@ func waitForOAuthStatusInAuth(t *testing.T, authPath, access string, want config
 }
 
 func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing.T) {
-	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	// Mark the single key as Codex OAuth so polled snapshots can be associated with it.
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: "oauth-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -285,7 +288,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing
 		"",
 		&authCfg,
 		&authMu,
-		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
 		"",
 	)
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
@@ -330,11 +333,12 @@ func TestCurrentRateLimitSnapshotForRefPrefersInlineOverPolled(t *testing.T) {
 }
 
 func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T) {
-	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	// Mark the single key as Codex OAuth so polled snapshots can be associated with it.
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: "oauth-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -345,7 +349,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 		"",
 		&authCfg,
 		&authMu,
-		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
 		"",
 	)
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
@@ -365,7 +369,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 		Source:     ratelimit.SnapshotSourcePolledUsage,
 	}
 	prov.UpdatePolledRateLimitSnapshotForCredentialIndex(0, polled)
-	prov.UpdateKeySnapshot("oauth-token", inline)
+	prov.UpdateKeySnapshot(access, inline)
 
 	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
 	if got := c.CurrentRateLimitSnapshotForRef("openai/gpt-5.5"); got != polled {
@@ -374,10 +378,11 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 }
 
 func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T) {
-	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: "oauth-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -389,7 +394,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 		&authCfg,
 		&authMu,
 		map[string]OAuthKeySetup{
-			"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()},
+			access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()},
 		},
 		"",
 	)
@@ -431,12 +436,13 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 
 func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	if err := os.WriteFile(authPath, []byte(`openai:
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: refresh-token
-    access: oauth-token
+    access: %s
     expires: 32503680000000
     account_id: acc-1
-`), 0o600); err != nil {
+`, access)), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -445,7 +451,7 @@ func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 	}
 
 	var authMu sync.Mutex
-	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-token"})
+	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	prov.SetOAuthRefresher(
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
@@ -453,7 +459,7 @@ func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 		strings.TrimSuffix(authPath, ".yaml")+".state.yaml",
 		&auth,
 		&authMu,
-		map[string]OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: 32503680000000}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: 32503680000000}},
 		"",
 	)
 	pollHit := make(chan struct{}, 1)
@@ -474,7 +480,7 @@ func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("polling did not run")
 	}
-	waitForOAuthStatusInAuth(t, authPath, "oauth-token", config.OAuthStatusInvalidated)
+	waitForOAuthStatusInAuth(t, authPath, access, config.OAuthStatusInvalidated)
 	_, total := prov.AvailableKeyCount()
 	if total != 0 {
 		t.Fatalf("total = %d, want 0: invalidated OAuth key should be excluded", total)

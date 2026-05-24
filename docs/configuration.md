@@ -240,10 +240,12 @@ For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime
 
 That split is intentional:
 
-- `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; do not put OAuth `status` in `auth.yaml`;
-- `auth.state.yaml` is machine-managed shared runtime state, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
+- `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; empty OAuth fields are omitted when Chord rewrites the file, and OAuth `status` does not belong in `auth.yaml`;
+- `auth.state.yaml` is machine-managed shared runtime state keyed by `account_id`, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
 
-For OAuth credentials, `expires` is the access-token expiry timestamp in Unix milliseconds. If an OAuth entry has an `access` token but no `refresh` token, Chord can still use that access token; it simply cannot refresh the slot afterward. A local `expires` value is metadata and is not used by itself to mark an OAuth slot `expired`; Chord only writes `expired` after an actual provider/token-endpoint authentication failure confirms the credential is no longer usable.
+For OAuth credentials, `access` must be a token from which Chord can parse the account id; if `auth.yaml` already has `account_id`, it must match the account id inside `access`. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
+
+`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache it in `auth.state.yaml`. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired`; it only makes that slot less preferred and can trigger a refresh before use. Chord writes `expired` only after an actual provider/token-endpoint authentication failure confirms the credential is no longer usable.
 
 A typical `auth.state.yaml` entry looks like:
 
@@ -251,8 +253,7 @@ A typical `auth.state.yaml` entry looks like:
 openai:
   openai:account_id:acc-1:
     account_id: acc-1
-    email: user@example.com
-    access: "..."
+    expires: 1774009702606
     status: normal
     updated_at: 1774009702606
     last_warmup_at: 1774009702606

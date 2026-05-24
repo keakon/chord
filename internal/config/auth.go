@@ -47,9 +47,9 @@ func (s OAuthCredentialStatus) IsValid() bool {
 // OAuthCredential stores OAuth token information.
 // expires is a millisecond-precision Unix timestamp.
 type OAuthCredential struct {
-	Refresh               string                `yaml:"refresh"`
-	Access                string                `yaml:"access"`
-	Expires               int64                 `yaml:"expires"`
+	Refresh               string                `yaml:"refresh,omitempty"`
+	Access                string                `yaml:"access,omitempty"`
+	Expires               int64                 `yaml:"expires,omitempty"`
 	AccountID             string                `yaml:"account_id,omitempty"`
 	Email                 string                `yaml:"email,omitempty"`
 	Status                OAuthCredentialStatus `yaml:"-"`
@@ -60,6 +60,7 @@ type OAuthCredential struct {
 type oauthTokenClaims struct {
 	ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
 	Email            string `json:"email,omitempty"`
+	ExpiresAt        int64  `json:"exp,omitempty"`
 	Organizations    []struct {
 		ID string `json:"id"`
 	} `json:"organizations,omitempty"`
@@ -123,6 +124,15 @@ func ExtractOAuthEmailFromToken(token string) string {
 	return ""
 }
 
+// ExtractOAuthExpiresAtFromToken extracts the JWT exp claim as a millisecond Unix timestamp.
+func ExtractOAuthExpiresAtFromToken(token string) int64 {
+	claims := extractOAuthClaims(token)
+	if claims.ExpiresAt <= 0 {
+		return 0
+	}
+	return claims.ExpiresAt * 1000
+}
+
 // ProviderCredential is a union type: either an API key or an OAuth token.
 // In YAML, a scalar string (including $ENV_VAR) maps to APIKey; a mapping maps to OAuth.
 // ExplicitEmpty is true when the YAML value is a literal empty string (not an unset $ENV_VAR).
@@ -178,14 +188,24 @@ func (c *ProviderCredential) UnmarshalYAML(value *yaml.Node) error {
 type AuthConfig map[string][]ProviderCredential
 
 // ExtractAPIKeys extracts all API keys from a credential list.
-// OAuth credentials' access tokens are included as API keys.
+// OAuth credentials' access tokens are included as API keys only when the token
+// carries a parseable account_id. Refresh-only OAuth credentials are represented
+// by an empty key slot so they can refresh on first use.
 // Explicit empty strings are included as valid keys.
 func ExtractAPIKeys(creds []ProviderCredential) []string {
 	keys := make([]string, 0, len(creds))
 	for _, c := range creds {
-		// OAuth branch: extract access token as API key
-		if c.OAuth != nil && c.OAuth.Access != "" {
-			keys = append(keys, c.OAuth.Access)
+		if c.OAuth != nil {
+			if c.OAuth.Access != "" {
+				accountID := ExtractOAuthAccountIDFromToken(c.OAuth.Access)
+				if accountID != "" && (c.OAuth.AccountID == "" || c.OAuth.AccountID == accountID) {
+					keys = append(keys, c.OAuth.Access)
+				}
+				continue
+			}
+			if c.OAuth.Refresh != "" {
+				keys = append(keys, "")
+			}
 			continue
 		}
 		if c.APIKey != "" || c.ExplicitEmpty {
@@ -210,6 +230,9 @@ func MergeAuthConfigWithState(auth AuthConfig, state AuthStateFile) AuthConfig {
 			if record, ok := findMatchingOAuthStateRecord(state, provider, out[i].OAuth); ok {
 				copyCred := *out[i].OAuth
 				copyCred.Status = record.Status
+				if record.Expires != 0 {
+					copyCred.Expires = record.Expires
+				}
 				if record.CodexPrimaryResetAt != 0 {
 					copyCred.CodexPrimaryResetAt = record.CodexPrimaryResetAt
 				}
@@ -228,26 +251,7 @@ func findMatchingOAuthStateRecord(state AuthStateFile, provider string, cred *OA
 	if cred == nil {
 		return OAuthStateRecord{}, false
 	}
-	entries := state[strings.TrimSpace(provider)]
-	if len(entries) == 0 {
-		return OAuthStateRecord{}, false
-	}
-	for _, record := range entries {
-		if strings.TrimSpace(record.AccountID) != "" && strings.EqualFold(strings.TrimSpace(record.AccountID), strings.TrimSpace(cred.AccountID)) {
-			return record, true
-		}
-	}
-	for _, record := range entries {
-		if strings.TrimSpace(record.Email) != "" && strings.EqualFold(strings.TrimSpace(record.Email), strings.TrimSpace(cred.Email)) {
-			return record, true
-		}
-	}
-	for _, record := range entries {
-		if strings.TrimSpace(record.Access) != "" && strings.TrimSpace(record.Access) == strings.TrimSpace(cred.Access) {
-			return record, true
-		}
-	}
-	return OAuthStateRecord{}, false
+	return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountID: cred.AccountID, Email: cred.Email, Access: cred.Access})
 }
 
 // LoadAuthConfig loads authentication configuration from a YAML file.
@@ -469,6 +473,9 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 	expires := cred.Expires
 	if tr.ExpiresIn != nil && *tr.ExpiresIn > 0 {
 		expires = (time.Now().Unix() + *tr.ExpiresIn) * 1000
+	}
+	if accessExpires := ExtractOAuthExpiresAtFromToken(access); accessExpires > 0 {
+		expires = accessExpires
 	}
 
 	idToken := ""

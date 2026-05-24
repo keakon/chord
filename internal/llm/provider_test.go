@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,10 @@ import (
 )
 
 func boolPtr(b bool) *bool { return &b }
+
+func testProviderOAuthJWT(payload string) string {
+	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
+}
 
 func newTestProviderConfig(keys []string) *ProviderConfig {
 	cfg := config.ProviderConfig{
@@ -82,21 +87,23 @@ func TestSelectKey_DeactivatedOnlyOAuthKeysReturnsNoUsableKeys(t *testing.T) {
 func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(time.Hour).UnixMilli()
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   # primary oauth comment
   - refresh: old-refresh
-    access: old-access
+    access: %s
     expires: %d
     account_id: acc-1
     codex_primary_reset_at: 111
     codex_secondary_reset_at: 222
   # sibling oauth comment
   - refresh: sibling-refresh
-    access: sibling-access
+    access: %s
     expires: %d
     account_id: acc-2
     email: sibling@example.com
-`, expires, expires)), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires)), 0o600); err != nil {
 		t.Fatalf("WriteFile(initial auth): %v", err)
 	}
 
@@ -105,16 +112,16 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 		t.Fatalf("LoadAuthConfig(initial): %v", err)
 	}
 	var authMu sync.Mutex
-	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"old-access"})
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{oldAccess})
 
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`)
+		_, _ = io.WriteString(w, `{"access_token":"`+newAccess+`","refresh_token":"new-refresh","expires_in":3600}`)
 	}))
 	defer refreshServer.Close()
 
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		"old-access": {
+		oldAccess: {
 			CredentialIndex:       0,
 			AccountID:             "acc-1",
 			Expires:               auth["openai"][0].OAuth.Expires,
@@ -126,37 +133,37 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   # primary oauth comment
   - refresh: old-refresh
-    access: old-access
+    access: %s
     expires: %d
     account_id: acc-1
     codex_primary_reset_at: 333
     codex_secondary_reset_at: 444
   # sibling oauth comment
   - refresh: sibling-refresh
-    access: sibling-access
+    access: %s
     expires: %d
     account_id: acc-2
     email: external@example.com
-`, expires, expires)), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires)), 0o600); err != nil {
 		t.Fatalf("WriteFile(latest auth): %v", err)
 	}
 
-	refreshedKey, ok, err := p.TryRefreshOAuthKey(context.Background(), "old-access")
+	refreshedKey, ok, err := p.TryRefreshOAuthKey(context.Background(), oldAccess)
 	if err != nil {
 		t.Fatalf("TryRefreshOAuthKey: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected ok=true for OAuth refresh")
 	}
-	if refreshedKey != "new-access" {
-		t.Fatalf("refreshedKey = %q, want new-access", refreshedKey)
+	if refreshedKey != newAccess {
+		t.Fatalf("refreshedKey = %q, want refreshed access", refreshedKey)
 	}
 
 	updated, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		t.Fatalf("LoadAuthConfig(updated): %v", err)
 	}
-	if got := updated["openai"][0].OAuth; got == nil || got.Access != "new-access" || got.Refresh != "new-refresh" {
+	if got := updated["openai"][0].OAuth; got == nil || got.Access != newAccess || got.Refresh != "new-refresh" {
 		t.Fatalf("expected refreshed primary oauth credential, got %#v", got)
 	}
 	if got := updated["openai"][0].OAuth; got.CodexPrimaryResetAt != 333 || got.CodexSecondaryResetAt != 444 {
@@ -183,10 +190,28 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	}
 }
 
-func TestSelectKeyWithExpiredLocalExpiresUsesAccessToken(t *testing.T) {
+func TestSetOAuthRefresherRefreshOnlyBindsByKeySlot(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses}, []string{"", ""})
+	auth := config.AuthConfig{}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher("https://example.invalid/token", "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"key_slot:1": {CredentialIndex: 1, AccountID: "acc-refresh", Status: config.OAuthStatusNormal},
+	}, "")
+
+	if p.keyStates[0].OAuthInfo != nil {
+		t.Fatalf("explicit empty key slot should not receive OAuth info: %#v", p.keyStates[0].OAuthInfo)
+	}
+	if p.keyStates[1].OAuthInfo == nil || p.keyStates[1].OAuthInfo.AccountID != "acc-refresh" {
+		t.Fatalf("refresh-only OAuth slot not bound by key slot: %#v", p.keyStates[1].OAuthInfo)
+	}
+}
+
+func TestSelectKeyRefreshesLikelyExpiredOAuthToken(t *testing.T) {
 	expires := time.Now().Add(-time.Minute).UnixMilli()
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "access-token",
+		Access:    access,
+		Refresh:   "refresh-token",
 		Expires:   expires,
 		AccountID: "acc-1",
 	}}}}
@@ -198,34 +223,36 @@ func TestSelectKeyWithExpiredLocalExpiresUsesAccessToken(t *testing.T) {
 	}))
 	defer refreshServer.Close()
 
-	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"access-token"})
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"access-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
 	if err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if key != "access-token" {
-		t.Fatalf("selected key = %q, want access-token", key)
+	if key != access {
+		t.Fatalf("selected key = %q, want access token", key)
 	}
-	if refreshHit {
-		t.Fatal("refresh endpoint was called based only on local expires")
+	if !refreshHit {
+		t.Fatal("refresh endpoint was not called for likely expired OAuth token")
 	}
 	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusNormal {
 		t.Fatalf("OAuth status = %q, want normal", got)
 	}
 }
 
-func TestSelectKeyDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
+func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: old-refresh
-    access: old-access
+    access: %s
     expires: %d
-`, expires)), 0o600); err != nil {
+    account_id: acc-1
+`, access, expires)), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -233,7 +260,7 @@ func TestSelectKeyDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
 		t.Fatalf("LoadAuthConfig: %v", err)
 	}
 	var authMu sync.Mutex
-	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"old-access"})
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		refreshHit = true
@@ -241,36 +268,40 @@ func TestSelectKeyDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		"old-access": {CredentialIndex: 0, Expires: expires},
+		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
 	if err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if key != "old-access" {
-		t.Fatalf("selected key = %q, want old-access", key)
+	if key != access {
+		t.Fatalf("selected key = %q, want original access", key)
 	}
-	if refreshHit {
-		t.Fatal("refresh endpoint was called based only on local expires")
+	if !refreshHit {
+		t.Fatal("refresh endpoint was not called for likely expired OAuth token")
 	}
 	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected in-memory auth OAuth credential status=normal, got %#v", got)
 	}
 }
 
-func TestSelectKeyDoesNotSkipCredentialFromLocalExpires(t *testing.T) {
+func TestSelectKeySkipsLikelyExpiredOAuthTokenWhenHealthyTokenAvailable(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expired := time.Now().Add(-time.Minute).UnixMilli()
 	valid := time.Now().Add(time.Hour).UnixMilli()
+	expiredAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	validAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2","exp":4102444800}`)
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
   - refresh: old-refresh
-    access: old-access
+    access: %s
     expires: %d
+    account_id: acc-1
   - refresh: valid-refresh
-    access: valid-access
+    access: %s
     expires: %d
-`, expired, valid)), 0o600); err != nil {
+    account_id: acc-2
+`, expiredAccess, expired, validAccess, valid)), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -278,7 +309,7 @@ func TestSelectKeyDoesNotSkipCredentialFromLocalExpires(t *testing.T) {
 		t.Fatalf("LoadAuthConfig: %v", err)
 	}
 	var authMu sync.Mutex
-	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex, KeyOrder: config.KeyOrderSequential}, []string{"old-access", "valid-access"})
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex, KeyOrder: config.KeyOrderSequential}, []string{expiredAccess, validAccess})
 	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		refreshHit = true
@@ -286,19 +317,19 @@ func TestSelectKeyDoesNotSkipCredentialFromLocalExpires(t *testing.T) {
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		"old-access":   {CredentialIndex: 0, Expires: expired},
-		"valid-access": {CredentialIndex: 1, Expires: valid},
+		expiredAccess: {CredentialIndex: 0, AccountID: "acc-1", Expires: expired},
+		validAccess:   {CredentialIndex: 1, AccountID: "acc-2", Expires: valid},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
 	if err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if key != "old-access" {
-		t.Fatalf("selected key = %q, want old-access", key)
+	if key != validAccess {
+		t.Fatalf("selected key = %q, want valid access", key)
 	}
 	if refreshHit {
-		t.Fatal("refresh endpoint was called based only on local expires")
+		t.Fatal("refresh endpoint should not be called when a healthier OAuth token is selectable")
 	}
 	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected first OAuth credential status=normal, got %#v", got)

@@ -68,6 +68,9 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 			ks.Invalid = !record.Status.IsValid()
 			ks.OAuthInfo.Status = record.Status
 		}
+		if record.Expires != 0 {
+			ks.OAuthInfo.Expires = record.Expires
+		}
 		ks.OAuthInfo.CodexPrimaryResetAt = record.CodexPrimaryResetAt
 		ks.OAuthInfo.CodexSecondaryResetAt = record.CodexSecondaryResetAt
 		ks.SoftCooldownUntil = time.Time{}
@@ -134,8 +137,7 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
 		record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
-		record.Email = firstNonEmptyOAuthAccess(stateKey.Email, record.Email)
-		record.Access = firstNonEmptyOAuthAccess(stateKey.Access, record.Access)
+		record.Expires = ks.OAuthInfo.Expires
 		record.Status = status
 		codexSnapshotToOAuthStateRecord(record, snap, warmupAt)
 		return !config.EqualOAuthStateRecord(before, *record), nil

@@ -13,7 +13,8 @@ import (
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
-// AccountID is preferred when available, then Email, then Access.
+// AccountID is required for auth.state.yaml records; Email and Access are only
+// carried for auth.yaml credential matching paths.
 type OAuthStateKey struct {
 	Provider  string
 	AccountID string
@@ -26,6 +27,7 @@ type OAuthStateRecord struct {
 	AccountID               string                `yaml:"account_id,omitempty"`
 	Email                   string                `yaml:"email,omitempty"`
 	Access                  string                `yaml:"access,omitempty"`
+	Expires                 int64                 `yaml:"expires,omitempty"`
 	Status                  OAuthCredentialStatus `yaml:"status,omitempty"`
 	UpdatedAt               int64                 `yaml:"updated_at,omitempty"`
 	LastWarmupAt            int64                 `yaml:"last_warmup_at,omitempty"`
@@ -59,27 +61,13 @@ func AuthStatePath() (string, error) {
 func OAuthStateRecordKey(key OAuthStateKey) string {
 	provider := strings.TrimSpace(key.Provider)
 	accountID := strings.TrimSpace(key.AccountID)
-	email := strings.TrimSpace(strings.ToLower(key.Email))
-	access := strings.TrimSpace(key.Access)
-	switch {
-	case accountID != "":
-		if provider == "" {
-			return "account_id:" + accountID
-		}
-		return provider + ":account_id:" + accountID
-	case email != "":
-		if provider == "" {
-			return "email:" + email
-		}
-		return provider + ":email:" + email
-	case access != "":
-		if provider == "" {
-			return "access:" + access
-		}
-		return provider + ":access:" + access
-	default:
+	if accountID == "" {
 		return ""
 	}
+	if provider == "" {
+		return "account_id:" + accountID
+	}
+	return provider + ":account_id:" + accountID
 }
 
 func LoadAuthState(path string) (AuthStateFile, error) {
@@ -174,15 +162,9 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 			state[provider] = make(map[string]OAuthStateRecord)
 		}
 		rec := state[provider][recordKey]
-		if rec.AccountID == "" {
-			rec.AccountID = strings.TrimSpace(key.AccountID)
-		}
-		if rec.Email == "" {
-			rec.Email = strings.TrimSpace(key.Email)
-		}
-		if rec.Access == "" {
-			rec.Access = strings.TrimSpace(key.Access)
-		}
+		rec.AccountID = strings.TrimSpace(key.AccountID)
+		rec.Email = ""
+		rec.Access = ""
 		changed, err := mutate(&rec)
 		if err != nil {
 			return false, err
@@ -292,15 +274,15 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 			continue
 		}
 		normalizedEntries := make(map[string]OAuthStateRecord)
-		for key, record := range entries {
-			key = strings.TrimSpace(key)
-			if key == "" {
+		for _, record := range entries {
+			record.AccountID = strings.TrimSpace(record.AccountID)
+			record.Email = ""
+			record.Access = ""
+			recordKey := OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: record.AccountID})
+			if recordKey == "" {
 				continue
 			}
-			record.AccountID = strings.TrimSpace(record.AccountID)
-			record.Email = strings.TrimSpace(record.Email)
-			record.Access = strings.TrimSpace(record.Access)
-			normalizedEntries[key] = record
+			normalizedEntries[recordKey] = record
 		}
 		if len(normalizedEntries) > 0 {
 			state[provider] = normalizedEntries
@@ -310,7 +292,7 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 }
 
 func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRecord, bool) {
-	if len(state) == 0 {
+	if len(state) == 0 || strings.TrimSpace(key.AccountID) == "" {
 		return OAuthStateRecord{}, false
 	}
 	provider := strings.TrimSpace(key.Provider)
@@ -318,27 +300,8 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 	if len(entries) == 0 {
 		return OAuthStateRecord{}, false
 	}
-	candidates := []string{
-		OAuthStateRecordKey(key),
-		OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: key.AccountID}),
-		OAuthStateRecordKey(OAuthStateKey{Provider: provider, Email: key.Email}),
-		OAuthStateRecordKey(OAuthStateKey{Provider: provider, Access: key.Access}),
-	}
-	seen := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		if record, ok := entries[candidate]; ok {
-			return record, true
-		}
-	}
-	return OAuthStateRecord{}, false
+	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: key.AccountID})]
+	return record, ok
 }
 
 func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord) OAuthStateRecord {
@@ -353,6 +316,9 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 	}
 	if incoming.Status != "" || existing.Status == "" {
 		existing.Status = incoming.Status
+	}
+	if incoming.Expires != 0 {
+		existing.Expires = incoming.Expires
 	}
 	if incoming.UpdatedAt >= existing.UpdatedAt {
 		existing.UpdatedAt = incoming.UpdatedAt
@@ -371,7 +337,7 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 }
 
 func EqualOAuthStateRecord(a, b OAuthStateRecord) bool {
-	if a.AccountID != b.AccountID || a.Email != b.Email || a.Access != b.Access || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
+	if a.AccountID != b.AccountID || a.Email != b.Email || a.Access != b.Access || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
 		return false
 	}
 	if (a.CodexHasCredits == nil) != (b.CodexHasCredits == nil) {

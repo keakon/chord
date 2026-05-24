@@ -69,6 +69,7 @@ func (p *stubProviderImpl) CompleteStream(
 func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pollCtxCh := make(chan context.Context, 1)
+	access := testOAuthJWTForCommonTest(`{"chatgpt_account_id":"account-1"}`)
 	cache := &providerCache{
 		ctx:      ctx,
 		m:        make(map[string]*llm.ProviderConfig),
@@ -76,7 +77,7 @@ func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 		authPath: filepath.Join(t.TempDir(), "auth.yaml"),
 		cfg:      &config.Config{},
 		auth: config.AuthConfig{"codex": {
-			{OAuth: &config.OAuthCredential{Access: "access-token", Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "account-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "account-1"}},
 		}},
 		fetchCodexUsage: func(ctx context.Context, _ *llm.ProviderConfig, _, _ string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 			pollCtxCh <- ctx
@@ -88,7 +89,7 @@ func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 	prov, err := cache.getOrCreate("codex", config.ProviderConfig{
 		Preset: config.ProviderPresetCodex,
 		Models: map[string]config.ModelConfig{"gpt-5": {}},
-	}, []string{"access-token"})
+	}, []string{access})
 	if err != nil {
 		t.Fatalf("getOrCreate: %v", err)
 	}

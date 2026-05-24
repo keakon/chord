@@ -223,10 +223,12 @@ openai:
 
 这样拆分是有意为之：
 
-- `auth.yaml` 继续作为用户手动维护的凭据真相源，保存 `refresh`、`access`、`expires`、`account_id`、`email` 等相对稳定字段；不要在 `auth.yaml` 中写 OAuth `status`；
-- `auth.state.yaml` 作为机器维护的共享运行时状态，避免额度 / reset 更新以及 `expired`、`deactivated`、`invalidated` 等账号状态频繁改动 `auth.yaml`，与用户手工编辑发生冲突。
+- `auth.yaml` 仍是用户可编辑的凭据与稳定 OAuth 字段来源，例如 `refresh`、`access`、`expires`、`account_id`、`email`；Chord 重写文件时会省略空 OAuth 字段，OAuth `status` 不属于 `auth.yaml`；
+- `auth.state.yaml` 是按 `account_id` 关联的机器维护共享运行时状态，因此 quota / reset 更新，以及 `expired`、`deactivated`、`invalidated` 这类账号状态，不会在用户可能同时编辑 `auth.yaml` 时频繁改写该文件。
 
-对于 OAuth 凭据，`expires` 表示 access token 的过期时间，单位为 Unix 毫秒。如果某个 OAuth 条目有 `access` token 但没有 `refresh` token，Chord 仍会直接使用该 access token；只是之后无法自动刷新。`expires` 本地字段只是元数据，不能单独作为写入 `expired` 的依据；只有实际 provider / token endpoint 认证失败确认凭据不可用后，Chord 才会写入 `expired`。
+对 OAuth 凭据来说，`access` 必须能解析出账号 ID；如果 `auth.yaml` 已有 `account_id`，它必须和 `access` 内的账号 ID 一致。Chord 也支持只包含 `refresh`、没有 `access` 的 OAuth 条目，并会在首次使用时刷新。既没有 `access` 也没有 `refresh` 的 OAuth 条目不可用。
+
+`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可缓存在 `auth.state.yaml` 中。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired`；它只会降低该 slot 的选择优先级，并可能在使用前触发 refresh。只有真实的 provider/token endpoint 认证失败确认凭据不可用时，Chord 才会写入 `expired`。
 
 典型的 `auth.state.yaml` 条目形态如下：
 
@@ -234,8 +236,7 @@ openai:
 openai:
   openai:account_id:acc-1:
     account_id: acc-1
-    email: user@example.com
-    access: "..."
+    expires: 1774009702606
     status: normal
     updated_at: 1774009702606
     last_warmup_at: 1774009702606

@@ -57,7 +57,6 @@ func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
 	}
 	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-expired", Email: "expired@example.com"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusExpired
-		record.Email = "expired@example.com"
 		return true, nil
 	})
 	if err != nil {
@@ -70,8 +69,8 @@ func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
 	if len(removed) != 1 {
 		t.Fatalf("len(removed) = %d, want 1", len(removed))
 	}
-	if removed[0].Email != "expired@example.com" {
-		t.Fatalf("removed email = %q, want expired@example.com", removed[0].Email)
+	if removed[0].AccountID != "acc-expired" {
+		t.Fatalf("removed account_id = %q, want acc-expired", removed[0].AccountID)
 	}
 	if _, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountID: "acc-expired"}); ok {
 		t.Fatal("expired state should be removed")

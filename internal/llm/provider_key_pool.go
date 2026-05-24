@@ -40,7 +40,11 @@ func (p *ProviderConfig) keyStateHealthyLocked(now time.Time, ks *KeyState) bool
 	if !p.keyStateSelectableLocked(now, ks) {
 		return false
 	}
-	return !ks.Recovering
+	return !ks.Recovering && !oauthTokenLikelyExpired(now, ks)
+}
+
+func oauthTokenLikelyExpired(now time.Time, ks *KeyState) bool {
+	return ks != nil && ks.OAuthInfo != nil && ks.OAuthInfo.Expires > 0 && time.UnixMilli(ks.OAuthInfo.Expires).Before(now.Add(time.Minute))
 }
 
 func (p *ProviderConfig) markHealthyLocked(ks *KeyState) {
@@ -369,10 +373,9 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		return "", false, &AllKeysCoolingError{RetryAfter: retryAfter}
 	}
 
-	// Refresh OAuth only when no access token is available. Do not use the local
-	// expires timestamp as proof that a token is expired; only an actual provider
-	// authentication failure may invalidate or expire an OAuth slot.
-	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil && selectedKS.Key == "" {
+	// Refresh OAuth when no access token is available or when JWT exp/expires says
+	// the token is likely stale. Provider auth failures still decide permanent status.
+	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil && (selectedKS.Key == "" || oauthTokenLikelyExpired(now, selectedKS)) {
 		if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
 			if config.IsRefreshTokenInvalid(err) {
 				persist := p.markInvalidKeyStateLocked(selectedKS, config.OAuthStatusExpired)

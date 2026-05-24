@@ -87,6 +87,13 @@ codex:
     account_id: acc-1
 ```
 
+Chord 也可以从只包含 refresh 的条目启动，并在首次刷新后补齐 `access`、`expires` 和身份元数据：
+
+```yaml
+codex:
+  - refresh: "..."
+```
+
 ## `~/.config/chord/agents/reviewer.md`
 
 ```md
