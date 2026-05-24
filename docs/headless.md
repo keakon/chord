@@ -193,7 +193,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `subscribe_response`  | Reply to a `subscribe` command                                                             | `events`                                                          |
 | `status_response`     | Reply to a `status` command                                                                | see [`status`](#status)                                           |
 | `models_response`     | Reply to a `models` command                                                                | `ok`, `message`, `status`                                         |
-| `error`               | Command parse / execution error                                                            | `message`                                                         |
+| `error`               | Command parse / execution error                                                            | `message`, optional `code` (for example `stdin_line_too_long`)    |
 
 ### Subscribable
 
@@ -212,7 +212,9 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
 | `todos`                 | Replacement todo list                                                                             | `todos[]` with `{id, content, status, active_form}`. In Delegate-enabled workflows, multiple `in_progress` items can be valid when each maps to a distinct active delegated workstream and uses a unique `active_form`. |
-| `error`                 | Runtime error                                                                                     | `agent_id`, `message`                                                                                        |
+| `error`                 | Runtime error                                                                                     | `agent_id`, `message`, optional `code`                                                                         |
+
+If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.
 
 `assistant_message.text` is empty only in pathological cases — Chord logs a warning when this happens, and gateway integrations should usually skip such messages instead of forwarding empty text downstream.
 

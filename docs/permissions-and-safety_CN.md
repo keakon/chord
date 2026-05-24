@@ -49,6 +49,8 @@ permission:
 
 > 权限属于 Agent 级配置，不是简单的全局开关。
 
+对于 `Shell`，像 `"git *": allow` 这样的具体 `allow` pattern 不会自动放行包含未引用 shell 分隔符（`;`、`&&`、`||`、`|`、`&` 或换行）的复合命令。这类调用会继续匹配后续规则，通常回到 `ask` 或 `deny`。这只是安全兜底，不是 shell 沙箱；`Shell: allow` 或 `Shell: { "*": allow }` 这类宽泛规则只应给完全可信的角色使用。
+
 ## Shell 与 shell 风险
 
 `Shell` 能执行系统命令，应格外谨慎。`Shell` 和 `Spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。普通 stdin 读取（如 shell `read`/`select`）会看到 EOF，而不是等待模型输入；如果命令需要输入，请通过 pipe、here-doc、文件或参数显式提供。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、以及需要 `/dev/tty` 的命令，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。

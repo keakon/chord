@@ -193,7 +193,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
 | `models_response`    | 响应 `models`                                | `ok`、`message`、`status` |
-| `error`              | 命令解析或执行错误                           | `message` |
+| `error`              | 命令解析或执行错误                           | `message`，可选 `code`（例如 `stdin_line_too_long`） |
 
 ### 可订阅推送事件
 
@@ -212,7 +212,9 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
 | `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；当启用 Delegate workflow 且各项分别对应不同的活跃委派工作流、并使用唯一 `active_form` 时，允许同时存在多个 `in_progress`。 |
-| `error`              | 运行时错误                                   | `agent_id`、`message` |
+| `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
+
+如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。
 
 `assistant_message.text` 只有在非常异常的情况下才会为空。Chord 遇到这种情况会记 warning；gateway 集成通常应跳过空消息，而不是继续向下游转发空文本。
 
