@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -568,6 +569,50 @@ func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 	}
 	if m.confirm.editError != "" {
 		t.Fatalf("editError = %q, want no prompt for ignored allow shortcut", m.confirm.editError)
+	}
+}
+
+func TestHandleConfirmDoneViewCopiesReportParsedFromArgs(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	report := "# Finished\n\nAll done.\n\n- verified"
+	m := NewModelWithSize(nil, 100, 30)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Finished\n\nAll done.\n\n- verified"}`}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'}))
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.mode != ModeContentViewer {
+		t.Fatalf("mode after Done view = %v, want ModeContentViewer", m.mode)
+	}
+	if m.contentViewer.content != report {
+		t.Fatalf("viewer content = %q, want %q", m.contentViewer.content, report)
+	}
+
+	_ = m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	cmd = m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("Done view yy should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "View content copied to clipboard" {
+		t.Fatalf("clipboard success = %q", second.success)
+	}
+	if copied != report {
+		t.Fatalf("copied content = %q, want %q", copied, report)
 	}
 }
 

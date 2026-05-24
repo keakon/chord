@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -104,6 +105,20 @@ func (m *Model) activeConfirmTextarea() (*textarea.Model, string, bool) {
 	return nil, "", false
 }
 
+func doneConfirmReportContent(req *ConfirmRequest) string {
+	if req == nil {
+		return ""
+	}
+	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
+	if strings.TrimSpace(summary.DoneReport) != "" {
+		return summary.DoneReport
+	}
+	if parsed, err := tools.ParseDoneArgs(json.RawMessage(req.ArgsJSON)); err == nil && strings.TrimSpace(parsed.Report) != "" {
+		return strings.TrimSpace(parsed.Report)
+	}
+	return req.DoneReport
+}
+
 // handleConfirmKey processes key events while in ModeConfirm.
 func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	if m.confirm.editing {
@@ -118,7 +133,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 
 	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
 		if msg.String() == "v" || msg.String() == "V" {
-			return m.openContentViewer("Done report", m.confirm.request.DoneReport)
+			return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
 		}
 		if m.confirm.request.ForceDenyReason {
 			switch msg.String() {
