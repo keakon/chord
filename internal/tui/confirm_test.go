@@ -461,6 +461,23 @@ func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmDenyReasonInputAfterResizeHasNoBlankSoftWrapLine(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.denyingWithReason = true
+	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+	m.confirm.denyReasonInput.SetValue("Done工具的报告时，没法用yy复制完整的报告？需要进行补充。同时检查Handoff工具的view，也需要能复制")
+
+	m.applyTerminalSize(80, 30, false)
+	plain := stripANSI(m.renderConfirmDialog())
+	if strings.Contains(plain, "需\n\n要") {
+		t.Fatalf("unexpected blank line inside soft-wrapped deny reason after resize:\n%s", plain)
+	}
+	if !strings.Contains(plain, "需要") && !strings.Contains(plain, "需\n要") {
+		t.Fatalf("expected wrapped deny reason to still contain 需要 content, got:\n%s", plain)
+	}
+}
+
 func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
