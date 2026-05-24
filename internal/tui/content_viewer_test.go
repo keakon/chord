@@ -63,7 +63,7 @@ func TestContentViewerCopyWritesRawContent(t *testing.T) {
 	defer func() { clipboardWriteAll = origWrite }()
 
 	m := NewModelWithSize(nil, 100, 20)
-	m.openContentViewer("Preview", "# Title\n\nBody")
+	m.openContentViewer("Preview", "\n# Title\n\nBody\n")
 
 	_ = m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
 	cmd := m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
@@ -79,7 +79,7 @@ func TestContentViewerCopyWritesRawContent(t *testing.T) {
 	if second.success != "View content copied to clipboard" {
 		t.Fatalf("clipboard success = %q", second.success)
 	}
-	if copied != "# Title\n\nBody" {
+	if copied != "\n# Title\n\nBody\n" {
 		t.Fatalf("copied content = %q", copied)
 	}
 }

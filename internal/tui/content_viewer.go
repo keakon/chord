@@ -320,8 +320,8 @@ func (m *Model) copyContentViewerSelection() tea.Cmd {
 }
 
 func (m *Model) copyContentViewerAll() tea.Cmd {
-	content := strings.TrimSpace(m.contentViewer.content)
-	if content == "" {
+	content := m.contentViewer.content
+	if strings.TrimSpace(content) == "" {
 		return m.enqueueToast("View content is empty", "info")
 	}
 	m.clearContentViewerSelection()
