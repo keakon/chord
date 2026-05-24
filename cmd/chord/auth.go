@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -660,13 +661,27 @@ func generateOpenAIState() (string, error) {
 func generateOpenAIRandomString(length int) (string, error) {
 	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
 	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
 	for i := range buf {
-		buf[i] = chars[int(buf[i])%len(chars)]
+		for {
+			var b [1]byte
+			if _, err := rand.Read(b[:]); err != nil {
+				return "", err
+			}
+			limit := byte(256 - (256 % len(chars)))
+			if b[0] < limit {
+				buf[i] = chars[int(b[0])%len(chars)]
+				break
+			}
+		}
 	}
 	return string(buf), nil
+}
+
+func constantTimeStringEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func buildOpenAIAuthorizeURL(pkce *openAIPKCECodes, state string, redirectURI string) string {
@@ -706,7 +721,7 @@ func startOpenAICallbackServer(
 			http.Error(w, errDescription, http.StatusBadRequest)
 			return
 		}
-		if r.URL.Query().Get("state") != expectedState {
+		if !constantTimeStringEqual(r.URL.Query().Get("state"), expectedState) {
 			select {
 			case errCh <- fmt.Errorf("OAuth state verification failed"):
 			default:

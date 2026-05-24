@@ -257,7 +257,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 		}
 
 		invalidatePathCache(path)
-		if err := os.Remove(path); err != nil {
+		if err := removeFileOrSymlink(path); err != nil {
 			if os.IsNotExist(err) {
 				result.AlreadyAbsent = append(result.AlreadyAbsent, path)
 				t.clearLSPDeleteState(ctx, path)

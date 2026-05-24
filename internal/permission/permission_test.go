@@ -145,6 +145,30 @@ func TestEvaluate_LastMatchWins(t *testing.T) {
 	}
 }
 
+func TestEvaluate_ShellAllowRuleDoesNotAutoAllowCompoundCommands(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "Shell", Pattern: "git *", Action: ActionAllow},
+	}
+
+	tests := []string{
+		"git status; rm -rf ~",
+		"git status && rm -rf ~",
+		"git status || rm -rf ~",
+		"git status | cat",
+		"git status & rm -rf ~",
+		"git status\nrm -rf ~",
+	}
+	for _, command := range tests {
+		if got := rs.Evaluate("Shell", command); got != ActionAsk {
+			t.Fatalf("Evaluate(Shell, %q) = %s, want ask", command, got)
+		}
+	}
+	if got := rs.Evaluate("Shell", "git status 'a;b'"); got != ActionAllow {
+		t.Fatalf("quoted separator command = %s, want allow", got)
+	}
+}
+
 func TestEvaluate_OverridePrecedence(t *testing.T) {
 	// A later "allow" overrides an earlier "deny" for the same pattern.
 	rs := Ruleset{

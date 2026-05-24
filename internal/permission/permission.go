@@ -86,9 +86,13 @@ func ParsePermission(node *yaml.Node) Ruleset {
 func (rs Ruleset) Evaluate(permission, pattern string) Action {
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
-		if globMatch(permission, r.Permission) && globMatch(pattern, r.Pattern) {
-			return r.Action
+		if !globMatch(permission, r.Permission) || !globMatch(pattern, r.Pattern) {
+			continue
 		}
+		if r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
+			continue
+		}
+		return r.Action
 	}
 	return ActionDeny // default deny if no rule matches
 }
@@ -118,6 +122,49 @@ func Merge(rulesets ...Ruleset) Ruleset {
 // globCache caches compiled regex patterns for glob matching.
 // This is a hot path (called on every tool invocation), so caching is important.
 var globCache sync.Map // pattern string → *regexp.Regexp
+
+func shellCompoundCommandNeedsReview(permission, command, rulePattern string) bool {
+	if !strings.EqualFold(strings.TrimSpace(permission), "Shell") {
+		return false
+	}
+	if strings.TrimSpace(rulePattern) == "*" {
+		return false
+	}
+	return shellCommandContainsSeparator(command)
+}
+
+func shellCommandContainsSeparator(command string) bool {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		switch c {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '\n', ';', '|', '&':
+			if inSingle || inDouble {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
 
 // globMatch matches a string against a glob pattern.
 // Supports: * (any character sequence), ? (single character).

@@ -336,6 +336,18 @@ func TestGenerateOpenAIRandomString(t *testing.T) {
 	}
 }
 
+func TestConstantTimeStringEqual(t *testing.T) {
+	if !constantTimeStringEqual("state-123", "state-123") {
+		t.Fatal("matching strings should compare equal")
+	}
+	if constantTimeStringEqual("state-123", "state-124") {
+		t.Fatal("different same-length strings should not compare equal")
+	}
+	if constantTimeStringEqual("state-123", "state-1234") {
+		t.Fatal("different-length strings should not compare equal")
+	}
+}
+
 func TestOpenAIOAuthCallbackAddressHelpers(t *testing.T) {
 	if got := openAIOAuthCallbackListenAddr(1455); got != "127.0.0.1:1455" {
 		t.Fatalf("listen addr = %q", got)
