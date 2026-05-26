@@ -29,7 +29,9 @@ const (
 // Empty string means the credential is normal/usable.
 // "deactivated" means the account has been permanently disabled (e.g. banned).
 // "invalidated" means the account has been invalidated (e.g. needs re-auth).
-// "expired" means the refresh token has expired and cannot be refreshed.
+// "expired" means the access token is no longer usable and the credential
+// cannot recover, for example because its refresh token is missing, expired,
+// invalid, or already reused.
 type OAuthCredentialStatus string
 
 const (
@@ -346,13 +348,27 @@ func IsRefreshTokenInvalid(err error) bool {
 	if !errors.As(err, &refreshErr) {
 		return false
 	}
-	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" {
+	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" || refreshErr.Code == "app_session_terminated" {
 		return true
 	}
 	msg := strings.ToLower(refreshErr.Message)
 	return strings.Contains(msg, "refresh token has already been used") ||
 		strings.Contains(msg, "refresh token") && strings.Contains(msg, "expired") ||
 		strings.Contains(msg, "refresh token") && strings.Contains(msg, "invalid")
+}
+
+// IsMissingRefreshToken reports whether a refresh attempt failed because the
+// credential has no refresh token. This is recoverability information, not an
+// immediate credential-invalid signal while the access token is still usable.
+func IsMissingRefreshToken(err error) bool {
+	var refreshErr *OAuthRefreshError
+	return errors.As(err, &refreshErr) && refreshErr.Code == "missing_refresh_token"
+}
+
+// IsOAuthCredentialUnrecoverableAfterAccessExpiry reports whether an OAuth
+// credential cannot recover once its access token is already expired/stale.
+func IsOAuthCredentialUnrecoverableAfterAccessExpiry(err error) bool {
+	return IsRefreshTokenInvalid(err) || IsMissingRefreshToken(err)
 }
 
 // RefreshOAuthToken refreshes an OAuth credential using the refresh_token grant.

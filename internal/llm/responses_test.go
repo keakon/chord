@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
@@ -1165,6 +1167,50 @@ func TestOpenAIProvider_SendsSessionHeadersOnChatCompletions(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_SendsSystemPromptAsInstructions(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("sharedchat", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5", "You are helpful.",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotBody["instructions"]; got != "You are helpful." {
+		t.Fatalf("instructions = %v, want system prompt", got)
+	}
+	input, ok := gotBody["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input = %#v, want one user message", gotBody["input"])
+	}
+	item, ok := input[0].(map[string]any)
+	if !ok {
+		t.Fatalf("input[0] = %#v, want object", input[0])
+	}
+	if got := item["type"]; got != "message" {
+		t.Fatalf("input[0].type = %v, want message", got)
+	}
+	if got := item["role"]; got == "system" {
+		t.Fatalf("unexpected system message in input: %#v", item)
+	}
+}
+
 func TestResponsesProvider_HTTPSendsFullInputOnSecondRound(t *testing.T) {
 	var requestBodies []map[string]any
 	var mu sync.Mutex
@@ -1377,6 +1423,54 @@ func TestResponsesProvider_CodexWSIncrementalFailureRetriesWSFullThenHTTPFallbac
 	}
 	if httpCalls != 1 {
 		t.Fatalf("http calls = %d, want 1 after ws retries", httpCalls)
+	}
+}
+
+func TestResponsesProvider_CodexWSProtocolCloseDoesNotDisableFutureWebSocketAttempts(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-http","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:               config.ProviderTypeChatCompletions,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	var wsCalls int
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time) (*message.Response, bool, error) {
+		wsCalls++
+		return nil, false, &websocket.CloseError{Code: websocket.ClosePolicyViolation, Text: "parse_failed"}
+	}
+
+	for i := 0; i < 2; i++ {
+		resp, err := r.CompleteStream(
+			context.Background(), "oauth-key", "gpt-5", "system",
+			[]message.Message{{Role: "user", Content: "hello"}},
+			nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+		)
+		if err != nil {
+			t.Fatalf("CompleteStream call %d: %v", i+1, err)
+		}
+		if resp == nil || resp.ProviderResponseID != "resp-http" {
+			t.Fatalf("call %d unexpected response after fallback: %#v", i+1, resp)
+		}
+	}
+	if wsCalls != 2 {
+		t.Fatalf("ws calls = %d, want 2; protocol close must not disable future websocket attempts", wsCalls)
+	}
+	if httpCalls != 2 {
+		t.Fatalf("http calls = %d, want 2 fallback calls", httpCalls)
 	}
 }
 

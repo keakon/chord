@@ -319,26 +319,19 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
 	}
 	streamReducer.beforeStatus = func(status *message.StatusDelta) {
-		// When a fallback model is being tried, emit RunningModelChangedEvent
-		// immediately so the info panel updates without waiting for the response.
-		if status.Type == "retrying" && status.ModelRef != "" {
+		// Any status carrying ModelRef means the retry loop is actively attempting
+		// that target. Reflect it immediately so sidebar errors/toasts and MODEL
+		// stay aligned even before the target emits visible output.
+		if status.ModelRef != "" {
 			if llmClient != nil {
 				if lim := llmClient.ContextLimitForModelRef(status.ModelRef); lim > 0 {
 					a.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(status.ModelRef), a.effectiveCompactionReservedInput())
 				}
 			}
-			a.llmMu.Lock()
-			a.runningModelRef = status.ModelRef
-			provRef := a.providerModelRef
-			a.llmMu.Unlock()
-			a.emitToTUI(RunningModelChangedEvent{
-				AgentID:          a.instanceID,
-				ProviderModelRef: provRef,
-				RunningModelRef:  status.ModelRef,
-			})
+			updateRunningModelRef(status.ModelRef)
 			// Only treat as fallback if the model name differs from selected.
 			// Same model name with different provider is effectively a key switch.
-			if modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
+			if status.Type == "retrying" && modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
 				state.pendingFallbackRef = status.ModelRef
 				state.pendingFallbackReason = status.Reason
 			}

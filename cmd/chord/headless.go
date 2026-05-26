@@ -104,25 +104,8 @@ func newStdoutWriter(ctx context.Context, w io.Writer) *stdoutWriter {
 // run processes the channel and writes JSON envelopes to stdout.
 func (w *stdoutWriter) run() {
 	defer close(w.done)
-	for {
-		select {
-		case msg, ok := <-w.ch:
-			if !ok {
-				return
-			}
-			_ = w.enc.Encode(msg)
-			continue
-		default:
-		}
-		select {
-		case msg, ok := <-w.ch:
-			if !ok {
-				return
-			}
-			_ = w.enc.Encode(msg)
-		case <-w.ctx.Done():
-			return
-		}
+	for msg := range w.ch {
+		_ = w.enc.Encode(msg)
 	}
 }
 

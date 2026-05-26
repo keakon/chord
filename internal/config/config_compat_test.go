@@ -82,6 +82,30 @@ providers:
 	}
 }
 
+func TestConfigYAML_ProviderUserAgent(t *testing.T) {
+	const raw = `
+providers:
+  openai-main:
+    type: "chat-completions"
+    user_agent: "ProviderUA/1.0"
+    models:
+      gpt-5:
+        limit:
+          context: 400000
+          output: 128000
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+
+	provider := cfg.Providers["openai-main"]
+	if provider.UserAgent != "ProviderUA/1.0" {
+		t.Fatalf("unexpected user_agent: %q", provider.UserAgent)
+	}
+}
+
 func TestConfigYAML_ProviderCompatAnthropicTransport(t *testing.T) {
 	const raw = `
 providers:
@@ -93,7 +117,6 @@ providers:
         extra_beta:
           - beta-a
           - beta-b
-        user_agent: "Chord-Test/1.0"
         metadata_user_id: true
     models:
       claude-sonnet:
@@ -120,9 +143,6 @@ providers:
 	}
 	if len(transport.ExtraBeta) != 2 || transport.ExtraBeta[0] != "beta-a" || transport.ExtraBeta[1] != "beta-b" {
 		t.Fatalf("unexpected extra_beta: %#v", transport.ExtraBeta)
-	}
-	if transport.UserAgent != "Chord-Test/1.0" {
-		t.Fatalf("unexpected user_agent: %q", transport.UserAgent)
 	}
 	if !transport.MetadataUserID {
 		t.Fatal("expected metadata_user_id=true")

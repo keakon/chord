@@ -146,6 +146,7 @@ type ProviderConfig struct {
 	codexPollFetchFn           func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot
 	effectiveProxyURL          string
+	userAgent                  string
 	compress                   bool // whether gzip request compression is enabled
 	authStatePath              string
 	authState                  config.AuthStateFile
@@ -219,6 +220,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		stickyIdx:                  stickyIdx,
 		lastSelectedSlot:           -1,
 		effectiveProxyURL:          "",
+		userAgent:                  strings.TrimSpace(cfg.UserAgent),
 		compress:                   cfg.Compress,
 		polledRateLimitByCredIdx:   polledRateLimitByCredIdx,
 		polledRateLimitAttemptedAt: polledRateLimitAttemptedAt,
@@ -343,6 +345,13 @@ func (p *ProviderConfig) EffectiveProxyURL() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.effectiveProxyURL
+}
+
+// UserAgent returns the provider-level User-Agent override, or empty for the default.
+func (p *ProviderConfig) UserAgent() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.userAgent
 }
 
 // CompressEnabled reports whether upstream request body compression is enabled.

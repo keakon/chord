@@ -38,27 +38,49 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 
 	byPath := m.allDiagnosticsByAbsPath()
 
-	primary, _ := selectDiagnosticsByOutput(byPath[edited], output, ranges)
-	hasDiagnostics := len(primary) > 0
+	maxTotal := output.MaxTotalDiagnostics
+	if maxTotal <= 0 {
+		maxTotal = ToolOutputMaxDiagnosticsPerFile
+	}
+	remaining := maxTotal
+	selectWithinRemaining := func(diags []Diagnostic, ranges []EditRange) []Diagnostic {
+		if remaining <= 0 {
+			return nil
+		}
+		limitedOutput := output
+		limitedOutput.MaxTotalDiagnostics = remaining
+		selected, _ := selectDiagnosticsByOutput(diags, limitedOutput, ranges)
+		remaining -= len(selected)
+		return selected
+	}
+
+	primary := selectWithinRemaining(byPath[edited], ranges)
 	type otherDiagnostics struct {
 		path  string
 		diags []Diagnostic
 	}
 	var others []otherDiagnostics
-	if includeOtherFiles {
+	if includeOtherFiles && remaining > 0 {
+		otherPaths := make([]string, 0, len(byPath))
 		for p, diags := range byPath {
 			if p == edited || len(diags) == 0 {
 				continue
 			}
-			selected, _ := selectDiagnosticsByOutput(diags, output, nil)
+			otherPaths = append(otherPaths, p)
+		}
+		sort.Strings(otherPaths)
+		for _, p := range otherPaths {
+			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
+				break
+			}
+			selected := selectWithinRemaining(byPath[p], nil)
 			if len(selected) == 0 {
 				continue
 			}
-			hasDiagnostics = true
 			others = append(others, otherDiagnostics{path: p, diags: selected})
 		}
 	}
-	if !hasDiagnostics {
+	if len(primary) == 0 && len(others) == 0 {
 		return base
 	}
 
@@ -66,27 +88,21 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	b.WriteString(base)
 	b.WriteString("\n\nDiagnostics:\n")
 
+	wroteBlock := false
 	appendDiagBlock := func(file string, diags []Diagnostic, thisFile bool) {
 		if len(diags) == 0 {
 			return
 		}
-		if thisFile {
-			b.WriteString(formatSelectedDiagnosticsBlock(file, diags, true))
-			return
+		if wroteBlock {
+			b.WriteString("\n\n")
 		}
-		b.WriteString(formatSelectedDiagnosticsBlock(file, diags, false))
+		block := formatSelectedDiagnosticsBlock(file, diags, thisFile)
+		b.WriteString(strings.TrimLeft(block, "\n"))
+		wroteBlock = true
 	}
 	appendDiagBlock(edited, primary, true)
 
-	if !includeOtherFiles {
-		return b.String()
-	}
-
-	sort.SliceStable(others, func(i, j int) bool { return others[i].path < others[j].path })
-	for i, other := range others {
-		if i >= ToolOutputMaxOtherErrorFiles {
-			break
-		}
+	for _, other := range others {
 		appendDiagBlock(other.path, other.diags, false)
 	}
 

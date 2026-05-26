@@ -468,6 +468,11 @@ func TestIsRefreshTokenInvalid(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "app_session_terminated",
+			err:  &OAuthRefreshError{StatusCode: 400, Code: "app_session_terminated", Message: "Your session has ended. Please log in again."},
+			want: true,
+		},
+		{
 			name: "missing_refresh_token",
 			err:  &OAuthRefreshError{Code: "missing_refresh_token", Message: "refresh token is empty"},
 			want: false,

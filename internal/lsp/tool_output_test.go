@@ -137,6 +137,74 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesInfoAndHintsWhenSlotsAvailab
 	}
 }
 
+func TestAppendLSPDiagnosticsToToolOutput_OtherFilesWithoutPrimaryHaveNoBlankLineAfterHeader(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	other := filepath.Join(tmp, "other.py")
+	mgr.clientsMu.Lock()
+	mgr.clients["test"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityInformation, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "other info"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	if strings.Contains(out, "Diagnostics:\n\n") {
+		t.Fatalf("expected first diagnostics block to follow header without blank line, got %q", out)
+	}
+	if !strings.Contains(out, "Diagnostics:\nLSP diagnostics in other files:") {
+		t.Fatalf("expected other-file diagnostics directly after header, got %q", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	diagnostics := map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {},
+	}
+	for i := 0; i < 6; i++ {
+		diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(edited))] = append(diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(edited))], protocol.Diagnostic{
+			Severity: protocol.SeverityWarning,
+			Range:    protocol.Range{Start: protocol.Position{Line: uint32(i), Character: 0}},
+			Message:  fmt.Sprintf("edited warning %d", i),
+		})
+	}
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(tmp, fmt.Sprintf("other%d.py", i))
+		diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(path))] = []protocol.Diagnostic{
+			{Severity: protocol.SeverityWarning, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: fmt.Sprintf("other warning %d", i)},
+		}
+	}
+	mgr.clientsMu.Lock()
+	mgr.clients["test"] = &Client{diagnostics: diagnostics}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	if got := countFormattedDiagnostics(out); got != 10 {
+		t.Fatalf("formatted diagnostics = %d, want 10\n%s", got, out)
+	}
+	if !strings.Contains(out, "edited warning 5") {
+		t.Fatalf("expected current file diagnostics to consume budget first, got %q", out)
+	}
+	if strings.Contains(out, "other warning 4") || strings.Contains(out, "other warning 5") {
+		t.Fatalf("expected global budget to omit diagnostics after 10 total, got %q", out)
+	}
+}
+
+func countFormattedDiagnostics(s string) int {
+	count := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(line, "[E] ") || strings.HasPrefix(line, "[W] ") || strings.HasPrefix(line, "[I] ") || strings.HasPrefix(line, "[H] ") || strings.HasPrefix(line, "[?] ") {
+			count++
+		}
+	}
+	return count
+}
+
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAvailable(t *testing.T) {
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
 	edited := filepath.Join(t.TempDir(), "edited.py")
@@ -245,7 +313,7 @@ func TestAppendLSPDiagnosticsToToolOutput_CurrentFileHintsPrecedeOtherErrors(t *
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 1})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2})
 	if !strings.Contains(out, "edited hint") || !strings.Contains(out, "other error") {
 		t.Fatalf("expected current-file hint and other-file error included, got %q", out)
 	}

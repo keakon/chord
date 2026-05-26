@@ -373,11 +373,12 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		return "", false, &AllKeysCoolingError{RetryAfter: retryAfter}
 	}
 
-	// Refresh OAuth when no access token is available or when JWT exp/expires says
-	// the token is likely stale. Provider auth failures still decide permanent status.
-	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil && (selectedKS.Key == "" || oauthTokenLikelyExpired(now, selectedKS)) {
+	// With an existing access token, let the provider prove whether it still works;
+	// refresh only after an auth failure. Select-time refresh is reserved for
+	// refresh-only slots that have no access token to try.
+	if selectedKS.OAuthInfo != nil && p.oauthRefresher != nil && selectedKS.Key == "" {
 		if err := p.refreshOAuthKey(ctx, selectedKS); err != nil {
-			if config.IsRefreshTokenInvalid(err) {
+			if config.IsOAuthCredentialUnrecoverableAfterAccessExpiry(err) {
 				persist := p.markInvalidKeyStateLocked(selectedKS, config.OAuthStatusExpired)
 				hasRemaining := false
 				for _, ks := range p.keyStates {
@@ -391,7 +392,7 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 				if hasRemaining {
 					return p.SelectKeyWithContext(ctx)
 				}
-				return "", false, fmt.Errorf("OAuth refresh token invalid provider=%v: %w", p.name, err)
+				return "", false, fmt.Errorf("OAuth credential unrecoverable after access token expiry provider=%v: %w", p.name, err)
 			}
 			// Log warning but continue with the old token (might still work).
 			log.Warnf("failed to refresh OAuth token on-demand provider=%v error=%v", p.name, err)

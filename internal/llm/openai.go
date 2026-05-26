@@ -286,6 +286,7 @@ func (o *OpenAIProvider) CompleteStream(
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setProviderLLMUserAgent(req.Header, o.provider)
 	applySessionIDHeaders(req.Header, o.sessionID)
 
 	// Apply request body compression if configured

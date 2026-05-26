@@ -129,13 +129,13 @@ func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
 	defer srv.Close()
 
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{
-		Type:   config.ProviderTypeMessages,
-		APIURL: srv.URL,
+		Type:      config.ProviderTypeMessages,
+		APIURL:    srv.URL,
+		UserAgent: "ProviderUA/1.0",
 		Compat: &config.ProviderCompatConfig{
 			AnthropicTransport: &config.AnthropicTransportCompatConfig{
 				SystemPrefix:   "[proxy-prefix]\n",
 				ExtraBeta:      []string{"beta-a", "interleaved-thinking-2025-05-14", "beta-b"},
-				UserAgent:      "Chord-Test/1.0",
 				MetadataUserID: true,
 			},
 		},
@@ -164,8 +164,8 @@ func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
 	if got := captured.Header.Get("anthropic-beta"); got != "interleaved-thinking-2025-05-14,beta-a,beta-b" {
 		t.Fatalf("anthropic-beta = %q", got)
 	}
-	if got := captured.Header.Get("User-Agent"); got != "Chord-Test/1.0" {
-		t.Fatalf("User-Agent = %q", got)
+	if got := captured.Header.Get("User-Agent"); got != "ProviderUA/1.0" {
+		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", got)
 	}
 	if captured.Body.Metadata == nil || captured.Body.Metadata.UserID == "" {
 		t.Fatalf("expected metadata.user_id to be present, got %#v", captured.Body.Metadata)
@@ -246,7 +246,31 @@ func TestAnthropicCompleteStreamEncodesAdaptiveThinkingAndAutoCache(t *testing.T
 	}
 }
 
-func TestAnthropicCompleteStreamLeavesTransportDefaultsUnchanged(t *testing.T) {
+func TestAnthropicCompleteStreamSetsDefaultUserAgent(t *testing.T) {
+	var gotUserAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserAgent = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+	_, err = anthropicProvider.CompleteStream(context.Background(), "test-key", "claude-sonnet", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 2048, RequestTuning{}, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if gotUserAgent != defaultLLMUserAgent() {
+		t.Fatalf("User-Agent = %q, want %q", gotUserAgent, defaultLLMUserAgent())
+	}
+}
+
+func TestAnthropicCompleteStreamSetsProviderUserAgentWithoutTransportCompat(t *testing.T) {
 	type capturedRequest struct {
 		Header http.Header
 		Body   anthropicRequest
@@ -266,8 +290,9 @@ func TestAnthropicCompleteStreamLeavesTransportDefaultsUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{
-		Type:   config.ProviderTypeMessages,
-		APIURL: srv.URL,
+		Type:      config.ProviderTypeMessages,
+		APIURL:    srv.URL,
+		UserAgent: "ProviderUA/1.0",
 	}, []string{"test-key"})
 
 	anthropicProvider, err := NewAnthropicProvider(provider, "")
@@ -292,6 +317,9 @@ func TestAnthropicCompleteStreamLeavesTransportDefaultsUnchanged(t *testing.T) {
 
 	if got := captured.Header.Get("anthropic-beta"); got != "" {
 		t.Fatalf("anthropic-beta = %q, want empty", got)
+	}
+	if got := captured.Header.Get("User-Agent"); got != "ProviderUA/1.0" {
+		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", got)
 	}
 	if captured.Body.Metadata != nil {
 		t.Fatalf("expected metadata to be omitted, got %#v", captured.Body.Metadata)

@@ -352,9 +352,10 @@ func (p *ProviderConfig) MarkDeactivated(key string) {
 	p.markInvalid(key, config.OAuthStatusDeactivated)
 }
 
-// MarkExpired permanently marks an OAuth key as expired (refresh token unusable)
-// and persists that state back to auth.yaml when possible. This key will never
-// be selected again and is excluded from the total key count shown in the sidebar.
+// MarkExpired permanently marks an OAuth key as expired because its access token
+// is no longer usable and the credential cannot recover. The state is persisted
+// back to auth.yaml when possible. This key will never be selected again and is
+// excluded from the total key count shown in the sidebar.
 
 func (p *ProviderConfig) MarkExpired(key string) {
 	p.markInvalid(key, config.OAuthStatusExpired)

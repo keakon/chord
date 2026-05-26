@@ -206,7 +206,7 @@ func TestSetOAuthRefresherRefreshOnlyBindsByKeySlot(t *testing.T) {
 	}
 }
 
-func TestSelectKeyRefreshesLikelyExpiredOAuthToken(t *testing.T) {
+func TestSelectKeyUsesExistingOAuthAccessTokenWithoutPreRefresh(t *testing.T) {
 	expires := time.Now().Add(-time.Minute).UnixMilli()
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
@@ -216,10 +216,8 @@ func TestSelectKeyRefreshesLikelyExpiredOAuthToken(t *testing.T) {
 		AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
-	refreshHit := false
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		refreshHit = true
-		w.WriteHeader(http.StatusInternalServerError)
+		t.Fatal("refresh endpoint should not be called before trying existing access token")
 	}))
 	defer refreshServer.Close()
 
@@ -234,9 +232,6 @@ func TestSelectKeyRefreshesLikelyExpiredOAuthToken(t *testing.T) {
 	}
 	if key != access {
 		t.Fatalf("selected key = %q, want access token", key)
-	}
-	if !refreshHit {
-		t.Fatal("refresh endpoint was not called for likely expired OAuth token")
 	}
 	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusNormal {
 		t.Fatalf("OAuth status = %q, want normal", got)
@@ -278,8 +273,45 @@ func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T)
 	if key != access {
 		t.Fatalf("selected key = %q, want original access", key)
 	}
-	if !refreshHit {
-		t.Fatal("refresh endpoint was not called for likely expired OAuth token")
+	if refreshHit {
+		t.Fatal("refresh endpoint should not be called before trying existing access token")
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("expected in-memory auth OAuth credential status=normal, got %#v", got)
+	}
+}
+
+func TestSelectKeyMissingRefreshTokenStillUsesExistingAccessToken(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	expires := time.Now().Add(-time.Minute).UnixMilli()
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+  - access: %s
+    expires: %d
+    account_id: acc-1
+`, access, expires)), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("refresh endpoint should not be called before trying existing access token")
+	}))
+	defer refreshServer.Close()
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
+		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+	}, "")
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != access {
+		t.Fatalf("selected key = %q, want existing access token", key)
 	}
 	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected in-memory auth OAuth credential status=normal, got %#v", got)
@@ -1082,7 +1114,6 @@ func TestProviderConfig_AnthropicTransportCompat(t *testing.T) {
 			AnthropicTransport: &config.AnthropicTransportCompatConfig{
 				SystemPrefix:   "prefix\n",
 				ExtraBeta:      []string{"beta-a", "beta-b"},
-				UserAgent:      "Chord-Test/1.0",
 				MetadataUserID: true,
 			},
 		},
@@ -1097,9 +1128,6 @@ func TestProviderConfig_AnthropicTransportCompat(t *testing.T) {
 	}
 	if len(got.ExtraBeta) != 2 || got.ExtraBeta[0] != "beta-a" || got.ExtraBeta[1] != "beta-b" {
 		t.Fatalf("unexpected extra_beta: %#v", got.ExtraBeta)
-	}
-	if got.UserAgent != "Chord-Test/1.0" {
-		t.Fatalf("unexpected user_agent: %q", got.UserAgent)
 	}
 	if !got.MetadataUserID {
 		t.Fatal("expected metadata_user_id=true")

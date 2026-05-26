@@ -190,6 +190,7 @@ func (g *GeminiProvider) CompleteStream(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", apiKey)
+	setProviderLLMUserAgent(req.Header, g.provider)
 
 	req, _ = compressRequestBody(req, bodyBytes, g.provider.CompressEnabled())
 

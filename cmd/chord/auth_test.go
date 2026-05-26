@@ -741,6 +741,82 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	}
 }
 
+func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	authPath, err := config.AuthPath()
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(auth dir): %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - access: stale-access
+    account_id: acc-1
+  - access: good-access
+    account_id: acc-2
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "stale-access"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.AccountID = "acc-1"
+		record.Access = "stale-access"
+		record.Status = config.OAuthStatusExpired
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	defer r.Close()
+	if err := cmd.Execute(); err != nil {
+		_ = w.Close()
+		t.Fatalf("Execute: %v", err)
+	}
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout): %v", err)
+	}
+	if !strings.Contains(string(output), "Removed 1 expired/deactivated OAuth credentials") {
+		t.Fatalf("expected clean to remove one auth credential, got %q", string(output))
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := len(auth["openai"]); got != 1 {
+		t.Fatalf("remaining openai credentials = %d, want 1", got)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.AccountID != "acc-2" {
+		t.Fatalf("remaining OAuth credential = %#v, want acc-2", got)
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok {
+		t.Fatal("expired state record should be removed")
+	}
+}
+
 func TestParseAuthBrowserPromptByte(t *testing.T) {
 	tests := []struct {
 		name  string

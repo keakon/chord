@@ -3,13 +3,10 @@ package llm
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
 
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,15 +31,11 @@ func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 	r.codexWSLastInpSig = "sig"
 	r.codexWSLastReqSig = "reqsig"
 	r.codexWSPromptCacheKey = "prompt"
-	r.codexWSStickyDisabled.Store(true)
 
 	r.resetCodexWebSocketChain("test")
 
 	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
 		t.Fatalf("chain state not fully cleared: %+v", r)
-	}
-	if !r.codexWSStickyDisabled.Load() {
-		t.Fatal("sticky disabled flag should be preserved")
 	}
 }
 
@@ -216,29 +209,6 @@ func TestEffectiveResponsesWebsocket_PresetAndOverride(t *testing.T) {
 	}
 	if !config.EffectiveResponsesWebsocket("", &trueVal) {
 		t.Fatal("explicit true should enable websocket even without preset")
-	}
-}
-
-func TestIsCodexWSProtocolStickyError(t *testing.T) {
-	t.Parallel()
-	ce := &websocket.CloseError{Code: websocket.CloseProtocolError, Text: "proto"}
-	if !isCodexWSProtocolStickyError(ce) {
-		t.Fatal("expected protocol close to be sticky")
-	}
-	if !isCodexWSProtocolStickyError(fmt.Errorf("wrap: %w", ce)) {
-		t.Fatal("expected wrapped protocol close to be sticky")
-	}
-	if isCodexWSProtocolStickyError(&websocket.CloseError{Code: websocket.CloseGoingAway, Text: "bye"}) {
-		t.Fatal("going away should not be sticky")
-	}
-	if isCodexWSProtocolStickyError(&websocket.CloseError{Code: websocket.CloseAbnormalClosure}) {
-		t.Fatal("abnormal closure should not be sticky")
-	}
-	if isCodexWSProtocolStickyError(io.EOF) {
-		t.Fatal("EOF should not be sticky")
-	}
-	if isCodexWSProtocolStickyError(errors.New("codex ws api error: {}")) {
-		t.Fatal("application api error should not be sticky")
 	}
 }
 

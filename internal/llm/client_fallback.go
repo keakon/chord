@@ -177,9 +177,9 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		if refreshedKey, ok, refreshErr := provider.TryRefreshOAuthKey(ctx, key); ok {
 			log.Infof("OAuth token refreshed after 401, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
-		} else if config.IsRefreshTokenInvalid(refreshErr) {
+		} else if config.IsOAuthCredentialUnrecoverableAfterAccessExpiry(refreshErr) {
 			info := provider.oauthInfoForKey(key)
-			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
+			log.Warnf("OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
 			result := markKeyCooldownResult{cooldownApplied: true}
 			if info != nil {
@@ -216,9 +216,9 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		if refreshedKey, ok, refreshErr := provider.TryRefreshOAuthKey(ctx, key); ok {
 			log.Infof("OAuth token refreshed after 403, key ready for retry key_suffix=%v", keySuffix(key))
 			return markKeyCooldownResult{oauthRefreshed: true, refreshedKey: refreshedKey}
-		} else if config.IsRefreshTokenInvalid(refreshErr) {
+		} else if config.IsOAuthCredentialUnrecoverableAfterAccessExpiry(refreshErr) {
 			info := provider.oauthInfoForKey(key)
-			log.Warnf("OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
+			log.Warnf("OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
 			result := markKeyCooldownResult{cooldownApplied: true}
 			if info != nil {

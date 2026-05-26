@@ -41,7 +41,6 @@ type ResponsesProvider struct {
 
 	codexWSMu             sync.Mutex
 	codexWSConn           *websocket.Conn
-	codexWSStickyDisabled atomic.Bool
 	codexWSLastKey        string
 	codexWSLastAPIURL     string
 	codexWSLastModel      string
@@ -181,12 +180,11 @@ func (r *ResponsesProvider) CompleteStream(
 		log.Warnf("ResponsesProvider called with non-Responses API URL model=%v api_url=%v expected=%v", model, url, "*/responses")
 	}
 
-	// Convert messages to Responses API format.
-	conversionSystemPrompt := systemPrompt
-	if useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport()) {
-		conversionSystemPrompt = ""
-	}
-	apiInput := convertMessagesToResponses(conversionSystemPrompt, providerWireFamily(r.provider), messages)
+	// Convert messages to Responses API format. System/developer instructions are
+	// sent through the top-level instructions field (matching Codex) instead of as
+	// a system-role input message; some Responses-compatible backends reject typed
+	// system messages in input.
+	apiInput := convertMessagesToResponses("", providerWireFamily(r.provider), messages)
 
 	// Validate that we have at least one input item.
 	if len(apiInput) == 0 {
@@ -251,8 +249,9 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.Store = &v
 	}
 	log.Debugf("responses: full model=%v store=%v input_len=%v", model, effectiveStore, len(fullInput))
-	// Set instructions for Codex OAuth transport
-	if useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport()) {
+	// Set instructions separately from input messages, matching Codex's Responses
+	// request shape and avoiding system-role input items on compatible backends.
+	if systemPrompt != "" {
 		instructions := systemPrompt
 		reqBody.Instructions = &instructions
 	}
@@ -296,7 +295,7 @@ func (r *ResponsesProvider) CompleteStream(
 	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, effectiveMaxTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 
 	start := time.Now()
-	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && !r.codexWSStickyDisabled.Load() {
+	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() {
 		wsComplete := r.codexWSCompleteFn
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
@@ -336,14 +335,8 @@ func (r *ResponsesProvider) CompleteStream(
 			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 			return nil, callErr
 		}
-		if isCodexWSProtocolStickyError(wsErr) {
-			r.codexWSStickyDisabled.Store(true)
-			r.resetCodexWebSocketChain("ws_sticky_disabled")
-			log.Warnf("responses: Codex WebSocket disabled for this process after protocol error error=%v", wsErr)
-		} else {
-			log.Warnf("responses: Codex WebSocket failed, falling back to HTTP error=%v", wsErr)
-			r.resetCodexWebSocketChain("ws_fallback_http")
-		}
+		log.Warnf("responses: Codex WebSocket failed, falling back to HTTP error=%v", wsErr)
+		r.resetCodexWebSocketChain("ws_fallback_http")
 	}
 
 	r.lastTransportUsed.Store("http")
@@ -383,6 +376,7 @@ func (r *ResponsesProvider) sendAndParse(
 	} else {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("OpenAI-Beta", "responses=v1")
+		setProviderLLMUserAgent(req.Header, r.provider)
 	}
 	applySessionIDHeaders(req.Header, r.sessionID)
 

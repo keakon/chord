@@ -66,6 +66,41 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 		t.Fatal("expected streaming activity promoted from tool_use_start")
 	}
 }
+
+func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.SetProviderModelRef("freemodel/gpt-5.5@xhigh")
+
+	state := &mainLLMStreamState{}
+	reducer := a.newMainLLMStreamReducer(nil, "freemodel/gpt-5.5@xhigh", "freemodel/gpt-5.5@xhigh", nil, false, state)
+	reducer.Handle(message.StreamDelta{
+		Type: "status",
+		Status: &message.StatusDelta{
+			Type:     "waiting_headers",
+			ModelRef: "codex/gpt-5.5@xhigh",
+		},
+	})
+
+	if got := a.RunningModelRef(); got != "codex/gpt-5.5@xhigh" {
+		t.Fatalf("RunningModelRef = %q, want codex/gpt-5.5@xhigh", got)
+	}
+	events := drainAgentEvents(a.Events())
+	var saw bool
+	for _, evt := range events {
+		changed, ok := evt.(RunningModelChangedEvent)
+		if !ok {
+			continue
+		}
+		if changed.ProviderModelRef == "freemodel/gpt-5.5@xhigh" && changed.RunningModelRef == "codex/gpt-5.5@xhigh" {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatalf("missing RunningModelChangedEvent for codex retry; events=%#v", events)
+	}
+}
+
 func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.newTurn()

@@ -1,11 +1,14 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -123,6 +126,54 @@ func TestParseGeminiSSEStream(t *testing.T) {
 	}
 	if !sawThinkingEnd || !sawText || !sawToolEnd {
 		t.Fatalf("missing expected stream events: thinking_end=%v text=%v tool_end=%v events=%#v", sawThinkingEnd, sawText, sawToolEnd, events)
+	}
+}
+
+func TestGeminiCompleteStreamSetsDefaultUserAgent(t *testing.T) {
+	var gotUserAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserAgent = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	_, err = geminiProvider.CompleteStream(context.Background(), "test-key", "gemini-test", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if gotUserAgent != defaultLLMUserAgent() {
+		t.Fatalf("User-Agent = %q, want %q", gotUserAgent, defaultLLMUserAgent())
+	}
+}
+
+func TestGeminiCompleteStreamSetsProviderUserAgent(t *testing.T) {
+	var gotUserAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserAgent = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models", UserAgent: "ProviderUA/1.0"}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	_, err = geminiProvider.CompleteStream(context.Background(), "test-key", "gemini-test", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if gotUserAgent != "ProviderUA/1.0" {
+		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", gotUserAgent)
 	}
 }
 

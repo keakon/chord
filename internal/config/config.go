@@ -220,6 +220,7 @@ type ProviderConfig struct {
 	Store              *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                             // whether to enable server-side storage for Responses API (enables previous_response_id reuse)
 	ResponsesWebsocket *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"` // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
 	RateLimit          int                    `json:"rate_limit" yaml:"rate_limit"`                                       // requests per minute (0 = no limit)
+	UserAgent          string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                   // optional User-Agent override for provider/model HTTP requests
 	Proxy              *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
 	Compat             *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                           // provider-level compat defaults (model-level can override model compat only)
 	Models             map[string]ModelConfig `json:"models" yaml:"models"`
@@ -397,7 +398,6 @@ type ProviderCompatConfig struct {
 type AnthropicTransportCompatConfig struct {
 	SystemPrefix   string   `json:"system_prefix,omitempty" yaml:"system_prefix,omitempty"`
 	ExtraBeta      []string `json:"extra_beta,omitempty" yaml:"extra_beta,omitempty"`
-	UserAgent      string   `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
 	MetadataUserID bool     `json:"metadata_user_id,omitempty" yaml:"metadata_user_id,omitempty"`
 }
 

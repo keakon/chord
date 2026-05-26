@@ -196,7 +196,6 @@ func (r *ResponsesProvider) codexWSCloseConnUnlocked(reason string) bool {
 }
 
 // resetCodexWebSocketChain closes the WebSocket and clears in-connection incremental state.
-// It does not clear codexWSStickyDisabled.
 func (r *ResponsesProvider) resetCodexWebSocketChain(reason string) {
 	r.codexWSMu.Lock()
 	defer r.codexWSMu.Unlock()
@@ -209,26 +208,7 @@ func (r *ResponsesProvider) resetCodexWebSocketChain(reason string) {
 	}
 }
 
-func isCodexWSProtocolStickyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var ce *websocket.CloseError
-	if errors.As(err, &ce) && ce != nil {
-		// gorilla's IsCloseError does not unwrap; classify the concrete close frame.
-		return websocket.IsCloseError(ce,
-			websocket.CloseProtocolError,
-			websocket.CloseUnsupportedData,
-			websocket.CloseInvalidFramePayloadData,
-			websocket.ClosePolicyViolation,
-			websocket.CloseMandatoryExtension,
-			websocket.CloseMessageTooBig,
-			websocket.CloseNoStatusReceived,
-		)
-	}
-	return false
-}
-
+// codexWSParseFailureReason normalizes transport and parse errors for the close frame reason.
 func codexWSParseFailureReason(err error) string {
 	if err == nil {
 		return "parse_failed"

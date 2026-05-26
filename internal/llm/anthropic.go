@@ -225,9 +225,7 @@ func (a *AnthropicProvider) CompleteStream(
 	if betaHeader := anthropicBetaHeader(at, transportCompat); betaHeader != "" {
 		req.Header.Set("anthropic-beta", betaHeader)
 	}
-	if transportCompat != nil && transportCompat.UserAgent != "" {
-		req.Header.Set("User-Agent", transportCompat.UserAgent)
-	}
+	setProviderLLMUserAgent(req.Header, a.provider)
 
 	log.Debugf("anthropic request model=%v max_tokens=%v thinking_type=%v thinking_budget=%v messages=%v tools=%v", model, maxTokens, at.ThinkingType, at.ThinkingBudget, len(messages), len(tools))
 

@@ -485,8 +485,8 @@ func (p *ProviderConfig) handleCodexWarmupAuthFailure(ctx context.Context, key s
 	if refreshedKey, ok, refreshErr := p.TryRefreshOAuthKey(ctx, key); ok {
 		log.Infof("OAuth token refreshed during codex warmup key_suffix=%v", keySuffix(refreshedKey))
 		return true
-	} else if config.IsRefreshTokenInvalid(refreshErr) {
-		log.Warnf("codex warmup detected OAuth refresh token invalid, permanently removing key key_suffix=%v", keySuffix(key))
+	} else if config.IsOAuthCredentialUnrecoverableAfterAccessExpiry(refreshErr) {
+		log.Warnf("codex warmup detected OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
 		p.MarkExpired(key)
 		return true
 	}
