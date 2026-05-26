@@ -144,7 +144,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
-	if m.maybeFastModeShortcut(key) {
+	if m.maybeServiceTierShortcut(key) {
 		return nil
 	}
 

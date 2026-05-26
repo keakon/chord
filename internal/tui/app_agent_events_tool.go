@@ -243,7 +243,6 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		updated := false
 		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
-		keepDoneArgProgress := strings.EqualFold(evt.Name, "Done")
 		displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		if displayArgs != "" && displayArgs != block.Content {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
@@ -264,7 +263,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				block.ToolQueuedByExecutionEvent = false
 				updated = true
 			}
-			if block.ToolProgress != nil && !keepDoneArgProgress {
+			if block.ToolProgress != nil {
 				block.ToolProgress = nil
 				updated = true
 			}

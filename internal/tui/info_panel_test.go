@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/config"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -88,6 +90,20 @@ func (a *infoPanelAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnaps
 
 func (a *infoPanelAgent) WakeCodexRateLimitPolling() {
 	a.wakeRateLimitCalls++
+}
+
+func (a *infoPanelAgent) ServiceTier() config.ServiceTier {
+	if a.sessionControlAgent != nil && a.sessionControlAgent.serviceTierEnabled {
+		return config.ServiceTierFast
+	}
+	return a.sessionControlAgent.ServiceTier()
+}
+
+func (a *infoPanelAgent) EffectiveServiceTier() config.ServiceTier {
+	if a.sessionControlAgent != nil {
+		return a.sessionControlAgent.EffectiveServiceTier()
+	}
+	return config.ServiceTierStandard
 }
 
 func (a *infoPanelAgent) KeyStats() (confirmed, total int) {

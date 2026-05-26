@@ -54,6 +54,10 @@ type selectionState struct {
 	selEndCol              int
 	selEndInclusiveForCopy bool
 	inputMouseDown         bool
+	inputLastClickTime     time.Time
+	inputLastClickY        int
+	inputLastClickX        int
+	inputClickCount        int
 
 	// Status bar copy targets (working directory / session ID).
 	statusPathLastClickTime time.Time

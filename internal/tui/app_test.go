@@ -20,6 +20,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/buildinfo"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -1038,46 +1039,75 @@ func TestRenderStatusBarDoesNotShowLoopWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarShowsFastModeAfterModelWhenInfoPanelHidden(t *testing.T) {
-	backend := &sessionControlAgent{currentRole: "builder", fastMode: true, runningModelRef: "anthropic/claude-sonnet-4.5"}
+func TestRenderStatusBarShowsServiceTierAfterModelWhenInfoPanelHidden(t *testing.T) {
+	backend := &sessionControlAgent{currentRole: "builder", serviceTierEnabled: true, runningModelRef: "anthropic/claude-sonnet-4.5"}
 	m := NewModelWithSize(backend, 180, 24)
 	m.mode = ModeNormal
 	m.rightPanelVisible = false
 
 	plain := stripANSI(m.renderStatusBar())
 	modelIdx := strings.Index(plain, "◇ anthropic/claude-sonnet-4.5")
-	fastIdx := strings.Index(plain, "FAST")
+	fastIdx := strings.Index(plain, "TIER")
 	if modelIdx < 0 || fastIdx < 0 || fastIdx <= modelIdx {
-		t.Fatalf("status bar = %q, want FAST after model when info panel is hidden", plain)
+		t.Fatalf("status bar = %q, want TIER after model when info panel is hidden", plain)
 	}
 }
 
-func TestRenderStatusBarFastModeChangesFingerprint(t *testing.T) {
+func TestRenderStatusBarServiceTierChangesFingerprint(t *testing.T) {
 	backend := &sessionControlAgent{currentRole: "builder"}
 	m := NewModelWithSize(backend, 180, 24)
 	now := time.Unix(123, 0)
 
 	before := m.statusBarFingerprint(now)
-	backend.fastMode = true
+	backend.serviceTierEnabled = true
 	after := m.statusBarFingerprint(now)
 	if before == after {
-		t.Fatal("statusBarFingerprint did not change after fast mode changed")
+		t.Fatal("statusBarFingerprint did not change after service tier changed")
 	}
 }
 
-func TestRenderInfoPanelShowsFastModeState(t *testing.T) {
+func TestRenderStatusBarHidesUnsupportedServiceTier(t *testing.T) {
+	backend := &sessionControlAgent{currentRole: "builder", serviceTierEnabled: true, serviceTier: config.ServiceTierFast, effectiveServiceTier: config.ServiceTierStandard, runningModelRef: "anthropic/claude-sonnet-4.5"}
+	m := NewModelWithSize(backend, 180, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, "TIER") {
+		t.Fatalf("status bar = %q, should hide unsupported tier", plain)
+	}
+}
+
+func TestRenderInfoPanelMarksUnsupportedFastServiceTier(t *testing.T) {
 	backend := newInfoPanelAgent()
+	backend.serviceTierEnabled = true
+	backend.serviceTier = config.ServiceTierFast
+	backend.effectiveServiceTier = config.ServiceTierStandard
 	m := NewModelWithSize(backend, 100, 24)
 
-	plain := stripANSI(m.renderInfoPanel(40, 20))
-	if strings.Contains(plain, "Fast:") {
-		t.Fatalf("info panel = %q, should not show fast state when disabled", plain)
+	out := m.renderInfoPanel(40, 20)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "tier: fast") {
+		t.Fatalf("info panel = %q, want unsupported fast tier shown", plain)
 	}
+	if idxStrike, idxTier := strings.Index(out, ";9m"), strings.Index(out, "tier: "); idxStrike < 0 || idxTier < 0 || idxStrike <= idxTier+len("tier: ") {
+		t.Fatalf("info panel = %q, want only unsupported fast tier value strikethrough", out)
+	}
+}
 
-	backend.fastMode = true
-	plain = stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(plain, "Fast: on") {
-		t.Fatalf("info panel = %q, want fast on state", plain)
+func TestRenderInfoPanelMarksUnsupportedSlowServiceTier(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.serviceTier = config.ServiceTierSlow
+	backend.effectiveServiceTier = config.ServiceTierStandard
+	m := NewModelWithSize(backend, 100, 24)
+
+	out := m.renderInfoPanel(40, 20)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "tier: slow") {
+		t.Fatalf("info panel = %q, want unsupported slow tier shown", plain)
+	}
+	if idxStrike, idxTier := strings.Index(out, ";9m"), strings.Index(out, "tier: "); idxStrike < 0 || idxTier < 0 || idxStrike <= idxTier+len("tier: ") {
+		t.Fatalf("info panel = %q, want only unsupported slow tier value strikethrough", out)
 	}
 }
 
@@ -1151,45 +1181,45 @@ func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
 	}
 }
 
-func TestFastModeShortcutSendsToggleCommand(t *testing.T) {
+func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
-	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/fast on" {
-		t.Fatalf("sentMessages = %#v, want [/fast on]", backend.sentMessages)
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier fast" {
+		t.Fatalf("sentMessages = %#v, want [/tier fast]", backend.sentMessages)
 	}
 
-	backend.fastMode = true
+	backend.serviceTierEnabled = true
 	m.mode = ModeNormal
 	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
-	if len(backend.sentMessages) != 2 || backend.sentMessages[1] != "/fast off" {
-		t.Fatalf("sentMessages = %#v, want second /fast off", backend.sentMessages)
+	if len(backend.sentMessages) != 2 || backend.sentMessages[1] != "/tier slow" {
+		t.Fatalf("sentMessages = %#v, want second /tier slow", backend.sentMessages)
 	}
 }
 
 func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
-	matches := m.getSlashCompletions("/f")
-	if len(matches) != 1 || matches[0].Cmd != "/fast on" {
-		t.Fatalf("matches = %#v, want /fast on", matches)
+	matches := m.getSlashCompletions("/t")
+	if len(matches) != 1 || matches[0].Cmd != "/tier fast" {
+		t.Fatalf("matches = %#v, want /tier fast", matches)
 	}
 
-	backend.fastMode = true
-	matches = m.getSlashCompletions("/f")
-	if len(matches) != 1 || matches[0].Cmd != "/fast off" {
-		t.Fatalf("matches = %#v, want /fast off", matches)
+	backend.serviceTierEnabled = true
+	matches = m.getSlashCompletions("/t")
+	if len(matches) != 1 || matches[0].Cmd != "/tier slow" {
+		t.Fatalf("matches = %#v, want /tier slow", matches)
 	}
 }
 
 func TestSlashCompletionShowsFastCommandWhenSubAgentFocused(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	m.focusedAgentID = "sub-1"
-	matches := m.getSlashCompletions("/f")
-	if len(matches) != 1 || matches[0].Cmd != "/fast on" {
-		t.Fatalf("matches = %#v, want /fast on when subagent is focused", matches)
+	matches := m.getSlashCompletions("/t")
+	if len(matches) != 1 || matches[0].Cmd != "/tier fast" {
+		t.Fatalf("matches = %#v, want /tier fast when subagent is focused", matches)
 	}
 }
 
@@ -2406,6 +2436,42 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected tool to hide temp char count when arg streaming completes; got:\n%s", joined)
+	}
+}
+
+func TestDoneToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	argsJSON := `{"report":"## Completion status\nDone\n\n## Verification\nChecked"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-done-progress-done-1",
+		Name:     "Done",
+		AgentID:  "",
+		ArgsJSON: argsJSON,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-done-progress-done-1")
+	if !ok {
+		t.Fatal("expected Done tool block")
+	}
+	if block.ToolProgress == nil {
+		t.Fatal("expected transient char count before Done arg streaming completes")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "call-done-progress-done-1",
+		Name:              "Done",
+		AgentID:           "",
+		ArgsJSON:          argsJSON,
+		ArgsStreamingDone: true,
+	}})
+
+	if block.ToolProgress != nil {
+		t.Fatalf("expected Done temp char count cleared on arg completion, got %+v", *block.ToolProgress)
+	}
+	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if strings.Contains(joined, "chars received") {
+		t.Fatalf("expected Done to hide temp char count when arg streaming completes; got:\n%s", joined)
 	}
 }
 

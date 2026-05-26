@@ -7,7 +7,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const mouseWheelScrollStep = 3
+const (
+	mouseWheelScrollStep = 3
+
+	// doubleClickThreshold and mouseClickTolerance gate multi-click detection
+	// across input/transcript/status-bar zones so the same gesture feels uniform.
+	doubleClickThreshold = 400 * time.Millisecond
+	mouseClickTolerance  = 2
+)
 
 func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 	mouse := msg.Mouse()
@@ -197,11 +204,9 @@ func (m *Model) handleStatusCopyClick(x, y int) (tea.Cmd, bool) {
 func (m *Model) handleStatusClipboardClick(x, y int, value string, copyCmd func(string) tea.Cmd) tea.Cmd {
 	m.clearFocusedBlock()
 	now := time.Now()
-	const doubleClickThreshold = 400 * time.Millisecond
-	const clickTolerance = 2
 	if now.Sub(m.statusPathLastClickTime) <= doubleClickThreshold &&
-		abs(x-m.statusPathLastClickX) <= clickTolerance &&
-		abs(y-m.statusPathLastClickY) <= clickTolerance {
+		abs(x-m.statusPathLastClickX) <= mouseClickTolerance &&
+		abs(y-m.statusPathLastClickY) <= mouseClickTolerance {
 		m.statusPathClickCount++
 	} else {
 		m.statusPathClickCount = 1
@@ -341,6 +346,59 @@ func (m *Model) handleInfoPanelMouseClick(mouse tea.Mouse) tea.Cmd {
 	return nil
 }
 
+func (m *Model) handleInputSelectionClick(mouse tea.Mouse, line, col int) bool {
+	m.clearMouseSelection()
+
+	now := time.Now()
+	if now.Sub(m.inputLastClickTime) <= doubleClickThreshold &&
+		abs(mouse.X-m.inputLastClickX) <= mouseClickTolerance &&
+		abs(mouse.Y-m.inputLastClickY) <= mouseClickTolerance {
+		m.inputClickCount++
+	} else {
+		m.inputClickCount = 1
+	}
+	m.inputLastClickTime = now
+	m.inputLastClickX = mouse.X
+	m.inputLastClickY = mouse.Y
+
+	content, ok := m.input.visibleContentLine(line)
+	if !ok {
+		m.input.ClearSelection()
+		m.inputMouseDown = false
+		return false
+	}
+
+	if m.inputClickCount == 2 {
+		sCol, eCol := WordBoundsAtCol(content, col)
+		if sCol < eCol {
+			m.input.StartSelection(line, sCol)
+			m.input.UpdateSelection(line, eCol)
+			m.inputMouseDown = false
+		} else {
+			m.input.StartSelection(line, col)
+			m.inputMouseDown = true
+		}
+		return true
+	}
+	if m.inputClickCount >= 3 {
+		m.inputClickCount = 0
+		lineWidth := selectionPlainTextWidth(content)
+		if lineWidth > 0 {
+			m.input.StartSelection(line, 0)
+			m.input.UpdateSelection(line, lineWidth)
+			m.inputMouseDown = false
+		} else {
+			m.input.StartSelection(line, col)
+			m.inputMouseDown = true
+		}
+		return true
+	}
+
+	m.input.StartSelection(line, col)
+	m.inputMouseDown = true
+	return true
+}
+
 func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (tea.Cmd, bool) {
 	// Insert mode: click outside input zone -> switch to Normal and blur,
 	// then fall through to start selection so drag works immediately.
@@ -357,9 +415,7 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 			mouse.Y-m.layout.input.Min.Y-1,
 			mouse.X-m.layout.input.Min.X-inputPromptWidth,
 		); ok {
-			m.clearMouseSelection()
-			m.input.StartSelection(line, col)
-			m.inputMouseDown = true
+			m.handleInputSelectionClick(mouse, line, col)
 		} else {
 			m.input.ClearSelection()
 			m.inputMouseDown = false
@@ -375,9 +431,7 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 			mouse.Y-m.layout.input.Min.Y-1,
 			mouse.X-m.layout.input.Min.X-inputPromptWidth,
 		); ok {
-			m.clearMouseSelection()
-			m.input.StartSelection(line, col)
-			m.inputMouseDown = true
+			m.handleInputSelectionClick(mouse, line, col)
 		} else {
 			m.input.ClearSelection()
 			m.inputMouseDown = false
@@ -403,12 +457,10 @@ func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) te
 
 func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, lineInBlock, col int) (tea.Cmd, bool) {
 	// Double/triple click for word/line selection.
-	const doubleClickThreshold = 400 * time.Millisecond
-	const clickTolerance = 2
 	now := time.Now()
 	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
-		abs(mouse.X-m.lastClickX) <= clickTolerance &&
-		abs(mouse.Y-m.lastClickY) <= clickTolerance {
+		abs(mouse.X-m.lastClickX) <= mouseClickTolerance &&
+		abs(mouse.Y-m.lastClickY) <= mouseClickTolerance {
 		m.clickCount++
 	} else {
 		m.clickCount = 1

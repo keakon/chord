@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -209,15 +210,18 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 		}
 	}
 	out = append(out, loopCommands...)
-	fastCommands := []slashCommand{}
-	if strings.HasPrefix("/fast", prefix) {
-		if m.fastModeEnabled() {
-			fastCommands = append(fastCommands, slashCommand{Cmd: "/fast off", Desc: "disable fast responses"})
-		} else {
-			fastCommands = append(fastCommands, slashCommand{Cmd: "/fast on", Desc: "enable fast responses"})
+	tierCommands := []slashCommand{}
+	if strings.HasPrefix("/tier", prefix) {
+		switch m.serviceTier() {
+		case config.ServiceTierFast:
+			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier slow", Desc: "switch to slow tier"})
+		case config.ServiceTierSlow:
+			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier standard", Desc: "switch to standard tier"})
+		default:
+			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier fast", Desc: "switch to fast tier"})
 		}
 	}
-	out = append(out, fastCommands...)
+	out = append(out, tierCommands...)
 	for _, c := range slashCommands {
 		if strings.HasPrefix(strings.ToLower(c.Cmd), prefix) {
 			out = append(out, c)

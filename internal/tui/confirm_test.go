@@ -462,20 +462,31 @@ func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 	}
 }
 
-func TestRenderConfirmDenyReasonInputAfterResizeHasNoBlankSoftWrapLine(t *testing.T) {
+func TestRenderConfirmDenyReasonInputAfterResizeUsesDialogContentWidth(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-	m.confirm.denyReasonInput.SetValue("Done工具的报告时，没法用yy复制完整的报告？需要进行补充。同时检查Handoff工具的view，也需要能复制")
+	m.confirm.denyReasonInput.SetValue("Please wait until the deployment notes mention the rollback plan and the dashboard checks that should be reviewed after release.")
 
 	m.applyTerminalSize(80, 30, false)
-	plain := stripANSI(m.renderConfirmDialog())
-	if strings.Contains(plain, "需\n\n要") {
-		t.Fatalf("unexpected blank line inside soft-wrapped deny reason after resize:\n%s", plain)
+
+	want := confirmDialogWidth(m.width) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
+	if got := m.confirm.denyReasonInput.Width(); got != want {
+		t.Fatalf("deny-reason input width = %d, want dialog content width %d", got, want)
 	}
-	if !strings.Contains(plain, "需要") && !strings.Contains(plain, "需\n要") {
-		t.Fatalf("expected wrapped deny reason to still contain 需要 content, got:\n%s", plain)
+}
+
+func TestNewConfirmTextareaUsesDialogContentWidth(t *testing.T) {
+	m := NewModelWithSize(nil, 180, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.denyingWithReason = true
+	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+	m.confirm.denyReasonInput.SetValue("The summary is missing the migration risk and the follow-up owner, so this should be revised before it is sent.")
+
+	want := confirmDialogWidth(m.width) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
+	if got := m.confirm.denyReasonInput.Width(); got != want {
+		t.Fatalf("deny-reason input width = %d, want dialog content width %d", got, want)
 	}
 }
 

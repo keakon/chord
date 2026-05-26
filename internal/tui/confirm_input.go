@@ -46,7 +46,7 @@ func confirmDialogWidth(totalWidth int) int {
 }
 
 func confirmDialogInnerWidth(totalWidth int) int {
-	innerWidth := confirmDialogWidth(totalWidth) - 2
+	innerWidth := confirmDialogWidth(totalWidth) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
 	if innerWidth < 20 {
 		innerWidth = 20
 	}

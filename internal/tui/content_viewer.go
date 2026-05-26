@@ -242,12 +242,10 @@ func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 		return false
 	}
 
-	const doubleClickThreshold = 400 * time.Millisecond
-	const clickTolerance = 2
 	now := time.Now()
 	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
-		abs(mouse.X-m.lastClickX) <= clickTolerance &&
-		abs(mouse.Y-m.lastClickY) <= clickTolerance {
+		abs(mouse.X-m.lastClickX) <= mouseClickTolerance &&
+		abs(mouse.Y-m.lastClickY) <= mouseClickTolerance {
 		m.clickCount++
 	} else {
 		m.clickCount = 1

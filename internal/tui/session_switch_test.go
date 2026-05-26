@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/runtimecache"
@@ -3845,7 +3846,9 @@ type sessionControlAgent struct {
 	loopMaxSet              bool
 	canUseLoop              bool
 	canUseLoopSet           bool
-	fastMode                bool
+	serviceTierEnabled      bool
+	serviceTier             config.ServiceTier
+	effectiveServiceTier    config.ServiceTier
 	executePlanCalls        int
 	executePlanPath         string
 	executePlanAgent        string
@@ -4047,8 +4050,28 @@ func (s *sessionControlAgent) EnableLoopMode(target string) {
 	s.loopEnableCalls++
 	s.loopTarget = target
 }
-func (s *sessionControlAgent) DisableLoopMode()      { s.loopDisableCalls++ }
-func (s *sessionControlAgent) FastModeEnabled() bool { return s.fastMode }
+func (s *sessionControlAgent) DisableLoopMode() { s.loopDisableCalls++ }
+func (s *sessionControlAgent) ServiceTier() config.ServiceTier {
+	if s == nil {
+		return config.ServiceTierStandard
+	}
+	if s.serviceTier != "" {
+		return s.serviceTier
+	}
+	if s.serviceTierEnabled {
+		return config.ServiceTierFast
+	}
+	return config.ServiceTierStandard
+}
+func (s *sessionControlAgent) EffectiveServiceTier() config.ServiceTier {
+	if s == nil {
+		return config.ServiceTierStandard
+	}
+	if s.effectiveServiceTier != "" {
+		return s.effectiveServiceTier
+	}
+	return s.ServiceTier()
+}
 func (s *sessionControlAgent) CanUseLoopMode() bool {
 	if s.canUseLoopSet {
 		return s.canUseLoop

@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
@@ -60,8 +61,8 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 		m.cachedModelPill = modelPill
 	}
 	pills = append(pills, modelPill)
-	if m.fastModeEnabled() {
-		pills = append(pills, StatusHintStyle.Render("FAST"))
+	if tier := m.effectiveServiceTier(); tier != config.ServiceTierStandard {
+		pills = append(pills, StatusHintStyle.Render("TIER "+string(tier)))
 	}
 
 	if snap.proxyInUse {

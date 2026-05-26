@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/bytefmt"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
@@ -68,6 +69,18 @@ func renderInfoPanelIndentedLine(lineW, inset int, content string) string {
 	return InfoPanelLineBg.Width(lineW).Render(line)
 }
 
+func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
+	requested := m.serviceTier()
+	if requested == config.ServiceTierStandard {
+		return ""
+	}
+	style := InfoPanelValue
+	if requested != m.effectiveServiceTier() {
+		style = InfoPanelDim.Strikethrough(true)
+	}
+	return InfoPanelLineBg.Width(lineW).Render(style.Render("tier: " + string(requested)))
+}
+
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	// RunningModelRef may temporarily omit provider or @variant; backfill from selected ref.
 	modelDisplay := modelref.FormatRunningModelRefForDisplay(m.agent.RunningModelRef(), m.agent.ProviderModelRef(), m.agent.RunningVariant(), lineW)
@@ -95,8 +108,8 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 		keysStr := fmt.Sprintf("Keys: %d/%d", keysConfirmed, keysTotal)
 		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(keysStyle.Render(keysStr)))
 	}
-	if m.fastModeEnabled() {
-		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Fast: on")))
+	if tierLine := m.renderInfoPanelServiceTierLine(lineW); tierLine != "" {
+		modelLines = append(modelLines, tierLine)
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))
 }

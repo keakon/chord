@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
@@ -114,7 +115,7 @@ type statusBarInputs struct {
 	LoopState         agent.LoopState
 	LoopIteration     int
 	LoopMaxIterations int
-	FastMode          bool
+	ServiceTier       config.ServiceTier
 	DynamicCacheKey   string
 	InflightDraft     bool
 	LocalShellPending bool
@@ -154,7 +155,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		LoopState:         loopState,
 		LoopIteration:     loopIteration,
 		LoopMaxIterations: loopMaxIterations,
-		FastMode:          m.fastModeEnabled(),
+		ServiceTier:       m.effectiveServiceTier(),
 		DynamicCacheKey:   m.statusBarDynamicCacheKeyAt(now),
 		InflightDraft:     m.inflightDraft != nil,
 		LocalShellPending: m.viewport != nil && m.viewport.HasUserLocalShellPending(),
@@ -376,7 +377,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%t|%s|%d|%d|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -390,7 +391,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		inputs.SearchFP,
 		inputs.NextEscHint,
 		string(inputs.LoopState),
-		inputs.FastMode,
+		string(inputs.ServiceTier),
 		inputs.DynamicCacheKey,
 		inputs.LoopIteration,
 		inputs.LoopMaxIterations,
