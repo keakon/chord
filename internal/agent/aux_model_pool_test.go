@@ -144,7 +144,7 @@ func TestNewCompactionClientInheritsMainModelPoolWhenUnconfigured(t *testing.T) 
 	mainClient := newAuxClientFromPool([]llm.FallbackModel{
 		first.PrimaryModelEntry(),
 		second.PrimaryModelEntry(),
-	}, 1, 0, false)
+	}, 1, 0, config.ServiceTierSlow)
 	a.llmClient = mainClient
 
 	client, contextLimit, err := a.newCompactionClient("")
@@ -160,6 +160,9 @@ func TestNewCompactionClientInheritsMainModelPoolWhenUnconfigured(t *testing.T) 
 	}
 	if selectedIdx != 0 {
 		t.Fatalf("snapshot selectedIdx = %d, want 0 for cloned cursor head", selectedIdx)
+	}
+	if got := client.ServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("compaction service tier = %q, want %q", got, config.ServiceTierSlow)
 	}
 	if contextLimit != 8192 {
 		t.Fatalf("contextLimit = %d, want 8192", contextLimit)
@@ -189,25 +192,45 @@ func TestNewCompactionClientFailsWhenConfiguredPoolRefFails(t *testing.T) {
 	}
 }
 
-func TestNewCompactionClientDoesNotRetrySelectedWhenAlreadyInConfiguredPool(t *testing.T) {
-	a := &MainAgent{
-		projectConfig: &config.Config{
-			Context:    config.ContextConfig{Compaction: config.CompactionConfig{ModelPool: "compact"}},
-			ModelPools: map[string][]string{"compact": {"main/ref"}},
+func TestNewAuxModelPoolClientAppliesServiceTierToDirectFallback(t *testing.T) {
+	a := &MainAgent{}
+	mainClient := newAuxClientFromPool([]llm.FallbackModel{{
+		ProviderConfig: llm.NewProviderConfig("main", config.ProviderConfig{
+			Type: config.ProviderTypeMessages,
+			Models: map[string]config.ModelConfig{
+				"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"key"}),
+		ProviderImpl: auxModelPoolStubProvider{},
+		ModelID:      "model",
+		MaxTokens:    1024,
+	}}, 0, 0, config.ServiceTierSlow)
+	a.llmClient = mainClient
+
+	directClient := llm.NewClient(llm.NewProviderConfig("aux", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
-	}
-	a.SetProviderModelRef("main/ref")
-	calls := make([]string, 0, 1)
+	}, []string{"key"}), nil, "model", 1024, "")
 	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
-		calls = append(calls, providerModel)
-		return nil, "", 0, fmt.Errorf("failed %s", providerModel)
+		if providerModel != "aux/model" {
+			t.Fatalf("providerModel = %q, want aux/model", providerModel)
+		}
+		return directClient, providerModel, 0, nil
 	}
 
-	_, _, err := a.newCompactionClient("")
-	if err == nil {
-		t.Fatal("newCompactionClient() error = nil, want configured failure")
+	client, err := a.newAuxModelPoolClient([]string{"aux/model"}, 0, 2048)
+	if err != nil {
+		t.Fatalf("newAuxModelPoolClient() error = %v", err)
 	}
-	if !reflect.DeepEqual(calls, []string{"main/ref"}) {
-		t.Fatalf("modelSwitchFactory calls = %#v, want no duplicate selected retry", calls)
+	if client == nil {
+		t.Fatal("newAuxModelPoolClient() returned nil client")
+	}
+	if got := client.ServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("direct fallback service tier = %q, want %q", got, config.ServiceTierSlow)
+	}
+	if got := client.OutputTokenMax(); got != 2048 {
+		t.Fatalf("direct fallback output max = %d, want 2048", got)
 	}
 }

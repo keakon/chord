@@ -323,11 +323,12 @@ func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(string, string)
 	p.codexPollFetchFn = fetchFn
 }
 
-func (p *ProviderConfig) StopCodexRateLimitPolling() {
+func (p *ProviderConfig) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.codexPollFetchFn = nil
 	p.polledRateLimitInFlight = make(map[int]bool)
+	p.stopAuthStateMonitorLocked()
 }
 
 func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
@@ -343,6 +344,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 		p.mu.Unlock()
 		return false
 	}
+	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	candidates := make([]int, 0, len(p.keyStates))
 	for i, ks := range p.keyStates {
@@ -499,6 +501,7 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		p.mu.Unlock()
 		return
 	}
+	p.maybeReloadAuthStateLocked()
 	key, accountID, credIdx, ok := p.codexUsagePollAuthLocked()
 	if !ok {
 		p.mu.Unlock()

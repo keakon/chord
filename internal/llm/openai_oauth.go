@@ -60,7 +60,7 @@ func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey
 }
 
 func openAICodexUserAgent() string {
-	return fmt.Sprintf("%s/0.0.1 (%s %s)", openAICodexOriginator, runtime.GOOS, runtime.GOARCH)
+	return defaultLLMUserAgent() + fmt.Sprintf(" (%s; %s %s)", openAICodexOriginator, runtime.GOOS, runtime.GOARCH)
 }
 
 func newOpenAIOAuthSessionID() string {

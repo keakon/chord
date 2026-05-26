@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -75,7 +76,7 @@ func (p *scriptedProvider) CompleteStream(
 	next := p.calls[0]
 	p.calls = p.calls[1:]
 	if next.expectTuning != nil {
-		if tuning != *next.expectTuning {
+		if !reflect.DeepEqual(tuning, *next.expectTuning) {
 			return nil, &APIError{StatusCode: 400, Message: fmt.Sprintf("invalid_request_error: unexpected request tuning: got %#v want %#v", tuning, *next.expectTuning)}
 		}
 	}
@@ -124,13 +125,13 @@ type recordingTuningProvider struct {
 	tuning []RequestTuning
 }
 
-type fastModeToggleRetryProvider struct {
+type serviceTierToggleRetryProvider struct {
 	client     *Client
 	expectFast RequestTuning
 	calls      int
 }
 
-func (p *fastModeToggleRetryProvider) CompleteStream(
+func (p *serviceTierToggleRetryProvider) CompleteStream(
 	_ context.Context,
 	_ string,
 	_ string,
@@ -144,20 +145,42 @@ func (p *fastModeToggleRetryProvider) CompleteStream(
 	p.calls++
 	switch p.calls {
 	case 1:
-		want := RequestTuning{Anthropic: AnthropicTuning{PromptCacheMode: "explicit"}, FastModeSupported: true}
-		if tuning != want {
+		want := RequestTuning{Anthropic: AnthropicTuning{PromptCacheMode: "explicit"}, SupportedServiceTiers: map[config.ServiceTier]bool{config.ServiceTierFast: true}}
+		if !reflect.DeepEqual(tuning, want) {
 			return nil, fmt.Errorf("first retry-round tuning = %#v, want %#v", tuning, want)
 		}
-		p.client.SetFastMode(true)
-		return nil, &APIError{StatusCode: 500, Message: "retry with fast mode"}
+		p.client.SetServiceTier(config.ServiceTierFast)
+		return nil, &APIError{StatusCode: 500, Message: "retry with fast service tier"}
 	case 2:
-		if tuning != p.expectFast {
+		if !reflect.DeepEqual(tuning, p.expectFast) {
 			return nil, fmt.Errorf("second retry-round tuning = %#v, want %#v", tuning, p.expectFast)
 		}
 		return &message.Response{Content: "ok"}, nil
 	default:
 		return nil, fmt.Errorf("unexpected provider call %d", p.calls)
 	}
+}
+
+type serviceTierSwitchingProvider struct {
+	client *Client
+}
+
+func (p *serviceTierSwitchingProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	tuning RequestTuning,
+	_ StreamCallback,
+) (*message.Response, error) {
+	if tuning.OpenAI.ServiceTier != "fast" {
+		return nil, fmt.Errorf("OpenAI service tier = %q, want fast", tuning.OpenAI.ServiceTier)
+	}
+	p.client.SetServiceTier(config.ServiceTierStandard)
+	return &message.Response{Content: "ok"}, nil
 }
 
 func (p *recordingTuningProvider) CompleteStream(
@@ -358,8 +381,8 @@ func testFastProviderConfig(name, model string) *ProviderConfig {
 		Type: config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{
 			model: {
-				Limit:        config.ModelLimit{Context: 128000, Output: 4096},
-				SupportsFast: boolPtr(true),
+				Limit:                 config.ModelLimit{Context: 128000, Output: 4096},
+				SupportedServiceTiers: []config.ServiceTier{config.ServiceTierFast},
 			},
 		},
 	}, []string{"test-key"})
@@ -3426,20 +3449,20 @@ func TestClientRunningModelRefOmitsVariantOnFallbackSuccess(t *testing.T) {
 	}
 }
 
-func TestClientFastModeSkipsUnsupportedModel(t *testing.T) {
+func TestClientServiceTierSkipsUnsupportedModel(t *testing.T) {
 	cfg := testProviderConfig("openai", "gpt-5-codex")
 	expect := RequestTuning{Anthropic: AnthropicTuning{PromptCacheMode: "explicit"}}
 	impl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
 	c := NewClient(cfg, impl, "gpt-5-codex", 4096, "sys")
 	c.SetStreamRetryRounds(1)
-	c.SetFastMode(true)
+	c.SetServiceTier(config.ServiceTierFast)
 
 	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
 }
 
-func TestClientFastModeDefaultsToCodexPreset(t *testing.T) {
+func TestClientServiceTierDefaultsToCodexPreset(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		Preset: config.ProviderPresetCodex,
@@ -3448,45 +3471,46 @@ func TestClientFastModeDefaultsToCodexPreset(t *testing.T) {
 		},
 	}, []string{"test-key"})
 	expect := RequestTuning{
-		Anthropic:         AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
-		OpenAI:            OpenAITuning{ServiceTier: "fast"},
-		FastModeSupported: true,
+		Anthropic:             AnthropicTuning{PromptCacheMode: "explicit", ServiceTier: "fast"},
+		OpenAI:                OpenAITuning{ServiceTier: "fast"},
+		SupportedServiceTiers: map[config.ServiceTier]bool{config.ServiceTierFast: true, config.ServiceTierSlow: true},
 	}
 	impl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
 	c := NewClient(cfg, impl, "gpt-5-codex", 4096, "sys")
 	c.SetStreamRetryRounds(1)
-	c.SetFastMode(true)
+	c.SetServiceTier(config.ServiceTierFast)
 
 	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
 }
 
-func TestClientFastModeOverridesRequestTuning(t *testing.T) {
+func TestClientServiceTierOverridesRequestTuning(t *testing.T) {
 	cfg := testFastProviderConfig("openai", "gpt-5-codex")
 	expect := RequestTuning{
-		Anthropic:         AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
-		OpenAI:            OpenAITuning{ServiceTier: "fast"},
-		FastModeSupported: true,
+		Anthropic:             AnthropicTuning{PromptCacheMode: "explicit", ServiceTier: "fast"},
+		OpenAI:                OpenAITuning{ServiceTier: "fast"},
+		SupportedServiceTiers: map[config.ServiceTier]bool{config.ServiceTierFast: true},
 	}
 	impl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
 	c := NewClient(cfg, impl, "gpt-5-codex", 4096, "sys")
 	c.SetStreamRetryRounds(1)
-	c.SetFastMode(true)
+	c.SetServiceTier(config.ServiceTierFast)
 
 	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
 }
 
-func TestClientFastModeAppliesToFallbackTuning(t *testing.T) {
+func TestClientServiceTierAppliesToFallbackTuning(t *testing.T) {
 	primaryCfg := testProviderConfig("primary", "primary-model")
 	fallbackCfg := testFastProviderConfig("fallback", "gpt-5-codex")
 	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 503, Message: "try fallback"}}}}
 	expect := RequestTuning{
-		Anthropic:         AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
-		OpenAI:            OpenAITuning{ServiceTier: "fast"},
-		FastModeSupported: true,
+		Anthropic: AnthropicTuning{PromptCacheMode: "explicit", ServiceTier: "fast"},
+		OpenAI:    OpenAITuning{ServiceTier: "fast"},
+
+		SupportedServiceTiers: map[config.ServiceTier]bool{config.ServiceTierFast: true},
 	}
 	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok"}, expectTuning: &expect}}}
 	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
@@ -3495,23 +3519,24 @@ func TestClientFastModeAppliesToFallbackTuning(t *testing.T) {
 		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
 		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "gpt-5-codex", MaxTokens: 4096, ContextLimit: 128000},
 	}, 0)
-	c.SetFastMode(true)
+	c.SetServiceTier(config.ServiceTierFast)
 
 	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
 }
 
-func TestClientFastModeToggleAppliesToNextRetryRound(t *testing.T) {
+func TestClientServiceTierToggleAppliesToNextRetryRound(t *testing.T) {
 	cfg := testFastProviderConfig("openai", "gpt-5-codex")
 	expectFast := RequestTuning{
-		Anthropic:         AnthropicTuning{PromptCacheMode: "explicit", Speed: "fast"},
-		OpenAI:            OpenAITuning{ServiceTier: "fast"},
-		FastModeSupported: true,
+		Anthropic: AnthropicTuning{PromptCacheMode: "explicit", ServiceTier: "fast"},
+		OpenAI:    OpenAITuning{ServiceTier: "fast"},
+
+		SupportedServiceTiers: map[config.ServiceTier]bool{config.ServiceTierFast: true},
 	}
 	c := NewClient(cfg, nil, "gpt-5-codex", 4096, "sys")
 	disableRetryDelayForTest(cfg)
-	impl := &fastModeToggleRetryProvider{client: c, expectFast: expectFast}
+	impl := &serviceTierToggleRetryProvider{client: c, expectFast: expectFast}
 	c.providerImpl = impl
 
 	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
@@ -3524,20 +3549,45 @@ func TestClientFastModeToggleAppliesToNextRetryRound(t *testing.T) {
 	if impl.calls != 2 {
 		t.Fatalf("provider calls = %d, want 2", impl.calls)
 	}
+	if got := c.LastCallStatus().ServiceTier; got != config.ServiceTierFast {
+		t.Fatalf("LastCallStatus().ServiceTier = %q, want fast from successful retry round", got)
+	}
 }
 
-func TestClientFastModeSet(t *testing.T) {
+func TestClientLastCallStatusKeepsActualServiceTierWhenTierChangesDuringRequest(t *testing.T) {
+	cfg := testFastProviderConfig("openai", "gpt-5-codex")
+	c := NewClient(cfg, nil, "gpt-5-codex", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+	c.SetServiceTier(config.ServiceTierFast)
+	c.providerImpl = &serviceTierSwitchingProvider{client: c}
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("resp = %#v, want ok", resp)
+	}
+	if got := c.ServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("current ServiceTier() = %q, want standard after provider switched it", got)
+	}
+	if got := c.LastCallStatus().ServiceTier; got != config.ServiceTierFast {
+		t.Fatalf("LastCallStatus().ServiceTier = %q, want actual request tier fast", got)
+	}
+}
+
+func TestClientServiceTierSet(t *testing.T) {
 	c := NewClient(testProviderConfig("openai", "gpt-5-codex"), &scriptedProvider{}, "gpt-5-codex", 4096, "sys")
-	if c.FastMode() {
-		t.Fatal("FastMode() = true, want false by default")
+	if got := c.ServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("ServiceTier() = %q, want standard by default", got)
 	}
-	c.SetFastMode(true)
-	if !c.FastMode() {
-		t.Fatal("SetFastMode(true) did not enable fast mode")
+	c.SetServiceTier(config.ServiceTierFast)
+	if got := c.ServiceTier(); got != config.ServiceTierFast {
+		t.Fatalf("ServiceTier() = %q, want fast", got)
 	}
-	c.SetFastMode(false)
-	if c.FastMode() {
-		t.Fatal("SetFastMode(false) did not disable fast mode")
+	c.SetServiceTier(config.ServiceTierStandard)
+	if got := c.ServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("ServiceTier() = %q, want standard", got)
 	}
 }
 

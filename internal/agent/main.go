@@ -1312,7 +1312,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 
 	log.Debugf("handling user message content_len=%v", len(content))
 
-	// /export, /models, /fast, and /compact are local-only: never queue or send to the model.
+	// /export, /models, /tier, and /compact are local-only: never queue or send to the model.
 	// Pass busy = (a.turn != nil) so handlers skip setIdleAndDrainPending and
 	// don't clobber the active turn while it's mid-retry.
 	if a.handleLocalOnlySlashCommands(content, parts, a.turn != nil) {

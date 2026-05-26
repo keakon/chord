@@ -185,8 +185,8 @@ func appendUsageEventAt(t *testing.T, sessionDir, projectRoot string, occurredAt
 		RunningModelRef:  modelRef,
 		UsageRaw:         raw,
 		BillingUsage:     billing,
-		Cost:             CalculateUsageCost(costCfg, billing),
-		PricingSnapshot:  PricingSnapshotFromCost(costCfg),
+		Cost:             CalculateUsageCost(costCfg, billing, config.ServiceTierStandard),
+		PricingSnapshot:  PricingSnapshotFromCost(costCfg, billing, config.ServiceTierStandard),
 	}); err != nil {
 		t.Fatalf("AppendEvent(%s): %v", modelRef, err)
 	}

@@ -212,21 +212,22 @@ const (
 
 // ProviderConfig specifies an LLM provider and its available models.
 type ProviderConfig struct {
-	Type               string                 `json:"type" yaml:"type"`                                                   // "chat-completions" | "messages" | "responses"
-	APIURL             string                 `json:"api_url" yaml:"api_url"`                                             // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
-	TokenURL           string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                     // OAuth2 token endpoint for refresh_token grant
-	ClientID           string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                     // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
-	Preset             string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                           // e.g. "codex" for the official ChatGPT/Codex OAuth transport
-	Store              *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                             // whether to enable server-side storage for Responses API (enables previous_response_id reuse)
-	ResponsesWebsocket *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"` // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
-	RateLimit          int                    `json:"rate_limit" yaml:"rate_limit"`                                       // requests per minute (0 = no limit)
-	UserAgent          string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                   // optional User-Agent override for provider/model HTTP requests
-	Proxy              *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
-	Compat             *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                           // provider-level compat defaults (model-level can override model compat only)
-	Models             map[string]ModelConfig `json:"models" yaml:"models"`
-	KeyRotation        string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
-	KeyOrder           string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
-	Compress           bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
+	Type                  string                 `json:"type" yaml:"type"`                                                           // "chat-completions" | "messages" | "responses"
+	APIURL                string                 `json:"api_url" yaml:"api_url"`                                                     // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
+	TokenURL              string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                             // OAuth2 token endpoint for refresh_token grant
+	ClientID              string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                             // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
+	Preset                string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                   // e.g. "codex" for the official ChatGPT/Codex OAuth transport
+	Store                 *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                     // whether to enable server-side storage for Responses API (enables previous_response_id reuse)
+	ResponsesWebsocket    *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`         // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
+	RateLimit             int                    `json:"rate_limit" yaml:"rate_limit"`                                               // requests per minute (0 = no limit)
+	UserAgent             string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                           // optional User-Agent override for provider/model HTTP requests
+	Proxy                 *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                     // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
+	Compat                *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                   // provider-level compat defaults (model-level can override model compat only)
+	SupportedServiceTiers []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // provider-level default non-standard tiers; model-level can override
+	Models                map[string]ModelConfig `json:"models" yaml:"models"`
+	KeyRotation           string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
+	KeyOrder              string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
+	Compress              bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
 }
 
 // ModelModalities declares which input modalities a model supports.
@@ -236,19 +237,19 @@ type ModelModalities struct {
 
 // ModelConfig specifies a model and its parameters.
 type ModelConfig struct {
-	Name              string                  `json:"name" yaml:"name"`
-	Limit             ModelLimit              `json:"limit" yaml:"limit"`
-	Modalities        *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
-	SupportsFast      *bool                   `json:"supports_fast,omitempty" yaml:"supports_fast,omitempty"` // nil = preset default; true enables /fast request parameters for this model
-	Thinking          *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
-	Reasoning         *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
-	Text              *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = omit from request; non-nil = send explicit Responses API hint
-	PromptCache       *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
-	Compat            *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
-	Cost              *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
-	Store             *bool                   `json:"store,omitempty" yaml:"store,omitempty"` // model-level override for server-side storage; takes priority over provider-level Store
-	Variants          map[string]ModelVariant `json:"variants,omitempty" yaml:"variants,omitempty"`
+	Name                  string                  `json:"name" yaml:"name"`
+	Limit                 ModelLimit              `json:"limit" yaml:"limit"`
+	Modalities            *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
+	SupportedServiceTiers []ServiceTier           `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
+	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
+	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
+	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
+	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = omit from request; non-nil = send explicit Responses API hint
+	PromptCache           *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
+	Compat                *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
+	Cost                  *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
+	Store                 *bool                   `json:"store,omitempty" yaml:"store,omitempty"` // model-level override for server-side storage; takes priority over provider-level Store
+	Variants              map[string]ModelVariant `json:"variants,omitempty" yaml:"variants,omitempty"`
 }
 
 // EffectiveResponsesWebsocket returns whether Responses WebSocket should be used.
@@ -369,14 +370,40 @@ func (m *ModelConfig) SupportsInput(modality string) bool {
 	return false
 }
 
-// SupportsFastMode reports whether /fast may emit provider-specific request
-// parameters for this model. Explicit model config wins; preset: codex defaults
-// to enabled because Codex first-party transport supports fast service tier.
-func (m *ModelConfig) SupportsFastMode(providerPreset string) bool {
-	if m != nil && m.SupportsFast != nil {
-		return *m.SupportsFast
+func serviceTierSet(rawTiers []ServiceTier) map[ServiceTier]bool {
+	var out map[ServiceTier]bool
+	add := func(tier ServiceTier) {
+		if out == nil {
+			out = make(map[ServiceTier]bool, 2)
+		}
+		out[tier] = true
 	}
-	return strings.EqualFold(strings.TrimSpace(providerPreset), ProviderPresetCodex)
+	for _, raw := range rawTiers {
+		switch NormalizeServiceTier(string(raw)) {
+		case ServiceTierFast:
+			add(ServiceTierFast)
+		case ServiceTierSlow:
+			add(ServiceTierSlow)
+		}
+	}
+	return out
+}
+
+// SupportedServiceTierSet returns the non-standard service tiers this model can accept.
+// Explicit model supported_service_tiers wins; provider supported_service_tiers is
+// the next default; preset: codex defaults to fast+slow because the first-party
+// transport supports OpenAI service_tier fast/flex.
+func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTiers []ServiceTier) map[ServiceTier]bool {
+	if m != nil && len(m.SupportedServiceTiers) > 0 {
+		return serviceTierSet(m.SupportedServiceTiers)
+	}
+	if len(providerTiers) > 0 {
+		return serviceTierSet(providerTiers)
+	}
+	if strings.EqualFold(strings.TrimSpace(providerPreset), ProviderPresetCodex) {
+		return serviceTierSet([]ServiceTier{ServiceTierFast, ServiceTierSlow})
+	}
+	return nil
 }
 
 // ModelCompatConfig contains provider/model-specific compatibility toggles.
@@ -592,12 +619,126 @@ func (m ModelConfig) EffectivePromptCacheMode() string {
 	return "explicit"
 }
 
+// ServiceTier identifies the user-facing service tier abstraction.
+type ServiceTier string
+
+const (
+	ServiceTierStandard ServiceTier = "standard"
+	ServiceTierFast     ServiceTier = "fast"
+	ServiceTierSlow     ServiceTier = "slow"
+)
+
+// NormalizeServiceTier folds arbitrary input into one of the supported tiers.
+// Unknown or empty values default to standard.
+func NormalizeServiceTier(raw string) ServiceTier {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(ServiceTierFast):
+		return ServiceTierFast
+	case string(ServiceTierSlow):
+		return ServiceTierSlow
+	default:
+		return ServiceTierStandard
+	}
+}
+
+// ServiceTierMultipliers stores optional per-tier price multipliers.
+type ServiceTierMultipliers struct {
+	Fast float64 `json:"fast,omitempty" yaml:"fast,omitempty"`
+	Slow float64 `json:"slow,omitempty" yaml:"slow,omitempty"`
+}
+
+// ModelCostInputTier overrides the flat top-level prices above a strict token threshold.
+type ModelCostInputTier struct {
+	AboveInputTokens int64   `json:"above_input_tokens" yaml:"above_input_tokens"`
+	Input            float64 `json:"input" yaml:"input"`
+	Output           float64 `json:"output" yaml:"output"`
+	CacheRead        float64 `json:"cache_read" yaml:"cache_read"`
+	CacheWrite       float64 `json:"cache_write" yaml:"cache_write"`
+	CacheWrite1h     float64 `json:"cache_write_1h" yaml:"cache_write_1h"`
+}
+
+// ResolvedModelCost captures the final prices after input-tier selection and service-tier multipliers.
+type ResolvedModelCost struct {
+	Input                 float64     `json:"input"`
+	Output                float64     `json:"output"`
+	CacheRead             float64     `json:"cache_read"`
+	CacheWrite            float64     `json:"cache_write"`
+	CacheWrite1h          float64     `json:"cache_write_1h"`
+	ServiceTier           ServiceTier `json:"service_tier"`
+	ServiceTierMultiplier float64     `json:"service_tier_multiplier"`
+	InputTierAboveTokens  int64       `json:"input_tier_above_tokens"`
+}
+
 // ModelCost records per-token pricing for cost tracking (USD per 1M tokens).
 type ModelCost struct {
-	Input      float64 `json:"input" yaml:"input"`
-	Output     float64 `json:"output" yaml:"output"`
-	CacheRead  float64 `json:"cache_read" yaml:"cache_read"`
-	CacheWrite float64 `json:"cache_write" yaml:"cache_write"`
+	Input                  float64                 `json:"input" yaml:"input"`
+	Output                 float64                 `json:"output" yaml:"output"`
+	CacheRead              float64                 `json:"cache_read" yaml:"cache_read"`
+	CacheWrite             float64                 `json:"cache_write" yaml:"cache_write"`
+	CacheWrite1h           float64                 `json:"cache_write_1h" yaml:"cache_write_1h"`
+	ServiceTierMultipliers *ServiceTierMultipliers `json:"service_tier_multipliers,omitempty" yaml:"service_tier_multipliers,omitempty"`
+	InputTiers             []ModelCostInputTier    `json:"input_tiers,omitempty" yaml:"input_tiers,omitempty"`
+}
+
+func effectiveCacheWritePrice(input, cacheWrite float64) float64 {
+	if cacheWrite > 0 {
+		return cacheWrite
+	}
+	return input
+}
+
+func effectiveCacheWrite1hPrice(input, cacheWrite, cacheWrite1h float64) float64 {
+	if cacheWrite1h > 0 {
+		return cacheWrite1h
+	}
+	return effectiveCacheWritePrice(input, cacheWrite)
+}
+
+// ResolvePricing returns the final token prices for a given billable input size and service tier.
+func (c *ModelCost) ResolvePricing(billableInputTokens int64, tier ServiceTier) ResolvedModelCost {
+	if c == nil {
+		return ResolvedModelCost{ServiceTier: NormalizeServiceTier(string(tier)), ServiceTierMultiplier: 1}
+	}
+	resolved := ResolvedModelCost{
+		Input:                 c.Input,
+		Output:                c.Output,
+		CacheRead:             c.CacheRead,
+		CacheWrite:            effectiveCacheWritePrice(c.Input, c.CacheWrite),
+		CacheWrite1h:          effectiveCacheWrite1hPrice(c.Input, c.CacheWrite, c.CacheWrite1h),
+		ServiceTier:           NormalizeServiceTier(string(tier)),
+		ServiceTierMultiplier: 1,
+		InputTierAboveTokens:  -1,
+	}
+	for _, inputTier := range c.InputTiers {
+		if inputTier.AboveInputTokens < billableInputTokens && inputTier.AboveInputTokens > resolved.InputTierAboveTokens {
+			resolved.Input = inputTier.Input
+			resolved.Output = inputTier.Output
+			resolved.CacheRead = inputTier.CacheRead
+			resolved.CacheWrite = effectiveCacheWritePrice(inputTier.Input, inputTier.CacheWrite)
+			resolved.CacheWrite1h = effectiveCacheWrite1hPrice(inputTier.Input, inputTier.CacheWrite, inputTier.CacheWrite1h)
+			resolved.InputTierAboveTokens = inputTier.AboveInputTokens
+		}
+	}
+	if c.ServiceTierMultipliers != nil {
+		switch resolved.ServiceTier {
+		case ServiceTierFast:
+			if c.ServiceTierMultipliers.Fast > 0 {
+				resolved.ServiceTierMultiplier = c.ServiceTierMultipliers.Fast
+			}
+		case ServiceTierSlow:
+			if c.ServiceTierMultipliers.Slow > 0 {
+				resolved.ServiceTierMultiplier = c.ServiceTierMultipliers.Slow
+			}
+		}
+	}
+	if resolved.ServiceTierMultiplier != 1 {
+		resolved.Input *= resolved.ServiceTierMultiplier
+		resolved.Output *= resolved.ServiceTierMultiplier
+		resolved.CacheRead *= resolved.ServiceTierMultiplier
+		resolved.CacheWrite *= resolved.ServiceTierMultiplier
+		resolved.CacheWrite1h *= resolved.ServiceTierMultiplier
+	}
+	return resolved
 }
 
 // ContextConfig controls automatic context compression behavior.

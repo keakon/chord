@@ -38,8 +38,8 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 		RunningModelRef:  "provider-a/model-1",
 		UsageRaw:         raw,
 		BillingUsage:     billing,
-		Cost:             CalculateUsageCost(costCfg, billing),
-		PricingSnapshot:  PricingSnapshotFromCost(costCfg),
+		Cost:             CalculateUsageCost(costCfg, billing, config.ServiceTierStandard),
+		PricingSnapshot:  PricingSnapshotFromCost(costCfg, billing, config.ServiceTierStandard),
 	}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -260,8 +260,8 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 		RunningModelRef:  "provider-a/model-1",
 		UsageRaw:         firstRaw,
 		BillingUsage:     NormalizeBillingUsage(firstRaw),
-		Cost:             CalculateUsageCost(costCfg, NormalizeBillingUsage(firstRaw)),
-		PricingSnapshot:  PricingSnapshotFromCost(costCfg),
+		Cost:             CalculateUsageCost(costCfg, NormalizeBillingUsage(firstRaw), config.ServiceTierStandard),
+		PricingSnapshot:  PricingSnapshotFromCost(costCfg, NormalizeBillingUsage(firstRaw), config.ServiceTierStandard),
 	}); err != nil {
 		t.Fatalf("AppendEvent(first): %v", err)
 	}
@@ -289,8 +289,8 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 		ModelID:          "model-2",
 		UsageRaw:         UsageSnapshot{InputTokens: 200, OutputTokens: 80},
 		BillingUsage:     NormalizeBillingUsage(UsageSnapshot{InputTokens: 200, OutputTokens: 80}),
-		Cost:             CalculateUsageCost(costCfg, NormalizeBillingUsage(UsageSnapshot{InputTokens: 200, OutputTokens: 80})),
-		PricingSnapshot:  PricingSnapshotFromCost(costCfg),
+		Cost:             CalculateUsageCost(costCfg, NormalizeBillingUsage(UsageSnapshot{InputTokens: 200, OutputTokens: 80}), config.ServiceTierStandard),
+		PricingSnapshot:  PricingSnapshotFromCost(costCfg, NormalizeBillingUsage(UsageSnapshot{InputTokens: 200, OutputTokens: 80}), config.ServiceTierStandard),
 	}
 	data, marshalErr := json.Marshal(secondEvent)
 	if marshalErr != nil {
@@ -342,8 +342,8 @@ func TestUsageLedgerBuildSessionStatsUsesRunningModelRefs(t *testing.T) {
 			RunningModelRef:  modelRef,
 			UsageRaw:         raw,
 			BillingUsage:     billing,
-			Cost:             CalculateUsageCost(costCfg, billing),
-			PricingSnapshot:  PricingSnapshotFromCost(costCfg),
+			Cost:             CalculateUsageCost(costCfg, billing, config.ServiceTierStandard),
+			PricingSnapshot:  PricingSnapshotFromCost(costCfg, billing, config.ServiceTierStandard),
 		}); err != nil {
 			t.Fatalf("AppendEvent(%s): %v", modelRef, err)
 		}

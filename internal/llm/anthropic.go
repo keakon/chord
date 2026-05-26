@@ -197,8 +197,8 @@ func (a *AnthropicProvider) CompleteStream(
 	if oc := buildAnthropicOutputConfig(at); oc != nil {
 		reqBody.OutputConfig = oc
 	}
-	if at.Speed != "" {
-		reqBody.Speed = at.Speed
+	if at.ServiceTier != "" {
+		reqBody.Speed = at.ServiceTier
 	}
 	if userID := stableAnthropicMetadataUserID(a.provider, transportCompat); userID != "" {
 		reqBody.Metadata = &anthropicMetadata{UserID: userID}
@@ -422,8 +422,8 @@ func validateAnthropicTuning(tuning AnthropicTuning) (AnthropicTuning, error) {
 	default:
 		return tuning, fmt.Errorf("unsupported anthropic thinking.type %q", tuning.ThinkingType)
 	}
-	if tuning.Speed != "" && tuning.Speed != "fast" {
-		return tuning, fmt.Errorf("unsupported anthropic speed %q", tuning.Speed)
+	if tuning.ServiceTier != "" && tuning.ServiceTier != "fast" {
+		return tuning, fmt.Errorf("unsupported anthropic service tier %q", tuning.ServiceTier)
 	}
 	mode, err := normalizeAnthropicPromptCacheMode(tuning.PromptCacheMode)
 	if err != nil {
@@ -441,7 +441,7 @@ func anthropicBetaHeader(tuning AnthropicTuning, compat *config.AnthropicTranspo
 	if compat != nil && len(compat.ExtraBeta) > 0 {
 		betas = append(betas, compat.ExtraBeta...)
 	}
-	if tuning.Speed == "fast" {
+	if tuning.ServiceTier == "fast" {
 		betas = append(betas, "fast-mode-2026-02-01")
 	}
 	if len(betas) == 0 {

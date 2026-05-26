@@ -16,11 +16,12 @@ const (
 
 // UsageSnapshot records provider-reported usage fields as-is.
 type UsageSnapshot struct {
-	InputTokens      int64 `json:"input_tokens"`
-	OutputTokens     int64 `json:"output_tokens"`
-	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens  int64 `json:"reasoning_tokens,omitempty"`
+	InputTokens        int64 `json:"input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
+	CacheReadTokens    int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens   int64 `json:"cache_write_tokens,omitempty"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitempty"`
+	ReasoningTokens    int64 `json:"reasoning_tokens,omitempty"`
 }
 
 func UsageSnapshotIsZero(usage UsageSnapshot) bool {
@@ -28,6 +29,7 @@ func UsageSnapshotIsZero(usage UsageSnapshot) bool {
 		usage.OutputTokens == 0 &&
 		usage.CacheReadTokens == 0 &&
 		usage.CacheWriteTokens == 0 &&
+		usage.CacheWrite1hTokens == 0 &&
 		usage.ReasoningTokens == 0
 }
 
@@ -39,6 +41,7 @@ type BillingUsage struct {
 	OutputTokens       int64 `json:"output_tokens"`
 	CacheReadTokens    int64 `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens   int64 `json:"cache_write_tokens,omitempty"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitempty"`
 	BillingTotalTokens int64 `json:"billing_total_tokens"`
 }
 
@@ -54,21 +57,26 @@ type UsageCost struct {
 
 // PricingSnapshot stores the per-1M token prices used to compute the event cost.
 type PricingSnapshot struct {
-	Source               string  `json:"source"`
-	InputPerMillion      float64 `json:"input_per_million"`
-	OutputPerMillion     float64 `json:"output_per_million"`
-	CacheReadPerMillion  float64 `json:"cache_read_per_million"`
-	CacheWritePerMillion float64 `json:"cache_write_per_million"`
+	Source                 string             `json:"source"`
+	InputPerMillion        float64            `json:"input_per_million"`
+	OutputPerMillion       float64            `json:"output_per_million"`
+	CacheReadPerMillion    float64            `json:"cache_read_per_million"`
+	CacheWritePerMillion   float64            `json:"cache_write_per_million"`
+	CacheWrite1hPerMillion float64            `json:"cache_write_1h_per_million,omitempty"`
+	ServiceTier            config.ServiceTier `json:"service_tier,omitempty"`
+	ServiceTierMultiplier  float64            `json:"service_tier_multiplier,omitempty"`
+	InputTierAboveTokens   int64              `json:"input_tier_above_tokens,omitempty"`
 }
 
 // UsageSnapshotFromTokenUsage converts runtime usage into a persisted snapshot.
 func UsageSnapshotFromTokenUsage(usage message.TokenUsage) UsageSnapshot {
 	return UsageSnapshot{
-		InputTokens:      int64(usage.InputTokens),
-		OutputTokens:     int64(usage.OutputTokens),
-		CacheReadTokens:  int64(usage.CacheReadTokens),
-		CacheWriteTokens: int64(usage.CacheWriteTokens),
-		ReasoningTokens:  int64(usage.ReasoningTokens),
+		InputTokens:        int64(usage.InputTokens),
+		OutputTokens:       int64(usage.OutputTokens),
+		CacheReadTokens:    int64(usage.CacheReadTokens),
+		CacheWriteTokens:   int64(usage.CacheWriteTokens),
+		CacheWrite1hTokens: int64(usage.CacheWrite1hTokens),
+		ReasoningTokens:    int64(usage.ReasoningTokens),
 	}
 }
 
@@ -79,39 +87,48 @@ func NormalizeBillingUsage(raw UsageSnapshot) BillingUsage {
 		inputTokens = 0
 	}
 	out := BillingUsage{
-		InputTokens:      inputTokens,
-		OutputTokens:     raw.OutputTokens,
-		CacheReadTokens:  raw.CacheReadTokens,
-		CacheWriteTokens: raw.CacheWriteTokens,
+		InputTokens:        inputTokens,
+		OutputTokens:       raw.OutputTokens,
+		CacheReadTokens:    raw.CacheReadTokens,
+		CacheWriteTokens:   raw.CacheWriteTokens,
+		CacheWrite1hTokens: raw.CacheWrite1hTokens,
 	}
 	out.BillingTotalTokens = out.InputTokens + out.OutputTokens + out.CacheReadTokens + out.CacheWriteTokens
 	return out
 }
 
 // CalculateUsageCost calculates event cost from normalized billing usage.
-func CalculateUsageCost(cost *config.ModelCost, billing BillingUsage) UsageCost {
+func CalculateUsageCost(cost *config.ModelCost, billing BillingUsage, tier config.ServiceTier) UsageCost {
 	out := UsageCost{Currency: "USD"}
 	if cost == nil {
 		return out
 	}
-	out.InputCost = float64(billing.InputTokens) / 1_000_000 * cost.Input
-	out.OutputCost = float64(billing.OutputTokens) / 1_000_000 * cost.Output
-	out.CacheReadCost = float64(billing.CacheReadTokens) / 1_000_000 * cost.CacheRead
-	out.CacheWriteCost = float64(billing.CacheWriteTokens) / 1_000_000 * cost.CacheWrite
+	resolved := cost.ResolvePricing(billing.InputTokens, tier)
+	cacheWrite1hTokens := min(billing.CacheWrite1hTokens, billing.CacheWriteTokens)
+	cacheWriteDefaultTokens := billing.CacheWriteTokens - cacheWrite1hTokens
+	out.InputCost = float64(billing.InputTokens) / 1_000_000 * resolved.Input
+	out.OutputCost = float64(billing.OutputTokens) / 1_000_000 * resolved.Output
+	out.CacheReadCost = float64(billing.CacheReadTokens) / 1_000_000 * resolved.CacheRead
+	out.CacheWriteCost = float64(cacheWriteDefaultTokens)/1_000_000*resolved.CacheWrite + float64(cacheWrite1hTokens)/1_000_000*resolved.CacheWrite1h
 	out.TotalCost = out.InputCost + out.OutputCost + out.CacheReadCost + out.CacheWriteCost
 	return out
 }
 
 // PricingSnapshotFromCost freezes the price config used for a usage event.
-func PricingSnapshotFromCost(cost *config.ModelCost) PricingSnapshot {
+func PricingSnapshotFromCost(cost *config.ModelCost, billing BillingUsage, tier config.ServiceTier) PricingSnapshot {
 	out := PricingSnapshot{Source: "config"}
 	if cost == nil {
 		return out
 	}
-	out.InputPerMillion = cost.Input
-	out.OutputPerMillion = cost.Output
-	out.CacheReadPerMillion = cost.CacheRead
-	out.CacheWritePerMillion = cost.CacheWrite
+	resolved := cost.ResolvePricing(billing.InputTokens, tier)
+	out.InputPerMillion = resolved.Input
+	out.OutputPerMillion = resolved.Output
+	out.CacheReadPerMillion = resolved.CacheRead
+	out.CacheWritePerMillion = resolved.CacheWrite
+	out.CacheWrite1hPerMillion = resolved.CacheWrite1h
+	out.ServiceTier = resolved.ServiceTier
+	out.ServiceTierMultiplier = resolved.ServiceTierMultiplier
+	out.InputTierAboveTokens = resolved.InputTierAboveTokens
 	return out
 }
 

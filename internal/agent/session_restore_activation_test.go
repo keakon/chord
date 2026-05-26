@@ -16,6 +16,19 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestGetContextStatsIncludesCacheWriteTokens(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1, CacheWriteTokens: 62156})
+
+	current, limit := a.GetContextStats()
+	if current != 62157 {
+		t.Fatalf("GetContextStats current = %d, want input + cache write tokens 62157", current)
+	}
+	if limit <= 0 {
+		t.Fatalf("GetContextStats limit = %d, want configured limit", limit)
+	}
+}
+
 func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
@@ -41,8 +54,8 @@ func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.
 		t.Fatalf("GetUsageStats() = %+v, want loaded usage stats", stats)
 	}
 	current, _ := a.GetContextStats()
-	if current != 11 {
-		t.Fatalf("GetContextStats current = %d, want loaded input tokens 11", current)
+	if current != 29 {
+		t.Fatalf("GetContextStats current = %d, want loaded total context tokens 29", current)
 	}
 }
 

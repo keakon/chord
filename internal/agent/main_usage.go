@@ -148,12 +148,14 @@ func (a *MainAgent) recordUsage(
 	runningModelRef string,
 	turnID uint64,
 	usage *message.TokenUsage,
+	serviceTier config.ServiceTier,
 ) {
 	if runningModelRef == "" {
 		runningModelRef = selectedModelRef
 	}
 	costCfg := a.lookupModelCost(runningModelRef)
 
+	serviceTier = config.NormalizeServiceTier(string(serviceTier))
 	var u message.TokenUsage
 	if usage != nil {
 		u = *usage
@@ -171,7 +173,7 @@ func (a *MainAgent) recordUsage(
 		RunningModelRef:  runningModelRef,
 		UsageRaw:         rawUsage,
 		BillingUsage:     billingUsage,
-		Cost:             analytics.CalculateUsageCost(costCfg, billingUsage),
-		PricingSnapshot:  analytics.PricingSnapshotFromCost(costCfg),
+		Cost:             analytics.CalculateUsageCost(costCfg, billingUsage, serviceTier),
+		PricingSnapshot:  analytics.PricingSnapshotFromCost(costCfg, billingUsage, serviceTier),
 	})
 }

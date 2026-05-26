@@ -367,7 +367,8 @@ func (l *UsageLedger) prepareEventLocked(event UsageEvent) UsageEvent {
 		event.BillingUsage.InputTokens == 0 &&
 		event.BillingUsage.OutputTokens == 0 &&
 		event.BillingUsage.CacheReadTokens == 0 &&
-		event.BillingUsage.CacheWriteTokens == 0 {
+		event.BillingUsage.CacheWriteTokens == 0 &&
+		event.BillingUsage.CacheWrite1hTokens == 0 {
 		event.BillingUsage = NormalizeBillingUsage(event.UsageRaw)
 	}
 	if event.Cost.Currency == "" {
@@ -702,7 +703,8 @@ func scanUsageEvents(path string, fn func(UsageEvent)) error {
 			evt.BillingUsage.InputTokens == 0 &&
 			evt.BillingUsage.OutputTokens == 0 &&
 			evt.BillingUsage.CacheReadTokens == 0 &&
-			evt.BillingUsage.CacheWriteTokens == 0 {
+			evt.BillingUsage.CacheWriteTokens == 0 &&
+			evt.BillingUsage.CacheWrite1hTokens == 0 {
 			evt.BillingUsage = NormalizeBillingUsage(evt.UsageRaw)
 		}
 		if evt.Cost.Currency == "" {

@@ -77,23 +77,23 @@ func TestResetSessionRuntimeStateClearsLoopControllerState(t *testing.T) {
 	}
 }
 
-func TestResetSessionRuntimeStateKeepsFastMode(t *testing.T) {
+func TestResetSessionRuntimeStateKeepsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	client, _, _, _ := a.llmSnapshot()
-	client.SetFastMode(true)
+	client.SetServiceTier(config.ServiceTierFast)
 
 	a.resetSessionRuntimeState()
 
-	if !a.FastModeEnabled() {
-		t.Fatal("fast mode should stay enabled after session runtime reset")
+	if got := a.ServiceTier(); got != config.ServiceTierFast {
+		t.Fatalf("service tier = %q, want fast after session runtime reset", got)
 	}
 }
 
-func TestActivateLoadedSessionKeepsFastModeForMainAndRestoredSubAgents(t *testing.T) {
+func TestActivateLoadedSessionKeepsServiceTierForMainAndRestoredSubAgents(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 	client, _, _, _ := a.llmSnapshot()
-	client.SetFastMode(true)
+	client.SetServiceTier(config.ServiceTierFast)
 	loaded := &loadedSessionState{
 		SessionPath: a.sessionDir,
 		SubAgentStates: []loadedSubAgentState{{
@@ -107,16 +107,19 @@ func TestActivateLoadedSessionKeepsFastModeForMainAndRestoredSubAgents(t *testin
 
 	a.activateLoadedSession(loaded)
 
-	if !a.FastModeEnabled() {
-		t.Fatal("fast mode should stay enabled after loaded session activation")
+	if got := a.ServiceTier(); got != config.ServiceTierFast {
+		t.Fatalf("service tier = %q, want fast after loaded session activation", got)
 	}
 	sub := a.subAgentByTaskID("task-restored")
 	if sub == nil {
 		t.Fatal("expected restored SubAgent")
 	}
 	subClient, _ := sub.llmSnapshot()
-	if subClient == nil || !subClient.FastMode() {
-		t.Fatal("expected restored SubAgent client to inherit fast mode")
+	if subClient == nil {
+		t.Fatal("expected restored SubAgent client")
+	}
+	if got := subClient.ServiceTier(); got != config.ServiceTierFast {
+		t.Fatalf("restored SubAgent service tier = %q, want fast", got)
 	}
 }
 

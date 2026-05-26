@@ -802,7 +802,7 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		apiKeys = apiKeys[:1]
 	}
 	llmProviderCfg := llm.NewProviderConfig(target.ProviderName, normalizedCfg, apiKeys)
-	defer llmProviderCfg.StopCodexRateLimitPolling()
+	defer llmProviderCfg.Close()
 	if normalizedCfg.RateLimit > 0 {
 		llmProviderCfg.SetRateLimiter(normalizedCfg.RateLimit)
 	}

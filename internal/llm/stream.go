@@ -163,10 +163,13 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				resp.Usage.InputTokens = ev.Message.Usage.InputTokens + cacheRead
 				resp.Usage.CacheReadTokens = cacheRead
 				cacheWrite := ev.Message.Usage.CacheCreationInputTokens
+				cacheWrite1h := 0
 				if ev.Message.Usage.CacheCreation != nil {
-					cacheWrite = ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + ev.Message.Usage.CacheCreation.Ephemeral1hInputTokens
+					cacheWrite1h = ev.Message.Usage.CacheCreation.Ephemeral1hInputTokens
+					cacheWrite = ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + cacheWrite1h
 				}
 				resp.Usage.CacheWriteTokens = cacheWrite
+				resp.Usage.CacheWrite1hTokens = cacheWrite1h
 
 			case "content_block_start":
 				var ev sseContentBlockStart

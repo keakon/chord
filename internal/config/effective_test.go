@@ -66,19 +66,48 @@ func TestModelConfigEffectiveAccessors(t *testing.T) {
 	if (ModelConfig{}).EffectivePromptCacheMode() != "explicit" {
 		t.Fatal("prompt cache mode should default explicit")
 	}
-	if !(&ModelConfig{}).SupportsFastMode(ProviderPresetCodex) {
-		t.Fatal("preset: codex should default supports_fast to true")
+	if tiers := (&ModelConfig{}).SupportedServiceTierSet(ProviderPresetCodex, nil); !tiers[ServiceTierFast] || !tiers[ServiceTierSlow] {
+		t.Fatal("preset: codex should default to fast and slow service tiers")
 	}
-	if (&ModelConfig{}).SupportsFastMode("") {
-		t.Fatal("non-codex preset should default supports_fast to false")
+	if len((&ModelConfig{}).SupportedServiceTierSet("", nil)) != 0 {
+		t.Fatal("non-codex preset should default service tiers to false")
 	}
-	fast := true
-	if !(&ModelConfig{SupportsFast: &fast}).SupportsFastMode("") {
-		t.Fatal("explicit supports_fast=true should enable fast mode")
+	tiers := (&ModelConfig{SupportedServiceTiers: []ServiceTier{ServiceTierSlow}}).SupportedServiceTierSet(ProviderPresetCodex, nil)
+	if tiers[ServiceTierFast] || !tiers[ServiceTierSlow] {
+		t.Fatalf("supported_service_tiers should override defaults, got %#v", tiers)
 	}
-	fast = false
-	if (&ModelConfig{SupportsFast: &fast}).SupportsFastMode(ProviderPresetCodex) {
-		t.Fatal("explicit supports_fast=false should disable codex fast mode")
+
+	providerTiers := []ServiceTier{ServiceTierFast, ServiceTierSlow}
+	if tiers := (&ModelConfig{}).SupportedServiceTierSet("", providerTiers); !tiers[ServiceTierSlow] {
+		t.Fatal("provider supported_service_tiers should act as model default")
+	}
+	modelOverride := (&ModelConfig{SupportedServiceTiers: []ServiceTier{ServiceTierFast}}).SupportedServiceTierSet("", providerTiers)
+	if !modelOverride[ServiceTierFast] || modelOverride[ServiceTierSlow] {
+		t.Fatalf("model supported_service_tiers should override provider default, got %#v", modelOverride)
+	}
+	if NormalizeServiceTier(" FAST ") != ServiceTierFast {
+		t.Fatal("NormalizeServiceTier should fold fast input")
+	}
+	if NormalizeServiceTier("") != ServiceTierStandard {
+		t.Fatal("empty service tier should default to standard")
+	}
+	pricing := ModelCost{
+		Input:                  1,
+		Output:                 2,
+		CacheRead:              0.1,
+		ServiceTierMultipliers: &ServiceTierMultipliers{Fast: 2, Slow: 0.5},
+		InputTiers:             []ModelCostInputTier{{AboveInputTokens: 100, Input: 3, Output: 4, CacheRead: 0.3, CacheWrite1h: 5}},
+	}
+	resolved := pricing.ResolvePricing(50, ServiceTierStandard)
+	if resolved.Input != 1 || resolved.Output != 2 || resolved.CacheWrite != 1 || resolved.CacheWrite1h != 1 || resolved.InputTierAboveTokens != -1 || resolved.ServiceTierMultiplier != 1 {
+		t.Fatalf("unexpected base pricing resolution: %+v", resolved)
+	}
+	resolved = pricing.ResolvePricing(101, ServiceTierFast)
+	if resolved.Input != 6 || resolved.Output != 8 || resolved.CacheRead != 0.6 || resolved.CacheWrite != 6 || resolved.CacheWrite1h != 10 {
+		t.Fatalf("unexpected tier pricing resolution: %+v", resolved)
+	}
+	if resolved.InputTierAboveTokens != 100 || resolved.ServiceTier != ServiceTierFast || resolved.ServiceTierMultiplier != 2 {
+		t.Fatalf("unexpected resolved metadata: %+v", resolved)
 	}
 	v := ModelVariant{Text: &TextConfig{Verbosity: "low"}, Thinking: &ThinkingConfig{Type: "enabled"}}
 	if v.EffectiveTextVerbosity() != "low" || v.EffectiveThinkingType() != "enabled" {

@@ -565,7 +565,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.autoCompactRequested.Store(true)
 	}
 
-	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage)
+	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier)
 
 	// Hook: on_after_llm_call (after LLM call).
 	inputTok, outputTok := 0, 0

@@ -203,47 +203,15 @@ func firstNonEmptyOAuthAccess(values ...string) string {
 	return ""
 }
 
-func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath string, args ...any) {
-	var (
-		authStatePath string
-		authConfig    *config.AuthConfig
-		authConfigMu  *sync.Mutex
-		oauthKeys     map[string]OAuthKeySetup
-		proxyURL      string
-	)
-	switch len(args) {
-	case 4:
-		if v, ok := args[0].(*config.AuthConfig); ok {
-			authConfig = v
-		}
-		if v, ok := args[1].(*sync.Mutex); ok {
-			authConfigMu = v
-		}
-		if v, ok := args[2].(map[string]OAuthKeySetup); ok {
-			oauthKeys = v
-		}
-		if v, ok := args[3].(string); ok {
-			proxyURL = v
-		}
-	case 5:
-		if v, ok := args[0].(string); ok {
-			authStatePath = v
-		}
-		if v, ok := args[1].(*config.AuthConfig); ok {
-			authConfig = v
-		}
-		if v, ok := args[2].(*sync.Mutex); ok {
-			authConfigMu = v
-		}
-		if v, ok := args[3].(map[string]OAuthKeySetup); ok {
-			oauthKeys = v
-		}
-		if v, ok := args[4].(string); ok {
-			proxyURL = v
-		}
-	default:
+func (p *ProviderConfig) stopAuthStateMonitorLocked() {
+	if p.authStateMonitor == nil {
 		return
 	}
+	p.authStateMonitor.stop()
+	p.authStateMonitor = nil
+}
+
+func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath, authStatePath string, authConfig *config.AuthConfig, authConfigMu *sync.Mutex, oauthKeys map[string]OAuthKeySetup, proxyURL string) {
 	if tokenURL == "" {
 		return
 	}
@@ -266,6 +234,11 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath st
 		providerName:   p.name,
 	}
 	p.authStatePath = authStatePath
+	p.stopAuthStateMonitorLocked()
+	if authStatePath != "" {
+		p.authStateMonitor = newAuthStateMonitor(authStatePath, p.reloadAuthStateFromMonitor)
+		p.authStateMonitor.start()
+	}
 	p.effectiveProxyURL = proxyURL
 	for keySlot, ks := range p.keyStates {
 		setup, ok := oauthKeys[ks.Key]

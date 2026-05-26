@@ -146,6 +146,7 @@ type streamRetryTarget struct {
 	contextLimit int
 	inputLimit   int
 	tuning       RequestTuning
+	serviceTier  config.ServiceTier
 	variant      string
 	isFallback   bool
 }
@@ -161,8 +162,10 @@ func (c *Client) buildStreamRetryTargets(
 	fallbackEnabled bool,
 	fallbackModels []FallbackModel,
 ) []streamRetryTarget {
-	if c.FastMode() {
-		startTuning = fastModeTuning(startTuning)
+	tier := c.ServiceTier()
+	startServiceTier := effectiveServiceTierForTuning(startTuning, tier)
+	if tier != config.ServiceTierStandard {
+		startTuning = serviceTierTuning(startTuning, tier)
 	}
 	targets := []streamRetryTarget{
 		{
@@ -173,6 +176,7 @@ func (c *Client) buildStreamRetryTargets(
 			contextLimit: c.ContextLimitForModelRef(providerModelRef(startProvider, startModelID)),
 			inputLimit:   c.InputLimitForModelRef(providerModelRef(startProvider, startModelID)),
 			tuning:       startTuning,
+			serviceTier:  startServiceTier,
 			variant:      variantForStart,
 			isFallback:   false,
 		},
@@ -186,7 +190,7 @@ func (c *Client) buildStreamRetryTargets(
 		fbContextLimit := fb.ContextLimit
 		fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
 		if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-			fbTuning = tuningFromModel(m, fb.ProviderConfig.Preset())
+			fbTuning = tuningFromModel(m, fb.ProviderConfig.Preset(), fb.ProviderConfig.SupportedServiceTiers())
 			if fbContextLimit <= 0 {
 				fbContextLimit = m.Limit.Context
 			}
@@ -200,8 +204,9 @@ func (c *Client) buildStreamRetryTargets(
 		if fbInputLimit <= 0 {
 			fbInputLimit = fbContextLimit
 		}
-		if c.FastMode() {
-			fbTuning = fastModeTuning(fbTuning)
+		fbServiceTier := effectiveServiceTierForTuning(fbTuning, tier)
+		if tier != config.ServiceTierStandard {
+			fbTuning = serviceTierTuning(fbTuning, tier)
 		}
 		targets = append(targets, streamRetryTarget{
 			provider:     fb.ProviderConfig,
@@ -211,6 +216,7 @@ func (c *Client) buildStreamRetryTargets(
 			contextLimit: fbContextLimit,
 			inputLimit:   fbInputLimit,
 			tuning:       fbTuning,
+			serviceTier:  fbServiceTier,
 			variant:      fbVariantUsed,
 			isFallback:   true,
 		})
@@ -282,6 +288,7 @@ func updateSuccessfulCallStatus(status *CallStatus, target streamRetryTarget) {
 	status.RunningModelRef = target.displayRef()
 	status.RunningContextLimit = target.contextLimit
 	status.RunningInputLimit = target.inputLimit
+	status.ServiceTier = target.serviceTier
 }
 
 type streamTargetAttemptResult struct {

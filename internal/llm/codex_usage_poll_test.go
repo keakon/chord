@@ -133,7 +133,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
-	defer prov.StopCodexRateLimitPolling()
+	defer prov.Close()
 
 	if !prov.StartCodexWarmup(t.Context()) {
 		t.Fatal("expected codex warmup to start")
@@ -222,7 +222,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
-	defer prov.StopCodexRateLimitPolling()
+	defer prov.Close()
 
 	if !prov.StartCodexWarmup(t.Context()) {
 		t.Fatal("expected codex warmup to start")
@@ -409,7 +409,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 		}
 		return nil, nil
 	})
-	defer prov.StopCodexRateLimitPolling()
+	defer prov.Close()
 
 	select {
 	case <-pollStarted:
@@ -470,7 +470,7 @@ func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 		}
 		return nil, &APIError{StatusCode: http.StatusUnauthorized, Code: "account_invalidated", Message: "account invalidated"}
 	})
-	defer prov.StopCodexRateLimitPolling()
+	defer prov.Close()
 
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)

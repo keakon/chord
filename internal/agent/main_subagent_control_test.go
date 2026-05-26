@@ -56,11 +56,27 @@ func configureNestedDelegationTestRuntime(a *MainAgent, maxDepth int) {
 	}
 }
 
-func TestCreateSubAgentInheritsFastMode(t *testing.T) {
+func TestHandleTierCommandRejectsEmptyTierArgument(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	a.handleTierCommand("/tier", true)
+	toast := waitForToastEvent(t, a.Events(), "Usage: /tier standard | /tier fast | /tier slow")
+	if toast.Level != "info" {
+		t.Fatalf("toast level = %q, want info", toast.Level)
+	}
+	if got := a.ServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("expected empty /tier to leave service tier unchanged, got %q", got)
+	}
+}
+
+func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 	client, _, _, _ := a.llmSnapshot()
-	client.SetFastMode(true)
+	if client == nil {
+		t.Fatal("expected llm client")
+	}
+	client.SetServiceTier(config.ServiceTierSlow)
 
 	handle, err := a.CreateSubAgent(context.Background(), "child work", "worker", "", "", tools.WriteScope{})
 	if err != nil {
@@ -71,27 +87,30 @@ func TestCreateSubAgentInheritsFastMode(t *testing.T) {
 		t.Fatal("expected child SubAgent to exist")
 	}
 	childClient, _ := child.llmSnapshot()
-	if childClient == nil || !childClient.FastMode() {
-		t.Fatal("expected child SubAgent client to inherit fast mode")
+	if childClient == nil {
+		t.Fatal("expected child SubAgent client")
+	}
+	if got := childClient.ServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("child service tier = %q, want %q", got, config.ServiceTierSlow)
 	}
 }
 
-func TestHandleFastCommandSyncsExistingSubAgents(t *testing.T) {
+func TestHandleTierCommandSyncsExistingSubAgents(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	sub := newControllableTestSubAgent(t, a, "adhoc-fast")
+	sub := newControllableTestSubAgent(t, a, "adhoc-tier")
 	subClient, _ := sub.llmSnapshot()
 	if subClient == nil {
 		t.Fatal("expected SubAgent client")
 	}
 
-	a.handleFastCommand("/fast on", true)
-	if !subClient.FastMode() {
-		t.Fatal("expected /fast on to enable existing SubAgent client")
+	a.handleTierCommand("/tier fast", true)
+	if got := subClient.ServiceTier(); got != config.ServiceTierFast {
+		t.Fatalf("subagent service tier = %q, want %q", got, config.ServiceTierFast)
 	}
 
-	a.handleFastCommand("/fast off", true)
-	if subClient.FastMode() {
-		t.Fatal("expected /fast off to disable existing SubAgent client")
+	a.handleTierCommand("/tier slow", true)
+	if got := subClient.ServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("subagent service tier = %q, want %q", got, config.ServiceTierSlow)
 	}
 }
 

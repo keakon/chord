@@ -215,7 +215,7 @@ func (c *providerCache) close() {
 	defer c.mu.Unlock()
 	for _, p := range c.m {
 		if p != nil {
-			p.StopCodexRateLimitPolling()
+			p.Close()
 		}
 	}
 }

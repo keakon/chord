@@ -78,6 +78,13 @@ func LoadAuthState(path string) (AuthStateFile, error) {
 		}
 		return nil, err
 	}
+	return ParseAuthState(data)
+}
+
+// ParseAuthState parses raw auth.state.yaml bytes. It returns an empty file
+// when the payload is blank so callers can treat "no file" and "empty file"
+// uniformly without re-reading from disk.
+func ParseAuthState(data []byte) (AuthStateFile, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return make(AuthStateFile), nil
 	}

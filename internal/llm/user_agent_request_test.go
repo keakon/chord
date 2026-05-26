@@ -106,9 +106,9 @@ func TestResponsesCompleteStreamSetsProviderUserAgent(t *testing.T) {
 	}
 }
 
-func TestOpenAICodexUserAgentMatchesCodexCLI(t *testing.T) {
+func TestOpenAICodexUserAgentIncludesChordAndCodexIdentity(t *testing.T) {
 	got := openAICodexUserAgent()
-	if want := openAICodexOriginator + "/"; len(got) < len(want) || got[:len(want)] != want {
+	if want := defaultLLMUserAgent() + " (" + openAICodexOriginator + ";"; len(got) < len(want) || got[:len(want)] != want {
 		t.Fatalf("openAICodexUserAgent = %q, want prefix %q", got, want)
 	}
 	if got == "Go-http-client/1.1" {

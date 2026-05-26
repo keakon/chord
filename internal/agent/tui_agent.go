@@ -5,6 +5,7 @@ package agent
 
 import (
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
@@ -120,9 +121,10 @@ type LoopController interface {
 	CanUseLoopMode() bool
 }
 
-// FastModeReporter exposes runtime fast-mode state for command completion and status UI.
-type FastModeReporter interface {
-	FastModeEnabled() bool
+// ServiceTierReporter exposes effective runtime service-tier state for command completion and status UI.
+type ServiceTierReporter interface {
+	ServiceTier() config.ServiceTier
+	EffectiveServiceTier() config.ServiceTier
 }
 
 // RoleController exposes role/handoff lifecycle for the active agent.

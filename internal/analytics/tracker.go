@@ -114,7 +114,7 @@ func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.Mod
 	t.stats.LLMCalls++
 
 	rawUsage := UsageSnapshotFromTokenUsage(usage)
-	callCost := CalculateUsageCost(cost, NormalizeBillingUsage(rawUsage)).TotalCost
+	callCost := CalculateUsageCost(cost, NormalizeBillingUsage(rawUsage), config.ServiceTierStandard).TotalCost
 	t.stats.EstimatedCost += callCost
 
 	ms, ok := t.stats.ByModel[model]
@@ -166,11 +166,12 @@ func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 
 	raw := event.UsageRaw
 	usage := message.TokenUsage{
-		InputTokens:      int(raw.InputTokens),
-		OutputTokens:     int(raw.OutputTokens),
-		CacheReadTokens:  int(raw.CacheReadTokens),
-		CacheWriteTokens: int(raw.CacheWriteTokens),
-		ReasoningTokens:  int(raw.ReasoningTokens),
+		InputTokens:        int(raw.InputTokens),
+		OutputTokens:       int(raw.OutputTokens),
+		CacheReadTokens:    int(raw.CacheReadTokens),
+		CacheWriteTokens:   int(raw.CacheWriteTokens),
+		CacheWrite1hTokens: int(raw.CacheWrite1hTokens),
+		ReasoningTokens:    int(raw.ReasoningTokens),
 	}
 	model := strings.TrimSpace(event.RunningModelRef)
 	if model == "" {
@@ -180,10 +181,11 @@ func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 		model = usageKeyOrUnknown(event.ModelID)
 	}
 	costCfg := &config.ModelCost{
-		Input:      event.PricingSnapshot.InputPerMillion,
-		Output:     event.PricingSnapshot.OutputPerMillion,
-		CacheRead:  event.PricingSnapshot.CacheReadPerMillion,
-		CacheWrite: event.PricingSnapshot.CacheWritePerMillion,
+		Input:        event.PricingSnapshot.InputPerMillion,
+		Output:       event.PricingSnapshot.OutputPerMillion,
+		CacheRead:    event.PricingSnapshot.CacheReadPerMillion,
+		CacheWrite:   event.PricingSnapshot.CacheWritePerMillion,
+		CacheWrite1h: event.PricingSnapshot.CacheWrite1hPerMillion,
 	}
 	if event.PricingSnapshot.Source == "" && event.Cost.TotalCost == 0 {
 		costCfg = nil

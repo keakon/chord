@@ -1,6 +1,10 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -22,26 +26,43 @@ func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
 	}
 }
 
+const missingAuthStateDigest = "<missing>"
+
 func (p *ProviderConfig) loadAuthStateLocked() {
 	if strings.TrimSpace(p.authStatePath) == "" {
 		return
 	}
-	mtime, err := config.ReadAuthStateMTime(p.authStatePath)
-	if err != nil {
-		log.Warnf("failed to stat auth state path=%v error=%v", p.authStatePath, err)
-		return
-	}
-	if !mtime.IsZero() && !p.authStateMTime.IsZero() && !mtime.After(p.authStateMTime) {
-		return
-	}
-	state, err := config.LoadAuthState(p.authStatePath)
+	state, mtime, digest, err := loadAuthStateSnapshot(p.authStatePath)
 	if err != nil {
 		log.Warnf("failed to load auth state path=%v error=%v", p.authStatePath, err)
 		return
 	}
+	if digest == p.authStateDigest {
+		return
+	}
 	p.authState = state
 	p.authStateMTime = mtime
+	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, true)
+}
+
+func loadAuthStateSnapshot(path string) (config.AuthStateFile, time.Time, string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return make(config.AuthStateFile), time.Time{}, missingAuthStateDigest, nil
+		}
+		return nil, time.Time{}, "", fmt.Errorf("read auth state: %w", err)
+	}
+	state, err := config.ParseAuthState(data)
+	if err != nil {
+		return nil, time.Time{}, "", err
+	}
+	mtime, err := config.ReadAuthStateMTime(path)
+	if err != nil {
+		return nil, time.Time{}, "", err
+	}
+	return state, mtime, fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
 
 func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetPollTTL bool) {
@@ -49,8 +70,13 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		if ks == nil || ks.OAuthInfo == nil {
 			continue
 		}
+		credIdx := ks.OAuthInfo.CredentialIndex
+		if credIdx < 0 {
+			credIdx = p.keySlotByStateLocked(ks)
+		}
 		record, ok := config.FindOAuthStateRecord(state, p.authStateKeyLocked(ks))
 		if !ok {
+			p.clearPolledRateLimitForCredLocked(credIdx)
 			continue
 		}
 		if record.AccountID != "" {
@@ -74,45 +100,117 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		ks.OAuthInfo.CodexPrimaryResetAt = record.CodexPrimaryResetAt
 		ks.OAuthInfo.CodexSecondaryResetAt = record.CodexSecondaryResetAt
 		ks.SoftCooldownUntil = time.Time{}
-		if snap := codexSnapshotFromOAuthState(p.name, record); snap != nil {
-			credIdx := ks.OAuthInfo.CredentialIndex
-			if credIdx < 0 {
-				continue
+		snap := codexSnapshotFromOAuthState(p.name, record)
+		if snap == nil {
+			p.clearPolledRateLimitForCredLocked(credIdx)
+			continue
+		}
+		if credIdx < 0 {
+			continue
+		}
+		if p.polledRateLimitByCredIdx == nil {
+			p.polledRateLimitByCredIdx = make(map[int]*ratelimit.KeyRateLimitSnapshot)
+		}
+		prev := p.polledRateLimitByCredIdx[credIdx]
+		p.polledRateLimitByCredIdx[credIdx] = snap
+		if resetPollTTL && (prev == nil || prev.CapturedAt.Before(snap.CapturedAt)) {
+			if p.polledRateLimitSucceededAt == nil {
+				p.polledRateLimitSucceededAt = make(map[int]time.Time)
 			}
-			if p.polledRateLimitByCredIdx == nil {
-				p.polledRateLimitByCredIdx = make(map[int]*ratelimit.KeyRateLimitSnapshot)
-			}
-			prev := p.polledRateLimitByCredIdx[credIdx]
-			p.polledRateLimitByCredIdx[credIdx] = snap
-			if resetPollTTL && (prev == nil || prev.CapturedAt.Before(snap.CapturedAt)) {
-				if p.polledRateLimitSucceededAt == nil {
-					p.polledRateLimitSucceededAt = make(map[int]time.Time)
-				}
-				p.polledRateLimitSucceededAt[credIdx] = time.Now()
-			}
+			p.polledRateLimitSucceededAt[credIdx] = time.Now()
 		}
 	}
 }
 
-func (p *ProviderConfig) maybeReloadAuthStateLocked() {
+func (p *ProviderConfig) keySlotByStateLocked(target *KeyState) int {
+	for i, ks := range p.keyStates {
+		if ks == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func (p *ProviderConfig) clearPolledRateLimitForCredLocked(credIdx int) {
+	if credIdx < 0 {
+		return
+	}
+	delete(p.polledRateLimitByCredIdx, credIdx)
+	delete(p.polledRateLimitSucceededAt, credIdx)
+}
+
+func (p *ProviderConfig) maybeReloadAuthStateLocked() bool {
 	if strings.TrimSpace(p.authStatePath) == "" {
-		return
+		return false
 	}
-	mtime, err := config.ReadAuthStateMTime(p.authStatePath)
-	if err != nil {
-		return
-	}
-	if mtime.IsZero() || (!p.authStateMTime.IsZero() && !mtime.After(p.authStateMTime)) {
-		return
-	}
-	state, err := config.LoadAuthState(p.authStatePath)
+	state, mtime, digest, err := loadAuthStateSnapshot(p.authStatePath)
 	if err != nil {
 		log.Warnf("failed to reload auth state path=%v error=%v", p.authStatePath, err)
-		return
+		return false
+	}
+	if digest == p.authStateDigest {
+		return false
 	}
 	p.authState = state
 	p.authStateMTime = mtime
+	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, true)
+	return true
+}
+
+func (p *ProviderConfig) currentPolledRateLimitSnapshotLocked() *ratelimit.KeyRateLimitSnapshot {
+	if p.lastSelectedSlot < 0 || p.polledRateLimitByCredIdx == nil {
+		return nil
+	}
+	ks := p.keyStateBySlotLocked(p.lastSelectedSlot)
+	if ks == nil || ks.OAuthInfo == nil {
+		return nil
+	}
+	credIdx := ks.OAuthInfo.CredentialIndex
+	if credIdx < 0 {
+		credIdx = p.lastSelectedSlot
+	}
+	return p.polledRateLimitByCredIdx[credIdx]
+}
+
+func codexPolledSnapshotEquivalent(a, b *ratelimit.KeyRateLimitSnapshot) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if !a.CapturedAt.Equal(b.CapturedAt) || a.LimitID != b.LimitID || a.LimitName != b.LimitName || a.PlanType != b.PlanType || a.Provider != b.Provider || a.Source != b.Source {
+		return false
+	}
+	if !codexRateLimitWindowEquivalent(a.Primary, b.Primary) || !codexRateLimitWindowEquivalent(a.Secondary, b.Secondary) {
+		return false
+	}
+	return codexCreditsSnapshotEquivalent(a.Credits, b.Credits)
+}
+
+func codexRateLimitWindowEquivalent(a, b *ratelimit.RateLimitWindow) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.UsedPercent() == b.UsedPercent() && a.WindowMinutes == b.WindowMinutes && a.ResetsAt.Equal(b.ResetsAt)
+}
+
+func codexCreditsSnapshotEquivalent(a, b *ratelimit.CreditsSnapshot) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.HasCredits == b.HasCredits && a.Unlimited == b.Unlimited && strings.TrimSpace(a.Balance) == strings.TrimSpace(b.Balance)
+}
+
+func (p *ProviderConfig) reloadAuthStateFromMonitor() {
+	p.mu.Lock()
+	before := p.currentPolledRateLimitSnapshotLocked()
+	changed := p.maybeReloadAuthStateLocked()
+	after := p.currentPolledRateLimitSnapshotLocked()
+	currentChanged := changed && !codexPolledSnapshotEquivalent(before, after)
+	cb := p.onPolledUpdate
+	p.mu.Unlock()
+	if currentChanged && cb != nil {
+		cb()
+	}
 }
 
 func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyRateLimitSnapshot, warmupAt time.Time) {
@@ -126,6 +224,7 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		return
 	}
 	stateKey := p.authStateKeyLocked(ks)
+	expires := ks.OAuthInfo.Expires
 	status := config.OAuthStatusNormal
 	if ks.Invalid {
 		status = ks.OAuthInfo.Status
@@ -137,7 +236,7 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
 		record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
-		record.Expires = ks.OAuthInfo.Expires
+		record.Expires = expires
 		record.Status = status
 		codexSnapshotToOAuthStateRecord(record, snap, warmupAt)
 		return !config.EqualOAuthStateRecord(before, *record), nil
@@ -150,9 +249,14 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		return
 	}
 	mtime, _ := config.ReadAuthStateMTime(p.authStatePath)
+	digest := ""
+	if _, _, loadedDigest, loadErr := loadAuthStateSnapshot(p.authStatePath); loadErr == nil {
+		digest = loadedDigest
+	}
 	p.mu.Lock()
 	p.authState = state
 	p.authStateMTime = mtime
+	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, false)
 	p.mu.Unlock()
 }

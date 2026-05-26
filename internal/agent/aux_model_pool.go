@@ -93,6 +93,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 			if outputMax > 0 {
 				directClient.SetOutputTokenMax(outputMax)
 			}
+			directClient.SetServiceTier(a.ServiceTier())
 			return directClient, nil
 		}
 		if firstErr != nil {
@@ -100,10 +101,10 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		return nil, fmt.Errorf("model pool has no usable refs")
 	}
-	return newAuxClientFromPool(pool, 0, outputMax, a.FastModeEnabled()), nil
+	return newAuxClientFromPool(pool, 0, outputMax, a.ServiceTier()), nil
 }
 
-func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax int, fastMode bool) *llm.Client {
+func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax int, serviceTier config.ServiceTier) *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
@@ -113,7 +114,7 @@ func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax i
 	selected := pool[selectedIdx]
 	client := llm.NewClient(selected.ProviderConfig, selected.ProviderImpl, selected.ModelID, selected.MaxTokens, "")
 	client.SetModelPool(pool, selectedIdx)
-	client.SetFastMode(fastMode)
+	client.SetServiceTier(serviceTier)
 	if outputMax > 0 {
 		client.SetOutputTokenMax(outputMax)
 	}

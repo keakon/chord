@@ -538,7 +538,12 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: progressBytes, Events: progressEvents})
 	selectedRef := client.PrimaryModelRef()
 	runningRef := client.RunningModelRef()
-	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage)
+	callStatus := client.LastCallStatus()
+	serviceTier := callStatus.ServiceTier
+	if serviceTier == "" {
+		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
+	}
+	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier)
 	if strings.TrimSpace(runningRef) != "" {
 		modelRef = runningRef
 	} else if strings.TrimSpace(selectedRef) != "" {
@@ -642,7 +647,7 @@ func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
-	return newAuxClientFromPool(pool, selectedIdx, 0, a.FastModeEnabled())
+	return newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier())
 }
 
 // compactionKeepAlive sends periodic activity signals during long compaction

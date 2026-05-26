@@ -23,7 +23,7 @@ type AnthropicTuning struct {
 	PromptCacheMode string // ""|"off"|"auto"|"explicit"
 	PromptCacheTTL  string // ""|"1h"
 	CacheTools      bool
-	Speed           string // ""|"fast" (Anthropic first-party fast mode)
+	ServiceTier     string // ""|"fast" (Anthropic first-party service tier)
 }
 
 // OpenAITuning holds OpenAI-specific request tuning parameters.
@@ -46,10 +46,10 @@ type GeminiTuning struct {
 // RequestTuning bundles all provider-specific tuning parameters for a single
 // LLM request. Each provider reads only its own sub-struct.
 type RequestTuning struct {
-	Anthropic         AnthropicTuning
-	OpenAI            OpenAITuning
-	Gemini            GeminiTuning
-	FastModeSupported bool
+	Anthropic             AnthropicTuning
+	OpenAI                OpenAITuning
+	Gemini                GeminiTuning
+	SupportedServiceTiers map[config.ServiceTier]bool
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.
@@ -129,6 +129,7 @@ type ProviderConfig struct {
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level store setting for Responses API
+	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
@@ -151,6 +152,8 @@ type ProviderConfig struct {
 	authStatePath              string
 	authState                  config.AuthStateFile
 	authStateMTime             time.Time
+	authStateDigest            string
+	authStateMonitor           *authStateMonitor
 }
 
 // NewProviderConfig creates a new ProviderConfig.
@@ -213,6 +216,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		models:                     models,
 		compat:                     cfg.Compat,
 		store:                      cfg.Store,
+		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
 		responsesWebsocket:         cfg.ResponsesWebsocket,
 		keyRotation:                keyRotation,
@@ -255,6 +259,12 @@ func (p *ProviderConfig) Preset() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.preset
+}
+
+func (p *ProviderConfig) SupportedServiceTiers() []config.ServiceTier {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]config.ServiceTier(nil), p.supportedServiceTiers...)
 }
 
 // GetModel returns the ModelConfig for the given model ID.

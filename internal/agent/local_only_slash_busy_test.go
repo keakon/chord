@@ -361,6 +361,11 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		{"/export --json", true},
 		{"/mcp", true},
 		{"/mcp enable exa", true},
+		{"/tier", true},
+		{"  /tier  ", true},
+		{"/tier fast", true},
+		{"/tier slow", true},
+		{"/tier standard", true},
 		{"/compact", true},
 		{"/new", false},
 		{"/loop", false},
@@ -371,5 +376,16 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		if got := isTUILocalOnlySlashCommand(tc.content); got != tc.want {
 			t.Errorf("isTUILocalOnlySlashCommand(%q) = %v, want %v", tc.content, got, tc.want)
 		}
+	}
+}
+
+func TestExecuteLocalOnlySlashCommandBareTierShowsUsage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if !a.executeLocalOnlySlashCommand("/tier", nil, true) {
+		t.Fatal("expected bare /tier to be handled as a local-only command")
+	}
+	toast := waitForToastEvent(t, a.Events(), "Usage: /tier standard | /tier fast | /tier slow")
+	if toast.Level != "info" {
+		t.Fatalf("toast level = %q, want info", toast.Level)
 	}
 }

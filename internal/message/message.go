@@ -167,13 +167,14 @@ type RollbackDelta struct {
 
 // TokenUsage records token usage from a single API response.
 // InputTokens = prompt size (total input); OutputTokens = total generated (content + reasoning if reported together).
-// CacheReadTokens/CacheWriteTokens = cache read/write; ReasoningTokens = thinking/reasoning output when reported separately.
+// CacheReadTokens/CacheWriteTokens = cache read/write; CacheWrite1hTokens is the 1-hour TTL subset of CacheWriteTokens when reported separately; ReasoningTokens = thinking/reasoning output when reported separately.
 type TokenUsage struct {
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-	CacheReadTokens  int `json:"cache_read_input_tokens"`
-	CacheWriteTokens int `json:"cache_creation_input_tokens"`
-	ReasoningTokens  int `json:"reasoning_tokens"`
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	CacheReadTokens    int `json:"cache_read_input_tokens"`
+	CacheWriteTokens   int `json:"cache_creation_input_tokens"`
+	CacheWrite1hTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
+	ReasoningTokens    int `json:"reasoning_tokens"`
 }
 
 // ThinkingBlock holds extended-thinking content returned by Anthropic models.

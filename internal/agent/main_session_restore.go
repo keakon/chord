@@ -729,7 +729,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		}
 
 		subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
-		a.applyFastModeToClient(subLLMClient)
+		a.applyServiceTierToClient(subLLMClient)
 		agentRuleset := a.effectiveRuleset()
 		if agentDef.Permission.Kind != 0 {
 			agentPermRules := permission.ParsePermission(&agentDef.Permission)

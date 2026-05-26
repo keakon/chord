@@ -55,6 +55,237 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	p.mu.Unlock()
 }
 
+func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	updated := make(chan struct{}, 1)
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	p.SetOnPolledRateLimitUpdated(func() {
+		select {
+		case updated <- struct{}{}:
+		default:
+		}
+	})
+
+	captured := time.Now()
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = captured.UnixMilli()
+		record.CodexPrimaryUsedPct = 25
+		record.CodexPrimaryWindowMin = 300
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p.reloadAuthStateFromMonitor()
+
+	select {
+	case <-updated:
+	default:
+		t.Fatal("expected polled update callback after auth.state reload")
+	}
+	p.mu.Lock()
+	snap := p.polledRateLimitByCredIdx[0]
+	p.mu.Unlock()
+	if snap == nil || snap.Primary == nil || snap.Primary.UsedPct != 25 {
+		t.Fatalf("expected reloaded polled snapshot, got %#v", snap)
+	}
+}
+
+func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	updated := make(chan struct{}, 1)
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	p.SetOnPolledRateLimitUpdated(func() {
+		select {
+		case updated <- struct{}{}:
+		default:
+		}
+	})
+
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.CodexPrimaryUsedPct = 55
+		record.CodexPrimaryWindowMin = 300
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+	p.reloadAuthStateFromMonitor()
+	select {
+	case <-updated:
+	default:
+		t.Fatal("expected initial polled update callback after auth.state reload")
+	}
+	if got := p.CurrentPolledRateLimitSnapshot(); got == nil || got.Primary == nil || got.Primary.UsedPct != 55 {
+		t.Fatalf("expected initial auth.state snapshot, got %#v", got)
+	}
+
+	if err := os.Remove(statePath); err != nil {
+		t.Fatalf("Remove(auth.state): %v", err)
+	}
+	p.reloadAuthStateFromMonitor()
+
+	select {
+	case <-updated:
+	default:
+		t.Fatal("expected polled update callback after auth.state removal")
+	}
+	if got := p.CurrentPolledRateLimitSnapshot(); got != nil {
+		t.Fatalf("current polled snapshot after auth.state removal = %#v, want nil", got)
+	}
+}
+
+func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	auth := config.AuthConfig{"openai": {
+		{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: "key-b", Refresh: "refresh-b", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-2"}},
+	}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-b": {CredentialIndex: 1, AccountID: "acc-2", Access: "key-b", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	updated := make(chan struct{}, 1)
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	p.SetOnPolledRateLimitUpdated(func() {
+		select {
+		case updated <- struct{}{}:
+		default:
+		}
+	})
+
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-2", Access: "key-b"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.CodexPrimaryUsedPct = 90
+		record.CodexPrimaryWindowMin = 300
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p.reloadAuthStateFromMonitor()
+
+	select {
+	case <-updated:
+		t.Fatal("did not expect polled update callback for non-current auth.state change")
+	default:
+	}
+	p.mu.Lock()
+	current := p.polledRateLimitByCredIdx[0]
+	nonCurrent := p.polledRateLimitByCredIdx[1]
+	p.mu.Unlock()
+	if current != nil {
+		t.Fatalf("current snapshot = %#v, want nil", current)
+	}
+	if nonCurrent == nil || nonCurrent.Primary == nil || nonCurrent.Primary.UsedPct != 90 {
+		t.Fatalf("expected non-current snapshot to be cached, got %#v", nonCurrent)
+	}
+}
+
+func TestProviderCloseStopsAuthStateMonitor(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+
+	p.mu.Lock()
+	started := p.authStateMonitor != nil
+	p.mu.Unlock()
+	if !started {
+		t.Fatal("expected auth state monitor to start")
+	}
+
+	p.Close()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.authStateMonitor != nil {
+		t.Fatal("expected Close to clear auth state monitor")
+	}
+	if p.codexPollFetchFn != nil {
+		t.Fatal("expected Close to clear Codex polling fetch function")
+	}
+}
+
+func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.CodexPrimaryUsedPct = 40
+		record.CodexPrimaryWindowMin = 300
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	fetchCalled := make(chan struct{}, 1)
+	p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		select {
+		case fetchCalled <- struct{}{}:
+		default:
+		}
+		return nil, nil
+	})
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+
+	p.WakeCodexRateLimitPolling()
+
+	select {
+	case <-fetchCalled:
+		t.Fatal("did not expect external /wham/usage fetch after fresh auth.state reload")
+	case <-time.After(100 * time.Millisecond):
+	}
+	p.mu.Lock()
+	snap := p.polledRateLimitByCredIdx[0]
+	p.mu.Unlock()
+	if snap == nil || snap.Primary == nil || snap.Primary.UsedPct != 40 {
+		t.Fatalf("expected auth.state snapshot to be used, got %#v", snap)
+	}
+}
+
 func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})

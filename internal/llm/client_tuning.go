@@ -28,9 +28,9 @@ func geminiLevelFromThinking(t *config.ThinkingConfig) string {
 }
 
 // tuningFromModel builds a RequestTuning from a ModelConfig.
-func tuningFromModel(m config.ModelConfig, providerPreset string) RequestTuning {
+func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers []config.ServiceTier) RequestTuning {
 	var t RequestTuning
-	t.FastModeSupported = (&m).SupportsFastMode(providerPreset)
+	t.SupportedServiceTiers = (&m).SupportedServiceTierSet(providerPreset, providerTiers)
 	t.Anthropic = mergeAnthropicThinkingTuning(t.Anthropic, m.Thinking)
 	t.Anthropic.PromptCacheMode = m.EffectivePromptCacheMode()
 	if m.PromptCache != nil {
@@ -51,19 +51,28 @@ func tuningFromModel(m config.ModelConfig, providerPreset string) RequestTuning 
 	return t
 }
 
-func fastModeTuning(t RequestTuning) RequestTuning {
-	if !t.FastModeSupported {
+func serviceTierTuning(t RequestTuning, tier config.ServiceTier) RequestTuning {
+	tier = config.NormalizeServiceTier(string(tier))
+	if !t.SupportedServiceTiers[tier] {
 		return t
 	}
-	// Align with Codex: "fast" is a service tier / transport-level acceleration.
-	// It should NOT change behavior knobs like reasoning effort / verbosity.
-	//
-	// - OpenAI Responses: set service_tier="fast".
-	// - Anthropic: enable first-party fast mode via speed="fast".
-	// - Gemini: there is no generic "speed" knob; fast mode is a no-op (callers
-	//   can still choose a cheaper model pool / thinking level via variants).
-	t.OpenAI.ServiceTier = "fast"
-	t.Anthropic.Speed = "fast"
+	switch tier {
+	case config.ServiceTierFast:
+		// Align with Codex: "fast" is a service tier / transport-level acceleration.
+		// It should NOT change behavior knobs like reasoning effort / verbosity.
+		//
+		// - OpenAI Responses: set service_tier="fast".
+		// - Anthropic: set speed="fast" on wire (mapped from the same service tier).
+		// - Gemini: there is no generic "speed" knob; the fast tier is a no-op
+		//   (callers can still choose a cheaper model pool / thinking level via variants).
+		t.OpenAI.ServiceTier = "fast"
+		t.Anthropic.ServiceTier = "fast"
+	case config.ServiceTierSlow:
+		// OpenAI exposes the lower-cost/lower-priority tier as flex. Other providers
+		// either do not expose a generic slow tier through this abstraction or use
+		// provider-specific routing; leave those wire fields unset.
+		t.OpenAI.ServiceTier = "flex"
+	}
 	return t
 }
 

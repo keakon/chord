@@ -56,7 +56,7 @@ type Client struct {
 	fallbackModels         []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
 	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
 	lastCallStatus         CallStatus
-	fastMode               bool
+	serviceTier            config.ServiceTier
 
 	routingGeneration atomic.Uint64
 	routingChangedCh  chan struct{}
@@ -75,6 +75,7 @@ type CallStatus struct {
 	FallbackTriggered   bool
 	FallbackReason      string
 	FallbackExhausted   bool
+	ServiceTier         config.ServiceTier
 }
 
 // NewClient creates a new Client for making LLM completions.
@@ -87,7 +88,7 @@ func NewClient(
 ) *Client {
 	var tuning RequestTuning
 	if m, ok := providerCfg.GetModel(modelID); ok {
-		tuning = tuningFromModel(m, providerCfg.Preset())
+		tuning = tuningFromModel(m, providerCfg.Preset(), providerCfg.SupportedServiceTiers())
 	}
 
 	c := &Client{
@@ -260,7 +261,7 @@ func (c *Client) SetModelPool(models []FallbackModel, selectedIdx int) {
 	c.tuning = RequestTuning{}
 	c.activeVariant = ""
 	if m, ok := sel.ProviderConfig.GetModel(sel.ModelID); ok {
-		c.tuning = tuningFromModel(m, sel.ProviderConfig.Preset())
+		c.tuning = tuningFromModel(m, sel.ProviderConfig.Preset(), sel.ProviderConfig.SupportedServiceTiers())
 		if sel.Variant != "" {
 			if v, ok := m.Variants[sel.Variant]; ok {
 				c.tuning = mergeVariantTuning(c.tuning, v)
@@ -426,7 +427,7 @@ func (c *Client) SetVariant(variantName string) {
 	if !ok {
 		return
 	}
-	base := tuningFromModel(m, c.provider.Preset())
+	base := tuningFromModel(m, c.provider.Preset(), c.provider.SupportedServiceTiers())
 	c.tuning = mergeVariantTuning(base, v)
 	c.activeVariant = variantName
 }
@@ -478,8 +479,8 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	if tuning.Anthropic.CacheTools {
 		merged.Anthropic.CacheTools = true
 	}
-	if tuning.Anthropic.Speed != "" {
-		merged.Anthropic.Speed = tuning.Anthropic.Speed
+	if tuning.Anthropic.ServiceTier != "" {
+		merged.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
 	}
 	if tuning.OpenAI.ReasoningEffort != "" {
 		merged.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
@@ -538,19 +539,64 @@ func (c *Client) RunningModelRef() string {
 	return st.SelectedModelRef
 }
 
-// FastMode reports whether runtime fast mode is enabled for this client.
-func (c *Client) FastMode() bool {
+// ServiceTier returns the configured runtime request tier for this client.
+func (c *Client) ServiceTier() config.ServiceTier {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.fastMode
+	return config.NormalizeServiceTier(string(c.serviceTier))
 }
 
-// SetFastMode toggles runtime fast mode. It affects subsequent LLM requests,
+func effectiveServiceTierForTuning(tuning RequestTuning, tier config.ServiceTier) config.ServiceTier {
+	tier = config.NormalizeServiceTier(string(tier))
+	if tier == config.ServiceTierStandard || !tuning.SupportedServiceTiers[tier] {
+		return config.ServiceTierStandard
+	}
+	return tier
+}
+
+// EffectiveServiceTierForModelRef returns the tier that can actually be applied
+// to the configured model ref in the effective model pool.
+func (c *Client) EffectiveServiceTierForModelRef(ref string) config.ServiceTier {
+	if c == nil {
+		return config.ServiceTierStandard
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effectiveServiceTierForModelRefLocked(ref)
+}
+
+func (c *Client) effectiveServiceTierForModelRefLocked(ref string) config.ServiceTier {
+	tier := config.NormalizeServiceTier(string(c.serviceTier))
+	if tier == config.ServiceTierStandard {
+		return config.ServiceTierStandard
+	}
+	normalizedRef := strings.TrimSpace(ref)
+	if normalizedRef != "" {
+		normalizedRef, _ = config.ParseModelRef(normalizedRef)
+	}
+	if c.provider != nil {
+		primaryRef := providerModelRef(c.provider, c.modelID)
+		if normalizedRef == "" || normalizedRef == primaryRef {
+			return effectiveServiceTierForTuning(tuningForPoolTarget(FallbackModel{ProviderConfig: c.provider, ModelID: c.modelID, Variant: c.activeVariant}), tier)
+		}
+	}
+	for _, fb := range c.fallbackModels {
+		if fb.ProviderConfig == nil {
+			continue
+		}
+		if normalizedRef == providerModelRef(fb.ProviderConfig, fb.ModelID) {
+			return effectiveServiceTierForTuning(tuningForPoolTarget(fb), tier)
+		}
+	}
+	return config.ServiceTierStandard
+}
+
+// SetServiceTier sets the runtime request tier. It affects subsequent LLM requests,
 // including later retry rounds that have not yet built their request targets.
-func (c *Client) SetFastMode(enabled bool) {
+func (c *Client) SetServiceTier(tier config.ServiceTier) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.fastMode = enabled
+	c.serviceTier = config.NormalizeServiceTier(string(tier))
 }
 
 // ContextLimitForModelRef returns the configured context window for a
@@ -640,6 +686,7 @@ func (c *Client) CompleteStream(
 	routingGeneration := c.routingGeneration.Load()
 	routingChangedCh := c.routingChangedCh
 	streamRetryRounds := c.streamRetryRounds
+	serviceTier := c.serviceTier
 	c.mu.Unlock()
 
 	status := CallStatus{
@@ -647,6 +694,7 @@ func (c *Client) CompleteStream(
 		RunningModelRef:     startRef,
 		RunningContextLimit: startLimit,
 		RunningInputLimit:   startInputLimit,
+		ServiceTier:         effectiveServiceTierForTuning(requestTuning, serviceTier),
 	}
 
 	// Single call handles the whole round-based retry chain (cursor-start entry
@@ -937,7 +985,7 @@ func tuningForPoolTarget(t FallbackModel) RequestTuning {
 	if !ok {
 		return RequestTuning{}
 	}
-	base := tuningFromModel(m, t.ProviderConfig.Preset())
+	base := tuningFromModel(m, t.ProviderConfig.Preset(), t.ProviderConfig.SupportedServiceTiers())
 	if t.Variant == "" {
 		return base
 	}

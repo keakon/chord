@@ -42,6 +42,7 @@ func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testin
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
 		"",
+		"",
 		&authCfg,
 		&authMu,
 		map[string]llm.OAuthKeySetup{"oauth-token": {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
@@ -84,6 +85,7 @@ func TestCurrentRateLimitSnapshotPrefersPolledWhenInlineStale(t *testing.T) {
 	prov.SetOAuthRefresher(
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
+		"",
 		"",
 		&authCfg,
 		&authMu,
@@ -138,6 +140,7 @@ func TestPolledRateLimitUpdateEmitsEventViaCallback(t *testing.T) {
 	provCfg.SetOAuthRefresher(
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
+		"",
 		"",
 		&authCfg,
 		&authMu,

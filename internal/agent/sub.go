@@ -348,7 +348,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	return s
 }
 
-func (s *SubAgent) setFastMode(enabled bool) {
+func (s *SubAgent) setServiceTier(tier config.ServiceTier) {
 	if s == nil {
 		return
 	}
@@ -356,7 +356,7 @@ func (s *SubAgent) setFastMode(enabled bool) {
 	client := s.llmClient
 	s.llmMu.RUnlock()
 	if client != nil {
-		client.SetFastMode(enabled)
+		client.SetServiceTier(tier)
 	}
 }
 
@@ -517,8 +517,12 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 
 		// Track usage for cost analytics (mirrors MainAgent.callLLM).
 		if err == nil && resp != nil {
+			callStatus := llmClient.LastCallStatus()
 			selectedRef := llmClient.PrimaryModelRef()
-			runningRef := llmClient.RunningModelRef()
+			runningRef := callStatus.RunningModelRef
+			if runningRef == "" {
+				runningRef = llmClient.RunningModelRef()
+			}
 			// Set context limit so the info panel gauge shows correct capacity
 			// when TUI focus is on this SubAgent (mirrors MainAgent.callLLM).
 			if runningRef != "" {
@@ -526,7 +530,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), 0)
 				}
 			}
-			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage)
+			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier)
 
 			// Hook: on_after_llm_call.
 			subInputTok, subOutputTok := 0, 0
