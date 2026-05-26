@@ -31,7 +31,7 @@ func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 	a.mu.Lock()
 	a.subAgents[sub.instanceID] = sub
 	a.mu.Unlock()
-	if _, err := tools.ExecuteSpawnForTest(tools.WithAgentID(context.Background(), sub.instanceID), "job", "sleep 5", "Sub background object", intPtr(5)); err != nil {
+	if _, err := tools.ExecuteSpawnForTest(tools.WithAgentID(context.Background(), sub.instanceID), "job", "sleep 5", "Sub background object", new(5)); err != nil {
 		t.Fatalf("start sub background: %v", err)
 	}
 
@@ -52,8 +52,6 @@ func resetSpawnRegistryForAgentTests(t *testing.T) {
 	restore := tools.ResetSpawnRegistryForTest()
 	t.Cleanup(restore)
 }
-
-func intPtr(v int) *int { return &v }
 
 func TestResetSessionRuntimeStateClearsLoopControllerState(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())

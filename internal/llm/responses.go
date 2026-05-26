@@ -255,7 +255,9 @@ func (r *ResponsesProvider) CompleteStream(
 		instructions := systemPrompt
 		reqBody.Instructions = &instructions
 	}
-	reqBody.ParallelToolCalls = cloneBoolPtr(ot.ParallelToolCalls)
+	if ot.ParallelToolCalls != nil {
+		reqBody.ParallelToolCalls = new(*ot.ParallelToolCalls)
+	}
 
 	effectiveReasoningEffort := ot.ReasoningEffort
 	effectiveMaxTokens := maxTokens

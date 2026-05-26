@@ -4,22 +4,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-func cloneBoolPtr(v *bool) *bool {
-	if v == nil {
-		return nil
-	}
-	b := *v
-	return &b
-}
-
-func intPtrFromThinkingBudget(v int) *int {
-	if v == 0 {
-		return nil
-	}
-	n := v
-	return &n
-}
-
 func geminiLevelFromThinking(t *config.ThinkingConfig) string {
 	if t == nil {
 		return ""
@@ -42,11 +26,17 @@ func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers 
 		t.OpenAI.ReasoningSummary = m.Reasoning.Summary
 	}
 	t.OpenAI.TextVerbosity = m.EffectiveTextVerbosity()
-	t.OpenAI.ParallelToolCalls = cloneBoolPtr(m.ParallelToolCalls)
+	if m.ParallelToolCalls != nil {
+		t.OpenAI.ParallelToolCalls = new(*m.ParallelToolCalls)
+	}
 	if m.Thinking != nil {
-		t.Gemini.ThinkingBudget = intPtrFromThinkingBudget(m.Thinking.Budget)
+		if m.Thinking.Budget != 0 {
+			t.Gemini.ThinkingBudget = new(m.Thinking.Budget)
+		}
 		t.Gemini.ThinkingLevel = geminiLevelFromThinking(m.Thinking)
-		t.Gemini.IncludeThoughts = cloneBoolPtr(m.Thinking.IncludeThoughts)
+		if m.Thinking.IncludeThoughts != nil {
+			t.Gemini.IncludeThoughts = new(*m.Thinking.IncludeThoughts)
+		}
 	}
 	return t
 }
@@ -153,17 +143,17 @@ func mergeVariantTuning(base RequestTuning, v config.ModelVariant) RequestTuning
 		base.OpenAI.TextVerbosity = tv
 	}
 	if v.ParallelToolCalls != nil {
-		base.OpenAI.ParallelToolCalls = cloneBoolPtr(v.ParallelToolCalls)
+		base.OpenAI.ParallelToolCalls = new(*v.ParallelToolCalls)
 	}
 	if v.Thinking != nil {
 		if v.Thinking.Budget != 0 {
-			base.Gemini.ThinkingBudget = intPtrFromThinkingBudget(v.Thinking.Budget)
+			base.Gemini.ThinkingBudget = new(v.Thinking.Budget)
 		}
 		if lvl := geminiLevelFromThinking(v.Thinking); lvl != "" {
 			base.Gemini.ThinkingLevel = lvl
 		}
 		if v.Thinking.IncludeThoughts != nil {
-			base.Gemini.IncludeThoughts = cloneBoolPtr(v.Thinking.IncludeThoughts)
+			base.Gemini.IncludeThoughts = new(*v.Thinking.IncludeThoughts)
 		}
 	}
 	return base

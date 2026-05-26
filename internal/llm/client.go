@@ -440,7 +440,9 @@ func (c *Client) SetNextRequestTuningOverride(tuning RequestTuning) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	copy := tuning
-	copy.OpenAI.ParallelToolCalls = cloneBoolPtr(tuning.OpenAI.ParallelToolCalls)
+	if tuning.OpenAI.ParallelToolCalls != nil {
+		copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
+	}
 	c.nextTuning = &copy
 }
 
@@ -452,12 +454,16 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	defer c.mu.Unlock()
 	if c.nextTuning == nil {
 		copy := tuning
-		copy.OpenAI.ParallelToolCalls = cloneBoolPtr(tuning.OpenAI.ParallelToolCalls)
+		if tuning.OpenAI.ParallelToolCalls != nil {
+			copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
+		}
 		c.nextTuning = &copy
 		return
 	}
 	merged := *c.nextTuning
-	merged.OpenAI.ParallelToolCalls = cloneBoolPtr(c.nextTuning.OpenAI.ParallelToolCalls)
+	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
+		merged.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
+	}
 	if tuning.Anthropic.ThinkingType != "" {
 		merged.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
 	}
@@ -492,7 +498,7 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 		merged.OpenAI.TextVerbosity = tuning.OpenAI.TextVerbosity
 	}
 	if tuning.OpenAI.ParallelToolCalls != nil {
-		merged.OpenAI.ParallelToolCalls = cloneBoolPtr(tuning.OpenAI.ParallelToolCalls)
+		merged.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
 	}
 	if tuning.OpenAI.ToolChoice != "" {
 		merged.OpenAI.ToolChoice = tuning.OpenAI.ToolChoice
@@ -506,7 +512,9 @@ func (c *Client) consumeRequestTuningOverrideLocked() (RequestTuning, bool) {
 		return RequestTuning{}, false
 	}
 	override := *c.nextTuning
-	override.OpenAI.ParallelToolCalls = cloneBoolPtr(c.nextTuning.OpenAI.ParallelToolCalls)
+	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
+		override.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
+	}
 	c.nextTuning = nil
 	return override, true
 }

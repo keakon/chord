@@ -224,7 +224,7 @@ func TestWebFetchUserAgentOverride(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{UserAgent: stringPtr(customUA)}, "")
+	tool := NewWebFetchTool(config.WebFetchConfig{UserAgent: new(customUA)}, "")
 	_ = executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	if gotUA != customUA {
 		t.Fatalf("User-Agent = %q, want %q", gotUA, customUA)
@@ -241,7 +241,7 @@ func TestWebFetchEmptyUserAgentFallsBackToDefault(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{UserAgent: &empty}, "")
+	tool := NewWebFetchTool(config.WebFetchConfig{UserAgent: new(empty)}, "")
 	_ = executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
 	if gotUA != webFetchDefaultUserAgent {
 		t.Fatalf("User-Agent = %q, want %q", gotUA, webFetchDefaultUserAgent)
@@ -554,8 +554,4 @@ func mustParseHTMLDoc(t *testing.T, body string) *html.Node {
 		t.Fatalf("html.Parse: %v", err)
 	}
 	return doc
-}
-
-func stringPtr(v string) *string {
-	return &v
 }

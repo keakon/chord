@@ -27,16 +27,16 @@ func resetMarkdownRenderer() {
 // block-level surface.
 func contentMarkdownStyleConfig() ansi.StyleConfig {
 	// Keep markdown text transparent so the outer card owns the background.
-	fg := stringPtr(currentTheme.ToolResultExpandedFg)
-	fgCode := stringPtr(currentTheme.ParamValFg)
-	bgCode := stringPtr(currentTheme.InlineCodeBg)
-	fgH1 := stringPtr(currentTheme.HeaderFg)
-	fgH2 := stringPtr(currentTheme.ConfirmToolFg)
-	fgH3 := stringPtr(currentTheme.ModeSearchFg)
-	fgH4 := stringPtr(currentTheme.ToolCallFg)
-	fgH5 := stringPtr(currentTheme.DimFg)
-	fgH6 := stringPtr(currentTheme.DimFg)
-	fgStrong := stringPtr(currentTheme.HeaderFg)
+	fg := new(currentTheme.ToolResultExpandedFg)
+	fgCode := new(currentTheme.ParamValFg)
+	bgCode := new(currentTheme.InlineCodeBg)
+	fgH1 := new(currentTheme.HeaderFg)
+	fgH2 := new(currentTheme.ConfirmToolFg)
+	fgH3 := new(currentTheme.ModeSearchFg)
+	fgH4 := new(currentTheme.ToolCallFg)
+	fgH5 := new(currentTheme.DimFg)
+	fgH6 := new(currentTheme.DimFg)
+	fgStrong := new(currentTheme.HeaderFg)
 	block := func() ansi.StyleBlock {
 		return ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BackgroundColor: nil, Color: fg}}
 	}
@@ -47,16 +47,16 @@ func contentMarkdownStyleConfig() ansi.StyleConfig {
 		return ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{
 			BackgroundColor: nil,
 			Color:           color,
-			Bold:            boolPtr(true),
-			Underline:       boolPtr(underline),
+			Bold:            new(true),
+			Underline:       new(underline),
 			BlockSuffix:     "\n",
 		}}
 	}
-	strongPrim := ansi.StylePrimitive{BackgroundColor: nil, Color: fgStrong, Bold: boolPtr(true)}
+	strongPrim := ansi.StylePrimitive{BackgroundColor: nil, Color: fgStrong, Bold: new(true)}
 	codePrim := ansi.StylePrimitive{BackgroundColor: bgCode, Color: fgCode}
 	return ansi.StyleConfig{
 		Document:              block(),
-		BlockQuote:            ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BackgroundColor: nil, Color: fg}, Indent: uintPtr(1), IndentToken: stringPtr("│ ")},
+		BlockQuote:            ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BackgroundColor: nil, Color: fg}, Indent: new(uint(1)), IndentToken: new("│ ")},
 		Paragraph:             block(),
 		Heading:               headingBlock(fgH2, false),
 		H1:                    headingBlock(fgH1, true),
@@ -79,16 +79,12 @@ func contentMarkdownStyleConfig() ansi.StyleConfig {
 		Image:                 prim(),
 		ImageText:             prim(),
 		Code:                  ansi.StyleBlock{StylePrimitive: codePrim},
-		CodeBlock:             ansi.StyleCodeBlock{StyleBlock: ansi.StyleBlock{StylePrimitive: codePrim, Margin: uintPtr(1)}},
+		CodeBlock:             ansi.StyleCodeBlock{StyleBlock: ansi.StyleBlock{StylePrimitive: codePrim, Margin: new(uint(1))}},
 		Table:                 ansi.StyleTable{StyleBlock: block()},
 		DefinitionTerm:        prim(),
 		DefinitionDescription: prim(),
 	}
 }
-
-func boolPtr(b bool) *bool       { return &b }
-func stringPtr(s string) *string { return &s }
-func uintPtr(u uint) *uint       { return &u }
 
 // renderMarkdownContent renders settled markdown with transparent block-level
 // backgrounds; fenced code is handled separately in assistant code paths.

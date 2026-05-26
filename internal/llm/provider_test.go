@@ -19,8 +19,6 @@ import (
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 func testProviderOAuthJWT(payload string) string {
 	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
 }
@@ -1047,7 +1045,7 @@ func TestProviderConfig_ThinkingToolcallCompat_ModelOnly(t *testing.T) {
 			"m1": {
 				Compat: &config.ModelCompatConfig{
 					ThinkingToolcall: &config.ThinkingToolcallCompatConfig{
-						Enabled: boolPtr(true),
+						Enabled: new(true),
 					},
 				},
 			},
@@ -1065,7 +1063,7 @@ func TestProviderConfig_ThinkingToolcallCompat_ProviderDefault(t *testing.T) {
 		Type: config.ProviderTypeChatCompletions,
 		Compat: &config.ProviderCompatConfig{
 			ThinkingToolcall: &config.ThinkingToolcallCompatConfig{
-				Enabled: boolPtr(true),
+				Enabled: new(true),
 			},
 		},
 		Models: map[string]config.ModelConfig{
@@ -1084,14 +1082,14 @@ func TestProviderConfig_ThinkingToolcallCompat_ModelOverride(t *testing.T) {
 		Type: config.ProviderTypeChatCompletions,
 		Compat: &config.ProviderCompatConfig{
 			ThinkingToolcall: &config.ThinkingToolcallCompatConfig{
-				Enabled: boolPtr(true),
+				Enabled: new(true),
 			},
 		},
 		Models: map[string]config.ModelConfig{
 			"m1": {
 				Compat: &config.ModelCompatConfig{
 					ThinkingToolcall: &config.ThinkingToolcallCompatConfig{
-						Enabled: boolPtr(false),
+						Enabled: new(false),
 					},
 				},
 			},

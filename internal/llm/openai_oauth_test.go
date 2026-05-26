@@ -371,7 +371,7 @@ func TestResponsesProvider_OpenAIOAuthSendsParallelToolCallsWhenConfigured(t *te
 		[]message.Message{{Role: "user", Content: "hello"}},
 		nil,
 		128,
-		RequestTuning{OpenAI: OpenAITuning{ParallelToolCalls: boolPtr(false)}},
+		RequestTuning{OpenAI: OpenAITuning{ParallelToolCalls: new(false)}},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {

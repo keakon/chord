@@ -660,20 +660,22 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	if newConnection {
 		generate := false
 		prewarmEnv := codexWSResponseCreate{
-			Type:              "response.create",
-			Model:             req.Model,
-			Instructions:      req.Instructions,
-			Input:             fullInput,
-			Tools:             req.Tools,
-			ToolChoice:        "auto",
-			ParallelToolCalls: cloneBoolPtr(req.ParallelToolCalls),
-			Generate:          &generate,
-			Stream:            true,
-			Include:           []any{},
-			PromptCacheKey:    r.codexWSPromptCacheKey,
-			MaxOutputTokens:   req.MaxOutputTokens,
-			Reasoning:         req.Reasoning,
-			Text:              req.Text,
+			Type:            "response.create",
+			Model:           req.Model,
+			Instructions:    req.Instructions,
+			Input:           fullInput,
+			Tools:           req.Tools,
+			ToolChoice:      "auto",
+			Generate:        &generate,
+			Stream:          true,
+			Include:         []any{},
+			PromptCacheKey:  r.codexWSPromptCacheKey,
+			MaxOutputTokens: req.MaxOutputTokens,
+			Reasoning:       req.Reasoning,
+			Text:            req.Text,
+		}
+		if req.ParallelToolCalls != nil {
+			prewarmEnv.ParallelToolCalls = new(*req.ParallelToolCalls)
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
 			ctx, apiKey, model, prewarmEnv, nil, false, start, false,
@@ -709,7 +711,6 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Input:              wireInput,
 		Tools:              req.Tools,
 		ToolChoice:         req.ToolChoice,
-		ParallelToolCalls:  cloneBoolPtr(req.ParallelToolCalls),
 		Stream:             true,
 		Include:            []any{},
 		PromptCacheKey:     r.codexWSPromptCacheKey,
@@ -717,6 +718,9 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		MaxOutputTokens:    req.MaxOutputTokens,
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,
+	}
+	if req.ParallelToolCalls != nil {
+		env.ParallelToolCalls = new(*req.ParallelToolCalls)
 	}
 	// reusingConn is always true here: if we just dialed+prewarmed, the WS
 	// connection is already established; if we reused an existing connection,

@@ -91,10 +91,12 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
 	reqBody := responsesRequest{
-		Model:             model,
-		Input:             apiInput,
-		Tools:             convertToolsToResponses(tools),
-		ParallelToolCalls: cloneBoolPtr(ot.ParallelToolCalls),
+		Model: model,
+		Input: apiInput,
+		Tools: convertToolsToResponses(tools),
+	}
+	if ot.ParallelToolCalls != nil {
+		reqBody.ParallelToolCalls = new(*ot.ParallelToolCalls)
 	}
 	if strings.TrimSpace(systemPrompt) != "" {
 		reqBody.Instructions = &systemPrompt
