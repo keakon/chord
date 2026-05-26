@@ -4,7 +4,10 @@
 
 ## 未发布
 
+- TUI / 快捷键：各 overlay 不再保留未提示的关闭/操作键。Stats 浮层移除 `q`，hint 同时展示 `esc/$ close`；Model Select 移除 `ctrl+d`（esc 是文档化的关闭键）；Handoff Select 移除未公开的 `d/D`，只用 `r` 进入 deny-reason 流；通用 Confirm 对话框新增 `enter` 作为 Allow，并在 UI 显示 `[Enter/A] Allow`、`[Esc/D] Deny`。Help 与 Stats 浮层在状态栏也会显示 `esc ⇢ close`。
+- TUI / 工具卡：已恢复/已继续的文件修改卡片现在使用与实时结果一致的展开终态。没有持久化 diff 的 Edit 卡片会显示保存的结果文本，不再只渲染空 header；恢复后的 Write/Edit 错误和 Delete 完成结果也无需手动展开即可保持可见；确认弹窗里记住规则的快捷键现在是 `M`，让 `A` 保留给 Allow。
 - Auth / OAuth：不再把本地 access token 的 `expires` 元数据当作凭据已失效的证明；只有 provider 或 token endpoint 的认证失败确认不可用后，才会将 OAuth slot 标记为 `expired`。
+- **不兼容 / 配置：** 将 provider / 模型 HTTP 请求的 `User-Agent` 覆盖移到 provider 级 `user_agent`（仅影响普通模型请求）。旧的 Anthropic transport 兼容字段 `user_agent` 已移除；provider / 模型请求默认使用 `User-Agent: chord/<version>`，除非显式覆盖。
 - LSP / 诊断：Write / Edit 后追加到工具结果中的 diagnostics 现在会等待 fresh 的 publishDiagnostics 快照和短暂 settle 窗口。若 server 提供 document version，会忽略旧版本 diagnostics；无 version 的 diagnostics 也必须在 edit 通知之后到达，从而减少 gopls 等异步 server 的瞬时误报。
 - Headless / 本地 shell：新增 `local_shell` stdin 命令和 `local_shell_result` 事件，让 headless 集成可以执行 `!` 风格的本地 shell 命令，并接收带超时和输出大小限制的 stdout/stderr 合并结果。
 - Headless / Handoff：`Handoff` 现在会在 headless 模式下发出结构化的 `handoff_request` 事件，包含完整已保存 plan 以及可选 agent / model pool；headless 也新增 `handoff` 命令，可批准执行或拒绝后继续规划。
@@ -14,7 +17,7 @@
 - TUI / 导航：当用户手动关闭 sticky follow 后，在底部执行无位移的向下滚动不会再重新开启 sticky follow，从而保留手动滚动状态。
 - TUI / 工具卡：卡片 header 现在显示从 1 开始的 block 序号（例如 `TOOL CALL #12`），方便明确引用渲染出来的卡片。
 - TUI / Git 侧边栏：当当前目录位于 Git 仓库内时，右侧 info panel 现在会显示紧凑、可折叠的 Git 摘要，包括分支或 detached commit、linked worktree 名、改动文件数、已暂存文件数、stash 数量以及 ahead/behind 数量。Git 状态会在启动、文件修改工具或 Shell git 命令后异步刷新，并通过低频定时器更新，不阻塞渲染。
-- TUI / Handoff：planner 触发 Handoff 后，选择器现在按审批决策处理：Enter/Y 表示 approve 并启动计划执行，R/N 可填写拒绝原因并让模型继续当前回合，Esc 只关闭选择器并保留已保存的 plan，等待用户后续输入。选择器现在也会预览已保存的 plan 内容，较长 plan 可用鼠标滚轮滚动，并提供 View 操作用全屏 Markdown 视图查看完整 plan。等待用户决策时，状态栏现在会回到 idle。
+- TUI / Handoff：planner 触发 Handoff 后，选择器现在按审批决策处理：Enter/A 表示 approve 并启动计划执行，R 表示填写拒绝原因并让模型继续当前回合，Esc 只关闭选择器并保留已保存的 plan，等待用户后续输入。工具确认弹窗统一使用 A 表示 Allow、D 表示 Deny、R 表示 Deny+Reason、M 表示添加记住规则；Done 确认弹窗刻意不提供 Deny，只接受 A/R/V/esc，确保拒绝时必须带原因。选择器现在也会预览已保存的 plan 内容，较长 plan 可用鼠标滚轮滚动，并提供 View 操作用全屏 Markdown 视图查看完整 plan。等待用户决策时，状态栏现在会回到 idle。
 - LLM / Fallback：API 400 错误现在会作为候选模型级失败处理，而不是立即视为整个请求失败，因此 client 可以继续尝试另一个可能接受同一段对话历史的配置模型。对于 request-shape 400，client 仍不会在同一模型上轮换 key，并会在模型池耗尽后停止。
 - LSP / Python 诊断：Python 文件的 Edit / Write 完成后诊断新增 quick 回退后端。默认配置下，主诊断走 `pyright` LSP，quick 回退走 `ruff check ... --output-format json`；大文件（可配置 `diagnostics.python.large_file.line_threshold` / `byte_threshold`，默认 5000 行 / 250000 字节）会自动改走 quick 后端，避免阻塞在完整语义分析上；当 quick 后端不可用时，可通过 `run_semantic_when_quick_unavailable: true` 让大文件继续跑语义诊断。新增顶层 `diagnostics.*` 配置，包含分后端的命令/服务选择，以及 `diagnostics.python.output.*` 用于控制追加到工具结果中的诊断文本长度与裁剪窗口。完整字段见 `docs/configuration_CN.md`。
 - LSP / 诊断输出：追加到工具结果中的 LSP 与 Ruff 诊断现在会按优先级裁剪为更简洁的块（错误和警告优先；还有剩余名额时再显示 info 和 hint）。无诊断时不再追加冗余状态行；只有诊断集合确实变化时，才追加简短的 `Diagnostics changed: N new, M resolved.` 摘要。

@@ -97,6 +97,8 @@ providers:
 
 `gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
 
+对 `type: responses`，Chord 使用与 Codex 一致的 Responses 请求形态：稳定 system prompt 会放在顶层 `instructions` 字段；对话消息仍保留为 typed `input` item，例如 `{"type":"message","role":"user",...}`。这样兼容网关不会在 `input` 里收到 system-role message。
+
 ### OpenAI Codex preset
 
 ```yaml
@@ -228,7 +230,7 @@ openai:
 
 对 OAuth 凭据来说，`access` 必须能解析出账号 ID；如果 `auth.yaml` 已有 `account_id`，它必须和 `access` 内的账号 ID 一致。Chord 也支持只包含 `refresh`、没有 `access` 的 OAuth 条目，并会在首次使用时刷新。既没有 `access` 也没有 `refresh` 的 OAuth 条目不可用。
 
-`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可缓存在 `auth.state.yaml` 中。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired`；它只会降低该 slot 的选择优先级，并可能在使用前触发 refresh。只有真实的 provider/token endpoint 认证失败确认凭据不可用时，Chord 才会写入 `expired`。
+`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可缓存在 `auth.state.yaml` 中。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired`；它只会降低该 slot 的选择优先级。Chord 仍会先尝试已有的 access token，只有在认证失败后，才会在可恢复时刷新凭据，或者在无法恢复时标记为 expired。
 
 典型的 `auth.state.yaml` 条目形态如下：
 
@@ -248,7 +250,7 @@ openai:
     codex_secondary_reset_at: 1774600000000
 ```
 
-`status` 字段只在 `auth.state.yaml` 中权威生效。刷新 token 不可用时 Chord 写入 `expired`，服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
+`status` 字段只在 `auth.state.yaml` 中权威生效。当 access token 已不可用且凭据无法刷新时，Chord 会写入 `expired`（包括 refresh token 缺失、无效、过期或已被复用），服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
 
 这些 Codex 缓存字段是跨重启保留的调度与展示提示，不是硬封禁：
 
@@ -385,8 +387,11 @@ model_templates:
       output: 128000
     reasoning:
       summary: auto
-    text:
-      verbosity: medium
+    # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
+    # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要
+    # 更详细可见输出时再设 high。
+    # text:
+    #   verbosity: low
     variants:
       high:
         reasoning:
@@ -397,6 +402,24 @@ model_templates:
     modalities:
       input: [text, image]
     supports_fast: true
+
+  # Chord 使用的 YAML 解析器不接受 anchor 名称里的点号：模型 key 可以有 .，
+  # 但 anchor/alias 名请用 _。
+  gpt-5.2: &gpt-5_2
+    <<: *gpt-400k
+    cost:
+      input: 1.75
+      output: 14
+      cache_read: 0.175
+      cache_write: 1.75
+
+  gpt-5.5: &gpt-5_5
+    <<: *gpt-400k
+    cost:
+      input: 5
+      output: 30
+      cache_read: 0.5
+      cache_write: 5
 
   gpt-1m: &gpt-1m
     limit:
@@ -405,8 +428,11 @@ model_templates:
       output: 128000
     reasoning:
       summary: auto
-    text:
-      verbosity: medium
+    # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
+    # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要
+    # 更详细可见输出时再设 high。
+    # text:
+    #   verbosity: low
     variants:
       high:
         reasoning:
@@ -417,6 +443,14 @@ model_templates:
     modalities:
       input: [text, image]
     supports_fast: true
+
+  gpt-5.4: &gpt-5_4
+    <<: *gpt-1m
+    cost:
+      input: 2.5
+      output: 15
+      cache_read: 0.25
+      cache_write: 2.5
 
   claude-1m: &claude-1m
     limit:
@@ -425,15 +459,18 @@ model_templates:
     thinking:
       type: adaptive
       effort: medium
+      display: summarized
     variants:
       high:
         thinking:
           type: adaptive
           effort: high
+          display: summarized
       xhigh:
         thinking:
           type: adaptive
           effort: xhigh
+          display: summarized
     modalities:
       input: [text, image]
     supports_fast: true
@@ -442,13 +479,14 @@ providers:
   codex:
     preset: codex
     models:
-      gpt-5.5: *gpt-400k
+      gpt-5.2: *gpt-5_2
+      gpt-5.5: *gpt-5_5
 
   openai:
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.4: *gpt-1m
-      gpt-5.5: *gpt-400k
+      gpt-5.4: *gpt-5_4
+      gpt-5.5: *gpt-5_5
 
   anthropic:
     type: messages
@@ -463,9 +501,10 @@ providers:
 - `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，Chord 会按 `limit.context - 有效请求输出` 推导输入预算；有效请求输出来自 `max_output_tokens`，并受 `limit.output` 上限约束。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
 - `limit.output`：模型最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
 - `reasoning`：OpenAI / OpenAI-compatible reasoning 选项。`type: chat-completions` 会把 `reasoning.effort` 发送为顶层 `reasoning_effort`，并使用 `max_completion_tokens`；`type: responses` 会把 `reasoning.effort` 和 `reasoning.summary` 放进 `reasoning` 对象。`summary` 只对支持 Responses reasoning summary 的模型有意义；variant 通常覆盖 `reasoning.effort`。
-- `text.verbosity`：OpenAI 文本详细程度提示，取决于 provider/model 是否支持。
-- `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；variant 可覆盖 `thinking.effort`。
+- `text.verbosity`：可选的 OpenAI 文本详细程度提示，取决于 provider/model 是否支持。可复用模板里建议默认留空，除非你明确要覆盖 provider/model 默认值；需要更短的可见文本输出时用 `low`，明确需要详细可见输出时用 `high`。
+- `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；`display: summarized` 会请求 Claude 返回可展示的 summarized thinking block（仅在 `type: enabled` 或 `adaptive` 下有效，`disabled` 模式会被拒绝）；variant 可覆盖 `thinking.effort` 与 `thinking.display`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
+- `cost`：估算价格，单位是 USD / 1M tokens。`input`、`output`、`cache_read`、`cache_write` 都是可选字段；配置后，Chord 会在 UI 和 `/usage` 输出中估算费用。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
 - `supports_fast`：`/fast on` 是否可以为该模型发送 provider 专用 fast-mode 请求参数。省略时使用 preset 默认值：`preset: codex` 下的模型默认启用，其他模型默认关闭。只有确认模型 / provider 支持 Chord 使用的 fast 参数（OpenAI Responses 的 `service_tier="fast"`，或 Anthropic 的 `speed="fast"`）时才设为 `true`；设为 `false` 可强制关闭，包括 Codex preset provider。运行时 `/fast on` 和 `/fast off` 会同时作用于主 agent 和 SubAgent：已有 SubAgent client 会立即更新，后续新建、恢复、rehydrate 或切换模型后的 SubAgent client 会继承当前 fast-mode 状态。
 
@@ -492,6 +531,16 @@ providers:
 ```
 
 启用后，Chord 仅在 gzip 能减小体积时才发送压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则无需配置。
+
+Provider / 模型 HTTP 请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`。这个 provider 级配置取代了旧的 Anthropic transport compat `user_agent` 字段，只影响对应 provider 的普通模型 HTTP 请求：
+
+```yaml
+providers:
+  gateway:
+    user_agent: RequiredGatewayClient/1.0
+```
+
+该配置只影响对应 provider 的普通模型 HTTP 请求。WebFetch 使用独立的 `web_fetch.user_agent`；Codex OAuth、用量轮询和 WebSocket 请求继续使用 Chord 的协议专用 User-Agent。
 
 ## 输出 token 上限
 
@@ -878,8 +927,8 @@ Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compaction.threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
 | `reasoning`       | object | OpenAI reasoning 选项。Chat Completions 发送 `reasoning.effort` 为 `reasoning_effort`；Responses 发送 `reasoning.effort` / `reasoning.summary` 到 `reasoning` 对象。 |
-| `text.verbosity`  | string | OpenAI 文本详细程度提示，支持的模型生效。                                                                      |
-| `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算。                                          |
+| `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
+| `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认 `[text, image]`。                                                           |
 | `supports_fast`  | bool   | `/fast on` 是否可发送 provider 专用 fast 参数。省略时 `preset: codex` 启用，其他模型关闭。                         |

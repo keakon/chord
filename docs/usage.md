@@ -161,6 +161,8 @@ The export includes every conversation message plus the current session usage st
 
 The TUI info panel's `Reduced` line is request-level context reduction, not persistent compaction. After `/compact` or automatic compaction rewrites the session history, Chord refreshes that value, including while loop mode is active.
 
+In the info panel's `USAGE` block, `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
+
 ### `/stats` — usage statistics overlay
 
 Opens an overlay to browse usage data along two axes:
@@ -209,7 +211,7 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 3. **verifying**: running checks (tests, lint, etc.)
 4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `Done` tool
 
-When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
+When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report is being generated, the Done tool card shows the same live `chars received` progress as other streaming tool arguments. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
 
 Loop mode also guards against a stalled tool-call loop. If the MainAgent emits the same tool call three times in a row — same tool name and identical arguments — Chord rejects that tool result automatically, injects guidance to stop repeating the unchanged call and continue toward the loop target, and counts it as one loop interception. The check uses a sliding window: if the fourth call is still identical, it is rejected again immediately. Once the loop interception limit is reached, Chord shows the same local confirmation flow so you can decide whether to stop or continue.
 

@@ -114,6 +114,8 @@ Read model limits in this order:
 
 Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. Provider docs sometimes call this setup split limits; see [Glossary](./glossary.md).
 
+For `type: responses`, Chord follows the Responses request shape used by Codex: the stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. This keeps compatible gateways from receiving a system-role message in `input`.
+
 ### OpenAI Codex preset
 
 ```yaml
@@ -245,7 +247,7 @@ That split is intentional:
 
 For OAuth credentials, `access` must be a token from which Chord can parse the account id; if `auth.yaml` already has `account_id`, it must match the account id inside `access`. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
 
-`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache it in `auth.state.yaml`. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired`; it only makes that slot less preferred and can trigger a refresh before use. Chord writes `expired` only after an actual provider/token-endpoint authentication failure confirms the credential is no longer usable.
+`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache it in `auth.state.yaml`. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired`; it only makes that slot less preferred. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
 
 A typical `auth.state.yaml` entry looks like:
 
@@ -265,7 +267,7 @@ openai:
     codex_secondary_reset_at: 1774600000000
 ```
 
-The `status` field is authoritative only in `auth.state.yaml`. Chord writes `expired` when a refresh token can no longer be used, `deactivated` when the service reports a disabled/banned account, and `invalidated` when the account must be re-authenticated. Any non-empty status makes that OAuth slot unselectable until it is cleaned up or replaced.
+The `status` field is authoritative only in `auth.state.yaml`. Chord writes `expired` when an access token can no longer be used and the credential cannot be refreshed (including missing, invalid, expired, or reused refresh tokens), `deactivated` when the service reports a disabled/banned account, and `invalidated` when the account must be re-authenticated. Any non-empty status makes that OAuth slot unselectable until it is cleaned up or replaced.
 
 These cached Codex quota/reset fields are restart-stable scheduling and display hints, not hard blocks by themselves:
 
@@ -418,8 +420,11 @@ model_templates:
       output: 128000
     reasoning:
       summary: auto
-    text:
-      verbosity: medium
+    # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
+    # the provider/model default; set low for shorter visible text output or high
+    # when you explicitly want more detailed visible output.
+    # text:
+    #   verbosity: low
     variants:
       high:
         reasoning:
@@ -430,6 +435,24 @@ model_templates:
     modalities:
       input: [text, image]
     supports_fast: true
+
+  # Anchor names cannot contain dots in Chord's YAML parser: use _ in the
+  # anchor/alias name even when the model key contains dots.
+  gpt-5.2: &gpt-5_2
+    <<: *gpt-400k
+    cost:
+      input: 1.75
+      output: 14
+      cache_read: 0.175
+      cache_write: 1.75
+
+  gpt-5.5: &gpt-5_5
+    <<: *gpt-400k
+    cost:
+      input: 5
+      output: 30
+      cache_read: 0.5
+      cache_write: 5
 
   gpt-1m: &gpt-1m
     limit:
@@ -438,8 +461,11 @@ model_templates:
       output: 128000
     reasoning:
       summary: auto
-    text:
-      verbosity: medium
+    # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
+    # the provider/model default; set low for shorter visible text output or high
+    # when you explicitly want more detailed visible output.
+    # text:
+    #   verbosity: low
     variants:
       high:
         reasoning:
@@ -450,6 +476,14 @@ model_templates:
     modalities:
       input: [text, image]
     supports_fast: true
+
+  gpt-5.4: &gpt-5_4
+    <<: *gpt-1m
+    cost:
+      input: 2.5
+      output: 15
+      cache_read: 0.25
+      cache_write: 2.5
 
   claude-1m: &claude-1m
     limit:
@@ -458,15 +492,18 @@ model_templates:
     thinking:
       type: adaptive
       effort: medium
+      display: summarized
     variants:
       high:
         thinking:
           type: adaptive
           effort: high
+          display: summarized
       xhigh:
         thinking:
           type: adaptive
           effort: xhigh
+          display: summarized
     modalities:
       input: [text, image]
     supports_fast: true
@@ -475,13 +512,14 @@ providers:
   codex:
     preset: codex
     models:
-      gpt-5.5: *gpt-400k
+      gpt-5.2: *gpt-5_2
+      gpt-5.5: *gpt-5_5
 
   openai:
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.4: *gpt-1m
-      gpt-5.5: *gpt-400k
+      gpt-5.4: *gpt-5_4
+      gpt-5.5: *gpt-5_5
 
   anthropic:
     type: messages
@@ -497,14 +535,16 @@ Model fields used in the example:
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
 - `reasoning`: OpenAI / OpenAI-compatible reasoning options. For `type: chat-completions`, `reasoning.effort` is sent as top-level `reasoning_effort` and Chord uses `max_completion_tokens`; for `type: responses`, `reasoning.effort` and `reasoning.summary` are sent inside the `reasoning` object. `summary` is only meaningful for models that support Responses reasoning summaries; variants commonly override `reasoning.effort`.
-- `text.verbosity`: OpenAI text verbosity hint, where supported.
+- `text.verbosity`: optional OpenAI text verbosity hint, where supported. Leave it unset in reusable templates unless you intentionally want to override the provider/model default; use `low` for shorter visible text output and `high` for deliberately detailed visible output.
 - `thinking`: Anthropic extended-thinking options. `type: adaptive` lets Chord
-  derive an appropriate thinking budget from `effort`; variants can override
-  `thinking.effort`.
+  derive an appropriate thinking budget from `effort`; `display: summarized`
+  asks Claude to return summarized thinking blocks for Chord to show (only
+  valid for `type: enabled` or `adaptive`; rejected under `disabled`); variants
+  can override `thinking.effort` and `thinking.display`.
 - `variants`: named model parameter presets. Use a model ref like
   `openai/gpt-5.5@high` or `anthropic/claude-opus-4.7@xhigh` to select one.
-- `modalities.input`: supported input modalities. Supported values are `text`,
-  `image`, and `pdf`. When omitted, Chord defaults to `text` and `image` for
+- `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, and `cache_write` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output.
+- `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` and `image` for
   backward compatibility.
 - `supports_fast`: whether `/fast on` may emit provider-specific fast-mode
   request parameters for this model. Omit it to use the preset default: models
@@ -548,6 +588,16 @@ providers:
 When enabled, Chord gzip-compresses the request body only if compression reduces
 the payload size; otherwise it sends the request uncompressed. Leave this unset
 unless your provider or gateway benefits from compressed request bodies.
+
+Provider/model HTTP requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value. This provider-level setting replaces the old Anthropic transport compat `user_agent` field and affects only normal model HTTP requests for that provider:
+
+```yaml
+providers:
+  gateway:
+    user_agent: RequiredGatewayClient/1.0
+```
+
+This setting affects only normal model HTTP requests for that provider. WebFetch uses its own `web_fetch.user_agent`; Codex OAuth, usage polling, and WebSocket requests keep Chord's protocol-specific User-Agent.
 
 ## Output token cap
 
@@ -1018,8 +1068,8 @@ not from a Chord session id header.
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
 | `reasoning`       | object | OpenAI reasoning options. Chat Completions sends `reasoning.effort` as `reasoning_effort`; Responses sends `reasoning.effort` / `reasoning.summary` inside `reasoning`. |
-| `text.verbosity`  | string | OpenAI text verbosity hint where supported.                                                                            |
-| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`.                        |
+| `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
+| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text, image]`.                                                       |
 | `supports_fast`  | bool   | Whether `/fast on` may send provider-specific fast parameters. Omitted = enabled for `preset: codex`, disabled elsewhere. |

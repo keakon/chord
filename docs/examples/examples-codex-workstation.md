@@ -21,8 +21,11 @@ providers:
           output: 128000
         reasoning:
           summary: auto
-        text:
-          verbosity: medium
+        # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
+        # the provider/model default; set low for shorter visible text output or high
+        # when you explicitly want more detailed visible output.
+        # text:
+        #   verbosity: low
         variants:
           high:
             reasoning:

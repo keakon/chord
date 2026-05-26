@@ -23,6 +23,7 @@ providers:
         thinking:
           type: adaptive
           effort: medium
+          display: summarized
 
 model_pools:
   thinking:

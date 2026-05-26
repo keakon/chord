@@ -25,6 +25,7 @@ providers:
         thinking:
           type: adaptive
           effort: medium
+          display: summarized
         modalities:
           input: [text, image]
 

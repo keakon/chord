@@ -21,8 +21,11 @@ providers:
           output: 128000
         reasoning:
           summary: auto
-        text:
-          verbosity: medium
+        # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
+        # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要
+        # 更详细可见输出时再设 high。
+        # text:
+        #   verbosity: low
         variants:
           high:
             reasoning:
