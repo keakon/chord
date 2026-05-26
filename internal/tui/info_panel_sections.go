@@ -74,11 +74,13 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 	if requested == config.ServiceTierStandard {
 		return ""
 	}
-	style := InfoPanelValue
+	label := InfoPanelValue.Render("tier: ")
+	valueStyle := InfoPanelValue
 	if requested != m.effectiveServiceTier() {
-		style = InfoPanelDim.Strikethrough(true)
+		valueStyle = InfoPanelDim.Strikethrough(true)
 	}
-	return InfoPanelLineBg.Width(lineW).Render(style.Render("tier: " + string(requested)))
+	line := lipgloss.JoinHorizontal(lipgloss.Left, label, valueStyle.Render(string(requested)))
+	return InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
@@ -338,12 +340,25 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	if info.WorktreeName != "" {
 		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree", InfoPanelValue.Render(truncateOneLine(info.WorktreeName, lineW-10-infoPanelCollapsibleContentInset))))
 	}
-	lines = append(lines,
-		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))),
-		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Staged", InfoPanelValue.Render(fmt.Sprintf("%d files", info.StagedFiles))),
-		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Stash", InfoPanelValue.Render(fmt.Sprintf("%d entries", info.Stashes))),
-		renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", InfoPanelValue.Render(fmt.Sprintf("↑%d ↓%d", info.Ahead, info.Behind))),
-	)
+	if info.ChangedFiles > 0 {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))))
+	}
+	if info.StagedFiles > 0 {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Staged", InfoPanelValue.Render(fmt.Sprintf("%d files", info.StagedFiles))))
+	}
+	if info.Stashes > 0 {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Stash", InfoPanelValue.Render(fmt.Sprintf("%d entries", info.Stashes))))
+	}
+	syncParts := make([]string, 0, 2)
+	if info.Ahead > 0 {
+		syncParts = append(syncParts, fmt.Sprintf("↑%d", info.Ahead))
+	}
+	if info.Behind > 0 {
+		syncParts = append(syncParts, fmt.Sprintf("↓%d", info.Behind))
+	}
+	if len(syncParts) > 0 {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", InfoPanelValue.Render(strings.Join(syncParts, " "))))
+	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 

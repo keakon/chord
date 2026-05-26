@@ -734,6 +734,39 @@ func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	}
 }
 
+func TestInfoPanelGitBlockExpandedHidesZeroNumericRows(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", ChangedFiles: 2}
+	m.toggleInfoPanelSection(infoPanelSectionGit)
+
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
+	joined := strings.Join(section, "\n")
+	for _, want := range []string{"Branch: main", "Changes: 2 files"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
+		}
+	}
+	for _, hidden := range []string{"Staged:", "Stash:", "Sync:", "0 files", "0 entries", "↑0", "↓0"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("expanded git section should hide zero value %q in:\n%s", hidden, joined)
+		}
+	}
+}
+
+func TestInfoPanelGitBlockExpandedShowsOneSidedSync(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 2}
+	m.toggleInfoPanelSection(infoPanelSectionGit)
+
+	joined := strings.Join(infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT"), "\n")
+	if !strings.Contains(joined, "Sync: ↑2") {
+		t.Fatalf("expanded git section should show non-zero ahead count, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "↓0") {
+		t.Fatalf("expanded git section should hide zero behind count, got:\n%s", joined)
+	}
+}
+
 func TestRenderInfoPanelCollapsedLSPShowsCountOnly(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}, {Name: "pyright", Pending: true}}
