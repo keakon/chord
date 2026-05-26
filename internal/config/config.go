@@ -223,6 +223,7 @@ type ProviderConfig struct {
 	UserAgent             string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                           // optional User-Agent override for provider/model HTTP requests
 	Proxy                 *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                     // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
 	Compat                *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                   // provider-level compat defaults (model-level can override model compat only)
+	OfficialAPI           *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                       // true for direct official provider endpoints; false for aggregating/proxy gateways
 	SupportedServiceTiers []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // provider-level default non-standard tiers; model-level can override
 	Models                map[string]ModelConfig `json:"models" yaml:"models"`
 	KeyRotation           string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"

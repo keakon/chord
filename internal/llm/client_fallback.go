@@ -132,6 +132,20 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		return markKeyCooldownResult{}
 	}
 	switch apiErr.StatusCode {
+	case 400:
+		if providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr.Message) {
+			return markKeyCooldownResult{}
+		}
+		cooldown := apiErr.RetryAfter
+		if cooldown <= 0 {
+			cooldown = time.Minute
+		}
+		if cooldown > time.Minute {
+			cooldown = time.Minute
+		}
+		log.Warnf("compatible API key returned 400, marking cooldown key_suffix=%v cooldown=%v", keySuffix(key), cooldown)
+		provider.MarkCooldown(key, cooldown)
+		return markKeyCooldownResult{cooldownApplied: true}
 	case 402, 429:
 		now := time.Now()
 		if primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {

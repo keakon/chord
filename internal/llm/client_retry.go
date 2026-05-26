@@ -501,11 +501,14 @@ func (c *Client) completeStreamTarget(
 
 			retriable := isRetriable(err)
 			var apiErrPtr *APIError
-			if errors.As(err, &apiErrPtr) && apiErrPtr != nil && (apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403) {
-				retriable = true
+			if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
+				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 || (apiErrPtr.StatusCode == 400 && !providerUsesOfficialAPI(t.provider) && !isRequestOrParamError(apiErrPtr.Message)) {
+					retriable = true
+				}
 			}
 			if !retriable && isTimeoutLikeError(err) {
-				log.Warnf("invisible timeout before visible output; skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				t.provider.MarkRecovering(apiKey)
+				log.Warnf("invisible timeout before visible output; marking current key recovering and skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				result.skipProvider = true
 			}
 
@@ -514,6 +517,9 @@ func (c *Client) completeStreamTarget(
 				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
 					modelDone = true
 					break
+				}
+				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr.Message)) {
+					return result, lastInputTokens, err
 				}
 				modelDone = true
 				break
@@ -758,11 +764,10 @@ func (c *Client) completeStreamWithRetry(
 			return nil, lastErr
 		}
 		if _, ok := errors.AsType[*NoUsableKeysError](lastErr); ok {
-			if fallbackEnabled && len(targets) > 1 && roundHadRequestAttempt {
-				log.Warnf("model pool exhausted with no usable keys after at least one request attempt; retrying full pool provider=%v model=%v error=%v", startProvider.Name(), startModelID, lastErr)
-			} else {
+			if !roundHadRequestAttempt && len(targets) <= 1 {
 				return nil, lastErr
 			}
+			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
 		}
 		if isTerminalModelPoolFailure(lastErr) {
 			return nil, lastErr

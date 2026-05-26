@@ -129,6 +129,7 @@ type ProviderConfig struct {
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level store setting for Responses API
+	officialAPI                *bool                        // nil = infer from known official endpoints
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
@@ -216,6 +217,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		models:                     models,
 		compat:                     cfg.Compat,
 		store:                      cfg.Store,
+		officialAPI:                cfg.OfficialAPI,
 		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
 		responsesWebsocket:         cfg.ResponsesWebsocket,

@@ -376,6 +376,38 @@ func testProviderConfigWithKeys(name, model string, keys []string) *ProviderConf
 	}, keys)
 }
 
+func testOfficialOpenAIProviderConfigWithKeys(name, model string, keys []string) *ProviderConfig {
+	return NewProviderConfig(name, config.ProviderConfig{
+		Type:        config.ProviderTypeResponses,
+		APIURL:      "https://api.openai.com/v1/responses",
+		OfficialAPI: new(true),
+		Models: map[string]config.ModelConfig{
+			model: {
+				Limit: config.ModelLimit{
+					Context: 128000,
+					Output:  4096,
+				},
+			},
+		},
+	}, keys)
+}
+
+func testCompatibleResponsesProviderConfigWithKeys(name, model string, keys []string) *ProviderConfig {
+	return NewProviderConfig(name, config.ProviderConfig{
+		Type:        config.ProviderTypeResponses,
+		APIURL:      "https://gateway.example.com/v1/responses",
+		OfficialAPI: new(false),
+		Models: map[string]config.ModelConfig{
+			model: {
+				Limit: config.ModelLimit{
+					Context: 128000,
+					Output:  4096,
+				},
+			},
+		},
+	}, keys)
+}
+
 func testFastProviderConfig(name, model string) *ProviderConfig {
 	return NewProviderConfig(name, config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -1240,6 +1272,71 @@ func TestClientCompleteStreamVisibleInterruptionRetriesSameKey(t *testing.T) {
 	healthy, total := primaryCfg.HealthyKeyCount()
 	if total != 2 || healthy != 2 {
 		t.Fatalf("HealthyKeyCount = %d/%d, want 2/2 after same-key recovery", healthy, total)
+	}
+}
+
+func TestClientCompleteStreamCompatible400CoolsKeyAndRotates(t *testing.T) {
+	cfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: `all 10 attempts failed: HTTP 403: {"error":{"code":"insufficient_user_quota"}}`}},
+		{resp: &message.Response{Content: "ok from k2"}},
+	}
+	c := NewClient(cfg, impl, "gpt-test", 4096, "sys")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from k2" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.apiKeys; len(got) != 2 || got[0] != "k1" || got[1] != "k2" {
+		t.Fatalf("api keys = %#v, want [k1 k2]", got)
+	}
+}
+
+func TestClientCompleteStreamOfficial400DoesNotRetry(t *testing.T) {
+	cfg := testOfficialOpenAIProviderConfigWithKeys("openai", "gpt-test", []string{"k1", "k2"})
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "invalid_request_error: missing required parameter: input"}},
+		{resp: &message.Response{Content: "should not retry"}},
+	}
+	c := NewClient(cfg, impl, "gpt-test", 4096, "sys")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected official 400 error")
+	}
+	if resp != nil {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.apiKeys; len(got) != 1 || got[0] != "k1" {
+		t.Fatalf("api keys = %#v, want only [k1]", got)
+	}
+}
+
+func TestClientCompleteStreamInvisibleTimeoutMarksKeyRecoveringBeforeNextRound(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1", "k2"})
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: testNetTimeoutErr{timeout: true}},
+		{resp: &message.Response{Content: "ok from k2"}},
+	}
+	c := NewClient(cfg, impl, "gpt-test", 4096, "sys")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from k2" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.apiKeys; len(got) != 2 || got[0] != "k1" || got[1] != "k2" {
+		t.Fatalf("api keys = %#v, want [k1 k2]", got)
 	}
 }
 
@@ -3302,13 +3399,13 @@ func TestClientSetVariantMergesPromptCacheOverrides(t *testing.T) {
 				PromptCache: &config.PromptCacheConfig{
 					Mode:       "auto",
 					TTL:        "1h",
-					CacheTools: boolPtr(cacheToolsFalse),
+					CacheTools: new(cacheToolsFalse),
 				},
 				Variants: map[string]config.ModelVariant{
 					"explicit-tools": {
 						PromptCache: &config.PromptCacheConfig{
 							Mode:       "explicit",
-							CacheTools: boolPtr(true),
+							CacheTools: new(true),
 						},
 					},
 				},
@@ -3335,10 +3432,10 @@ func TestClientSetVariantOverridesParallelToolCalls(t *testing.T) {
 		Models: map[string]config.ModelConfig{
 			"gpt-5.5": {
 				Limit:             config.ModelLimit{Context: 400000, Output: 128000},
-				ParallelToolCalls: boolPtr(false),
+				ParallelToolCalls: new(false),
 				Variants: map[string]config.ModelVariant{
 					"parallel": {
-						ParallelToolCalls: boolPtr(true),
+						ParallelToolCalls: new(true),
 					},
 				},
 			},
@@ -3598,7 +3695,7 @@ func TestClientNextRequestTuningOverrideIsOneShot(t *testing.T) {
 		Models: map[string]config.ModelConfig{
 			"gpt-5.5": {
 				Limit:             config.ModelLimit{Context: 400000, Output: 128000},
-				ParallelToolCalls: boolPtr(true),
+				ParallelToolCalls: new(true),
 			},
 		},
 	}, []string{"k"})
@@ -3753,13 +3850,13 @@ func TestCompleteStreamFallbackVariantCarriesPromptCacheTuning(t *testing.T) {
 				PromptCache: &config.PromptCacheConfig{
 					Mode:       "explicit",
 					TTL:        "1h",
-					CacheTools: boolPtr(false),
+					CacheTools: new(false),
 				},
 				Variants: map[string]config.ModelVariant{
 					"fastcache": {
 						PromptCache: &config.PromptCacheConfig{
 							Mode:       "auto",
-							CacheTools: boolPtr(true),
+							CacheTools: new(true),
 						},
 					},
 				},

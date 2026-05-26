@@ -77,6 +77,14 @@ curl -I https://api.anthropic.com
 curl -I https://api.openai.com/v1
 ```
 
+### OpenAI-compatible 400s and timeouts
+
+For provider endpoints that use official API semantics, HTTP 400 normally means the request is invalid and Chord stops instead of retrying the same bad payload. Set `official_api: true` on those providers. Set `official_api: false` or omit it for aggregating or proxy gateways when you want Chord to treat unknown 400s as potentially recoverable gateway errors. Providers with `preset: codex` are treated as official automatically.
+
+For non-official OpenAI-compatible gateways, Chord treats unknown HTTP 400 responses as possibly coming from a bad upstream channel or wrapped provider error. The current key is put into a short cooldown of at most 1 minute, then Chord can try another key, model, or retry round. Known request-shape errors, such as missing parameters or invalid assistant message shapes, still stop immediately.
+
+If a connection cannot be established or no first token arrives before timeout, Chord marks the current key as recovering so the next retry prefers another healthy key.
+
 ### DeepSeek / OpenAI-compatible thinking-mode 400s
 
 If you use a `chat-completions` provider such as DeepSeek and see errors like:

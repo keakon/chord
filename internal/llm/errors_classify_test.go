@@ -130,7 +130,7 @@ func TestShouldFallback400ModelIncompatible(t *testing.T) {
 		t.Fatal("model-incompatible 400 should be fallback-eligible")
 	}
 	if isRetriable(err) {
-		t.Fatal("model-incompatible 400 should not rotate keys on same model")
+		t.Fatal("model-incompatible 400 should not rotate keys on same model globally")
 	}
 }
 
@@ -141,10 +141,10 @@ func TestShouldFallback400CodexRequiresStreaming(t *testing.T) {
 		t.Fatal("codex stream-required 400 should be fallback-eligible")
 	}
 	if isRetriable(err) {
-		t.Fatal("codex stream-required 400 should not rotate keys on same model")
+		t.Fatal("codex stream-required 400 should not rotate keys on same model globally")
 	}
 	if !isTerminalModelPoolFailure(err) {
-		t.Fatal("codex stream-required 400 should stop after model pool exhaustion")
+		t.Fatal("codex stream-required 400 should stop after model pool exhaustion by default")
 	}
 }
 
@@ -155,10 +155,10 @@ func TestShouldFallback400RequestShapeError(t *testing.T) {
 		t.Fatal("request-shape 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("request-shape 400 should not rotate keys on same model")
+		t.Fatal("request-shape 400 should not rotate keys on same model globally")
 	}
 	if !isTerminalModelPoolFailure(err) {
-		t.Fatal("request-shape 400 should stop after model pool exhaustion")
+		t.Fatal("request-shape 400 should stop after model pool exhaustion by default")
 	}
 }
 
@@ -169,10 +169,10 @@ func TestReasoningReplay400FallsBackToAnotherModel(t *testing.T) {
 		t.Fatal("reasoning replay 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("reasoning replay 400 should not rotate keys on same model")
+		t.Fatal("reasoning replay 400 should not rotate keys on same model globally")
 	}
 	if !isTerminalModelPoolFailure(err) {
-		t.Fatal("reasoning replay 400 should stop after model pool exhaustion")
+		t.Fatal("reasoning replay 400 should stop after model pool exhaustion by default")
 	}
 }
 
@@ -183,10 +183,10 @@ func TestAnthropicThinkingReplay400FallsBackToAnotherModel(t *testing.T) {
 		t.Fatal("anthropic thinking replay 400 should be fallback-eligible for another model")
 	}
 	if isRetriable(err) {
-		t.Fatal("anthropic thinking replay 400 should not rotate keys on same model")
+		t.Fatal("anthropic thinking replay 400 should not rotate keys on same model globally")
 	}
 	if !isTerminalModelPoolFailure(err) {
-		t.Fatal("anthropic thinking replay 400 should stop after model pool exhaustion")
+		t.Fatal("anthropic thinking replay 400 should stop after model pool exhaustion by default")
 	}
 }
 
