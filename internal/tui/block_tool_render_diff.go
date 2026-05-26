@@ -103,6 +103,18 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
+		if strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" {
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, b.ResultContent))
+			lineCount := len(strings.Split(displayResult, "\n"))
+			summary := truncateOneLine(displayResult, width-30)
+			if b.toolResultIsError() {
+				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
+			} else if b.toolResultIsCancelled() {
+				result = append(result, DimStyle.Render(fmt.Sprintf("  ▸ ↳ cancelled (%d lines)", lineCount)))
+			} else {
+				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
+			}
+		}
 		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	const diffLineNumWidth = 5
@@ -236,7 +248,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if writeEditToolResultExtraVisible(b) {
+	if writeEditToolResultExtraVisible(b) || (b.ToolName == tools.NameEdit && strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}

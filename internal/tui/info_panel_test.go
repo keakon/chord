@@ -483,6 +483,35 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelUsageShowsReasoningTokens(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.usage = analytics.SessionStats{
+		InputTokens:     10_000,
+		OutputTokens:    20_000,
+		ReasoningTokens: 5_600,
+	}
+
+	m := NewModel(backend)
+	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(36, 20)), "USAGE")
+	want := []string{
+		"TOKENS",
+		"↑ 10.0k  ↓ 20.0k",
+		"Think    5.6k",
+	}
+	for _, expected := range want {
+		found := false
+		for _, got := range usageLines {
+			if got == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
+		}
+	}
+}
+
 func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.usage = analytics.SessionStats{
@@ -545,7 +574,7 @@ func TestRenderInfoPanelUsageStandardWidthShowsCurrentStableLayout(t *testing.T)
 	}
 }
 
-func TestRenderInfoPanelUsageStandardWidthShowsCostInTokenSummary(t *testing.T) {
+func TestRenderInfoPanelUsageStandardWidthShowsCostOnSeparateLine(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.usage = analytics.SessionStats{
 		InputTokens:   2_400_000,
@@ -555,16 +584,26 @@ func TestRenderInfoPanelUsageStandardWidthShowsCostInTokenSummary(t *testing.T) 
 
 	m := NewModel(backend)
 	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "USAGE")
-	wantSummary := "↑ 2.4M  ↓ 88.0k  $ 1.2345"
-	found := false
-	for _, line := range usageLines {
+	wantSummary := "↑ 2.4M  ↓ 88.0k"
+	wantCost := "$ 1.2345"
+	summaryIdx := -1
+	costIdx := -1
+	for i, line := range usageLines {
 		if line == wantSummary {
-			found = true
-			break
+			summaryIdx = i
+		}
+		if line == wantCost {
+			costIdx = i
 		}
 	}
-	if !found {
+	if summaryIdx < 0 {
 		t.Fatalf("usage lines = %#v, want token summary %q", usageLines, wantSummary)
+	}
+	if costIdx < 0 {
+		t.Fatalf("usage lines = %#v, want separate cost line %q", usageLines, wantCost)
+	}
+	if costIdx <= summaryIdx {
+		t.Fatalf("usage lines = %#v, want cost line after token summary", usageLines)
 	}
 }
 

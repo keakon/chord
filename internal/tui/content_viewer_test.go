@@ -14,6 +14,7 @@ func TestContentViewerScrollsWithKeysAndMouseWheel(t *testing.T) {
 	if m.mode != ModeContentViewer {
 		t.Fatalf("mode = %v, want ModeContentViewer", m.mode)
 	}
+	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.renderContentViewer()
 	if m.contentViewerMaxScroll(m.viewport.width) == 0 {
 		t.Fatal("expected content viewer to have scrollable content")
@@ -84,17 +85,41 @@ func TestContentViewerCopyWritesRawContent(t *testing.T) {
 	}
 }
 
-func TestContentViewerCopySelectionClearsHighlight(t *testing.T) {
+func TestContentViewerCopySelectionThenFullWithYY(t *testing.T) {
 	origWrite := clipboardWriteAll
-	var copied string
+	var copied []string
 	clipboardWriteAll = func(text string) error {
-		copied = text
+		copied = append(copied, text)
 		return nil
 	}
 	defer func() { clipboardWriteAll = origWrite }()
 
+	runCmdTree := func(cmd tea.Cmd) {
+		var walk func(any)
+		walk = func(v any) {
+			if v == nil {
+				return
+			}
+			rv := reflect.ValueOf(v)
+			if !rv.IsValid() {
+				return
+			}
+			if rv.Kind() == reflect.Func {
+				walk(rv.Call(nil)[0].Interface())
+				return
+			}
+			if rv.Kind() == reflect.Slice {
+				for i := 0; i < rv.Len(); i++ {
+					walk(rv.Index(i).Interface())
+				}
+			}
+		}
+		walk(cmd())
+	}
+
 	m := NewModelWithSize(nil, 100, 20)
 	m.openContentViewer("Preview", "alpha beta gamma")
+	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.renderContentViewer()
 	m.contentViewer.selStartLine = 2
 	m.contentViewer.selStartCol = 0
@@ -106,20 +131,79 @@ func TestContentViewerCopySelectionClearsHighlight(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("copy selection should return clipboard command")
 	}
-	msg := cmd()
-	v := reflect.ValueOf(msg)
-	if v.Kind() != reflect.Slice || v.Len() != 2 {
-		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	runCmdTree(cmd)
+	if len(copied) != 1 || copied[0] != "alpha" {
+		t.Fatalf("copied content history = %#v, want [alpha]", copied)
 	}
-	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
-	if second.success != "Selection copied to clipboard" {
-		t.Fatalf("clipboard success = %q", second.success)
+	if !m.chord.active() || m.chord.op != chordY {
+		t.Fatalf("chord state = %#v, want pending y chord", m.chord)
 	}
-	if copied != "alpha" {
-		t.Fatalf("copied content = %q", copied)
+
+	cmd = m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("yy should return clipboard command")
 	}
-	if m.contentViewerHasSelection() {
-		t.Fatal("selection should be cleared after y copies it")
+	runCmdTree(cmd)
+	if len(copied) != 2 || copied[1] != "alpha beta gamma" {
+		t.Fatalf("copied content history = %#v, want [alpha alpha beta gamma]", copied)
+	}
+}
+
+func TestContentViewerDoubleClickSelectsWord(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 20)
+	m.openContentViewer("Preview", "alpha beta gamma")
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.renderContentViewer()
+
+	marginX := contentViewerHorizontalMargin(m.viewport.width)
+	marginY := contentViewerVerticalMargin(m.viewport.height)
+	click := tea.MouseClickMsg{
+		X:      m.layout.main.Min.X + marginX + len("alpha ") + 1,
+		Y:      m.layout.main.Min.Y + marginY + 2,
+		Button: tea.MouseLeft,
+	}
+	_, handled := m.handleModalMouseMsg(click)
+	if !handled {
+		t.Fatal("first content viewer click was not handled")
+	}
+	_, handled = m.handleModalMouseMsg(click)
+	if !handled {
+		t.Fatal("second content viewer click was not handled")
+	}
+
+	if got := m.selectedContentViewerText(); got != "beta" {
+		t.Fatalf("selected text = %q, want beta", got)
+	}
+	if m.contentViewer.selecting {
+		t.Fatal("double-click selection should not remain in dragging state")
+	}
+}
+
+func TestContentViewerTripleClickSelectsLine(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 20)
+	m.openContentViewer("Preview", "alpha beta gamma")
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.renderContentViewer()
+
+	marginX := contentViewerHorizontalMargin(m.viewport.width)
+	marginY := contentViewerVerticalMargin(m.viewport.height)
+	click := tea.MouseClickMsg{
+		X:      m.layout.main.Min.X + marginX + len("alpha ") + 1,
+		Y:      m.layout.main.Min.Y + marginY + 2,
+		Button: tea.MouseLeft,
+	}
+	for i := 0; i < 3; i++ {
+		_, handled := m.handleModalMouseMsg(click)
+		if !handled {
+			t.Fatalf("content viewer click %d was not handled", i+1)
+		}
+	}
+
+	if got := m.selectedContentViewerText(); got != "alpha beta gamma" {
+		t.Fatalf("selected text = %q, want full line", got)
+	}
+	if m.contentViewer.selecting {
+		t.Fatal("triple-click selection should not remain in dragging state")
 	}
 }
 

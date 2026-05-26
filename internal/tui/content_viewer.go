@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -234,12 +235,71 @@ func (m *Model) contentViewerSelectionPointAt(mouse tea.Mouse) (int, int, bool) 
 	return lineIdx, col, true
 }
 
-func (m *Model) startContentViewerSelection(mouse tea.Mouse) bool {
+func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 	line, col, ok := m.contentViewerSelectionPointAt(mouse)
 	if !ok {
 		m.clearContentViewerSelection()
 		return false
 	}
+
+	const doubleClickThreshold = 400 * time.Millisecond
+	const clickTolerance = 2
+	now := time.Now()
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(mouse.X-m.lastClickX) <= clickTolerance &&
+		abs(mouse.Y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+	m.lastClickTime = now
+	m.lastClickX = mouse.X
+	m.lastClickY = mouse.Y
+
+	lines := m.cachedContentViewerLines(m.viewport.width)
+	if line < 0 || line >= len(lines) {
+		m.clearContentViewerSelection()
+		return false
+	}
+	plain := stripANSI(lines[line])
+
+	if m.clickCount == 2 {
+		sCol, eCol := WordBoundsAtCol(plain, col)
+		if sCol < eCol {
+			m.contentViewer.selecting = false
+			m.contentViewer.selStartLine = line
+			m.contentViewer.selStartCol = sCol
+			m.contentViewer.selEndLine = line
+			m.contentViewer.selEndCol = eCol
+			m.contentViewer.selEndInclusiveForCopy = false
+			m.contentViewer.renderCacheText = ""
+		} else {
+			m.startContentViewerSelectionAt(line, col)
+		}
+		return true
+	}
+	if m.clickCount >= 3 {
+		m.clickCount = 0
+		lineWidth := selectionPlainTextWidth(plain)
+		if lineWidth > 0 {
+			m.contentViewer.selecting = false
+			m.contentViewer.selStartLine = line
+			m.contentViewer.selStartCol = 0
+			m.contentViewer.selEndLine = line
+			m.contentViewer.selEndCol = lineWidth
+			m.contentViewer.selEndInclusiveForCopy = false
+			m.contentViewer.renderCacheText = ""
+		} else {
+			m.startContentViewerSelectionAt(line, col)
+		}
+		return true
+	}
+
+	m.startContentViewerSelectionAt(line, col)
+	return true
+}
+
+func (m *Model) startContentViewerSelectionAt(line, col int) {
 	m.contentViewer.selecting = true
 	m.contentViewer.selStartLine = line
 	m.contentViewer.selStartCol = col
@@ -247,7 +307,6 @@ func (m *Model) startContentViewerSelection(mouse tea.Mouse) bool {
 	m.contentViewer.selEndCol = col
 	m.contentViewer.selEndInclusiveForCopy = true
 	m.contentViewer.renderCacheText = ""
-	return true
 }
 
 func (m *Model) updateContentViewerSelection(mouse tea.Mouse) bool {
@@ -335,8 +394,11 @@ func (m *Model) handleContentViewerKey(msg tea.KeyMsg) tea.Cmd {
 		return m.closeContentViewer()
 	case "y", "Y":
 		if m.contentViewerHasSelection() {
-			m.clearChordState()
-			return m.copyContentViewerSelection()
+			cmd := m.copyContentViewerSelection()
+			if cmd == nil {
+				return m.startChordOp(chordY)
+			}
+			return tea.Batch(cmd, m.startChordOp(chordY))
 		}
 		if m.chord.op == chordY {
 			m.clearChordState()

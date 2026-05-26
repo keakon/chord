@@ -543,6 +543,8 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				}
 				if msg.ToolDiff != "" {
 					b.Diff = msg.ToolDiff
+				}
+				if shouldExpandToolResult(b.ToolName) {
 					b.Collapsed = false
 				}
 				if b.ToolName == tools.NameRead {

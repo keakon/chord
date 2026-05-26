@@ -197,7 +197,7 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("Done confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
 	}
-	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
+	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("expected Done confirm actions to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "more lines hidden") {
@@ -273,7 +273,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
 	}
-	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[N] Deny") || !strings.Contains(plain, "[E] Edit") {
+	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Edit") {
 		t.Fatalf("expected confirm actions to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "more lines hidden") {
@@ -298,14 +298,14 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	m.confirm.request = &ConfirmRequest{ToolName: "Edit", ArgsJSON: `{"path":"internal/tui/confirm_render.go","old_string":"old","new_string":"new"}`}
 
 	summary := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(summary, "[A] Add rule…") {
+	if !strings.Contains(summary, "[M] Add rule…") {
 		t.Fatalf("expected add-rule option in summary dialog, got:\n%s", summary)
 	}
 	if !strings.Contains(summary, "⚠ Confirmation Required") {
 		t.Fatalf("expected summary confirmation title before entering picker, got:\n%s", summary)
 	}
 
-	_ = m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
+	_ = m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
 
 	if !m.confirm.pickingRule {
 		t.Fatal("expected add-rule key to enter rule picker mode")
@@ -531,10 +531,10 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "[Y] Allow") || !strings.Contains(plain, "[R] Deny+Reason") {
+	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
 	}
-	if strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") || strings.Contains(plain, "Press E") {
+	if strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[M] Add rule") || strings.Contains(plain, "Press E") {
 		t.Fatalf("Done confirm should not show generic actions or edit hints:\n%s", plain)
 	}
 }
@@ -544,11 +544,69 @@ func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "[R] Deny+Reason required") {
+	if !strings.Contains(plain, "[Esc/R] Deny+Reason required") {
 		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
 	}
-	if strings.Contains(plain, "[Y] Allow") || strings.Contains(plain, "[N] Deny") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[A] Add rule") {
+	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[M] Add rule") {
 		t.Fatalf("forced deny confirm should not show allow or generic actions:\n%s", plain)
+	}
+}
+
+func TestHandleConfirmDImmediatelyDeniesGenericConfirm(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
+	if cmd == nil {
+		t.Fatal("expected immediate deny command from D")
+	}
+	select {
+	case result := <-m.confirmResultCh:
+		if result.Action != ConfirmDeny {
+			t.Fatalf("action = %v, want %v", result.Action, ConfirmDeny)
+		}
+	default:
+		t.Fatal("expected confirm result after pressing D")
+	}
+	if m.confirm.request != nil {
+		t.Fatal("expected confirm state to reset after immediate deny")
+	}
+}
+
+func TestHandleConfirmDoneIgnoresDenyShortcut(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
+	if cmd != nil {
+		t.Fatalf("Done dialog should not expose hidden D deny shortcut, got %T", cmd)
+	}
+	select {
+	case result := <-m.confirmResultCh:
+		t.Fatalf("unexpected confirm result from hidden D shortcut: %#v", result)
+	default:
+	}
+	if m.confirm.denyingWithReason {
+		t.Fatal("D should not enter deny-with-reason mode for Done dialog")
+	}
+}
+
+func TestHandleConfirmDoneForceDenyIgnoresDenyShortcut(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.mode = ModeConfirm
+	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
+	if cmd != nil {
+		t.Fatalf("force-deny Done dialog should not expose hidden D shortcut, got %T", cmd)
+	}
+	if m.confirm.denyingWithReason {
+		t.Fatal("D should not enter deny-with-reason mode for force-deny Done dialog")
 	}
 }
 
@@ -558,7 +616,7 @@ func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 	m.mode = ModeConfirm
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
 
-	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
 	if cmd != nil {
 		t.Fatalf("forced deny allow shortcut should be ignored, got %T", cmd)
 	}

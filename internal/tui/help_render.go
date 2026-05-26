@@ -20,7 +20,7 @@ func (m Model) helpLines(width int) []string {
 	lines := []string{
 		centerHelpLine("Chord "+buildinfo.Current().Short(), width),
 		"",
-		DimStyle.Render("Press ? or Esc to close. /help also opens this view."),
+		DimStyle.Render("Press Esc, q, or ? to close. /help also opens this view."),
 		DimStyle.Render("In the local main-agent view, Enter completes a visible / command suggestion, otherwise it sends, queues (when busy), or continues (when idle with empty input). Ctrl+C starts quit confirmation; normal-mode Esc stops the current run, and queued drafts are committed without auto-resuming on that cancel."),
 		DimStyle.Render("Click a queued draft to edit it, or click [del] to remove it before send."),
 		"",

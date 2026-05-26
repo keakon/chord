@@ -162,11 +162,17 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		}
 		usageLines = append(usageLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelDim.Render("TOKENS")))
 		usageLines = append(usageLines, usageSummary)
+		if reasoningLine := renderUsageReasoningLine(lineW, stats); reasoningLine != "" {
+			usageLines = append(usageLines, reasoningLine)
+		}
 		// Cache details only at tier 2+.
 		if bp >= 2 {
 			if cacheLine := renderUsageCacheLine(lineW, stats); cacheLine != "" {
 				usageLines = append(usageLines, cacheLine)
 			}
+		}
+		if costLine := renderUsageCostLine(lineW, stats); costLine != "" {
+			usageLines = append(usageLines, costLine)
 		}
 	}
 	if len(usageLines) <= 1 {
@@ -571,20 +577,32 @@ func renderInfoPanelKVLine(lineW int, key, value string) string {
 }
 
 func renderUsageSummaryLine(lineW int, stats analytics.SessionStats) string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 2)
 	if stats.InputTokens > 0 {
 		parts = append(parts, InfoPanelDim.Render("↑ ")+InfoPanelValue.Render(formatUsageTokens(stats.InputTokens)))
 	}
 	if stats.OutputTokens > 0 {
 		parts = append(parts, InfoPanelDim.Render("↓ ")+InfoPanelValue.Render(formatUsageTokens(stats.OutputTokens)))
 	}
-	if stats.EstimatedCost > 0 {
-		parts = append(parts, InfoPanelDim.Render("$ ")+InfoPanelValue.Render(fmt.Sprintf("%.4f", stats.EstimatedCost)))
-	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return InfoPanelLineBg.Width(lineW).Render(strings.Join(parts, InfoPanelDim.Render("  ")))
+}
+
+func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {
+	if stats.EstimatedCost <= 0 {
+		return ""
+	}
+	line := InfoPanelDim.Render("$ ") + InfoPanelValue.Render(fmt.Sprintf("%.4f", stats.EstimatedCost))
+	return InfoPanelLineBg.Width(lineW).Render(line)
+}
+
+func renderUsageReasoningLine(lineW int, stats analytics.SessionStats) string {
+	if stats.ReasoningTokens <= 0 {
+		return ""
+	}
+	return renderUsageCacheDetailLine(lineW, "Think", ansi.StringWidth("Cache W"), InfoPanelValue.Render(formatUsageTokens(stats.ReasoningTokens)))
 }
 
 func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {

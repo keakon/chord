@@ -110,11 +110,12 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		{
 			Title: "Confirm",
 			Bindings: []HelpBinding{
-				helpBinding([]string{"y"}, "allow"),
-				helpBinding([]string{"n"}, "deny"),
+				helpBinding([]string{"enter / a"}, "allow"),
+				helpBinding([]string{"esc / d"}, "deny"),
+				helpBinding([]string{"r"}, "deny with reason"),
 				helpBinding([]string{"e"}, "edit arguments"),
+				helpBinding([]string{"m"}, "add remembered rule"),
 				helpBinding([]string{"tab"}, "toggle details"),
-				helpBinding([]string{"esc"}, "cancel"),
 			},
 		},
 		{

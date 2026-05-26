@@ -23,6 +23,17 @@ type confirmRuleIntentResolver interface {
 	ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSummary, denyReason, requestID string, ruleIntent *agent.ConfirmRuleIntent)
 }
 
+// isConfirmGenericShortcut reports whether the key is a confirm-dialog action
+// shortcut (A/D/E/M). Done dialogs intentionally omit some of these, so they
+// are swallowed there instead of falling through to the generic switch.
+func isConfirmGenericShortcut(key string) bool {
+	switch key {
+	case "a", "A", "d", "D", "e", "E", "m", "M":
+		return true
+	}
+	return false
+}
+
 func confirmDialogWidth(totalWidth int) int {
 	maxWidth := totalWidth - 6
 	if maxWidth > confirmDialogMaxWidth {
@@ -137,25 +148,35 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if m.confirm.request.ForceDenyReason {
 			switch msg.String() {
-			case "r", "R", "n", "N", "esc":
+			case "r", "R", "esc":
 				m.confirm.denyingWithReason = true
 				m.confirm.editError = ""
 				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 				m.recalcViewportSize()
 				return textareaBlinkCmd()
-			case "y", "Y":
+			}
+			// Force-deny Done dialog only exposes V/R/esc; swallow generic
+			// shortcuts (A/D/E/M) so the handler stays consistent with the
+			// rendered options. Other keys (e.g. scroll) fall through below.
+			if isConfirmGenericShortcut(msg.String()) {
 				return nil
 			}
-			return nil
-		}
-		switch msg.String() {
-		case "y", "Y":
-			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
-		case "n", "N", "r", "R", "esc":
-			m.confirm.denyingWithReason = true
-			m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-			m.recalcViewportSize()
-			return textareaBlinkCmd()
+		} else {
+			switch msg.String() {
+			case "a", "A", "enter":
+				return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+			case "r", "R", "esc":
+				m.confirm.denyingWithReason = true
+				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+				m.recalcViewportSize()
+				return textareaBlinkCmd()
+			}
+			// Done dialog only exposes A/V/R/esc; swallow generic shortcuts
+			// (D/E/M) so the handler stays consistent with the rendered
+			// options. Other keys (e.g. scroll) fall through below.
+			if isConfirmGenericShortcut(msg.String()) {
+				return nil
+			}
 		}
 	}
 
@@ -179,13 +200,13 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
-	case "y", "Y":
+	case "a", "A", "enter":
 		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
 			return nil
 		}
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 
-	case "n", "N":
+	case "d", "D":
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
 
 	case "r", "R":
@@ -204,7 +225,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	case "a", "A":
+	case "m", "M":
 		// Enter rule picker (not available for Delete)
 		if m.confirm.request != nil && !strings.EqualFold(m.confirm.request.ToolName, "Delete") {
 			m.enterRulePicker()

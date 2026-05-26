@@ -135,7 +135,7 @@ func (m *Model) closeUsageStats() tea.Cmd {
 
 func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
-	case "esc", "q":
+	case "esc":
 		return m.closeUsageStats()
 	case "tab":
 		m.cycleUsageStatsView(1)

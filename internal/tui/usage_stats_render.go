@@ -57,12 +57,12 @@ func (m *Model) renderUsageStatsDialog() string {
 }
 
 func (m *Model) usageStatsHint() string {
-	base := "tab view  s scope  j/k scroll  g/G jump  ctrl+f/b page  $ close"
+	base := "tab/shift+tab view  s scope  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
 	if m.usageStats.scope == statsScopeProject {
 		if m.usageStats.projectLoadErr != "" && m.usageStats.projectReport == nil {
-			return "tab view  s scope  r retry  j/k scroll  g/G jump  ctrl+f/b page  $ close"
+			return "tab/shift+tab view  s scope  r retry  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
 		}
-		return "tab view  s scope  r range  j/k scroll  g/G jump  ctrl+f/b page  $ close"
+		return "tab/shift+tab view  s scope  r range  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
 	}
 	return base
 }

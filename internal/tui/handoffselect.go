@@ -132,9 +132,9 @@ func (m *Model) handleHandoffSelectKey(msg tea.KeyMsg) tea.Cmd {
 	case "v", "V":
 		return m.openContentViewer("Handoff plan", m.handoffFullPlanContent())
 
-	case "enter", "y":
+	case "enter", "a", "A":
 		return m.confirmHandoff()
-	case "r", "n":
+	case "r", "R":
 		m.handoffSelect.denyingWithReason = true
 		m.handoffSelect.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 		m.handoffSelect.error = ""
@@ -308,7 +308,7 @@ func (m *Model) renderHandoffSelectDialog() string {
 
 	overlayCfg := OverlayConfig{
 		Title:    "Handoff To Agent",
-		Hint:     "j/k move  g/G jump  v view plan  enter/y approve  r/n deny reason  esc close",
+		Hint:     "j/k move  g/G jump  v view plan  enter/a approve  r deny reason  esc close",
 		MinWidth: 30,
 		MaxWidth: 70,
 	}

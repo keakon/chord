@@ -222,7 +222,7 @@ func TestHelpViewShowsVersionOnShortFirstScreen(t *testing.T) {
 	m.help = helpState{prevMode: ModeNormal}
 
 	plain := ansi.Strip(m.renderHelpView())
-	for _, want := range []string{"Chord", buildinfo.Current().Short(), "Press ? or Esc"} {
+	for _, want := range []string{"Chord", buildinfo.Current().Short(), "Press Esc, q, or ?"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("short help first screen should contain %q, got:\n%s", want, plain)
 		}

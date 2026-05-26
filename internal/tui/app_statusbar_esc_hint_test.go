@@ -39,13 +39,30 @@ func TestNextEscHint(t *testing.T) {
 		}
 	})
 
+	t.Run("help mode", func(t *testing.T) {
+		m := NewModelWithSize(nil, 120, 24)
+		m.mode = ModeHelp
+		m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
+		if got := m.nextEscHint(); got != "close help" {
+			t.Fatalf("nextEscHint() = %q, want %q", got, "close help")
+		}
+	})
+
+	t.Run("usage stats mode", func(t *testing.T) {
+		m := NewModelWithSize(nil, 120, 24)
+		m.mode = ModeUsageStats
+		m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
+		if got := m.nextEscHint(); got != "close stats" {
+			t.Fatalf("nextEscHint() = %q, want %q", got, "close stats")
+		}
+	})
+
 	nonNormalModes := []struct {
 		name string
 		mode Mode
 	}{
 		{"confirm", ModeConfirm},
 		{"question", ModeQuestion},
-		{"help", ModeHelp},
 		{"image viewer", ModeImageViewer},
 		{"model select", ModeModelSelect},
 		{"session select", ModeSessionSelect},

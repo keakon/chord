@@ -160,25 +160,25 @@ func (m Model) renderConfirmOptions() string {
 		if m.confirm.request.ForceDenyReason {
 			return strings.Join([]string{
 				ConfirmEditStyle.Render("[V] View"),
-				ConfirmDenyStyle.Render("[R] Deny+Reason required"),
+				ConfirmDenyStyle.Render("[Esc/R] Deny+Reason required"),
 			}, "  ")
 		}
 		parts := []string{
-			ConfirmAllowStyle.Render("[Y] Allow"),
+			ConfirmAllowStyle.Render("[Enter/A] Allow"),
 			ConfirmEditStyle.Render("[V] View"),
-			ConfirmDenyStyle.Render("[R] Deny+Reason"),
+			ConfirmDenyStyle.Render("[Esc/R] Deny+Reason"),
 		}
 		return strings.Join(parts, "  ")
 	}
 	parts := []string{
-		ConfirmAllowStyle.Render("[Y] Allow"),
-		ConfirmDenyStyle.Render("[N] Deny"),
+		ConfirmAllowStyle.Render("[Enter/A] Allow"),
+		ConfirmDenyStyle.Render("[Esc/D] Deny"),
 		ConfirmDenyStyle.Render("[R] Deny+Reason"),
 		ConfirmEditStyle.Render("[E] Edit"),
 	}
-	// Don't show [A] for Delete tool
+	// Don't show [M] Add rule for Delete tool
 	if m.confirm.request != nil && !strings.EqualFold(m.confirm.request.ToolName, "Delete") {
-		parts = append(parts, ConfirmEditStyle.Render("[A] Add rule…"))
+		parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
 	}
 	return strings.Join(parts, "  ")
 }

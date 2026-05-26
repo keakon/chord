@@ -138,15 +138,6 @@ func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return cmd
 	}
-	if key == "ctrl+d" {
-		prevMode := m.modelSelect.prevMode
-		cmd := m.restoreModeWithIME(prevMode)
-		m.recalcViewportSize()
-		if prevMode == ModeInsert {
-			return tea.Batch(cmd, m.input.Focus())
-		}
-		return cmd
-	}
 
 	itemCount := len(m.modelSelect.poolNames)
 	switch key {

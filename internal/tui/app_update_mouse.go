@@ -139,7 +139,7 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		switch msg.(type) {
 		case tea.MouseClickMsg:
 			if mouse.Button == tea.MouseLeft {
-				m.startContentViewerSelection(mouse)
+				m.handleContentViewerSelectionClick(mouse)
 			}
 		case tea.MouseMotionMsg:
 			m.updateContentViewerSelection(mouse)

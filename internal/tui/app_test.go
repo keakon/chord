@@ -4378,6 +4378,92 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksRestoredEditWithoutToolDiffShowsResult(t *testing.T) {
+	nextID := 1
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","old_string":"old","new_string":"new"}`)}}},
+		{Role: "tool", ToolCallID: "edit-1", Content: "Replaced 1 occurrence (12 bytes -> 12 bytes)", ToolStatus: string(agent.ToolResultStatusSuccess)},
+	}
+
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.ToolName != tools.NameEdit || !block.ResultDone || block.Diff != "" {
+		t.Fatalf("restored block = %#v, want completed Edit without diff", block)
+	}
+	if block.Collapsed {
+		t.Fatal("restored Edit should use the same expanded terminal state as live Edit results")
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "↳ Result:") || !strings.Contains(plain, "Replaced 1 occurrence") {
+		t.Fatalf("restored Edit without ToolDiff should show result content, got:\n%s", plain)
+	}
+}
+
+func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		args     json.RawMessage
+		content  string
+		status   agent.ToolResultStatus
+		want     []string
+	}{
+		{
+			name:     "write error",
+			toolName: tools.NameWrite,
+			args:     json.RawMessage(`{"path":"foo.txt","content":"hello"}`),
+			content:  "Error: writing file: permission denied",
+			status:   agent.ToolResultStatusError,
+			want:     []string{"↳ Error:", "permission denied"},
+		},
+		{
+			name:     "edit error",
+			toolName: tools.NameEdit,
+			args:     json.RawMessage(`{"path":"foo.txt","old_string":"old","new_string":"new"}`),
+			content:  "old_string not found in file",
+			status:   agent.ToolResultStatusError,
+			want:     []string{"↳ Error:", "old_string not found"},
+		},
+		{
+			name:     "delete success",
+			toolName: tools.NameDelete,
+			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
+			content:  "Deleted (1):\n- /tmp/obsolete.go",
+			status:   agent.ToolResultStatusSuccess,
+			want:     []string{"Delete /tmp/obsolete.go", "remove obsolete file", "Deleted (1):"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nextID := 1
+			msgs := []message.Message{
+				{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: tt.toolName, Args: tt.args}}},
+				{Role: "tool", ToolCallID: "call-1", Content: tt.content, ToolStatus: string(tt.status)},
+			}
+
+			blocks := messagesToBlocks(msgs, &nextID)
+			if len(blocks) != 1 {
+				t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+			}
+			block := blocks[0]
+			if block.Collapsed {
+				t.Fatalf("restored %s should use live expanded terminal state", tt.toolName)
+			}
+			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			for _, want := range tt.want {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("restored %s render missing %q; got:\n%s", tt.toolName, want, plain)
+				}
+			}
+		})
+	}
+}
+
 func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "del-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`)}}},

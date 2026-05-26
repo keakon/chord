@@ -12,6 +12,10 @@ func (m *Model) nextEscHint() string {
 		return "cancel search"
 	case ModeContentViewer:
 		return "close view"
+	case ModeHelp:
+		return "close help"
+	case ModeUsageStats:
+		return "close stats"
 	case ModeInsert:
 		return "normal mode"
 	case ModeNormal:
