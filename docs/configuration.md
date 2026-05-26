@@ -317,7 +317,7 @@ Loop mode still follows the configured `key_rotation` / `key_order`. For Codex l
 
 Only providers with `preset: codex` are treated as OAuth providers.
 
-For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supports_fast` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, and fast-mode capability; overriding these fields usually does not improve quality and may degrade WebSocket incremental reuse, prompt-cache behavior, or official API compatibility.
+For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supported_service_tiers` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, and service-tier capability. Use `supported_service_tiers` when you need an explicit tier matrix.
 
 Codex OAuth account selection is controlled by `key_rotation` / `key_order` in [Provider key selection](#provider-key-selection). Codex defaults to `key_order: smart`, which considers quota snapshots, soft cooldown, and reset timing when choosing an account.
 
@@ -419,6 +419,9 @@ model_templates:
       input: 272000
       output: 128000
     reasoning:
+      # Recommended example when you want readable reasoning summaries from
+      # OpenAI Responses reasoning models. This is not Chord's implicit default:
+      # leave `summary` unset to omit the field and use provider/model behavior.
       summary: auto
     # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
     # the provider/model default; set low for shorter visible text output or high
@@ -434,7 +437,6 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
-    supports_fast: true
 
   # Anchor names cannot contain dots in Chord's YAML parser: use _ in the
   # anchor/alias name even when the model key contains dots.
@@ -444,7 +446,14 @@ model_templates:
       input: 1.75
       output: 14
       cache_read: 0.175
-      cache_write: 1.75
+      service_tier_multipliers:
+        fast: 2
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 3.5
+          output: 28
+          cache_read: 0.35
 
   gpt-5.5: &gpt-5_5
     <<: *gpt-400k
@@ -452,7 +461,14 @@ model_templates:
       input: 5
       output: 30
       cache_read: 0.5
-      cache_write: 5
+      service_tier_multipliers:
+        fast: 2.5
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 10
+          output: 60
+          cache_read: 1
 
   gpt-1m: &gpt-1m
     limit:
@@ -460,6 +476,9 @@ model_templates:
       input: 922000
       output: 128000
     reasoning:
+      # Recommended example when you want readable reasoning summaries from
+      # OpenAI Responses reasoning models. This is not Chord's implicit default:
+      # leave `summary` unset to omit the field and use provider/model behavior.
       summary: auto
     # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
     # the provider/model default; set low for shorter visible text output or high
@@ -475,7 +494,6 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
-    supports_fast: true
 
   gpt-5.4: &gpt-5_4
     <<: *gpt-1m
@@ -483,12 +501,27 @@ model_templates:
       input: 2.5
       output: 15
       cache_read: 0.25
-      cache_write: 2.5
+      service_tier_multipliers:
+        fast: 2
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 5
+          output: 30
+          cache_read: 0.5
 
   claude-1m: &claude-1m
     limit:
       context: 1000000
       output: 65536
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+      service_tier_multipliers:
+        fast: 6
     thinking:
       type: adaptive
       effort: medium
@@ -506,17 +539,21 @@ model_templates:
           display: summarized
     modalities:
       input: [text, image]
-    supports_fast: true
 
 providers:
   codex:
     preset: codex
+    # Optional: model entries inherit this provider-level default.
+    # Codex preset already defaults to [fast, slow]; set it explicitly when
+    # documenting or overriding a non-preset provider.
+    supported_service_tiers: [fast, slow]
     models:
       gpt-5.2: *gpt-5_2
       gpt-5.5: *gpt-5_5
 
   openai:
     api_url: https://api.openai.com/v1/responses
+    supported_service_tiers: [fast, slow]
     models:
       gpt-5.4: *gpt-5_4
       gpt-5.5: *gpt-5_5
@@ -524,6 +561,7 @@ providers:
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
+    supported_service_tiers: [fast]
     models:
       claude-opus-4.7: *claude-1m
 ```
@@ -534,7 +572,13 @@ Model fields used in the example:
 - `limit.input`: use this only when the provider also publishes a separate input cap. Chord uses it to decide when to compact before the prompt is too large and how to retry after a provider rejects a too-large request. If omitted, Chord derives the input budget from `limit.context` minus the effective requested output (`max_output_tokens`, capped by `limit.output`). It does not by itself reduce requested output tokens; output clamping follows `limit.output`, `max_output_tokens`, and any total-context (`limit.context`) remainder.
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
-- `reasoning`: OpenAI / OpenAI-compatible reasoning options. For `type: chat-completions`, `reasoning.effort` is sent as top-level `reasoning_effort` and Chord uses `max_completion_tokens`; for `type: responses`, `reasoning.effort` and `reasoning.summary` are sent inside the `reasoning` object. `summary` is only meaningful for models that support Responses reasoning summaries; variants commonly override `reasoning.effort`.
+- `reasoning`: OpenAI / OpenAI-compatible reasoning options.
+  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. Chord currently passes `low`, `medium`, `high`, or `xhigh`; leave it unset to omit the field and use the provider/model default. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
+  - For `type: chat-completions`, Chord sends `reasoning.effort` as top-level `reasoning_effort` and uses `max_completion_tokens`.
+  - For `type: responses`, Chord sends `reasoning.effort` and `reasoning.summary` inside the `reasoning` object.
+  - `reasoning.summary` controls whether Chord explicitly asks for a readable reasoning summary in Responses output. Chord currently accepts `auto`, `concise`, or `detailed`; leave it unset to omit the field, which means Chord does not explicitly request a summary and the provider/model decides its default behavior.
+  - Recommended `reasoning.summary` value: `auto` when you want summaries. It lets the provider choose the best supported detail level, avoids pinning templates to a fixed summarizer, and matches current OpenAI guidance. Use `concise` to reduce UI noise or `detailed` when you deliberately want fuller debugging/evaluation output.
+  - `reasoning.summary` is only meaningful for models that support Responses reasoning summaries. Some upstream clients/catalogs model “summary off” as `none`; in Chord, the equivalent is leaving `reasoning.summary` unset.
 - `text.verbosity`: optional OpenAI text verbosity hint, where supported. Leave it unset in reusable templates unless you intentionally want to override the provider/model default; use `low` for shorter visible text output and `high` for deliberately detailed visible output.
 - `thinking`: Anthropic extended-thinking options. `type: adaptive` lets Chord
   derive an appropriate thinking budget from `effort`; `display: summarized`
@@ -543,19 +587,12 @@ Model fields used in the example:
   can override `thinking.effort` and `thinking.display`.
 - `variants`: named model parameter presets. Use a model ref like
   `openai/gpt-5.5@high` or `anthropic/claude-opus-4.7@xhigh` to select one.
-- `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, and `cache_write` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output.
+- `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
+  - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI priority (`fast`) or flex (`slow`).
+  - `cost.input_tiers`: optional long-context pricing overrides. Each entry uses `above_input_tokens` as a strict threshold; when billable input is greater than that value, Chord uses the highest matching tier's `input`, `output`, `cache_read`, and optional `cache_write` prices before applying any service-tier multiplier.
 - `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` and `image` for
   backward compatibility.
-- `supports_fast`: whether `/fast on` may emit provider-specific fast-mode
-  request parameters for this model. Omit it to use the preset default: models
-  under `preset: codex` default to enabled; all other models default to disabled.
-  Set `supports_fast: true` only for models/providers that accept Chord's fast
-  request parameters (`service_tier="fast"` for OpenAI Responses or `speed="fast"`
-  for Anthropic). Set `supports_fast: false` to force-disable them, including in
-  a Codex preset provider. At runtime, `/fast on` and `/fast off` apply to the
-  main agent and SubAgents: existing SubAgent clients are updated immediately,
-  and newly created, restored, rehydrated, or model-switched SubAgent clients
-  inherit the current fast-mode state.
+- `supported_service_tiers`: explicit non-standard service tiers accepted by a provider or model, for example `[fast, slow]` for OpenAI service tiers or `[fast]` for Anthropic speed. Provider-level values act as defaults for all models in that provider; model-level values override provider defaults. If both are omitted, Chord uses preset defaults. Pricing is configured separately with `cost.service_tier_multipliers` for service-tier rates and `cost.input_tiers` for long-context thresholds. When the user selects `fast` or `slow` but the current provider/model does not support it, the info panel still shows the requested `tier: fast` or `tier: slow` in dim strikethrough text so the requested mode remains visible while indicating it is not effective.
 
 Only fields defined by Chord's model schema are used. `modalities.output` is
 not currently interpreted, so it is intentionally omitted from the example.
@@ -589,7 +626,7 @@ When enabled, Chord gzip-compresses the request body only if compression reduces
 the payload size; otherwise it sends the request uncompressed. Leave this unset
 unless your provider or gateway benefits from compressed request bodies.
 
-Provider/model HTTP requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value. This provider-level setting replaces the old Anthropic transport compat `user_agent` field and affects only normal model HTTP requests for that provider:
+Provider/model HTTP requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value. This setting affects only normal model HTTP requests for that provider:
 
 ```yaml
 providers:
@@ -847,7 +884,10 @@ otherwise Chord derives it from `limit.context - effective requested output`
 (where effective output is `max_output_tokens` capped by the model's
 `limit.output`). If `reserved` is set, it is subtracted first. The TUI
 `Context` indicator in the info panel and footer uses the same input-budget
-calculation, so its percentage matches automatic compaction thresholds.
+baseline, so its percentage matches automatic compaction thresholds. For
+providers that report prompt-cache writes separately, Chord counts the current
+prompt-side usage as `input_tokens + cache_write_tokens` so newly cached prompt
+segments are included in the displayed context burden.
 
 **Reserved headroom example**:
 
@@ -929,8 +969,8 @@ context:
 Use the defaults when prompt-cache stability matters and your sessions commonly
 reuse the same active files across several turns. If your main problem is
 hitting context limits quickly in tool-heavy sessions, you can lower the byte
-thresholds toward the older aggressive values (`shell_success_bytes: 4000`,
-`read_like_output_bytes: 2500`).
+thresholds, for example `shell_success_bytes: 4000` and
+`read_like_output_bytes: 2500`.
 
 **Reduction categories**: Tool results are classified into five categories,
 each with its own age and size thresholds.
@@ -1044,10 +1084,22 @@ providers as cache/routing affinity metadata: OpenAI Responses requests include
 fields are not user-configurable; they follow the active Chord session and are
 cleared or changed on session switch/resume. Anthropic prompt caching is driven
 by `cache_control` blocks, and its optional `metadata.user_id` remains a stable
-anonymous user/provider id rather than a per-session id. Gemini does not have a
-simple per-request session-id cache key in Chord's `generateContent` transport;
-its cache signals come from provider-specific cached-content APIs/usage fields,
-not from a Chord session id header.
+anonymous user/provider id rather than a per-session id. For Anthropic models,
+you can request an hourly cache TTL with `prompt_cache.ttl: 1h`:
+
+```yaml
+providers:
+  anthropic:
+    models:
+      claude-sonnet-4-5:
+        prompt_cache:
+          mode: auto
+          ttl: 1h
+```
+
+Gemini does not have a simple per-request session-id cache key in Chord's
+`generateContent` transport; its cache signals come from provider-specific
+cached-content APIs/usage fields, not from a Chord session id header.
 
 | Field          | Type   | Description                                                                                                                                              |
 | -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1057,6 +1109,7 @@ not from a Chord session id header.
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
+| `supported_service_tiers` | list | Provider-level default accepted non-standard tiers for its models, e.g. `[fast, slow]` or `[fast]`. Model entries can override it. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 
 ### Model field reference
@@ -1067,14 +1120,16 @@ not from a Chord session id header.
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
-| `reasoning`       | object | OpenAI reasoning options. Chat Completions sends `reasoning.effort` as `reasoning_effort`; Responses sends `reasoning.effort` / `reasoning.summary` inside `reasoning`. |
+| `reasoning`       | object | OpenAI reasoning options. Chord-supported subfields are `reasoning.effort` (`low` / `medium` / `high` / `xhigh`; unset = omit and use provider/model default) and, for Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text, image]`.                                                       |
-| `supports_fast`  | bool   | Whether `/fast on` may send provider-specific fast parameters. Omitted = enabled for `preset: codex`, disabled elsewhere. |
+| `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |
 
-For more on agents, see [Customization — Agents](./customization.md#agents); for the full agent schema, see [Agent config](#agent-config).
+Service tiers and prompt caching are provider-specific. OpenAI supports priority/flex-style tiering plus `prompt_cache_key` / `prompt_cache_retention`; Anthropic supports `cache_control` with 5m and 1h TTLs and service-tier controls; Gemini uses its own routing / thinking / cached-content mechanisms when available. Chord maps the user-facing tier to the closest supported provider behavior instead of forcing one wire format across all backends.
+
+OpenAI reasoning items can also be returned as `reasoning.encrypted_content` when you need stateless continuation. Treat that field as opaque continuation data: it is not meant to be rendered directly in the UI. When a readable summary is available, that is the user-facing form to show.
 
 ## Related
 

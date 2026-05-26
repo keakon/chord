@@ -20,6 +20,9 @@ providers:
           input: 272000
           output: 128000
         reasoning:
+          # 推荐示例：当你希望 OpenAI Responses reasoning 模型返回可读的
+          # reasoning 摘要时，可显式设置为 `auto`。这不是 Chord 的隐式默认值：
+          # 留空 `summary` 表示不发送该字段，交给 provider/model 按自身行为处理。
           summary: auto
         # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
         # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要

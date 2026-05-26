@@ -131,12 +131,10 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Configuration — Context compaction](./configuration.md#context-compaction)
-- `/fast on` / `/fast off`: enable or disable fast-response mode for subsequent model requests (including later retry rounds that have not started yet).
-  - Fast request parameters are sent only for models whose `supports_fast` capability is enabled. Omitted `supports_fast` defaults to enabled for `preset: codex` models and disabled elsewhere.
-  - OpenAI Responses: sets `service_tier="fast"` when enabled.
-  - Claude (Anthropic): enables `speed="fast"` when enabled (requires provider support / beta).
-  - Does not change behavior knobs like `reasoning.effort` / `text.verbosity`; use model pools or `@variant` for more aggressive tradeoffs.
+- `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
+
+When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If you request a tier that the current provider/model does not support, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective.
 
 The following commands have more interactive detail, expanded below.
 
@@ -211,7 +209,7 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 3. **verifying**: running checks (tests, lint, etc.)
 4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `Done` tool
 
-When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report is being generated, the Done tool card shows the same live `chars received` progress as other streaming tool arguments. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
+When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report argument is still streaming, the Done tool card shows the same live `chars received` progress as other streaming tool arguments; once the argument stream finishes, that temporary progress indicator is hidden. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
 
 Loop mode also guards against a stalled tool-call loop. If the MainAgent emits the same tool call three times in a row — same tool name and identical arguments — Chord rejects that tool result automatically, injects guidance to stop repeating the unchanged call and continue toward the loop target, and counts it as one loop interception. The check uses a sliding window: if the fourth call is still identical, it is rejected again immediately. Once the loop interception limit is reached, Chord shows the same local confirmation flow so you can decide whether to stop or continue.
 

@@ -26,9 +26,9 @@
 
 每次 LLM 请求前执行的轻量级确定性裁剪。根据工具输出的年龄和大小启发式规则，从当前 prompt 中裁剪过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [配置 — 上下文剪裁](./configuration_CN.md#上下文剪裁reduction)。
 
-## Fast mode
+## Service tier
 
-可通过 `/fast on|off` 切换的快速响应模式。启用后，Chord 会在支持的模型上发送 provider 专用 fast 参数：OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`。只有 `supports_fast: true` 的模型才会真正发送这些参数。Fast mode 是向 provider 发出的请求，不保证一定降延迟。
+可通过 `/tier standard|fast|slow` 切换的请求档位，用来让当前 provider/model 使用最接近的低延迟 / 成本模式。OpenAI 会把 `fast` 映射到 `fast`、把 `slow` 映射到 `flex`；Anthropic 会把 `fast` 映射到 `speed` / service-tier 控制，而 `slow` 暂不支持；Gemini 则按自身的路由 / thinking 控制做最接近的适配。这个档位只是请求提示，不保证一定生效；provider 仍可能在负载或模型限制下回退。费用按当前 provider/model 对实际生效档位的配置价格计算；如果 provider 对不同档位单独收费，可用 `cost.service_tier_multipliers` 建模档位价格倍率。
 
 ## Loop mode
 

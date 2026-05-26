@@ -300,7 +300,7 @@ Chord 支持多个 API key / OAuth 账号时的两层选择策略：`key_rotatio
 
 当前仅配置了 `preset: codex` 的 provider 支持 OAuth。
 
-对 Codex provider，建议只写 `preset: codex` 和模型配置，不要手动覆盖 `api_url`、`token_url`、`client_id`、`type`、`store`、`responses_websocket`、`supports_fast` 等由 preset 管理的字段。Codex preset 会自动选择官方 OAuth transport、Responses endpoint、WebSocket / cache 相关默认值和 fast-mode 能力；手动改这些字段通常不会提升效果，反而可能破坏 WebSocket 增量复用、prompt cache 或官方接口兼容性。
+对 Codex provider，建议只写 `preset: codex` 和模型配置，不要手动覆盖 `api_url`、`token_url`、`client_id`、`type`、`store`、`responses_websocket` 或 `supported_service_tiers` 等由 preset 管理的字段。Codex preset 会自动选择官方 OAuth transport、Responses endpoint、WebSocket / cache 相关默认值和 service-tier 能力。需要显式 tier 矩阵时使用 `supported_service_tiers`。
 
 Codex OAuth 账号的选择由 [Provider key 选择](#provider-key-选择) 中的 `key_rotation` / `key_order` 控制。Codex 默认使用 `key_order: smart`，会结合额度快照、soft cooldown 和 reset 时间选择更合适的账号。
 
@@ -386,6 +386,9 @@ model_templates:
       input: 272000
       output: 128000
     reasoning:
+      # 推荐示例：当你希望 OpenAI Responses reasoning 模型返回可读的
+      # reasoning 摘要时，可显式设置为 `auto`。这不是 Chord 的隐式默认值：
+      # 留空 `summary` 表示不发送该字段，交给 provider/model 按自身行为处理。
       summary: auto
     # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
     # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要
@@ -401,8 +404,6 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
-    supports_fast: true
-
   # Chord 使用的 YAML 解析器不接受 anchor 名称里的点号：模型 key 可以有 .，
   # 但 anchor/alias 名请用 _。
   gpt-5.2: &gpt-5_2
@@ -411,7 +412,14 @@ model_templates:
       input: 1.75
       output: 14
       cache_read: 0.175
-      cache_write: 1.75
+      service_tier_multipliers:
+        fast: 2
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 3.5
+          output: 28
+          cache_read: 0.35
 
   gpt-5.5: &gpt-5_5
     <<: *gpt-400k
@@ -419,7 +427,14 @@ model_templates:
       input: 5
       output: 30
       cache_read: 0.5
-      cache_write: 5
+      service_tier_multipliers:
+        fast: 2.5
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 10
+          output: 60
+          cache_read: 1
 
   gpt-1m: &gpt-1m
     limit:
@@ -427,6 +442,9 @@ model_templates:
       input: 922000
       output: 128000
     reasoning:
+      # 推荐示例：当你希望 OpenAI Responses reasoning 模型返回可读的
+      # reasoning 摘要时，可显式设置为 `auto`。这不是 Chord 的隐式默认值：
+      # 留空 `summary` 表示不发送该字段，交给 provider/model 按自身行为处理。
       summary: auto
     # 可选：适用于 OpenAI GPT-5 / Responses API 模型。默认留空，使用
     # provider/model 自身默认值；需要更短的可见文本输出时设 low，明确需要
@@ -442,7 +460,6 @@ model_templates:
           effort: xhigh
     modalities:
       input: [text, image]
-    supports_fast: true
 
   gpt-5.4: &gpt-5_4
     <<: *gpt-1m
@@ -450,12 +467,27 @@ model_templates:
       input: 2.5
       output: 15
       cache_read: 0.25
-      cache_write: 2.5
+      service_tier_multipliers:
+        fast: 2
+        slow: 0.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 5
+          output: 30
+          cache_read: 0.5
 
   claude-1m: &claude-1m
     limit:
       context: 1000000
       output: 65536
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+      service_tier_multipliers:
+        fast: 6
     thinking:
       type: adaptive
       effort: medium
@@ -473,17 +505,20 @@ model_templates:
           display: summarized
     modalities:
       input: [text, image]
-    supports_fast: true
 
 providers:
   codex:
     preset: codex
+    # 可选：model 条目会继承这个 provider-level 默认值。
+    # Codex preset 已默认 [fast, slow]；显式写出通常用于文档化或覆盖非 preset provider。
+    supported_service_tiers: [fast, slow]
     models:
       gpt-5.2: *gpt-5_2
       gpt-5.5: *gpt-5_5
 
   openai:
     api_url: https://api.openai.com/v1/responses
+    supported_service_tiers: [fast, slow]
     models:
       gpt-5.4: *gpt-5_4
       gpt-5.5: *gpt-5_5
@@ -491,6 +526,7 @@ providers:
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
+    supported_service_tiers: [fast]
     models:
       claude-opus-4.7: *claude-1m
 ```
@@ -500,13 +536,21 @@ providers:
 - `limit.context`：已知时表示总请求窗口大小。
 - `limit.input`：只在 provider 还单独公布了输入上限时才需要配置。Chord 用它判断何时在 prompt 过大前压缩，以及 provider 因请求过大而拒绝后如何重试。若省略，Chord 会按 `limit.context - 有效请求输出` 推导输入预算；有效请求输出来自 `max_output_tokens`，并受 `limit.output` 上限约束。它本身不会直接压低请求输出上限；输出裁剪遵循 `limit.output`、`max_output_tokens` 和已知的总窗口余量（`limit.context`）。
 - `limit.output`：模型最大输出 token。实际请求还会受 `max_output_tokens` 限制，因此运行时会取两者里更小的值。
-- `reasoning`：OpenAI / OpenAI-compatible reasoning 选项。`type: chat-completions` 会把 `reasoning.effort` 发送为顶层 `reasoning_effort`，并使用 `max_completion_tokens`；`type: responses` 会把 `reasoning.effort` 和 `reasoning.summary` 放进 `reasoning` 对象。`summary` 只对支持 Responses reasoning summary 的模型有意义；variant 通常覆盖 `reasoning.effort`。
+- `reasoning`：OpenAI / OpenAI-compatible reasoning 选项。
+  - `reasoning.effort` 用来控制 Chord 主动请求的 reasoning 深度/预算。Chord 当前透传 `low`、`medium`、`high`、`xhigh`；留空表示不发送该字段，使用 provider/model 自身默认值。日常编码一般可从 `medium` 起步；`high` / `xhigh` 更适合复杂规划、疑难调试或高难度综合任务，但通常也会增加延迟和 token 消耗。
+  - `type: chat-completions` 会把 `reasoning.effort` 发送为顶层 `reasoning_effort`，并使用 `max_completion_tokens`。
+  - `type: responses` 会把 `reasoning.effort` 和 `reasoning.summary` 放进 `reasoning` 对象。
+  - `reasoning.summary` 用来控制 Chord 是否显式请求 Responses 输出中的可读 reasoning 摘要。Chord 当前支持 `auto`、`concise`、`detailed`；留空表示不发送该字段，也就是不由 Chord 显式请求 summary，具体默认行为由 provider/model 决定。
+  - 需要 summary 时，推荐值是 `auto`。它会让 provider 选择当前模型支持的最佳摘要详细度，避免把模板绑定到某个固定 summarizer，也更贴近当前 OpenAI 的推荐用法。想减少 UI 噪音时用 `concise`；明确要更完整的调试/评估信息时用 `detailed`。
+  - `reasoning.summary` 只对支持 Responses reasoning summary 的模型有意义。有些上游客户端/模型目录会用 `none` 表示“关闭 summary”；在 Chord 里，对应做法是直接留空 `reasoning.summary`。
 - `text.verbosity`：可选的 OpenAI 文本详细程度提示，取决于 provider/model 是否支持。可复用模板里建议默认留空，除非你明确要覆盖 provider/model 默认值；需要更短的可见文本输出时用 `low`，明确需要详细可见输出时用 `high`。
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；`display: summarized` 会请求 Claude 返回可展示的 summarized thinking block（仅在 `type: enabled` 或 `adaptive` 下有效，`disabled` 模式会被拒绝）；variant 可覆盖 `thinking.effort` 与 `thinking.display`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.7@xhigh` 引用。
-- `cost`：估算价格，单位是 USD / 1M tokens。`input`、`output`、`cache_read`、`cache_write` 都是可选字段；配置后，Chord 会在 UI 和 `/usage` 输出中估算费用。
+- `cost`：估算价格，单位是 USD / 1M tokens。`input`、`output`、`cache_read`、`cache_write`、`cache_write_1h` 都是可选字段；配置后，Chord 会在 UI 和 `/usage` 输出中估算费用。`cache_write` 是默认 prompt-cache 写入价格，对 Anthropic 通常对应 5 分钟 TTL；当 provider 报告或配置为请求 1 小时 cache write 时，使用 `cache_write_1h`。缺少匹配的 cache-write 价格时，Chord 会按生效后的 `input` 价格估算 cache-write token。
+  - `cost.service_tier_multipliers`：可选的 service tier 价格倍数，会在选中基础价格或匹配的 `input_tiers` 价格之后应用。用于表达 provider 的 service tier，例如 OpenAI priority（`fast`）或 flex（`slow`）。
+  - `cost.input_tiers`：可选的长上下文价格覆盖。每项使用 `above_input_tokens` 作为严格阈值；当 billable input 大于该值时，Chord 会使用匹配阈值最高一项的 `input`、`output`、`cache_read` 和可选的 `cache_write`，然后再应用 service-tier 倍数。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
-- `supports_fast`：`/fast on` 是否可以为该模型发送 provider 专用 fast-mode 请求参数。省略时使用 preset 默认值：`preset: codex` 下的模型默认启用，其他模型默认关闭。只有确认模型 / provider 支持 Chord 使用的 fast 参数（OpenAI Responses 的 `service_tier="fast"`，或 Anthropic 的 `speed="fast"`）时才设为 `true`；设为 `false` 可强制关闭，包括 Codex preset provider。运行时 `/fast on` 和 `/fast off` 会同时作用于主 agent 和 SubAgent：已有 SubAgent client 会立即更新，后续新建、恢复、rehydrate 或切换模型后的 SubAgent client 会继承当前 fast-mode 状态。
+- `supported_service_tiers`：显式声明 provider 或 model 可接收的非 standard service tier，例如 OpenAI 可用 `[fast, slow]`，Anthropic 可用 `[fast]`。provider-level 值作为该 provider 下所有 model 的默认值；model-level 值会覆盖 provider 默认。两者都省略时使用 preset 默认值。定价需单独在 `cost.service_tier_multipliers`（service-tier 费率）和 `cost.input_tiers`（长上下文阈值）里配置。当用户选择了 `fast` 或 `slow`，但当前 provider/model 不支持时，信息侧栏仍会显示用户请求的 `tier: fast` 或 `tier: slow`，并用灰色删除线表示该模式当前未实际生效。
 
 只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不被运行时解释，示例中刻意省略。
 
@@ -532,7 +576,7 @@ providers:
 
 启用后，Chord 仅在 gzip 能减小体积时才发送压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则无需配置。
 
-Provider / 模型 HTTP 请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`。这个 provider 级配置取代了旧的 Anthropic transport compat `user_agent` 字段，只影响对应 provider 的普通模型 HTTP 请求：
+Provider / 模型 HTTP 请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`。该配置只影响对应 provider 的普通模型 HTTP 请求：
 
 ```yaml
 providers:
@@ -753,7 +797,7 @@ context:
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 
-**触发阈值如何计算**：以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。TUI 信息面板和底部栏的 `Context` 百分比使用同一口径，与自动压缩阈值保持对齐。
+**触发阈值如何计算**：以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。TUI 信息面板和底部栏的 `Context` 百分比使用同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
 **预留 headroom 示例**：
 
@@ -807,7 +851,7 @@ context:
     min_tool_results_prune: 8
 ```
 
-当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，默认配置是推荐选择。如果主要问题是工具密集型会话很快顶到上下文上限，可以把字节阈值下调到更激进的旧取值（`shell_success_bytes: 4000`、`read_like_output_bytes: 2500`）。
+当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，默认配置是推荐选择。如果主要问题是工具密集型会话很快顶到上下文上限，可以下调字节阈值，例如 `shell_success_bytes: 4000`、`read_like_output_bytes: 2500`。
 
 **剪裁规则**：按工具输出的类型和时效分五类处理，类别不同，裁剪激进程度也不同。
 
@@ -906,7 +950,19 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
-Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；它的可选 `metadata.user_id` 仍是稳定的匿名用户 / provider 标识，而不是按 session 变化的 id。Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请求 session-id cache key；它的缓存信号来自 provider 专用 cached-content API / usage 字段，而不是 Chord session id header。
+Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；它的可选 `metadata.user_id` 仍是稳定的匿名用户 / provider 标识，而不是按 session 变化的 id。对于 Anthropic 模型，你可以用 `prompt_cache.ttl: 1h` 请求按小时缓存：
+
+```yaml
+providers:
+  anthropic:
+    models:
+      claude-sonnet-4-5:
+        prompt_cache:
+          mode: auto
+          ttl: 1h
+```
+
+Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请求 session-id cache key；它的缓存信号来自 provider 专用 cached-content API / usage 字段，而不是 Chord session id header。
 
 | 字段          | 类型   | 说明                                                                                                                                                |
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -926,14 +982,16 @@ Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compaction.threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
-| `reasoning`       | object | OpenAI reasoning 选项。Chat Completions 发送 `reasoning.effort` 为 `reasoning_effort`；Responses 发送 `reasoning.effort` / `reasoning.summary` 到 `reasoning` 对象。 |
+| `reasoning`       | object | OpenAI reasoning 选项。Chord 当前支持的子字段有 `reasoning.effort`（`low` / `medium` / `high` / `xhigh`；留空 = 不发送，使用 provider/model 默认）以及 Responses 场景下的 `reasoning.summary`（`auto` / `concise` / `detailed`；留空 = 不发送 / 不显式请求 summary）。需要可读摘要时推荐 `auto`。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认 `[text, image]`。                                                           |
-| `supports_fast`  | bool   | `/fast on` 是否可发送 provider 专用 fast 参数。省略时 `preset: codex` 启用，其他模型关闭。                         |
+| `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |
 
-Agent 用法见 [扩展与定制 — Agent](./customization_CN.md#agent)；agent 完整 schema 见 [Agent 配置](#agent-配置)。
+服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。
+
+OpenAI 的 reasoning item 还可能通过 `reasoning.encrypted_content` 返回，用于无状态续传。这个字段是加密后的续传载荷，不适合直接在 UI 里展示；如果有可读摘要，应优先展示摘要而不是 encrypted payload。
 
 ## 相关文档
 

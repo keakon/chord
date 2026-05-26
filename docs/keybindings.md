@@ -77,13 +77,17 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
-| `Ctrl+R`     | Toggle fast responses for all agents                                                                   |
+| `Ctrl+R`     | Cycle service tier for all agents (`standard` → `fast` → `slow`)                                     |
 | `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
 ### Note on `Ctrl+O` and MCP
 
 `Ctrl+O` opens the MCP server selector in both Insert and Normal mode. You can open it while the agent is running to inspect server status, but the panel is read-only until the agent returns to idle. Only servers configured with `manual: true` can be toggled; auto-start servers are always read-only in the selector.
+
+### Mouse text selection
+
+Transcript cards, the composer input, and Done/Handoff Markdown viewers share the same mouse selection gestures: drag to select a range, double-click to select the current word, and triple-click to select the current visible line.
 
 ### Content viewer — Done reports and Handoff plans
 
@@ -167,7 +171,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `switch_agent`             | `["shift+tab"]`                  |
 | `switch_role`              | `["tab"]`                        |
 | `switch_model`             | `["ctrl+p"]`                     |
-| `fast_mode`                | `["ctrl+r"]`                     |
+| `service_tier`             | `["ctrl+r"]`                     |
 | `mcp`                      | `["ctrl+o"]`                     |
 | `diagnostics`              | `["ctrl+g"]`                     |
 

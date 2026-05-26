@@ -20,6 +20,9 @@ providers:
           input: 272000
           output: 128000
         reasoning:
+          # Recommended example when you want readable reasoning summaries from
+          # OpenAI Responses reasoning models. This is not Chord's implicit default:
+          # leave `summary` unset to omit the field and use provider/model behavior.
           summary: auto
         # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
         # the provider/model default; set low for shorter visible text output or high

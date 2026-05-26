@@ -4,9 +4,11 @@
 
 ## 未发布
 
+- TUI / 鼠标选择：文本选择体验现在在对话卡片、Done/Handoff Markdown viewer 和 composer 输入框之间保持一致。双击选中当前词，三击选中当前可见行，拖拽选择继续保持原行为。
 - TUI / 快捷键：各 overlay 不再保留未提示的关闭/操作键。Stats 浮层移除 `q`，hint 同时展示 `esc/$ close`；Model Select 移除 `ctrl+d`（esc 是文档化的关闭键）；Handoff Select 移除未公开的 `d/D`，只用 `r` 进入 deny-reason 流；通用 Confirm 对话框新增 `enter` 作为 Allow，并在 UI 显示 `[Enter/A] Allow`、`[Esc/D] Deny`。Help 与 Stats 浮层在状态栏也会显示 `esc ⇢ close`。
 - TUI / 工具卡：已恢复/已继续的文件修改卡片现在使用与实时结果一致的展开终态。没有持久化 diff 的 Edit 卡片会显示保存的结果文本，不再只渲染空 header；恢复后的 Write/Edit 错误和 Delete 完成结果也无需手动展开即可保持可见；确认弹窗里记住规则的快捷键现在是 `M`，让 `A` 保留给 Allow。
 - Auth / OAuth：不再把本地 access token 的 `expires` 元数据当作凭据已失效的证明；只有 provider 或 token endpoint 的认证失败确认不可用后，才会将 OAuth slot 标记为 `expired`。
+- Auth / Codex：Codex OAuth 运行时状态现在会在 `auth.state.yaml` 变化后自动重新加载，因此其它 Chord 进程写入的额度快照、reset 计时、刷新的账号元数据以及 invalidated/deactivated 状态无需重启当前会话即可生效。
 - **不兼容 / 配置：** 将 provider / 模型 HTTP 请求的 `User-Agent` 覆盖移到 provider 级 `user_agent`（仅影响普通模型请求）。旧的 Anthropic transport 兼容字段 `user_agent` 已移除；provider / 模型请求默认使用 `User-Agent: chord/<version>`，除非显式覆盖。
 - LSP / 诊断：Write / Edit 后追加到工具结果中的 diagnostics 现在会等待 fresh 的 publishDiagnostics 快照和短暂 settle 窗口。若 server 提供 document version，会忽略旧版本 diagnostics；无 version 的 diagnostics 也必须在 edit 通知之后到达，从而减少 gopls 等异步 server 的瞬时误报。
 - Headless / 本地 shell：新增 `local_shell` stdin 命令和 `local_shell_result` 事件，让 headless 集成可以执行 `!` 风格的本地 shell 命令，并接收带超时和输出大小限制的 stdout/stderr 合并结果。
@@ -24,7 +26,8 @@
 - TUI / 复制：在工具卡片上按 `yy` 会复制结构化的 Markdown 块（`# Tool call` / `## Arguments` / `## Result` / `## Diff`）；Done 拒绝卡片额外包含 `## Rejection reason` 段，方便粘贴到外部时保留 Chord 的展示结构。
 - Runtime / 压缩：`/compact` 现在与自动压缩共用同一个后台 worker；可以在 turn 进行中触发，进度显示在后台压缩状态槽，并在下一个安全的 continuation / idle 节点应用，而不要求先达到 idle barrier。
 - Runtime / Loop / 压缩：在 loop 模式下也会执行自动和手动上下文压缩，让长跑 loop 会话能在 context 预算耗尽后继续运行。新增消息的请求级 reduction 现在只会在 `preset: codex` provider 且 5h 或 7d 任一配额窗口剩余不足 10% 时关闭；其它情况下，loop 模式仍保持正常上下文剪裁。
-- Runtime / Fast mode：`/fast on` / `/fast off` 现在同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 fast-mode 状态。TUI 同时新增默认快捷键 `Ctrl+R`，可在 Insert 或 Normal 模式直接切换 fast mode。
+- Runtime / Service tier：`/tier standard` / `/tier fast` / `/tier slow` 和 `Ctrl+R` 现在会将 service-tier 状态同步作用到 SubAgent。已存在的 SubAgent LLM client 会立即更新；新创建、恢复、rehydrate 或切换模型的 SubAgent client 会继承当前 service-tier 状态。空的 `/tier` 不是状态查询命令；侧边栏/状态栏会在 `standard` 时隐藏 tier 标识，并且只在当前 provider/model 实际支持并应用该档位时显示 `tier: fast` / `tier: slow`。
+- **不兼容 / 配置：** 移除旧的模型字段 `supports_fast`。之前使用 `supports_fast: true` 的模型请迁移为 `supported_service_tiers: [fast]`；省略 `supported_service_tiers` 表示使用 preset/provider 默认值；如果 provider/model 支持多个非 standard tier，可显式配置如 `[fast, slow]`。
 - Runtime / Delegate todo：当当前角色有 `Delegate` 工作流时，`TodoWrite` 允许多个 `in_progress` 条目，但每个 in_progress 条目必须有唯一的 `active_form`，明确对应一个真实的 live workstream。无 `Delegate` 的角色仍保持单 in_progress 限制。
 - TUI / Thinking 翻译：译文现在持久化到 `<session_dir>/thinking_translations.json`，按 `(message, block)` 定位、用内容 hash 校验；恢复会话后会直接复用。修改 `thinking_translation.target_language` 不会重新翻译已经存在的 block —— 同一个 thinking block 最多翻译一次。译文仅用于 UI，不会写回模型上下文。
 - TUI / Thinking 翻译：如果翻译模型误回显内部包装标记（包括只有开头 `<TRANSLATION>`、缺少闭合标签的情况），Chord 会在持久化、恢复和渲染前移除这些标记，避免它们被 Markdown 解析成 HTML block 导致翻译卡片格式失效。
@@ -51,7 +54,6 @@
 - Build / 依赖：源码构建与 release artifact 现在要求 Go 1.26.3+，直接运行时依赖已更新到当前兼容最新版，并刷新了实际构建图中的间接依赖。CI 与 release workflow 都从 `go.mod` 读取 Go 版本，因此发布二进制会使用已修补的 Go toolchain 构建。
 - Runtime / 上下文：新增 `context.reduction` 下的确定性请求级上下文裁剪控制，包括陈旧工具结果剪裁阈值和专用 reduction 模型池预留配置；loop 模式仍保持不做请求级裁剪。
 - Auth / Runtime：将 OAuth 账号状态的权威来源迁移到 `auth.state.yaml`，新增 `invalidated` 状态与 `key_invalidated` 流式增量，并确保旧版 `status` 不再写入 `auth.yaml`。
-- Runtime / Fast mode：`/fast` 现在只在模型启用 `supports_fast` 能力时发送 provider 原生加速参数（OpenAI Responses 使用 `service_tier="fast"`，Anthropic 使用 `speed="fast"`）；`preset: codex` 默认启用，其它模型需要显式开启。
 - **不兼容 / 配置：** 将 `context.compact_threshold` 重命名为 `context.compaction.threshold`；旧字段不再提供兼容别名。
 - **不兼容 / 配置：** 移除 `context.auto_compact`。现在当 `context.compaction.threshold > 0` 时启用自动上下文压缩；设置 `context.compaction.threshold: 0` 可关闭。
 - **不兼容 / 配置：** 移除 `context.compact_model`。上下文压缩现在只接受 `context.compaction.model_pool` 来指定专用压缩模型池；未设置时，压缩会克隆当前 agent 的模型池，而不是回退到单个已选模型。

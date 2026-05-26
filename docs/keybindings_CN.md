@@ -77,13 +77,17 @@ TUI 有两种模式：
 | `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
 | `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
-| `Ctrl+R`      | 切换所有 agent 的 fast responses                                                                       |
+| `Ctrl+R`      | 循环切换所有 agent 的 service tier（`standard` → `fast` → `slow`）                                  |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 
 ### 关于 `Ctrl+O` 与 MCP
 
 `Ctrl+O` 在 Insert 和 Normal 模式下都会打开 MCP server 选择器。Agent 运行中也可以打开它查看 server 状态，但面板会保持只读，直到 agent 回到 idle。只有配置了 `manual: true` 的 server 才能切换启用/禁用；自动启动的 server 在选择器里始终只读。
+
+### 鼠标文本选择
+
+对话卡片、composer 输入框以及 Done/Handoff Markdown viewer 使用一致的鼠标选择手势：拖拽选择范围，双击选中当前词，三击选中当前可见行。
 
 ### Content viewer — Done report 与 Handoff plan
 
@@ -167,7 +171,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `switch_agent`             | `["shift+tab"]`                   |
 | `switch_role`              | `["tab"]`                         |
 | `switch_model`             | `["ctrl+p"]`                      |
-| `fast_mode`                | `["ctrl+r"]`                      |
+| `service_tier`             | `["ctrl+r"]`                      |
 | `mcp`                      | `["ctrl+o"]`                      |
 | `diagnostics`              | `["ctrl+g"]`                      |
 

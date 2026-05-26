@@ -131,12 +131,10 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可在空闲时切换手动 server
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)
-- `/fast on` / `/fast off`：开启或关闭快速响应模式，对后续模型请求生效（包括尚未开始的后续 retry round）。
-  - 只有启用了 `supports_fast` 能力的模型才会发送 fast 请求参数。省略 `supports_fast` 时，`preset: codex` 模型默认启用，其他模型默认关闭。
-  - 对 OpenAI Responses：启用时会设置 `service_tier="fast"`。
-  - 对 Claude（Anthropic）：启用时会设置 `speed="fast"`（需要 provider 支持相应 beta/版本）。
-  - 不会修改 `reasoning.effort` / `text.verbosity` 等行为参数；如需更激进的降配请用模型池或 `@variant`。
+- `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
+
+当当前 provider/model 实际启用了非 standard tier 时，侧边栏/状态区域会正常显示它。如果请求了当前 provider/model 不支持的 tier，信息面板仍会以灰色删除线显示请求的 tier，让它保持可见但明确表示未生效。
 
 下面几个命令有更多交互细节，单独展开说明。
 
@@ -211,7 +209,7 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 3. **verifying**：运行校验（跑测试、lint 等）
 4. **继续或申请退出**：如果仍有工作，就继续推进；如果它认为 loop 可以结束，必须通过 `Done` 工具提出退出请求
 
-如果 `Done` 在退出条件尚未满足时被调用，Chord 会拒绝这次退出请求，并让 agent 自动继续运行。只有当退出条件满足时，Chord 才会弹出本地确认框，而不是立即停止。`Done` 工具必须带一个非空的 `report` 参数来承载最终完成报告，确认框展示的也正是这份报告。`report` 生成过程中，Done 工具卡片会像其他流式工具参数一样显示实时的 `chars received` 进度。你确认退出后，loop 才真正结束并回到 idle；如果你选择继续运行，loop 会自动继续。
+如果 `Done` 在退出条件尚未满足时被调用，Chord 会拒绝这次退出请求，并让 agent 自动继续运行。只有当退出条件满足时，Chord 才会弹出本地确认框，而不是立即停止。`Done` 工具必须带一个非空的 `report` 参数来承载最终完成报告，确认框展示的也正是这份报告。`report` 参数仍在流式接收时，Done 工具卡片会像其他流式工具参数一样显示实时的 `chars received` 进度；参数流结束后，这个临时进度提示会被隐藏。你确认退出后，loop 才真正结束并回到 idle；如果你选择继续运行，loop 会自动继续。
 
 loop 模式也会防止工具调用卡死循环。如果 MainAgent 连续 3 次发出完全相同的工具调用（工具名相同且参数相同），Chord 会自动拒绝这次工具结果，向模型注入“不要原样重复调用、继续朝 loop 目标推进”的指导，并把它计为一次 loop 拦截。检测使用滑动窗口：如果第 4 次调用仍然完全相同，也会立即再次拒绝。达到 loop 拦截上限后，Chord 会弹出同样的本地确认流程，由你决定停止还是继续。
 

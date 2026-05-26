@@ -26,9 +26,9 @@ The runtime process of summarizing earlier conversation into a compact context s
 
 A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Configuration — Reduction](./configuration.md#context-reduction).
 
-## Fast mode
+## Service tier
 
-A user-togglable mode (`/fast on|off`) that sends provider-specific fast-mode request parameters to reduce response latency. For OpenAI Responses this requests `service_tier="fast"`; for Anthropic it requests `speed="fast"`. Only models with `supports_fast: true` include the fast parameters. Fast mode is a *request* to the provider, not a guarantee — the provider may ignore it under load.
+A user-togglable request tier (`/tier standard|fast|slow`) that asks the active provider/model to use the closest supported latency / cost mode. OpenAI maps this to its service-tier knobs (`fast` → `fast`, `slow` → `flex`), Anthropic maps `fast` to `speed` / service-tier controls and leaves `slow` unsupported, and Gemini uses its own routing / thinking controls where applicable. The tier is a request hint, not a guarantee; the provider may still fall back under load or model limits. Billing follows the active provider/model's configured pricing for the effective tier; use `cost.service_tier_multipliers` to model tier-specific price multipliers when the provider charges differently.
 
 ## Loop mode
 
