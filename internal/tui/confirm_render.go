@@ -191,26 +191,36 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 
 	// Pattern section
 	lines = append(lines, ConfirmToolStyle.Render("Pattern:"))
-	for i, c := range m.confirm.candidates {
-		marker := "( )"
-		if i == m.confirm.patternIdx {
-			marker = "(●)"
+	if m.confirm.editingRulePattern {
+		lines = append(lines, ConfirmAllowStyle.Render(m.confirm.rulePatternInput.View()))
+		if m.confirm.editError != "" {
+			lines = append(lines, ConfirmDenyStyle.Render(m.confirm.editError))
 		}
-		broadTag := ""
-		if c.Broad {
-			broadTag = "  ⚠ very broad"
+	} else {
+		for i, c := range m.confirm.candidates {
+			marker := "( )"
+			if i == m.confirm.patternIdx {
+				marker = "(●)"
+			}
+			broadTag := ""
+			if c.Broad {
+				broadTag = "  ⚠ very broad"
+			}
+			line := fmt.Sprintf("  %s %s", marker, c.Pattern)
+			if c.Summary != "" {
+				line += "  — " + c.Summary
+			}
+			if broadTag != "" {
+				line += broadTag
+			}
+			if i == m.confirm.patternIdx {
+				lines = append(lines, ConfirmAllowStyle.Render(line))
+			} else {
+				lines = append(lines, DimStyle.Render(line))
+			}
 		}
-		line := fmt.Sprintf("  %s %s", marker, c.Pattern)
-		if c.Summary != "" {
-			line += "  — " + c.Summary
-		}
-		if broadTag != "" {
-			line += broadTag
-		}
-		if i == m.confirm.patternIdx {
-			lines = append(lines, ConfirmAllowStyle.Render(line))
-		} else {
-			lines = append(lines, DimStyle.Render(line))
+		if m.confirm.editError != "" {
+			lines = append(lines, ConfirmDenyStyle.Render(m.confirm.editError))
 		}
 	}
 
@@ -242,7 +252,7 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 	}
 
 	lines = append(lines, "")
-	hint := ConfirmHintStyle.Render("[↑↓] pattern  [Tab] scope  [Enter] add rule + allow  [Esc] back")
+	hint := ConfirmHintStyle.Render("[↑↓] pattern  [E] edit pattern  [Tab] scope  [Enter] add rule + allow  [Esc] back")
 	lines = append(lines, hint)
 
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)

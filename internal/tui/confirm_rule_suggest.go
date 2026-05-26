@@ -31,8 +31,7 @@ func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd 
 	case "webfetch":
 		return suggestWebFetchPatterns(argsJSON)
 	case "delete":
-		// Delete approvals are path-specific; do not suggest reusable rule candidates.
-		return nil
+		return suggestDeletePatterns(argsJSON, needsApproval)
 	case "read", "grep", "glob", "lsp", "skill":
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
@@ -243,6 +242,34 @@ func isPathWithinCWD(filePath, cwd string) bool {
 		return true
 	}
 	return strings.HasPrefix(path, cwd+string(os.PathSeparator))
+}
+
+// suggestDeletePatterns generates conservative path-specific candidates for Delete.
+func suggestDeletePatterns(argsJSON string, needsApproval []string) []PatternCandidate {
+	paths := append([]string(nil), needsApproval...)
+	if len(paths) == 0 {
+		var req struct {
+			Paths []string `json:"paths"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &req); err == nil {
+			paths = append(paths, req.Paths...)
+		}
+	}
+	candidates := make([]PatternCandidate, 0, min(len(paths)*2, 6))
+	seenDir := make(map[string]bool)
+	for _, raw := range paths {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		candidates = append(candidates, PatternCandidate{Pattern: p, Summary: "this exact path", Default: len(candidates) == 0})
+		dir := filepath.Dir(p)
+		if dir != "." && dir != "" && !seenDir[dir] {
+			seenDir[dir] = true
+			candidates = append(candidates, PatternCandidate{Pattern: filepath.Join(dir, "*"), Summary: "any path in " + dir + "/", Broad: true})
+		}
+	}
+	return normalizePatternCandidates(candidates)
 }
 
 // suggestWebFetchPatterns generates pattern candidates for WebFetch tool.

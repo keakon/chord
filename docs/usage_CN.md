@@ -174,16 +174,21 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 
 浮层打开期间，所有活动搜索自动取消。按 `Esc` 关闭。也可在 Normal 模式用 `$` 键直接打开。
 
-### `/rules` — 会话规则管理器
+### `/rules` — 权限规则管理器
 
-打开一个浮层，查看当前会话中通过权限确认弹窗"允许并记住规则"添加的规则。
+打开一个浮层管理已记住的权限规则。即使当前还没有规则也会打开，因此可以手动新增规则。
 
+- `a`：手动添加规则
 - `↑` / `↓` 或 `j` / `k`：移动光标
 - `d`：删除当前规则
 - `o`：在系统编辑器中打开规则对应的配置文件
 - `Esc` / `q`：关闭
 
+手动添加规则时，填写 tool 名称和 pattern，然后用 `Ctrl+S` 切换作用域（`session` / `project` / `global`），用 `Ctrl+A` 切换动作（`allow` / `ask` / `deny`）。tool 和 pattern 必填。不会匹配后续工具调用的 pattern 也可以保存，但在实际命中前不会产生效果。
+
 规则旁会显示作用域（`session` / `project` / `global`）和落盘文件路径。`session` 规则只在当前会话内生效；`project` 规则写入当前项目的 `.chord/agents/<role>.yaml`；`global` 规则写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。这些规则会直接更新对应 agent 的 `permission` 配置，删除规则时也会从同一 agent 配置文件移除。
+
+权限确认弹窗也可以用 `M` 添加记住规则。在规则选择器中按 `E` 可在保存前编辑建议 pattern。Delete 确认会使用保守的路径级建议（精确路径和同目录 pattern），不会提供全局通配。
 
 ### `/loop` — 持续执行模式
 

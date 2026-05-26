@@ -174,16 +174,21 @@ Project statistics are auto-aggregated from local sessions directories, with fiv
 
 Any active search is automatically cleared when the overlay opens. Press `Esc` to close. You can also open it directly via the `$` key in Normal mode.
 
-### `/rules` — session rule manager
+### `/rules` — permission rule manager
 
-Opens an overlay listing rules added during the current session via the confirmation popup's "allow and remember" path.
+Opens an overlay for remembered permission rules. It opens even when no rules have been added yet, so you can add one manually.
 
+- `a`: add a rule manually
 - `↑` / `↓` or `j` / `k`: move cursor
 - `d`: delete the current rule
 - `o`: open the rule's backing config file in the OS editor
 - `Esc` / `q`: close
 
+When adding a rule manually, enter the tool name and pattern, then use `Ctrl+S` to cycle scope (`session` / `project` / `global`) and `Ctrl+A` to cycle action (`allow` / `ask` / `deny`). Tool and pattern are required. Patterns that do not match future tool calls are accepted but have no effect until they match.
+
 Each rule shows its scope (`session` / `project` / `global`) and on-disk file path. `session` rules apply only to the current session; `project` rules are written to the current project's `.chord/agents/<role>.yaml`; `global` rules are written to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). These rules directly update the target agent's `permission` config, and deleting a rule removes it from the same agent config file.
+
+The confirmation popup also supports adding a remembered rule with `M`. In the rule picker, press `E` to edit the suggested pattern before saving. Delete confirmations use conservative path-specific suggestions (exact paths and same-directory patterns) instead of a global wildcard.
 
 ### `/loop` — continuous execution mode
 

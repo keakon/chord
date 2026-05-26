@@ -84,11 +84,13 @@ type confirmState struct {
 	deadline  time.Time       // zero value = no timeout
 
 	// Rule picker state
-	pickingRule bool               // true while in rule picker sub-mode
-	candidates  []PatternCandidate // suggested patterns
-	patternIdx  int                // selected pattern index
-	scopeIdx    int                // selected scope index (0=session, 1=project, 2=user-global)
-	scopes      []permission.RuleScope
+	pickingRule        bool               // true while in rule picker sub-mode
+	candidates         []PatternCandidate // suggested patterns
+	patternIdx         int                // selected pattern index
+	scopeIdx           int                // selected scope index (0=session, 1=project, 2=user-global)
+	scopes             []permission.RuleScope
+	editingRulePattern bool
+	rulePatternInput   textarea.Model
 
 	// Deny with reason state
 	denyingWithReason bool           // true while in deny-reason sub-mode

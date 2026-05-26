@@ -135,6 +135,9 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	if m.confirm.editing {
 		return m.handleConfirmEditKey(msg)
 	}
+	if m.confirm.pickingRule && m.confirm.editingRulePattern {
+		return m.handleConfirmRulePatternEditKey(msg)
+	}
 	if m.confirm.pickingRule {
 		return m.handleConfirmRulePickerKey(msg)
 	}
@@ -226,8 +229,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return textareaBlinkCmd()
 
 	case "m", "M":
-		// Enter rule picker (not available for Delete)
-		if m.confirm.request != nil && !strings.EqualFold(m.confirm.request.ToolName, "Delete") {
+		if m.confirm.request != nil {
 			m.enterRulePicker()
 			m.recalcViewportSize()
 		}
@@ -302,7 +304,12 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		if len(m.confirm.candidates) == 0 || len(m.confirm.scopes) == 0 {
 			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 		}
-		pattern := m.confirm.candidates[m.confirm.patternIdx].Pattern
+		pattern := strings.TrimSpace(m.confirm.candidates[m.confirm.patternIdx].Pattern)
+		if pattern == "" {
+			m.confirm.editError = "Pattern is required."
+			m.recalcViewportSize()
+			return nil
+		}
 		scope := m.confirm.scopes[m.confirm.scopeIdx]
 		return m.resolveConfirm(ConfirmResult{
 			Action: ConfirmAllow,
@@ -311,6 +318,16 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 				Scope:   scope,
 			},
 		})
+
+	case "e", "E":
+		if len(m.confirm.candidates) == 0 {
+			return nil
+		}
+		m.confirm.editingRulePattern = true
+		m.confirm.editError = ""
+		m.confirm.rulePatternInput = newConfirmTextarea(m.width, m.height, m.confirm.candidates[m.confirm.patternIdx].Pattern)
+		m.recalcViewportSize()
+		return textareaBlinkCmd()
 
 	case "esc":
 		// Back to main confirm dialog
@@ -321,6 +338,44 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		pattern := strings.TrimSpace(m.confirm.rulePatternInput.Value())
+		if pattern == "" {
+			m.confirm.editError = "Pattern is required."
+			m.recalcViewportSize()
+			return nil
+		}
+		if len(m.confirm.candidates) == 0 {
+			m.confirm.candidates = []PatternCandidate{{Pattern: pattern, Summary: "custom pattern", Default: true}}
+			m.confirm.patternIdx = 0
+		} else {
+			m.confirm.candidates[m.confirm.patternIdx].Pattern = pattern
+			m.confirm.candidates[m.confirm.patternIdx].Summary = "custom pattern"
+			m.confirm.candidates[m.confirm.patternIdx].Broad = pattern == "*"
+		}
+		m.confirm.editingRulePattern = false
+		m.confirm.rulePatternInput.Blur()
+		m.confirm.editError = ""
+		m.recalcViewportSize()
+		return nil
+	case "esc":
+		m.confirm.editingRulePattern = false
+		m.confirm.rulePatternInput.Blur()
+		m.confirm.editError = ""
+		m.recalcViewportSize()
+		return nil
+	default:
+		if m.confirm.editError != "" {
+			m.confirm.editError = ""
+		}
+		var cmd tea.Cmd
+		m.confirm.rulePatternInput, cmd = m.confirm.rulePatternInput.Update(msg)
+		return cmd
+	}
 }
 
 // handleConfirmDenyReasonKey processes key events in the deny-reason sub-mode.

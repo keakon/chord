@@ -16,18 +16,36 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 	if intent == nil {
 		return
 	}
+	a.addPermissionRule(permission.Rule{Permission: toolName, Pattern: intent.Pattern, Action: permission.ActionAllow}, permission.RuleScope(intent.Scope))
+}
+
+// AddOverlayRule adds a permission rule from the /rules UI and refreshes runtime state.
+func (a *MainAgent) AddOverlayRule(rule permission.Rule, scope permission.RuleScope) error {
+	return a.addPermissionRule(rule, scope)
+}
+
+func (a *MainAgent) addPermissionRule(rule permission.Rule, scope permission.RuleScope) error {
 	if a.overlay == nil {
 		a.initOverlay()
 		if a.overlay == nil {
-			return
+			return fmt.Errorf("permission overlay unavailable")
 		}
 	}
-	intent.Pattern = strings.TrimSpace(intent.Pattern)
-	if intent.Pattern == "" {
-		return
+	rule.Permission = strings.TrimSpace(rule.Permission)
+	rule.Pattern = strings.TrimSpace(rule.Pattern)
+	if rule.Permission == "" {
+		return fmt.Errorf("permission tool is required")
 	}
-	if strings.EqualFold(toolName, "Delete") {
-		return // never persist always-allow for Delete
+	if rule.Pattern == "" {
+		return fmt.Errorf("permission pattern is required")
+	}
+	if rule.Action == "" {
+		rule.Action = permission.ActionAllow
+	}
+	switch rule.Action {
+	case permission.ActionAllow, permission.ActionAsk, permission.ActionDeny:
+	default:
+		return fmt.Errorf("unsupported permission action %q", rule.Action)
 	}
 
 	// Get the role name for tracking
@@ -41,13 +59,6 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 		roleName = "builder"
 	}
 
-	rule := permission.Rule{
-		Permission: toolName,
-		Pattern:    intent.Pattern,
-		Action:     permission.ActionAllow,
-	}
-	scope := permission.RuleScope(intent.Scope)
-
 	var err error
 	scopePath := ""
 	switch scope {
@@ -58,7 +69,7 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 	case permission.ScopeUserGlobal:
 		scopePath = strings.TrimSpace(a.overlay.UserGlobalPath())
 	default:
-		err = fmt.Errorf("unknown rule scope %d", intent.Scope)
+		err = fmt.Errorf("unknown rule scope %d", scope)
 	}
 	if err == nil && (scope == permission.ScopeProject || scope == permission.ScopeUserGlobal) {
 		if scopePath == "" {
@@ -68,14 +79,14 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 		}
 	}
 	if err != nil {
-		log.Warnf("failed to add permission overlay rule tool=%v pattern=%v scope=%v err=%v", toolName, intent.Pattern, scope.String(), err)
+		log.Warnf("failed to add permission overlay rule tool=%v pattern=%v action=%v scope=%v err=%v", rule.Permission, rule.Pattern, rule.Action, scope.String(), err)
 		if a.outputCh != nil {
 			a.emitToTUI(ToastEvent{
 				Message: fmt.Sprintf("Failed to add rule: %v", err),
 				Level:   "error",
 			})
 		}
-		return
+		return err
 	}
 
 	// Update the merged ruleset
@@ -99,10 +110,11 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 	}
 	if a.outputCh != nil {
 		a.emitToTUI(ToastEvent{
-			Message: fmt.Sprintf("Rule added: %s %q · %s — /rules to undo", toolName, intent.Pattern, scopeText),
+			Message: fmt.Sprintf("Rule added: %s %s %q · %s — /rules to undo", rule.Permission, rule.Action, rule.Pattern, scopeText),
 			Level:   "info",
 		})
 	}
+	return nil
 }
 
 func (a *MainAgent) activeConfigSnapshot() *config.AgentConfig {

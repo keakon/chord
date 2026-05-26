@@ -161,9 +161,17 @@ func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_Delete(t *testing.T) {
-	candidates := suggestRulePatterns("Delete", `{"paths":["foo.go"]}`, nil, "")
-	if candidates != nil {
-		t.Error("expected nil candidates for Delete tool")
+	candidates := suggestRulePatterns("Delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, "")
+	if len(candidates) == 0 {
+		t.Fatal("expected conservative candidates for Delete tool")
+	}
+	if candidates[0].Pattern != "tmp/foo.log" || !candidates[0].Default {
+		t.Fatalf("first candidate = %+v, want exact default path", candidates[0])
+	}
+	for _, c := range candidates {
+		if c.Pattern == "*" {
+			t.Fatalf("Delete candidates should not include global wildcard: %+v", candidates)
+		}
 	}
 }
 

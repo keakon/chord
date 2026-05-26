@@ -24,6 +24,12 @@ func (s *rulesAgentStub) AddedOverlayRules() []permission.AddedRule {
 	return out
 }
 
+func (s *rulesAgentStub) AddOverlayRule(rule permission.Rule, scope permission.RuleScope) error {
+	role := strings.TrimSpace(s.currentRole)
+	s.added = append(s.added, permission.AddedRule{Role: role, Rule: rule, Scope: scope})
+	return nil
+}
+
 func (s *rulesAgentStub) RemoveOverlayAddedRule(index int) error {
 	s.removedIdx = append(s.removedIdx, index)
 	if s.removeErr != nil {
@@ -69,7 +75,7 @@ func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 	}
 }
 
-func TestOpenRulesWithNoRulesShowsToastAndKeepsMode(t *testing.T) {
+func TestOpenRulesWithNoRulesOpensEmptyOverlay(t *testing.T) {
 	ag := &rulesAgentStub{
 		sessionControlAgent: sessionControlAgent{
 			events:      make(chan agent.AgentEvent),
@@ -80,14 +86,43 @@ func TestOpenRulesWithNoRulesShowsToastAndKeepsMode(t *testing.T) {
 	m.mode = ModeNormal
 
 	cmd := m.openRules()
-	if m.mode != ModeNormal {
-		t.Fatalf("mode = %v, want ModeNormal", m.mode)
+	if m.mode != ModeRules {
+		t.Fatalf("mode = %v, want ModeRules", m.mode)
 	}
-	if cmd == nil {
-		t.Fatal("expected toast command")
+	if cmd != nil {
+		t.Fatal("expected no toast command")
 	}
-	if m.activeToast == nil || m.activeToast.Message != "No rules added this session" {
-		t.Fatalf("active toast = %#v, want no-rules toast", m.activeToast)
+	plain := stripANSI(m.renderRulesList())
+	if !strings.Contains(plain, "No remembered rules yet") || !strings.Contains(plain, "Press A to add") {
+		t.Fatalf("empty /rules view = %q", plain)
+	}
+}
+
+func TestRulesAddManualRuleUsesAgentBackend(t *testing.T) {
+	ag := &rulesAgentStub{
+		sessionControlAgent: sessionControlAgent{
+			events:      make(chan agent.AgentEvent),
+			currentRole: "builder",
+		},
+	}
+	m := NewModel(ag)
+	_ = m.openRules()
+	_ = m.startAddRule()
+	m.rules.addToolInput.SetValue("Delete")
+	m.rules.addPatInput.SetValue("tmp/*")
+	m.rules.addScopeIdx = 1  // project
+	m.rules.addActionIdx = 2 // deny
+
+	_ = m.submitAddRule()
+	if m.rules.adding {
+		t.Fatal("add form should close after successful submit")
+	}
+	if got := len(ag.added); got != 1 {
+		t.Fatalf("agent rules = %d, want 1", got)
+	}
+	added := ag.added[0]
+	if added.Rule.Permission != "Delete" || added.Rule.Pattern != "tmp/*" || added.Rule.Action != permission.ActionDeny || added.Scope != permission.ScopeProject {
+		t.Fatalf("added rule = %+v", added)
 	}
 }
 
