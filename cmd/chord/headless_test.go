@@ -827,22 +827,6 @@ func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	}
 }
 
-func TestHeadlessModelsCommandSetCurrentModelPoolLegacyAlias(t *testing.T) {
-	state := &headlessState{}
-	to := newTestOut()
-	backend := &mockBackend{}
-
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_role", Pool: "fast"}, backend, state, to.writer(), "test-session")
-
-	backend.mu.Lock()
-	msgs := append([]string(nil), backend.sentMessages...)
-	backend.mu.Unlock()
-	want := []string{"set-current-model-pool:fast"}
-	if len(msgs) != len(want) || msgs[0] != want[0] {
-		t.Fatalf("sent messages = %v, want %v", msgs, want)
-	}
-}
-
 func TestHeadlessUnsupportedRemoteCommand(t *testing.T) {
 	tests := []struct {
 		content string

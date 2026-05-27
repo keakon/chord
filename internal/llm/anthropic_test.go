@@ -439,31 +439,6 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	}
 }
 
-func TestParseSSEStreamUsesAnthropicLegacyCacheCreationInputTokens(t *testing.T) {
-	stream := strings.Join([]string{
-		"event: message_start",
-		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":62156}}}",
-		"",
-		"event: message_stop",
-		"data: {\"type\":\"message_stop\"}",
-		"",
-	}, "\n")
-
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
-	if err != nil {
-		t.Fatalf("parseSSEStream: %v", err)
-	}
-	if resp == nil || resp.Usage == nil {
-		t.Fatalf("resp/usage = %#v, want non-nil", resp)
-	}
-	if got := resp.Usage.InputTokens; got != 1 {
-		t.Fatalf("InputTokens = %d, want 1", got)
-	}
-	if got := resp.Usage.CacheWriteTokens; got != 62156 {
-		t.Fatalf("CacheWriteTokens = %d, want legacy cache_creation_input_tokens", got)
-	}
-}
-
 func TestParseSSEStreamEmitsProgressDeltas(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: message_start",

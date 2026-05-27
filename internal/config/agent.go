@@ -236,7 +236,7 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 		return nil, fmt.Errorf("agent config %s: empty config", path)
 	}
 
-	// Inline models: { ... } definitions are deprecated and no longer supported.
+	// Inline models: { ... } definitions are not supported.
 	// Model pools must be defined in config.yaml's top-level model_pools.
 	// Agents may optionally restrict usable pools via model_pools: [...].
 	if len(cfg.Models) > 0 {

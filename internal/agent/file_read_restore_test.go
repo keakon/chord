@@ -56,27 +56,6 @@ func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *test
 	}
 }
 
-func TestRestoreTrackedFileStateSkipsMissingDurableReadState(t *testing.T) {
-	projectRoot := t.TempDir()
-	path := filepath.Join(projectRoot, "demo.txt")
-	writeTestFile(t, path, "before")
-
-	a := newRestoreEditTestAgent(t, projectRoot)
-	msgs := []message.Message{
-		restoreAssistantCall(t, "read-legacy", tools.NameRead, map[string]any{"path": path}, nil),
-		{Role: "tool", ToolCallID: "read-legacy", Content: "1\tbefore"},
-	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
-	if result.RestoredUsable != 0 || result.SkippedMissingDurableState != 1 {
-		t.Fatalf("restore result = %+v, want missing durable state to be skipped", result)
-	}
-
-	err := executeEdit(t, a, path, "before", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been read") {
-		t.Fatalf("edit error = %v, want unread-file error", err)
-	}
-}
-
 func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
@@ -132,30 +111,6 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 		t.Fatalf("old path edit error = %v, want unread-file error", err)
 	}
 	mustExecuteEdit(t, a, realPath, "real", "updated")
-}
-
-func TestRestoreTrackedFileStateWrappedArgsRequireDurableMetadata(t *testing.T) {
-	projectRoot := t.TempDir()
-	path := filepath.Join(projectRoot, "wrapped.txt")
-	writeTestFile(t, path, "before")
-
-	a := newRestoreEditTestAgent(t, projectRoot)
-	rawArgs := mustJSONRaw(t, map[string]any{"path": path})
-	wrappedArgs, err := json.Marshal(string(rawArgs))
-	if err != nil {
-		t.Fatalf("marshal wrapped args: %v", err)
-	}
-	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead, Args: wrappedArgs}}},
-		{Role: "tool", ToolCallID: "read-1", Content: "1\tbefore"},
-	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
-	if result.RestoredUsable != 0 || result.SkippedMissingDurableState != 1 {
-		t.Fatalf("restore result = %+v, want wrapped args without durable state skipped", result)
-	}
-	if err := executeEdit(t, a, path, "before", "after"); err == nil || !strings.Contains(err.Error(), "has not been read") {
-		t.Fatalf("edit error = %v, want unread-file error", err)
-	}
 }
 
 func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T) {
@@ -409,26 +364,6 @@ func TestRestoreTrackedFileStateSkipReasonCounters(t *testing.T) {
 		result.SkippedStateMismatch != 1 ||
 		result.SkippedDeleteState != 1 {
 		t.Fatalf("restore result = %+v, want one skip in each classified bucket", result)
-	}
-}
-
-func TestRestoreTrackedFileStateMissingDurableStateCounters(t *testing.T) {
-	projectRoot := t.TempDir()
-	legacyPath := filepath.Join(projectRoot, "legacy.txt")
-	writeTestFile(t, legacyPath, "legacy")
-	missingPath := filepath.Join(projectRoot, "missing.txt")
-
-	msgs := []message.Message{
-		restoreAssistantCall(t, "legacy-1", tools.NameRead, map[string]any{"path": legacyPath}, nil),
-		{Role: "tool", ToolCallID: "legacy-1", Content: "1\tlegacy"},
-		restoreAssistantCall(t, "legacy-2", tools.NameRead, map[string]any{"path": missingPath}, nil),
-		{Role: "tool", ToolCallID: "legacy-2", Content: "1\tmissing"},
-	}
-
-	a := newRestoreEditTestAgent(t, projectRoot)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
-	if result.Skipped != 2 || result.SkippedMissingDurableState != 2 {
-		t.Fatalf("restore result = %+v, want missing durable state skips classified", result)
 	}
 }
 

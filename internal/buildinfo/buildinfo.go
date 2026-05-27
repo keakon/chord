@@ -24,10 +24,6 @@ import (
 //	-X github.com/keakon/chord/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 //	-X github.com/keakon/chord/internal/buildinfo.Dirty=false
 //
-// The historical `-X main.Version=<version>` path is bridged from cmd/chord
-// to Version here during package init for backwards compatibility with
-// existing CI workflows.
-//
 // Plain `go build ./cmd/chord` still records useful VCS fields through Go's
 // build info when the build is performed inside a Git checkout with buildvcs
 // enabled, so Commit and Dirty remain populated even without ldflags.
@@ -67,9 +63,8 @@ type Field struct {
 }
 
 const (
-	unknown               = "unknown"
-	DefaultDevVersion     = "v0.6.1-dev"
-	historicalMainVersion = "dev"
+	unknown           = "unknown"
+	DefaultDevVersion = "v0.6.1-dev"
 )
 
 // current is the cached result of [computeCurrent]. The build identity does
@@ -114,18 +109,6 @@ func computeCurrent() Info {
 	}
 	info.ExecutablePath, info.ExecutableMTime = executableMetadata()
 	return info
-}
-
-// IsDefaultDevVersion reports whether version is the source default used for
-// plain local development builds.
-func IsDefaultDevVersion(version string) bool {
-	return strings.TrimSpace(version) == DefaultDevVersion
-}
-
-// IsHistoricalMainVersion reports whether version is the historical cmd/chord
-// default used before buildinfo owned the default development version.
-func IsHistoricalMainVersion(version string) bool {
-	return strings.TrimSpace(version) == historicalMainVersion
 }
 
 // Short returns a compact one-line identity intended for human-facing

@@ -94,7 +94,7 @@ func TestUpsertOAuthCredentialInFile_AppendsWhenExistingSlotHasNoAccountID(t *te
 		t.Fatalf("expected 2 oauth credentials, got %#v", creds)
 	}
 	if creds[0].OAuth == nil || creds[0].OAuth.Access != "old-access" || creds[0].OAuth.AccountID != "" {
-		t.Fatalf("expected legacy slot unchanged, got %#v", creds[0])
+		t.Fatalf("expected existing slot unchanged, got %#v", creds[0])
 	}
 	if creds[1].OAuth == nil || creds[1].OAuth.Access != "new-access" || creds[1].OAuth.AccountID != "acc-1" {
 		t.Fatalf("expected new slot appended, got %#v", creds[1])
@@ -135,65 +135,6 @@ func TestUpdateOAuthCredentialInFile_RequiresAccountIDMatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "oauth credential not found") {
 		t.Fatalf("expected oauth credential not found error, got %v", err)
-	}
-}
-
-func TestUpdateOAuthCredentialInFile_UsesCredentialIndexFallbackAcrossMixedNormalizedCredentials(t *testing.T) {
-	path := writeAuthFixture(t, `openai:
-  - $UNSET_AUTH_SLOT
-  - sk-live
-  - ""
-  - refresh: target-refresh
-    access: target-access
-    expires: 111
-  - refresh: sibling-refresh
-    access: sibling-access
-    expires: 222
-`)
-	_ = os.Unsetenv("UNSET_AUTH_SLOT")
-
-	credentialIndex := 2
-	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{
-		Access:          "missing-access",
-		CredentialIndex: &credentialIndex,
-	}, func(cred *OAuthCredential) (bool, error) {
-		cred.Status = OAuthStatusExpired
-		return true, nil
-	})
-	if err != nil {
-		t.Fatalf("UpdateOAuthCredentialInFile: %v", err)
-	}
-	if !changed {
-		t.Fatal("expected changed=true when credential index fallback matches target OAuth credential")
-	}
-	if updated == nil || updated.Access != "target-access" || updated.Status != OAuthStatusExpired {
-		t.Fatalf("updated credential = %#v, want target-access with expired status", updated)
-	}
-
-	creds := auth["openai"]
-	if len(creds) != 4 {
-		t.Fatalf("expected 4 normalized openai credentials after filtering hidden env slot, got %#v", creds)
-	}
-	if creds[0].APIKey != "sk-live" {
-		t.Fatalf("expected first normalized credential to be API key, got %#v", creds[0])
-	}
-	if !creds[1].ExplicitEmpty {
-		t.Fatalf("expected second normalized credential to be explicit empty, got %#v", creds[1])
-	}
-	if got := creds[2].OAuth; got == nil || got.Access != "target-access" || got.Status != OAuthStatusNormal {
-		t.Fatalf("expected auth.yaml credential to omit status, got %#v", got)
-	}
-	if got := creds[3].OAuth; got == nil || got.Access != "sibling-access" || got.Status != OAuthStatusNormal {
-		t.Fatalf("expected sibling OAuth credential to remain unchanged, got %#v", got)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "status:") {
-		t.Fatalf("expected auth.yaml to omit status fields, got:\n%s", text)
 	}
 }
 

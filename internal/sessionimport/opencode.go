@@ -317,7 +317,7 @@ func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string)
 }
 
 func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (string, []string) {
-	// Common legacy OpenCode shapes: {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
+	// Common OpenCode tool shapes: {"tool":{...}}, {"shell":{...}}, or content blocks of type "tool".
 	var warns []string
 	if raw, ok := obj["tool"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		pretty := indentJSON(raw)

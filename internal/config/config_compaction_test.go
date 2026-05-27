@@ -84,7 +84,7 @@ func TestLoadConfigFromPathParsesMaxOutputTokens(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathIgnoresLegacyOutputTokenMax(t *testing.T) {
+func TestLoadConfigFromPathIgnoresUnknownOutputTokenMax(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("output_token_max: 8192\n")
@@ -97,7 +97,7 @@ func TestLoadConfigFromPathIgnoresLegacyOutputTokenMax(t *testing.T) {
 		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
 	if cfg.MaxOutputTokens != 0 {
-		t.Fatalf("legacy output_token_max should be ignored, got max_output_tokens = %d", cfg.MaxOutputTokens)
+		t.Fatalf("output_token_max should be ignored, got max_output_tokens = %d", cfg.MaxOutputTokens)
 	}
 }
 

@@ -149,7 +149,7 @@ providers:
 	}
 }
 
-func TestConfigYAML_ModelTextVerbosityAndLegacyFallback(t *testing.T) {
+func TestConfigYAML_ModelTextVerbosity(t *testing.T) {
 	const raw = `
 providers:
   openai-main:

@@ -43,7 +43,6 @@ var (
 	// Path policy overrides (CLI > env > config.yaml paths.* > XDG defaults).
 	// These map to CHORD_* env vars so internal config/path resolvers stay centralized.
 	flagConfigHome  string
-	flagConfig      string // alias of --config-home
 	flagStateDir    string
 	flagCacheDir    string
 	flagSessionsDir string
@@ -116,12 +115,6 @@ func newRootCmd() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			// Apply CLI path overrides as env vars so they participate in the
 			// unified path policy resolution across all commands.
-			if strings.TrimSpace(flagConfigHome) != "" && strings.TrimSpace(flagConfig) != "" && strings.TrimSpace(flagConfigHome) != strings.TrimSpace(flagConfig) {
-				return fmt.Errorf("--config-home and --config specify different values")
-			}
-			if strings.TrimSpace(flagConfigHome) == "" {
-				flagConfigHome = flagConfig
-			}
 			if strings.TrimSpace(flagConfigHome) != "" {
 				os.Setenv("CHORD_CONFIG_HOME", strings.TrimSpace(flagConfigHome))
 			}
@@ -149,9 +142,6 @@ func newRootCmd() *cobra.Command {
 	// Storage path overrides (see docs/guides/session-storage.md).
 	rootCmd.PersistentFlags().StringVar(&flagConfigHome, "config-home", "",
 		"Config home directory (overrides CHORD_CONFIG_HOME)")
-	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "",
-		"Alias of --config-home")
-	_ = rootCmd.PersistentFlags().MarkHidden("config")
 	rootCmd.PersistentFlags().StringVar(&flagStateDir, "state-dir", "",
 		"State directory (overrides CHORD_STATE_DIR and config.yaml paths.state_dir)")
 	rootCmd.PersistentFlags().StringVar(&flagCacheDir, "cache-dir", "",

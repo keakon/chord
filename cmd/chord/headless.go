@@ -748,7 +748,7 @@ func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBack
 	switch strings.TrimSpace(cmd.Action) {
 	case "", "status":
 		emitHeadlessModelsResponse(out, true, "", backend.ModelsStatusText())
-	case "set_current_model_pool", "set_current_role":
+	case "set_current_model_pool":
 		pool := strings.TrimSpace(cmd.Pool)
 		if pool == "" {
 			emitHeadlessModelsResponse(out, false, "models set_current_model_pool requires pool", "")

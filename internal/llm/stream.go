@@ -27,8 +27,8 @@ type sseMessageStart struct {
 		Usage struct {
 			InputTokens              int `json:"input_tokens"`
 			OutputTokens             int `json:"output_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			CacheCreation            *struct {
 				Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
 				Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
@@ -162,11 +162,17 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				// transports report cache reads separately, so normalize here.
 				resp.Usage.InputTokens = ev.Message.Usage.InputTokens + cacheRead
 				resp.Usage.CacheReadTokens = cacheRead
+				// Prefer the nested cache_creation breakdown when present (it
+				// carries the 5m/1h TTL split), and fall back to the flat
+				// cache_creation_input_tokens counter that Anthropic-compatible
+				// gateways may report on its own.
 				cacheWrite := ev.Message.Usage.CacheCreationInputTokens
 				cacheWrite1h := 0
 				if ev.Message.Usage.CacheCreation != nil {
 					cacheWrite1h = ev.Message.Usage.CacheCreation.Ephemeral1hInputTokens
-					cacheWrite = ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + cacheWrite1h
+					if nested := ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + cacheWrite1h; nested > 0 {
+						cacheWrite = nested
+					}
 				}
 				resp.Usage.CacheWriteTokens = cacheWrite
 				resp.Usage.CacheWrite1hTokens = cacheWrite1h

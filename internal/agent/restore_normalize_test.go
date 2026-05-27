@@ -7,135 +7,137 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestNormalizeRestoredMessagesDropsTrailingInterruptedAssistants(t *testing.T) {
+func TestNormalizeRestoredMessages_DropsTrailingInterruptedAssistant(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "partial", StopReason: "interrupted"},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 1 {
-		t.Fatalf("len(normalized) = %d, want 1", len(normalized))
-	}
-	if normalized[0].Role != "user" {
-		t.Fatalf("normalized[0].Role = %q, want user", normalized[0].Role)
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 1 || got[0].Role != "user" {
+		t.Fatalf("unexpected result: %#v", got)
 	}
 }
 
-func TestNormalizeRestoredMessagesKeepsInterruptedAssistantInMiddle(t *testing.T) {
+func TestNormalizeRestoredMessages_KeepsCompletedAssistant(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "hi"},
-		{Role: "assistant", Content: "partial", StopReason: "interrupted"},
-		{Role: "user", Content: "continue"},
+		{Role: "assistant", Content: "done", StopReason: "stop"},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 3 {
-		t.Fatalf("len(normalized) = %d, want 3", len(normalized))
-	}
-	if normalized[1].Role != "assistant" || normalized[1].StopReason != "interrupted" {
-		t.Fatalf("normalized[1] = %#v, want interrupted assistant preserved", normalized[1])
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %d: %#v", len(got), got)
 	}
 }
 
-func TestNormalizeRestoredMessagesDropsOrphanToolResult(t *testing.T) {
+func TestNormalizeRestoredMessages_PreservesPairedToolCalls(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "user", Content: "hi"},
-		{Role: "tool", ToolCallID: "missing", Content: "oops"},
+		{Role: "user", Content: "do it"},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "call_1", Name: "Read"},
+			},
+		},
+		{Role: "tool", ToolCallID: "call_1", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 1 {
-		t.Fatalf("len(normalized) = %d, want 1", len(normalized))
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %#v", len(got), got)
 	}
-	if normalized[0].Role != "user" {
-		t.Fatalf("normalized[0].Role = %q, want user", normalized[0].Role)
+	if got[2].ToolCallID != "call_1" || got[2].ToolStatus != string(ToolResultStatusSuccess) {
+		t.Fatalf("paired tool message altered: %#v", got[2])
 	}
 }
 
-func TestNormalizeRestoredMessagesDropsEmptyToolCallIDResult(t *testing.T) {
+func TestNormalizeRestoredMessages_SynthesizesOrphanToolResult(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "user", Content: "hi"},
-		{Role: "tool", Content: "oops"},
+		{Role: "user", Content: "do it"},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "call_orphan", Name: "Shell"},
+			},
+		},
+		{Role: "user", Content: "ping"},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 1 {
-		t.Fatalf("len(normalized) = %d, want 1", len(normalized))
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 4 {
+		t.Fatalf("expected synthesized tool result, got %d messages: %#v", len(got), got)
+	}
+	synth := got[2]
+	if synth.Role != "tool" || synth.ToolCallID != "call_orphan" {
+		t.Fatalf("synthesized message not in tool position: %#v", synth)
+	}
+	if synth.ToolStatus != string(ToolResultStatusError) {
+		t.Fatalf("synthesized tool status = %q, want error", synth.ToolStatus)
+	}
+	if !strings.Contains(synth.Content, "Model stopped") {
+		t.Fatalf("synthesized content = %q", synth.Content)
 	}
 }
 
-func TestNormalizeRestoredMessagesSynthesizesDanglingToolResultAtEOF(t *testing.T) {
+func TestNormalizeRestoredMessages_SynthesizesOrphansAtTail(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "user", Content: "inspect"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tool-main-1", Name: "WebFetch", Args: []byte(`{"url":"https://example.com"}`)}}},
+		{Role: "user", Content: "do it"},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "call_a", Name: "Shell"},
+				{ID: "call_b", Name: "Shell"},
+			},
+		},
+		{Role: "tool", ToolCallID: "call_a", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 3 {
-		t.Fatalf("len(normalized) = %d, want 3", len(normalized))
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %#v", len(got), got)
 	}
-	last := normalized[2]
-	if last.Role != "tool" || last.ToolCallID != "tool-main-1" {
-		t.Fatalf("last = %#v, want synthetic tool result for tool-main-1", last)
-	}
-	if !strings.Contains(last.Content, "Model stopped before completing this tool call") {
-		t.Fatalf("last.Content = %q, want interruption prefix", last.Content)
-	}
-	if !strings.Contains(last.Content, "session restored before tool result was persisted") {
-		t.Fatalf("last.Content = %q, want restore-specific cause", last.Content)
+	tail := got[3]
+	if tail.Role != "tool" || tail.ToolCallID != "call_b" || tail.ToolStatus != string(ToolResultStatusError) {
+		t.Fatalf("expected synthesized tail tool error for call_b, got %#v", tail)
 	}
 }
 
-func TestNormalizeRestoredMessagesSynthesizesDanglingToolResultBeforeNextUser(t *testing.T) {
+func TestNormalizeRestoredMessages_DropsDuplicateToolResults(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "user", Content: "first"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tool-main-1", Name: "Read", Args: []byte(`{"path":"go.mod"}`)}}},
-		{Role: "user", Content: "second"},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "call_a", Name: "Shell"},
+			},
+		},
+		{Role: "tool", ToolCallID: "call_a", Content: "first", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "call_a", Content: "second", ToolStatus: string(ToolResultStatusSuccess)},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 4 {
-		t.Fatalf("len(normalized) = %d, want 4", len(normalized))
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 2 {
+		t.Fatalf("expected duplicate tool result to be dropped, got %d messages: %#v", len(got), got)
 	}
-	if normalized[2].Role != "tool" || normalized[2].ToolCallID != "tool-main-1" {
-		t.Fatalf("normalized[2] = %#v, want synthetic tool result before next user", normalized[2])
-	}
-	if normalized[3].Role != "user" || normalized[3].Content != "second" {
-		t.Fatalf("normalized[3] = %#v, want trailing user message preserved", normalized[3])
+	if got[1].Role != "tool" || got[1].ToolCallID != "call_a" || got[1].Content != "first" {
+		t.Fatalf("unexpected preserved tool result: %#v", got[1])
 	}
 }
 
-func TestNormalizeRestoredMessagesSynthesizesOnlyUnresolvedToolCalls(t *testing.T) {
+func TestNormalizeRestoredMessages_DoesNotMutateToolContentText(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "A", Name: "Read", Args: []byte(`{"path":"go.mod"}`)}, {ID: "B", Name: "Grep", Args: []byte(`{"pattern":"TODO","path":"."}`)}}},
-		{Role: "tool", ToolCallID: "A", Content: "ok"},
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "call_x", Name: "Shell"},
+			},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call_x",
+			Content:    "permission denied by upstream service",
+			ToolStatus: string(ToolResultStatusSuccess),
+		},
 	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 3 {
-		t.Fatalf("len(normalized) = %d, want 3", len(normalized))
+	got := normalizeRestoredMessages(msgs)
+	if got[1].Content != "permission denied by upstream service" {
+		t.Fatalf("tool content rewritten by heuristics: %q", got[1].Content)
 	}
-	if normalized[1].ToolCallID != "A" {
-		t.Fatalf("normalized[1] = %#v, want preserved tool A result", normalized[1])
-	}
-	if normalized[2].Role != "tool" || normalized[2].ToolCallID != "B" {
-		t.Fatalf("normalized[2] = %#v, want synthetic tool B result", normalized[2])
-	}
-}
-
-func TestNormalizeRestoredMessagesDuplicateToolResultDropsSecond(t *testing.T) {
-	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "A", Name: "Read", Args: []byte(`{"path":"go.mod"}`)}}},
-		{Role: "tool", ToolCallID: "A", Content: "first"},
-		{Role: "tool", ToolCallID: "A", Content: "second"},
-	}
-
-	normalized := normalizeRestoredMessages(msgs)
-	if len(normalized) != 2 {
-		t.Fatalf("len(normalized) = %d, want 2", len(normalized))
-	}
-	if normalized[1].Content != "first" {
-		t.Fatalf("normalized[1].Content = %q, want first", normalized[1].Content)
+	if got[1].ToolStatus != string(ToolResultStatusSuccess) {
+		t.Fatalf("tool status rewritten: %q", got[1].ToolStatus)
 	}
 }

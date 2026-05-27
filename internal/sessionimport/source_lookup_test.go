@@ -13,7 +13,8 @@ func TestResolveImportInputPath_CodexByID(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(`{"timestamp":"2026-01-01T00:00:00Z","item":{"session_id":"sess-1","role":"user","content":"hi"}}`+"\n"), 0o600); err != nil {
+	data := `{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"sess-1"}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	lookup, err := resolveImportInputPath("codex", "", "sess-1", root)
@@ -72,7 +73,10 @@ func TestImport_Codex_ByID(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(rollout, []byte(`{"timestamp":"2026-01-01T00:00:00Z","item":{"session_id":"sess-1","role":"user","content":"hi"}}`+"\n"), 0o600); err != nil {
+	data := `{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"sess-1"}}
+{"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
+`
+	if err := os.WriteFile(rollout, []byte(data), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	projectRoot := t.TempDir()

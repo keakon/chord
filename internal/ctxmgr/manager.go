@@ -39,7 +39,7 @@ func NewManager(maxTokens int, threshold float64) *Manager {
 
 // NewManagerWithInputBudget creates a Manager with separate total-context,
 // input-side budget, and reserved input headroom. If inputBudget <= 0,
-// maxTokens is used for backward compatibility with older single-limit configs.
+// maxTokens is used as the input budget.
 // A threshold <= 0 disables automatic compaction.
 func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, threshold float64) *Manager {
 	if inputBudget <= 0 {
@@ -77,7 +77,7 @@ func (m *Manager) SetMaxTokens(n int) {
 }
 
 // SetTokenBudgets updates total context window, input-side budget, and reserved
-// input headroom. If inputBudget <= 0, maxTokens is used for backward compatibility.
+// input headroom. If inputBudget <= 0, maxTokens is used as the input budget.
 func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

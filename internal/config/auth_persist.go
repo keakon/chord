@@ -13,9 +13,8 @@ import (
 )
 
 // OAuthCredentialMatch identifies an OAuth credential slot inside auth.yaml.
-// AccountID is the preferred selector when unique, while Access and
-// CredentialIndex act as fallbacks for legacy credentials without account_id and
-// as disambiguators when multiple OAuth slots share the same account_id.
+// AccountID is the primary selector. Access and CredentialIndex disambiguate
+// matching OAuth slots when multiple entries share the same account_id.
 // CredentialIndex uses the normalized AuthConfig index, after filtering unset
 // environment-variable credentials the same way LoadAuthConfig does.
 type OAuthCredentialMatch struct {
@@ -508,10 +507,8 @@ func (d *authYAMLDocument) updateOAuthCredential(
 
 func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCredentialMatch) *authCredentialNodeRef {
 	var (
-		accountIDMatch        *authCredentialNodeRef
-		accountIndexMatch     *authCredentialNodeRef
-		accessFallback        *authCredentialNodeRef
-		credentialIdxFallback *authCredentialNodeRef
+		accountIDMatch    *authCredentialNodeRef
+		accountIndexMatch *authCredentialNodeRef
 	)
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
@@ -531,12 +528,6 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 			}
 			continue
 		}
-		if accessFallback == nil && match.Access != "" && oauth.Access == match.Access {
-			accessFallback = &refs[i]
-		}
-		if credentialIdxFallback == nil && match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
-			credentialIdxFallback = &refs[i]
-		}
 	}
 	if accountIndexMatch != nil {
 		return accountIndexMatch
@@ -544,10 +535,7 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 	if accountIDMatch != nil {
 		return accountIDMatch
 	}
-	if accessFallback != nil {
-		return accessFallback
-	}
-	return credentialIdxFallback
+	return nil
 }
 
 func newOAuthCredentialNode(cred *OAuthCredential) *yaml.Node {

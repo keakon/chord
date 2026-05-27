@@ -454,16 +454,6 @@ type ModelLimit struct {
 	Output  int `json:"output" yaml:"output"`
 }
 
-// InputBudget returns the legacy input-side budget used by callers that cannot
-// account for requested output headroom. Older configs without limit.input keep
-// treating limit.context as the input budget for backward compatibility.
-func (l ModelLimit) InputBudget() int {
-	if l.Input > 0 {
-		return l.Input
-	}
-	return l.Context
-}
-
 // EffectiveInputBudget returns the input-side budget for request sizing and
 // automatic compaction. When limit.input is configured it is authoritative;
 // otherwise reserve the effective requested-output budget from the total context

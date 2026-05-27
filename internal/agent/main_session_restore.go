@@ -255,8 +255,7 @@ func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, se
 	}
 	normalizeStarted := time.Now()
 	msgs = normalizeRestoredMessages(msgs)
-	normalizeDuration := time.Since(normalizeStarted)
-	return msgs, mainLoadDuration, normalizeDuration, nil
+	return msgs, mainLoadDuration, time.Since(normalizeStarted), nil
 }
 
 func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath string) (time.Duration, int64) {

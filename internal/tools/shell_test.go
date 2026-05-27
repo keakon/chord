@@ -119,24 +119,6 @@ func TestBashExecutesReadWithClosedStdinInsteadOfRejecting(t *testing.T) {
 	}
 }
 
-func TestBashIgnoresLegacyBackgroundFields(t *testing.T) {
-	tool := ShellTool{}
-	for name, args := range map[string]map[string]any{
-		"mode":              {"command": "printf ok", "mode": "job", "timeout": 5},
-		"run_in_background": {"command": "printf ok", "run_in_background": true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			out, err := tool.Execute(context.Background(), mustMarshal(t, args))
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if out != "ok" {
-				t.Fatalf("output = %q, want ok", out)
-			}
-		})
-	}
-}
-
 func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 	tool := ShellTool{}
 

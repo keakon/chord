@@ -392,27 +392,6 @@ func TestSaveSnapshot_AndRecover(t *testing.T) {
 	}
 }
 
-func TestRecoverLegacyModelPoolCurrentRole(t *testing.T) {
-	rm, dir := newTestManager(t)
-	defer rm.Close()
-
-	data := []byte(`{"todos":[],"active_agents":[],"model_name":"model","model_pool_current_role":"strong","created_at":"2026-01-01T00:00:00Z"}`)
-	if err := os.WriteFile(filepath.Join(dir, "snapshot.json"), data, 0o600); err != nil {
-		t.Fatalf("WriteFile(snapshot.json): %v", err)
-	}
-
-	recovered, err := rm.Recover()
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-	if recovered.ModelPoolCurrentModelPool != "strong" {
-		t.Fatalf("ModelPoolCurrentModelPool = %q, want strong", recovered.ModelPoolCurrentModelPool)
-	}
-	if recovered.LegacyModelPoolCurrentRole != "" {
-		t.Fatalf("LegacyModelPoolCurrentRole should be cleared, got %q", recovered.LegacyModelPoolCurrentRole)
-	}
-}
-
 func TestRecover_NoSnapshot(t *testing.T) {
 	rm, _ := newTestManager(t)
 	defer rm.Close()

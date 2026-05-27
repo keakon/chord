@@ -12,37 +12,8 @@ import (
 // commit/dirty annotations.
 //
 // The CLI `--version` output is richer and is sourced from internal/buildinfo.
-// We keep Version bare so external integrations can continue to rely on it.
-//
-// It is overridable at build time via the historical ldflags path:
-//
-//	-ldflags "-X main.Version=<version>"
-//
-// New builds may also (or instead) override internal/buildinfo.Version
-// directly, together with Commit, BuildTime, and Dirty for richer diagnostics:
-//
-//	-ldflags "-X github.com/keakon/chord/internal/buildinfo.Version=<version> ..."
-//
-// init() below mirrors whichever side was set so MCP, startup logs, diagnostics
-// dumps, and CLI version output always agree on the version.
-var Version = buildinfo.DefaultDevVersion
-
-func init() {
-	// init() runs after package-level var initialization for both this file
-	// and internal/buildinfo, but before main() — and before anything calls
-	// buildinfo.Current() (which is sync.OnceValue-cached). This is the
-	// correct time to bridge the two ldflags paths.
-	switch {
-	case !buildinfo.IsHistoricalMainVersion(Version) && buildinfo.IsDefaultDevVersion(buildinfo.Version):
-		// Only the historical -X main.Version=... path was used.
-		buildinfo.Version = Version
-	case buildinfo.IsHistoricalMainVersion(Version) && !buildinfo.IsDefaultDevVersion(buildinfo.Version):
-		// Only the new -X .../buildinfo.Version=... path was used.
-		Version = buildinfo.Version
-	}
-	// If both are set, we trust each — CI may set them deliberately and the
-	// values are expected to match.
-}
+// We keep Version bare so external integrations can rely on it.
+var Version = buildinfo.Version
 
 func cliVersionTemplate() string {
 	return formatCLIVersionTemplate(buildinfo.Current())

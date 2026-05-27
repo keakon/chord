@@ -31,7 +31,10 @@ func TestNewImportCmd_SucceedsWithIDAndRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(rollout, []byte(`{"timestamp":"2026-01-01T00:00:00Z","item":{"session_id":"sess-1","role":"user","content":"hi"}}`+"\n"), 0o600); err != nil {
+	data := `{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"sess-1"}}
+{"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
+`
+	if err := os.WriteFile(rollout, []byte(data), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	cmd := newImportCmd()

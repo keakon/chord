@@ -52,7 +52,7 @@ func TestSaveLoadSessionMeta_RoundTrip_Worktree(t *testing.T) {
 	}
 }
 
-func TestLoadSessionMeta_LegacyForkedFromOnly(t *testing.T) {
+func TestLoadSessionMeta_ForkedFromOnly(t *testing.T) {
 	dir := t.TempDir()
 	if err := SaveSessionMeta(dir, SessionMeta{ForkedFrom: "abc"}); err != nil {
 		t.Fatalf("SaveSessionMeta: %v", err)

@@ -315,35 +315,6 @@ func TestRootPersistentPreRunSetsConfigHome(t *testing.T) {
 	}
 }
 
-func TestRootPersistentPreRunSetsConfigHomeFromAliasFlag(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("CHORD_CONFIG_HOME", "")
-	flagConfigHome = ""
-	flagConfig = ""
-	defer func() {
-		flagConfigHome = ""
-		flagConfig = ""
-	}()
-
-	cmd := newRootCmd()
-	if err := cmd.PersistentFlags().Set("config", configHome); err != nil {
-		t.Fatalf("set alias flag: %v", err)
-	}
-	if cmd.PersistentPreRunE == nil {
-		t.Fatal("expected PersistentPreRunE")
-	}
-	if err := cmd.PersistentPreRunE(cmd, nil); err != nil {
-		t.Fatalf("PersistentPreRunE: %v", err)
-	}
-	path, err := config.ConfigPath()
-	if err != nil {
-		t.Fatalf("ConfigPath: %v", err)
-	}
-	if path != filepath.Join(configHome, "config.yaml") {
-		t.Fatalf("ConfigPath = %q, want %q", path, filepath.Join(configHome, "config.yaml"))
-	}
-}
-
 func TestRunRootDoesNotTriggerWizardWhenConfigIsMalformed(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)

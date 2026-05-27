@@ -9,10 +9,9 @@ import (
 )
 
 type ModelPoolState struct {
-	Version           int               `yaml:"version"`
-	CurrentModelPool  string            `yaml:"current_model_pool,omitempty"`
-	LegacyCurrentRole string            `yaml:"current_role,omitempty"`
-	AgentOverrides    map[string]string `yaml:"agent_overrides,omitempty"`
+	Version          int               `yaml:"version"`
+	CurrentModelPool string            `yaml:"current_model_pool,omitempty"`
+	AgentOverrides   map[string]string `yaml:"agent_overrides,omitempty"`
 }
 
 const modelPoolStateVersion = 1
@@ -36,10 +35,6 @@ func LoadModelPoolState(path string) (*ModelPoolState, error) {
 	if state.Version == 0 {
 		state.Version = modelPoolStateVersion
 	}
-	if state.CurrentModelPool == "" {
-		state.CurrentModelPool = state.LegacyCurrentRole
-	}
-	state.LegacyCurrentRole = ""
 	return &state, nil
 }
 
@@ -48,7 +43,6 @@ func SaveModelPoolState(path string, state *ModelPoolState) error {
 		return nil
 	}
 	state.Version = modelPoolStateVersion
-	state.LegacyCurrentRole = ""
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

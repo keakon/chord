@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,33 +254,6 @@ func TestRestoreSessionAtStartupKeepsInterruptedMainToolResults(t *testing.T) {
 	}
 }
 
-func TestRestoreSessionAtStartupRepairsBlankReadToolResults(t *testing.T) {
-	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "restored-read-blank")
-	targetPath := filepath.Join(projectRoot, "empty-read-target.txt")
-	if err := os.WriteFile(targetPath, []byte(""), 0o644); err != nil {
-		t.Fatalf("WriteFile(empty read target): %v", err)
-	}
-
-	persistRestorableBlankReadSession(t, sessionDir, targetPath)
-
-	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	if err := a.RestoreSessionAtStartup(); err != nil {
-		t.Fatalf("RestoreSessionAtStartup: %v", err)
-	}
-
-	msgs := a.GetMessages()
-	if got := len(msgs); got != 3 {
-		t.Fatalf("len(GetMessages()) = %d, want 3", got)
-	}
-	if msgs[2].Role != "tool" {
-		t.Fatalf("restored tool message role = %q, want tool", msgs[2].Role)
-	}
-	if msgs[2].Content != "(empty file)" {
-		t.Fatalf("restored tool content = %q, want %q", msgs[2].Content, "(empty file)")
-	}
-}
-
 func TestRestoreSessionAtStartupPreservesRejectedDoneAsSingleToolMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "rejected-done-single-tool")
@@ -322,47 +294,6 @@ func TestRestoreSessionAtStartupPreservesRejectedDoneAsSingleToolMessage(t *test
 	}
 }
 
-func TestRestoreSessionAtStartupClosesDanglingDeclaredToolCalls(t *testing.T) {
-	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "dangling-main-tool")
-
-	rm := recovery.NewRecoveryManager(sessionDir)
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "inspect session"}); err != nil {
-		t.Fatalf("PersistMessage(user): %v", err)
-	}
-	assistant := message.Message{
-		Role: "assistant",
-		ToolCalls: []message.ToolCall{{
-			ID:   "tool-grep-1",
-			Name: "Grep",
-			Args: []byte(`{"pattern":"TODO","path":"internal","glob":"**/*.go"}`),
-		}},
-	}
-	if err := rm.PersistMessage("main", assistant); err != nil {
-		t.Fatalf("PersistMessage(assistant tool call): %v", err)
-	}
-	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
-	rm.Close()
-
-	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	if err := a.RestoreSessionAtStartup(); err != nil {
-		t.Fatalf("RestoreSessionAtStartup: %v", err)
-	}
-
-	msgs := a.GetMessages()
-	if got := len(msgs); got != 3 {
-		t.Fatalf("len(GetMessages()) = %d, want 3", got)
-	}
-	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "tool-grep-1" {
-		t.Fatalf("restored synthetic tool message = %#v, want tool-grep-1", msgs[2])
-	}
-	if !strings.Contains(msgs[2].Content, "Model stopped before completing this tool call") {
-		t.Fatalf("restored synthetic tool content = %q, want interruption message", msgs[2].Content)
-	}
-}
-
 func TestRestoreSessionAtStartupRestoresSubAgentInterruptedToolResults(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "interrupted-sub")
@@ -395,41 +326,6 @@ func TestRestoreSessionAtStartupRestoresSubAgentInterruptedToolResults(t *testin
 	}
 }
 
-func TestRestoreSessionAtStartupSynthesizesDanglingSubAgentToolResult(t *testing.T) {
-	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "dangling-sub")
-
-	persistDanglingSubAgentSession(t, sessionDir)
-
-	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	a.agentConfigs = map[string]*config.AgentConfig{
-		"restorer": {Name: "restorer", Mode: "subagent"},
-	}
-	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
-		return newTestLLMClient()
-	})
-	if err := a.RestoreSessionAtStartup(); err != nil {
-		t.Fatalf("RestoreSessionAtStartup: %v", err)
-	}
-
-	a.mu.RLock()
-	sub := a.subAgents["agent-1"]
-	a.mu.RUnlock()
-	if sub == nil {
-		t.Fatal("expected restored sub-agent agent-1")
-	}
-	msgs := sub.GetMessages()
-	if got := len(msgs); got != 2 {
-		t.Fatalf("len(sub.GetMessages()) = %d, want 2", got)
-	}
-	if msgs[1].Role != "tool" || msgs[1].ToolCallID != "tool-sub-1" {
-		t.Fatalf("sub synthetic tool result = %#v, want tool-sub-1", msgs[1])
-	}
-	if !strings.Contains(msgs[1].Content, "session restored before tool result was persisted") {
-		t.Fatalf("sub synthetic tool result content = %q, want restore-specific cause", msgs[1].Content)
-	}
-}
-
 func TestRestoreSessionAtStartupDropsOrphanToolResults(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "orphan-tool-result")
@@ -447,49 +343,6 @@ func TestRestoreSessionAtStartupDropsOrphanToolResults(t *testing.T) {
 	}
 	if msgs[0].Role != "user" {
 		t.Fatalf("msgs[0] = %#v, want user only", msgs[0])
-	}
-}
-
-func TestRestoreSessionAtStartupDropsDuplicateToolResults(t *testing.T) {
-	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "duplicate-tool-result")
-
-	persistDuplicateToolResultSession(t, sessionDir)
-
-	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	if err := a.RestoreSessionAtStartup(); err != nil {
-		t.Fatalf("RestoreSessionAtStartup: %v", err)
-	}
-
-	msgs := a.GetMessages()
-	if got := len(msgs); got != 2 {
-		t.Fatalf("len(GetMessages()) = %d, want 2", got)
-	}
-	if msgs[1].Role != "tool" || msgs[1].Content != "first" {
-		t.Fatalf("msgs[1] = %#v, want first tool result only", msgs[1])
-	}
-}
-
-func TestRestoreSessionAtStartupSynthesizesDanglingToolResultBeforeLaterUser(t *testing.T) {
-	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "dangling-before-user")
-
-	persistDanglingMainToolCallBeforeLaterUserSession(t, sessionDir)
-
-	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	if err := a.RestoreSessionAtStartup(); err != nil {
-		t.Fatalf("RestoreSessionAtStartup: %v", err)
-	}
-
-	msgs := a.GetMessages()
-	if got := len(msgs); got != 4 {
-		t.Fatalf("len(GetMessages()) = %d, want 4", got)
-	}
-	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "tool-main-1" {
-		t.Fatalf("msgs[2] = %#v, want synthetic tool result before later user", msgs[2])
-	}
-	if msgs[3].Role != "user" || msgs[3].Content != "follow-up" {
-		t.Fatalf("msgs[3] = %#v, want later user preserved", msgs[3])
 	}
 }
 
@@ -1110,60 +963,6 @@ func persistInterruptedMainSession(t *testing.T, sessionDir string) {
 	rm.Close()
 }
 
-func persistRestorableBlankReadSession(t *testing.T, sessionDir, targetPath string) {
-	t.Helper()
-
-	rm := recovery.NewRecoveryManager(sessionDir)
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "check placeholder implementation"}); err != nil {
-		t.Fatalf("PersistMessage(user): %v", err)
-	}
-	assistant := message.Message{
-		Role: "assistant",
-		ToolCalls: []message.ToolCall{{
-			ID:   "tool-read-blank",
-			Name: "Read",
-			Args: []byte(fmt.Sprintf(`{"path":%q,"limit":240,"offset":358}`, targetPath)),
-		}},
-	}
-	if err := rm.PersistMessage("main", assistant); err != nil {
-		t.Fatalf("PersistMessage(assistant tool call): %v", err)
-	}
-	if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "tool-read-blank", Content: "   359\t\n"}); err != nil {
-		t.Fatalf("PersistMessage(blank read tool result): %v", err)
-	}
-	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
-	rm.Close()
-}
-
-func persistDanglingMainToolCallBeforeLaterUserSession(t *testing.T, sessionDir string) {
-	t.Helper()
-
-	rm := recovery.NewRecoveryManager(sessionDir)
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "inspect session"}); err != nil {
-		t.Fatalf("PersistMessage(user): %v", err)
-	}
-	assistant := message.Message{
-		Role: "assistant",
-		ToolCalls: []message.ToolCall{{
-			ID:   "tool-main-1",
-			Name: "Read",
-			Args: []byte(`{"path":"go.mod"}`),
-		}},
-	}
-	if err := rm.PersistMessage("main", assistant); err != nil {
-		t.Fatalf("PersistMessage(assistant tool call): %v", err)
-	}
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "follow-up"}); err != nil {
-		t.Fatalf("PersistMessage(later user): %v", err)
-	}
-	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
-	rm.Close()
-}
-
 func persistOrphanToolResultSession(t *testing.T, sessionDir string) {
 	t.Helper()
 
@@ -1173,33 +972,6 @@ func persistOrphanToolResultSession(t *testing.T, sessionDir string) {
 	}
 	if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "missing", Content: "unexpected"}); err != nil {
 		t.Fatalf("PersistMessage(orphan tool result): %v", err)
-	}
-	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
-	rm.Close()
-}
-
-func persistDuplicateToolResultSession(t *testing.T, sessionDir string) {
-	t.Helper()
-
-	rm := recovery.NewRecoveryManager(sessionDir)
-	assistant := message.Message{
-		Role: "assistant",
-		ToolCalls: []message.ToolCall{{
-			ID:   "tool-main-1",
-			Name: "Read",
-			Args: []byte(`{"path":"go.mod"}`),
-		}},
-	}
-	if err := rm.PersistMessage("main", assistant); err != nil {
-		t.Fatalf("PersistMessage(assistant tool call): %v", err)
-	}
-	if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "tool-main-1", Content: "first"}); err != nil {
-		t.Fatalf("PersistMessage(first tool result): %v", err)
-	}
-	if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "tool-main-1", Content: "second"}); err != nil {
-		t.Fatalf("PersistMessage(second tool result): %v", err)
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{Todos: []recovery.TodoState{}}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
@@ -1303,38 +1075,6 @@ func persistMailboxRestoreSessionWithID(t *testing.T, sessionDir, mailboxID stri
 	}
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close(mailbox): %v", err)
-	}
-	rm.Close()
-}
-
-func persistDanglingSubAgentSession(t *testing.T, sessionDir string) {
-	t.Helper()
-
-	rm := recovery.NewRecoveryManager(sessionDir)
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "delegate task"}); err != nil {
-		t.Fatalf("PersistMessage(main user): %v", err)
-	}
-	subAssistant := message.Message{
-		Role: "assistant",
-		ToolCalls: []message.ToolCall{{
-			ID:   "tool-sub-1",
-			Name: "WebFetch",
-			Args: []byte(`{"url":"https://missing.example"}`),
-		}},
-	}
-	if err := rm.PersistMessage("agent-1", subAssistant); err != nil {
-		t.Fatalf("PersistMessage(sub assistant tool call): %v", err)
-	}
-	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		Todos: []recovery.TodoState{},
-		ActiveAgents: []recovery.AgentSnapshot{{
-			InstanceID:   "agent-1",
-			TaskID:       "restored",
-			AgentDefName: "restorer",
-			TaskDesc:     "Fetch docs",
-		}},
-	}); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
 	}
 	rm.Close()
 }

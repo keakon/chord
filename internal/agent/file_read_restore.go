@@ -264,46 +264,7 @@ func isNativeChordProvenance(prov *message.MessageProvenance) bool {
 }
 
 func restoreToolResultSucceeded(msg message.Message) bool {
-	switch strings.ToLower(strings.TrimSpace(msg.ToolStatus)) {
-	case "success":
-		return true
-	case "error", "cancelled", "canceled":
-		return false
-	case "":
-		// Legacy messages did not persist structured status; fall through to
-		// conservative text checks below.
-	default:
-		return false
-	}
-
-	content := strings.TrimSpace(msg.Content)
-	if content == "" {
-		return false
-	}
-	lower := strings.ToLower(content)
-	if strings.Contains(content, "\n\nError: ") || strings.HasPrefix(content, "Error:") {
-		return false
-	}
-	if strings.HasPrefix(content, "Model stopped before completing this tool call") {
-		return false
-	}
-	failureMarkers := []string{
-		"cancelled",
-		"canceled",
-		"interrupted",
-		"permission denied",
-		"denied by permission",
-		"requires confirmation",
-		"rejected by user",
-		"not executed",
-		"tool call was not executed",
-	}
-	for _, marker := range failureMarkers {
-		if strings.Contains(lower, marker) {
-			return false
-		}
-	}
-	return true
+	return strings.EqualFold(strings.TrimSpace(msg.ToolStatus), "success")
 }
 
 func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMessage, bool) {

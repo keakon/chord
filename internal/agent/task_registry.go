@@ -648,7 +648,7 @@ func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecor
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, normalizeRestoredMessages(msgs)...)
+		out = append(out, msgs...)
 	}
 	if len(out) == 0 && strings.TrimSpace(rec.TaskDesc) != "" {
 		out = append(out, message.Message{Role: "user", Content: rec.TaskDesc})

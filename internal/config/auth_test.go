@@ -141,7 +141,7 @@ func TestLoadAuthConfig_OAuth(t *testing.T) {
 	}
 }
 
-func TestLoadAuthConfig_IgnoresLegacyOAuthStatus(t *testing.T) {
+func TestLoadAuthConfig_IgnoresOAuthStatusInAuthYAML(t *testing.T) {
 	f, err := os.CreateTemp("", "auth-*.yaml")
 	if err != nil {
 		t.Fatal(err)

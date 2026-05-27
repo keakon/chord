@@ -23,8 +23,6 @@ type codexRolloutEntry struct {
 }
 
 // parseCodexJSONL scans JSONL and returns typed entries.
-// Handles both the current protocol format (type+payload) and legacy
-// item-based format used by older Codex versions.
 func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
@@ -39,143 +37,31 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 			continue
 		}
 
-		// First, parse as raw map to detect format.
 		var lineObj map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(line), &lineObj); err != nil {
 			return nil, "", fmt.Errorf("codex import: line %d: parse JSON: %w", lineNo, err)
 		}
 
-		// Current format: top-level "type" + "payload" fields.
-		if rawType, ok := lineObj["type"]; ok {
-			var typeStr string
-			if err := json.Unmarshal(rawType, &typeStr); err == nil && typeStr != "" {
-				payload := lineObj["payload"]
-				entries = append(entries, codexRolloutEntry{
-					Timestamp: pickJSONString(lineObj, "timestamp"),
-					EventType: typeStr,
-					Payload:   payload,
-				})
-				// Extract session_id from session_meta entries.
-				if sessionID == "" && typeStr == "session_meta" && len(payload) > 0 {
-					var meta struct {
-						ID string `json:"id"`
-					}
-					if json.Unmarshal(payload, &meta) == nil && meta.ID != "" {
-						sessionID = meta.ID
-					}
-				}
-				continue
-			}
-		}
-
-		// Legacy format: "item" field with various inner structures.
-		itemRaw, hasItem := lineObj["item"]
-		if !hasItem || len(bytes.TrimSpace(itemRaw)) == 0 {
+		rawType, ok := lineObj["type"]
+		if !ok {
 			continue
 		}
-		var itemObj map[string]json.RawMessage
-		if err := json.Unmarshal(itemRaw, &itemObj); err != nil {
+		var typeStr string
+		if err := json.Unmarshal(rawType, &typeStr); err != nil || typeStr == "" {
 			continue
 		}
-
-		ts := pickJSONString(lineObj, "timestamp")
-
-		// Extract session_id from legacy items.
-		if sessionID == "" {
-			if sid, ok := pickJSONStringOK(itemObj, "session_id", "sessionId", "sessionID", "id"); ok {
-				sessionID = sid
+		payload := lineObj["payload"]
+		entries = append(entries, codexRolloutEntry{
+			Timestamp: pickJSONString(lineObj, "timestamp"),
+			EventType: typeStr,
+			Payload:   payload,
+		})
+		if sessionID == "" && typeStr == "session_meta" && len(payload) > 0 {
+			var meta struct {
+				ID string `json:"id"`
 			}
-		}
-
-		// Detect item kind from the legacy object.
-		kind := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "type")))
-
-		// Legacy FunctionCall/FunctionCallOutput keys.
-		if fcRaw, ok := itemObj["FunctionCall"]; ok {
-			entries = append(entries, codexRolloutEntry{
-				Timestamp: ts,
-				EventType: "response_item",
-				Payload:   codexLegacyFunctionCallToPayload(fcRaw),
-			})
-			continue
-		}
-		if fcoRaw, ok := itemObj["FunctionCallOutput"]; ok {
-			entries = append(entries, codexRolloutEntry{
-				Timestamp: ts,
-				EventType: "response_item",
-				Payload:   codexLegacyFunctionCallOutputToPayload(fcoRaw),
-			})
-			continue
-		}
-		if ctcRaw, ok := itemObj["CustomToolCall"]; ok {
-			entries = append(entries, codexRolloutEntry{
-				Timestamp: ts,
-				EventType: "response_item",
-				Payload:   codexLegacyCustomToolCallToPayload(ctcRaw),
-			})
-			continue
-		}
-		if ctcoRaw, ok := itemObj["CustomToolCallOutput"]; ok {
-			entries = append(entries, codexRolloutEntry{
-				Timestamp: ts,
-				EventType: "response_item",
-				Payload:   codexLegacyCustomToolCallOutputToPayload(ctcoRaw),
-			})
-			continue
-		}
-
-		switch kind {
-		case "responseitem", "response_item":
-			// Convert to response_item entry.
-			role := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "role")))
-			text := pickJSONString(itemObj, "content", "text")
-			if role != "" {
-				payload := map[string]any{
-					"type":    "message",
-					"role":    role,
-					"content": []map[string]string{{"type": "input_text", "text": text}},
-				}
-				payloadBytes, _ := json.Marshal(payload)
-				entries = append(entries, codexRolloutEntry{Timestamp: ts, EventType: "response_item", Payload: payloadBytes})
-			}
-
-		case "eventmsg", "event_msg":
-			eventType := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "type", "kind")))
-			if eventType == "" || eventType == "eventmsg" || eventType == "event_msg" {
-				eventType = pickJSONString(itemObj, "__event_type")
-			}
-			// Try to determine event sub-type from the item content.
-			if role := pickJSONString(itemObj, "role"); role == "user" {
-				payload := map[string]any{"type": "user_message", "message": pickJSONString(itemObj, "content", "text", "message")}
-				payloadBytes, _ := json.Marshal(payload)
-				entries = append(entries, codexRolloutEntry{Timestamp: ts, EventType: "event_msg", Payload: payloadBytes})
-			} else if role == "assistant" || eventType == "agent_message" {
-				payload := map[string]any{"type": "agent_message", "message": pickJSONString(itemObj, "content", "text", "message")}
-				payloadBytes, _ := json.Marshal(payload)
-				entries = append(entries, codexRolloutEntry{Timestamp: ts, EventType: "event_msg", Payload: payloadBytes})
-			}
-
-		case "reasoning":
-			text := pickJSONString(itemObj, "content", "text", "reasoning")
-			payload := map[string]any{
-				"type":    "reasoning",
-				"content": []map[string]string{{"type": "summary_text", "text": text}},
-			}
-			payloadBytes, _ := json.Marshal(payload)
-			entries = append(entries, codexRolloutEntry{Timestamp: ts, EventType: "response_item", Payload: payloadBytes})
-
-		default:
-			// Try to extract a message-like item from the legacy object.
-			role := strings.ToLower(strings.TrimSpace(pickJSONString(itemObj, "role", "sender")))
-			text := pickJSONString(itemObj, "content", "text", "message")
-			if role == "user" || role == "assistant" {
-				payload := map[string]any{
-					"type":    "message",
-					"role":    role,
-					"content": []map[string]string{{"type": "input_text", "text": text}},
-				}
-				payloadBytes, _ := json.Marshal(payload)
-				entries = append(entries, codexRolloutEntry{Timestamp: ts, EventType: "response_item", Payload: payloadBytes})
+			if json.Unmarshal(payload, &meta) == nil && meta.ID != "" {
+				sessionID = meta.ID
 			}
 		}
 	}
@@ -185,126 +71,8 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 	return entries, sessionID, nil
 }
 
-// codexLegacyFunctionCallToPayload converts a legacy FunctionCall object to a
-// response_item payload compatible with the new protocol.
-func codexLegacyFunctionCallToPayload(fcRaw json.RawMessage) json.RawMessage {
-	var fc struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-		CallID    string          `json:"call_id"`
-	}
-	if err := json.Unmarshal(fcRaw, &fc); err != nil {
-		return fcRaw
-	}
-	if fc.CallID == "" {
-		fc.CallID = "call_legacy_" + fc.Name
-	}
-	// In the legacy format, arguments is a JSON object.
-	// In the new protocol format, arguments is a JSON string containing JSON.
-	// We need to convert: object → JSON-encoded string.
-	var argsStr string
-	if len(fc.Arguments) > 0 {
-		goStr := string(fc.Arguments)
-		jsonStr, err := json.Marshal(goStr)
-		if err == nil {
-			argsStr = string(jsonStr)
-			argsStr = argsStr[1 : len(argsStr)-1] // strip outer quotes
-		}
-	}
-	// Use a struct with a custom arguments field to ensure proper JSON encoding.
-	type fcPayload struct {
-		Type      string `json:"type"`
-		Name      string `json:"name"`
-		CallID    string `json:"call_id"`
-		Arguments string `json:"arguments,omitempty"`
-	}
-	payload, _ := json.Marshal(fcPayload{
-		Type:      "function_call",
-		Name:      fc.Name,
-		CallID:    fc.CallID,
-		Arguments: argsStr,
-	})
-	return payload
-}
-
-// codexLegacyFunctionCallOutputToPayload converts a legacy FunctionCallOutput
-// object to a response_item payload.
-func codexLegacyFunctionCallOutputToPayload(fcoRaw json.RawMessage) json.RawMessage {
-	var fco struct {
-		Output interface{} `json:"output"`
-		CallID string      `json:"call_id"`
-	}
-	if err := json.Unmarshal(fcoRaw, &fco); err != nil {
-		return fcoRaw
-	}
-	if fco.CallID == "" {
-		fco.CallID = "call_legacy_output"
-	}
-	// Normalize output to string.
-	outputBytes, _ := json.Marshal(fco.Output)
-	payload, _ := json.Marshal(map[string]any{
-		"type":    "function_call_output",
-		"output":  string(outputBytes),
-		"call_id": fco.CallID,
-	})
-	return payload
-}
-
-// codexLegacyCustomToolCallToPayload converts a legacy CustomToolCall.
-func codexLegacyCustomToolCallToPayload(ctcRaw json.RawMessage) json.RawMessage {
-	var ctc struct {
-		Name   string `json:"name"`
-		CallID string `json:"call_id"`
-		Input  string `json:"input"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(ctcRaw, &ctc); err != nil {
-		return ctcRaw
-	}
-	if ctc.CallID == "" {
-		ctc.CallID = "call_legacy_custom_" + ctc.Name
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"type":    "custom_tool_call",
-		"name":    ctc.Name,
-		"call_id": ctc.CallID,
-		"input":   ctc.Input,
-		"status":  ctc.Status,
-	})
-	return payload
-}
-
-// codexLegacyCustomToolCallOutputToPayload converts a legacy CustomToolCallOutput.
-func codexLegacyCustomToolCallOutputToPayload(ctcoRaw json.RawMessage) json.RawMessage {
-	var ctco struct {
-		CallID string      `json:"call_id"`
-		Output interface{} `json:"output"`
-		Name   string      `json:"name"`
-	}
-	if err := json.Unmarshal(ctcoRaw, &ctco); err != nil {
-		return ctcoRaw
-	}
-	if ctco.CallID == "" {
-		ctco.CallID = "call_legacy_custom_output"
-	}
-	outputBytes, _ := json.Marshal(ctco.Output)
-	payload, _ := json.Marshal(map[string]any{
-		"type":    "custom_tool_call_output",
-		"call_id": ctco.CallID,
-		"output":  string(outputBytes),
-	})
-	return payload
-}
-
 // pickJSONString extracts a string value from a map of raw JSON messages.
 func pickJSONString(m map[string]json.RawMessage, keys ...string) string {
-	s, _ := pickJSONStringOK(m, keys...)
-	return s
-}
-
-// pickJSONStringOK extracts a string value from a map of raw JSON messages,
-// returning whether a non-empty value was found.
-func pickJSONStringOK(m map[string]json.RawMessage, keys ...string) (string, bool) {
 	for _, k := range keys {
 		raw, ok := m[k]
 		if !ok {
@@ -314,11 +82,11 @@ func pickJSONStringOK(m map[string]json.RawMessage, keys ...string) (string, boo
 		if err := json.Unmarshal(raw, &s); err == nil {
 			s = strings.TrimSpace(s)
 			if s != "" {
-				return s, true
+				return s
 			}
 		}
 	}
-	return "", false
+	return ""
 }
 
 // ---------------------------------------------------------------------------

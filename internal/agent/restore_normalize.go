@@ -2,19 +2,19 @@ package agent
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/keakon/chord/internal/message"
 )
 
-// normalizeRestoredMessages applies compatibility repairs only to messages loaded
-// from persisted sessions.
+// normalizeRestoredMessages repairs structural defects that can survive a
+// session interruption: trailing assistants stopped mid-stream (interrupted),
+// and tool_calls whose matching tool result never got persisted before the
+// process exited.
 //
-// This restore-time layer is intentionally scoped to historical or interrupted
-// session data. New session writes should be persisted in canonical form and must
-// not rely on normalization here for correctness. When adding a rule, document
-// the legacy or interrupted shape it repairs and prefer fixing new writes at the
-// source.
+// New session writes are canonical and do not rely on this layer — it only
+// runs on transcripts loaded from disk on resume. Anything that depends on
+// payload content shape (text heuristics, missing ToolStatus fields, etc.)
+// belongs at write time, not here.
 func normalizeRestoredMessages(msgs []message.Message) []message.Message {
 	if len(msgs) == 0 {
 		return msgs
@@ -23,7 +23,7 @@ func normalizeRestoredMessages(msgs []message.Message) []message.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
-	return normalizeRestoredToolChain(msgs)
+	return repairOrphanToolCalls(msgs)
 }
 
 func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message {
@@ -37,9 +37,13 @@ func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message
 	return msgs
 }
 
-func normalizeRestoredToolChain(msgs []message.Message) []message.Message {
+// repairOrphanToolCalls walks the transcript and synthesizes an error tool
+// message for every assistant tool_call whose matching tool result is missing.
+// Without this, sending the loaded history to a provider that requires
+// function_call ↔ function_call_output pairing (OpenAI Responses, Anthropic
+// tool_use ↔ tool_result) produces an API 400.
+func repairOrphanToolCalls(msgs []message.Message) []message.Message {
 	out := make([]message.Message, 0, len(msgs))
-	toolNames := make(map[string]string)
 	pending := make(map[string]struct{})
 	pendingOrder := make([]string, 0)
 	flushPending := func() {
@@ -65,7 +69,6 @@ func normalizeRestoredToolChain(msgs []message.Message) []message.Message {
 				if tc.ID == "" {
 					continue
 				}
-				toolNames[tc.ID] = strings.TrimSpace(tc.Name)
 				if _, exists := pending[tc.ID]; exists {
 					continue
 				}
@@ -81,9 +84,6 @@ func normalizeRestoredToolChain(msgs []message.Message) []message.Message {
 				continue
 			}
 			delete(pending, msg.ToolCallID)
-			if normalized, ok := normalizeBlankReadToolResult(msg, toolNames[msg.ToolCallID]); ok {
-				msg = normalized
-			}
 			out = append(out, msg)
 
 		default:
@@ -95,31 +95,6 @@ func normalizeRestoredToolChain(msgs []message.Message) []message.Message {
 		flushPending()
 	}
 	return out
-}
-
-func normalizeBlankReadToolResult(msg message.Message, toolName string) (message.Message, bool) {
-	if strings.TrimSpace(toolName) != "Read" {
-		return msg, false
-	}
-	content := strings.TrimRight(msg.Content, "\n")
-	before, after, ok := strings.Cut(content, "\t")
-	if !ok {
-		return msg, false
-	}
-	if strings.TrimSpace(after) != "" {
-		return msg, false
-	}
-	trimmedLineNo := strings.TrimSpace(before)
-	if trimmedLineNo == "" {
-		return msg, false
-	}
-	for _, r := range trimmedLineNo {
-		if r < '0' || r > '9' {
-			return msg, false
-		}
-	}
-	msg.Content = "(empty file)"
-	return msg, true
 }
 
 var errRestoreToolResultMissing = errors.New("session restored before tool result was persisted")

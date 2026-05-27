@@ -26,12 +26,9 @@ func assertCodexUnsupportedToolArgs(t *testing.T, raw json.RawMessage) {
 	}
 }
 
-func TestConvertCodexRollout_ParsesBasicJSONL(t *testing.T) {
+func TestConvertCodexRollout_IgnoresItemJSONL(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-01-01T00:00:00Z","item":{"type":"EventMsg","session_id":"sess-1","role":"user","content":"hi"}}
 {"timestamp":"2026-01-01T00:00:01Z","item":{"type":"ResponseItem","role":"assistant","content":"hello"}}
-{"timestamp":"2026-01-01T00:00:02Z","item":{"FunctionCall":{"name":"bash","arguments":{"command":"ls"}}}}
-{"timestamp":"2026-01-01T00:00:03Z","item":{"FunctionCallOutput":{"output":"file1"}}}
-{"timestamp":"2026-01-01T00:00:04Z","item":{"type":"Reasoning","text":"secret"}}
 `)
 
 	var report ImportReport
@@ -39,40 +36,11 @@ func TestConvertCodexRollout_ParsesBasicJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
-
-	// Expected source order: user "hi", assistant "hello", unsupported bash tool card,
-	// then the linked tool result. "bash" is not in the tool mapping, so the
-	// original tool name is preserved with unsupported metadata.
-	if len(msgs) != 4 {
-		t.Fatalf("msgs len=%d, want 4", len(msgs))
+	if len(msgs) != 0 {
+		t.Fatalf("msgs len=%d, want 0", len(msgs))
 	}
-	if msgs[0].Role != "user" || msgs[0].Content != "hi" {
-		t.Fatalf("msg0=%+v", msgs[0])
-	}
-	if msgs[1].Role != "assistant" || msgs[1].Content != "hello" {
-		t.Fatalf("msg1=%+v", msgs[1])
-	}
-	if msgs[2].Role != "assistant" || len(msgs[2].ToolCalls) != 1 || msgs[2].ToolCalls[0].Name != "bash" {
-		t.Fatalf("msg2=%+v", msgs[2])
-	}
-	assertCodexUnsupportedToolArgs(t, msgs[2].ToolCalls[0].Args)
-	if msgs[3].Role != "assistant" || !strings.Contains(msgs[3].Content, "orphaned tool result") {
-		t.Fatalf("msg3=%+v", msgs[3])
-	}
-	if report.SourceSessionID != "sess-1" {
-		t.Fatalf("SourceSessionID=%q, want sess-1", report.SourceSessionID)
-	}
-	if report.ReasoningBlocksSkipped == 0 {
-		t.Fatalf("ReasoningBlocksSkipped=%d, want >0", report.ReasoningBlocksSkipped)
-	}
-	if report.UnsupportedToolCalls != 1 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
-	}
-	if report.MissingToolDeclarations != 1 {
-		t.Fatalf("MissingToolDeclarations=%d, want 1", report.MissingToolDeclarations)
-	}
-	if report.ToolEntriesRendered != 2 {
-		t.Fatalf("ToolEntriesRendered=%d, want 2", report.ToolEntriesRendered)
+	if report.SourceSessionID != "" {
+		t.Fatalf("SourceSessionID=%q, want empty", report.SourceSessionID)
 	}
 }
 

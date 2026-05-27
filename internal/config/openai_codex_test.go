@@ -88,11 +88,11 @@ func TestNormalizeOpenAICodexProvider_StoreDefault(t *testing.T) {
 	}
 }
 
-func TestNormalizeOpenAICodexProvider_PresetRejectsLegacyType(t *testing.T) {
+func TestNormalizeOpenAICodexProvider_PresetRejectsUnsupportedType(t *testing.T) {
 	cfg := ProviderConfig{Type: ProviderTypeChatCompletions, Preset: ProviderPresetCodex}
 	_, _, err := NormalizeOpenAICodexProvider(cfg, false)
 	if err == nil {
-		t.Fatal("expected preset codex to reject legacy type=openai")
+		t.Fatal("expected preset codex to reject unsupported type")
 	}
 }
 
@@ -106,7 +106,7 @@ func TestNormalizeOpenAICodexProvider_WithoutPresetDisabled(t *testing.T) {
 			cfg:  ProviderConfig{Type: ProviderTypeChatCompletions},
 		},
 		{
-			name: "legacy token url",
+			name: "token url without preset",
 			cfg: ProviderConfig{
 				Type:     ProviderTypeChatCompletions,
 				TokenURL: OpenAIOAuthTokenURL,

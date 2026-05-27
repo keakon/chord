@@ -17,14 +17,9 @@ const (
 	SubAgentStateFailed            SubAgentState = "failed"
 	SubAgentStateCancelled         SubAgentState = "cancelled"
 	SubAgentStateIdle              SubAgentState = "idle"
-
-	legacySubAgentStateWaitingMainValue = "waiting_primary"
 )
 
 func normalizeSubAgentState(state SubAgentState) SubAgentState {
-	if state == SubAgentState(legacySubAgentStateWaitingMainValue) {
-		return SubAgentStateWaitingMain
-	}
 	return state
 }
 

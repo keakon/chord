@@ -62,25 +62,6 @@ func TestSaveAndLoadModelPoolState(t *testing.T) {
 	}
 }
 
-func TestLoadModelPoolStateLegacyCurrentRole(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "model_pool_state.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\ncurrent_role: fast\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	loaded, err := LoadModelPoolState(path)
-	if err != nil {
-		t.Fatalf("LoadModelPoolState: %v", err)
-	}
-	if loaded.CurrentModelPool != "fast" {
-		t.Fatalf("current model pool: got %q, want %q", loaded.CurrentModelPool, "fast")
-	}
-	if loaded.LegacyCurrentRole != "" {
-		t.Fatalf("legacy current role should be cleared after load, got %q", loaded.LegacyCurrentRole)
-	}
-}
-
 func TestSaveModelPoolStateAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "model_pool_state.yaml")

@@ -48,7 +48,7 @@ type ImportReport struct {
 	// Source-specific diagnostics.
 	Claude *ClaudeImportReport `json:"claude,omitempty"`
 
-	// Legacy fields kept for backwards compatibility with existing tooling.
+	// Import summary retained for CLI/report display.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitempty"`
 
 	Warnings []string `json:"warnings,omitempty"`
