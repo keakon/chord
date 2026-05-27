@@ -129,10 +129,10 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/resume`: resume a session
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
-- `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
+- `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers. Runtime changes take effect for the next LLM request, not the currently in-flight request.
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Configuration — Context compaction](./configuration.md#context-compaction)
 - `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier. If you enter a tier that the current provider/model does not support, Chord leaves the current tier unchanged and shows an error.
-- `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping Handoff, Delegate, and Cancel permissions enforced. It can only be changed while the agent is idle because it changes the visible tool surface and can invalidate cached context assumptions.
+- `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping Handoff, Delegate, Cancel, and Done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
 When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model.
@@ -143,7 +143,7 @@ The following commands have more interactive detail, expanded below.
 
 Press `Ctrl+O` to open the MCP server selector. It lists configured MCP servers, their connection state, and whether manual servers are currently enabled or disabled. Use `j` / `k` to move, `Enter` to toggle the selected manual server, `e` to enable, `d` to disable, and `Esc` to close.
 
-The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. While running, it is read-only: enable/disable actions are disabled until the agent is idle. Auto-start MCP servers are always read-only in this selector; only servers configured with `manual: true` can be changed at runtime.
+The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. Enable/disable actions are also allowed while running, but they are deferred: the current in-flight request keeps the MCP tool surface and prompt it started with, and the changed MCP state is reflected in the next LLM request. Auto-start MCP servers are always read-only in this selector; only servers configured with `manual: true` can be changed at runtime.
 
 ### `/export` — export the current session
 
@@ -217,6 +217,8 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 
 When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report argument is still streaming, the Done tool card shows the same live `chars received` progress as other streaming tool arguments; once the argument stream finishes, that temporary progress indicator is hidden. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
 
+`Done` is deliberately treated as loop control rather than an ordinary permission-bypassable tool. `/loop` is available only when the active MainAgent role can use `Done`, and YOLO does not override `Done` permissions. This keeps roles that are not allowed to finish/exit from silently taking over loop termination, and it preserves the local confirmation gate that prevents premature completion.
+
 Loop mode also guards against a stalled tool-call loop. If the MainAgent emits the same tool call three times in a row — same tool name and identical arguments — Chord rejects that tool result automatically, injects guidance to stop repeating the unchanged call and continue toward the loop target, and counts it as one loop interception. The check uses a sliding window: if the fourth call is still identical, it is rejected again immediately. Once the loop interception limit is reached, Chord shows the same local confirmation flow so you can decide whether to stop or continue.
 
 Runtime-injected user continuation messages are used only after a terminal assistant turn that ended with an `end_turn` / `stop` / `done`-style stop reason and no tool calls. If the model already returned tool calls in that turn, loop continuation stays inside the tool-call flow: Chord records tool results, updates loop state, and may show loop guidance in the TUI, but it does not append a synthetic user message unless you manually send one.
@@ -239,6 +241,19 @@ If the task is genuinely blocked, the agent can still report `<blocked>category:
 **When to use:** multi-step tasks (generate code → write tests → debug → refine), iterative development. Not suitable for: one-shot queries or pure Q&A.
 
 You can also define **custom** slash commands (per project or globally). See [Customization — Custom slash commands](./customization.md#custom-slash-commands).
+
+## YOLO and protected control tools
+
+YOLO is a convenience mode for trusted local work: it bypasses ordinary MainAgent permission checks so tools such as file edits, reads, shell commands, and web requests can run without repeated confirmations. It does **not** bypass permissions for `Handoff`, `Delegate`, `Cancel`, or `Done`.
+
+Those four tools are protected because they control agent orchestration rather than just local side effects:
+
+- `Handoff` can transfer work/plans between roles, so it changes who is responsible for the task.
+- `Delegate` can start or manage delegated workstreams and may run work in parallel.
+- `Cancel` can interrupt the active turn.
+- `Done` completes a turn or requests loop exit and carries the final report.
+
+Keeping these permissions enforced under YOLO prevents a broad "allow tools" switch from also granting workflow-control powers. In loop mode this matters especially for `Done`: loop exit remains gated by the active role's `Done` permission, loop exit-condition checks, and local confirmation, so YOLO cannot accidentally let the model terminate a long-running loop early.
 
 ## Multi-agent focus switching
 
