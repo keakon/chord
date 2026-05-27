@@ -162,12 +162,16 @@ func detectInteractiveGit(tokens []string, env map[string]string, hasPipelineInp
 			}
 			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Run it manually in a terminal, or use non-interactive git commands.")
 		}
-	case "add", "checkout", "restore", "reset", "stash":
+	case "add", "checkout", "restore", "reset":
 		if hasOption(args, "-p", "--patch") && !hasPipelineInput {
 			return interactiveFinding("git "+sub+" -p", fmt.Sprintf("`git %s -p` is an interactive patch workflow", sub), "Run it manually in a terminal or use non-interactive pathspecs/options.")
 		}
 		if sub == "add" && hasOption(args, "-i", "--interactive") {
 			return interactiveFinding("git add -i", "`git add -i` is interactive", "Run it manually in a terminal or use non-interactive pathspecs/options.")
+		}
+	case "stash":
+		if gitStashPatchIsInteractive(args) && !hasPipelineInput {
+			return interactiveFinding("git stash -p", "`git stash -p` is an interactive patch workflow", "Run it manually in a terminal or use non-interactive pathspecs/options.")
 		}
 	case "clean":
 		if hasOption(args, "-i", "--interactive") {
@@ -177,6 +181,24 @@ func detectInteractiveGit(tokens []string, env map[string]string, hasPipelineInp
 		return interactiveFinding("git "+sub, fmt.Sprintf("`git %s` launches an interactive tool", sub), "Run it manually in a terminal or use plain git diff/merge commands.")
 	}
 	return nil
+}
+
+func gitStashPatchIsInteractive(args []string) bool {
+	if !hasOption(args, "-p", "--patch") {
+		return false
+	}
+	stashSub := "push"
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		stashSub = arg
+		break
+	}
+	return stashSub == "push" || stashSub == "save"
 }
 
 func detectInteractiveContainerCommand(name string, tokens []string) *InteractiveCommandFinding {
