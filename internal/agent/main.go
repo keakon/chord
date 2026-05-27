@@ -257,6 +257,7 @@ type MainAgent struct {
 	projectConfig *config.Config
 	ruleset       permission.Ruleset  // merged ruleset (base + overlays)
 	overlay       *permission.Overlay // layered permission rules
+	yoloEnabled   atomic.Bool         // temporary main-agent permission bypass; Handoff/Delegate remain governed by rules
 
 	// confirmFn is called when permission evaluates to "ask". It must be set
 	// before Run whenever the active ruleset can yield ActionAsk.
@@ -776,13 +777,47 @@ func (a *MainAgent) currentActiveConfig() *config.AgentConfig {
 	return a.activeConfig
 }
 
-func (a *MainAgent) effectiveRuleset() permission.Ruleset {
+// snapshotRuleset returns a defensive copy of the main agent's merged ruleset,
+// without any YOLO-mode filtering. Use this when the caller needs the same
+// rules the user configured, regardless of the temporary YOLO bypass.
+func (a *MainAgent) snapshotRuleset() permission.Ruleset {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 	if len(a.ruleset) == 0 {
 		return nil
 	}
 	return append(permission.Ruleset(nil), a.ruleset...)
+}
+
+// effectiveRuleset returns the ruleset that should drive the main agent's own
+// LLM-facing surface (system prompt, tool visibility) and rule evaluation.
+// Under YOLO it returns only the protected-tool rules so the visible surface
+// matches what bypassPermission actually enforces. SubAgents must use
+// subAgentBaseRuleset instead.
+func (a *MainAgent) effectiveRuleset() permission.Ruleset {
+	ruleset := a.snapshotRuleset()
+	if a.yoloEnabled.Load() {
+		return yoloRuleset(ruleset)
+	}
+	return ruleset
+}
+
+// subAgentBaseRuleset returns the unfiltered ruleset SubAgents should inherit
+// when they are created or refreshed. YOLO is intentionally a main-agent-only
+// relaxation; subagents continue to evaluate the user's full rule set.
+func (a *MainAgent) subAgentBaseRuleset() permission.Ruleset {
+	return a.snapshotRuleset()
+}
+
+// buildSubAgentRuleset returns the ruleset a freshly created or restored
+// SubAgent should evaluate tool permissions against: the unfiltered main-agent
+// ruleset merged with the SubAgent's own permission config.
+func (a *MainAgent) buildSubAgentRuleset(agentDef *config.AgentConfig) permission.Ruleset {
+	ruleset := a.subAgentBaseRuleset()
+	if agentDef != nil && agentDef.Permission.Kind != 0 {
+		ruleset = permission.Merge(ruleset, permission.ParsePermission(&agentDef.Permission))
+	}
+	return ruleset
 }
 
 // switchRole switches the MainAgent's active role configuration.
@@ -1224,7 +1259,7 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 	return content, filtered
 }
 
-// handleLocalOnlySlashCommands runs /export and /models. These must never
+// handleLocalOnlySlashCommands runs local-only slash commands that must never
 // be appended to the conversation or sent to the model. Returns true if
 // handled. busy reports whether an active turn is in flight (a.turn != nil)
 // so handlers can avoid clearing turn state mid-retry. Runs even when the

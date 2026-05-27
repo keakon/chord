@@ -38,6 +38,7 @@ var (
 	flagContinueSession bool
 	flagResumeSession   string
 	flagWorktree        string
+	flagYolo            bool
 
 	// Path policy overrides (CLI > env > config.yaml paths.* > XDG defaults).
 	// These map to CHORD_* env vars so internal config/path resolvers stay centralized.
@@ -163,6 +164,8 @@ func newRootCmd() *cobra.Command {
 		"Continue the latest non-empty session in the current project")
 	rootCmd.Flags().StringVarP(&flagResumeSession, "resume", "r", "",
 		"Resume a specific session ID in the current project")
+	rootCmd.Flags().BoolVar(&flagYolo, "yolo", false,
+		"Temporarily bypass main-agent tool permissions except Handoff, Delegate, Cancel, and Done")
 	rootCmd.Flags().StringVarP(&flagWorktree, "worktree", "w", "",
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""

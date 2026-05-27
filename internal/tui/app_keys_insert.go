@@ -69,12 +69,31 @@ func (m *Model) maybeMCPShortcut(key string) bool {
 	return true
 }
 
+// sendSlashShortcut binds a key to a slash command that is routed to the agent
+// (e.g. `/tier fast`, `/yolo on`). Returns true once the binding consumed the
+// key, regardless of whether the agent was ready to receive the command, so
+// callers can short-circuit further key handling.
+func (m *Model) sendSlashShortcut(key string, binding []string, command string) bool {
+	if !keyMatches(key, binding) {
+		return false
+	}
+	if m.agent == nil {
+		return true
+	}
+	m.recordTUIDiagnostic("agent-command", "shortcut:%s %s", key, command)
+	m.agent.SendUserMessage(command)
+	return true
+}
+
 func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
 	if m.maybeServiceTierShortcut(key) {
+		return nil
+	}
+	if m.maybeYoloShortcut(key) {
 		return nil
 	}
 	if m.maybeMCPShortcut(key) {
@@ -273,6 +292,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
 				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
 				trimmed == "/tier" || strings.HasPrefix(trimmed, "/tier ") ||
+				trimmed == "/yolo" || strings.HasPrefix(trimmed, "/yolo ") ||
 				trimmed == "/compact" || trimmed == "/loop" || trimmed == "/loop on" || strings.HasPrefix(trimmed, "/loop on ") || trimmed == "/loop off" {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 				m.agent.SendUserMessage(value)

@@ -335,7 +335,7 @@ func (m *Model) renderRulesList() string {
 		return m.renderRulesAdd(maxWidth)
 	}
 
-	title := fmt.Sprintf("Session Rules (%d added)", len(m.rules.rules))
+	title := fmt.Sprintf("Permission Rules (%d added)", len(m.rules.rules))
 	sep := ConfirmSeparatorStyle.Render(title)
 	lines := []string{sep}
 

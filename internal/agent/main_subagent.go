@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -512,11 +511,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	}
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
 	a.applyServiceTierToClient(subLLMClient)
-	agentRuleset := a.effectiveRuleset()
-	if agentDef.Permission.Kind != 0 {
-		agentPermRules := permission.ParsePermission(&agentDef.Permission)
-		agentRuleset = permission.Merge(agentRuleset, agentPermRules)
-	}
+	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
 		extraMCPTools = a.getOrCreateAgentMCP(agentDef.MCP)

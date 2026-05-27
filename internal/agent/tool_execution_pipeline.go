@@ -43,6 +43,7 @@ type toolExecutionPipeline struct {
 	fireHook                      func(context.Context, string, uint64, map[string]any) (*hook.Result, error)
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
+	bypassPermission              func(string) bool
 }
 
 func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
@@ -136,6 +137,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 }
 
 func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
+	if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
+		return nil
+	}
 	if p.currentRuleset == nil {
 		return nil
 	}

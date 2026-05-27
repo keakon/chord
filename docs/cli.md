@@ -55,6 +55,7 @@ Runs the local TUI in the current directory. On the first run, if global `config
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`          | Resume the most recent non-empty session for this project                                                                                                                                    |
 | `-r`, `--resume <id>`       | Resume a specific session ID for this project                                                                                                                                                |
+| `--yolo`                    | Start with YOLO mode enabled: temporarily bypass main-agent tool permissions except Handoff, Delegate, Cancel, and Done                                                                                 |
 | `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
 
 `--continue` and `--resume` are mutually exclusive.

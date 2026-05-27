@@ -147,6 +147,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	if m.maybeServiceTierShortcut(key) {
 		return nil
 	}
+	if m.maybeYoloShortcut(key) {
+		return nil
+	}
 
 	switch {
 	// -- mode switches ---------------------------------------------------

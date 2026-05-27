@@ -248,6 +248,13 @@ type LoopStateChangedEvent struct{}
 
 func (LoopStateChangedEvent) agentEvent() {}
 
+// YoloModeChangedEvent notifies the TUI that YOLO permission-bypass state changed.
+type YoloModeChangedEvent struct {
+	Enabled bool
+}
+
+func (YoloModeChangedEvent) agentEvent() {}
+
 // ToolCallUpdateEvent refreshes the visible arguments for an already-started tool call.
 // Used for streaming providers that deliver tool arguments incrementally.
 // When ArgsStreamingDone is true, ArgsJSON is the final accumulated argument JSON

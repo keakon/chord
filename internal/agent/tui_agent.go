@@ -121,6 +121,10 @@ type LoopController interface {
 	CanUseLoopMode() bool
 }
 
+type YoloController interface {
+	YoloEnabled() bool
+}
+
 // ServiceTierReporter exposes effective runtime service-tier state for command completion and status UI.
 type ServiceTierReporter interface {
 	ServiceTier() config.ServiceTier

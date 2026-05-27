@@ -113,6 +113,7 @@ type statusBarInputs struct {
 	SearchFP          string
 	NextEscHint       string
 	LoopState         agent.LoopState
+	YoloEnabled       bool
 	LoopIteration     int
 	LoopMaxIterations int
 	ServiceTier       config.ServiceTier
@@ -153,6 +154,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		SearchFP:          m.statusBarSearchFingerprint(),
 		NextEscHint:       m.nextEscHint(),
 		LoopState:         loopState,
+		YoloEnabled:       m.yoloEnabled(),
 		LoopIteration:     loopIteration,
 		LoopMaxIterations: loopMaxIterations,
 		ServiceTier:       m.effectiveServiceTier(),
@@ -296,13 +298,20 @@ func (m *Model) appendStatusBarLoopPill(pills []string, inputs statusBarInputs) 
 	return append(pills, StatusHintStyle.Render(label))
 }
 
+func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) []string {
+	if !inputs.YoloEnabled {
+		return pills
+	}
+	return append(pills, StatusHintStyle.Render("YOLO"))
+}
+
 func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
 	snap := inputs.Snapshot
 	pills := []string{
 		m.statusBarModePill(inputs.ModeText),
 		m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor),
 	}
-	return m.appendStatusBarLoopPill(pills, inputs)
+	return m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs)
 }
 
 func (m *Model) statusBarSearchPill() string {
@@ -377,7 +386,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -396,6 +405,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		inputs.LoopIteration,
 		inputs.LoopMaxIterations,
 		inputs.InfoPanelVisible,
+		inputs.YoloEnabled,
 		inputs.SessionSwitchKind,
 		inputs.SessionSwitchID,
 		inputs.WorkingDirDisplay,

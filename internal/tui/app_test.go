@@ -1199,6 +1199,24 @@ func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 	}
 }
 
+func TestYoloShortcutSendsToggleCommand(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'y', Mod: tea.ModCtrl}))
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/yolo on" {
+		t.Fatalf("sentMessages = %#v, want [/yolo on]", backend.sentMessages)
+	}
+
+	backend.yoloEnabled = true
+	m.mode = ModeNormal
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'y', Mod: tea.ModCtrl}))
+	if len(backend.sentMessages) != 2 || backend.sentMessages[1] != "/yolo off" {
+		t.Fatalf("sentMessages = %#v, want second /yolo off", backend.sentMessages)
+	}
+}
+
 func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
@@ -1220,6 +1238,35 @@ func TestSlashCompletionShowsFastCommandWhenSubAgentFocused(t *testing.T) {
 	matches := m.getSlashCompletions("/t")
 	if len(matches) != 1 || matches[0].Cmd != "/tier fast" {
 		t.Fatalf("matches = %#v, want /tier fast when subagent is focused", matches)
+	}
+}
+
+func TestSlashCompletionHidesYoloCommandsWhenSubAgentFocused(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
+	m.focusedAgentID = "sub-1"
+	matches := m.getSlashCompletions("/y")
+	joined := make([]string, 0, len(matches))
+	for _, item := range matches {
+		joined = append(joined, item.Cmd)
+	}
+	got := strings.Join(joined, "\n")
+	if strings.Contains(got, "/yolo on") || strings.Contains(got, "/yolo off") {
+		t.Fatalf("slash completions = %q, should not show /yolo commands when subagent is focused", got)
+	}
+}
+
+func TestSlashCompletionShowsYoloCommandForCurrentState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 100, 30)
+	matches := m.getSlashCompletions("/y")
+	if len(matches) != 1 || matches[0].Cmd != "/yolo on" {
+		t.Fatalf("matches = %#v, want only /yolo on", matches)
+	}
+
+	backend.yoloEnabled = true
+	matches = m.getSlashCompletions("/y")
+	if len(matches) != 1 || matches[0].Cmd != "/yolo off" {
+		t.Fatalf("matches = %#v, want only /yolo off", matches)
 	}
 }
 

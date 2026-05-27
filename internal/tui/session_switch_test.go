@@ -3849,6 +3849,7 @@ type sessionControlAgent struct {
 	serviceTierEnabled      bool
 	serviceTier             config.ServiceTier
 	effectiveServiceTier    config.ServiceTier
+	yoloEnabled             bool
 	executePlanCalls        int
 	executePlanPath         string
 	executePlanAgent        string
@@ -4071,6 +4072,9 @@ func (s *sessionControlAgent) EffectiveServiceTier() config.ServiceTier {
 		return s.effectiveServiceTier
 	}
 	return s.ServiceTier()
+}
+func (s *sessionControlAgent) YoloEnabled() bool {
+	return s != nil && s.yoloEnabled
 }
 func (s *sessionControlAgent) CanUseLoopMode() bool {
 	if s.canUseLoopSet {

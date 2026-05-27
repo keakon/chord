@@ -132,6 +132,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可在空闲时切换手动 server
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。
+- `/yolo on|off`：临时绕过 MainAgent 工具权限，但仍保留 Handoff、Delegate 和 Cancel 权限。该模式会改变可见工具面，可能让缓存和上下文假设失效，因此只能在 agent idle 时切换。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
 
 当当前 provider/model 实际启用了非 standard tier 时，侧边栏/状态区域会正常显示它。如果请求了当前 provider/model 不支持的 tier，信息面板仍会以灰色删除线显示请求的 tier，让它保持可见但明确表示未生效。

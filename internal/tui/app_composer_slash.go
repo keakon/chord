@@ -210,6 +210,15 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 		}
 	}
 	out = append(out, loopCommands...)
+	yoloCommands := []slashCommand{}
+	if m.focusedAgentID == "" && strings.HasPrefix("/yolo", prefix) {
+		if m.yoloEnabled() {
+			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo off", Desc: "disable YOLO permission bypass"})
+		} else {
+			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo on", Desc: "enable YOLO permission bypass"})
+		}
+	}
+	out = append(out, yoloCommands...)
 	tierCommands := []slashCommand{}
 	if strings.HasPrefix("/tier", prefix) {
 		switch m.serviceTier() {

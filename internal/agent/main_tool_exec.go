@@ -62,6 +62,9 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 			return nil
 		},
+		bypassPermission: func(name string) bool {
+			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
+		},
 	}
 }
 

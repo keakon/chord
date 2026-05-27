@@ -606,6 +606,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		mcp.ClientInfo{Name: "chord", Version: Version},
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
+	ac.MainAgent.SetInitialYoloMode(flagYolo)
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {

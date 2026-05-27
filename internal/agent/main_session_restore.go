@@ -17,7 +17,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
@@ -730,11 +729,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 
 		subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
 		a.applyServiceTierToClient(subLLMClient)
-		agentRuleset := a.effectiveRuleset()
-		if agentDef.Permission.Kind != 0 {
-			agentPermRules := permission.ParsePermission(&agentDef.Permission)
-			agentRuleset = permission.Merge(agentRuleset, agentPermRules)
-		}
+		agentRuleset := a.buildSubAgentRuleset(agentDef)
 
 		var extraMCPTools []tools.Tool
 		if len(agentDef.MCP) > 0 {

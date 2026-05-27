@@ -28,15 +28,8 @@ func (m *Model) effectiveServiceTier() config.ServiceTier {
 }
 
 func (m *Model) maybeServiceTierShortcut(key string) bool {
-	if !keyMatches(key, m.keyMap.ServiceTier) {
-		return false
-	}
-	if m.agent == nil {
-		return true
-	}
-	tier := m.serviceTier()
 	next := config.ServiceTierFast
-	switch tier {
+	switch m.serviceTier() {
 	case config.ServiceTierStandard:
 		next = config.ServiceTierFast
 	case config.ServiceTierFast:
@@ -44,7 +37,5 @@ func (m *Model) maybeServiceTierShortcut(key string) bool {
 	case config.ServiceTierSlow:
 		next = config.ServiceTierStandard
 	}
-	m.recordTUIDiagnostic("agent-command", "shortcut:%s /tier %s", key, next)
-	m.agent.SendUserMessage("/tier " + string(next))
-	return true
+	return m.sendSlashShortcut(key, m.keyMap.ServiceTier, "/tier "+string(next))
 }

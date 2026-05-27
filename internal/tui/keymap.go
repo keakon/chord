@@ -52,6 +52,7 @@ type KeyMap struct {
 	SwitchModel []string // open model pool selector
 	ServiceTier []string // switch service tier for all agents
 	Diagnostics []string // export diagnostics bundle
+	Yolo        []string // toggle YOLO permission-bypass mode
 	MCP         []string // open MCP server selector
 }
 
@@ -104,6 +105,7 @@ func DefaultKeyMap() KeyMap {
 		SwitchModel: []string{"ctrl+p"},
 		ServiceTier: []string{"ctrl+r"},
 		Diagnostics: []string{"ctrl+g"},
+		Yolo:        []string{"ctrl+y"},
 		MCP:         []string{"ctrl+o"},
 	}
 }

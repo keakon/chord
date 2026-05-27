@@ -32,7 +32,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.viewport.ScrollToBottom()
 		}
 		return true, effects
-	case agent.LoopStateChangedEvent:
+	case agent.LoopStateChangedEvent, agent.YoloModeChangedEvent:
 		effects.invalidateUsage = true
 		m.invalidateDrawCaches()
 		return true, effects

@@ -65,6 +65,7 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.SwitchModel, "switch_model")
 	apply(&km.ServiceTier, "service_tier")
 	apply(&km.Diagnostics, "diagnostics")
+	apply(&km.Yolo, "yolo")
 	apply(&km.MCP, "mcp")
 
 	return km

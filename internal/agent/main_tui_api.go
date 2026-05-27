@@ -28,6 +28,8 @@ func isTUILocalOnlySlashCommand(content string) bool {
 		return true
 	case c == "/compact":
 		return true
+	case c == "/yolo" || strings.HasPrefix(c, "/yolo "):
+		return true
 	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
 		// MCP control affects the tool surface and must always be routed to the main agent.
 		return true
@@ -57,6 +59,9 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 		return true
 	case c == "/compact":
 		a.handleCompactCommand()
+		return true
+	case c == "/yolo" || strings.HasPrefix(c, "/yolo "):
+		a.handleYoloCommand(c, busy)
 		return true
 	default:
 		return false

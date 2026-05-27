@@ -78,6 +78,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for all agents (`standard` → `fast` → `slow`)                                     |
+| `Ctrl+Y`     | Toggle YOLO mode while idle; bypasses main-agent permissions except Handoff, Delegate, and Cancel              |
 | `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
@@ -172,6 +173,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `switch_role`              | `["tab"]`                        |
 | `switch_model`             | `["ctrl+p"]`                     |
 | `service_tier`             | `["ctrl+r"]`                     |
+| `yolo`                     | `["ctrl+y"]`                     |
 | `mcp`                      | `["ctrl+o"]`                     |
 | `diagnostics`              | `["ctrl+g"]`                     |
 
