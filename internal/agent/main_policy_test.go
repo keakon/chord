@@ -1168,6 +1168,7 @@ func newTestLLMClient() *llm.Client {
 					Context: 8192,
 					Output:  1024,
 				},
+				SupportedServiceTiers: []config.ServiceTier{config.ServiceTierFast, config.ServiceTierSlow},
 			},
 		},
 	}, []string{"test-key"})

@@ -77,7 +77,7 @@ TUI 有两种模式：
 | `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
 | `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
-| `Ctrl+R`      | 循环切换所有 agent 的 service tier（`standard` → `fast` → `slow`）                                  |
+| `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier                         |
 | `Ctrl+Y`      | idle 时切换 YOLO 模式；绕过 MainAgent 权限，但不影响 Handoff、Delegate 和 Cancel 权限                         |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |

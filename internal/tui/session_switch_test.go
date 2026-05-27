@@ -3849,6 +3849,7 @@ type sessionControlAgent struct {
 	serviceTierEnabled      bool
 	serviceTier             config.ServiceTier
 	effectiveServiceTier    config.ServiceTier
+	supportedServiceTiers   []config.ServiceTier
 	yoloEnabled             bool
 	executePlanCalls        int
 	executePlanPath         string
@@ -4072,6 +4073,12 @@ func (s *sessionControlAgent) EffectiveServiceTier() config.ServiceTier {
 		return s.effectiveServiceTier
 	}
 	return s.ServiceTier()
+}
+func (s *sessionControlAgent) SupportedServiceTiers() []config.ServiceTier {
+	if s == nil || len(s.supportedServiceTiers) == 0 {
+		return []config.ServiceTier{config.ServiceTierStandard, config.ServiceTierFast, config.ServiceTierSlow}
+	}
+	return append([]config.ServiceTier(nil), s.supportedServiceTiers...)
 }
 func (s *sessionControlAgent) YoloEnabled() bool {
 	return s != nil && s.yoloEnabled

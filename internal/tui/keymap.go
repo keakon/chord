@@ -50,7 +50,7 @@ type KeyMap struct {
 
 	// Both Insert and Normal modes
 	SwitchModel []string // open model pool selector
-	ServiceTier []string // switch service tier for all agents
+	ServiceTier []string // switch service tier for subsequent model requests
 	Diagnostics []string // export diagnostics bundle
 	Yolo        []string // toggle YOLO permission-bypass mode
 	MCP         []string // open MCP server selector

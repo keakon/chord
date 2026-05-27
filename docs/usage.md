@@ -131,11 +131,11 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers while idle
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Configuration — Context compaction](./configuration.md#context-compaction)
-- `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier.
+- `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier. If you enter a tier that the current provider/model does not support, Chord leaves the current tier unchanged and shows an error.
 - `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping Handoff, Delegate, and Cancel permissions enforced. It can only be changed while the agent is idle because it changes the visible tool surface and can invalidate cached context assumptions.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
-When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If you request a tier that the current provider/model does not support, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective.
+When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model.
 
 The following commands have more interactive detail, expanded below.
 

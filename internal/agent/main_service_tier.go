@@ -24,6 +24,14 @@ func (a *MainAgent) EffectiveServiceTier() config.ServiceTier {
 	return client.EffectiveServiceTierForModelRef(client.RunningModelRef())
 }
 
+func (a *MainAgent) SupportedServiceTiers() []config.ServiceTier {
+	client, _, _, _ := a.llmSnapshot()
+	if client == nil {
+		return []config.ServiceTier{config.ServiceTierStandard}
+	}
+	return client.SupportedServiceTiersForModelRef(client.RunningModelRef())
+}
+
 func (a *MainAgent) applyServiceTierToClient(client *llm.Client) {
 	if a == nil || client == nil {
 		return
@@ -77,6 +85,21 @@ func (a *MainAgent) handleTierCommand(content string, busy bool) {
 		tier = config.ServiceTierSlow
 	default:
 		a.emitToTUI(ToastEvent{Message: "Usage: /tier standard | /tier fast | /tier slow", Level: "info"})
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
+		return
+	}
+	supported := client.SupportedServiceTiersForModelRef(client.RunningModelRef())
+	supportedTier := false
+	for _, candidate := range supported {
+		if candidate == tier {
+			supportedTier = true
+			break
+		}
+	}
+	if !supportedTier {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Service tier %s is not supported by the current model", tier), Level: "error"})
 		if !busy {
 			a.setIdleAndDrainPending()
 		}

@@ -1199,6 +1199,70 @@ func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 	}
 }
 
+func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
+	t.Run("standard only", func(t *testing.T) {
+		backend := &sessionControlAgent{
+			serviceTier:           config.ServiceTierFast,
+			effectiveServiceTier:  config.ServiceTierStandard,
+			supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard},
+		}
+		m := NewModel(backend)
+		m.mode = ModeInsert
+
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier standard" {
+			t.Fatalf("sentMessages = %#v, want [/tier standard]", backend.sentMessages)
+		}
+	})
+
+	t.Run("standard and fast", func(t *testing.T) {
+		backend := &sessionControlAgent{supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard, config.ServiceTierFast}}
+		m := NewModel(backend)
+		m.mode = ModeInsert
+
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier fast" {
+			t.Fatalf("sentMessages = %#v, want [/tier fast]", backend.sentMessages)
+		}
+
+		backend.serviceTier = config.ServiceTierFast
+		m.mode = ModeNormal
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if len(backend.sentMessages) != 2 || backend.sentMessages[1] != "/tier standard" {
+			t.Fatalf("sentMessages = %#v, want second /tier standard", backend.sentMessages)
+		}
+	})
+
+	t.Run("standard and slow skips unsupported fast", func(t *testing.T) {
+		backend := &sessionControlAgent{supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard, config.ServiceTierSlow}}
+		m := NewModel(backend)
+		m.mode = ModeInsert
+
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier slow" {
+			t.Fatalf("sentMessages = %#v, want [/tier slow]", backend.sentMessages)
+		}
+	})
+}
+
+func TestServiceTierShortcutKeepsUnsupportedRequestedTierVisibleUntilSwitched(t *testing.T) {
+	backend := &sessionControlAgent{
+		serviceTier:           config.ServiceTierFast,
+		effectiveServiceTier:  config.ServiceTierStandard,
+		supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard},
+	}
+	m := NewModel(backend)
+	plain := stripANSI(m.renderInfoPanelServiceTierLine(80))
+	if !strings.Contains(plain, "tier: fast") {
+		t.Fatalf("service tier line = %q, want unsupported requested fast visible", plain)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier standard" {
+		t.Fatalf("sentMessages = %#v, want [/tier standard]", backend.sentMessages)
+	}
+}
+
 func TestYoloShortcutSendsToggleCommand(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)

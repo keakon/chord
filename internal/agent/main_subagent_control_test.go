@@ -69,6 +69,29 @@ func TestHandleTierCommandRejectsEmptyTierArgument(t *testing.T) {
 	}
 }
 
+func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	providerCfg := llm.NewProviderConfig("standard-only", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmMu.Lock()
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model", 1024, "")
+	a.llmMu.Unlock()
+
+	a.handleTierCommand("/tier fast", true)
+	toast := waitForToastEvent(t, a.Events(), "Service tier fast is not supported by the current model")
+	if toast.Level != "error" {
+		t.Fatalf("toast level = %q, want error", toast.Level)
+	}
+	if got := a.ServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("service tier = %q, want unchanged standard", got)
+	}
+}
+
 func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)

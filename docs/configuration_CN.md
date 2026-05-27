@@ -550,7 +550,7 @@ providers:
   - `cost.service_tier_multipliers`：可选的 service tier 价格倍数，会在选中基础价格或匹配的 `input_tiers` 价格之后应用。用于表达 provider 的 service tier，例如 OpenAI priority（`fast`）或 flex（`slow`）。
   - `cost.input_tiers`：可选的长上下文价格覆盖。每项使用 `above_input_tokens` 作为严格阈值；当 billable input 大于该值时，Chord 会使用匹配阈值最高一项的 `input`、`output`、`cache_read` 和可选的 `cache_write`，然后再应用 service-tier 倍数。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
-- `supported_service_tiers`：显式声明 provider 或 model 可接收的非 standard service tier，例如 OpenAI 可用 `[fast, slow]`，Anthropic 可用 `[fast]`。provider-level 值作为该 provider 下所有 model 的默认值；model-level 值会覆盖 provider 默认。两者都省略时使用 preset 默认值。定价需单独在 `cost.service_tier_multipliers`（service-tier 费率）和 `cost.input_tiers`（长上下文阈值）里配置。当用户选择了 `fast` 或 `slow`，但当前 provider/model 不支持时，信息侧栏仍会显示用户请求的 `tier: fast` 或 `tier: slow`，并用灰色删除线表示该模式当前未实际生效。
+- `supported_service_tiers`：显式声明 provider 或 model 可接收的非 standard service tier，例如 OpenAI 可用 `[fast, slow]`，Anthropic 可用 `[fast]`。provider-level 值作为该 provider 下所有 model 的默认值；model-level 值会覆盖 provider 默认。两者都省略时使用 preset 默认值。定价需单独在 `cost.service_tier_multipliers`（service-tier 费率）和 `cost.input_tiers`（长上下文阈值）里配置。`standard` 始终可用，不需要写进 `supported_service_tiers`。手动切换只会选择当前 provider/model 支持的 tier：`Ctrl+R` 只在可用集合（`standard` 加上支持的非 standard tier）内循环；手动输入 `/tier fast` 或 `/tier slow` 但当前 provider/model 不支持时会显示错误提示。当切换 provider/model 后，之前请求的 `fast` 或 `slow` 不再受支持时，信息侧栏仍会显示用户请求的 `tier: fast` 或 `tier: slow`，并用灰色删除线表示该模式当前未实际生效。
 
 只有 Chord 模型 schema 中定义的字段会被使用。`modalities.output` 当前不被运行时解释，示例中刻意省略。
 

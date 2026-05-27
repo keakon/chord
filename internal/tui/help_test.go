@@ -29,7 +29,7 @@ func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
 				foundHelp = len(binding.Keys) == 1 && binding.Keys[0] == "f1"
 			case "start search":
 				foundSearch = len(binding.Keys) == 1 && binding.Keys[0] == "?"
-			case "switch service tier for all agents":
+			case "switch service tier for subsequent model requests":
 				foundFast = len(binding.Keys) == 1 && binding.Keys[0] == "ctrl+r"
 			}
 		}

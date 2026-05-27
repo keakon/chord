@@ -8,7 +8,6 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -221,14 +220,8 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 	out = append(out, yoloCommands...)
 	tierCommands := []slashCommand{}
 	if strings.HasPrefix("/tier", prefix) {
-		switch m.serviceTier() {
-		case config.ServiceTierFast:
-			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier slow", Desc: "switch to slow tier"})
-		case config.ServiceTierSlow:
-			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier standard", Desc: "switch to standard tier"})
-		default:
-			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier fast", Desc: "switch to fast tier"})
-		}
+		next := nextServiceTier(m.serviceTier(), m.supportedServiceTiers())
+		tierCommands = append(tierCommands, slashCommand{Cmd: "/tier " + string(next), Desc: "switch to " + string(next) + " tier"})
 	}
 	out = append(out, tierCommands...)
 	for _, c := range slashCommands {

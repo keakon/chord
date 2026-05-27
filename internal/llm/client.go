@@ -554,12 +554,56 @@ func (c *Client) ServiceTier() config.ServiceTier {
 	return config.NormalizeServiceTier(string(c.serviceTier))
 }
 
+func supportedServiceTiersForTuning(tuning RequestTuning) []config.ServiceTier {
+	tiers := []config.ServiceTier{config.ServiceTierStandard}
+	for _, tier := range []config.ServiceTier{config.ServiceTierFast, config.ServiceTierSlow} {
+		if tuning.SupportedServiceTiers[tier] {
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
+}
+
 func effectiveServiceTierForTuning(tuning RequestTuning, tier config.ServiceTier) config.ServiceTier {
 	tier = config.NormalizeServiceTier(string(tier))
 	if tier == config.ServiceTierStandard || !tuning.SupportedServiceTiers[tier] {
 		return config.ServiceTierStandard
 	}
 	return tier
+}
+
+// SupportedServiceTiersForModelRef returns the user-selectable tiers accepted by
+// the configured model ref in the effective model pool. Standard is always
+// included because it means omitting any non-standard provider tier hint.
+func (c *Client) SupportedServiceTiersForModelRef(ref string) []config.ServiceTier {
+	if c == nil {
+		return []config.ServiceTier{config.ServiceTierStandard}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportedServiceTiersForModelRefLocked(ref)
+}
+
+func (c *Client) supportedServiceTiersForModelRefLocked(ref string) []config.ServiceTier {
+	normalizedRef := strings.TrimSpace(ref)
+	if normalizedRef != "" {
+		normalizedRef, _ = config.ParseModelRef(normalizedRef)
+	}
+	if c.provider != nil {
+		primaryRef := providerModelRef(c.provider, c.modelID)
+		if normalizedRef == "" || normalizedRef == primaryRef {
+			return supportedServiceTiersForTuning(tuningForPoolTarget(FallbackModel{ProviderConfig: c.provider, ModelID: c.modelID, Variant: c.activeVariant}))
+		}
+	}
+	for _, fb := range c.fallbackModels {
+		if fb.ProviderConfig == nil {
+			continue
+		}
+		if normalizedRef == providerModelRef(fb.ProviderConfig, fb.ModelID) {
+			return supportedServiceTiersForTuning(tuningForPoolTarget(fb))
+		}
+	}
+	return []config.ServiceTier{config.ServiceTierStandard}
 }
 
 // EffectiveServiceTierForModelRef returns the tier that can actually be applied

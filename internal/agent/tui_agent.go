@@ -129,6 +129,7 @@ type YoloController interface {
 type ServiceTierReporter interface {
 	ServiceTier() config.ServiceTier
 	EffectiveServiceTier() config.ServiceTier
+	SupportedServiceTiers() []config.ServiceTier
 }
 
 // RoleController exposes role/handoff lifecycle for the active agent.
