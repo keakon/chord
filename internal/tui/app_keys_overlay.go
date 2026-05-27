@@ -224,6 +224,14 @@ func (m *Model) handleDirectoryKey(msg tea.KeyMsg) tea.Cmd {
 		if m.dirList != nil {
 			m.dirList.CursorUp()
 		}
+	case "ctrl+f", "pgdown":
+		if m.dirList != nil {
+			m.dirList.CursorPageDown()
+		}
+	case "ctrl+b", "pgup":
+		if m.dirList != nil {
+			m.dirList.CursorPageUp()
+		}
 	case "enter":
 		cursor := 0
 		prevOffset := m.viewport.offset

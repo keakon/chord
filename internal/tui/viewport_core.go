@@ -2,7 +2,7 @@ package tui
 
 import "time"
 
-// DirectoryEntry is one row in the message-directory overlay (Ctrl+J).
+// DirectoryEntry is one row in the message-directory overlay (Ctrl+T).
 type DirectoryEntry struct {
 	BlockIndex int
 	BlockID    int

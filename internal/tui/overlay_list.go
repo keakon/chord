@@ -139,6 +139,28 @@ func (l *OverlayList) CursorToBottom() {
 	l.SetCursor(len(l.items) - 1)
 }
 
+func (l *OverlayList) CursorPageDown() {
+	if len(l.items) == 0 {
+		return
+	}
+	step := l.maxVisible
+	if step < 1 {
+		step = len(l.items)
+	}
+	l.SetCursor(l.cursor + step)
+}
+
+func (l *OverlayList) CursorPageUp() {
+	if len(l.items) == 0 {
+		return
+	}
+	step := l.maxVisible
+	if step < 1 {
+		step = len(l.items)
+	}
+	l.SetCursor(l.cursor - step)
+}
+
 func (l *OverlayList) CursorAt() int {
 	return l.cursor
 }

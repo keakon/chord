@@ -59,7 +59,7 @@ func (m *Model) recalcViewportSize() {
 	}
 	// Reduce viewport width when the right panel (info + agents) is visible.
 	vpWidth := m.width
-	if m.rightPanelVisible && m.mode != ModeDirectory && m.mode != ModeHelp {
+	if m.rightPanelVisible && m.mode != ModeHelp {
 		vpWidth -= 32 // right panel width
 		vpWidth--     // 1-column gap before right panel
 	}
@@ -113,7 +113,7 @@ func (m *Model) generateLayout(w, h int) tuiLayout {
 	// The right panel (width >= 120) hosts both the agent list (sidebar) on
 	// top and the info panel below. No left-side sidebar any more.
 	rightPanelWidth := 0
-	if m.rightPanelVisible && m.mode != ModeDirectory && m.mode != ModeHelp {
+	if m.rightPanelVisible && m.mode != ModeHelp {
 		rightPanelWidth = 32
 	}
 	mainMaxX := w - rightPanelWidth

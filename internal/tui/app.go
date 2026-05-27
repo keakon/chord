@@ -189,7 +189,7 @@ type Model struct {
 	chord               chordState
 	chordTickGeneration uint64
 
-	// Message-directory state (Ctrl+J)
+	// Message-directory state (Ctrl+T)
 	dirEntries []DirectoryEntry
 	dirList    *OverlayList
 	help       helpState

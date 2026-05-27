@@ -77,8 +77,8 @@ func DefaultKeyMap() KeyMap {
 		// Normal mode – scrolling
 		ScrollDown:     []string{"down"},
 		ScrollUp:       []string{"up"},
-		FullPageDown:   []string{"ctrl+f"},
-		FullPageUp:     []string{"ctrl+b"},
+		FullPageDown:   []string{"ctrl+f", "pgdown"},
+		FullPageUp:     []string{"ctrl+b", "pgup"},
 		ScrollToBottom: []string{"G"},
 		ScrollToTopSeq: []string{"g"},
 

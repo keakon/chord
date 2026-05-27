@@ -220,8 +220,9 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 	out = append(out, yoloCommands...)
 	tierCommands := []slashCommand{}
 	if strings.HasPrefix("/tier", prefix) {
-		next := nextServiceTier(m.serviceTier(), m.supportedServiceTiers())
-		tierCommands = append(tierCommands, slashCommand{Cmd: "/tier " + string(next), Desc: "switch to " + string(next) + " tier"})
+		if next, ok := nextServiceTier(m.serviceTier(), m.supportedServiceTiers()); ok {
+			tierCommands = append(tierCommands, slashCommand{Cmd: "/tier " + string(next), Desc: "switch to " + string(next) + " tier"})
+		}
 	}
 	out = append(out, tierCommands...)
 	for _, c := range slashCommands {

@@ -1200,7 +1200,18 @@ func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 }
 
 func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
-	t.Run("standard only", func(t *testing.T) {
+	t.Run("standard only and already standard", func(t *testing.T) {
+		backend := &sessionControlAgent{supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard}}
+		m := NewModel(backend)
+		m.mode = ModeInsert
+
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if len(backend.sentMessages) != 0 {
+			t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)
+		}
+	})
+
+	t.Run("standard only with unsupported requested tier", func(t *testing.T) {
 		backend := &sessionControlAgent{
 			serviceTier:           config.ServiceTierFast,
 			effectiveServiceTier:  config.ServiceTierStandard,
@@ -1281,19 +1292,49 @@ func TestYoloShortcutSendsToggleCommand(t *testing.T) {
 	}
 }
 
-func TestSlashCompletionShowsFastCommandForCurrentState(t *testing.T) {
-	backend := &sessionControlAgent{}
-	m := NewModel(backend)
-	matches := m.getSlashCompletions("/t")
-	if len(matches) != 1 || matches[0].Cmd != "/tier fast" {
-		t.Fatalf("matches = %#v, want /tier fast", matches)
+func TestSlashCompletionShowsTierCommandMatchingServiceTierShortcut(t *testing.T) {
+	assertCompletionMatchesShortcut := func(t *testing.T, backend *sessionControlAgent, want string) {
+		t.Helper()
+		m := NewModel(backend)
+		matches := m.getSlashCompletions("/t")
+		if want == "" {
+			if len(matches) != 0 {
+				t.Fatalf("matches = %#v, want none", matches)
+			}
+		} else if len(matches) != 1 || matches[0].Cmd != want {
+			t.Fatalf("matches = %#v, want %s", matches, want)
+		}
+
+		m.mode = ModeInsert
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		if want == "" {
+			if len(backend.sentMessages) != 0 {
+				t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)
+			}
+		} else if len(backend.sentMessages) != 1 || backend.sentMessages[0] != want {
+			t.Fatalf("sentMessages = %#v, want [%s]", backend.sentMessages, want)
+		}
 	}
 
-	backend.serviceTierEnabled = true
-	matches = m.getSlashCompletions("/t")
-	if len(matches) != 1 || matches[0].Cmd != "/tier slow" {
-		t.Fatalf("matches = %#v, want /tier slow", matches)
-	}
+	t.Run("default standard to fast", func(t *testing.T) {
+		assertCompletionMatchesShortcut(t, &sessionControlAgent{}, "/tier fast")
+	})
+
+	t.Run("fast to slow", func(t *testing.T) {
+		assertCompletionMatchesShortcut(t, &sessionControlAgent{serviceTierEnabled: true}, "/tier slow")
+	})
+
+	t.Run("standard only and already standard", func(t *testing.T) {
+		assertCompletionMatchesShortcut(t, &sessionControlAgent{supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard}}, "")
+	})
+
+	t.Run("standard only with unsupported requested tier", func(t *testing.T) {
+		assertCompletionMatchesShortcut(t, &sessionControlAgent{
+			serviceTier:           config.ServiceTierFast,
+			effectiveServiceTier:  config.ServiceTierStandard,
+			supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard},
+		}, "/tier standard")
+	})
 }
 
 func TestSlashCompletionShowsFastCommandWhenSubAgentFocused(t *testing.T) {
@@ -4177,6 +4218,83 @@ func TestApplyResizeMsgUsesLatestPendingSize(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatalf("applyResizeMsg should not schedule extra command, got %#v", cmd)
+	}
+}
+
+func TestDirectoryModeKeepsRightPanelLayoutAndStatusBarState(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "alpha"})
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 't', Mod: tea.ModCtrl})); cmd != nil {
+		t.Fatalf("opening directory should not schedule command, got %#v", cmd)
+	}
+	if m.mode != ModeDirectory {
+		t.Fatalf("mode = %v, want ModeDirectory", m.mode)
+	}
+	layout := m.generateLayout(m.width, m.height)
+	if layout.infoPanel.Dx() == 0 {
+		t.Fatal("directory mode should keep the right panel/sidebar visible")
+	}
+	if layout.main.Max.X >= layout.infoPanel.Min.X {
+		t.Fatalf("main layout overlaps right panel: main=%v infoPanel=%v", layout.main, layout.infoPanel)
+	}
+	if !m.statusBarInputs(time.Now()).InfoPanelVisible {
+		t.Fatal("directory mode status bar should keep the side-panel-visible layout state")
+	}
+}
+
+func TestDirectoryItemsAreNumberedAndPageNavigationWorks(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeDirectory
+	m.dirEntries = make([]DirectoryEntry, 10)
+	for i := range m.dirEntries {
+		m.dirEntries[i] = DirectoryEntry{BlockIndex: i, Summary: fmt.Sprintf("message-%02d", i+1)}
+	}
+	m.dirList = NewOverlayList(directoryItems(m.dirEntries), 3)
+	m.viewport.SetSize(80, 7)
+
+	rendered := stripANSI(m.renderDirectory())
+	if !strings.Contains(rendered, "1. message-01") || !strings.Contains(rendered, "2. message-02") {
+		t.Fatalf("directory rows should be numbered, got:\n%s", rendered)
+	}
+
+	_ = m.handleDirectoryKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+	if got := m.dirList.CursorAt(); got != 3 {
+		t.Fatalf("cursor after PgDown = %d, want 3", got)
+	}
+	_ = m.handleDirectoryKey(tea.KeyPressMsg(tea.Key{Code: 'f', Mod: tea.ModCtrl}))
+	if got := m.dirList.CursorAt(); got != 6 {
+		t.Fatalf("cursor after Ctrl+F = %d, want 6", got)
+	}
+	_ = m.handleDirectoryKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
+	if got := m.dirList.CursorAt(); got != 3 {
+		t.Fatalf("cursor after PgUp = %d, want 3", got)
+	}
+	_ = m.handleDirectoryKey(tea.KeyPressMsg(tea.Key{Code: 'b', Mod: tea.ModCtrl}))
+	if got := m.dirList.CursorAt(); got != 0 {
+		t.Fatalf("cursor after Ctrl+B = %d, want 0", got)
+	}
+}
+
+func TestNormalModePageKeysScrollMainViewport(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeNormal
+	m.viewport.height = 5
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("line\n", 30)})
+	m.viewport.ScrollToTop()
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown})); cmd != nil {
+		t.Fatalf("PgDown should not schedule command without inline images, got %#v", cmd)
+	}
+	if got := m.viewport.offset; got <= 0 {
+		t.Fatalf("offset after PgDown = %d, want > 0", got)
+	}
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp})); cmd != nil {
+		t.Fatalf("PgUp should not schedule command without inline images, got %#v", cmd)
+	}
+	if got := m.viewport.offset; got != 0 {
+		t.Fatalf("offset after PgUp = %d, want 0", got)
 	}
 }
 

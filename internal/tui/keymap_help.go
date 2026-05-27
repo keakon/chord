@@ -137,6 +137,8 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 			Bindings: []HelpBinding{
 				helpBinding([]string{"j / down"}, "move down"),
 				helpBinding([]string{"k / up"}, "move up"),
+				helpBinding([]string{"ctrl+f / pgdown"}, "page down"),
+				helpBinding([]string{"ctrl+b / pgup"}, "page up"),
 				helpBinding([]string{"g"}, "jump to top"),
 				helpBinding([]string{"G"}, "jump to bottom"),
 				helpBinding([]string{"enter"}, "jump to message"),

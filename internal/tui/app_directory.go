@@ -6,17 +6,28 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// renderDirectory produces the Ctrl+J overlay that fills the viewport area.
+// renderDirectory produces the Ctrl+T message directory within the main viewport area.
 func (m Model) renderDirectory() string {
+	width := m.viewport.width
+	height := m.viewport.height
+	if width <= 0 {
+		width = m.width
+	}
+	if height <= 0 {
+		height = 1
+	}
 	if len(m.dirEntries) == 0 {
-		centred := lipgloss.Place(m.viewport.width, m.viewport.height,
+		centred := lipgloss.Place(width, height,
 			lipgloss.Center, lipgloss.Center, DimStyle.Render("(no messages)"))
 		return centred
 	}
 
-	maxWidth := m.width - 6
+	maxWidth := width - 6
 	if maxWidth < 20 {
 		maxWidth = 20
+	}
+	if maxWidth > width {
+		maxWidth = width
 	}
 
 	// innerWidth is the usable content width inside the DirectoryBorderStyle
@@ -33,7 +44,7 @@ func (m Model) renderDirectory() string {
 	title := DialogTitleStyle.Render("Message Directory")
 	box := DirectoryBorderStyle.Width(maxWidth).Render(title + "\n" + content)
 
-	return lipgloss.Place(m.width, m.viewport.height, lipgloss.Center, lipgloss.Center, box)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m *Model) directoryMaxVisible() int {
@@ -46,10 +57,10 @@ func (m *Model) directoryMaxVisible() int {
 
 func directoryItems(entries []DirectoryEntry) []OverlayListItem {
 	items := make([]OverlayListItem, 0, len(entries))
-	for _, entry := range entries {
+	for i, entry := range entries {
 		items = append(items, OverlayListItem{
 			ID:    fmt.Sprintf("%d", entry.BlockIndex),
-			Label: entry.Summary,
+			Label: fmt.Sprintf("%d. %s", i+1, entry.Summary),
 		})
 	}
 	return items

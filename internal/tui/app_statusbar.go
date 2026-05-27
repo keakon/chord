@@ -145,7 +145,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		Snapshot:          snap,
 		StatusActiveID:    statusActiveID,
 		StatusActivity:    m.activities[statusActiveID],
-		InfoPanelVisible:  m.rightPanelVisible && m.mode != ModeDirectory && m.mode != ModeHelp,
+		InfoPanelVisible:  m.rightPanelVisible && m.mode != ModeHelp,
 		SessionSwitchKind: m.sessionSwitch.kind,
 		SessionSwitchID:   m.sessionSwitch.sessionID,
 		WorkingDirDisplay: displayWorkingDir(m.workingDir),

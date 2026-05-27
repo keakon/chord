@@ -42,20 +42,29 @@ func (m *Model) supportedServiceTiers() []config.ServiceTier {
 	return tiers
 }
 
-func nextServiceTier(current config.ServiceTier, supported []config.ServiceTier) config.ServiceTier {
+func nextServiceTier(current config.ServiceTier, supported []config.ServiceTier) (config.ServiceTier, bool) {
 	if len(supported) == 0 {
-		return config.ServiceTierStandard
+		return "", false
 	}
 	current = config.NormalizeServiceTier(string(current))
 	for i, tier := range supported {
 		if tier == current {
-			return supported[(i+1)%len(supported)]
+			if len(supported) == 1 {
+				return "", false
+			}
+			return supported[(i+1)%len(supported)], true
 		}
 	}
-	return supported[0]
+	return supported[0], true
 }
 
 func (m *Model) maybeServiceTierShortcut(key string) bool {
-	next := nextServiceTier(m.serviceTier(), m.supportedServiceTiers())
+	if !keyMatches(key, m.keyMap.ServiceTier) {
+		return false
+	}
+	next, ok := nextServiceTier(m.serviceTier(), m.supportedServiceTiers())
+	if !ok {
+		return true
+	}
 	return m.sendSlashShortcut(key, m.keyMap.ServiceTier, "/tier "+string(next))
 }
