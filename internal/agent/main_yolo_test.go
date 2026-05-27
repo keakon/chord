@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -45,5 +48,41 @@ func TestYoloRulesetEmptyInputReturnsNil(t *testing.T) {
 	}
 	if got := yoloRuleset(permission.Ruleset{}); got != nil {
 		t.Fatalf("yoloRuleset(empty) = %v, want nil", got)
+	}
+}
+
+func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
+	pipeline := toolExecutionPipeline{
+		registry: tools.NewRegistry(),
+		currentRuleset: func() permission.Ruleset {
+			return permission.Ruleset{
+				{Permission: tools.NameShell, Pattern: "*", Action: permission.ActionDeny},
+				{Permission: tools.NameHandoff, Pattern: "*", Action: permission.ActionDeny},
+				{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionDeny},
+				{Permission: tools.NameCancel, Pattern: "*", Action: permission.ActionDeny},
+			}
+		},
+		bypassPermission: func(name string) bool {
+			return !yoloProtectedPermissionTool(name)
+		},
+	}
+
+	for _, toolName := range []string{tools.NameShell, tools.NameWrite, tools.NameRead} {
+		t.Run(toolName+" bypassed", func(t *testing.T) {
+			call := message.ToolCall{Name: toolName, Args: json.RawMessage(`{}`)}
+			if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+				t.Fatalf("applyPermission(%s) err = %v, want nil", toolName, err)
+			}
+		})
+	}
+
+	for _, toolName := range []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel} {
+		t.Run(toolName+" protected", func(t *testing.T) {
+			call := message.ToolCall{Name: toolName, Args: json.RawMessage(`{}`)}
+			err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{})
+			if err == nil || !strings.Contains(err.Error(), "denied by permission policy") {
+				t.Fatalf("applyPermission(%s) err = %v, want permission denied", toolName, err)
+			}
+		})
 	}
 }

@@ -122,6 +122,35 @@ func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 	}
 }
 
+func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {
+			Name:       "worker",
+			Permission: parsePermissionNode(t, "Write: deny\n"),
+		},
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-rule-intent")
+	sub.ruleset = a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName])
+
+	pipeline := sub.toolExecutionPipeline()
+	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
+		Pattern: "*",
+		Scope:   int(permission.ScopeSession),
+	})
+
+	if got := refreshed.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
+		t.Fatalf("subagent rule-intent Shell permission = %q, want allow", got)
+	}
+	if got := refreshed.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("subagent Write permission after rule-intent refresh = %q, want deny", got)
+	}
+	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("stored subagent Write permission after rule-intent refresh = %q, want deny", got)
+	}
+}
+
 func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
