@@ -135,7 +135,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/yolo on|off`：临时绕过 MainAgent 工具权限，但仍保留 Handoff、Delegate、Cancel 和 Done 权限。Agent 运行中也可以切换 YOLO；执行期权限绕过会立刻影响后续工具调用，而 LLM 可见的工具描述和权限提示会在下一次请求刷新。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
 
-当当前 provider/model 实际启用了非 standard tier 时，侧边栏/状态区域会正常显示它。如果切换 provider/model 后，之前请求的 tier 不再受支持，信息面板仍会以灰色删除线显示请求的 tier，让它保持可见但明确表示未生效。`Ctrl+R` 会跳过不支持的 tier，只在当前 provider/model 可用的 tier 中循环。
+当当前 provider/model 实际启用了非 standard tier 时，侧边栏/状态区域会正常显示它。如果切换 provider/model 后，之前请求的 tier 不再受支持，信息面板仍会以灰色删除线显示请求的 tier，让它保持可见但明确表示未生效。`Ctrl+R` 会跳过不支持的 tier，只在当前 provider/model 可用的 tier 中循环。`/tier` 的 slash 补全会预测与 `Ctrl+R` 相同的下一个 tier；如果唯一可用 tier 是当前已经生效的 `standard`，补全列表会隐藏 `/tier`。
 
 下面几个命令有更多交互细节，单独展开说明。
 

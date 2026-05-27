@@ -94,6 +94,14 @@ If you use a `chat-completions` provider such as DeepSeek and see errors like:
 
 this usually means the provider requires thinking/reasoning content from the previous tool round to be included again in the follow-up request, with a strict assistant message shape. If the same error keeps repeating, keep the corresponding session dump / trace for diagnosis.
 
+### Codex WebSocket 400 "No tool call found for function call output"
+
+The Codex WebSocket transport sends incremental requests keyed by `previous_response_id`. The server keeps its own view of the conversation under that id, and if our locally constructed input drifts from that view (for example after a request-signature change between turns), the server can reject the next turn with `400 No tool call found for function call output with call_id …` even though the matching `function_call` and `function_call_output` are present together in the input we sent.
+
+When Chord sees this kind of 400 it now clears the WebSocket chain state (`previous_response_id`, baseline, signature) and immediately retries the same request on the same WebSocket as a full send without `previous_response_id`. That is equivalent to starting a fresh server-side conversation seeded by the local input, and resolves the mismatch in-place without burning an HTTP round trip. The retry is only tried when the original 400 is identified as a chain-state mismatch; if the retry still fails the input itself is malformed and HTTP fallback would fail identically, so the error is returned without further fallback.
+
+Most users do not need to do anything — the recovery is automatic. If you see this error repeating across many turns, capture the trace and the session id so the conversation contents can be examined.
+
 ## MCP never becomes ready
 
 Check first:
@@ -128,6 +136,13 @@ For `--continue`, `--resume`, new-session, fork-session, and plan-execution flow
 - prefer `--resume <session-id>` when you need an exact target
 - if model/provider state looks wrong after restore, keep the relevant session logs and traces for diagnosis
 - if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
+
+When a session is resumed Chord also repairs structurally broken turns before the transcript is sent to a provider:
+
+- a trailing assistant message with `stop_reason=interrupted` (process killed mid-stream) is dropped, so the next user/system turn drives a fresh assistant reply
+- every assistant `tool_call` whose matching tool result was never persisted gets a synthetic `error` tool message (`ToolStatus=error`) appended in its place, so providers that require strict `function_call ↔ function_call_output` pairing (OpenAI Responses, Anthropic `tool_use`/`tool_result`) accept the input
+
+The repair is structural only — text and `ToolStatus` of already-persisted tool messages are not rewritten. Tool messages whose payload happens to contain words like "denied" or "cancelled" are no longer reinterpreted as failures.
 
 Session resume itself is fully supported. Internal transport cleanup does not affect the ability to continue or resume sessions. If you see unexpected behavior after restore, capture logs from the current build for diagnosis.
 

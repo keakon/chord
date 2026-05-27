@@ -38,13 +38,13 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 ### Normal mode — scrolling
 
-| Key                | Action                                                   |
-| ------------------ | -------------------------------------------------------- |
-| `↓` / `↑`          | Scroll one line                                          |
-| `Ctrl+F`           | Scroll one full page down                                |
-| `Ctrl+B`           | Scroll one full page up                                  |
-| `G`                | Jump to the bottom                                       |
-| `gg`               | Jump to the top (two-key sequence)                       |
+| Key                  | Action                                                   |
+| -------------------- | -------------------------------------------------------- |
+| `↓` / `↑`            | Scroll one line                                          |
+| `Ctrl+F` / `PgDown`  | Scroll one full page down                                |
+| `Ctrl+B` / `PgUp`    | Scroll one full page up                                  |
+| `G`                  | Jump to the bottom                                       |
+| `gg`                 | Jump to the top (two-key sequence)                       |
 
 ### Normal mode — message blocks
 
@@ -77,7 +77,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
-| `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model |
+| `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
 | `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except Handoff, Delegate, Cancel, and Done                 |
 | `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
@@ -156,8 +156,8 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `help_toggle`              | `["?"]`                          |
 | `scroll_down`              | `["down"]`                       |
 | `scroll_up`                | `["up"]`                         |
-| `full_page_down`           | `["ctrl+f"]`                     |
-| `full_page_up`             | `["ctrl+b"]`                     |
+| `full_page_down`           | `["ctrl+f", "pgdown"]`          |
+| `full_page_up`             | `["ctrl+b", "pgup"]`            |
 | `scroll_to_bottom`         | `["G"]`                          |
 | `scroll_to_top_seq`        | `["g"]` (first key of `gg`)      |
 | `next_block`               | `["j", "}"]`                     |

@@ -135,7 +135,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping Handoff, Delegate, Cancel, and Done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
-When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model.
+When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model. Slash completion for `/tier` predicts the same next tier as `Ctrl+R`; when the only available tier is the already-active `standard`, `/tier` is omitted from slash completions.
 
 The following commands have more interactive detail, expanded below.
 

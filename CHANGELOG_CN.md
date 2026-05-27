@@ -4,6 +4,14 @@
 
 ## 未发布
 
+- LLM / Codex：Codex WebSocket 返回 400 且错误信息表明服务端增量会话状态与本地 input 不一致（例如 `No tool call found for function call output with call_id …`，或消息中包含 `previous_response_id`）时，Chord 现在会清空 WebSocket 链状态并立即在同一 WS 上以**全量、不带 `previous_response_id`**的方式重发一次；只有原始 400 属于链状态不一致才会触发该重试，重试仍失败时直接返回错误、不再回退 HTTP，因为 HTTP 会发送相同的 input、注定同样失败。
+- Agent / 会话恢复：恢复的对话现在会在送入 provider 前修复结构上的破损——尾部 `stop_reason=interrupted` 的 assistant 消息会被丢弃，每个 assistant `tool_call` 若缺失对应 tool result，会补一条合成的 `error` tool 消息（`ToolStatus=error`）。仅做结构修复；tool 消息的文本和 `ToolStatus` 字段不再被改写，1.0 之前基于文本启发式（搜索 `denied` / `cancelled` 等子串）猜测状态的逻辑不再恢复。
+- TUI / 消息目录：Ctrl+T 消息目录现在在主视图区域内渲染，不再遮挡右侧信息面板；条目按 1 开始编号显示，新增 `Ctrl+F` / `PgDown` / `Ctrl+B` / `PgUp` 一次翻一页。
+- LLM / Key pool：多个 credential slot 如果共享同一个 access token，现在会同步应用 cooldown、recovering、quota-exhausted 和 success 状态，避免已耗尽 token 通过另一个 slot 再次被选中。
+- LLM / Codex：Codex WebSocket 返回 usage-limit / quota exhausted 类错误时，现在会跳过 HTTP fallback，直接进入 key quota/cooldown 处理，避免先等到响应头超时才切换下一个账号或 fallback 模型。
+- LLM / 兼容网关：非官方兼容网关返回看起来是临时态的 HTTP 400（例如 `Concurrency limit exceeded`）时，现在会冷却当前 key、轮换到下一个 key，并允许跨完整池继续重试；官方 API 的 400 以及请求参数/模型不兼容类 400（包括 `Store must be set to false` / `Stream must be set to true`）仍立即停止。
+- Tools / Shell：`git stash show -p`、`git stash list --patch` 等非交互式 `git stash` 子命令不再被识别为交互式补丁流程；只有在无管道输入时的 `git stash push -p` 和 `git stash save --patch` 仍会被拦截。
+- TUI / Service tier：`/tier` slash 补全现在和 `Ctrl+R` 快捷键保持一致——预测的下一个 tier 相同；如果当前唯一支持的 tier 就是已生效的 `standard`，`/tier` 会从补全列表隐藏，快捷键也变为 no-op。
 - TUI / YOLO：新增 `--yolo`、`/yolo on|off` 和 `Ctrl+Y`，可在运行中切换临时 MainAgent 权限绕过。Handoff、Delegate、Cancel 和 Done 权限仍会生效；启用时状态栏显示 YOLO。
 - TUI / 权限：`/rules` 现在即使没有已记住规则也会打开，并支持手动添加 session/project/global 级 allow/ask/deny 规则。确认弹窗的记住规则选择器现在允许保存前手动编辑建议 pattern；Delete 确认会提供保守的路径级候选，而不是完全禁用记住规则。
 - TUI / 鼠标选择：文本选择体验现在在对话卡片、Done/Handoff Markdown viewer 和 composer 输入框之间保持一致。双击选中当前词，三击选中当前可见行，拖拽选择继续保持原行为。
@@ -41,13 +49,15 @@
 - TUI / 焦点恢复：延迟到达的 tail-window 焦点恢复事件会被重新应用，让聚焦的卡片在多次重绘后仍保持可见。
 - Runtime / 上下文 reduction 统计：info-panel 的 `Reduced` 行在 `/compact` 或自动压缩重写会话历史后会刷新，loop 模式下同样有效。
 - Runtime / 压缩摘要：持久化压缩摘要的小节标题从单一的 `## Goal` 拆为 `## Current User Request` / `## Active Objective` / `## Background Goals`。最新用户请求和最近一次 Done 拒绝原因现在被视为同等优先级的 latest-request anchor（按消息序号取最新），不会再被一条更早的约束反过来盖住新到的 Done 拒绝。`## Todo State` 显式使用 `Active/relevant to latest request` / `Completed/background` / `Stale/superseded` 三个子组，让压缩后的 agent 按最新请求重新评估旧 todo，而不是默认沿用。
+- Runtime / 上下文剪裁：剪裁现在会保留最近的未完成 tool-call 链在当前尾部，而不是直接归档，这样没有 result 的 tool call 会继续和 assistant 消息保持配对；当这类未完成 tool call 足够陈旧时，仍然可以被压缩掉。每次发送 LLM 请求前，凡是已经没有有效 assistant tool-call 锚点的孤儿 tool result 都会被丢弃，不会再发送给 provider。
 - Runtime / Plan 执行：开始执行 plan 时，prompt 现在通过 `@<plan-path>` file mention + 附带文件 part 的方式把 plan 内容传给 LLM，不再把 plan 文本直接内联进 system prompt；这样 plan 体积有界，引用方式与普通文件 mention 一致。
 - Runtime / SubAgent prompt：SubAgent 系统提示现在与 MainAgent 一致，platform 字段输出完整 `<goos>/<goarch>`，而不是只 `<goos>`。
 - CLI / Done 自动化：统一了自动 Done 拦截在启动、运行时和 TUI 中的行为。启动/TUI 创建/关闭路径现在更易测试，浏览器启动式 auth 规划也可以在不实际拉起浏览器命令的情况下验证，loop 模式的 Done 退出拦截文档也已保持一致。`CHORD_PPROF_PORT` 设置成非法值时，`--continue` / `--resume` / `--worktree` 及其它启动流程会继续生效（pprof 仅记一条 warn 后跳过），不再被静默丢弃。
 - TUI / Done 内部机制：集中收口了 Done 相关 UI effect 与流式渲染失效处理，拆分了更聚焦的回归测试，并保持 rejected 与 auto-rejected Done completion 的界面呈现一致。
 - Config / Auth 持久化：将 auth 持久化锁统一到共享的配置变更锁实现，并补充了写锁行为与 named pipe 测试可移植性的分平台回归覆盖。
-- **不兼容 / 权限：** 记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。迁移：先前写入 `<project>/.chord/permissions/<role>.yaml` 或 `~/.chord/permissions/<role>.yaml` 的规则在升级后不会再被自动加载。Chord 启动时会对每个仍存在的旧文件输出一次 warn 日志，请手动把规则合并到对应的 agent 配置文件中。
+- **不兼容 / 权限：** 记住的权限规则现在直接写入 agent 配置文件，不再写入单独的 permissions overlay。`session` 规则仍只保存在内存中；`project` 规则更新 `<project>/.chord/agents/<role>.yaml`；`global` 规则更新 `<config-home>/agents/<role>.yaml`；`/rules` 删除规则时也会从同一个 agent 文件移除。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `Write` / `Edit`。先前写入 `<project>/.chord/permissions/<role>.yaml` 或 `~/.chord/permissions/<role>.yaml` 的规则不会再被加载，也不会再输出旧文件提示；如仍需要，请手动移入对应 agent 配置文件。
 - TUI / 性能：降低后台标签页和长对话的 CPU 与渲染开销，让大会话中的滚动和重新聚焦恢复更顺畅；权限判定与工具定义构造热路径也做了优化。
+- **不兼容 / 兼容路径：** 移除剩余 pre-1.0 历史兼容路径。Codex 导入现在只接受当前 `type` + `payload` rollout schema；`--config` 不再作为 `--config-home` 的别名；headless 模型切换只接受 `set_current_model_pool`；会话恢复不再恢复旧的、基于启发式的 dangling / duplicate tool-result 修补；model-pool state 与 recovery snapshot 不再读取 `current_role` / `model_pool_current_role`；OAuth 凭据更新要求账号身份，不再用 access token 或索引兜底。Anthropic usage 解析在嵌套 `usage.cache_creation` 存在时优先读取其 TTL 拆分，若仅返回扁平 `cache_creation_input_tokens`（部分 Anthropic-compatible 网关）则以扁平字段兜底统计 cache write tokens。
 - TUI / Delete：`Delete` 工具卡片现在会在实时会话和恢复后的会话中显示必填的 `reason`；恢复工具卡片也会优先使用已持久化的状态和耗时元数据，让继续会话后的历史展示与实时完成态保持一致。
 - Docs：明确 agent 权限保存在 `agents/<role>.yaml`，确认弹窗和 headless 记住规则都会更新对应 agent 配置文件；顶层配置 keys 表新增 `diagnostics` 条目；补充了 `thinking_translation.max_chars` 预览范围的说明。
 

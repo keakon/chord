@@ -41,8 +41,6 @@ These flags are accepted by every command and are merged with environment variab
 | `--sessions-dir` | Override the sessions root only                                                                                  | `CHORD_SESSIONS_DIR`   | `<state-dir>/sessions`                                                           |
 | `--logs-dir`     | Override the logs directory only                                                                                 | `CHORD_LOGS_DIR`       | `<state-dir>/logs`                                                               |
 
-`--config` is a hidden alias of `--config-home` kept for backward compatibility; new scripts should use `--config-home`.
-
 For the full directory layout, see [Paths](./paths.md). For all environment variables, see [Environment variables](./environment.md).
 
 ## `chord` (default — TUI)

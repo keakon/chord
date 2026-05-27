@@ -86,6 +86,14 @@ curl -I https://api.openai.com/v1
 
 通常说明这个 provider 要求把上一轮工具调用里的 thinking/reasoning 内容按严格的 assistant message 形状一并带回后续请求。如果同一类报错持续重复，请保留对应的 session dump / trace 供排查。
 
+### Codex WebSocket 400 "No tool call found for function call output"
+
+Codex WebSocket 传输按 `previous_response_id` 发增量请求，服务端在该 id 下保存自己侧的对话快照。如果本地拼出的 input 与该快照对不齐（例如两轮之间 request signature 发生变化），即便本次发送的 input 里 `function_call` 与 `function_call_output` 是配对完整的，服务端依然可能返回 `400 No tool call found for function call output with call_id …`。
+
+Chord 现在识别到这类 400 时，会清空 WebSocket 链状态（`previous_response_id`、baseline、signature），并在同一个 WebSocket 上立即以**全量、不带 `previous_response_id`** 的方式重发一次。这等价于让服务端基于当前完整 input 开启一段新对话，可就地修复链状态不一致而无需走 HTTP 兜底。只有原始 400 被判定为链状态不一致才会触发该重试；重试仍失败说明 input 本身存在问题，HTTP 路径会以同样的 input 失败，因此不再进一步回退、直接返回错误。
+
+绝大多数情况下用户无需任何操作 —— 该恢复是自动完成的。如果某次会话中该错误反复出现，请保留对应 trace 和 session id 以便排查会话内容。
+
 ## MCP 一直未就绪
 
 先确认：
@@ -147,6 +155,13 @@ diagnostics:
 - 如果恢复后的 model/provider 状态异常，请保留相关 session 日志和 trace 供排查
 
 会话恢复本身不受影响。内部传输层的清理不会影响 `--continue` 或 `--resume` 的正常使用。如恢复后出现异常，请保留当前版本的日志供排查。
+
+会话恢复时，Chord 还会在把对话送入 provider 之前修复结构性破损：
+
+- 若尾部 assistant 消息的 `stop_reason=interrupted`（进程在流式输出中途被中断），会被丢弃，由下一轮 user/system 触发一次新的 assistant 回复
+- 对每个未持久化匹配 tool 结果的 assistant `tool_call`，会在其位置追加一条合成的 `error` tool 消息（`ToolStatus=error`），使要求严格 `function_call ↔ function_call_output` 配对的 provider（OpenAI Responses、Anthropic `tool_use`/`tool_result`）能接受该 input
+
+仅做结构修复 —— 已持久化的 tool 消息文本和 `ToolStatus` 不会被改写。tool 输出里恰好出现 `denied`、`cancelled` 等词的内容不会再被反向解读为失败。
 
 ## 查看日志 / dump / shell 输出时，TUI 卡片出现异色、背景泄漏或换行错乱
 

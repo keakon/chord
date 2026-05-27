@@ -601,7 +601,13 @@ max_output_tokens: 32000
 `stream_retry_rounds` 用来给公开 LLM 流式请求的“整轮重试”设置硬上限。
 每一轮里仍会按正常顺序遍历当前模型池和 provider key；这个设置限制的是 `CompleteStream` 最多做多少轮完整重试。
 
-这里的“一轮”指的是整个公开重试回合，而不是单次 provider/model 尝试。比如 `stream_retry_rounds: 2` 表示最多允许两次完整的路由遍历；一旦达到上限，即使是 all-keys-cooling 或并发 429 这类通常会等待后继续的错误，也会直接停止。
+这里的“一轮”指的是整个公开重试回合，而不是单次 provider/model 尝试。比如 `stream_retry_rounds: 2` 表示最多允许两次完整的路由遍历；一旦达到上限，即使是 all-keys-cooling、并发 429，或非官方兼容网关返回的可重试 HTTP 400 这类通常会等待后继续的错误，也会直接停止。
+
+Provider HTTP 400 的处理是有意保守的：
+
+- 官方 API 会把 400 视为终态 invalid-request 错误；
+- 非官方兼容网关有时会把并发限制、上游容量不足等临时状态映射成 400。这类非请求形态的 400 会冷却当前 key、轮换到下一个 key，并在所有 key 都冷却时等待后继续；
+- 请求参数/模型不兼容类 400 仍会停止，避免无限重试，例如 `invalid_request_error`、`missing required parameter`、`Store must be set to false` 或 `Stream must be set to true`。
 
 - `0` 保持默认行为：一直重试，直到成功、被取消，或遇到终态失败；
 - 正整数表示最多重试这么多轮，即使是 cooling / 并发 429 这类通常会继续等待的错误，也会在达到上限后停止；

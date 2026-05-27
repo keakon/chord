@@ -590,8 +590,7 @@ Model fields used in the example:
 - `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
   - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI priority (`fast`) or flex (`slow`).
   - `cost.input_tiers`: optional long-context pricing overrides. Each entry uses `above_input_tokens` as a strict threshold; when billable input is greater than that value, Chord uses the highest matching tier's `input`, `output`, `cache_read`, and optional `cache_write` prices before applying any service-tier multiplier.
-- `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` and `image` for
-  backward compatibility.
+- `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` and `image`.
 - `supported_service_tiers`: explicit non-standard service tiers accepted by a provider or model, for example `[fast, slow]` for OpenAI service tiers or `[fast]` for Anthropic speed. Provider-level values act as defaults for all models in that provider; model-level values override provider defaults. If both are omitted, Chord uses preset defaults. Pricing is configured separately with `cost.service_tier_multipliers` for service-tier rates and `cost.input_tiers` for long-context thresholds. `standard` is always available and is not listed in `supported_service_tiers`. Manual switching only selects tiers supported by the current provider/model: `Ctrl+R` cycles through the available set (`standard` plus supported non-standard tiers), and `/tier fast` or `/tier slow` shows an error when the current provider/model does not support that tier. When the active provider/model changes and a previously requested `fast` or `slow` is no longer supported, the info panel still shows the requested `tier: fast` or `tier: slow` in dim strikethrough text so the requested mode remains visible while indicating it is not effective.
 
 Only fields defined by Chord's model schema are used. `modalities.output` is
@@ -656,8 +655,20 @@ make before giving up.
 A "round" here means the whole public retry pass, not a single provider/model
 attempt. For example, `stream_retry_rounds: 2` allows at most two full passes
 through the active routing chain. Once the cap is reached, Chord stops even for
-retry classes that would normally wait and continue, such as all-keys-cooling
-or concurrent-request 429 responses.
+retry classes that would normally wait and continue, such as all-keys-cooling,
+concurrent-request 429 responses, or retryable HTTP 400 responses from a
+non-official compatible gateway.
+
+Provider HTTP 400 handling is intentionally conservative:
+
+- Official APIs treat 400 as a terminal invalid-request error.
+- Non-official compatible gateways may return 400 for transient gateway states
+  such as concurrency limits or upstream capacity. Those non request-shaped 400s
+  can cool the current key, rotate to the next key, and continue after all keys
+  are cooling.
+- Request/parameter/model-incompatible 400s still stop instead of retrying
+  forever, for example `invalid_request_error`, `missing required parameter`,
+  `Store must be set to false`, or `Stream must be set to true`.
 
 - `0` keeps the default behavior: retry until success, cancellation, or a terminal failure.
 - Positive values stop after that many rounds, even for cooling / concurrent-request retry classes.

@@ -41,8 +41,6 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `--sessions-dir` | 仅覆盖 sessions 根目录                                                                              | `CHORD_SESSIONS_DIR`  | `<state-dir>/sessions`                                                       |
 | `--logs-dir`     | 仅覆盖 logs 目录                                                                                    | `CHORD_LOGS_DIR`      | `<state-dir>/logs`                                                           |
 
-`--config` 是 `--config-home` 的隐藏别名，仅为向后兼容保留；新脚本请用 `--config-home`。
-
 完整目录布局见 [目录与路径](./paths_CN.md)。完整环境变量列表见 [环境变量](./environment_CN.md)。
 
 ## `chord`（默认 — TUI）

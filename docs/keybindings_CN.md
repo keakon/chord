@@ -38,13 +38,13 @@ TUI 有两种模式：
 
 ### Normal 模式 — 滚动
 
-| 按键               | 动作                                |
-| ------------------ | ----------------------------------- |
-| `↓` / `↑`          | 行滚动                              |
-| `Ctrl+F`           | 整页向下                            |
-| `Ctrl+B`           | 整页向上                            |
-| `G`                | 跳到最底                            |
-| `gg`               | 跳到最顶（双键序列）                |
+| 按键                 | 动作                                |
+| -------------------- | ----------------------------------- |
+| `↓` / `↑`            | 行滚动                              |
+| `Ctrl+F` / `PgDown`  | 整页向下                            |
+| `Ctrl+B` / `PgUp`    | 整页向上                            |
+| `G`                  | 跳到最底                            |
+| `gg`                 | 跳到最顶（双键序列）                |
 
 ### Normal 模式 — 消息卡片
 
@@ -77,7 +77,7 @@ TUI 有两种模式：
 | `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
 | `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
-| `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier                         |
+| `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
 | `Ctrl+Y`      | 切换 YOLO 模式；绕过 MainAgent 权限，但不影响 Handoff、Delegate、Cancel 和 Done 权限                         |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中修改会在下一次模型请求生效                                                |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
@@ -156,8 +156,8 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `help_toggle`              | `["?"]`                           |
 | `scroll_down`              | `["down"]`                        |
 | `scroll_up`                | `["up"]`                          |
-| `full_page_down`           | `["ctrl+f"]`                      |
-| `full_page_up`             | `["ctrl+b"]`                      |
+| `full_page_down`           | `["ctrl+f", "pgdown"]`           |
+| `full_page_up`             | `["ctrl+b", "pgup"]`             |
 | `scroll_to_bottom`         | `["G"]`                           |
 | `scroll_to_top_seq`        | `["g"]`（`gg` 序列的首键）        |
 | `next_block`               | `["j", "}"]`                      |
