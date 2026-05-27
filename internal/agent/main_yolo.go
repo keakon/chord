@@ -13,7 +13,7 @@ import (
 // surrounding whitespace, so no trimming is needed here.
 func yoloProtectedPermissionTool(toolName string) bool {
 	switch toolName {
-	case tools.NameHandoff, tools.NameDelegate, tools.NameCancel:
+	case tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone:
 		return true
 	default:
 		return false

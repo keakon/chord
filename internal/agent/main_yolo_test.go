@@ -17,6 +17,7 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 		{Permission: tools.NameHandoff, Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionAsk},
 		{Permission: tools.NameCancel, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameDone, Pattern: "*", Action: permission.ActionAllow},
 	}
 	filtered := yoloRuleset(ruleset)
 
@@ -30,7 +31,7 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 	if got := evaluateToolPermission(filtered, tools.NameShell, json.RawMessage(`{"command":"rm -rf /"}`)); got.Action != permission.ActionDeny {
 		t.Fatalf("Shell action under YOLO = %v, want deny (allow rule should be filtered)", got.Action)
 	}
-	// Protected rules survive with their original action (Handoff allow, Delegate ask, Cancel deny).
+	// Protected rules survive with their original action (Handoff allow, Delegate ask, Cancel deny, Done allow).
 	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAllow {
 		t.Fatalf("Handoff action = %v, want allow", got.Action)
 	}
@@ -39,6 +40,9 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 	}
 	if got := evaluateToolPermission(filtered, tools.NameCancel, json.RawMessage(`{}`)); got.Action != permission.ActionDeny {
 		t.Fatalf("Cancel action = %v, want deny", got.Action)
+	}
+	if got := evaluateToolPermission(filtered, tools.NameDone, json.RawMessage(`{"report":"done"}`)); got.Action != permission.ActionAllow {
+		t.Fatalf("Done action = %v, want allow", got.Action)
 	}
 }
 
@@ -60,6 +64,7 @@ func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
 				{Permission: tools.NameHandoff, Pattern: "*", Action: permission.ActionDeny},
 				{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionDeny},
 				{Permission: tools.NameCancel, Pattern: "*", Action: permission.ActionDeny},
+				{Permission: tools.NameDone, Pattern: "*", Action: permission.ActionDeny},
 			}
 		},
 		bypassPermission: func(name string) bool {
@@ -76,7 +81,7 @@ func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
 		})
 	}
 
-	for _, toolName := range []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel} {
+	for _, toolName := range []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone} {
 		t.Run(toolName+" protected", func(t *testing.T) {
 			call := message.ToolCall{Name: toolName, Args: json.RawMessage(`{}`)}
 			err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{})

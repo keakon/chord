@@ -1517,6 +1517,32 @@ Read: allow
 	}
 }
 
+func TestHandleUserMessageLoopOnAllowedWhenYoloEnabled(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+Done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.SetInitialYoloMode(true)
+	a.newTurn()
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
+
+	if !a.loopState.Enabled {
+		t.Fatal("loop should be enabled when YOLO mode keeps Done available")
+	}
+	if !a.loopState.DeferContinuationPromptUntilDone {
+		t.Fatal("busy /loop on should defer loop continuation prompt injection")
+	}
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0 for busy /loop on control command", got)
+	}
+}
+
 func TestSubAgentTerminalTransitionMarksLoopProgress(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")

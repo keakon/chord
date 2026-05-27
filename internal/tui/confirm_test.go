@@ -292,6 +292,16 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: `{"path":"old.txt"}`}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "[M] Add rule…") {
+		t.Fatalf("expected [M] Add rule option for Delete confirmation, got:\n%s", plain)
+	}
+}
+
 func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.workingDir = "/tmp/project"

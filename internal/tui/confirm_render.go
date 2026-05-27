@@ -176,10 +176,7 @@ func (m Model) renderConfirmOptions() string {
 		ConfirmDenyStyle.Render("[R] Deny+Reason"),
 		ConfirmEditStyle.Render("[E] Edit"),
 	}
-	// Don't show [M] Add rule for Delete tool
-	if m.confirm.request != nil && !strings.EqualFold(m.confirm.request.ToolName, "Delete") {
-		parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
-	}
+	parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
 	return strings.Join(parts, "  ")
 }
 
