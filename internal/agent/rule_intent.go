@@ -130,15 +130,36 @@ func (a *MainAgent) activeConfigSnapshot() *config.AgentConfig {
 	return &cfg
 }
 
-// syncSubAgentOverlay propagates the overlay changes to all SubAgents.
+// syncSubAgentOverlay propagates overlay changes to all SubAgents while
+// preserving each SubAgent's own agent-definition permission config.
 func (a *MainAgent) syncSubAgentOverlay() {
-	if a.overlay == nil {
+	if a == nil || a.overlay == nil {
 		return
 	}
-	merged := a.overlay.MergedRuleset()
+	type subAgentRulesetUpdate struct {
+		instanceID string
+		sub        *SubAgent
+		ruleset    permission.Ruleset
+	}
 	a.mu.RLock()
-	defer a.mu.RUnlock()
+	updates := make([]subAgentRulesetUpdate, 0, len(a.subAgents))
 	for _, sub := range a.subAgents {
-		sub.ruleset = merged
+		if sub == nil {
+			continue
+		}
+		updates = append(updates, subAgentRulesetUpdate{
+			instanceID: sub.instanceID,
+			sub:        sub,
+			ruleset:    a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]),
+		})
+	}
+	a.mu.RUnlock()
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, update := range updates {
+		if current := a.subAgents[update.instanceID]; current == update.sub {
+			current.ruleset = update.ruleset
+		}
 	}
 }

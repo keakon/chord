@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -89,6 +90,35 @@ func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
 	}
 	if got := a.ServiceTier(); got != config.ServiceTierStandard {
 		t.Fatalf("service tier = %q, want unchanged standard", got)
+	}
+}
+
+func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	a.ruleset = permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow}}
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {
+			Name:       "worker",
+			Permission: parsePermissionNode(t, "Write: deny\n"),
+		},
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-rules")
+	sub.ruleset = a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName])
+
+	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("initial subagent Write permission = %q, want deny", got)
+	}
+
+	if err := a.AddOverlayRule(permission.Rule{Permission: tools.NameShell, Pattern: "*", Action: permission.ActionAllow}, permission.ScopeSession); err != nil {
+		t.Fatalf("AddOverlayRule: %v", err)
+	}
+
+	if got := sub.ruleset.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
+		t.Fatalf("subagent overlay Shell permission = %q, want allow", got)
+	}
+	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("subagent Write permission after overlay sync = %q, want deny", got)
 	}
 }
 
