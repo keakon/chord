@@ -1297,6 +1297,131 @@ func TestClientCompleteStreamCompatible400CoolsKeyAndRotates(t *testing.T) {
 	}
 }
 
+func TestClientCompleteStreamCompatible400RetriesAfterAllKeysCooling(t *testing.T) {
+	cfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later", RetryAfter: time.Millisecond}},
+		{err: &APIError{StatusCode: 400, Message: "upstream temporarily busy", RetryAfter: time.Millisecond}},
+		{resp: &message.Response{Content: "ok after cooldown"}},
+	}
+	c := NewClient(cfg, impl, "gpt-test", 4096, "sys")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after cooldown" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.apiKeys; len(got) != 3 || got[0] != "k1" || got[1] != "k2" || got[2] != "k1" {
+		t.Fatalf("api keys = %#v, want [k1 k2 k1]", got)
+	}
+}
+
+func TestClientCompleteStreamOfficialPrimaryCompatibleFallback400UsesFallbackProviderSemantics(t *testing.T) {
+	primaryCfg := testOfficialOpenAIProviderConfigWithKeys("openai", "primary-model", []string{"openai-key"})
+	fallbackCfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "fallback-model", []string{"gateway-key"})
+	disableRetryDelayForTest(primaryCfg)
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 429, Message: "rate limited"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "upstream temporarily busy", RetryAfter: time.Millisecond}},
+		{resp: &message.Response{Content: "ok after fallback cooldown"}},
+	}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		primaryImpl,
+		"primary-model",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{
+			ProviderConfig: fallbackCfg,
+			ProviderImpl:   fallbackImpl,
+			ModelID:        "fallback-model",
+			MaxTokens:      4096,
+		}},
+		2,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after fallback cooldown" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 2 {
+		t.Fatalf("fallback calls = %d, want 2 after compatible 400 retries into next round", got)
+	}
+}
+
+func TestClientCompleteStreamCompatiblePrimaryOfficialFallback400UsesFallbackProviderSemantics(t *testing.T) {
+	primaryCfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "primary-model", []string{"gateway-key"})
+	fallbackCfg := testOfficialOpenAIProviderConfigWithKeys("openai", "fallback-model", []string{"openai-key"})
+	disableRetryDelayForTest(primaryCfg)
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 429, Message: "rate limited"}},
+		{resp: &message.Response{Content: "should not retry after official 400"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "invalid_request_error: missing required parameter: input"}},
+	}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		primaryImpl,
+		"primary-model",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{
+			ProviderConfig: fallbackCfg,
+			ProviderImpl:   fallbackImpl,
+			ModelID:        "fallback-model",
+			MaxTokens:      4096,
+		}},
+		2,
+		&CallStatus{},
+	)
+	if err == nil {
+		t.Fatal("expected official fallback 400 error")
+	}
+	if resp != nil {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+}
+
 func TestClientCompleteStreamOfficial400DoesNotRetry(t *testing.T) {
 	cfg := testOfficialOpenAIProviderConfigWithKeys("openai", "gpt-test", []string{"k1", "k2"})
 	impl := &recordingProvider{}

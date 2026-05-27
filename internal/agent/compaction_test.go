@@ -1480,7 +1480,7 @@ func TestExtractCompactionKeyFilesFromTruncateOnlySummary(t *testing.T) {
 	}
 }
 
-func TestInjectCompactionFileContextOnlyOncePerCheckpoint(t *testing.T) {
+func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "internal", "agent"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -1508,8 +1508,12 @@ func TestInjectCompactionFileContextOnlyOncePerCheckpoint(t *testing.T) {
 		t.Fatalf("injected message parts = %#v", first[1].Parts)
 	}
 	second := a.injectCompactionFileContext(msgs)
-	if len(second) != 2 {
-		t.Fatalf("len(second) = %d, want 2 after one-shot consumption", len(second))
+	if len(second) != 3 {
+		t.Fatalf("len(second) = %d, want 3 for stable per-request injection", len(second))
+	}
+	alreadyInjected := a.injectCompactionFileContext(first)
+	if len(alreadyInjected) != 3 {
+		t.Fatalf("len(alreadyInjected) = %d, want 3 without duplicate injection", len(alreadyInjected))
 	}
 }
 

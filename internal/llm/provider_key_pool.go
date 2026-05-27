@@ -29,6 +29,17 @@ func (p *ProviderConfig) keyStateByKeyLocked(key string) *KeyState {
 	return nil
 }
 
+func (p *ProviderConfig) forEachKeyStateByKeyLocked(key string, fn func(*KeyState)) {
+	if key == "" || fn == nil {
+		return
+	}
+	for _, ks := range p.keyStates {
+		if ks != nil && ks.Key == key {
+			fn(ks)
+		}
+	}
+}
+
 func (p *ProviderConfig) keyStateSelectableLocked(now time.Time, ks *KeyState) bool {
 	if ks == nil {
 		return false
@@ -419,11 +430,10 @@ func (p *ProviderConfig) MarkTemporaryUnavailable(key string, d time.Duration) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ks := p.keyStateByKeyLocked(key)
-	if ks == nil {
-		return
-	}
-	p.markTemporaryUnavailableLocked(ks, time.Now(), d)
+	now := time.Now()
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		p.markTemporaryUnavailableLocked(ks, now, d)
+	})
 }
 
 // MarkRecovering marks the key as selectable-but-not-preferred. Under
@@ -436,7 +446,7 @@ func (p *ProviderConfig) MarkRecovering(key string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.markRecoveringLocked(p.keyStateByKeyLocked(key))
+	p.forEachKeyStateByKeyLocked(key, p.markRecoveringLocked)
 }
 
 // MarkCooldown puts the specified key into cooldown for the given duration.
@@ -447,7 +457,9 @@ func (p *ProviderConfig) MarkRecovering(key string) {
 func (p *ProviderConfig) MarkCooldown(key string, d time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.markCooldownLocked(p.keyStateByKeyLocked(key), d)
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		p.markCooldownLocked(ks, d)
+	})
 }
 
 // MarkQuotaExhaustedUntil marks a key unavailable until the real provider reset time.
@@ -459,7 +471,9 @@ func (p *ProviderConfig) MarkQuotaExhaustedUntil(key string, until time.Time) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.markQuotaExhaustedLocked(p.keyStateByKeyLocked(key), until)
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		p.markQuotaExhaustedLocked(ks, until)
+	})
 }
 
 // MarkKeySuccess clears soft failure state after a successful request.
@@ -469,19 +483,20 @@ func (p *ProviderConfig) MarkKeySuccess(key string) {
 		return
 	}
 	p.mu.Lock()
-	ks := p.keyStateByKeyLocked(key)
-	if ks == nil {
-		p.mu.Unlock()
-		return
-	}
-	ks.CooldownCount = 0
-	if !ks.ExhaustedUntil.After(time.Now()) {
-		ks.ExhaustedUntil = time.Time{}
-	}
-	clearSoftHints := ks.OAuthInfo != nil && (ks.OAuthInfo.CodexPrimaryResetAt != 0 || ks.OAuthInfo.CodexSecondaryResetAt != 0)
-	p.markHealthyLocked(ks)
+	clearSoftHints := false
+	matched := false
+	now := time.Now()
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		matched = true
+		ks.CooldownCount = 0
+		if !ks.ExhaustedUntil.After(now) {
+			ks.ExhaustedUntil = time.Time{}
+		}
+		clearSoftHints = clearSoftHints || (ks.OAuthInfo != nil && (ks.OAuthInfo.CodexPrimaryResetAt != 0 || ks.OAuthInfo.CodexSecondaryResetAt != 0))
+		p.markHealthyLocked(ks)
+	})
 	p.mu.Unlock()
-	if clearSoftHints {
+	if matched && clearSoftHints {
 		p.clearCodexResetHintsForKey(key)
 	}
 }

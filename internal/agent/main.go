@@ -313,8 +313,6 @@ type MainAgent struct {
 	compactionState      compactionState
 	sessionEpoch         uint64
 	nextCompactionPlanID uint64
-	compactionFileCtxMu  sync.Mutex
-	compactionFileCtxSig string
 
 	thinkingTranslateMu          sync.Mutex
 	thinkingTranslateSvc         *thinkingtranslate.Service

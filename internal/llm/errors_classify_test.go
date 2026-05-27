@@ -6,6 +6,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 func TestIsRetriable5xxRotatesKeysBeforeFallback(t *testing.T) {
@@ -143,7 +145,7 @@ func TestShouldFallback400CodexRequiresStreaming(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("codex stream-required 400 should not rotate keys on same model globally")
 	}
-	if !isTerminalModelPoolFailure(err) {
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
 		t.Fatal("codex stream-required 400 should stop after model pool exhaustion by default")
 	}
 }
@@ -157,7 +159,7 @@ func TestShouldFallback400RequestShapeError(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("request-shape 400 should not rotate keys on same model globally")
 	}
-	if !isTerminalModelPoolFailure(err) {
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
 		t.Fatal("request-shape 400 should stop after model pool exhaustion by default")
 	}
 }
@@ -171,7 +173,7 @@ func TestReasoningReplay400FallsBackToAnotherModel(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("reasoning replay 400 should not rotate keys on same model globally")
 	}
-	if !isTerminalModelPoolFailure(err) {
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
 		t.Fatal("reasoning replay 400 should stop after model pool exhaustion by default")
 	}
 }
@@ -185,7 +187,7 @@ func TestAnthropicThinkingReplay400FallsBackToAnotherModel(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("anthropic thinking replay 400 should not rotate keys on same model globally")
 	}
-	if !isTerminalModelPoolFailure(err) {
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
 		t.Fatal("anthropic thinking replay 400 should stop after model pool exhaustion by default")
 	}
 }
@@ -199,7 +201,16 @@ func TestAssistantMessageShape400FallsBackToAnotherModel(t *testing.T) {
 	if isRetriable(err) {
 		t.Fatal("assistant-message-shape 400 should not rotate keys on same model")
 	}
-	if !isTerminalModelPoolFailure(err) {
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
 		t.Fatal("assistant-message-shape 400 should stop after model pool exhaustion")
+	}
+}
+
+func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testing.T) {
+	t.Parallel()
+	compatible := NewProviderConfig("gateway", config.ProviderConfig{OfficialAPI: new(false)}, nil)
+	err := &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"}
+	if isTerminalModelPoolFailureForProvider(compatible, err) {
+		t.Fatal("compatible gateway 400 should not stop after model pool exhaustion")
 	}
 }

@@ -580,6 +580,10 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 	}
 }
 
+type codexWSCompleteOptions struct {
+	SkipPrewarm bool
+}
+
 // completeStreamCodexWebSocket streams a turn over an existing or new Codex WebSocket.
 // The caller must not hold codexWSMu.
 func (r *ResponsesProvider) completeStreamCodexWebSocket(
@@ -591,6 +595,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	fullInput []responsesInputItem,
 	cb StreamCallback,
 	start time.Time,
+	opts codexWSCompleteOptions,
 ) (*message.Response, bool, error) {
 	r.codexWSMu.Lock()
 	defer r.codexWSMu.Unlock()
@@ -657,7 +662,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 
 	// Match Codex behavior: prewarm the first request on a fresh websocket so the
 	// following real request can reuse previous_response_id with an empty delta.
-	if newConnection {
+	if newConnection && !opts.SkipPrewarm {
 		generate := false
 		prewarmEnv := codexWSResponseCreate{
 			Type:            "response.create",

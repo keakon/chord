@@ -294,10 +294,20 @@ func updateSuccessfulCallStatus(status *CallStatus, target streamRetryTarget) {
 type streamTargetAttemptResult struct {
 	resp                *message.Response
 	lastErr             error
+	lastErrProvider     *ProviderConfig
 	pendingRoundWait    time.Duration
 	hadRequestAttempt   bool
 	roundHadUsableReply bool
 	skipProvider        bool
+}
+
+func (r *streamTargetAttemptResult) setLastErr(provider *ProviderConfig, err error) {
+	r.lastErr = err
+	if err == nil {
+		r.lastErrProvider = nil
+		return
+	}
+	r.lastErrProvider = provider
 }
 
 func (c *Client) completeStreamTarget(
@@ -388,11 +398,11 @@ func (c *Client) completeStreamTarget(
 		}
 		if err != nil {
 			if _, ok := errors.AsType[*NoUsableKeysError](err); ok {
-				result.lastErr = err
+				result.setLastErr(t.provider, err)
 				break
 			}
 			if cooling, ok := errors.AsType[*AllKeysCoolingError](err); ok {
-				result.lastErr = err
+				result.setLastErr(t.provider, err)
 				result.pendingRoundWait = mergeRoundWait(result.pendingRoundWait, cooling.RetryAfter)
 				if hasNextTarget {
 					log.Infof("all API keys cooling; trying next model provider=%v model=%v", t.provider.Name(), t.modelID)
@@ -407,7 +417,7 @@ func (c *Client) completeStreamTarget(
 					}
 				}
 			} else {
-				result.lastErr = err
+				result.setLastErr(t.provider, err)
 			}
 			break
 		}
@@ -459,7 +469,7 @@ func (c *Client) completeStreamTarget(
 			return result, lastInputTokens, err
 		}
 
-		result.lastErr = err
+		result.setLastErr(t.provider, err)
 		visibleStarted := tracker.visible
 		tracker.EmitRollback(err.Error())
 		if err := abortIfCancelled(); err != nil {
@@ -493,7 +503,7 @@ func (c *Client) completeStreamTarget(
 				status.FallbackReason = classifyFallbackReason(err)
 			}
 			if IsContextLengthExceeded(err) {
-				result.lastErr = err
+				result.setLastErr(t.provider, err)
 				oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
 				modelDone = true
 				break
@@ -544,7 +554,7 @@ func (c *Client) completeStreamTarget(
 		}
 		if IsContextLengthExceeded(err) {
 			log.Warnf("context length exceeded; trying next model provider=%v model=%v key_suffix=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
-			result.lastErr = err
+			result.setLastErr(t.provider, err)
 			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
 			modelDone = true
 			break
@@ -568,7 +578,7 @@ func (c *Client) completeStreamTarget(
 				emptyErr = &EmptyTruncationError{}
 			}
 			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_suffix=%v stop_reason=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), resp.StopReason)
-			result.lastErr = emptyErr
+			result.setLastErr(t.provider, emptyErr)
 			t.provider.MarkRecovering(apiKey)
 			if cb != nil {
 				emitStreamStatus(cb, "retrying_key", "next")
@@ -607,6 +617,7 @@ func (c *Client) completeStreamWithRetry(
 	routingChangedCh <-chan struct{},
 ) (*message.Response, error) {
 	var lastErr error
+	var lastErrProvider *ProviderConfig
 	var pendingRoundWait time.Duration
 	abortIfCancelled := func() error {
 		if err := ctx.Err(); err != nil {
@@ -733,6 +744,7 @@ func (c *Client) completeStreamWithRetry(
 			} else {
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
+				lastErrProvider = targetResult.lastErrProvider
 				pendingRoundWait = mergePendingRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
 				if targetResult.hadRequestAttempt {
 					roundHadRequestAttempt = true
@@ -769,7 +781,7 @@ func (c *Client) completeStreamWithRetry(
 			}
 			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
 		}
-		if isTerminalModelPoolFailure(lastErr) {
+		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) {
 			return nil, lastErr
 		}
 		retryCount = nextRetryCount(retryCount, roundHadUsableReply)

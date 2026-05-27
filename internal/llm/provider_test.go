@@ -687,6 +687,33 @@ func TestMarkQuotaExhaustedUntil_blocksSelectionUntilReset(t *testing.T) {
 	}
 }
 
+func TestMarkQuotaExhaustedUntil_blocksAllDuplicateKeySlots(t *testing.T) {
+	p := newTestProviderConfig([]string{"shared-key", "other-key", "shared-key"})
+	p.mu.Lock()
+	p.stickyIdx = 2
+	p.mu.Unlock()
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("initial SelectKeyWithContext: %v", err)
+	}
+	if key != "shared-key" {
+		t.Fatalf("initial selected key = %q, want shared-key", key)
+	}
+
+	p.MarkQuotaExhaustedUntil("shared-key", time.Now().Add(2*time.Hour))
+	avail, total := p.AvailableKeyCount()
+	if total != 3 || avail != 1 {
+		t.Fatalf("AvailableKeyCount = %d/%d, want 1/3 with both duplicate shared-key slots exhausted", avail, total)
+	}
+	key, _, err = p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("second SelectKeyWithContext: %v", err)
+	}
+	if key != "other-key" {
+		t.Fatalf("selected key = %q, want other-key after duplicate shared-key slots exhausted", key)
+	}
+}
+
 func TestMarkKeySuccess_ClearsPersistedCodexResetHints(t *testing.T) {
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
 		Access:                "oauth-key",

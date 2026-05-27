@@ -205,9 +205,6 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.ctxMgr.RestoreMessages(nil)
 	a.fileTrack = filelock.NewFileTracker()
 	a.clearEvidenceCandidates()
-	a.compactionFileCtxMu.Lock()
-	a.compactionFileCtxSig = ""
-	a.compactionFileCtxMu.Unlock()
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
 	a.ctxMgr.SetLastInputTokens(0)
 	a.ctxMgr.SetLastTotalContextTokens(0)
@@ -234,9 +231,6 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
 	a.sessionDir = sessionDir
-	a.compactionFileCtxMu.Lock()
-	a.compactionFileCtxSig = ""
-	a.compactionFileCtxMu.Unlock()
 	a.recovery = recovery.NewRecoveryManager(sessionDir)
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
 	a.setTaskRecords(nil)

@@ -458,14 +458,22 @@ func isRequestOrParamError(message string) bool {
 		strings.Contains(msg, "invalid parameter") ||
 		strings.Contains(msg, "invalid request") ||
 		strings.Contains(msg, "content or tool_calls must be set") ||
+		(strings.Contains(msg, "store") && strings.Contains(msg, "must be set to false")) ||
+		(strings.Contains(msg, "stream") && strings.Contains(msg, "must be set to true")) ||
 		strings.Contains(msg, "reasoning_content") && strings.Contains(msg, "must be passed back") ||
 		strings.Contains(msg, "content[].thinking") && strings.Contains(msg, "must be passed back")
 }
 
-// isTerminalModelPoolFailure reports errors that should stop after the current
-// model pool (current cursor-head entry + all remaining configured entries) is exhausted, rather than
-// continuing full retry rounds forever.
-func isTerminalModelPoolFailure(err error) bool {
+// isTerminalModelPoolFailureForProvider reports errors that should stop after
+// the current model pool (current cursor-head entry + all remaining configured
+// entries) is exhausted, rather than continuing full retry rounds forever.
+//
+// HTTP 400 is treated as terminal for official APIs (where the request shape
+// is the source of truth) and for request/parameter/model-incompatible
+// gateway responses (where retrying will keep failing the same way). Other
+// non-official 400s — typically transient gateway states such as concurrency
+// limits — remain retryable across pool passes.
+func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) bool {
 	if IsContextLengthExceeded(err) {
 		return true
 	}
@@ -473,8 +481,8 @@ func isTerminalModelPoolFailure(err error) bool {
 	if !errors.As(err, &apiErr) || apiErr == nil {
 		return false
 	}
-	// Any 400 is deterministic for the request sent to that candidate. It should
-	// not stop the pool early, but once every candidate has failed there is no
-	// value in retrying the same malformed/provider-incompatible requests forever.
-	return apiErr.StatusCode == 400
+	if apiErr.StatusCode != 400 {
+		return false
+	}
+	return providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr.Message)
 }

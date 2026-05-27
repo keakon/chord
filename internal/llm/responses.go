@@ -37,7 +37,7 @@ type ResponsesProvider struct {
 	dialProxyURL string
 	// codexWSCompleteFn is a test seam for the Codex WebSocket path. Production
 	// uses completeStreamCodexWebSocket directly.
-	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time) (*message.Response, bool, error)
+	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time, codexWSCompleteOptions) (*message.Response, bool, error)
 
 	codexWSMu             sync.Mutex
 	codexWSConn           *websocket.Conn
@@ -302,7 +302,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
 		}
-		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start)
+		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{})
 		if wsErr == nil {
 			r.lastTransportUsed.Store("websocket")
 			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -314,10 +314,34 @@ func (r *ResponsesProvider) CompleteStream(
 			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 			return nil, callErr
 		}
+		if isCodexWSChainStateMismatch(wsErr) {
+			log.Warnf("responses: Codex WebSocket chain-state mismatch, retrying full request without previous_response_id error=%v model=%v", wsErr, model)
+			r.resetCodexWebSocketChain("ws_chain_state_mismatch")
+			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
+			if retryErr == nil {
+				r.lastTransportUsed.Store("websocket")
+				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, retryResp, nil)
+				return retryResp, nil
+			}
+			wsErr = retryErr
+			wsUsedIncremental = retryUsedIncremental
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				r.resetCodexWebSocketChain("context_cancel")
+				callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
+				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+				return nil, callErr
+			}
+		}
+		if shouldStopCodexWSHTTPFallback(wsErr) {
+			log.Warnf("responses: Codex WebSocket returned terminal API error, skipping HTTP fallback error=%v", wsErr)
+			r.resetCodexWebSocketChain("ws_terminal_api_error")
+			persistLLMTrace(r.traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
+			return nil, wsErr
+		}
 		if wsUsedIncremental {
 			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
-			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start)
+			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
 				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -329,6 +353,12 @@ func (r *ResponsesProvider) CompleteStream(
 				callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
 				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 				return nil, callErr
+			}
+			if shouldStopCodexWSHTTPFallback(wsErr) {
+				log.Warnf("responses: Codex WebSocket retry returned terminal API error, skipping HTTP fallback error=%v", wsErr)
+				r.resetCodexWebSocketChain("ws_terminal_api_error")
+				persistLLMTrace(r.traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
+				return nil, wsErr
 			}
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -348,6 +378,62 @@ func (r *ResponsesProvider) CompleteStream(
 
 	persistLLMTrace(r.traceWriter, traceCollector, httpStatus, "http", start, resp, parseErr)
 	return resp, parseErr
+}
+
+func apiErrorStatusCode(err error) int {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr != nil {
+		return apiErr.StatusCode
+	}
+	return 0
+}
+
+func shouldStopCodexWSHTTPFallback(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return false
+	}
+
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	typ := strings.ToLower(strings.TrimSpace(apiErr.Type))
+	if code == "websocket_connection_limit_reached" {
+		return false
+	}
+	if code == "rate_limit_exceeded" || typ == "rate_limit_exceeded" {
+		return false
+	}
+
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+		return true
+	}
+
+	if code == "account_invalidated" || code == "account_deactivated" || confirmedCodexUsageLimitError(apiErr) {
+		return true
+	}
+	return false
+}
+
+// isCodexWSChainStateMismatch reports whether a 400 indicates the server-side
+// incremental conversation state (keyed by previous_response_id) has diverged
+// from the input we sent. Recovering only requires clearing previous_response_id
+// and re-sending the full input over the same WebSocket; if that also fails,
+// the input itself is malformed and HTTP would fail identically.
+func isCodexWSChainStateMismatch(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return false
+	}
+	if apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(apiErr.Message))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "no tool call found for function call output") ||
+		strings.Contains(msg, "no tool call found for custom tool call output") ||
+		strings.Contains(msg, "previous_response_id")
 }
 
 // sendAndParse sends a Responses API request and parses the SSE stream.

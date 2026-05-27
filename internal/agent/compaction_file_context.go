@@ -13,6 +13,11 @@ import (
 const (
 	compactionInjectedFileMaxBytes  = 12 * 1024
 	compactionInjectedFilesMaxBytes = 48 * 1024
+
+	// compactionFileCtxPrefix opens the synthesized user message that re-loads
+	// key files identified by the latest compaction summary. Detection on the
+	// next request and generation here share this marker so they cannot drift.
+	compactionFileCtxPrefix = "[system] Automatically loaded key files from the latest compaction checkpoint"
 )
 
 func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (int, string) {
@@ -28,6 +33,18 @@ func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (in
 		return i, raw
 	}
 	return -1, ""
+}
+
+func compactionFileContextAlreadyInjected(msgs []message.Message, checkpointIdx int) bool {
+	next := checkpointIdx + 1
+	if next < 0 || next >= len(msgs) {
+		return false
+	}
+	msg := msgs[next]
+	if msg.Role != "user" || len(msg.Parts) == 0 {
+		return false
+	}
+	return strings.Contains(msg.Parts[0].Text, compactionFileCtxPrefix)
 }
 
 func (a *MainAgent) resolveCheckpointFilePath(path string) string {
@@ -48,17 +65,13 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 	if checkpointIdx < 0 || signature == "" {
 		return messages
 	}
+	if compactionFileContextAlreadyInjected(messages, checkpointIdx) {
+		return messages
+	}
 	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
 	if len(keyFiles) == 0 {
 		return messages
 	}
-
-	a.compactionFileCtxMu.Lock()
-	if a.compactionFileCtxSig == signature {
-		a.compactionFileCtxMu.Unlock()
-		return messages
-	}
-	a.compactionFileCtxMu.Unlock()
 
 	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFilePath, filectx.BuildFilePartsOptions{
 		MaxFileBytes:  compactionInjectedFileMaxBytes,
@@ -75,7 +88,7 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 		Role: "user",
 		Parts: append([]message.ContentPart{{
 			Type: "text",
-			Text: "[system] Automatically loaded key files from the latest compaction checkpoint for continuation.\n",
+			Text: compactionFileCtxPrefix + " for continuation.\n",
 		}}, result.Parts...),
 	}
 
@@ -84,8 +97,5 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 	out = append(out, injected)
 	out = append(out, messages[checkpointIdx+1:]...)
 
-	a.compactionFileCtxMu.Lock()
-	a.compactionFileCtxSig = signature
-	a.compactionFileCtxMu.Unlock()
 	return out
 }

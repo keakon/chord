@@ -21,6 +21,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1373,6 +1374,114 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_CodexWSUsageLimitSkipsHTTPFallback(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+		return nil, false, &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"}
+	}
+
+	_, err := r.CompleteStream(
+		context.Background(), "oauth-key", "gpt-5", "system",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "usage limit") {
+		t.Fatalf("CompleteStream error = %v, want usage limit error", err)
+	}
+	if httpCalls != 0 {
+		t.Fatalf("http calls = %d, want 0 after terminal Codex WebSocket error", httpCalls)
+	}
+}
+
+func TestResponsesProvider_CodexWSIncrementalRetryUsageLimitSkipsHTTPFallback(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	var wsCalls int
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+		wsCalls++
+		if wsCalls == 1 {
+			return nil, true, fmt.Errorf("previous_response_not_found")
+		}
+		return nil, false, &APIError{StatusCode: http.StatusInternalServerError, Message: "The usage limit has been reached"}
+	}
+
+	_, err := r.CompleteStream(
+		context.Background(), "oauth-key", "gpt-5", "system",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "usage limit") {
+		t.Fatalf("CompleteStream error = %v, want usage limit error", err)
+	}
+	if wsCalls != 2 {
+		t.Fatalf("ws calls = %d, want 2", wsCalls)
+	}
+	if httpCalls != 0 {
+		t.Fatalf("http calls = %d, want 0 after terminal Codex WebSocket retry error", httpCalls)
+	}
+}
+
+func TestMarkKeyCooldownCodexWSUsageLimitWithoutHTTPStatusUsesResetWindow(t *testing.T) {
+	ctx := context.Background()
+	resetPrimary := time.Now().Add(2 * time.Hour)
+	resetSecondary := time.Now().Add(24 * time.Hour)
+	p := NewProviderConfig("codex", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	p.UpdateKeySnapshot("oauth-key", &ratelimit.KeyRateLimitSnapshot{
+		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
+	})
+	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"})
+	if !res.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true for Codex WebSocket usage limit")
+	}
+	p.mu.Lock()
+	exhaustedUntil := p.keyStates[0].ExhaustedUntil
+	cooldownEnd := p.keyStates[0].CooldownEnd
+	p.mu.Unlock()
+	if exhaustedUntil.Before(resetSecondary.Add(-2*time.Second)) || exhaustedUntil.After(resetSecondary.Add(2*time.Second)) {
+		t.Fatalf("ExhaustedUntil = %v, want ~%v", exhaustedUntil, resetSecondary)
+	}
+	if !cooldownEnd.IsZero() {
+		t.Fatalf("CooldownEnd = %v, want zero when quota exhaustion uses hard reset window", cooldownEnd)
+	}
+}
+
 func TestResponsesProvider_CodexWSIncrementalFailureRetriesWSFullThenHTTPFallback(t *testing.T) {
 	var httpCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1395,7 +1504,7 @@ func TestResponsesProvider_CodexWSIncrementalFailureRetriesWSFullThenHTTPFallbac
 
 	var wsCalls []bool
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time) (*message.Response, bool, error) {
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
 		call := len(wsCalls)
 		wsCalls = append(wsCalls, call == 0)
 		if call == 0 {
@@ -1426,6 +1535,101 @@ func TestResponsesProvider_CodexWSIncrementalFailureRetriesWSFullThenHTTPFallbac
 	}
 }
 
+func TestResponsesProvider_CodexWSChainStateMismatchRetriesWSFullThenStops(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	var wsCalls int
+	var retryOpts codexWSCompleteOptions
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, opts codexWSCompleteOptions) (*message.Response, bool, error) {
+		wsCalls++
+		if wsCalls == 2 {
+			retryOpts = opts
+		}
+		return nil, false, &APIError{StatusCode: http.StatusBadRequest, Message: "No tool call found for function call output with call_id call_abc."}
+	}
+
+	_, err := r.CompleteStream(
+		context.Background(), "oauth-key", "gpt-5", "system",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "No tool call found") {
+		t.Fatalf("CompleteStream error = %v, want chain-state mismatch error", err)
+	}
+	if wsCalls != 2 {
+		t.Fatalf("ws calls = %d, want 2 (initial + chain-reset retry)", wsCalls)
+	}
+	if !retryOpts.SkipPrewarm {
+		t.Fatal("chain-state mismatch retry must skip prewarm so it sends the full input without previous_response_id")
+	}
+	if httpCalls != 0 {
+		t.Fatalf("http calls = %d, want 0 (chain-mismatch does not fall back to HTTP)", httpCalls)
+	}
+}
+
+func TestResponsesProvider_CodexWSChainStateMismatchRecoversAfterReset(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	var wsCalls int
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+		wsCalls++
+		if wsCalls == 1 {
+			return nil, false, &APIError{StatusCode: http.StatusBadRequest, Message: "No tool call found for function call output with call_id call_abc."}
+		}
+		return &message.Response{ProviderResponseID: "resp-ws-recovered"}, false, nil
+	}
+
+	resp, err := r.CompleteStream(
+		context.Background(), "oauth-key", "gpt-5", "system",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.ProviderResponseID != "resp-ws-recovered" {
+		t.Fatalf("unexpected response after chain-mismatch retry: %#v", resp)
+	}
+	if wsCalls != 2 {
+		t.Fatalf("ws calls = %d, want 2", wsCalls)
+	}
+	if httpCalls != 0 {
+		t.Fatalf("http calls = %d, want 0 when ws retry succeeds", httpCalls)
+	}
+}
+
 func TestResponsesProvider_CodexWSProtocolCloseDoesNotDisableFutureWebSocketAttempts(t *testing.T) {
 	var httpCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1448,7 +1652,7 @@ func TestResponsesProvider_CodexWSProtocolCloseDoesNotDisableFutureWebSocketAtte
 
 	var wsCalls int
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time) (*message.Response, bool, error) {
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
 		wsCalls++
 		return nil, false, &websocket.CloseError{Code: websocket.ClosePolicyViolation, Text: "parse_failed"}
 	}
@@ -1499,7 +1703,7 @@ func TestResponsesProvider_CodexWSCancelDoesNotRetryOrFallback(t *testing.T) {
 	var wsCalls int
 	var deltas []message.StreamDelta
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time) (*message.Response, bool, error) {
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
 		wsCalls++
 		cancel()
 		return nil, true, fmt.Errorf("previous_response_not_found")
