@@ -255,6 +255,8 @@ Those four tools are protected because they control agent orchestration rather t
 
 Keeping these permissions enforced under YOLO prevents a broad "allow tools" switch from also granting workflow-control powers. In loop mode this matters especially for `Done`: loop exit remains gated by the active role's `Done` permission, loop exit-condition checks, and local confirmation, so YOLO cannot accidentally let the model terminate a long-running loop early.
 
+Under YOLO, these protected tools still need explicit permissions. A broad default such as `"*": allow` is treated as part of the bypassed ordinary permission surface and does not by itself grant `Handoff`, `Delegate`, `Cancel`, or `Done`; configure those tools directly when a role should use them.
+
 ## Multi-agent focus switching
 
 Chord supports cooperation between MainAgent and SubAgents.

@@ -47,6 +47,16 @@ permission:
 
 This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `WebFetch` and `Shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
 
+### Special permission semantics
+
+Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orchestration tools intentionally have extra coupling so permission settings match the workflow Chord can safely run:
+
+- `Handoff` and `Done` are treated as control gates. Setting either one to `deny` hides or disables that workflow. Setting it to `allow` or `ask` makes the workflow available; Chord may still show local confirmation at the actual handoff/finish point (for example the loop `Done` confirmation). This means `ask` is not a second, stronger workflow mode for these tools: it mainly keeps the tool visible/available while preserving Chord's built-in confirmation gate. The trade-off avoids confusing the model with an available control tool that is later impossible to complete, while still preventing silent role switches or premature loop exits.
+- `Delegate` controls the delegation workflow as a group. If `Delegate` is `deny`, Chord also disables SubAgent cancellation via `Cancel`, hides nested `Delegate`/`Cancel` from SubAgents, and limits SubAgent `Notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while denying `Delegate` would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
+- `Cancel` therefore depends on `Delegate`: even if `Cancel: allow` is configured, `Cancel` is denied when `Delegate` is disabled. To allow a role to cancel delegated work, enable both `Delegate` and `Cancel`.
+- `Question: ask` is normalized to `allow`. The `Question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.
+- YOLO does not override `Handoff`, `Delegate`, `Cancel`, or `Done`; those control-tool permissions remain enforced even when ordinary file/shell/web permissions are bypassed. Under YOLO, a broad `"*": allow` rule does not grant these protected tools by itself; configure each protected tool directly when the role should use it.
+
 > Permissions are Agent-level configuration, not a simple global switch.
 
 For `Shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow compound commands containing unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines). Those calls fall through to the next matching rule, typically `ask` or `deny`. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `Shell: allow` or `Shell: { "*": allow }` for only fully trusted roles.

@@ -47,6 +47,16 @@ permission:
 
 这套配置的含义：默认允许大多数工具；禁用 `Handoff` 与 `Delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `WebFetch` 和 `Shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
 
+### 特殊权限语义
+
+大多数工具都按上面的 `allow` / `ask` / `deny` 字面含义执行，但少数编排工具有意带有额外联动，使权限设置与 Chord 能安全运行的工作流保持一致：
+
+- `Handoff` 和 `Done` 会被当作控制 gate。设为 `deny` 会隐藏或禁用对应工作流；设为 `allow` 或 `ask` 都会让工作流可用，真正交接 / 完成时 Chord 仍可能显示本地确认（例如 loop 的 `Done` 确认）。也就是说，`ask` 不是这两个工具的“更强工作流模式”，它主要表示工具保持可见 / 可用，同时保留 Chord 内建确认 gate。这个取舍可以避免模型看到一个可用控制工具却最终无法完成，同时仍防止静默切换角色或过早退出 loop。
+- `Delegate` 控制的是一组委派工作流。如果 `Delegate` 为 `deny`，Chord 也会禁用通过 `Cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `Delegate` / `Cancel`，并把 SubAgent 的 `Notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用了 `Delegate` 却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
+- 因此 `Cancel` 依赖 `Delegate`：即使配置了 `Cancel: allow`，只要 `Delegate` 被禁用，`Cancel` 仍会被拒绝。若希望某个角色能取消委派工作，需要同时启用 `Delegate` 和 `Cancel`。
+- `Question: ask` 会被归一化为 `allow`。`Question` 工具本身就是向用户提出结构化问题并等待回答；如果在提问前再加一次权限确认，只会产生重复弹窗，并不能降低最终决策风险。
+- YOLO 不会绕过 `Handoff`、`Delegate`、`Cancel` 或 `Done`；即使普通文件 / shell / web 权限被绕过，这些控制工具的权限仍会执行。YOLO 下，宽泛的 `"*": allow` 规则本身不会授予这些受保护工具；如果角色需要使用它们，请分别直接配置对应工具权限。
+
 > 权限属于 Agent 级配置，不是简单的全局开关。
 
 对于 `Shell`，像 `"git *": allow` 这样的具体 `allow` pattern 不会自动放行包含未引用 shell 分隔符（`;`、`&&`、`||`、`|`、`&` 或换行）的复合命令。这类调用会继续匹配后续规则，通常回到 `ask` 或 `deny`。这只是安全兜底，不是 shell 沙箱；`Shell: allow` 或 `Shell: { "*": allow }` 这类宽泛规则只应给完全可信的角色使用。
