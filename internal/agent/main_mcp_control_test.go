@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ratelimit"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestSummarizeMCPControlErrorFlattensJoinedErrorsForToast(t *testing.T) {
@@ -47,5 +51,188 @@ func TestSummarizeMCPControlErrorIgnoresCanceledBranches(t *testing.T) {
 	got := summarizeMCPControlError(errors.Join(context.Canceled, fmt.Errorf("other failure")))
 	if got != "other failure" {
 		t.Fatalf("mixed summary = %q, want %q", got, "other failure")
+	}
+}
+
+func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		return MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP updated prompt",
+		}, nil
+	})
+	a.sessionBuilt.Store(true)
+	a.freezeToolSurface()
+	a.newTurn()
+	beforePrompt := a.installedSysPrompt
+
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}}})
+	if !a.mcpTransitionActive.Load() {
+		t.Fatal("MCP transition should start while busy")
+	}
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		result: MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP updated prompt",
+		},
+	}})
+
+	if a.mcpTransitionActive.Load() {
+		t.Fatal("MCP transition should clear after control done")
+	}
+	if _, ok := a.tools.Get(tools.NameGlob); !ok {
+		t.Fatal("existing tool should remain before rebuild")
+	}
+	if _, ok := a.tools.Get(tools.NameRead); ok {
+		t.Fatal("new MCP tool should not register before next request rebuild")
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed before next request: %q", got)
+	}
+	if a.sessionBuilt.Load() {
+		t.Fatal("sessionBuilt should be reset after MCP control done")
+	}
+	if a.turn == nil {
+		t.Fatal("MCP control done while busy should preserve the active turn")
+	}
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	if _, ok := a.tools.Get(tools.NameRead); !ok {
+		t.Fatal("new MCP tool should register during next request rebuild")
+	}
+	if !strings.Contains(a.installedSysPrompt, "MCP updated prompt") {
+		t.Fatalf("rebuilt system prompt missing MCP block: %q", a.installedSysPrompt)
+	}
+}
+
+func TestMCPControlReturningToSameSurfaceKeepsFrozenContext(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.mcpServersPrompt = "MCP original prompt"
+	a.tools.Register(tools.ReadTool{})
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+	beforePrompt := a.installedSysPrompt
+	beforeReminder := a.cachedSessionReminderContent.Load()
+	beforeDefs := a.frozenToolDefs.Load()
+	if beforeReminder == nil || beforeDefs == nil {
+		t.Fatal("initial context surface should be frozen")
+	}
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		result: MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP original prompt",
+		},
+	}})
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt after unchanged MCP surface: %v", err)
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed for unchanged MCP surface: %q", got)
+	}
+	if got := a.cachedSessionReminderContent.Load(); got != beforeReminder {
+		t.Fatalf("session reminder pointer changed for unchanged MCP surface")
+	}
+	if got := a.frozenToolDefs.Load(); got != beforeDefs {
+		t.Fatalf("frozen tool surface pointer changed for unchanged MCP surface")
+	}
+	if a.surfaceDirty.Load() {
+		t.Fatal("surface dirty flag should clear after unchanged surface comparison")
+	}
+}
+
+func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.mcpServersPrompt = "MCP original prompt"
+	a.tools.Register(tools.ReadTool{})
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+	beforePrompt := a.installedSysPrompt
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		req: MCPControlRequest{Action: MCPControlDisable, Servers: []string{"manual"}},
+		err: errors.New("control failed"),
+	}})
+	if _, ok := a.tools.Get(tools.NameRead); !ok {
+		t.Fatal("existing MCP tool should remain registered after failed runtime control")
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed after failed runtime control: %q", got)
+	}
+	if !a.sessionBuilt.Load() {
+		t.Fatal("sessionBuilt should remain valid after failed runtime control")
+	}
+	if a.surfaceDirty.Load() {
+		t.Fatal("surfaceDirty should remain false after failed runtime control")
+	}
+	if a.mcpTransitionActive.Load() {
+		t.Fatal("MCP transition should clear after failed runtime control")
+	}
+	toast := waitForToastEvent(t, a.Events(), "control failed")
+	if toast.Level != "error" {
+		t.Fatalf("toast level = %q, want error", toast.Level)
+	}
+}
+
+func TestMCPLowQuotaCodexLoopKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.runningModelRef = "codex/gpt-5.5"
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 95},
+	}}
+	a.loopState.Enabled = true
+	a.tools.Register(tools.GlobTool{})
+	a.sessionBuilt.Store(true)
+	a.freezeToolSurface()
+	beforePrompt := a.installedSysPrompt
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		result: MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP updated prompt",
+		},
+	}})
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	if _, ok := a.tools.Get(tools.NameRead); !ok {
+		t.Fatal("new MCP runtime tool should still register under low-quota codex loop")
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed under low-quota codex loop: %q", got)
+	}
+	defs := a.mainLLMToolDefinitions()
+	if got := len(defs); got != 1 || defs[0].Name != tools.NameGlob {
+		t.Fatalf("tool surface changed under low-quota codex loop: %#v", defs)
 	}
 }

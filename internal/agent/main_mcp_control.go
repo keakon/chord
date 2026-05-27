@@ -75,20 +75,17 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		log.Errorf("handleMCPControlEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	if a.mcpControlFn == nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp is not available (runtime MCP control not configured)")})
-		return
-	}
-	if a.turn != nil {
-		a.emitToTUI(ToastEvent{Message: "MCP changes can only be applied while idle", Level: "warn"})
-		return
-	}
 	if a.mcpTransitionActive.Load() {
 		a.emitToTUI(ToastEvent{Message: "MCP change already in progress", Level: "warn"})
 		return
 	}
+	if a.mcpControlFn == nil {
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp is not available (runtime MCP control not configured)")})
+		return
+	}
 
-	// Begin transition: block new turns and reset the session/tool surface barrier.
+	// Begin transition: block new LLM requests at ensureSessionBuilt until the
+	// runtime control result is ready to be applied to the next request surface.
 	a.mcpTransitionActive.Store(true)
 	a.ResetMCPReady()
 	a.NotifyEnvStatusUpdated()
@@ -140,22 +137,23 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 		return
 	}
 
-	// Replace all MCP tool registrations atomically relative to the next turn.
-	if a.tools != nil {
-		_ = a.tools.UnregisterPrefix("mcp_")
-		for _, t := range payload.result.Tools {
-			a.tools.Register(t)
-		}
+	if payload.err == nil {
+		// Defer MCP tool registration until ensureSessionBuilt, so any in-flight turn
+		// continues with the tool surface it was started with and the next request
+		// (including an automatic retry) sees matching tools + system prompt.
+		a.mcpServersPromptMu.Lock()
+		a.mcpServersPrompt = payload.result.PromptBlock
+		a.pendingMCPTools = append([]tools.Tool(nil), payload.result.Tools...)
+		a.pendingMCPReplace = true
+		a.mcpServersPromptMu.Unlock()
+
+		// Ask the next request to compare the pending runtime MCP surface with the
+		// frozen request surface. If toggles return to the same prompt/tools, the
+		// existing context surface is reused to preserve provider cache stability.
+		a.markRuntimeSurfaceDirty()
 	}
-
-	// Update MCP prompt block.
-	a.SetMCPServersPromptBlock(payload.result.PromptBlock)
-
-	// Force next request to rebuild the stable prefix/tool surface.
-	a.resetSessionBuildState()
-
-	a.mcpTransitionActive.Store(false)
 	a.markMCPReady()
+	a.mcpTransitionActive.Store(false)
 	a.NotifyEnvStatusUpdated()
 
 	if payload.err != nil {
@@ -165,6 +163,9 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 		}
 	}
 
-	// Resume queued input, if any.
-	a.setIdleAndDrainPending()
+	// Resume queued input only when no turn is active. Busy MCP changes are
+	// applied to the next request surface without clearing the in-flight turn.
+	if a.turn == nil {
+		a.setIdleAndDrainPending()
+	}
 }

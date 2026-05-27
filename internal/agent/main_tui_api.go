@@ -63,6 +63,9 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 	case c == "/yolo" || strings.HasPrefix(c, "/yolo "):
 		a.handleYoloCommand(c, busy)
 		return true
+	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
+		a.handleMCPCommand(c, busy)
+		return true
 	default:
 		return false
 	}

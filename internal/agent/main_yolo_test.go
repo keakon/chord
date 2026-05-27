@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -89,5 +91,132 @@ func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
 				t.Fatalf("applyPermission(%s) err = %v, want permission denied", toolName, err)
 			}
 		})
+	}
+}
+
+func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+	a.ruleset = permission.Ruleset{{Permission: tools.NameGlob, Pattern: "*", Action: permission.ActionDeny}}
+	a.sessionBuilt.Store(true)
+	a.freezeToolSurface()
+	beforePrompt := a.installedSysPrompt
+	if _, ok := a.tools.Get(tools.NameGlob); !ok {
+		t.Fatal("expected Glob registered")
+	}
+	if len(a.mainLLMToolDefinitions()) != 0 {
+		t.Fatal("initial frozen surface should hide Glob under deny rule")
+	}
+
+	a.handleYoloCommand("/yolo on", true)
+
+	if !a.YoloEnabled() {
+		t.Fatal("YOLO should enable while busy")
+	}
+	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"pattern":"*"}`))
+	if decision.Action != permission.ActionDeny {
+		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed immediately after busy YOLO toggle")
+	}
+	if frozen := a.frozenToolDefs.Load(); frozen != nil && len(*frozen) != 0 {
+		t.Fatalf("frozen tool surface changed immediately: %#v", *frozen)
+	}
+	if a.sessionBuilt.Load() {
+		t.Fatal("sessionBuilt should be reset so next request rebuilds context")
+	}
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	defs := a.mainLLMToolDefinitions()
+	if got := len(defs); got != 1 {
+		t.Fatalf("rebuilt tool definitions count = %d, want 1", got)
+	}
+	if got := defs[0].Name; got != tools.NameGlob {
+		t.Fatalf("rebuilt tool = %q, want %q", got, tools.NameGlob)
+	}
+}
+
+func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+	beforePrompt := a.installedSysPrompt
+	beforeReminder := a.cachedSessionReminderContent.Load()
+	beforeDefs := a.frozenToolDefs.Load()
+	if beforeReminder == nil || beforeDefs == nil {
+		t.Fatal("initial context surface should be frozen")
+	}
+
+	a.handleYoloCommand("/yolo on", true)
+	a.handleYoloCommand("/yolo off", true)
+	if a.YoloEnabled() {
+		t.Fatal("YOLO should be off after toggling back")
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt after unchanged YOLO surface: %v", err)
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed after YOLO returned to original state: %q", got)
+	}
+	if got := a.cachedSessionReminderContent.Load(); got != beforeReminder {
+		t.Fatalf("session reminder pointer changed after YOLO returned to original state")
+	}
+	if got := a.frozenToolDefs.Load(); got != beforeDefs {
+		t.Fatalf("frozen tool surface pointer changed after YOLO returned to original state")
+	}
+	if a.surfaceDirty.Load() {
+		t.Fatal("surface dirty flag should clear after unchanged surface comparison")
+	}
+}
+
+func TestYoloLowQuotaCodexLoopKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.runningModelRef = "codex/gpt-5.5"
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 95},
+	}}
+	a.loopState.Enabled = true
+	a.tools.Register(tools.GlobTool{})
+	a.ruleset = permission.Ruleset{{Permission: tools.NameGlob, Pattern: "*", Action: permission.ActionDeny}}
+	a.sessionBuilt.Store(true)
+	a.freezeToolSurface()
+	beforePrompt := a.installedSysPrompt
+
+	a.handleYoloCommand("/yolo on", true)
+	if !a.YoloEnabled() {
+		t.Fatal("YOLO should enable while busy")
+	}
+	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"pattern":"*"}`))
+	if decision.Action != permission.ActionDeny {
+		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	if got := a.installedSysPrompt; got != beforePrompt {
+		t.Fatalf("system prompt changed under low-quota codex loop")
+	}
+	if defs := a.mainLLMToolDefinitions(); len(defs) != 0 {
+		t.Fatalf("tool surface changed under low-quota codex loop: %#v", defs)
 	}
 }

@@ -6,27 +6,38 @@ import (
 	"strings"
 )
 
-func (a *MainAgent) handleMCPCommand(content string) {
+func (a *MainAgent) handleMCPCommand(content string, busy ...bool) {
+	isBusy := len(busy) > 0 && busy[0]
 	arg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(content), "/mcp"))
 	if arg == "" {
 		a.emitToTUI(MCPSelectEvent{})
+		if !isBusy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 	fields := strings.Fields(arg)
 	if len(fields) == 0 {
 		a.emitToTUI(MCPSelectEvent{})
+		if !isBusy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 
 	switch fields[0] {
 	case "status":
 		a.emitToTUI(InfoEvent{Message: a.mcpStatusText()})
-		a.setIdleAndDrainPending()
+		if !isBusy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	case string(MCPControlEnable), string(MCPControlDisable):
 		if len(fields) < 2 {
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp %s: usage: /mcp %s <server|all|server...>", fields[0], fields[0])})
-			a.setIdleAndDrainPending()
+			if !isBusy {
+				a.setIdleAndDrainPending()
+			}
 			return
 		}
 		var servers []string
@@ -41,7 +52,9 @@ func (a *MainAgent) handleMCPCommand(content string) {
 			}
 			if len(servers) == 0 {
 				a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp %s: usage: /mcp %s <server|all|server...>", fields[0], fields[0])})
-				a.setIdleAndDrainPending()
+				if !isBusy {
+					a.setIdleAndDrainPending()
+				}
 				return
 			}
 		}
@@ -50,7 +63,9 @@ func (a *MainAgent) handleMCPCommand(content string) {
 		return
 	default:
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp: unknown subcommand %q (expected: status, enable, disable)", fields[0])})
-		a.setIdleAndDrainPending()
+		if !isBusy {
+			a.setIdleAndDrainPending()
+		}
 		return
 	}
 }

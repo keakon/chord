@@ -49,7 +49,7 @@ func (a *MainAgent) SetInitialYoloMode(enabled bool) {
 	}
 	a.yoloEnabled.Store(enabled)
 	if enabled {
-		a.resetSessionBuildState()
+		a.markRuntimeSurfaceDirty()
 	}
 }
 
@@ -58,8 +58,7 @@ func (a *MainAgent) setYoloMode(enabled bool) {
 		return
 	}
 	a.yoloEnabled.Store(enabled)
-	a.resetSessionBuildState()
-	a.refreshSystemPrompt()
+	a.markRuntimeSurfaceDirty()
 	a.emitToTUI(YoloModeChangedEvent{Enabled: enabled})
 	state := "off"
 	if enabled {
@@ -69,10 +68,6 @@ func (a *MainAgent) setYoloMode(enabled bool) {
 }
 
 func (a *MainAgent) handleYoloCommand(command string, busy bool) {
-	if busy {
-		a.emitToTUI(ToastEvent{Message: "YOLO mode can only be changed while idle", Level: "warn"})
-		return
-	}
 	fields := strings.Fields(command)
 	if len(fields) == 1 {
 		a.setYoloMode(!a.YoloEnabled())

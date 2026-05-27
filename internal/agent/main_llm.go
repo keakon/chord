@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -94,25 +95,83 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 
 	a.mcpServersPromptMu.Lock()
 	pendingMCPTools := append([]tools.Tool(nil), a.pendingMCPTools...)
+	pendingMCPReplace := a.pendingMCPReplace
 	a.pendingMCPTools = nil
+	a.pendingMCPReplace = false
 	a.mcpServersPromptMu.Unlock()
 
+	if pendingMCPReplace && a.tools != nil {
+		_ = a.tools.UnregisterPrefix("mcp_")
+	}
 	for _, t := range pendingMCPTools {
 		a.tools.Register(t)
 	}
 
-	a.refreshSystemPrompt()
+	if a.shouldFreezeLLMContextSurfaceInLoop() {
+		a.sessionBuilt.Store(true)
+		return nil
+	}
+
+	if !a.surfaceDirty.Load() {
+		a.refreshSystemPrompt()
+		a.refreshSessionContextReminder()
+		a.freezeToolSurface()
+		a.sessionBuilt.Store(true)
+		return nil
+	}
+
+	candidatePrompt := a.currentSystemPromptCandidate()
+	candidateTools := llmToolDefinitionsFromVisibleTools(a.mainVisibleLLMTools())
+	if a.currentLLMContextSurfaceMatches(candidatePrompt, candidateTools) {
+		a.sessionBuilt.Store(true)
+		a.surfaceDirty.Store(false)
+		return nil
+	}
+	a.installSystemPrompt(candidatePrompt)
 	a.refreshSessionContextReminder()
-	a.freezeToolSurface()
+	a.freezeToolSurfaceFromDefinitions(candidateTools)
+	a.surfaceDirty.Store(false)
 	a.sessionBuilt.Store(true)
 	return nil
 }
 
 func (a *MainAgent) resetSessionBuildState() {
 	a.sessionBuilt.Store(false)
+	if a.shouldFreezeLLMContextSurfaceInLoop() {
+		return
+	}
 	a.sessionReminderInjected.Store(false)
 	a.clearSessionContextReminder()
 	a.clearFrozenToolSurface()
+}
+
+func (a *MainAgent) markRuntimeSurfaceDirty() {
+	a.sessionBuilt.Store(false)
+	a.surfaceDirty.Store(true)
+}
+
+func (a *MainAgent) currentSystemPromptCandidate() string {
+	a.llmMu.RLock()
+	override := a.systemPromptOverride
+	a.llmMu.RUnlock()
+	if override != "" {
+		return override
+	}
+	return a.buildSystemPrompt()
+}
+
+func (a *MainAgent) currentLLMContextSurfaceMatches(prompt string, defs []message.ToolDefinition) bool {
+	a.llmMu.RLock()
+	installed := a.installedSysPrompt
+	a.llmMu.RUnlock()
+	if prompt != installed {
+		return false
+	}
+	frozen := a.frozenToolDefs.Load()
+	if frozen == nil {
+		return len(defs) == 0
+	}
+	return reflect.DeepEqual(*frozen, defs)
 }
 
 func (a *MainAgent) ensureMainModelPolicy() error {

@@ -4,7 +4,7 @@
 
 ## 未发布
 
-- TUI / YOLO：新增 `--yolo`、`/yolo on|off` 和 `Ctrl+Y`，可在 idle 时临时绕过 MainAgent 权限。Handoff、Delegate 和 Cancel 权限仍会生效；启用时状态栏显示 YOLO。
+- TUI / YOLO：新增 `--yolo`、`/yolo on|off` 和 `Ctrl+Y`，可在运行中切换临时 MainAgent 权限绕过。Handoff、Delegate、Cancel 和 Done 权限仍会生效；启用时状态栏显示 YOLO。
 - TUI / 权限：`/rules` 现在即使没有已记住规则也会打开，并支持手动添加 session/project/global 级 allow/ask/deny 规则。确认弹窗的记住规则选择器现在允许保存前手动编辑建议 pattern；Delete 确认会提供保守的路径级候选，而不是完全禁用记住规则。
 - TUI / 鼠标选择：文本选择体验现在在对话卡片、Done/Handoff Markdown viewer 和 composer 输入框之间保持一致。双击选中当前词，三击选中当前可见行，拖拽选择继续保持原行为。
 - TUI / 快捷键：各 overlay 不再保留未提示的关闭/操作键。Stats 浮层移除 `q`，hint 同时展示 `esc/$ close`；Model Select 移除 `ctrl+d`（esc 是文档化的关闭键）；Handoff Select 移除未公开的 `d/D`，只用 `r` 进入 deny-reason 流；通用 Confirm 对话框新增 `enter` 作为 Allow，并在 UI 显示 `[Enter/A] Allow`、`[Esc/D] Deny`。Help 与 Stats 浮层在状态栏也会显示 `esc ⇢ close`。

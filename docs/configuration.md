@@ -746,6 +746,9 @@ mcp:
   - `/mcp enable <server>`
   - `/mcp disable <server>`
   - `/mcp status`
+- Runtime `/mcp enable|disable` changes are allowed while a turn is running. The current in-flight request keeps the tool surface it started with; the new MCP tools and the MCP system-prompt block are applied at the next LLM request (including automatic retry/recovery requests).
+- In Codex loop mode, when a tracked Codex quota window has less than 10% remaining, Chord preserves the existing LLM-facing context surface instead of rewriting tool descriptions or system-prompt text. Runtime permissions and MCP tool execution state still change, but the model keeps seeing the previous tool list/prompt so a low-quota loop can continue on the same Codex session without a context-shape change.
+  This is an intentional trade-off. Until quota recovers or a new session/context surface is built, the model's view can temporarily disagree with runtime state: newly enabled MCP tools may not be discoverable by the model; disabled MCP tools may still appear callable and then fail at execution; permission changes from `deny`/`ask` to `allow` may not be reflected in the prompt/tool descriptions; and changes from `allow` to `deny`/`ask` may be enforced only when the tool call is attempted. Chord accepts that short-term mismatch to avoid exhausting a Codex loop session by changing its context shape near the end of the quota window.
 
 ### Startup consistency
 
@@ -841,7 +844,7 @@ purposes.
 | When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
-| Loop mode | Enabled; automatic and manual compaction can still run so long sessions can continue after the context budget is spent | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability |
+| Loop mode | Enabled; automatic and manual compaction can still run so long sessions can continue after the context budget is spent | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability. For Codex loop sessions with less than 10% quota remaining, Chord also keeps the existing LLM-facing tool descriptions and system prompt stable; permission/MCP execution state can still change. |
 
 **How they work together**: Reduction is the lightweight first line of defense —
 it trims stale tool output before every request, slowing down context growth.

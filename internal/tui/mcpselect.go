@@ -22,9 +22,8 @@ type mcpSelectState struct {
 }
 
 const (
-	mcpSelectIdleHint     = "j/k move  g/G jump  enter toggle  e enable  d disable  esc close  (auto servers are read-only)"
-	mcpSelectReadOnlyHint = "j/k move  g/G jump  enter/e/d disabled while running  esc close"
-	mcpSelectBusyMessage  = "Wait until the agent is idle before changing MCP"
+	mcpSelectIdleHint = "j/k move  g/G jump  enter toggle  e enable  d disable  esc close  (auto servers are read-only)"
+	mcpSelectBusyHint = "j/k move  g/G jump  enter toggle next request  e enable  d disable  esc close"
 )
 
 func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
@@ -119,7 +118,7 @@ func (m *Model) renderMCPSelectDialog() string {
 	readOnly := m.mcpSelectReadOnly()
 	hint := mcpSelectIdleHint
 	if readOnly {
-		hint = mcpSelectReadOnlyHint
+		hint = mcpSelectBusyHint
 	}
 	overlayCfg := OverlayConfig{
 		Title:    "MCP Servers",
@@ -130,9 +129,9 @@ func (m *Model) renderMCPSelectDialog() string {
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := overlayCfg.MaxWidth - 4
-	prefixText := "Changes apply immediately while idle"
+	prefixText := "Changes apply on the next request"
 	if readOnly {
-		prefixText = "Read-only while agent is running; changes disabled until idle"
+		prefixText = "Changes are allowed while running and apply on the next request"
 	}
 	prefix := DimStyle.Render(ansi.Truncate(prefixText, contentWidth, "…"))
 
@@ -220,9 +219,6 @@ func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
-	if m.mcpSelectReadOnly() {
-		return m.enqueueToast(mcpSelectBusyMessage, "warn")
-	}
 	if m.mcpSelect.selector.list == nil {
 		return nil
 	}
@@ -261,9 +257,6 @@ func (m *Model) mcpSelectToggleAtIndex(idx int) tea.Cmd {
 		return nil
 	}
 	item := m.mcpSelect.selector.list.items[idx]
-	if m.mcpSelectReadOnly() {
-		return m.enqueueToast(mcpSelectBusyMessage, "warn")
-	}
 	if item.Disabled {
 		return m.enqueueToast("Auto-start MCP servers are read-only", "info")
 	}

@@ -255,11 +255,35 @@ func TestHandleModelsCommandIdleClearsTurn(t *testing.T) {
 	}
 }
 
+func TestHandleUserMessageMCPWhileBusyRunsImmediately(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		return MCPControlResult{}, nil
+	})
+	a.newTurn()
+	turn := a.turn
+	drainAgentEvents(a.Events())
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp enable exa"})
+	dispatchPendingEvents(t, a)
+
+	if got := a.PendingUserMessageCount(); got != 0 {
+		t.Fatalf("PendingUserMessageCount = %d, want 0", got)
+	}
+	if a.turn != turn {
+		t.Fatal("busy /mcp should not clear or replace the active turn")
+	}
+	if !a.mcpTransitionActive.Load() {
+		t.Fatal("busy /mcp command should start MCP transition immediately")
+	}
+}
+
 func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.mcpTransitionActive.Store(true)
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp enable exa"})
+	dispatchPendingEvents(t, a)
 
 	if got := a.PendingUserMessageCount(); got != 0 {
 		t.Fatalf("PendingUserMessageCount = %d, want 0", got)

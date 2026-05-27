@@ -293,6 +293,19 @@ func (a *MainAgent) loopReductionSnapshot() (enabled bool, frozenPrefix []messag
 }
 
 func (a *MainAgent) shouldDisableContextReductionInLoop() bool {
+	return a.shouldFreezeLLMContextSurfaceInLoop()
+}
+
+func (a *MainAgent) shouldFreezeLLMContextSurfaceInLoop() bool {
+	if a == nil {
+		return false
+	}
+	a.loopReductionMu.Lock()
+	loopEnabled := a.loopState.Enabled
+	a.loopReductionMu.Unlock()
+	if !loopEnabled {
+		return false
+	}
 	providerName := a.mainRateLimitProviderName()
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
 		return false

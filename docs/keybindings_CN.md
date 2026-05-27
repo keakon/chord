@@ -78,13 +78,13 @@ TUI 有两种模式：
 | `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier                         |
-| `Ctrl+Y`      | idle 时切换 YOLO 模式；绕过 MainAgent 权限，但不影响 Handoff、Delegate 和 Cancel 权限                         |
-| `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中只读                                                                    |
+| `Ctrl+Y`      | 切换 YOLO 模式；绕过 MainAgent 权限，但不影响 Handoff、Delegate、Cancel 和 Done 权限                         |
+| `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中修改会在下一次模型请求生效                                                |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 
 ### 关于 `Ctrl+O` 与 MCP
 
-`Ctrl+O` 在 Insert 和 Normal 模式下都会打开 MCP server 选择器。Agent 运行中也可以打开它查看 server 状态，但面板会保持只读，直到 agent 回到 idle。只有配置了 `manual: true` 的 server 才能切换启用/禁用；自动启动的 server 在选择器里始终只读。
+`Ctrl+O` 在 Insert 和 Normal 模式下都会打开 MCP server 选择器。Agent 运行中也可以打开它查看 server 状态并切换手动 server；运行中的修改会在下一次模型请求生效。只有配置了 `manual: true` 的 server 才能切换启用/禁用；自动启动的 server 在选择器里始终只读。
 
 ### 鼠标文本选择
 

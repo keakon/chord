@@ -78,13 +78,13 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model |
-| `Ctrl+Y`     | Toggle YOLO mode while idle; bypasses main-agent permissions except Handoff, Delegate, and Cancel              |
-| `Ctrl+O`     | Open the MCP server selector; read-only while the agent is running                                      |
+| `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except Handoff, Delegate, Cancel, and Done                 |
+| `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 
 ### Note on `Ctrl+O` and MCP
 
-`Ctrl+O` opens the MCP server selector in both Insert and Normal mode. You can open it while the agent is running to inspect server status, but the panel is read-only until the agent returns to idle. Only servers configured with `manual: true` can be toggled; auto-start servers are always read-only in the selector.
+`Ctrl+O` opens the MCP server selector in both Insert and Normal mode. You can open it while the agent is running to inspect server status and toggle manual servers; changes made during a running turn apply to the next model request. Only servers configured with `manual: true` can be toggled; auto-start servers are always read-only in the selector.
 
 ### Mouse text selection
 

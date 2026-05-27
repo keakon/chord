@@ -164,6 +164,10 @@ func (a *MainAgent) mainLLMToolDefinitions() []message.ToolDefinition {
 // (if any) are registered.
 func (a *MainAgent) freezeToolSurface() {
 	defs := llmToolDefinitionsFromVisibleTools(a.mainVisibleLLMTools())
+	a.freezeToolSurfaceFromDefinitions(defs)
+}
+
+func (a *MainAgent) freezeToolSurfaceFromDefinitions(defs []message.ToolDefinition) {
 	snapshot := append([]message.ToolDefinition(nil), defs...)
 	a.frozenToolDefs.Store(&snapshot)
 }

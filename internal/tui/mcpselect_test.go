@@ -60,18 +60,15 @@ func TestRenderMCPSelectDialogShowsReadOnlyWhenBusy(t *testing.T) {
 	m.openMCPSelect()
 
 	plain := stripANSI(m.renderMCPSelectDialog())
-	if !strings.Contains(plain, "Read-only while agent is running") {
-		t.Fatalf("rendered MCP dialog = %q, want read-only running hint", plain)
+	if !strings.Contains(plain, "Changes are allowed while running") {
+		t.Fatalf("rendered MCP dialog = %q, want running next-request hint", plain)
 	}
-	if !strings.Contains(plain, "enter/e/d disabled while running") {
-		t.Fatalf("rendered MCP dialog = %q, want disabled button hint", plain)
-	}
-	if strings.Contains(plain, "enter toggle") {
-		t.Fatalf("rendered MCP dialog = %q, should not show active toggle hint while busy", plain)
+	if !strings.Contains(plain, "enter toggle next request") {
+		t.Fatalf("rendered MCP dialog = %q, want active toggle hint while busy", plain)
 	}
 }
 
-func TestMCPSelectBusyRejectsToggleWithoutSendingCommand(t *testing.T) {
+func TestMCPSelectBusyDispatchesToggleForNextRequest(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", OK: true, Manual: true}}
 	m := NewModelWithSize(backend, 100, 30)
@@ -79,17 +76,17 @@ func TestMCPSelectBusyRejectsToggleWithoutSendingCommand(t *testing.T) {
 	m.openMCPSelect()
 
 	cmd := m.handleMCPSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if cmd == nil {
-		t.Fatal("expected busy MCP toggle to return toast command")
+	if cmd != nil {
+		t.Fatal("busy MCP toggle should dispatch directly without toast command")
 	}
-	if got := len(backend.sentMessages); got != 0 {
-		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	if got := len(backend.sentMessages); got != 1 {
+		t.Fatalf("SendUserMessage() calls = %d, want 1", got)
 	}
-	if m.activeToast == nil {
-		t.Fatal("expected busy MCP toggle to show toast")
+	if got := backend.sentMessages[0]; got != "/mcp disable alpha" {
+		t.Fatalf("sent message = %q, want %q", got, "/mcp disable alpha")
 	}
-	if got := m.activeToast.Message; got != mcpSelectBusyMessage {
-		t.Fatalf("toast message = %q, want %q", got, mcpSelectBusyMessage)
+	if m.activeToast != nil {
+		t.Fatalf("unexpected toast: %#v", m.activeToast)
 	}
 }
 

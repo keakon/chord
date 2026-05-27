@@ -4,7 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
-- TUI / YOLO: added `--yolo`, `/yolo on|off`, and `Ctrl+Y` for an idle-only temporary main-agent permission bypass. Handoff, Delegate, and Cancel permissions remain enforced, and the status bar shows a YOLO pill when enabled.
+- TUI / YOLO: added `--yolo`, `/yolo on|off`, and `Ctrl+Y` for a temporary main-agent permission bypass that can be toggled while running. Handoff, Delegate, Cancel, and Done permissions remain enforced, and the status bar shows a YOLO pill when enabled.
 - TUI / Permissions: `/rules` now opens even when no remembered rules exist and supports manually adding session/project/global allow/ask/deny rules. Confirmation remembered-rule picker now allows editing the suggested pattern before saving, and Delete confirmations offer conservative path-specific rule candidates instead of disabling remembered rules entirely.
 - TUI / Mouse selection: text selection is now consistent across transcript cards, Done/Handoff Markdown viewers, and the composer input. Double-click selects the current word, triple-click selects the current visible line, and drag selection continues to work as before.
 - TUI / Shortcuts: overlays no longer expose hidden close/action keys. Stats overlay drops `q` and surfaces `esc/$ close` in its hint, Model Select drops `ctrl+d` (esc is the documented close), Handoff Select drops the undocumented `d/D` (only `r` opens the deny-reason flow), and the generic Confirm dialog now accepts `enter` as Allow and surfaces `[Enter/A] Allow` and `[Esc/D] Deny`. Help and Stats overlays also show `esc ⇢ close` in the status bar.

@@ -464,6 +464,7 @@ type MainAgent struct {
 	mcpServersPromptMu    sync.RWMutex
 	mcpServersPrompt      string
 	pendingMCPTools       []tools.Tool
+	pendingMCPReplace     bool
 	agentsMDReady         chan struct{}
 	agentsMDReadyOnce     sync.Once
 	skillsReady           chan struct{}
@@ -555,6 +556,9 @@ type MainAgent struct {
 	// and prompt cache / Responses previous_response_id remain effective.
 	// Cleared by resetSessionBuildState on session-head events.
 	frozenToolDefs atomic.Pointer[[]message.ToolDefinition]
+	// surfaceDirty asks the next request to compare the current runtime
+	// permission/MCP surface with the frozen request surface before rebuilding it.
+	surfaceDirty atomic.Bool
 
 	// rateLimitMu protects per-provider rate-limit snapshots for cross-goroutine access.
 	rateLimitMu    sync.RWMutex
@@ -716,6 +720,7 @@ func (a *MainAgent) SetMCPServersPromptBlock(block string) {
 func (a *MainAgent) SetPendingMCPDiscovery(mcpTools []tools.Tool, block string) {
 	a.mcpServersPromptMu.Lock()
 	a.mcpServersPrompt = block
+	a.pendingMCPReplace = false
 	if len(mcpTools) == 0 {
 		a.pendingMCPTools = nil
 	} else {
