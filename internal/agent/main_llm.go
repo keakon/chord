@@ -451,6 +451,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	messages = a.prepareMessagesForLLM(messages)
 	messages = a.injectCompactionFileContext(messages)
+	if repaired, dropped := message.RepairOrphanToolResults(messages); dropped > 0 {
+		log.Warnf("dropping orphan tool result messages before LLM request dropped=%v", dropped)
+		messages = repaired
+	}
 
 	// On the first LLM call, prepend git status to the first user message so
 	// the model has repository context without polluting the stable system prompt.

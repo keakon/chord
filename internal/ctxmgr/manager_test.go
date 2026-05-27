@@ -88,6 +88,66 @@ func TestSafeKeepBoundaryAndManagerWrapper(t *testing.T) {
 	}
 }
 
+func TestSafeKeepBoundaryKeepsRecentIncompleteToolCallInTail(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "a", Name: "Read", Args: json.RawMessage(`{}`)},
+			{ID: "b", Name: "Read", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: "tool", ToolCallID: "a", Content: "result-a"},
+	}
+	if got := SafeKeepBoundary(msgs, len(msgs)); got != 1 {
+		t.Fatalf("SafeKeepBoundary with recent pending tool call = %d, want 1", got)
+	}
+}
+
+func TestSafeKeepBoundaryArchivesStaleIncompleteToolCall(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "missing", Name: "Read", Args: json.RawMessage(`{}`)}}},
+	}
+	for i := 0; i <= incompleteToolCallProtectedTailMessages; i++ {
+		msgs = append(msgs, message.Message{Role: "user", Content: fmt.Sprintf("new-%d", i)})
+	}
+	if got := SafeKeepBoundary(msgs, len(msgs)); got != len(msgs) {
+		t.Fatalf("SafeKeepBoundary with stale pending tool call = %d, want %d", got, len(msgs))
+	}
+}
+
+func TestSafeKeepBoundaryArchivesCompletedToolCalls(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "a", Name: "Read", Args: json.RawMessage(`{}`)}}},
+		{Role: "tool", ToolCallID: "a", Content: "result-a"},
+	}
+	if got := SafeKeepBoundary(msgs, len(msgs)); got != len(msgs) {
+		t.Fatalf("SafeKeepBoundary with completed tool call = %d, want %d", got, len(msgs))
+	}
+}
+
+func TestSafeKeepBoundaryProtectsEarliestInWindowOnly(t *testing.T) {
+	// Two pending assistants — one stale (outside the protected window) and one
+	// recent (inside the window). The split must land just before the recent
+	// pending assistant; the stale pending is intentionally not re-protected
+	// once the boundary moves back.
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "stale", Name: "Read", Args: json.RawMessage(`{}`)}}},
+	}
+	// 12 filler user turns push the stale pending outside the 10-message window.
+	for i := range 12 {
+		msgs = append(msgs, message.Message{Role: "user", Content: fmt.Sprintf("filler-%d", i)})
+	}
+	recentIdx := len(msgs)
+	msgs = append(msgs, message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "recent", Name: "Read", Args: json.RawMessage(`{}`)}}})
+	msgs = append(msgs, message.Message{Role: "user", Content: "follow-up"})
+
+	if got := SafeKeepBoundary(msgs, len(msgs)); got != recentIdx {
+		t.Fatalf("SafeKeepBoundary = %d, want %d (split just before the recent pending assistant)", got, recentIdx)
+	}
+}
+
 func TestCompressForTarget(t *testing.T) {
 	m := NewManager(1000, 0)
 	msgs := []message.Message{

@@ -24,9 +24,36 @@ type stubProvider struct {
 	err      error
 }
 
-type sessionAwareStubProvider struct {
-	stubProvider
-	sessionID string
+type captureMessagesProvider struct {
+	messages []message.Message
+}
+
+func (p *captureMessagesProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	messages []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	_ llm.RequestTuning,
+	_ llm.StreamCallback,
+) (*message.Response, error) {
+	p.messages = append([]message.Message(nil), messages...)
+	return &message.Response{Content: "ok", StopReason: "stop"}, nil
+}
+
+func (p *captureMessagesProvider) Complete(
+	ctx context.Context,
+	apiKey string,
+	model string,
+	systemPrompt string,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	maxTokens int,
+	tuning llm.RequestTuning,
+) (*message.Response, error) {
+	return p.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, nil)
 }
 
 func (p stubProvider) CompleteStream(
@@ -66,6 +93,11 @@ func (p stubProvider) Complete(
 		return p.response, nil
 	}
 	return &message.Response{}, nil
+}
+
+type sessionAwareStubProvider struct {
+	stubProvider
+	sessionID string
 }
 
 func (p *sessionAwareStubProvider) SetSessionID(sid string) {
@@ -599,6 +631,35 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		}
 	})
 	return a
+}
+
+func TestCallLLMDropsOrphanToolResultsBeforeRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	provider := &captureMessagesProvider{}
+	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	_, err := a.callLLM(context.Background(), []message.Message{
+		{Role: "user", Content: "continue"},
+		{Role: "tool", ToolCallID: "missing", Content: "orphan result"},
+	})
+	if err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+	for _, msg := range provider.messages {
+		if msg.Role == "tool" && msg.ToolCallID == "missing" {
+			t.Fatalf("orphan tool result was sent to provider: %#v", provider.messages)
+		}
+	}
 }
 
 func TestSwitchModelAcceptsInlineVariant(t *testing.T) {

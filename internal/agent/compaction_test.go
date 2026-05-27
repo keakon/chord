@@ -20,10 +20,11 @@ import (
 )
 
 type countingCompactionProvider struct {
-	calls        int
-	compactCalls int
-	response     *message.Response
-	err          error
+	calls         int
+	compactCalls  int
+	invalidations []string
+	response      *message.Response
+	err           error
 }
 
 type countingSummaryOnlyProvider struct {
@@ -91,6 +92,10 @@ func (p *countingCompactionProvider) Compact(
 		return p.response, nil
 	}
 	return &message.Response{}, nil
+}
+
+func (p *countingCompactionProvider) InvalidateRouting(reason string) {
+	p.invalidations = append(p.invalidations, reason)
 }
 
 func (p *countingSummaryOnlyProvider) CompleteStream(
@@ -866,6 +871,41 @@ func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
 	}
 }
 
+func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	provider := &countingCompactionProvider{response: &message.Response{Content: "ok", StopReason: "stop"}}
+	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
+
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+		HeadSplit:      2,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		RelHistoryPath: "history-1.md",
+		SummaryMode:    "truncate_only",
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+		Manual:         true,
+	}
+
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("applyCompactionDraft: %v", err)
+	}
+	if len(provider.invalidations) != 1 || provider.invalidations[0] != "context_compacted" {
+		t.Fatalf("invalidations = %#v, want [context_compacted]", provider.invalidations)
+	}
+}
+
 func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -1158,10 +1198,11 @@ func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
 func TestSummarizeCompactionHeadUsesCompactEndpointForCodexPreset(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	a.globalConfig.Context.Compaction.Preset = config.CompactionPresetCodex
 	a.SetProviderModelRef("sample/compact-model")
 
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
-		Type:   "stub",
+		Type:   config.ProviderTypeResponses,
 		Preset: config.ProviderPresetCodex,
 		Models: map[string]config.ModelConfig{
 			"compact-model": {

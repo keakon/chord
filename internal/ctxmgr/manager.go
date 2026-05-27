@@ -455,26 +455,67 @@ func (m *Manager) CompressForTarget(messages []message.Message, targetTokens int
 // result without its preceding assistant tool_calls message). If the message
 // at rawBoundary is a tool result, we scan backwards to include the matching
 // assistant message as well.
+const incompleteToolCallProtectedTailMessages = 10
+
 func SafeKeepBoundary(msgs []message.Message, rawBoundary int) int {
 	if rawBoundary <= 0 {
 		return 0
 	}
-	if rawBoundary >= len(msgs) {
-		return len(msgs)
+	if rawBoundary > len(msgs) {
+		rawBoundary = len(msgs)
 	}
 
 	boundary := rawBoundary
 
 	// Walk backwards while the boundary message is a tool result. We need to
 	// include the assistant message that initiated the tool call.
-	for boundary > 0 && msgs[boundary].Role == "tool" {
+	for boundary > 0 && boundary < len(msgs) && msgs[boundary].Role == "tool" {
 		boundary--
 	}
 
-	// If we landed on an assistant message with tool_calls, include it.
-	// If we went all the way to 0 we can't compress at all — return 0.
 	if boundary == 0 {
 		return 0
+	}
+
+	// Do not archive assistant tool calls whose tool results have not been recorded
+	// yet. Keeping the assistant and any partial results in the tail preserves a
+	// valid request surface for the next LLM call. Walk forward and stop at the
+	// earliest pending assistant inside the protected tail window; the resulting
+	// split point safely covers any later pending assistants too because they sit
+	// in the kept tail.
+	for i := 0; i < boundary; i++ {
+		if msgs[i].Role != "assistant" || len(msgs[i].ToolCalls) == 0 {
+			continue
+		}
+		if boundary-i > incompleteToolCallProtectedTailMessages {
+			continue
+		}
+		pending := false
+		for _, tc := range msgs[i].ToolCalls {
+			if tc.ID == "" {
+				continue
+			}
+			found := false
+			for j := i + 1; j < boundary; j++ {
+				if msgs[j].Role == "tool" && msgs[j].ToolCallID == tc.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				pending = true
+				break
+			}
+		}
+		if pending {
+			// Pull the boundary just before this assistant. Walk back over any
+			// preceding tool results so the kept tail does not start mid-chain.
+			split := i
+			for split > 0 && msgs[split-1].Role == "tool" {
+				split--
+			}
+			return split
+		}
 	}
 
 	return boundary
