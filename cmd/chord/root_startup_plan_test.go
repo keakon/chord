@@ -10,6 +10,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestCommandScope(t *testing.T) {
+	cases := map[string]string{
+		"project-md":   "project",
+		"project-yaml": "project",
+		"global-md":    "global",
+		"global-yaml":  "global",
+		"":             "",
+		"unknown":      "",
+	}
+	for source, want := range cases {
+		if got := commandScope(source); got != want {
+			t.Fatalf("commandScope(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
 func TestPlanRootStartupMutualExclusion(t *testing.T) {
 	_, err := planRootStartup(newRootCmd(), true, "sid-123", "")
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {

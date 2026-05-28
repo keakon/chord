@@ -10,6 +10,17 @@ import (
 	"github.com/keakon/chord/internal/tui"
 )
 
+func commandScope(source string) string {
+	switch source {
+	case "project-md", "project-yaml":
+		return "project"
+	case "global-md", "global-yaml":
+		return "global"
+	default:
+		return ""
+	}
+}
+
 type tuiProgramRunner interface {
 	Run() (tea.Model, error)
 	Quit()
@@ -104,7 +115,7 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 		if len(ac.LoadedCommands) > 0 {
 			tuiCmds := make([]tui.CustomCommand, len(ac.LoadedCommands))
 			for i, d := range ac.LoadedCommands {
-				tuiCmds[i] = tui.CustomCommand{Cmd: "/" + d.Name, Desc: d.Description}
+				tuiCmds[i] = tui.CustomCommand{Cmd: "/" + d.Name, Desc: d.Description, Scope: commandScope(d.Source)}
 			}
 			tuiModel.SetCustomCommands(tuiCmds)
 		}

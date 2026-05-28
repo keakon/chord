@@ -15,6 +15,7 @@
 - CLI / 清理：`chord cleanup sessions` 现在会在删除会话目录后，把只剩 `project.json` 的项目会话目录也一并移除，因此旧会话清理不会留下空的 per-project 容器。`--older-than` 现在使用删除子目录前的项目会话目录时间戳，确保删除旧会话后项目容器变空时，dry-run 预览与 `--yes` 实际清理保持一致。
 - Tools / Shell：`git stash show -p`、`git stash list --patch` 等非交互式 `git stash` 子命令不再被识别为交互式补丁流程；只有在无管道输入时的 `git stash push -p` 和 `git stash save --patch` 仍会被拦截。
 - TUI / Service tier：`/tier` slash 补全现在和 `Ctrl+R` 快捷键保持一致——预测的下一个 tier 相同；如果当前唯一支持的 tier 就是已生效的 `standard`，`/tier` 会从补全列表隐藏，快捷键也变为 no-op。
+- TUI / 自定义命令：slash 补全现在会内联显示每个自定义命令的 scope，例如 `/commit  [project] ...`，便于区分 project / global 命令且不额外占用菜单行。
 - TUI / YOLO：新增 `--yolo`、`/yolo on|off` 和 `Ctrl+Y`，可在运行中切换临时 MainAgent 权限绕过。Handoff、Delegate、Cancel 和 Done 权限仍会生效；启用时状态栏显示 YOLO。
 - TUI / 权限：`/rules` 现在即使没有已记住规则也会打开，并支持手动添加 session/project/global 级 allow/ask/deny 规则。确认弹窗的记住规则选择器现在允许保存前手动编辑建议 pattern；Delete 确认会提供保守的路径级候选，而不是完全禁用记住规则。
 - TUI / 鼠标选择：文本选择体验现在在对话卡片、Done/Handoff Markdown viewer 和 composer 输入框之间保持一致。双击选中当前词，三击选中当前可见行，拖拽选择继续保持原行为。

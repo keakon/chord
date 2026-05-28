@@ -1181,6 +1181,19 @@ func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionRendersCustomCommandScopeInline(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
+	m.SetCustomCommands([]CustomCommand{{Cmd: "/commit", Desc: "Verify, document, and commit.", Scope: "project"}})
+
+	plain := stripANSI(m.renderSlashCompletionDropdown("/com"))
+	if !strings.Contains(plain, "/commit  [project] Verify, document, and commit.") {
+		t.Fatalf("slash completion missing inline custom command scope and description:\n%s", plain)
+	}
+	if strings.Contains(plain, "scope: project") {
+		t.Fatalf("slash completion should not render custom command scope on a separate line:\n%s", plain)
+	}
+}
+
 func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)

@@ -168,15 +168,17 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 
 // slashCommand describes one slash command for autocomplete.
 type slashCommand struct {
-	Cmd  string // e.g. "/resume"
-	Desc string // short description for the dropdown
+	Cmd   string // e.g. "/resume"
+	Desc  string // short description for the dropdown
+	Scope string // custom command scope, e.g. "project" or "global"; empty for built-ins
 }
 
 // CustomCommand is the exported DTO used to inject custom slash commands into
 // the TUI for autocomplete display only. The expansion is handled by the agent.
 type CustomCommand struct {
-	Cmd  string // must start with "/"
-	Desc string // short description shown in the dropdown; may be empty
+	Cmd   string // must start with "/"
+	Desc  string // short description shown in the dropdown; may be empty
+	Scope string // command scope shown on its own row; may be empty
 }
 
 // slashCommands is the list of available slash commands (alphabetical by Cmd).
@@ -189,6 +191,15 @@ var slashCommands = []slashCommand{
 	{Cmd: "/resume", Desc: "resume previous session"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
 	{Cmd: "/stats", Desc: "usage statistics"},
+}
+
+// slashCompletionLine formats a single completion row. Custom command scope stays
+// inline so each command consumes exactly one menu row.
+func slashCompletionLine(c slashCommand) string {
+	if c.Scope == "" {
+		return fmt.Sprintf("%s  %s", c.Cmd, c.Desc)
+	}
+	return fmt.Sprintf("%s  [%s] %s", c.Cmd, c.Scope, c.Desc)
 }
 
 // getSlashCompletions returns slash commands that match the current input.
@@ -273,7 +284,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	contentWidth := runewidth.StringWidth("Tab/Enter complete  ↑/↓ select  Esc close")
 	for i := start; i < end; i++ {
 		c := matches[i]
-		w := runewidth.StringWidth(fmt.Sprintf(" ▸ %s  %s", c.Cmd, c.Desc))
+		w := runewidth.StringWidth(fmt.Sprintf(" ▸ %s", slashCompletionLine(c)))
 		if w > contentWidth {
 			contentWidth = w
 		}
@@ -293,7 +304,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 
 	for i := start; i < end; i++ {
 		c := matches[i]
-		line := fmt.Sprintf("%s  %s", c.Cmd, c.Desc)
+		line := slashCompletionLine(c)
 		lineLimit := contentWidth
 		if i == sel {
 			lineLimit -= runewidth.StringWidth(" ▸ ")
@@ -337,7 +348,7 @@ func (m *Model) SetCustomCommands(cmds []CustomCommand) {
 		if !strings.HasPrefix(cmd, "/") {
 			cmd = "/" + cmd
 		}
-		m.customCommands = append(m.customCommands, slashCommand{Cmd: cmd, Desc: c.Desc})
+		m.customCommands = append(m.customCommands, slashCommand{Cmd: cmd, Desc: c.Desc, Scope: c.Scope})
 	}
 	sort.Slice(m.customCommands, func(i, j int) bool {
 		return m.customCommands[i].Cmd < m.customCommands[j].Cmd
