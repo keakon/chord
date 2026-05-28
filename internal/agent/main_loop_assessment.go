@@ -425,6 +425,9 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	if subLines := a.activeSubAgentContinuationLines(); len(subLines) > 0 {
 		sections = append(sections, "", "Active subagents:", strings.Join(subLines, "\n"))
 	}
+	if reason, ok := extractDoneRejectedReason(assessment.Message); ok {
+		sections = append(sections, "", "Latest Done rejection reason:", reason)
+	}
 
 	// Concrete reasons for continuation — no vague fallback.
 	gapLines := make([]string, 0, len(reasons))

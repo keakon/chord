@@ -1129,6 +1129,23 @@ func TestStallDetectorContinuationNoteIncludesSuspectedStall(t *testing.T) {
 	}
 }
 
+func TestDoneRejectedContinuationNoteIncludesRejectReason(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+
+	note := a.buildLoopContinuationNote(&LoopAssessment{
+		Action:  LoopAssessmentActionContinue,
+		Message: "Done rejected: 分析所有会话并找出可沉淀命令",
+		Reasons: []string{"done_rejected", "context_continue"},
+	})
+	if note == nil {
+		t.Fatal("expected continuation note")
+	}
+	if !strings.Contains(note.Text, "Latest Done rejection reason:\n分析所有会话并找出可沉淀命令") {
+		t.Fatalf("continuation note = %q, want explicit rejection reason", note.Text)
+	}
+}
+
 func TestStallDetectorDifferentContentDoesNotReset(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enable()

@@ -983,7 +983,7 @@ func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInpu
 		{"## Progress", fallbackProgressSection(input)},
 		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, input, keyFiles)},
-		{"## Todo State", formatTodosAsRelevanceBullets(todos)},
+		{"## Todo State", formatTodosAsRelevanceBullets(todos, latestDoneRejectedReasonText(input))},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
 		{"## Next Step", fallbackNextStepSection(input)},
@@ -991,17 +991,32 @@ func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInpu
 }
 
 func fallbackCurrentUserRequestSection(input *compactionInput) string {
+	if reason, ok := latestDoneRejectedReason(input); ok {
+		return "- Latest Done rejected reason: " + strings.ReplaceAll(reason, "\n", " ")
+	}
 	if input != nil {
-		for _, item := range input.EvidenceItems {
-			if item.Kind == evidenceDoneRejected {
-				return "- Latest Done rejected reason: " + strings.ReplaceAll(item.Excerpt, "\n", " ")
-			}
-		}
 		if strings.TrimSpace(input.RecentTailAnchor) != "" && input.RecentTailAnchor != "- (none)" {
 			return "- Continue from the latest preserved user request in the recent tail below:\n" + input.RecentTailAnchor
 		}
 	}
 	return "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."
+}
+
+func latestDoneRejectedReason(input *compactionInput) (string, bool) {
+	if input == nil {
+		return "", false
+	}
+	for _, item := range input.EvidenceItems {
+		if item.Kind == evidenceDoneRejected && strings.TrimSpace(item.Excerpt) != "" {
+			return item.Excerpt, true
+		}
+	}
+	return "", false
+}
+
+func latestDoneRejectedReasonText(input *compactionInput) string {
+	reason, _ := latestDoneRejectedReason(input)
+	return reason
 }
 
 func renderEvidenceKindForFallback(input *compactionInput, kind evidenceKind, empty string) string {
@@ -1078,13 +1093,31 @@ func fallbackNextStepSection(input *compactionInput) string {
 	return "- Continue from the preserved recent context below:\n" + input.RecentTailAnchor
 }
 
-func formatTodosAsRelevanceBullets(todos []tools.TodoItem) string {
+func formatTodosAsRelevanceBullets(todos []tools.TodoItem, latestDoneRejectedReason string) string {
+	latestDoneRejectedReason = strings.TrimSpace(latestDoneRejectedReason)
 	lines := []string{
 		"- Active/relevant to latest request: not relevance-filtered because model summarization was unavailable.",
 		"- Completed/background:",
 		"  - (none classified)",
 		"- Stale/superseded:",
 		"  - (none classified)",
+	}
+	if latestDoneRejectedReason != "" {
+		lines = []string{
+			"- Active/relevant to latest request:",
+			"  - Latest Done rejected reason: " + strings.ReplaceAll(latestDoneRejectedReason, "\n", " "),
+			"- Completed/background:",
+			"  - (none classified)",
+			"- Stale/superseded:",
+		}
+		if len(todos) == 0 {
+			lines = append(lines, "  - (none)")
+			return strings.Join(lines, "\n")
+		}
+		for _, todo := range todos {
+			lines = append(lines, fmt.Sprintf("  - [%s] %s: %s", todo.Status, todo.ID, todo.Content))
+		}
+		return strings.Join(lines, "\n")
 	}
 	if len(todos) == 0 {
 		lines[0] = "- Active/relevant to latest request: (none)"
@@ -1291,7 +1324,7 @@ func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFile
 		{"## Progress", "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
 		{"## Key Decisions", "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, nil, keyFiles)},
-		{"## Todo State", formatTodosAsRelevanceBullets(todos)},
+		{"## Todo State", formatTodosAsRelevanceBullets(todos, "")},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},

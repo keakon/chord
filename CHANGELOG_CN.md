@@ -10,6 +10,7 @@
 - LLM / Key pool：多个 credential slot 如果共享同一个 access token，现在会同步应用 cooldown、recovering、quota-exhausted 和 success 状态，避免已耗尽 token 通过另一个 slot 再次被选中。
 - LLM / Codex：Codex WebSocket 返回 usage-limit / quota exhausted 类错误时，现在会跳过 HTTP fallback，直接进入 key quota/cooldown 处理，避免先等到响应头超时才切换下一个账号或 fallback 模型。
 - LLM / 兼容网关：非官方兼容网关返回看起来是临时态的 HTTP 400（例如 `Concurrency limit exceeded`）时，现在会冷却当前 key、轮换到下一个 key，并允许跨完整池继续重试；官方 API 的 400 以及请求参数/模型不兼容类 400（包括 `Store must be set to false` / `Stream must be set to true`）仍立即停止。
+- Runtime / 压缩：fallback 压缩摘要现在会把最新 `Done rejected:` 原因作为当前请求锚点；当模型不可用、无法做 TODO 相关性判断时，会把压缩前 TODO 移入 stale/superseded。Loop continuation prompt 也会包含精确的 Done 拒绝原因，避免用户拒绝中变更范围后被降级成泛泛的“继续当前目标”。
 - CLI / 清理：`chord cleanup sessions` 现在会在删除会话目录后，把只剩 `project.json` 的项目会话目录也一并移除，因此旧会话清理不会留下空的 per-project 容器。`--older-than` 现在使用删除子目录前的项目会话目录时间戳，确保删除旧会话后项目容器变空时，dry-run 预览与 `--yes` 实际清理保持一致。
 - Tools / Shell：`git stash show -p`、`git stash list --patch` 等非交互式 `git stash` 子命令不再被识别为交互式补丁流程；只有在无管道输入时的 `git stash push -p` 和 `git stash save --patch` 仍会被拦截。
 - TUI / Service tier：`/tier` slash 补全现在和 `Ctrl+R` 快捷键保持一致——预测的下一个 tier 相同；如果当前唯一支持的 tier 就是已生效的 `standard`，`/tier` 会从补全列表隐藏，快捷键也变为 no-op。

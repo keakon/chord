@@ -2123,6 +2123,30 @@ func TestCompactionPromptAnchorsLatestRequestAgainstStaleTodo(t *testing.T) {
 	}
 }
 
+func TestStructuredFallbackSummaryDemotesTodosWhenDoneRejectionChangesTarget(t *testing.T) {
+	input := &compactionInput{
+		EvidenceItems: []evidenceItem{{Kind: evidenceDoneRejected, Excerpt: "分析所有会话并找出可沉淀命令"}},
+	}
+	summary := buildStructuredFallbackSummary(
+		"history-2.md",
+		input,
+		fmt.Errorf("summary quality fallback"),
+		nil,
+		[]tools.TodoItem{{ID: "old", Content: "更新文档并提交相关改动", Status: "in_progress"}},
+		nil,
+		nil,
+	)
+	for _, want := range []string{
+		"## Current User Request\n- Latest Done rejected reason: 分析所有会话并找出可沉淀命令",
+		"- Active/relevant to latest request:\n  - Latest Done rejected reason: 分析所有会话并找出可沉淀命令",
+		"- Stale/superseded:\n  - [in_progress] old: 更新文档并提交相关改动",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q:\n%s", want, summary)
+		}
+	}
+}
+
 func TestSelectEvidenceItemsKeepsDoneRejectedUnderTightBudget(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "tool", Content: "Error: " + strings.Repeat("long failing output ", 300)},
