@@ -55,7 +55,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 	prepared := make([]message.Message, len(messages))
 	copy(prepared, messages)
 	if a != nil {
-		loopEnabled, frozenPrefix, frozenStats := a.loopReductionSnapshot()
+		loopEnabled, frozenPrefix, frozenStats := a.contextSurfaceReductionSnapshot()
 		if loopEnabled {
 			return a.applyLoopFrozenReductionPrefix(prepared, frozenPrefix, frozenStats)
 		}
@@ -274,36 +274,42 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	a.contextReductionStats = a.lastPreparedReductionStats
 }
 
-func (a *MainAgent) loopReductionSnapshot() (enabled bool, frozenPrefix []message.Message, frozenStats ContextReductionStats) {
+func (a *MainAgent) contextSurfaceReductionSnapshot() (enabled bool, frozenPrefix []message.Message, frozenStats ContextReductionStats) {
 	if a == nil {
 		return false, nil, ContextReductionStats{}
 	}
-	a.loopReductionMu.Lock()
-	loopEnabled := a.loopState.Enabled
-	a.loopReductionMu.Unlock()
-	if !loopEnabled || !a.shouldDisableContextReductionInLoop() {
+	if !a.shouldFreezeLLMContextSurface() {
 		return false, nil, ContextReductionStats{}
 	}
+	turnID := a.currentTurnID()
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	if !a.loopState.Enabled {
-		return false, nil, ContextReductionStats{}
+	if len(a.loopState.FrozenReductionPrefix) == 0 && turnID != 0 && a.lastPreparedLLMTurnID == turnID {
+		a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
+		a.loopState.FrozenReductionStats = a.lastPreparedReductionStats
 	}
 	return true, cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix), a.loopState.FrozenReductionStats
 }
 
-func (a *MainAgent) shouldDisableContextReductionInLoop() bool {
-	return a.shouldFreezeLLMContextSurfaceInLoop()
+func (a *MainAgent) allowContextSurfaceRefreshAtUserBoundary() {
+	if a == nil {
+		return
+	}
+	a.contextSurfaceRefreshAllowed.Store(true)
 }
 
-func (a *MainAgent) shouldFreezeLLMContextSurfaceInLoop() bool {
+func (a *MainAgent) consumeContextSurfaceRefreshAllowance() bool {
 	if a == nil {
 		return false
 	}
-	a.loopReductionMu.Lock()
-	loopEnabled := a.loopState.Enabled
-	a.loopReductionMu.Unlock()
-	if !loopEnabled {
+	return a.contextSurfaceRefreshAllowed.Swap(false)
+}
+
+func (a *MainAgent) shouldFreezeLLMContextSurface() bool {
+	if a == nil {
+		return false
+	}
+	if a.contextSurfaceRefreshAllowed.Load() {
 		return false
 	}
 	providerName := a.mainRateLimitProviderName()
@@ -330,7 +336,11 @@ func codexQuotaRemainingUnderTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bo
 }
 
 func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, prefix []message.Message, stats ContextReductionStats) []message.Message {
-	if a == nil || len(prefix) == 0 {
+	if a == nil {
+		return prepared
+	}
+	if len(prefix) == 0 {
+		a.setContextReductionStats(ContextReductionStats{})
 		return prepared
 	}
 	limit := min(len(prefix), len(prepared))

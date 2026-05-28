@@ -957,6 +957,16 @@ flipping old history from a reduced form back to full raw tool output, preservin
 prompt-cache prefix stability; messages produced during the loop remain
 unreduced until loop mode is turned off.
 
+When the active main-agent provider uses the Codex rate-limit surface and a 5h
+or 7d quota window has less than 10% remaining, Chord temporarily freezes the
+LLM-facing request surface for continuous automatic continuations. The frozen
+surface includes request-level reduction, the installed system prompt, and the
+visible tool definitions. This is intentional: near quota exhaustion, Codex can
+continue a `stop_reason=tool_call` chain until `end_turn` only when the context
+surface is unchanged. The freeze is lifted at an interactive boundary — when the
+agent returns to idle or the user sends a real new message — so explicit user
+changes such as MCP or YOLO toggles can rebuild the surface on the next request.
+
 > **Most users do not need to configure this section.** The built-in defaults
 > are conservative and work well for common scenarios. In empirical local-session
 > analysis, reduction produced meaningful savings without systematically

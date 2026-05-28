@@ -308,6 +308,7 @@ type MainAgent struct {
 	lastPreparedLLMRequestPrefix []message.Message
 	lastPreparedReductionStats   ContextReductionStats
 	contextReductionStats        ContextReductionStats
+	contextSurfaceRefreshAllowed atomic.Bool
 
 	// Async durable compaction (pre-request gate): defer inbound events until commit.
 	compactionState      compactionState

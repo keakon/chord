@@ -389,7 +389,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 	}
 }
 
-func TestPrepareMessagesForLLM_DisablesRequestPruningInLoopWhenCodexQuotaLow(t *testing.T) {
+func TestPrepareMessagesForLLM_DisablesRequestPruningWhenCodexQuotaLow(t *testing.T) {
 	largeOutput := strings.Repeat("test output line\n", 500)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
@@ -408,11 +408,9 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningInLoopWhenCodexQuotaLow(t *
 			Primary: &ratelimit.RateLimitWindow{UsedPct: 100},
 		}},
 	}
-	a.loopState.Enabled = true
-
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != largeOutput {
-		t.Fatalf("low codex quota in loop mode should preserve full tool output, got %q", prepared[2].Content)
+		t.Fatalf("low codex quota should preserve full tool output, got %q", prepared[2].Content)
 	}
 	if msgs[2].Content != largeOutput {
 		t.Fatalf("prepareMessagesForLLM mutated original messages in loop mode")
@@ -511,7 +509,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
 	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 90},
 	}}
 	a.newTurn()
 	largeOutput := strings.Repeat("test output line\n", 500)
@@ -536,6 +534,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 		t.Fatalf("expected initial reduction stats, got %+v", firstStats)
 	}
 	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	a.EnableLoopMode("finish current task")
 	a.freezeLoopReductionPrefixForCurrentTurn()
 
@@ -560,9 +559,94 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	}
 
 	a.DisableLoopMode()
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
 	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
 	if !strings.Contains(afterLoopPrepared[7].Content, "Older Shell output omitted") {
 		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLoop(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+	}}
+	a.newTurn()
+	largeOutput := strings.Repeat("test output line\n", 500)
+	newLargeOutput := strings.Repeat("new output line\n", 600)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	// Simulate the last request before the Codex quota snapshot crossed the low-quota threshold.
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
+	firstPrepared := a.prepareMessagesForLLM(msgs)
+	firstStats := a.GetContextReductionStats()
+	if !strings.Contains(firstPrepared[2].Content, "Older Shell output omitted") {
+		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
+	}
+	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
+
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
+	continuationMsgs := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc2", Name: "Shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
+		}},
+		message.Message{Role: "tool", ToolCallID: "tc2", Content: newLargeOutput},
+		message.Message{Role: "user", Content: "u5"},
+		message.Message{Role: "user", Content: "u6"},
+	)
+	prepared := a.prepareMessagesForLLM(continuationMsgs)
+	if prepared[2].Content != firstPrepared[2].Content {
+		t.Fatalf("low-quota continuation should reuse frozen pruned prefix, got %q want %q", prepared[2].Content, firstPrepared[2].Content)
+	}
+	if prepared[7].Content != newLargeOutput {
+		t.Fatalf("low-quota continuation should not newly prune messages after frozen prefix, got %q", prepared[7].Content)
+	}
+	if stats := a.GetContextReductionStats(); stats != firstStats {
+		t.Fatalf("reduction stats = %+v, want frozen %+v", stats, firstStats)
+	}
+}
+
+func TestPrepareMessagesForLLM_UserBoundaryRefreshesLowQuotaCodexReduction(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+	}}
+	a.newTurn()
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	a.allowContextSurfaceRefreshAtUserBoundary()
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+		t.Fatalf("user boundary should temporarily allow low-quota codex pruning, got %q", prepared[2].Content)
 	}
 }
 

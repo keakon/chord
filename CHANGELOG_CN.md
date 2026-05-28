@@ -29,6 +29,7 @@
 - Headless / Handoff：`Handoff` 现在会在 headless 模式下发出结构化的 `handoff_request` 事件，包含完整已保存 plan 以及可选 agent / model pool；headless 也新增 `handoff` 命令，可批准执行或拒绝后继续规划。
 - **不兼容 / 配置：** 移除未使用的 `context.reduction.model_pool` 配置项和未使用的 `maintenance.size_check_interval_hours` 配置项。Context reduction 仍是确定性剪裁，不会调用辅助模型；需要 LLM 参与的持久化上下文压缩请使用 `context.compaction.model_pool`。
 - Runtime / 上下文剪裁：将默认字节阈值调成更偏 prompt cache 友好的配置，同时继续剪掉大型旧输出。`shell_success_bytes` 现在是 `8000`（之前 `4000`），`read_like_output_bytes` 现在是 `4000`（之前 `2500`）；age gate 和 `min_tool_results_prune` 保持不变。
+- Runtime / 上下文剪裁：低 Codex 额度时的 request-surface 冻结现在不再依赖 loop 模式。当 Codex 5h 或 7d 额度窗口剩余不足 10% 时，连续自动 continuation 会保持已准备的消息表面、系统提示词和工具定义稳定，使 `stop_reason=tool_call` 链尽可能继续执行到 `end_turn`；回到 idle 或发送真实用户消息会解除冻结，让下一次请求重新构建 surface。
 - Runtime / Loop：loop 模式下的 `Done` 退出请求不再有机器强制的验证状态门槛。未完成 TODO、活跃 subagent、blocked 状态以及格式错误/混用的 `Done` 批次仍会阻止自动完成；类似验证的工具结果仍会作为 stall 检测的进展信号。
 - TUI / 导航：当用户手动关闭 sticky follow 后，在底部执行无位移的向下滚动不会再重新开启 sticky follow，从而保留手动滚动状态。
 - TUI / 工具卡：卡片 header 现在显示从 1 开始的 block 序号（例如 `TOOL CALL #12`），方便明确引用渲染出来的卡片。

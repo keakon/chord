@@ -197,7 +197,7 @@ func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
 	}
 }
 
-func TestMCPLowQuotaCodexLoopKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
+func TestMCPLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -205,14 +205,16 @@ func TestMCPLowQuotaCodexLoopKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 	a.markMCPReady()
 	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
 	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
 	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
 		Primary: &ratelimit.RateLimitWindow{UsedPct: 95},
 	}}
-	a.loopState.Enabled = true
 	a.tools.Register(tools.GlobTool{})
 	a.sessionBuilt.Store(true)
 	a.freezeToolSurface()
+	a.newTurn()
 	beforePrompt := a.installedSysPrompt
 
 	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
@@ -226,10 +228,10 @@ func TestMCPLowQuotaCodexLoopKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 		t.Fatalf("ensureSessionBuilt: %v", err)
 	}
 	if _, ok := a.tools.Get(tools.NameRead); !ok {
-		t.Fatal("new MCP runtime tool should still register under low-quota codex loop")
+		t.Fatal("new MCP runtime tool should still register under low-quota codex")
 	}
 	if got := a.installedSysPrompt; got != beforePrompt {
-		t.Fatalf("system prompt changed under low-quota codex loop: %q", got)
+		t.Fatalf("system prompt changed under low-quota codex: %q", got)
 	}
 	defs := a.mainLLMToolDefinitions()
 	if got := len(defs); got != 1 || defs[0].Name != tools.NameGlob {
