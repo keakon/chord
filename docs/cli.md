@@ -209,12 +209,12 @@ Clean a specific kind of managed data. **Defaults to a dry run** — pass `--yes
 | `--older-than <duration>`   | Only consider entries older than this duration (Go duration syntax, e.g. `720h` for 30 days) |
 | `--yes`                     | Actually delete; without this flag the command only previews what would be removed           |
 
-| Kind        | What it cleans                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------- |
-| `sessions`  | Old session directories under `<state-dir>/sessions/<project-key>/`                         |
-| `cache`     | Rebuildable cache under `<cache-dir>/runtime/`                                              |
-| `logs`      | Rotated logs under `<state-dir>/logs/`                                                      |
-| `project`   | Orphan project entries (project directories that no longer exist on disk)                   |
+| Kind        | What it cleans                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `sessions`  | Old session directories under `<state-dir>/sessions/<project-key>/`; removes project session dirs left with only `project.json` after their sessions are gone |
+| `cache`     | Rebuildable cache under `<cache-dir>/runtime/`                                                                  |
+| `logs`      | Rotated logs under `<state-dir>/logs/`                                                                          |
+| `project`   | Orphan project entries (project directories that no longer exist on disk)                                       |
 
 ### Examples
 

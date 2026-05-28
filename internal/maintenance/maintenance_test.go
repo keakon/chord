@@ -163,6 +163,120 @@ func TestCleanupSessionsDryRunAndSkipsLocked(t *testing.T) {
 	}
 }
 
+func TestCleanupSessionsDryRunPreviewsProjectDirAfterSessionDeletion(t *testing.T) {
+	loc := testLocator(t)
+	project := t.TempDir()
+	pl, err := loc.EnsureProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(pl.ProjectSessionsDir, "20260427153042123")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CleanupSessions(loc, CleanupOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.DryRun || len(res.Candidates) != 2 || len(res.Deleted) != 0 {
+		t.Fatalf("dry-run result = %#v", res)
+	}
+	if res.Candidates[0].Kind != "session" || res.Candidates[1].Kind != "empty project sessions" {
+		t.Fatalf("candidate order/kinds = %#v", res.Candidates)
+	}
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("dry-run removed session dir: %v", err)
+	}
+	if _, err := os.Stat(pl.ProjectSessionsDir); err != nil {
+		t.Fatalf("dry-run removed project sessions dir: %v", err)
+	}
+}
+
+func TestCleanupSessionsRemovesMetadataOnlyProjectDirs(t *testing.T) {
+	loc := testLocator(t)
+	project := t.TempDir()
+	pl, err := loc.EnsureProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CleanupSessions(loc, CleanupOptions{Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DryRun || len(res.Deleted) != 1 {
+		t.Fatalf("cleanup result = %#v", res)
+	}
+	if res.Deleted[0].Kind != "empty project sessions" || res.Deleted[0].Path != pl.ProjectSessionsDir {
+		t.Fatalf("deleted = %#v, want empty project sessions %s", res.Deleted, pl.ProjectSessionsDir)
+	}
+	if _, err := os.Stat(pl.ProjectSessionsDir); !os.IsNotExist(err) {
+		t.Fatalf("project sessions dir still exists err=%v", err)
+	}
+}
+
+func TestCleanupSessionsRemovesProjectAfterDeletingSessions(t *testing.T) {
+	loc := testLocator(t)
+	project := t.TempDir()
+	pl, err := loc.EnsureProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(pl.ProjectSessionsDir, "20260427153042123")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CleanupSessions(loc, CleanupOptions{Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DryRun || len(res.Deleted) != 2 {
+		t.Fatalf("cleanup result = %#v", res)
+	}
+	if res.Deleted[0].Kind != "session" || res.Deleted[1].Kind != "empty project sessions" {
+		t.Fatalf("deleted order/kinds = %#v", res.Deleted)
+	}
+	if _, err := os.Stat(pl.ProjectSessionsDir); !os.IsNotExist(err) {
+		t.Fatalf("project sessions dir still exists err=%v", err)
+	}
+}
+
+func TestCleanupSessionsRemovesProjectAfterDeletingOldSessions(t *testing.T) {
+	loc := testLocator(t)
+	project := t.TempDir()
+	pl, err := loc.EnsureProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(pl.ProjectSessionsDir, "20260427153042123")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(sessionDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(pl.ProjectSessionsDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CleanupSessions(loc, CleanupOptions{Yes: true, OlderThan: 24 * time.Hour, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DryRun || len(res.Deleted) != 2 {
+		t.Fatalf("cleanup result = %#v", res)
+	}
+	if res.Deleted[0].Kind != "session" || res.Deleted[1].Kind != "empty project sessions" {
+		t.Fatalf("deleted order/kinds = %#v", res.Deleted)
+	}
+	if _, err := os.Stat(pl.ProjectSessionsDir); !os.IsNotExist(err) {
+		t.Fatalf("project sessions dir still exists err=%v", err)
+	}
+}
+
 func TestCleanupCacheDeletesWhenYes(t *testing.T) {
 	loc := testLocator(t)
 	dir := filepath.Join(loc.CacheDir, "runtime", "session-cache", "project", "sid")

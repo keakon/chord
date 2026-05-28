@@ -129,18 +129,27 @@ func CleanupSessions(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 			continue
 		}
 		projectDir := filepath.Join(locator.SessionsRoot, projectEntry.Name())
+		var projectModTime time.Time
+		if cutoff != nil {
+			if info, err := projectEntry.Info(); err == nil {
+				projectModTime = info.ModTime()
+			}
+		}
 		sessionEntries, err := os.ReadDir(projectDir)
 		if err != nil {
 			return nil, err
 		}
+		remainingEntries := make(map[string]struct{}, len(sessionEntries))
 		for _, entry := range sessionEntries {
 			if !entry.IsDir() {
+				remainingEntries[entry.Name()] = struct{}{}
 				continue
 			}
 			dir := filepath.Join(projectDir, entry.Name())
 			if cutoff != nil {
 				info, err := entry.Info()
 				if err == nil && info.ModTime().After(*cutoff) {
+					remainingEntries[entry.Name()] = struct{}{}
 					continue
 				}
 			}
@@ -152,6 +161,7 @@ func CleanupSessions(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 			}
 			res.Candidates = append(res.Candidates, cand)
 			if cand.Skip != "" {
+				remainingEntries[entry.Name()] = struct{}{}
 				res.Skipped = append(res.Skipped, cand)
 				continue
 			}
@@ -160,13 +170,59 @@ func CleanupSessions(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 			}
 			if err := os.RemoveAll(dir); err != nil {
 				cand.Skip = err.Error()
+				remainingEntries[entry.Name()] = struct{}{}
 				res.Skipped = append(res.Skipped, cand)
 				continue
 			}
 			res.Deleted = append(res.Deleted, cand)
 		}
+		if cutoff != nil && !projectModTime.IsZero() && projectModTime.After(*cutoff) {
+			continue
+		}
+		prunable, err := projectSessionsDirPrunable(projectDir, remainingEntries)
+		if err != nil {
+			return nil, err
+		}
+		if !prunable {
+			continue
+		}
+		cand := CleanupCandidate{Path: projectDir, Kind: "empty project sessions", Bytes: dirSize(projectDir, nil)}
+		res.Candidates = append(res.Candidates, cand)
+		if res.DryRun {
+			continue
+		}
+		if err := os.RemoveAll(projectDir); err != nil {
+			cand.Skip = err.Error()
+			res.Skipped = append(res.Skipped, cand)
+			continue
+		}
+		res.Deleted = append(res.Deleted, cand)
 	}
 	return res, nil
+}
+
+func projectSessionsDirPrunable(projectDir string, remainingEntries map[string]struct{}) (bool, error) {
+	if remainingEntries != nil {
+		for name := range remainingEntries {
+			if name != "project.json" {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() != "project.json" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func cleanupChildren(root, kind string, opts CleanupOptions) (*CleanupResult, error) {
