@@ -1161,6 +1161,10 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			item := buildDoneRejectedEvidence("runtime tool result", reason)
 			item.Sequence = len(a.evidenceCandidates) + 1
 			a.addEvidenceCandidate(item)
+		} else if reason, ok := extractToolRejectedByUserReason(text); ok && isPlainUserRequestForCompaction(reason) {
+			item := buildLatestUserRequestEvidence("runtime tool rejection reason", reason)
+			item.Sequence = len(a.evidenceCandidates) + 1
+			a.addEvidenceCandidate(item)
 		}
 		if strings.Contains(text, "Error:") || isToolErrorContent(text) {
 			a.addEvidenceCandidate(buildEvidenceItem(

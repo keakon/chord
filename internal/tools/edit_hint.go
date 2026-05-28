@@ -196,6 +196,42 @@ func buildTrimMismatchHint(fileText, oldText string) string {
 	return ""
 }
 
+func buildEditAmbiguousOldStringHint(fileText, oldText string) string {
+	lines := splitComparableLines(fileText)
+	oldLines := splitComparableLines(oldText)
+	if len(lines) == 0 || len(oldLines) == 0 {
+		return "Use Read to copy a smaller unique 2-4 line block around the intended occurrence."
+	}
+	var matches []int
+	for i := 0; i+len(oldLines) <= len(lines); i++ {
+		ok := true
+		for j := range oldLines {
+			if lines[i+j] != oldLines[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			matches = append(matches, i+1)
+			if len(matches) >= 5 {
+				break
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return "Use Read to copy a smaller unique 2-4 line block around the intended occurrence."
+	}
+	return fmt.Sprintf("Matching occurrences start near line(s): %s. Use Read around the intended line and include nearby unique context, or set replace_all only when every occurrence should change.", formatLineNumbers(matches))
+}
+
+func formatLineNumbers(lines []int) string {
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		parts = append(parts, fmt.Sprintf("%d", line))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func comparableLogicalLines(fileText, oldText string) ([]string, []string, bool) {
 	fileLines := splitComparableLines(fileText)
 	oldLines := splitComparableLines(oldText)

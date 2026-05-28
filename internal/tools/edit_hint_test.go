@@ -82,10 +82,10 @@ func TestEditToolErrorsUseSnakeCaseParameterNames(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple matches mention replace_all", func(t *testing.T) {
+	t.Run("multiple matches mention locations", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "multi.txt")
-		if err := os.WriteFile(path, []byte("dup\ndup\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("dup\nunique\ndup\n"), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
 		args, err := json.Marshal(map[string]any{
@@ -101,9 +101,14 @@ func TestEditToolErrorsUseSnakeCaseParameterNames(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		want := "old_string found 2 times, provide more context or set replace_all"
-		if err.Error() != want {
-			t.Fatalf("err = %q, want %q", err.Error(), want)
+		for _, want := range []string{
+			"old_string found 2 times, provide more context or set replace_all",
+			"Matching occurrences start near line(s): 1, 3",
+			"Use Read around the intended line",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %q, want substring %q", err.Error(), want)
+			}
 		}
 	})
 }

@@ -2164,6 +2164,18 @@ func TestSelectEvidenceItemsKeepsDoneRejectedUnderTightBudget(t *testing.T) {
 	}
 }
 
+func TestRecordEvidenceFromMessageCapturesToolRejectionReasonAsRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: `Error: tool "Write" rejected by user: 改成只分析，不要写文件`})
+	if got := len(a.evidenceCandidates); got != 2 {
+		t.Fatalf("len(evidenceCandidates) = %d, want request plus error evidence", got)
+	}
+	if a.evidenceCandidates[0].Kind != evidenceUserRequest || !strings.Contains(a.evidenceCandidates[0].Excerpt, "只分析") {
+		t.Fatalf("first candidate = %+v, want user request from rejection reason", a.evidenceCandidates[0])
+	}
+}
+
 func TestRecordEvidenceFromMessageCapturesDoneRejected(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

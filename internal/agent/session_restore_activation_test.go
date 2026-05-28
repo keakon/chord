@@ -59,6 +59,33 @@ func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.
 	}
 }
 
+func TestActivateLoadedSessionReportsFilteredTodoCount(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	loaded := &loadedSessionState{
+		SessionPath: "/tmp/session-stale-todos",
+		Messages: []message.Message{{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Todo State
+- Active/relevant to latest request:
+  - Latest Done rejected reason: new task
+- Completed/background:
+  - (none classified)
+- Stale/superseded:
+  - [in_progress] old: old task
+
+## SubAgent State
+- none`}},
+		TodoItems: []tools.TodoItem{{ID: "old", Status: "in_progress", Content: "old task"}},
+	}
+
+	result := a.activateLoadedSession(loaded)
+	if result.TodoCount != 0 {
+		t.Fatalf("TodoCount = %d, want filtered restored count 0", result.TodoCount)
+	}
+	if got := a.GetTodos(); len(got) != 0 {
+		t.Fatalf("GetTodos() = %+v, want stale todos dropped", got)
+	}
+}
+
 func TestActivateLoadedSessionDoesNotReplayThinkingTranslationsAcrossSessions(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{ThinkingTranslation: &config.ThinkingTranslationConfig{TargetLanguage: "zh-Hans"}}

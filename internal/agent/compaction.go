@@ -257,6 +257,20 @@ func extractDoneRejectedReason(text string) (string, bool) {
 	return "", false
 }
 
+func extractToolRejectedByUserReason(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false
+	}
+	marker := "rejected by user:"
+	idx := strings.Index(strings.ToLower(trimmed), marker)
+	if idx < 0 {
+		return "", false
+	}
+	reason := strings.TrimSpace(trimmed[idx+len(marker):])
+	return reason, reason != ""
+}
+
 func buildDoneRejectedEvidence(source, reason string) evidenceItem {
 	return buildEvidenceItem(
 		evidenceDoneRejected,

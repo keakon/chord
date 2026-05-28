@@ -502,7 +502,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.usageTracker.RestoreStats(loaded.UsageStats)
 	}
 	a.todoMu.Lock()
-	a.todoItems = append([]tools.TodoItem(nil), loaded.TodoItems...)
+	a.todoItems = filterRestoredTodosByLatestCompactionSummary(restoredMessages, loaded.TodoItems)
+	restoredTodoCount := len(a.todoItems)
 	a.todoMu.Unlock()
 	if a.lspSessionLoadFn != nil {
 		a.lspSessionLoadFn(restoredMessages)
@@ -579,7 +580,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	return sessionRestoreResult{
 		SessionPath:  loaded.SessionPath,
 		MessageCount: len(restoredMessages),
-		TodoCount:    len(loaded.TodoItems),
+		TodoCount:    restoredTodoCount,
 		AgentCount:   agentCount,
 	}
 }
@@ -888,6 +889,59 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, todos []tools.TodoItem) []tools.TodoItem {
+	if len(todos) == 0 {
+		return nil
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if messageHasTodoWrite(msg) {
+			break
+		}
+		if msg.Role != "user" || !msg.IsCompactionSummary || !strings.Contains(msg.Content, "## Todo State") {
+			continue
+		}
+		if compactionSummaryMarksTodosStale(msg.Content) {
+			return nil
+		}
+		break
+	}
+	return append([]tools.TodoItem(nil), todos...)
+}
+
+func messageHasTodoWrite(msg message.Message) bool {
+	for _, tc := range msg.ToolCalls {
+		if tc.Name == "TodoWrite" {
+			return true
+		}
+	}
+	return false
+}
+
+func compactionSummaryMarksTodosStale(summary string) bool {
+	active := compactionSummarySection(summary, "- Active/relevant to latest request:", "- Completed/background:")
+	stale := compactionSummarySection(summary, "- Stale/superseded:", "## SubAgent State")
+	if strings.TrimSpace(stale) == "" || strings.Contains(stale, "  - (none") {
+		return false
+	}
+	if strings.Contains(active, "[pending]") || strings.Contains(active, "[in_progress]") {
+		return false
+	}
+	return true
+}
+
+func compactionSummarySection(summary, startMarker, endMarker string) string {
+	start := strings.Index(summary, startMarker)
+	if start < 0 {
+		return ""
+	}
+	section := summary[start+len(startMarker):]
+	if end := strings.Index(section, endMarker); end >= 0 {
+		section = section[:end]
+	}
+	return section
 }
 
 // rebuildTodosFromMessages scans messages in reverse to find the last TodoWrite

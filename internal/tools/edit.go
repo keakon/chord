@@ -124,7 +124,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("old_string not found in file")
 	}
 	if count > 1 && !a.ReplaceAll {
-		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all", count)
+		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all. %s", count, buildEditAmbiguousOldStringHint(content, decodedOld))
 	}
 
 	// Perform replacement.

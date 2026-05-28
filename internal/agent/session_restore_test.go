@@ -20,6 +20,52 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestFilterRestoredTodosDropsStaleCompactionTodos(t *testing.T) {
+	todos := []tools.TodoItem{{ID: "old", Status: "in_progress", Content: "old task"}}
+	msgs := []message.Message{{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Current User Request
+- Latest Done rejected reason: new task
+
+## Todo State
+- Active/relevant to latest request:
+  - Latest Done rejected reason: new task
+- Completed/background:
+  - (none classified)
+- Stale/superseded:
+  - [in_progress] old: old task
+
+## SubAgent State
+- none`}}
+
+	if got := filterRestoredTodosByLatestCompactionSummary(msgs, todos); len(got) != 0 {
+		t.Fatalf("restored todos = %#v, want stale todos dropped", got)
+	}
+}
+
+func TestFilterRestoredTodosKeepsTodosAfterCompaction(t *testing.T) {
+	todos := []tools.TodoItem{{ID: "new", Status: "pending", Content: "new task"}}
+	todoArgs := mustJSONRaw(t, map[string]any{"todos": todos})
+	msgs := []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Todo State
+- Active/relevant to latest request:
+  - Latest Done rejected reason: new task
+- Completed/background:
+  - (none classified)
+- Stale/superseded:
+  - [in_progress] old: old task
+
+## SubAgent State
+- none`},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "todo-1", Name: tools.NameTodoWrite, Args: todoArgs}}},
+	}
+
+	got := filterRestoredTodosByLatestCompactionSummary(msgs, todos)
+	if len(got) != 1 || got[0].ID != "new" {
+		t.Fatalf("restored todos = %#v, want post-compaction todo kept", got)
+	}
+}
+
 func TestRestoreSessionAtStartupClearsTodosRestoresUsageAndQueuesToast(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "123")
