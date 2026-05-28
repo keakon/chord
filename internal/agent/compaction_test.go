@@ -2164,6 +2164,17 @@ func TestSelectEvidenceItemsKeepsDoneRejectedUnderTightBudget(t *testing.T) {
 	}
 }
 
+func TestCollectEvidenceItemsCapturesToolRejectionReasonAsRequest(t *testing.T) {
+	msgs := []message.Message{{Role: "tool", Content: `Error: tool "Write" rejected by user: 改成只分析，不要写文件`}}
+	items := selectEvidenceItems(msgs, 4096)
+	for _, item := range items {
+		if item.Kind == evidenceUserRequest && strings.Contains(item.Excerpt, "只分析") {
+			return
+		}
+	}
+	t.Fatalf("items = %+v, want user request from rejection reason", items)
+}
+
 func TestRecordEvidenceFromMessageCapturesToolRejectionReasonAsRequest(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

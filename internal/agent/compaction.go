@@ -528,6 +528,13 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					seen[item.Key] = true
 					items = append(items, item)
 				}
+			} else if reason, ok := extractToolRejectedByUserReason(text); ok && isPlainUserRequestForCompaction(reason) {
+				item := buildLatestUserRequestEvidence(fmt.Sprintf("message %d (tool rejection reason)", i+1), reason)
+				item.Sequence = sourceSeq
+				if !seen[item.Key] {
+					seen[item.Key] = true
+					items = append(items, item)
+				}
 			}
 			if text == "" && strings.TrimSpace(msg.ToolDiff) == "" {
 				continue
