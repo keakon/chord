@@ -624,8 +624,12 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	if resp.Usage != nil {
 		a.ctxMgr.UpdateFromUsage(*resp.Usage)
 	}
-	if a.ctxMgr.ShouldAutoCompact() {
+	decision := a.ctxMgr.AutoCompactDecision()
+	if decision.ShouldCompact {
+		log.Infof("automatic context compaction requested last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 		a.autoCompactRequested.Store(true)
+	} else {
+		log.Debugf("automatic context compaction not requested last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 	}
 
 	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier)

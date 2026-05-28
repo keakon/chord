@@ -59,6 +59,30 @@ func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
 	}
 }
 
+func TestIdleAutoCompactionClearsStaleRequestBelowCurrentThreshold(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 50000})
+	a.autoCompactRequested.Store(true)
+	a.autoCompactFailureState = autoCompactionFailureState{
+		ConsecutiveFailures: 1,
+		LastFailureClass:    string(compactionFailureTransient),
+		LastFailureReason:   "previous small-budget trigger",
+	}
+
+	a.maybeRunAutoCompaction()
+	if a.IsCompactionRunning() {
+		t.Fatal("stale usage-driven request below current threshold should not schedule compaction")
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("stale usage-driven request should be cleared")
+	}
+	if got := a.autoCompactFailureState; got != (autoCompactionFailureState{}) {
+		t.Fatalf("autoCompactFailureState = %+v, want zero value", got)
+	}
+}
+
 func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

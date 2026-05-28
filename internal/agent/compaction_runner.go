@@ -98,6 +98,13 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 	if !a.autoCompactRequested.Load() {
 		return
 	}
+	decision := a.ctxMgr.AutoCompactDecision()
+	if !decision.ShouldCompact {
+		log.Infof("automatic context compaction request cleared before idle compaction last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold)
+		a.clearUsageDrivenAutoCompactRequest()
+		a.resetAutoCompactionFailureState()
+		return
+	}
 	if a.isUsageDrivenAutoCompactSuppressed() {
 		log.Debugf("automatic context compaction suppressed after repeated failures suppressed_until_turn=%v current_turn=%v", a.autoCompactFailureState.SuppressedUntilTurn, a.usageDrivenAutoCompactCheckTurn())
 		return
@@ -109,6 +116,7 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 		log.Warn("automatic context compaction skipped: agent not idle")
 		return
 	}
+	log.Infof("automatic context compaction starting from idle last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold)
 	a.scheduleCompaction(false)
 }
 

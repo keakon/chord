@@ -362,20 +362,47 @@ func EstimateMessageTokens(msg message.Message) int {
 	return n
 }
 
-// ShouldAutoCompact reports whether the latest prompt size crossed the
-// configured automatic compaction threshold.
-func (m *Manager) ShouldAutoCompact() bool {
+type AutoCompactDecision struct {
+	LastInputTokens   int
+	InputBudget       int
+	ReservedInput     int
+	UsableInputBudget int
+	Threshold         float64
+	ThresholdTokens   int
+	ShouldCompact     bool
+}
+
+// AutoCompactDecision returns the current automatic compaction threshold inputs.
+func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	budget := m.inputBudget
 	if budget <= 0 {
 		budget = m.maxTokens
 	}
-	budget -= m.inputBudgetReserved
-	if m.threshold <= 0 || budget <= 0 {
-		return false
+	usable := budget - m.inputBudgetReserved
+	if usable < 0 {
+		usable = 0
 	}
-	return float64(m.lastInputTokens) >= m.threshold*float64(budget)
+	thresholdTokens := 0
+	if m.threshold > 0 && usable > 0 {
+		thresholdTokens = int(m.threshold * float64(usable))
+	}
+	return AutoCompactDecision{
+		LastInputTokens:   m.lastInputTokens,
+		InputBudget:       budget,
+		ReservedInput:     m.inputBudgetReserved,
+		UsableInputBudget: usable,
+		Threshold:         m.threshold,
+		ThresholdTokens:   thresholdTokens,
+		ShouldCompact:     m.threshold > 0 && usable > 0 && float64(m.lastInputTokens) >= m.threshold*float64(usable),
+	}
+}
+
+// ShouldAutoCompact reports whether the latest prompt size crossed the
+// configured automatic compaction threshold.
+func (m *Manager) ShouldAutoCompact() bool {
+	return m.AutoCompactDecision().ShouldCompact
 }
 
 // CompressForTarget compresses a message list to fit within targetTokens
