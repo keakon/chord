@@ -458,6 +458,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						if report == "" {
 							report = "Done approved"
 						}
+						a.persistLoopDoneToolResult(pending.CallID, "Done approved")
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", DoneReport: report, Status: ToolResultStatusSuccess})
 						a.loopState.State = LoopStateCompleted

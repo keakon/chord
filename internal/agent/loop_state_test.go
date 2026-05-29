@@ -197,6 +197,23 @@ Done: allow
 	if doneResult.DoneReport != report {
 		t.Fatalf("Done ToolResultEvent.DoneReport = %q, want %q", doneResult.DoneReport, report)
 	}
+	restored := normalizeRestoredMessages(a.ctxMgr.Snapshot())
+	var restoredTool *message.Message
+	for i := range restored {
+		if restored[i].Role == "tool" && restored[i].ToolCallID == callID {
+			restoredTool = &restored[i]
+			break
+		}
+	}
+	if restoredTool == nil {
+		t.Fatal("approved Done should persist a tool result for session resume")
+	}
+	if restoredTool.Content != "Done approved" {
+		t.Fatalf("persisted Done content = %q, want Done approved", restoredTool.Content)
+	}
+	if restoredTool.ToolStatus != string(ToolResultStatusSuccess) {
+		t.Fatalf("persisted Done status = %q, want %q", restoredTool.ToolStatus, ToolResultStatusSuccess)
+	}
 	if a.loopState.Enabled {
 		t.Fatal("loop should be disabled after approving Done confirmation")
 	}

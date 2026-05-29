@@ -190,7 +190,7 @@ func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
 	if callID == "" || result == "" {
 		return
 	}
-	toolMsg := message.Message{Role: "tool", Content: result, ToolCallID: callID}
+	toolMsg := message.Message{Role: "tool", Content: result, ToolCallID: callID, ToolStatus: string(ToolResultStatusSuccess)}
 	a.ctxMgr.Append(toolMsg)
 	if a.recovery != nil {
 		a.persistAsync("main", toolMsg)
