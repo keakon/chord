@@ -403,6 +403,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 	}
 	streamReducer.onKeySwitched = func() {
 		a.clearCurrentRateLimitSnapshot()
+		a.noteContextSurfaceIdentityChanged()
 		state.pendingKeySwitch = true
 		a.emitToTUI(KeyPoolChangedEvent{})
 	}

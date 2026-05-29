@@ -298,6 +298,14 @@ func (a *MainAgent) allowContextSurfaceRefreshAtUserBoundary() {
 	a.contextSurfaceRefreshAllowed.Store(true)
 }
 
+func (a *MainAgent) noteContextSurfaceIdentityChanged() {
+	if a == nil {
+		return
+	}
+	a.clearLoopFrozenReductionPrefix()
+	a.contextSurfaceRefreshAllowed.Store(true)
+}
+
 func (a *MainAgent) consumeContextSurfaceRefreshAllowance() bool {
 	if a == nil {
 		return false

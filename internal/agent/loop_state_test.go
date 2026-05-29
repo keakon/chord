@@ -1505,15 +1505,6 @@ func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.
 	}
 }
 
-func TestLoopWorkflowPromptBlockHiddenWhenBusyLoopOnIsDeferred(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.enableWithTarget("finish current task")
-	a.loopState.DeferContinuationPromptUntilDone = true
-	if got := a.loopWorkflowPromptBlock(); got != "" {
-		t.Fatalf("loopWorkflowPromptBlock() = %q, want empty while deferred injection gate is active", got)
-	}
-}
-
 func TestHandleUserMessageRejectsLoopOnWithoutDoneTool(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
@@ -1758,82 +1749,6 @@ func TestSendLoopAnchorFromCommandWaitsForOutputSpace(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for LoopNoticeEvent after freeing output channel space")
-	}
-}
-
-func TestLoopWorkflowPromptUsesPermissionSpecificConfirmationGuidance(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.Enabled = true
-	block := a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "Continue autonomously from the existing context") {
-		t.Fatalf("loop workflow prompt should emphasize autonomous continuation, got %q", block)
-	}
-	if strings.Contains(block, "Question tool") {
-		t.Fatalf("loop workflow prompt without Question should not require Question tool, got %q", block)
-	}
-
-	a.tools.Register(tools.NewQuestionTool(nil))
-	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
-"*": deny
-Question: allow
-`)}
-	a.rebuildRuleset()
-	block = a.loopWorkflowPromptBlock()
-	if strings.Contains(block, "call the `Question` tool") {
-		t.Fatalf("loop workflow prompt should not generally require Question during loop continuation, got %q", block)
-	}
-	if !strings.Contains(block, "do not ask merely because the automatic Done interception budget is low") {
-		t.Fatalf("loop workflow prompt should discourage premature user prompts near the interception limit, got %q", block)
-	}
-}
-
-func TestLoopWorkflowPromptIncludesCompletionContract(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.Enabled = true
-	block := a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "A task is complete only when") || !strings.Contains(block, "explicitly mark completion in your final response") {
-		t.Fatalf("loop workflow prompt = %q, want completion contract", block)
-	}
-	if !strings.Contains(block, "Default to making ordinary engineering decisions yourself") {
-		t.Fatalf("loop workflow prompt = %q, want autonomy guidance", block)
-	}
-	// Without open TODOs, the prompt should not mention TodoWrite or "no open TODO items remain"
-	if strings.Contains(block, "no open TODO items remain") {
-		t.Fatalf("loop workflow prompt should NOT contain 'no open TODO items remain' when no TODOs exist, got: %q", block)
-	}
-	if strings.Contains(block, "TodoWrite") {
-		t.Fatalf("loop workflow prompt should NOT contain 'TodoWrite' when no TODOs exist, got: %q", block)
-	}
-}
-
-func TestLoopWorkflowPromptIncludesTodoClauseWhenOpenTodosWithTodoWrite(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools.Register(tools.NewTodoWriteTool(nil))
-	a.loopState.Enabled = true
-	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "pending"}}
-	block := a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "no open TODO items remain") {
-		t.Fatalf("loop workflow prompt should contain 'no open TODO items remain' when TODOs exist and TodoWrite is available, got: %q", block)
-	}
-	if !strings.Contains(block, "TodoWrite") {
-		t.Fatalf("loop workflow prompt should contain 'TodoWrite' when TODOs exist and TodoWrite is available, got: %q", block)
-	}
-}
-
-func TestLoopWorkflowPromptIncludesTodoClauseWhenOpenTodosWithoutTodoWrite(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	// No TodoWrite registered.
-	a.loopState.Enabled = true
-	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "pending"}}
-	block := a.loopWorkflowPromptBlock()
-	if strings.Contains(block, "Mark every remaining open TODO item completed or cancelled with TodoWrite") {
-		t.Fatalf("loop workflow prompt should NOT tell model to use TodoWrite when the tool is unavailable, got: %q", block)
-	}
-	if !strings.Contains(block, "no open TODO items remain") {
-		t.Fatalf("loop workflow prompt should still contain 'no open TODO items remain' when TODOs exist even without TodoWrite, got: %q", block)
-	}
-	if !strings.Contains(block, "Open TODO items:") {
-		t.Fatalf("loop workflow prompt should list open TODOs even without TodoWrite, got: %q", block)
 	}
 }
 
@@ -2230,44 +2145,6 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 	}
 	if !strings.Contains(note.Text, "No active subagents remain") {
 		t.Fatalf("LOOP CONTINUE should contain 'No active subagents remain' when active subagents exist, got: %q", note.Text)
-	}
-}
-
-func TestLoopWorkflowPromptOmitsSubAgentClauseWhenNoActiveSubAgents(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.Enabled = true
-	block := a.loopWorkflowPromptBlock()
-	if strings.Contains(block, "no active subagents remain") {
-		t.Fatalf("loop workflow prompt should NOT contain 'no active subagents remain' when no active subagents exist, got: %q", block)
-	}
-	if strings.Contains(block, "Active subagents:") {
-		t.Fatalf("loop workflow prompt should NOT contain 'Active subagents:' when no active subagents exist, got: %q", block)
-	}
-}
-
-func TestLoopWorkflowPromptIncludesSubAgentClauseWhenActiveSubAgents(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.loopState.Enabled = true
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sub := &SubAgent{
-		instanceID: "agent-1",
-		parent:     a,
-		parentCtx:  ctx,
-		cancel:     cancel,
-		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
-		ctxMgr:     ctxmgr.NewManager(100, 0),
-	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
-	block := a.loopWorkflowPromptBlock()
-	if !strings.Contains(block, "no active subagents remain") {
-		t.Fatalf("loop workflow prompt should contain 'no active subagents remain' when active subagents exist, got: %q", block)
-	}
-	if !strings.Contains(block, "Active subagents:") {
-		t.Fatalf("loop workflow prompt should contain 'Active subagents:' when active subagents exist, got: %q", block)
 	}
 }
 

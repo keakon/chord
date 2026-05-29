@@ -30,8 +30,11 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 		email := ""
 		if access != "" {
 			accountID = config.ExtractOAuthAccountIDFromToken(access)
-			if accountID == "" || (cred.OAuth.AccountID != "" && cred.OAuth.AccountID != accountID) {
-				continue
+			if cred.OAuth.AccountID != "" {
+				if accountID != "" && cred.OAuth.AccountID != accountID {
+					continue
+				}
+				accountID = cred.OAuth.AccountID
 			}
 			email = config.ExtractOAuthEmailFromToken(access)
 			if cred.OAuth.Expires == 0 {

@@ -138,6 +138,58 @@ func TestUpdateOAuthCredentialInFile_RequiresAccountIDMatch(t *testing.T) {
 	}
 }
 
+func TestUpdateOAuthCredentialInFile_MatchesOAuthWithoutAccountIDByAccess(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - refresh: refresh-token
+    access: access-token
+    expires: 111
+    email: user@example.com
+`)
+
+	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{Access: "access-token"}, func(cred *OAuthCredential) (bool, error) {
+		cred.Status = OAuthStatusInvalidated
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when matching OAuth credential by access")
+	}
+	if updated == nil || updated.Access != "access-token" || updated.Status != OAuthStatusInvalidated {
+		t.Fatalf("updated credential = %#v, want access-token with invalidated status", updated)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Access != "access-token" || got.Status != OAuthStatusNormal {
+		t.Fatalf("expected auth.yaml view to omit status from persisted credential, got %#v", got)
+	}
+}
+
+func TestUpdateOAuthCredentialInFile_MatchesOAuthWithoutAccountIDByCredentialIndex(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - refresh: refresh-a
+    access: access-a
+    expires: 111
+  - refresh: refresh-b
+    access: access-b
+    expires: 222
+`)
+
+	credentialIndex := 1
+	_, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{CredentialIndex: &credentialIndex}, func(cred *OAuthCredential) (bool, error) {
+		cred.Email = "updated@example.com"
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateOAuthCredentialInFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when matching OAuth credential by index")
+	}
+	if updated == nil || updated.Access != "access-b" || updated.Email != "updated@example.com" {
+		t.Fatalf("updated credential = %#v, want second credential updated", updated)
+	}
+}
+
 func TestUpdateOAuthCredentialInFile_PrefersAccessAndCredentialIndexWhenAccountIDIsDuplicated(t *testing.T) {
 	path := writeAuthFixture(t, `openai:
   - refresh: refresh-a

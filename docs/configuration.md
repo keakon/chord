@@ -243,9 +243,9 @@ For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime
 That split is intentional:
 
 - `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; empty OAuth fields are omitted when Chord rewrites the file, and OAuth `status` does not belong in `auth.yaml`;
-- `auth.state.yaml` is machine-managed shared runtime state keyed by `account_id`, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
+- `auth.state.yaml` is machine-managed shared runtime state. Entries are keyed by `account_id` when Chord has one, or by an `access_sha256:<hash>` fallback for access tokens without a parseable account ID, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
 
-For OAuth credentials, `access` must be a token from which Chord can parse the account id; if `auth.yaml` already has `account_id`, it must match the account id inside `access`. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
+For OAuth credentials, `access` does not have to carry a parseable account ID. If `auth.yaml` already has `account_id` and Chord can also parse an account ID from `access`, the two values must match; otherwise the access token is ignored as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
 
 `expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache it in `auth.state.yaml`. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired`; it only makes that slot less preferred. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
 
@@ -323,13 +323,13 @@ Codex OAuth account selection is controlled by `key_rotation` / `key_order` in [
 
 `smart` ranks selectable Codex OAuth accounts by preferring:
 
-- accounts whose shared cached snapshot shows **both** tracked windows still have remaining quota;
-- then accounts where at least one tracked window still has remaining quota;
-- then higher remaining headroom when rate-limit snapshots are available;
-- then the nearer known reset time when candidates are otherwise similar;
+- accounts whose cached snapshot has no tracked window at `100%` used; a `100%` window is tried last but is not a hard block by itself;
+- accounts with remaining quota in the shorter primary window (for example the 5h window), choosing the nearer primary reset first so soon-expiring quota is used before it is wasted;
+- then accounts with remaining quota in the longer secondary window (for example the 1w window), again preferring the nearer secondary reset;
+- then higher remaining headroom when the comparable windows reset at the same time;
 - still falling back to unknown / stale candidates when no better option exists.
 
-When a Codex client becomes active, Chord may also background-probe additional OAuth slots to refresh cached headroom snapshots. That warm-up is best-effort, low-concurrency, cancels when the active client is replaced, and may update persisted OAuth credential status when an account becomes unusable.
+When a Codex client becomes active, Chord may also background-probe additional OAuth slots to refresh cached headroom snapshots. That warm-up is best-effort, low-concurrency, cancels when the active client is replaced, and only refreshes cached quota state; authentication failures from usage probes do not mark OAuth credentials unusable.
 
 Warm-up priority is also state-aware:
 
@@ -855,7 +855,7 @@ purposes.
 | When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
-| Loop mode | Enabled; automatic and manual compaction can still run so long sessions can continue after the context budget is spent | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability. For Codex loop sessions with less than 10% quota remaining, Chord also keeps the existing LLM-facing tool descriptions and system prompt stable; permission/MCP execution state can still change. |
+| Loop mode | Enabled; automatic and manual compaction can still run so long sessions can continue after the context budget is spent | Disabled for new messages; if `/loop on` is enabled while a request is in flight, Chord reuses that request's already-reduced prefix for cache stability. Switching loop mode does not rewrite the stable system prompt. For Codex loop sessions with less than 10% quota remaining, Chord also keeps the existing LLM-facing tool descriptions and system prompt stable; permission/MCP execution state can still change. |
 
 **How they work together**: Reduction is the lightweight first line of defense —
 it trims stale tool output before every request, slowing down context growth.
@@ -955,7 +955,10 @@ In loop mode, reduction is not applied to newly added messages. If you enable
 that request's already-prepared prefix for subsequent loop requests. This avoids
 flipping old history from a reduced form back to full raw tool output, preserving
 prompt-cache prefix stability; messages produced during the loop remain
-unreduced until loop mode is turned off.
+unreduced until loop mode is turned off. Switching loop mode itself does not add,
+remove, or rewrite stable system-prompt text. Changing the system prompt on a
+loop toggle would invalidate prompt-cache reuse even when the underlying task
+context did not otherwise change.
 
 When the active main-agent provider uses the Codex rate-limit surface and a 5h
 or 7d quota window has less than 10% remaining, Chord temporarily freezes the
@@ -963,9 +966,13 @@ LLM-facing request surface for continuous automatic continuations. The frozen
 surface includes request-level reduction, the installed system prompt, and the
 visible tool definitions. This is intentional: near quota exhaustion, Codex can
 continue a `stop_reason=tool_call` chain until `end_turn` only when the context
-surface is unchanged. The freeze is lifted at an interactive boundary — when the
-agent returns to idle or the user sends a real new message — so explicit user
-changes such as MCP or YOLO toggles can rebuild the surface on the next request.
+surface is unchanged. Changing the context shape at that point can prevent Codex
+from continuing after the quota is exhausted. The freeze is lifted at an
+interactive boundary — when the agent returns to idle or the user sends a real
+new message — so explicit user changes such as MCP or YOLO toggles can rebuild
+the surface on the next request. If the key or running model changes, Chord also
+allows the next request to rebuild the surface, because the previous frozen
+surface no longer matches the active Codex identity.
 
 > **Most users do not need to configure this section.** The built-in defaults
 > are conservative and work well for common scenarios. In empirical local-session

@@ -6,13 +6,10 @@ import (
 )
 
 func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
-	blocks := make([]string, 0, 3)
+	blocks := make([]string, 0, 2)
 	// bugTriagePromptBlock is delivered as a per-turn overlay, not part of the
 	// stable system prompt.
 	if block := strings.TrimSpace(a.todoWorkflowPromptBlock()); block != "" {
-		blocks = append(blocks, block)
-	}
-	if block := strings.TrimSpace(a.loopWorkflowPromptBlock()); block != "" {
 		blocks = append(blocks, block)
 	}
 	if block := a.subAgentWorkflowPromptBlock(); block != "" {
@@ -22,54 +19,6 @@ func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
 		return ""
 	}
 	return strings.Join(blocks, "\n\n")
-}
-
-func (a *MainAgent) loopWorkflowPromptBlock() string {
-	if !a.loopState.Enabled {
-		return ""
-	}
-	if a.loopState.DeferContinuationPromptUntilDone {
-		return ""
-	}
-	completionClause := "- A task is complete only when all requested work is finished"
-	syncClause := ""
-	if a.hasActiveSubAgents() {
-		completionClause += ", no active subagents remain"
-		var sb strings.Builder
-		sb.WriteString("- Active subagents:\n")
-		for _, line := range a.activeSubAgentContinuationLines() {
-			sb.WriteString("  " + line + "\n")
-		}
-		sb.WriteString("- No active subagents must remain before completion.\n")
-		syncClause = sb.String()
-	}
-	if a.hasOpenTodos() {
-		completionClause += ", no open TODO items remain"
-		var sb strings.Builder
-		sb.WriteString("- Open TODO items:\n")
-		for _, line := range a.openTodoContinuationLines() {
-			sb.WriteString("  " + line + "\n")
-		}
-		if a.hasTodoWriteAccess() {
-			sb.WriteString("- Mark every remaining open TODO item completed or cancelled with TodoWrite before finishing.\n")
-		} else {
-			sb.WriteString("- TodoWrite is not available in this role; finish the remaining work described in the above TODO items.\n")
-		}
-		syncClause += sb.String()
-	}
-	completionClause += ", and required verification is done or explicitly reported as not run.\n"
-	finalCompletionLine := "- When completion requirements are satisfied, explicitly mark completion in your final response: clearly state the task is complete, summarize completed work, report verification status, list any remaining limitations or unverified areas, and then call the `Done` tool to request loop exit.\n"
-	return "## Loop Mode\n" +
-		"- Loop mode is active. Keep driving toward the current loop target until it is completed, blocked, the automatic Done interception limit is reached, or it is explicitly disabled.\n" +
-		completionClause +
-		finalCompletionLine +
-		"- If the task is genuinely blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}.\n" +
-		"- Do not mark completion merely because you produced a summary or reached a natural stopping point in reasoning.\n" +
-		"- Default to making ordinary engineering decisions yourself. Do not stop to ask the user to choose between normal implementation options.\n" +
-		a.loopContinuationDecisionInstructionLine() + "\n" +
-		"- A regular assistant response is not the end of the task. If work remains and no true blocker exists, continue.\n" +
-		"- Only stop for missing external information, missing credentials or permissions, or genuinely high-risk irreversible actions.\n" +
-		syncClause
 }
 
 func (a *MainAgent) subAgentWorkflowPromptBlock() string {

@@ -348,6 +348,26 @@ func TestExtractAPIKeys_OAuthDeactivatedStillIncludedForDeferredFiltering(t *tes
 	}
 }
 
+func TestExtractAPIKeys_OAuthWithoutAccountIDStillIncluded(t *testing.T) {
+	creds := []ProviderCredential{
+		{OAuth: &OAuthCredential{Access: testJWT(`{"exp":4102444800}`), Expires: 9999999999000, Email: "user@example.com"}},
+	}
+	keys := ExtractAPIKeys(creds)
+	if len(keys) != 1 || keys[0] == "" {
+		t.Fatalf("expected OAuth access token without account_id to remain selectable, got %v", keys)
+	}
+}
+
+func TestExtractAPIKeys_OAuthMismatchedAccountIDSkipped(t *testing.T) {
+	creds := []ProviderCredential{
+		{OAuth: &OAuthCredential{Access: testJWT(`{"chatgpt_account_id":"acc-token"}`), AccountID: "acc-other", Expires: 9999999999000}},
+	}
+	keys := ExtractAPIKeys(creds)
+	if len(keys) != 0 {
+		t.Fatalf("expected mismatched OAuth access token to be skipped, got %v", keys)
+	}
+}
+
 func TestExtractAPIKeys_OAuthEmptyAccess(t *testing.T) {
 	creds := []ProviderCredential{
 		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: "", Expires: 0}},
@@ -470,6 +490,21 @@ func TestIsRefreshTokenInvalid(t *testing.T) {
 		{
 			name: "app_session_terminated",
 			err:  &OAuthRefreshError{StatusCode: 400, Code: "app_session_terminated", Message: "Your session has ended. Please log in again."},
+			want: true,
+		},
+		{
+			name: "token_invalidated",
+			err:  &OAuthRefreshError{StatusCode: 401, Code: "token_invalidated", Message: "token invalidated"},
+			want: true,
+		},
+		{
+			name: "unknown_unauthorized",
+			err:  &OAuthRefreshError{StatusCode: 401, Body: `{"detail":"unauthorized"}`},
+			want: true,
+		},
+		{
+			name: "sign_in_again_message",
+			err:  &OAuthRefreshError{StatusCode: 400, Message: "Please try signing in again."},
 			want: true,
 		},
 		{

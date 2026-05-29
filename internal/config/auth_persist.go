@@ -509,6 +509,8 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 	var (
 		accountIDMatch    *authCredentialNodeRef
 		accountIndexMatch *authCredentialNodeRef
+		accessMatch       *authCredentialNodeRef
+		indexMatch        *authCredentialNodeRef
 	)
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
@@ -528,6 +530,12 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 			}
 			continue
 		}
+		if accessMatch == nil && match.Access != "" && oauth.Access == match.Access {
+			accessMatch = &refs[i]
+		}
+		if indexMatch == nil && match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
+			indexMatch = &refs[i]
+		}
 	}
 	if accountIndexMatch != nil {
 		return accountIndexMatch
@@ -535,7 +543,10 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 	if accountIDMatch != nil {
 		return accountIDMatch
 	}
-	return nil
+	if accessMatch != nil {
+		return accessMatch
+	}
+	return indexMatch
 }
 
 func newOAuthCredentialNode(cred *OAuthCredential) *yaml.Node {

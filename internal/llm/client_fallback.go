@@ -129,11 +129,14 @@ func isAccountDeactivated(apiErr *APIError) bool {
 // isAccountInvalidated reports whether the API error indicates an invalidated
 // account that typically requires re-auth (as opposed to a banned/deactivated account).
 func isAccountInvalidated(apiErr *APIError) bool {
-	if apiErr.Code == "account_invalidated" {
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	if code == "account_invalidated" || code == "token_invalidated" || code == "token_revoked" {
 		return true
 	}
 	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "invalidated")
+	return strings.Contains(msg, "invalidated") ||
+		strings.Contains(msg, "revoked") ||
+		strings.Contains(msg, "could not parse your authentication token")
 }
 
 // applyCodexQuotaOrCooldown marks the key unavailable until the confirmed

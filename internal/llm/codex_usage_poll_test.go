@@ -144,13 +144,19 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		t.Fatal("warmup did not probe deactivated account")
 	}
 
-	waitForOAuthStatusInAuth(t, authPath, accessA, config.OAuthStatusDeactivated)
 	updated, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		t.Fatalf("LoadAuthConfig(updated): %v", err)
 	}
+	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("warmup usage probe should not change probed OAuth credential status, got %#v", got)
+	}
 	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected sibling OAuth credential to remain normal, got %#v", got)
+	}
+	available, total := prov.AvailableKeyCount()
+	if available != 2 || total != 2 {
+		t.Fatalf("available/total = %d/%d, want 2/2: warmup usage probe failures must not affect key health", available, total)
 	}
 }
 
@@ -234,17 +240,23 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 	}
 	select {
 	case <-refreshHit:
-	case <-time.After(2 * time.Second):
-		t.Fatal("warmup did not attempt OAuth refresh after 401")
+		t.Fatal("warmup usage probe should not attempt OAuth refresh after 401")
+	case <-time.After(100 * time.Millisecond):
 	}
 
-	waitForOAuthStatusInAuth(t, authPath, accessA, config.OAuthStatusExpired)
 	updated, err := config.LoadAuthConfig(authPath)
 	if err != nil {
 		t.Fatalf("LoadAuthConfig(updated): %v", err)
 	}
+	if got := updated["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
+		t.Fatalf("warmup usage probe should not change probed OAuth credential status, got %#v", got)
+	}
 	if got := updated["openai"][1].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected sibling OAuth credential to remain normal, got %#v", got)
+	}
+	available, total := prov.AvailableKeyCount()
+	if available != 2 || total != 2 {
+		t.Fatalf("available/total = %d/%d, want 2/2: warmup usage probe failures must not affect key health", available, total)
 	}
 }
 
@@ -434,7 +446,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 	}
 }
 
-func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
+func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
@@ -480,10 +492,17 @@ func TestCodexRateLimitPollingMarksInvalidatedOAuthCredential(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("polling did not run")
 	}
-	waitForOAuthStatusInAuth(t, authPath, access, config.OAuthStatusInvalidated)
-	_, total := prov.AvailableKeyCount()
-	if total != 0 {
-		t.Fatalf("total = %d, want 0: invalidated OAuth key should be excluded", total)
+	available, total := prov.AvailableKeyCount()
+	if available != 1 || total != 1 {
+		t.Fatalf("available/total = %d/%d, want 1/1: usage polling auth failures must not affect key health", available, total)
+	}
+
+	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
+	state, err := config.LoadAuthState(statePath)
+	if err == nil {
+		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: access}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {
+			t.Fatalf("polling auth failure changed persisted status to %q", record.Status)
+		}
 	}
 }
 

@@ -93,6 +93,45 @@ func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
 	}
 }
 
+func TestEffectiveAndSupportedServiceTierUseAgentRunningModelRef(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	providerA := llm.NewProviderConfig("slow-provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"slow-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+		SupportedServiceTiers: []config.ServiceTier{config.ServiceTierSlow},
+	}, []string{"slow-key"})
+	providerB := llm.NewProviderConfig("standard-provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"standard-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"standard-key"})
+	client := llm.NewClient(providerA, stubProvider{}, "slow-model", 1024, "")
+	client.SetModelPool([]llm.FallbackModel{
+		{ProviderConfig: providerA, ProviderImpl: stubProvider{}, ModelID: "slow-model", ContextLimit: 8192, MaxTokens: 1024},
+		{ProviderConfig: providerB, ProviderImpl: stubProvider{}, ModelID: "standard-model", ContextLimit: 8192, MaxTokens: 1024},
+	}, 0)
+	client.SetServiceTier(config.ServiceTierSlow)
+	a.swapLLMClientWithRef(client, "slow-model", 8192, "slow-provider/slow-model")
+
+	a.llmMu.Lock()
+	a.runningModelRef = "standard-provider/standard-model"
+	a.llmMu.Unlock()
+
+	if got := a.ServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("ServiceTier() = %q, want requested slow", got)
+	}
+	if got := a.EffectiveServiceTier(); got != config.ServiceTierStandard {
+		t.Fatalf("EffectiveServiceTier() = %q, want standard for unsupported running model", got)
+	}
+	supported := a.SupportedServiceTiers()
+	if len(supported) != 1 || supported[0] != config.ServiceTierStandard {
+		t.Fatalf("SupportedServiceTiers() = %#v, want [standard] for running model", supported)
+	}
+}
+
 func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeConfig = &config.AgentConfig{Name: "builder"}

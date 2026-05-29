@@ -736,8 +736,8 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll(stdout): %v", err)
 	}
-	if !strings.Contains(string(output), "acc-1") {
-		t.Fatalf("expected output to contain removed account_id, got %q", string(output))
+	if !strings.Contains(string(output), "expired@example.com") {
+		t.Fatalf("expected output to contain removed email, got %q", string(output))
 	}
 }
 
@@ -905,6 +905,30 @@ func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	}
 	if len(backfills) != 1 || backfills[0].AccountID != "acct-token" || backfills[0].Email != "token@example.com" {
 		t.Fatalf("backfills = %#v, want parsed metadata", backfills)
+	}
+}
+
+func TestOAuthCredentialMapIncludesAccessTokenWithoutAccountID(t *testing.T) {
+	access := testUnsignedJWT(`{"exp":4102444800,"email":"token@example.com"}`)
+	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Email: "stored@example.com"}}})
+
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("OAuth map missing access token without account_id: %#v", got)
+	}
+	if setup.AccountID != "" || setup.Email != "token@example.com" {
+		t.Fatalf("setup metadata = (%q, %q), want empty account and token email", setup.AccountID, setup.Email)
+	}
+	if len(backfills) != 0 {
+		t.Fatalf("backfills = %#v, want none without account_id", backfills)
+	}
+}
+
+func TestOAuthCredentialMapSkipsMismatchedAccountID(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token"}}`)
+	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-other"}}})
+	if len(got) != 0 || len(backfills) != 0 {
+		t.Fatalf("expected mismatched account_id OAuth token to be skipped, got map=%#v backfills=%#v", got, backfills)
 	}
 }
 

@@ -986,6 +986,107 @@ func TestMarkKeyCooldown401OAuthEmptyRefreshTokenMarksExpiredWithoutHTTP(t *test
 	}
 }
 
+func TestMarkKeyCooldown401OAuthTokenInvalidatedCodeSkipsRefreshAndInvalidatesKey(t *testing.T) {
+	ctx := context.Background()
+	refreshHit := false
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}`)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:    "oauth-key",
+		Refresh:   "refresh-token",
+		Expires:   expires,
+		AccountID: "acc-1",
+	}}}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+	}, "")
+
+	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "token_invalidated", Message: "Your authentication token has been invalidated. Please try signing in again."})
+	if !result.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true")
+	}
+	if refreshHit {
+		t.Fatal("refresh endpoint was called for token_invalidated")
+	}
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusInvalidated {
+		t.Fatalf("OAuth status = %q, want invalidated", auth["openai"][0].OAuth.Status)
+	}
+}
+
+func TestMarkKeyCooldown401OAuthMalformedAuthTokenDetailInvalidatesKey(t *testing.T) {
+	ctx := context.Background()
+	refreshHit := false
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}`)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:    "oauth-key",
+		Refresh:   "refresh-token",
+		Expires:   expires,
+		AccountID: "acc-1",
+	}}}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+	}, "")
+
+	apiErr := parseOpenAIHTTPErrorFromBytes(http.StatusUnauthorized, nil, []byte(`{"detail":"Could not parse your authentication token. Please try signing in again."}`))
+	result := markKeyCooldown(ctx, p, "oauth-key", apiErr)
+	if !result.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true")
+	}
+	if refreshHit {
+		t.Fatal("refresh endpoint was called for malformed authentication token")
+	}
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusInvalidated {
+		t.Fatalf("OAuth status = %q, want invalidated", auth["openai"][0].OAuth.Status)
+	}
+}
+
+func TestMarkKeyCooldown401OAuthRefreshUnknownUnauthorizedMarksExpired(t *testing.T) {
+	ctx := context.Background()
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"detail":"unauthorized"}`)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+		Access:    "oauth-key",
+		Refresh:   "refresh-token",
+		Expires:   expires,
+		AccountID: "acc-1",
+	}}}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+	}, "")
+
+	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "unauthorized"})
+	if !result.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true")
+	}
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusExpired {
+		t.Fatalf("OAuth status = %q, want expired for refresh 401", auth["openai"][0].OAuth.Status)
+	}
+}
+
 func TestCompleteStreamTerminal401MarksInvalidatedOAuthBeforeReturning(t *testing.T) {
 	ctx := context.Background()
 	expires := time.Now().Add(time.Hour).UnixMilli()

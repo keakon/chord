@@ -190,17 +190,18 @@ func (c *ProviderCredential) UnmarshalYAML(value *yaml.Node) error {
 type AuthConfig map[string][]ProviderCredential
 
 // ExtractAPIKeys extracts all API keys from a credential list.
-// OAuth credentials' access tokens are included as API keys only when the token
-// carries a parseable account_id. Refresh-only OAuth credentials are represented
-// by an empty key slot so they can refresh on first use.
-// Explicit empty strings are included as valid keys.
+// OAuth credentials' access tokens are included as API keys even when the token
+// does not carry a parseable account_id; the runtime still needs to bind the key
+// slot to its OAuth credential so auth failures can expire or invalidate it.
+// Refresh-only OAuth credentials are represented by an empty key slot so they can
+// refresh on first use. Explicit empty strings are included as valid keys.
 func ExtractAPIKeys(creds []ProviderCredential) []string {
 	keys := make([]string, 0, len(creds))
 	for _, c := range creds {
 		if c.OAuth != nil {
 			if c.OAuth.Access != "" {
 				accountID := ExtractOAuthAccountIDFromToken(c.OAuth.Access)
-				if accountID != "" && (c.OAuth.AccountID == "" || c.OAuth.AccountID == accountID) {
+				if accountID == "" || c.OAuth.AccountID == "" || c.OAuth.AccountID == accountID {
 					keys = append(keys, c.OAuth.Access)
 				}
 				continue
@@ -348,13 +349,19 @@ func IsRefreshTokenInvalid(err error) bool {
 	if !errors.As(err, &refreshErr) {
 		return false
 	}
-	if refreshErr.Code == "refresh_token_reused" || refreshErr.Code == "invalid_grant" || refreshErr.Code == "app_session_terminated" {
+	code := strings.ToLower(strings.TrimSpace(refreshErr.Code))
+	if code == "refresh_token_reused" || code == "refresh_token_expired" || code == "refresh_token_invalidated" || code == "invalid_grant" || code == "app_session_terminated" || code == "token_invalidated" || code == "token_revoked" {
+		return true
+	}
+	if refreshErr.StatusCode == 401 {
 		return true
 	}
 	msg := strings.ToLower(refreshErr.Message)
 	return strings.Contains(msg, "refresh token has already been used") ||
 		strings.Contains(msg, "refresh token") && strings.Contains(msg, "expired") ||
-		strings.Contains(msg, "refresh token") && strings.Contains(msg, "invalid")
+		strings.Contains(msg, "refresh token") && strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "signing in again") ||
+		strings.Contains(msg, "sign in again")
 }
 
 // IsMissingRefreshToken reports whether a refresh attempt failed because the

@@ -299,7 +299,6 @@ func (a *MainAgent) EnableLoopMode(target string) {
 	maxIterationsSet := a.loopState.MaxIterationsSet
 	a.loopReductionMu.Unlock()
 
-	a.refreshSystemPrompt()
 	a.emitLoopStateChanged()
 	msg := fmt.Sprintf("Loop enabled. Automatic Done interceptions: %d.", maxIterations)
 	if maxIterationsSet && maxIterations == 0 {
@@ -312,7 +311,6 @@ func (a *MainAgent) DisableLoopMode() {
 	a.loopReductionMu.Lock()
 	a.loopState.disable()
 	a.loopReductionMu.Unlock()
-	a.refreshSystemPrompt()
 	a.emitLoopStateChanged()
 	a.emitToTUI(InfoEvent{Message: "Loop disabled."})
 }

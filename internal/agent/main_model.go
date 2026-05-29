@@ -119,6 +119,7 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	if oldClient != nil && oldClient != newClient {
 		oldClient.InvalidateRouting("model_client_swapped")
 	}
+	a.noteContextSurfaceIdentityChanged()
 	if newClient != nil {
 		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), a.effectiveCompactionReservedInput())
 	} else {

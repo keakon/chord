@@ -446,6 +446,84 @@ func TestSelectKey_CodexSmartTreatsSnapshotAsHeadroomNotSoftCooldown(t *testing.
 	}
 }
 
+func TestSelectKey_CodexSmartPrefersSoonResetUsableHeadroom(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	now := time.Now()
+	p.UpdateKeySnapshot("key-a", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 20, ResetsAt: now.Add(6 * time.Hour)},
+	})
+	p.UpdateKeySnapshot("key-b", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 90, ResetsAt: now.Add(10 * time.Minute)},
+	})
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-b" {
+		t.Fatalf("selected key = %q, want key-b with soon-reset usable headroom", key)
+	}
+}
+
+func TestSelectKey_CodexSmartDoesNotDemoteNinetyNinePercentUsed(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	now := time.Now()
+	p.UpdateKeySnapshot("key-a", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 99, WindowMinutes: 300, ResetsAt: now.Add(10 * time.Minute)},
+	})
+	p.UpdateKeySnapshot("key-b", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 20, WindowMinutes: 300, ResetsAt: now.Add(6 * time.Hour)},
+	})
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-a" {
+		t.Fatalf("selected key = %q, want key-a because 99%% used still has usable quota and resets sooner", key)
+	}
+}
+
+func TestSelectKey_CodexSmartDemotesOneHundredPercentUsed(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	now := time.Now()
+	p.UpdateKeySnapshot("key-a", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 100, WindowMinutes: 300, ResetsAt: now.Add(10 * time.Minute)},
+	})
+	p.UpdateKeySnapshot("key-b", &ratelimit.KeyRateLimitSnapshot{
+		Primary: &ratelimit.RateLimitWindow{UsedPct: 20, WindowMinutes: 300, ResetsAt: now.Add(6 * time.Hour)},
+	})
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-b" {
+		t.Fatalf("selected key = %q, want key-b because 100%% used key-a is tried last", key)
+	}
+}
+
+func TestSelectKey_CodexSmartComparesPrimaryBeforeSecondaryWindow(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
+	now := time.Now()
+	p.UpdateKeySnapshot("key-a", &ratelimit.KeyRateLimitSnapshot{
+		Primary:   &ratelimit.RateLimitWindow{UsedPct: 10, WindowMinutes: 300, ResetsAt: now.Add(6 * time.Hour)},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 10, WindowMinutes: 10080, ResetsAt: now.Add(10 * time.Minute)},
+	})
+	p.UpdateKeySnapshot("key-b", &ratelimit.KeyRateLimitSnapshot{
+		Primary:   &ratelimit.RateLimitWindow{UsedPct: 90, WindowMinutes: 300, ResetsAt: now.Add(10 * time.Minute)},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 90, WindowMinutes: 10080, ResetsAt: now.Add(6 * time.Hour)},
+	})
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != "key-b" {
+		t.Fatalf("selected key = %q, want key-b because the primary 5h window resets sooner", key)
+	}
+}
+
 func TestSelectKey_UpdatesInlineDisplayToSelectedKeySnapshot(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	snapA := &ratelimit.KeyRateLimitSnapshot{

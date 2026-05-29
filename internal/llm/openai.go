@@ -581,13 +581,27 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		apiErr.Code = errResp.Error.Code
 		apiErr.Type = errResp.Error.Type
 	} else {
-		msg := string(body)
-		if len(msg) > 200 {
-			msg = msg[:200] + "..."
+		var detailResp struct {
+			Detail  string `json:"detail"`
+			Message string `json:"message"`
+			Code    string `json:"code"`
+			Type    string `json:"type"`
 		}
-		apiErr.Message = msg
+		if err := json.Unmarshal(body, &detailResp); err == nil && (detailResp.Detail != "" || detailResp.Message != "" || detailResp.Code != "") {
+			apiErr.Message = strings.TrimSpace(detailResp.Message)
+			if apiErr.Message == "" {
+				apiErr.Message = strings.TrimSpace(detailResp.Detail)
+			}
+			apiErr.Code = detailResp.Code
+			apiErr.Type = detailResp.Type
+		} else {
+			msg := string(body)
+			if len(msg) > 200 {
+				msg = msg[:200] + "..."
+			}
+			apiErr.Message = msg
+		}
 	}
-
 	return apiErr
 }
 

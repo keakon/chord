@@ -17,19 +17,19 @@ func (a *MainAgent) ServiceTier() config.ServiceTier {
 }
 
 func (a *MainAgent) EffectiveServiceTier() config.ServiceTier {
-	client, _, _, _ := a.llmSnapshot()
+	client, _, _, runningRef := a.llmSnapshot()
 	if client == nil {
 		return config.ServiceTierStandard
 	}
-	return client.EffectiveServiceTierForModelRef(client.RunningModelRef())
+	return client.EffectiveServiceTierForModelRef(runningRef)
 }
 
 func (a *MainAgent) SupportedServiceTiers() []config.ServiceTier {
-	client, _, _, _ := a.llmSnapshot()
+	client, _, _, runningRef := a.llmSnapshot()
 	if client == nil {
 		return []config.ServiceTier{config.ServiceTierStandard}
 	}
-	return client.SupportedServiceTiersForModelRef(client.RunningModelRef())
+	return client.SupportedServiceTiersForModelRef(runningRef)
 }
 
 func (a *MainAgent) applyServiceTierToClient(client *llm.Client) {

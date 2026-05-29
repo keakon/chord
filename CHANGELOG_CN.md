@@ -4,6 +4,8 @@
 
 ## 未发布
 
+- LLM / Codex：access token 中没有可解析 account ID 的 Codex OAuth 凭据现在仍会绑定到对应 credential slot，因此后续认证失败可以把正确凭据标记为 expired / invalidated，而不会让 token 脱离管理。`token_invalidated`、revoked、无法解析认证 token，以及 refresh token 返回 401 等情况现在会被归类为不可恢复的 OAuth 失败，并避免无意义的重复 refresh。
+- LLM / Codex：Codex `key_order: smart` 现在把缓存的额度快照仅作为调度提示：只有报告为 `100%` 的窗口会被放到最后尝试，`99%` 仍视为有可用额度，并且 primary / secondary 窗口会分开比较，让短窗口额度能在过期前优先使用，而不会和周额度混为一个分数。
 - LLM / Codex：Codex WebSocket 返回 400 且错误信息表明服务端增量会话状态与本地 input 不一致（例如 `No tool call found for function call output with call_id …`，或消息中包含 `previous_response_id`）时，Chord 现在会清空 WebSocket 链状态并立即在同一 WS 上以**全量、不带 `previous_response_id`**的方式重发一次；只有原始 400 属于链状态不一致才会触发该重试，重试仍失败时直接返回错误、不再回退 HTTP，因为 HTTP 会发送相同的 input、注定同样失败。
 - Agent / 会话恢复：恢复的对话现在会在送入 provider 前修复结构上的破损——尾部 `stop_reason=interrupted` 的 assistant 消息会被丢弃，每个 assistant `tool_call` 若缺失对应 tool result，会补一条合成的 `error` tool 消息（`ToolStatus=error`）。仅做结构修复；tool 消息的文本和 `ToolStatus` 字段不再被改写，1.0 之前基于文本启发式（搜索 `denied` / `cancelled` 等子串）猜测状态的逻辑不再恢复。
 - TUI / 消息目录：Ctrl+T 消息目录现在在主视图区域内渲染，不再遮挡右侧信息面板；条目按 1 开始编号显示，新增 `Ctrl+F` / `PgDown` / `Ctrl+B` / `PgUp` 一次翻一页。

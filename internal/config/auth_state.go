@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -13,8 +14,9 @@ import (
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
-// AccountID is required for auth.state.yaml records; Email and Access are only
-// carried for auth.yaml credential matching paths.
+// AccountID is preferred for stable records; Access is used as a fallback for
+// legacy/imported OAuth credentials whose access token does not carry a
+// parseable account_id.
 type OAuthStateKey struct {
 	Provider  string
 	AccountID string
@@ -61,13 +63,22 @@ func AuthStatePath() (string, error) {
 func OAuthStateRecordKey(key OAuthStateKey) string {
 	provider := strings.TrimSpace(key.Provider)
 	accountID := strings.TrimSpace(key.AccountID)
-	if accountID == "" {
+	if accountID != "" {
+		if provider == "" {
+			return "account_id:" + accountID
+		}
+		return provider + ":account_id:" + accountID
+	}
+	access := strings.TrimSpace(key.Access)
+	if access == "" {
 		return ""
 	}
+	sum := sha256.Sum256([]byte(access))
+	accessKey := fmt.Sprintf("access_sha256:%x", sum[:])
 	if provider == "" {
-		return "account_id:" + accountID
+		return accessKey
 	}
-	return provider + ":account_id:" + accountID
+	return provider + ":" + accessKey
 }
 
 func LoadAuthState(path string) (AuthStateFile, error) {
@@ -170,8 +181,8 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 		}
 		rec := state[provider][recordKey]
 		rec.AccountID = strings.TrimSpace(key.AccountID)
-		rec.Email = ""
-		rec.Access = ""
+		rec.Email = strings.TrimSpace(key.Email)
+		rec.Access = strings.TrimSpace(key.Access)
 		changed, err := mutate(&rec)
 		if err != nil {
 			return false, err
@@ -283,9 +294,9 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 		normalizedEntries := make(map[string]OAuthStateRecord)
 		for _, record := range entries {
 			record.AccountID = strings.TrimSpace(record.AccountID)
-			record.Email = ""
-			record.Access = ""
-			recordKey := OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: record.AccountID})
+			record.Email = strings.TrimSpace(record.Email)
+			record.Access = strings.TrimSpace(record.Access)
+			recordKey := OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: record.AccountID, Access: record.Access})
 			if recordKey == "" {
 				continue
 			}
@@ -299,7 +310,7 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 }
 
 func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRecord, bool) {
-	if len(state) == 0 || strings.TrimSpace(key.AccountID) == "" {
+	if len(state) == 0 || (strings.TrimSpace(key.AccountID) == "" && strings.TrimSpace(key.Access) == "") {
 		return OAuthStateRecord{}, false
 	}
 	provider := strings.TrimSpace(key.Provider)
@@ -307,7 +318,7 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 	if len(entries) == 0 {
 		return OAuthStateRecord{}, false
 	}
-	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: key.AccountID})]
+	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: key.AccountID, Access: key.Access})]
 	return record, ok
 }
 

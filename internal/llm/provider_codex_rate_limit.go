@@ -78,6 +78,64 @@ func codexWindowRemainingPct(w *ratelimit.RateLimitWindow) (float64, bool) {
 	return remaining, true
 }
 
+func codexSnapshotWindowUsageRank(snap *ratelimit.KeyRateLimitSnapshot) int {
+	if snap == nil {
+		return 1 // unknown
+	}
+	rank := 1 // unknown
+	consider := func(w *ratelimit.RateLimitWindow) {
+		if w == nil {
+			return
+		}
+		remaining, ok := codexWindowRemainingPct(w)
+		if !ok {
+			return
+		}
+		if remaining <= 0 {
+			rank = 0 // Any fully used known window is demoted to the last scheduling tier.
+			return
+		}
+		if rank > 0 {
+			rank = 2
+		}
+	}
+	consider(snap.Primary)
+	consider(snap.Secondary)
+	return rank
+}
+
+func codexWindowLess(now time.Time, a, b *ratelimit.RateLimitWindow) (bool, bool) {
+	aRem, aKnown := codexWindowRemainingPct(a)
+	bRem, bKnown := codexWindowRemainingPct(b)
+	if aKnown != bKnown {
+		return aKnown, true
+	}
+	if !aKnown {
+		return false, false
+	}
+	aUsable := aRem > 0
+	bUsable := bRem > 0
+	if aUsable != bUsable {
+		return aUsable, true
+	}
+	if !aUsable {
+		return false, false
+	}
+	if !a.ResetsAt.Equal(b.ResetsAt) {
+		if a.ResetsAt.IsZero() || !a.ResetsAt.After(now) {
+			return false, true
+		}
+		if b.ResetsAt.IsZero() || !b.ResetsAt.After(now) {
+			return true, true
+		}
+		return a.ResetsAt.Before(b.ResetsAt), true
+	}
+	if aRem != bRem {
+		return aRem > bRem, true
+	}
+	return false, false
+}
+
 func codexHeadroomScore(snap *ratelimit.KeyRateLimitSnapshot) (float64, bool) {
 	if snap == nil {
 		return 0, false
@@ -99,6 +157,11 @@ func codexHeadroomScore(snap *ratelimit.KeyRateLimitSnapshot) (float64, bool) {
 	}
 }
 
+func codexUsagePriority(snap *ratelimit.KeyRateLimitSnapshot) (rank int, headroom float64, known bool) {
+	headroom, known = codexHeadroomScore(snap)
+	return codexSnapshotWindowUsageRank(snap), headroom, known
+}
+
 func codexKnownWindowRank(snap *ratelimit.KeyRateLimitSnapshot) int {
 	if snap == nil {
 		return 0
@@ -117,24 +180,6 @@ func codexKnownWindowRank(snap *ratelimit.KeyRateLimitSnapshot) int {
 	default:
 		return 0
 	}
-}
-
-func codexSoonestResetAt(snap *ratelimit.KeyRateLimitSnapshot, now time.Time) time.Time {
-	if snap == nil {
-		return time.Time{}
-	}
-	var reset time.Time
-	consider := func(w *ratelimit.RateLimitWindow) {
-		if w == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) {
-			return
-		}
-		if reset.IsZero() || w.ResetsAt.Before(reset) {
-			reset = w.ResetsAt
-		}
-	}
-	consider(snap.Primary)
-	consider(snap.Secondary)
-	return reset
 }
 
 func codexCreditsPenalty(snap *ratelimit.KeyRateLimitSnapshot) bool {
@@ -167,29 +212,34 @@ func (p *ProviderConfig) codexSmartLessLocked(now time.Time, a, b *KeyState) boo
 	}
 	aSnap := p.codexSnapshotForKeyStateLocked(a)
 	bSnap := p.codexSnapshotForKeyStateLocked(b)
-	aRank := codexKnownWindowRank(aSnap)
-	bRank := codexKnownWindowRank(bSnap)
+	aRank, aHeadroom, aKnown := codexUsagePriority(aSnap)
+	bRank, bHeadroom, bKnown := codexUsagePriority(bSnap)
 	if aRank != bRank {
 		return aRank > bRank
 	}
-	aHeadroom, aKnown := codexHeadroomScore(aSnap)
-	bHeadroom, bKnown := codexHeadroomScore(bSnap)
+	var aPrimary, bPrimary, aSecondary, bSecondary *ratelimit.RateLimitWindow
+	if aSnap != nil {
+		aPrimary = aSnap.Primary
+		aSecondary = aSnap.Secondary
+	}
+	if bSnap != nil {
+		bPrimary = bSnap.Primary
+		bSecondary = bSnap.Secondary
+	}
+	if less, decided := codexWindowLess(now, aPrimary, bPrimary); decided {
+		return less
+	}
+	if less, decided := codexWindowLess(now, aSecondary, bSecondary); decided {
+		return less
+	}
 	if aKnown != bKnown {
 		return aKnown
 	}
 	if aKnown && bKnown && aHeadroom != bHeadroom {
 		return aHeadroom > bHeadroom
 	}
-	aReset := codexSoonestResetAt(aSnap, now)
-	bReset := codexSoonestResetAt(bSnap, now)
-	if !aReset.Equal(bReset) {
-		if aReset.IsZero() {
-			return false
-		}
-		if bReset.IsZero() {
-			return true
-		}
-		return aReset.Before(bReset)
+	if aWindowRank, bWindowRank := codexKnownWindowRank(aSnap), codexKnownWindowRank(bSnap); aWindowRank != bWindowRank {
+		return aWindowRank > bWindowRank
 	}
 	aPenalty := codexCreditsPenalty(aSnap)
 	bPenalty := codexCreditsPenalty(bSnap)
@@ -436,8 +486,8 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 			}
 			p.mu.Unlock()
 			if err != nil {
-				if p.handleCodexWarmupAuthFailure(ctx, key, err) {
-					log.Debugf("codex warmup auth failure handled provider=%v account_id=%v error=%v", providerName, accountID, err)
+				if p.handleCodexWarmupAuthFailure(key, err) {
+					log.Debugf("codex warmup auth failure ignored for key health provider=%v account_id=%v error=%v", providerName, accountID, err)
 				} else {
 					log.Debugf("codex warmup usage probe failed provider=%v account_id=%v error=%v", providerName, accountID, err)
 				}
@@ -464,7 +514,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	return true
 }
 
-func (p *ProviderConfig) handleCodexWarmupAuthFailure(ctx context.Context, key string, err error) bool {
+func (p *ProviderConfig) handleCodexWarmupAuthFailure(key string, err error) bool {
 	var apiErr *APIError
 	if !isAPIError(err, &apiErr) {
 		return false
@@ -472,27 +522,8 @@ func (p *ProviderConfig) handleCodexWarmupAuthFailure(ctx context.Context, key s
 	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
 		return false
 	}
-	if info := p.oauthInfoForKey(key); info != nil {
-		if isAccountInvalidated(apiErr) {
-			log.Warnf("codex warmup detected OAuth account invalidated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
-			p.MarkInvalidated(key)
-			return true
-		}
-		if isAccountDeactivated(apiErr) {
-			log.Warnf("codex warmup detected OAuth account deactivated, permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
-			p.MarkDeactivated(key)
-			return true
-		}
-	}
-	if refreshedKey, ok, refreshErr := p.TryRefreshOAuthKey(ctx, key); ok {
-		log.Infof("OAuth token refreshed during codex warmup key_suffix=%v", keySuffix(refreshedKey))
-		return true
-	} else if config.IsOAuthCredentialUnrecoverableAfterAccessExpiry(refreshErr) {
-		log.Warnf("codex warmup detected OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
-		p.MarkExpired(key)
-		return true
-	}
-	return false
+	log.Debugf("codex usage probe auth failure ignored for key health provider=%v key_suffix=%v status=%v code=%v error=%v", p.name, keySuffix(key), apiErr.StatusCode, apiErr.Code, err)
+	return true
 }
 
 func (p *ProviderConfig) WakeCodexRateLimitPolling() {
@@ -559,8 +590,8 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		}()
 		snaps, err := fetchFn(key, accountID)
 		if err != nil {
-			if p.handleCodexWarmupAuthFailure(context.Background(), key, err) {
-				log.Debugf("codex usage poll auth failure handled provider=%v error=%v", providerName, err)
+			if p.handleCodexWarmupAuthFailure(key, err) {
+				log.Debugf("codex usage poll auth failure ignored for key health provider=%v error=%v", providerName, err)
 			} else {
 				log.Debugf("codex usage poll failed provider=%v error=%v", providerName, err)
 			}

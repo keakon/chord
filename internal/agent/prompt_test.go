@@ -161,21 +161,49 @@ func TestTodoWorkflowPromptBlock_DelegateWorkflowAllowsMultipleInProgress(t *tes
 	}
 }
 
-func TestLoopWorkflowPromptBlockHiddenByDefault(t *testing.T) {
-	a := &MainAgent{}
-	if got := a.loopWorkflowPromptBlock(); got != "" {
-		t.Fatalf("loopWorkflowPromptBlock() = %q, want empty", got)
+func TestLoopModeToggleDoesNotChangeSystemPrompt(t *testing.T) {
+	a := &MainAgent{
+		ctxMgr:     ctxmgr.NewManager(8192, 0),
+		outputCh:   make(chan AgentEvent, 8),
+		stoppingCh: make(chan struct{}),
+	}
+	a.installedSysPrompt = "stable system prompt"
+	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: "stable system prompt"})
+
+	a.EnableLoopMode("finish current task")
+	if got := a.installedSysPrompt; got != "stable system prompt" {
+		t.Fatalf("EnableLoopMode changed installedSysPrompt = %q", got)
+	}
+	if got := a.ctxMgr.SystemPrompt().Content; got != "stable system prompt" {
+		t.Fatalf("EnableLoopMode changed ctxMgr system prompt = %q", got)
+	}
+
+	a.DisableLoopMode()
+	if got := a.installedSysPrompt; got != "stable system prompt" {
+		t.Fatalf("DisableLoopMode changed installedSysPrompt = %q", got)
+	}
+	if got := a.ctxMgr.SystemPrompt().Content; got != "stable system prompt" {
+		t.Fatalf("DisableLoopMode changed ctxMgr system prompt = %q", got)
 	}
 }
 
-func TestLoopWorkflowPromptBlockShownOnlyWhenLoopEnabled(t *testing.T) {
+func TestBuildSystemPromptDoesNotDependOnLoopMode(t *testing.T) {
 	a := &MainAgent{}
+	before := a.buildSystemPrompt()
+
 	a.loopState.enableWithTarget("finish current task")
-	got := a.loopWorkflowPromptBlock()
-	for _, want := range []string{"## Loop Mode", "Loop mode is active", "Do not stop to ask the user"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("loopWorkflowPromptBlock() missing %q in %q", want, got)
-		}
+	a.loopState.DeferContinuationPromptUntilDone = true
+	duringLoop := a.buildSystemPrompt()
+	if duringLoop != before {
+		t.Fatalf("buildSystemPrompt() changed after enabling loop mode")
+	}
+
+	a.loopState.disable()
+	a.loopState.DeferContinuationPromptUntilDone = false
+	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "pending"}}
+	withLoopArtifacts := a.buildSystemPrompt()
+	if withLoopArtifacts != before {
+		t.Fatalf("buildSystemPrompt() changed after stale loop artifacts")
 	}
 }
 
