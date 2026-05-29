@@ -66,10 +66,10 @@ type oauthTokenClaims struct {
 	Organizations    []struct {
 		ID string `json:"id"`
 	} `json:"organizations,omitempty"`
-	OpenAIAuth *struct {
+	OpenAIAuth struct {
 		ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
 	} `json:"https://api.openai.com/auth,omitempty"`
-	OpenAIProfile *struct {
+	OpenAIProfile struct {
 		Email string `json:"email,omitempty"`
 	} `json:"https://api.openai.com/profile,omitempty"`
 }
@@ -78,7 +78,7 @@ func extractOAuthAccountIDFromClaims(claims oauthTokenClaims) string {
 	if claims.ChatGPTAccountID != "" {
 		return claims.ChatGPTAccountID
 	}
-	if claims.OpenAIAuth != nil && claims.OpenAIAuth.ChatGPTAccountID != "" {
+	if claims.OpenAIAuth.ChatGPTAccountID != "" {
 		return claims.OpenAIAuth.ChatGPTAccountID
 	}
 	if len(claims.Organizations) > 0 {
@@ -120,7 +120,7 @@ func ExtractOAuthEmailFromToken(token string) string {
 	if claims.Email != "" {
 		return claims.Email
 	}
-	if claims.OpenAIProfile != nil && claims.OpenAIProfile.Email != "" {
+	if claims.OpenAIProfile.Email != "" {
 		return claims.OpenAIProfile.Email
 	}
 	return ""
@@ -254,7 +254,7 @@ func findMatchingOAuthStateRecord(state AuthStateFile, provider string, cred *OA
 	if cred == nil {
 		return OAuthStateRecord{}, false
 	}
-	return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountID: cred.AccountID, Email: cred.Email, Access: cred.Access})
+	return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountID: cred.AccountID, Email: cred.Email})
 }
 
 // LoadAuthConfig loads authentication configuration from a YAML file.
@@ -517,13 +517,13 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 	}
 
 	email := idClaims.Email
-	if email == "" && idClaims.OpenAIProfile != nil {
+	if email == "" {
 		email = idClaims.OpenAIProfile.Email
 	}
 	if email == "" {
 		email = accessClaims.Email
 	}
-	if email == "" && accessClaims.OpenAIProfile != nil {
+	if email == "" {
 		email = accessClaims.OpenAIProfile.Email
 	}
 	if email == "" {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -14,21 +13,17 @@ import (
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
-// AccountID is preferred for stable records; Access is used as a fallback for
-// legacy/imported OAuth credentials whose access token does not carry a
-// parseable account_id.
+// AccountID is required and is used directly as the key below the provider.
 type OAuthStateKey struct {
 	Provider  string
 	AccountID string
 	Email     string
-	Access    string
 }
 
 // OAuthStateRecord stores dynamic OAuth runtime state shared across processes.
 type OAuthStateRecord struct {
 	AccountID               string                `yaml:"account_id,omitempty"`
 	Email                   string                `yaml:"email,omitempty"`
-	Access                  string                `yaml:"access,omitempty"`
 	Expires                 int64                 `yaml:"expires,omitempty"`
 	Status                  OAuthCredentialStatus `yaml:"status,omitempty"`
 	UpdatedAt               int64                 `yaml:"updated_at,omitempty"`
@@ -61,24 +56,7 @@ func AuthStatePath() (string, error) {
 }
 
 func OAuthStateRecordKey(key OAuthStateKey) string {
-	provider := strings.TrimSpace(key.Provider)
-	accountID := strings.TrimSpace(key.AccountID)
-	if accountID != "" {
-		if provider == "" {
-			return "account_id:" + accountID
-		}
-		return provider + ":account_id:" + accountID
-	}
-	access := strings.TrimSpace(key.Access)
-	if access == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(access))
-	accessKey := fmt.Sprintf("access_sha256:%x", sum[:])
-	if provider == "" {
-		return accessKey
-	}
-	return provider + ":" + accessKey
+	return strings.TrimSpace(key.AccountID)
 }
 
 func LoadAuthState(path string) (AuthStateFile, error) {
@@ -144,7 +122,11 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 	}
 	defer func() { _ = lock.Close() }()
 
-	state, err := LoadAuthState(path)
+	beforeData, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("read auth state: %w", err)
+	}
+	state, err := ParseAuthState(beforeData)
 	if err != nil {
 		return nil, false, fmt.Errorf("load auth state: %w", err)
 	}
@@ -153,7 +135,11 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 		return nil, false, err
 	}
 	state = normalizeAuthStateFile(state)
-	if !changed {
+	data, err := yaml.Marshal(state)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed && bytes.Equal(bytes.TrimSpace(beforeData), bytes.TrimSpace(data)) {
 		return state, false, nil
 	}
 	if err := SaveAuthState(path, state); err != nil {
@@ -180,9 +166,7 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 			state[provider] = make(map[string]OAuthStateRecord)
 		}
 		rec := state[provider][recordKey]
-		rec.AccountID = strings.TrimSpace(key.AccountID)
 		rec.Email = strings.TrimSpace(key.Email)
-		rec.Access = strings.TrimSpace(key.Access)
 		changed, err := mutate(&rec)
 		if err != nil {
 			return false, err
@@ -232,7 +216,6 @@ type RemovedOAuthStateEntry struct {
 	StateKey  string
 	AccountID string
 	Email     string
-	Access    string
 	Status    OAuthCredentialStatus
 }
 
@@ -243,32 +226,39 @@ func (e RemovedOAuthStateEntry) DisplayName() string {
 	if accountID := strings.TrimSpace(e.AccountID); accountID != "" {
 		return accountID
 	}
-	if access := strings.TrimSpace(e.Access); access != "" {
-		return access
-	}
 	if stateKey := strings.TrimSpace(e.StateKey); stateKey != "" {
 		return stateKey
 	}
 	return strings.TrimSpace(e.Provider)
 }
 
-func RemoveInvalidOAuthStateRecords(path string) (AuthStateFile, []RemovedOAuthStateEntry, error) {
+func RemovedOAuthStateEntryFromRecord(provider, stateKey string, record OAuthStateRecord) RemovedOAuthStateEntry {
+	accountID := strings.TrimSpace(record.AccountID)
+	if accountID == "" {
+		accountID = strings.TrimSpace(stateKey)
+	}
+	return RemovedOAuthStateEntry{
+		Provider:  provider,
+		StateKey:  stateKey,
+		AccountID: accountID,
+		Email:     record.Email,
+		Status:    record.Status,
+	}
+}
+
+func RemoveOAuthStateRecords(path string, remove func(provider, stateKey string, record OAuthStateRecord) bool) (AuthStateFile, []RemovedOAuthStateEntry, error) {
+	if remove == nil {
+		return nil, nil, fmt.Errorf("oauth state remove func is nil")
+	}
 	var removed []RemovedOAuthStateEntry
 	state, _, err := UpdateAuthStateFile(path, func(state AuthStateFile) (bool, error) {
 		changed := false
 		for provider, entries := range state {
 			for key, record := range entries {
-				if record.Status.IsValid() {
+				if !remove(provider, key, record) {
 					continue
 				}
-				removed = append(removed, RemovedOAuthStateEntry{
-					Provider:  provider,
-					StateKey:  key,
-					AccountID: record.AccountID,
-					Email:     record.Email,
-					Access:    record.Access,
-					Status:    record.Status,
-				})
+				removed = append(removed, RemovedOAuthStateEntryFromRecord(provider, key, record))
 				delete(entries, key)
 				changed = true
 			}
@@ -284,6 +274,12 @@ func RemoveInvalidOAuthStateRecords(path string) (AuthStateFile, []RemovedOAuthS
 	return state, removed, nil
 }
 
+func RemoveInvalidOAuthStateRecords(path string) (AuthStateFile, []RemovedOAuthStateEntry, error) {
+	return RemoveOAuthStateRecords(path, func(_ string, _ string, record OAuthStateRecord) bool {
+		return !record.Status.IsValid()
+	})
+}
+
 func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 	state := make(AuthStateFile)
 	for provider, entries := range raw {
@@ -292,14 +288,13 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 			continue
 		}
 		normalizedEntries := make(map[string]OAuthStateRecord)
-		for _, record := range entries {
-			record.AccountID = strings.TrimSpace(record.AccountID)
-			record.Email = strings.TrimSpace(record.Email)
-			record.Access = strings.TrimSpace(record.Access)
-			recordKey := OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: record.AccountID, Access: record.Access})
-			if recordKey == "" {
+		for rawKey, record := range entries {
+			recordKey := strings.TrimSpace(rawKey)
+			if recordKey == "" || strings.Contains(recordKey, ":") {
 				continue
 			}
+			record.AccountID = ""
+			record.Email = strings.TrimSpace(record.Email)
 			normalizedEntries[recordKey] = record
 		}
 		if len(normalizedEntries) > 0 {
@@ -310,7 +305,7 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 }
 
 func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRecord, bool) {
-	if len(state) == 0 || (strings.TrimSpace(key.AccountID) == "" && strings.TrimSpace(key.Access) == "") {
+	if len(state) == 0 || strings.TrimSpace(key.AccountID) == "" {
 		return OAuthStateRecord{}, false
 	}
 	provider := strings.TrimSpace(key.Provider)
@@ -318,7 +313,10 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 	if len(entries) == 0 {
 		return OAuthStateRecord{}, false
 	}
-	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{Provider: provider, AccountID: key.AccountID, Access: key.Access})]
+	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{AccountID: key.AccountID})]
+	if ok {
+		record.AccountID = strings.TrimSpace(key.AccountID)
+	}
 	return record, ok
 }
 
@@ -328,9 +326,6 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 	}
 	if incoming.Email != "" {
 		existing.Email = incoming.Email
-	}
-	if incoming.Access != "" {
-		existing.Access = incoming.Access
 	}
 	if incoming.Status != "" || existing.Status == "" {
 		existing.Status = incoming.Status
@@ -355,7 +350,7 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 }
 
 func EqualOAuthStateRecord(a, b OAuthStateRecord) bool {
-	if a.AccountID != b.AccountID || a.Email != b.Email || a.Access != b.Access || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
+	if a.AccountID != b.AccountID || a.Email != b.Email || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
 		return false
 	}
 	if (a.CodexHasCredits == nil) != (b.CodexHasCredits == nil) {

@@ -688,6 +688,59 @@ func TestNewAuthCmd_DefaultsToDirectLogin(t *testing.T) {
 	}
 }
 
+func TestAuthStateListOnlyPrintsInvalidEntries(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-normal", Email: "normal@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord(normal): %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-expired", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusExpired
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord(expired): %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "list"})
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	defer r.Close()
+	if err := cmd.Execute(); err != nil {
+		_ = w.Close()
+		t.Fatalf("Execute: %v", err)
+	}
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout): %v", err)
+	}
+	got := string(output)
+	if !strings.Contains(got, "Found 1 expired/deactivated OAuth accounts") || !strings.Contains(got, "expired@example.com") {
+		t.Fatalf("expected only expired state in output, got %q", got)
+	}
+	if strings.Contains(got, "normal@example.com") {
+		t.Fatalf("normal state should not be listed, got %q", got)
+	}
+}
+
 func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	configHome := t.TempDir()
 	oldXDG := os.Getenv("XDG_CONFIG_HOME")
@@ -763,9 +816,8 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	if err != nil {
 		t.Fatalf("AuthStatePath: %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "stale-access"}, func(record *config.OAuthStateRecord) (bool, error) {
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.AccountID = "acc-1"
-		record.Access = "stale-access"
 		record.Status = config.OAuthStatusExpired
 		return true, nil
 	})
@@ -814,6 +866,75 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	}
 	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok {
 		t.Fatal("expired state record should be removed")
+	}
+}
+
+func TestAuthStateCleanRemovesOrphanState(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	authPath, err := config.AuthPath()
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(auth dir): %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - access: good-access
+    account_id: acc-2
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-orphan", Email: "orphan@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	defer r.Close()
+	if err := cmd.Execute(); err != nil {
+		_ = w.Close()
+		t.Fatalf("Execute: %v", err)
+	}
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout): %v", err)
+	}
+	if !strings.Contains(string(output), "Removed 1 invalid/orphan OAuth state entries") {
+		t.Fatalf("expected clean to remove one orphan state, got %q", string(output))
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-orphan"}); ok {
+		t.Fatal("orphan state record should be removed")
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := len(auth["openai"]); got != 1 {
+		t.Fatalf("auth credentials removed = %d entries remaining, want 1", got)
 	}
 }
 
@@ -870,7 +991,7 @@ func TestOpenBrowserCommandPlansPerPlatform(t *testing.T) {
 }
 
 func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
-	entry := config.RemovedOAuthStateEntry{AccountID: "acct-1", Email: "user@example.com", Access: "access-token"}
+	entry := config.RemovedOAuthStateEntry{AccountID: "acct-1", Email: "user@example.com"}
 	tests := []struct {
 		name string
 		cred *config.OAuthCredential
@@ -879,7 +1000,6 @@ func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 		{name: "nil", cred: nil, want: false},
 		{name: "account id", cred: &config.OAuthCredential{AccountID: "acct-1"}, want: true},
 		{name: "email", cred: &config.OAuthCredential{Email: "user@example.com"}, want: true},
-		{name: "access token", cred: &config.OAuthCredential{Access: "access-token"}, want: true},
 		{name: "empty fields do not match", cred: &config.OAuthCredential{}, want: false},
 		{name: "different", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "other@example.com", Access: "other"}, want: false},
 	}

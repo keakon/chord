@@ -22,7 +22,6 @@ func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
 		Provider:  p.name,
 		AccountID: ks.OAuthInfo.AccountID,
 		Email:     ks.OAuthInfo.Email,
-		Access:    firstNonEmptyOAuthAccess(ks.OAuthInfo.Access, ks.Key),
 	}
 }
 
@@ -85,9 +84,6 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		if record.Email != "" {
 			ks.OAuthInfo.Email = record.Email
 		}
-		if record.Access != "" {
-			ks.OAuthInfo.Access = record.Access
-		}
 		ks.OAuthInfo.StateUpdatedAt = record.UpdatedAt
 		ks.OAuthInfo.LastWarmupAt = record.LastWarmupAt
 		if record.Status != "" {
@@ -96,6 +92,9 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		}
 		if record.Expires != 0 {
 			ks.OAuthInfo.Expires = record.Expires
+		}
+		if !resetPollTTL {
+			continue
 		}
 		ks.OAuthInfo.CodexPrimaryResetAt = record.CodexPrimaryResetAt
 		ks.OAuthInfo.CodexSecondaryResetAt = record.CodexSecondaryResetAt

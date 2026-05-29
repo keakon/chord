@@ -316,7 +316,7 @@ func TestSelectKeyMissingRefreshTokenStillUsesExistingAccessToken(t *testing.T) 
 	}
 }
 
-func TestSelectKeySkipsLikelyExpiredOAuthTokenWhenHealthyTokenAvailable(t *testing.T) {
+func TestSelectKeyDoesNotSkipExpiredOAuthTokenBeforeProbe(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expired := time.Now().Add(-time.Minute).UnixMilli()
 	valid := time.Now().Add(time.Hour).UnixMilli()
@@ -355,11 +355,11 @@ func TestSelectKeySkipsLikelyExpiredOAuthTokenWhenHealthyTokenAvailable(t *testi
 	if err != nil {
 		t.Fatalf("SelectKeyWithContext: %v", err)
 	}
-	if key != validAccess {
-		t.Fatalf("selected key = %q, want valid access", key)
+	if key != expiredAccess {
+		t.Fatalf("selected key = %q, want first OAuth token before any auth probe", key)
 	}
 	if refreshHit {
-		t.Fatal("refresh endpoint should not be called when a healthier OAuth token is selectable")
+		t.Fatal("refresh endpoint should not be called during key selection")
 	}
 	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusNormal {
 		t.Fatalf("expected first OAuth credential status=normal, got %#v", got)

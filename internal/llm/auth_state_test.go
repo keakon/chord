@@ -14,7 +14,7 @@ import (
 
 func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.CodexPrimaryUsedPct = 10
 		record.CodexPrimaryWindowMin = 60
@@ -77,7 +77,7 @@ func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 	})
 
 	captured := time.Now()
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = captured.UnixMilli()
 		record.CodexPrimaryUsedPct = 25
@@ -123,7 +123,7 @@ func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) 
 		}
 	})
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 55
@@ -182,7 +182,7 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 		}
 	})
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-2", Access: "key-b"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-2"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 90
@@ -249,7 +249,7 @@ func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 	}, "")
 	defer p.Close()
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 40
@@ -306,7 +306,7 @@ func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"})
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"})
 	if !ok {
 		t.Fatal("expected auth.state record for key-a")
 	}
@@ -332,7 +332,7 @@ func TestPersistAuthStateForKeyPreservesRuntimeDeactivatedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: "key-a"})
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"})
 	if !ok {
 		t.Fatal("expected auth.state record for key-a")
 	}

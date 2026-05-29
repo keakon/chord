@@ -123,7 +123,7 @@ func newAuthStateCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "clean",
-		Short: "Remove expired or deactivated OAuth accounts from auth.yaml and auth.state.yaml",
+		Short: "Remove invalid or orphan OAuth state and invalid OAuth credentials",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			statePath, err := config.AuthStatePath()
@@ -138,10 +138,22 @@ func newAuthStateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load auth state: %w", err)
 			}
-			entries := listInvalidOAuthStateEntries(state)
-			_, removedState, err := config.RemoveInvalidOAuthStateRecords(statePath)
+			auth, err := config.LoadAuthConfig(authPath)
+			if err != nil {
+				return fmt.Errorf("load auth config: %w", err)
+			}
+			entries := listRemovableOAuthStateEntries(state, auth)
+			_, removedState, err := config.RemoveOAuthStateRecords(statePath, func(provider, stateKey string, record config.OAuthStateRecord) bool {
+				entry := config.RemovedOAuthStateEntryFromRecord(provider, stateKey, record)
+				return oauthStateEntryRemovable(entry, auth)
+			})
 			if err != nil {
 				return fmt.Errorf("clean auth state: %w", err)
+			}
+			if normalizedState, err := config.LoadAuthState(statePath); err == nil {
+				if saveErr := config.SaveAuthState(statePath, normalizedState); saveErr != nil {
+					return fmt.Errorf("normalize auth state: %w", saveErr)
+				}
 			}
 			_, removedCreds, err := config.RemoveOAuthCredentialsInFile(authPath, func(provider string, cred *config.OAuthCredential, _ int) bool {
 				if cred == nil {
@@ -160,7 +172,7 @@ func newAuthStateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("clean auth config: %w", err)
 			}
-			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth state entries from %s\n", len(removedState), statePath)
+			fmt.Fprintf(os.Stdout, "Removed %d invalid/orphan OAuth state entries from %s\n", len(removedState), statePath)
 			for _, entry := range removedState {
 				fmt.Fprintf(os.Stdout, "- state: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
@@ -178,26 +190,51 @@ func listInvalidOAuthStateEntries(state config.AuthStateFile) []config.RemovedOA
 	var removed []config.RemovedOAuthStateEntry
 	for provider, entries := range state {
 		for key, record := range entries {
-			if record.Status.IsValid() {
+			entry := config.RemovedOAuthStateEntryFromRecord(provider, key, record)
+			if entry.Status.IsValid() {
 				continue
 			}
-			removed = append(removed, config.RemovedOAuthStateEntry{
-				Provider:  provider,
-				StateKey:  key,
-				AccountID: record.AccountID,
-				Email:     record.Email,
-				Access:    record.Access,
-				Status:    record.Status,
-			})
+			removed = append(removed, entry)
 		}
 	}
-	sort.Slice(removed, func(i, j int) bool {
-		if removed[i].Provider != removed[j].Provider {
-			return removed[i].Provider < removed[j].Provider
-		}
-		return removed[i].DisplayName() < removed[j].DisplayName()
-	})
+	sortOAuthStateEntries(removed)
 	return removed
+}
+
+func listRemovableOAuthStateEntries(state config.AuthStateFile, auth config.AuthConfig) []config.RemovedOAuthStateEntry {
+	var removed []config.RemovedOAuthStateEntry
+	for provider, entries := range state {
+		for key, record := range entries {
+			entry := config.RemovedOAuthStateEntryFromRecord(provider, key, record)
+			if !oauthStateEntryRemovable(entry, auth) {
+				continue
+			}
+			removed = append(removed, entry)
+		}
+	}
+	sortOAuthStateEntries(removed)
+	return removed
+}
+
+func sortOAuthStateEntries(entries []config.RemovedOAuthStateEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Provider != entries[j].Provider {
+			return entries[i].Provider < entries[j].Provider
+		}
+		return entries[i].DisplayName() < entries[j].DisplayName()
+	})
+}
+
+func oauthStateEntryRemovable(entry config.RemovedOAuthStateEntry, auth config.AuthConfig) bool {
+	if !entry.Status.IsValid() {
+		return true
+	}
+	for _, cred := range auth[entry.Provider] {
+		if oauthCredentialMatchesStateEntry(cred.OAuth, entry) {
+			return false
+		}
+	}
+	return true
 }
 
 func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config.RemovedOAuthStateEntry) bool {
@@ -208,9 +245,6 @@ func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config
 		return true
 	}
 	if cred.Email != "" && entry.Email != "" && cred.Email == entry.Email {
-		return true
-	}
-	if cred.Access != "" && entry.Access != "" && cred.Access == entry.Access {
 		return true
 	}
 	return false

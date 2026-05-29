@@ -49,15 +49,14 @@ func (r *OAuthRefresher) persistCredentialStatus(match config.OAuthCredentialMat
 }
 
 func (r *OAuthRefresher) persistOAuthStateStatus(cred *config.OAuthCredential, status config.OAuthCredentialStatus) error {
-	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil || (strings.TrimSpace(cred.AccountID) == "" && strings.TrimSpace(cred.Access) == "") {
+	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil || strings.TrimSpace(cred.AccountID) == "" {
 		return nil
 	}
-	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID, Email: cred.Email, Access: cred.Access}
+	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID, Email: cred.Email}
 	_, _, _, err := config.UpsertOAuthStateRecord(r.authStatePath, key, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
 		record.AccountID = cred.AccountID
 		record.Email = cred.Email
-		record.Access = cred.Access
 		record.Expires = cred.Expires
 		record.Status = status
 		record.UpdatedAt = time.Now().UnixMilli()

@@ -51,11 +51,7 @@ func (p *ProviderConfig) keyStateHealthyLocked(now time.Time, ks *KeyState) bool
 	if !p.keyStateSelectableLocked(now, ks) {
 		return false
 	}
-	return !ks.Recovering && !oauthTokenLikelyExpired(now, ks)
-}
-
-func oauthTokenLikelyExpired(now time.Time, ks *KeyState) bool {
-	return ks != nil && ks.OAuthInfo != nil && ks.OAuthInfo.Expires > 0 && time.UnixMilli(ks.OAuthInfo.Expires).Before(now.Add(time.Minute))
+	return !ks.Recovering
 }
 
 func (p *ProviderConfig) markHealthyLocked(ks *KeyState) {

@@ -500,7 +500,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
 	state, err := config.LoadAuthState(statePath)
 	if err == nil {
-		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Access: access}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {
+		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {
 			t.Fatalf("polling auth failure changed persisted status to %q", record.Status)
 		}
 	}

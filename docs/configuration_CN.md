@@ -226,20 +226,20 @@ openai:
 这样拆分是有意为之：
 
 - `auth.yaml` 仍是用户可编辑的凭据与稳定 OAuth 字段来源，例如 `refresh`、`access`、`expires`、`account_id`、`email`；Chord 重写文件时会省略空 OAuth 字段，OAuth `status` 不属于 `auth.yaml`；
-- `auth.state.yaml` 是机器维护的共享运行时状态。Chord 有 `account_id` 时按它关联；access token 没有可解析账号 ID 时，则退回使用 `access_sha256:<hash>` 形式的 key，因此 quota / reset 更新，以及 `expired`、`deactivated`、`invalidated` 这类账号状态，不会在用户可能同时编辑 `auth.yaml` 时频繁改写该文件。
+- `auth.state.yaml` 是机器维护的共享运行时状态。在每个 provider 下，条目直接以 `account_id` 为 key；quota / reset 更新，以及 `expired`、`deactivated`、`invalidated` 这类账号状态，不会在用户可能同时编辑 `auth.yaml` 时频繁改写该文件。`chord auth state clean` 会移除没有对应 `auth.yaml` OAuth 凭据的孤儿状态，以及无法识别的旧 state key 格式。
 
-对 OAuth 凭据来说，`access` 不要求一定能解析出账号 ID。如果 `auth.yaml` 已有 `account_id`，并且 Chord 也能从 `access` 解析出账号 ID，两者必须一致；否则该 access token 会被视为账号不匹配而忽略。Chord 也支持只包含 `refresh`、没有 `access` 的 OAuth 条目，并会在首次使用时刷新。既没有 `access` 也没有 `refresh` 的 OAuth 条目不可用。
+对 OAuth 凭据来说，`access` 需要能解析出账号 ID，或 `auth.yaml` 需要提供 `account_id`，才能把共享运行时状态持久化到 `auth.state.yaml`。如果 `auth.yaml` 已有 `account_id`，并且 Chord 也能从 `access` 解析出账号 ID，两者必须一致；否则该 access token 会被视为账号不匹配而忽略。Chord 也支持只包含 `refresh`、没有 `access` 的 OAuth 条目，并会在首次使用时刷新。既没有 `access` 也没有 `refresh` 的 OAuth 条目不可用。
 
-`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可缓存在 `auth.state.yaml` 中。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired`；它只会降低该 slot 的选择优先级。Chord 仍会先尝试已有的 access token，只有在认证失败后，才会在可恢复时刷新凭据，或者在无法恢复时标记为 expired。
+`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可将得到的过期时间缓存到 `auth.state.yaml`，但不会在 state 文件里保存 access token。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired` 或不健康。Chord 仍会先尝试已有的 access token，只有在认证失败后，才会在可恢复时刷新凭据，或者在无法恢复时标记为 expired。
 
 典型的 `auth.state.yaml` 条目形态如下：
 
 ```yaml
 openai:
-  openai:account_id:acc-1:
-    account_id: acc-1
+  acc-1:
+    email: user@example.com
     expires: 1774009702606
-    status: normal
+    status: expired
     updated_at: 1774009702606
     last_warmup_at: 1774009702606
     codex_primary_used_pct: 12.5

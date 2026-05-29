@@ -243,20 +243,20 @@ For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime
 That split is intentional:
 
 - `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; empty OAuth fields are omitted when Chord rewrites the file, and OAuth `status` does not belong in `auth.yaml`;
-- `auth.state.yaml` is machine-managed shared runtime state. Entries are keyed by `account_id` when Chord has one, or by an `access_sha256:<hash>` fallback for access tokens without a parseable account ID, so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it.
+- `auth.state.yaml` is machine-managed shared runtime state. Entries are keyed directly by `account_id` below each provider so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it. State entries without a matching `auth.yaml` OAuth credential, and unrecognized legacy state-key formats, are removed by `chord auth state clean`.
 
-For OAuth credentials, `access` does not have to carry a parseable account ID. If `auth.yaml` already has `account_id` and Chord can also parse an account ID from `access`, the two values must match; otherwise the access token is ignored as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
+For OAuth credentials, `access` must carry a parseable account ID, or `auth.yaml` must provide `account_id`, for shared runtime state to be persisted. If `auth.yaml` already has `account_id` and Chord can also parse an account ID from `access`, the two values must match; otherwise the access token is ignored as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use. An OAuth entry with neither `access` nor `refresh` is unusable.
 
-`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache it in `auth.state.yaml`. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired`; it only makes that slot less preferred. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
+`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache the resulting expiry in `auth.state.yaml` without storing the access token there. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired` or unhealthy. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
 
 A typical `auth.state.yaml` entry looks like:
 
 ```yaml
 openai:
-  openai:account_id:acc-1:
-    account_id: acc-1
+  acc-1:
+    email: user@example.com
     expires: 1774009702606
-    status: normal
+    status: expired
     updated_at: 1774009702606
     last_warmup_at: 1774009702606
     codex_primary_used_pct: 12.5

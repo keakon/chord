@@ -100,9 +100,17 @@ chord auth codex
 chord auth codex --device-code
 ```
 
+### `chord auth state list`
+
+List expired, deactivated, or invalidated OAuth runtime-state entries from `~/.config/chord/auth.state.yaml`. This command does not report orphan state entries whose matching OAuth credential was removed from `auth.yaml`; use `chord auth state clean` to remove both invalid and orphan state.
+
+```bash
+chord auth state list
+```
+
 ### `chord auth state clean`
 
-Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml` and matching expired / deactivated / invalidated OAuth credentials from `~/.config/chord/auth.yaml`.
+Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml`, orphan state entries whose OAuth credential no longer exists in `auth.yaml`, and matching expired / deactivated / invalidated OAuth credentials from `~/.config/chord/auth.yaml`.
 
 Typical use cases:
 
