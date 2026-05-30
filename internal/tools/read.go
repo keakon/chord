@@ -207,7 +207,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 	lines := splitReadToolLines(decoded.Text)
 	if len(lines) == 0 {
-		return "(empty file)", nil
+		return "(empty content)", nil
 	}
 
 	// Determine offset.
@@ -258,7 +258,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	content := buildReadContent(prefixLines, numberedLines, footer)
 	if content == "" {
-		return "(empty file)", nil
+		return "(empty content)", nil
 	}
 	if !readOutputFitsBudget(content) {
 		content = truncateReadContentToBudget(prefixLines, numberedLines, offset+1, totalLines)

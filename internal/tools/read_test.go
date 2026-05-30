@@ -64,6 +64,23 @@ func TestSplitReadToolLinesNormalizesLineEndings(t *testing.T) {
 	}
 }
 
+func TestReadToolExecuteReportsEmptyContentForEmptyRange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":1,"limit":10}`, path))
+	got, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ReadTool.Execute: %v", err)
+	}
+	if got != "(empty content)" {
+		t.Fatalf("ReadTool.Execute output = %q, want empty content marker", got)
+	}
+}
+
 func TestReadToolExecuteNormalizesCRLFOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sample.csv")
