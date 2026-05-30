@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -74,7 +76,11 @@ func TestStartAtMentionFileLoadIsSingleFlight(t *testing.T) {
 		t.Fatal("atMentionLoaded = false after load completion, want true")
 	}
 	if next := model.startAtMentionFileLoad(); next != nil {
-		t.Fatal("startAtMentionFileLoad() after load completion should be nil")
+		t.Fatal("startAtMentionFileLoad() immediately after load completion should be nil")
+	}
+	model.atMentionLoadedAt = time.Now().Add(-atMentionRefreshTTL)
+	if next := model.startAtMentionFileLoad(); next == nil {
+		t.Fatal("startAtMentionFileLoad() after TTL should return refresh command")
 	}
 }
 
@@ -99,6 +105,49 @@ func TestAtMentionFilesLoadedKeepsBareAtPopupOpen(t *testing.T) {
 	}
 	if model.atMentionList == nil || model.atMentionList.Len() == 0 {
 		t.Fatal("atMentionList should be populated for bare @ after load")
+	}
+}
+
+func TestLoadAtMentionFilesUsesGitTrackedAndUntracked(t *testing.T) {
+	if _, err := gitCommand(context.Background(), ".", "--version"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	wd := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(wd); err != nil {
+		t.Fatalf("Chdir(%q) error = %v", wd, err)
+	}
+	if _, err := gitCommand(context.Background(), wd, "init"); err != nil {
+		t.Fatalf("git init error = %v", err)
+	}
+	mustWriteFile(t, filepath.Join(wd, "tracked.go"), "package main")
+	mustWriteFile(t, filepath.Join(wd, "new.md"), "new")
+	mustWriteFile(t, filepath.Join(wd, "ignored.log"), "ignored")
+	mustWriteFile(t, filepath.Join(wd, "deleted.txt"), "deleted")
+	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "*.log\n")
+	if _, err := gitCommand(context.Background(), wd, "add", "tracked.go", "deleted.txt", ".gitignore"); err != nil {
+		t.Fatalf("git add error = %v", err)
+	}
+	if err := os.Remove(filepath.Join(wd, "deleted.txt")); err != nil {
+		t.Fatalf("Remove(deleted.txt) error = %v", err)
+	}
+
+	loaded := loadAtMentionFileList(atMentionMaxFiles)
+	if !slices.Contains(loaded, "tracked.go") {
+		t.Fatalf("tracked file missing from git preload: %v", loaded)
+	}
+	if !slices.Contains(loaded, "new.md") {
+		t.Fatalf("untracked non-ignored file missing from git preload: %v", loaded)
+	}
+	if slices.Contains(loaded, "ignored.log") {
+		t.Fatalf("ignored file should be excluded from git preload: %v", loaded)
+	}
+	if slices.Contains(loaded, "deleted.txt") {
+		t.Fatalf("deleted tracked file should be excluded from git preload: %v", loaded)
 	}
 }
 
@@ -354,6 +403,48 @@ func TestRefreshAtMentionListPrefersExactIndexedMatchOnly(t *testing.T) {
 	match, _ := item.Value.(atMentionOption)
 	if match.Path != "docs/file.md" || match.IsDir {
 		t.Fatalf("selected match = %+v, want exact docs/file.md file", match)
+	}
+}
+
+func TestRefreshAtMentionListPrefersExactFilesystemMatchOutsideCache(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "new.txt"), "new")
+	mustWriteFile(t, filepath.Join(wd, "new-dir", "child.txt"), "child")
+
+	m := NewModel(nil)
+	m.workingDir = wd
+	m.atMentionLoaded = true
+	m.atMentionFiles = []string{"old.txt"}
+	m.atMentionOpen = true
+	m.atMentionQuery = "new.txt"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want exact filesystem file result")
+	}
+	if got := m.atMentionList.Len(); got != 1 {
+		t.Fatalf("atMentionList.Len() = %d, want 1 exact result", got)
+	}
+	item, ok := m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() ok = false, want true")
+	}
+	match, _ := item.Value.(atMentionOption)
+	if match.Path != "new.txt" || match.IsDir {
+		t.Fatalf("selected match = %+v, want exact new.txt file", match)
+	}
+
+	m.atMentionQuery = "new-dir"
+	m.refreshAtMentionList()
+
+	item, ok = m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() for directory ok = false, want true")
+	}
+	match, _ = item.Value.(atMentionOption)
+	if match.Path != "new-dir/" || !match.IsDir {
+		t.Fatalf("selected directory match = %+v, want exact new-dir/ directory", match)
 	}
 }
 
@@ -649,6 +740,47 @@ func TestAtMentionFileRefsSkipsRemovedComposerReference(t *testing.T) {
 	want := []string{"keep.txt"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestInsertComposerTextReturnsAtMentionLoadCommand(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.atMentionOpen = true
+	m.atMentionLine = 0
+	m.atMentionTriggerCol = 1
+	m.input.SetValue("@")
+	m.input.SetCursorPosition(0, 1)
+
+	cmd := m.insertComposerText("abc")
+	if cmd == nil {
+		t.Fatal("insertComposerText should return at-mention load command when completion is open")
+	}
+	if got := m.atMentionQuery; got != "abc" {
+		t.Fatalf("atMentionQuery = %q, want %q", got, "abc")
+	}
+}
+
+func TestInsertAtMentionSelectionReturnsDirectoryRefreshCommand(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.input.SetValue("@docs")
+	m.input.SetCursorPosition(0, len([]rune("@docs")))
+	m.atMentionOpen = true
+	m.atMentionLine = 0
+	m.atMentionTriggerCol = 1
+	m.atMentionQuery = "docs"
+	m.atMentionList = NewOverlayList([]OverlayListItem{{
+		Label: "docs/",
+		Value: atMentionOption{Path: "docs/", IsDir: true},
+	}}, 10)
+
+	cmd := m.insertAtMentionSelection()
+	if cmd == nil {
+		t.Fatal("directory selection should return at-mention refresh command")
+	}
+	if got := m.atMentionQuery; got != "docs/" {
+		t.Fatalf("atMentionQuery = %q, want %q", got, "docs/")
 	}
 }
 

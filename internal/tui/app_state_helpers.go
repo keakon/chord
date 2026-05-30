@@ -81,6 +81,7 @@ type completionState struct {
 	atMentionQuery      string
 	atMentionLoaded     bool
 	atMentionLoading    bool
+	atMentionLoadedAt   time.Time
 	atMentionFiles      []string
 	atMentionList       *OverlayList
 

@@ -111,10 +111,10 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		case key == "tab", keyMatches(key, m.keyMap.InsertSubmit):
 			if m.atMentionList != nil && m.atMentionList.Len() > 0 {
-				m.insertAtMentionSelection()
+				cmd := m.insertAtMentionSelection()
 				m.input.syncHeight()
 				m.recalcViewportSize()
-				return nil
+				return cmd
 			}
 			m.closeAtMention()
 			m.recalcViewportSize()
@@ -142,10 +142,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 
 	if m.input.ProtectInlinePastesOnKey(msg) {
 		m.recalcViewportSize()
-		if m.atMentionOpen {
-			m.syncAtMentionQuery()
-		}
-		return nil
+		return m.syncAtMentionIfOpen()
 	}
 
 	switch {
@@ -165,7 +162,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.input.syncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
-				m.syncAtMentionQuery()
+				return m.syncAtMentionQuery()
 			}
 			return nil
 		}
@@ -173,7 +170,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
-			m.syncAtMentionQuery()
+			return tea.Batch(cmd, m.syncAtMentionQuery())
 		}
 		return cmd
 
@@ -183,7 +180,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.input.syncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
-				m.syncAtMentionQuery()
+				return m.syncAtMentionQuery()
 			}
 			return nil
 		}
@@ -191,7 +188,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
-			m.syncAtMentionQuery()
+			return tea.Batch(cmd, m.syncAtMentionQuery())
 		}
 		return cmd
 
@@ -497,15 +494,14 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				m.atMentionLine = curLine
 				m.atMentionTriggerCol = m.input.Column()
 				m.atMentionQuery = ""
-				m.syncAtMentionQuery()
-				return cmd
+				return tea.Batch(cmd, m.syncAtMentionQuery())
 			}
 		}
 		cmd := m.input.Update(msg)
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
-			m.syncAtMentionQuery()
+			cmd = tea.Batch(cmd, m.syncAtMentionQuery())
 		} else if key == "@" {
 			m.closeAtMention()
 		}

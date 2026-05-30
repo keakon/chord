@@ -18,17 +18,14 @@ type attachmentReadyMsg struct {
 
 func (m *Model) handleAttachmentReadyMsg(msg attachmentReadyMsg) tea.Cmd {
 	if msg.err != nil {
-		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-		return m.enqueueToast(msg.err.Error(), "error")
+		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(msg.err.Error(), "error"))
 	}
 	const maxBytes = 5 * 1024 * 1024
 	if len(m.attachments) >= maxInlineImageAttachments {
-		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-		return m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn")
+		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn"))
 	}
 	if len(msg.attachment.Data) > maxBytes {
-		m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw)
-		return m.enqueueToast("Image exceeds 5 MB limit", "warn")
+		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast("Image exceeds 5 MB limit", "warn"))
 	}
 	m.attachments = append(m.attachments, msg.attachment)
 	m.recalcViewportSize()

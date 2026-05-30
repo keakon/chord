@@ -780,23 +780,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.ClearSelection()
 		if m.input.InsertLargePaste(string(msg)) {
 			m.input.syncHeight()
-			if m.atMentionOpen {
-				m.syncAtMentionQuery()
-			}
+			cmd := m.syncAtMentionIfOpen()
 			m.recalcViewportSize()
-			return m, nil
+			return m, cmd
 		}
-		m.insertComposerText(string(msg))
-		return m, nil
+		return m, m.insertComposerText(string(msg))
 
 	case atMentionFilesLoadedMsg:
 		m.atMentionFiles = msg.files
 		m.atMentionLoaded = true
+		m.atMentionLoadedAt = time.Now()
 		m.atMentionLoading = false
-		if m.atMentionOpen {
-			m.syncAtMentionQuery()
-		}
-		return m, nil
+		return m, m.syncAtMentionIfOpen()
 
 	// -- terminal resize -------------------------------------------------
 	case tea.BlurMsg:

@@ -2,30 +2,43 @@ package tui
 
 import (
 	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
-func (m *Model) syncAtMentionQuery() {
+func (m *Model) syncAtMentionIfOpen() tea.Cmd {
 	if !m.atMentionOpen {
-		return
+		return nil
+	}
+	return m.syncAtMentionQuery()
+}
+
+func (m *Model) syncAtMentionQuery() tea.Cmd {
+	if !m.atMentionOpen {
+		return nil
 	}
 	line := m.input.Line()
 	col := m.input.Column()
 	if line != m.atMentionLine || col < m.atMentionTriggerCol {
 		m.closeAtMention()
-		return
+		return nil
 	}
 	token, ok := inputTokenAt(m.input.Value(), line, m.atMentionTriggerCol, col)
 	if !ok {
 		m.closeAtMention()
-		return
+		return nil
 	}
 	m.atMentionQuery = token
 	m.refreshAtMentionList()
+	return m.startAtMentionFileLoadIfStale(time.Now())
 }
 
 func (m *Model) refreshAtMentionList() {
 	var matches []atMentionOption
-	if atMentionShouldUsePathMatches(m.atMentionFiles, m.atMentionQuery) {
+	if exact, ok := atMentionExactPathMatch(m.atMentionQuery, m.workingDir); ok {
+		matches = []atMentionOption{exact}
+	} else if atMentionShouldUsePathMatches(m.atMentionFiles, m.atMentionQuery) {
 		matches = atMentionPathMatches(m.atMentionQuery, m.workingDir)
 	} else {
 		if !m.atMentionLoaded || len(m.atMentionFiles) == 0 {
@@ -61,28 +74,28 @@ func (m *Model) closeAtMention() {
 	m.atMentionList = nil
 }
 
-func (m *Model) insertAtMentionSelection() {
+func (m *Model) insertAtMentionSelection() tea.Cmd {
 	if m.atMentionList == nil {
-		return
+		return nil
 	}
 	item, ok := m.atMentionList.SelectedItem()
 	if !ok {
-		return
+		return nil
 	}
 	selection, _ := item.Value.(atMentionOption)
 	if selection.Path == "" {
-		return
+		return nil
 	}
 	value := m.input.Value()
 	line := m.input.Line()
 	lines := strings.Split(value, "\n")
 	if line < 0 || line >= len(lines) {
-		return
+		return nil
 	}
 	rowRunes := []rune(lines[line])
 	cursorCol := min(m.input.Column(), len(rowRunes))
 	if m.atMentionTriggerCol < 0 || m.atMentionTriggerCol > len(rowRunes) {
-		return
+		return nil
 	}
 	prefix := string(rowRunes[:m.atMentionTriggerCol])
 	suffix := string(rowRunes[cursorCol:])
@@ -107,8 +120,8 @@ func (m *Model) insertAtMentionSelection() {
 	if selection.IsDir {
 		m.atMentionOpen = true
 		m.atMentionLine = line
-		m.syncAtMentionQuery()
-		return
+		return m.syncAtMentionQuery()
 	}
 	m.closeAtMention()
+	return nil
 }

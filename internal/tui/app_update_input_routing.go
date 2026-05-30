@@ -110,27 +110,25 @@ func (m *Model) removeAttachmentForInlinePaste(paste inlineLargePaste) {
 	m.input.ReindexInlineImagePlaceholdersAfterRemoval(imageIndex)
 }
 
-func (m *Model) insertComposerText(text string) {
+func (m *Model) insertComposerText(text string) tea.Cmd {
 	m.input.ClearSelection()
 	if !m.input.InsertLargePaste(text) {
 		m.input.InsertStringPreserveInlinePastes(text)
 	}
 	m.input.syncHeight()
-	if m.atMentionOpen {
-		m.syncAtMentionQuery()
-	}
+	cmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
+	return cmd
 }
 
-func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) {
+func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) tea.Cmd {
 	if raw == "" || !m.input.RemoveInlineImagePlaceholderByRaw(raw) {
-		return
+		return nil
 	}
 	m.input.syncHeight()
-	if m.atMentionOpen {
-		m.syncAtMentionQuery()
-	}
+	cmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
+	return cmd
 }
 
 func (m *Model) shouldSuppressDuplicateImagePasteAction(source string) bool {
@@ -169,17 +167,16 @@ func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
 	m.input.ClearSelection()
 	placeholderRaw := imagePlaceholder(len(m.attachments) + 1)
 	m.input.InsertImagePlaceholder(len(m.attachments) + 1)
+	var syncCmd tea.Cmd
 	if pastedText != "" {
-		m.insertComposerText(pastedText)
+		syncCmd = m.insertComposerText(pastedText)
 	} else {
 		m.input.syncHeight()
-		if m.atMentionOpen {
-			m.syncAtMentionQuery()
-		}
+		syncCmd = m.syncAtMentionIfOpen()
 		m.recalcViewportSize()
 	}
 	attach.inlineImagePlaceholderRaw = placeholderRaw
-	return m.handleAttachmentReadyMsg(attach)
+	return tea.Batch(syncCmd, m.handleAttachmentReadyMsg(attach))
 }
 
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
@@ -199,8 +196,7 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 			if strings.TrimSpace(pm.Content) == "" {
 				return pasteTextFromClipboard()
 			}
-			m.insertComposerText(pm.Content)
-			return nil
+			return m.insertComposerText(pm.Content)
 		}
 		return m.input.Update(msg)
 	case ModeConfirm:
