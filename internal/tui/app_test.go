@@ -343,7 +343,7 @@ func TestFinalizeAssistantBlockFlushesDeferredLocalStatusCards(t *testing.T) {
 
 func TestTUIDiagnosticRingBufferKeepsNewestEvents(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	for i := 0; i < maxTUIDiagnosticEvents+5; i++ {
+	for i := range maxTUIDiagnosticEvents + 5 {
 		m.recordTUIDiagnostic("event", "n=%d", i)
 	}
 	events := m.snapshotTUIDiagnosticEvents()
@@ -361,7 +361,7 @@ func TestTUIDiagnosticRingBufferKeepsNewestEvents(t *testing.T) {
 func TestTUIDiagnosticCoalescesConsecutiveIdenticalEvents(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.recordTUIDiagnostic("focus", "gained=true")
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		m.recordTUIDiagnostic("host-redraw-skip", "reason=stream-flush disallowed=true")
 	}
 	m.recordTUIDiagnostic("focus-settle", "generation=1")
@@ -406,7 +406,7 @@ func TestTUIDiagnosticCoalesceDoesNotMergeDifferentDetail(t *testing.T) {
 func TestTUIDiagnosticCoalescesToolCallUpdateLengthChanges(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.recordTUIDiagnostic("focus", "focused=true")
-	for i := 0; i < maxTUIDiagnosticEvents+10; i++ {
+	for i := range maxTUIDiagnosticEvents + 10 {
 		m.recordTUIDiagnostic("tool-call-update", "tool=TodoWrite id=call-1 block=79 len=%d->%d", i, i+1)
 	}
 	m.recordTUIDiagnostic("host-redraw", "reason=scroll-flush")
@@ -488,7 +488,7 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 
 func TestBuildTUIDiagnosticDumpTruncatesHugeRenderedSectionsInMiddle(t *testing.T) {
 	rows := make([]string, 0, 400)
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		rows = append(rows, fmt.Sprintf("%03d line-%03d", i+1, i))
 	}
 	content := strings.Join(rows, "\n")
@@ -1492,8 +1492,8 @@ func TestRenderStatusBarCentersActivityAwayFromPath(t *testing.T) {
 
 	got := stripANSI(m.renderStatusBar())
 	path := displayWorkingDir(m.workingDir)
-	pathIdx := strings.Index(got, path)
-	if pathIdx < 0 {
+	found := strings.Contains(got, path)
+	if !found {
 		t.Fatalf("status bar should include path %q; got %q", path, got)
 	}
 	if strings.Contains(got, statusBarActivityPathGap+path) {
@@ -1970,7 +1970,7 @@ func TestMouseWheelScrollTriggersInlineImageRefresh(t *testing.T) {
 			Data:     makeTestPNG(t),
 		}},
 	})
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		m.viewport.AppendBlock(&Block{ID: 2 + i, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
 
@@ -2009,7 +2009,7 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeInsert
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
 	m.layout = m.generateLayout(m.width, m.height)
@@ -2040,7 +2040,7 @@ func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
 	m.layout = m.generateLayout(m.width, m.height)
@@ -2071,7 +2071,7 @@ func TestConfirmDialogArrowKeysScrollViewport(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
 	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
 	m.layout = m.generateLayout(m.width, m.height)
@@ -7225,9 +7225,9 @@ func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
 	startCol := -1
 	for i, line := range lines {
 		plain := stripANSI(line)
-		if idx := strings.Index(plain, "app_id/app_secret"); idx >= 0 {
+		if before, _, ok := strings.Cut(plain, "app_id/app_secret"); ok {
 			target = i
-			startCol = ansi.StringWidth(plain[:idx])
+			startCol = ansi.StringWidth(before)
 			break
 		}
 	}

@@ -271,7 +271,7 @@ func TestMCPSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
 
 func TestMCPSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	rows := make([]agent.MCPServerDisplay, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		rows = append(rows, agent.MCPServerDisplay{
 			Name:   fmt.Sprintf("srv-%02d", i),
 			Manual: true,

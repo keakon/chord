@@ -116,8 +116,8 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 // isExcludedPath returns true if the path is inside a skipped directory
 // (VCS or tool data directories) or is one itself.
 func isExcludedPath(p string) bool {
-	parts := strings.Split(p, "/")
-	for _, part := range parts {
+	parts := strings.SplitSeq(p, "/")
+	for part := range parts {
 		if skipDirNames[part] {
 			return true
 		}

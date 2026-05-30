@@ -491,7 +491,7 @@ func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string 
 
 	var pen uv.Style
 	var link uv.Link
-	for y := 0; y < height; y++ {
+	for y := range height {
 		line := scr.Line(y)
 		renderFullFrameLine(&b, line, width, &pen, &link)
 		if y < height-1 {

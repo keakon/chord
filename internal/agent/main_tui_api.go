@@ -136,13 +136,13 @@ func (a *MainAgent) SendUserMessage(content string) {
 
 // SendUserMessageWithParts enqueues a multi-part user message (text + images).
 func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
-	var content string
+	var content strings.Builder
 	for _, part := range parts {
 		if part.Type == "text" {
-			content += part.Text
+			content.WriteString(part.Text)
 		}
 	}
-	if isTUILocalOnlySlashCommand(content) {
+	if isTUILocalOnlySlashCommand(content.String()) {
 		a.sendEvent(Event{Type: EventUserMessage, Payload: parts})
 		return
 	}

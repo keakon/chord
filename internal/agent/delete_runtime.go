@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/llm"
@@ -80,10 +81,5 @@ func (s *deleteLockSet) Commit(rawResult string) {
 }
 
 func containsDeleteResultPath(paths []string, target string) bool {
-	for _, path := range paths {
-		if path == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, target)
 }

@@ -213,10 +213,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// Determine offset.
 	offset := 0
 	if a.Offset != nil {
-		offset = *a.Offset
-		if offset < 0 {
-			offset = 0
-		}
+		offset = max(*a.Offset, 0)
 		if offset > len(lines) {
 			offset = len(lines)
 		}
@@ -228,10 +225,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		limit = *a.Limit
 	}
 
-	end := offset + limit
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(offset+limit, len(lines))
 
 	selected := lines[offset:end]
 	numberedLines := make([]string, 0, len(selected))

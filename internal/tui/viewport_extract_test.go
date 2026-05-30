@@ -64,9 +64,9 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 	want := "SaveArtifact"
 	for i := range cached {
 		plain, _ := v.GetLinePlain(block.ID, i)
-		if idx := strings.Index(plain, want); idx >= 0 {
+		if before, _, ok := strings.Cut(plain, want); ok {
 			targetLine = i
-			midCol := selectionPlainTextWidth(plain[:idx]) + selectionPlainTextWidth(want)/2
+			midCol := selectionPlainTextWidth(before) + selectionPlainTextWidth(want)/2
 			startCol, endCol = WordBoundsAtCol(plain, midCol)
 			break
 		}
@@ -111,10 +111,10 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	want := "cardBgStyle2 := lipgloss.NewStyle().Background(blockStyle2.GetBackground())"
 	for i, line := range lines {
 		plain := stripANSI(line)
-		idx := strings.Index(plain, want)
-		if idx >= 0 {
+		before, _, ok := strings.Cut(plain, want)
+		if ok {
 			targetLine = i
-			startCol = selectionPlainTextWidth(plain[:idx])
+			startCol = selectionPlainTextWidth(before)
 			endCol = startCol + selectionPlainTextWidth(want)
 			break
 		}

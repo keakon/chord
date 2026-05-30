@@ -130,7 +130,7 @@ func ParseDocument(content string) (*Document, error) {
 				// Extract dependencies.
 				var deps []string
 				if dm := dependsRe.FindStringSubmatch(rest); dm != nil {
-					for _, d := range strings.Split(dm[1], ",") {
+					for d := range strings.SplitSeq(dm[1], ",") {
 						d = strings.TrimSpace(d)
 						if d != "" {
 							deps = append(deps, d)

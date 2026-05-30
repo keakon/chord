@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -175,10 +177,8 @@ func (p *RuntimeModelPoolPolicy) ResolveInitialModelRef(agentName string, cfg *c
 	if pool != "" {
 		if picked, ok := p.lastPicked[agentName]; ok {
 			if ref, ok := picked[pool]; ok {
-				for _, m := range models {
-					if m == ref {
-						return ref
-					}
+				if slices.Contains(models, ref) {
+					return ref
 				}
 			}
 		}
@@ -196,9 +196,7 @@ func (p *RuntimeModelPoolPolicy) Overrides() map[string]string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	out := make(map[string]string, len(p.overrides))
-	for k, v := range p.overrides {
-		out[k] = v
-	}
+	maps.Copy(out, p.overrides)
 	return out
 }
 
@@ -313,9 +311,7 @@ func cloneStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(src))
-	for k, v := range src {
-		out[k] = v
-	}
+	maps.Copy(out, src)
 	return out
 }
 

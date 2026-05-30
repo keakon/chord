@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // HelpBinding describes one key binding in the generated help output.
 type HelpBinding struct {
@@ -26,12 +29,7 @@ func keysDisplay(keys []string) string {
 }
 
 func keyBindingContains(keys []string, target string) bool {
-	for _, key := range keys {
-		if key == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(keys, target)
 }
 
 // HelpGroups returns grouped help metadata derived from the active keymap.

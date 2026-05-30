@@ -44,7 +44,7 @@ type ExportedMessage struct {
 	Audit           *message.ToolArgsAudit  `json:"audit,omitempty"`
 	ToolCalls       []ExportedToolCall      `json:"tool_calls,omitempty"`
 	ThinkingBlocks  []message.ThinkingBlock `json:"thinking_blocks,omitempty"`
-	Timestamp       time.Time               `json:"timestamp,omitempty"`
+	Timestamp       time.Time               `json:"timestamp"`
 }
 
 // ExportedToolCall is a simplified tool call representation for export.

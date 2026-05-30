@@ -11,8 +11,7 @@ import (
 )
 
 func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	var calls atomic.Int32
 	exec := NewStreamingToolExecutor(7, ctx, nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
 		calls.Add(1)
@@ -38,8 +37,7 @@ func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
 }
 
 func TestStreamingToolExecutorArgsDriftInvalidates(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
 		return ToolExecutionResult{EffectiveArgsJSON: `{"path":"a"}`, Result: "a"}, nil
 	})
@@ -56,8 +54,7 @@ func TestStreamingToolExecutorArgsDriftInvalidates(t *testing.T) {
 }
 
 func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	completed := make(chan struct{})
 	rollbackStarted := make(chan struct{})
 	releaseRollback := make(chan struct{})
@@ -115,8 +112,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 }
 
 func TestStreamingToolExecutorDiscardSuppressesVisibleResult(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	release := make(chan struct{})
 	events := make(chan AgentEvent, 4)
 	exec := NewStreamingToolExecutor(7, ctx, func(evt AgentEvent) { events <- evt }, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {

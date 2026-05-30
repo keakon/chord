@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -532,9 +533,7 @@ func loadAuthLoginProviders() (map[string]config.ProviderConfig, string, error) 
 	}
 
 	allProviders := make(map[string]config.ProviderConfig, len(effectiveCfg.Providers))
-	for name, providerCfg := range effectiveCfg.Providers {
-		allProviders[name] = providerCfg
-	}
+	maps.Copy(allProviders, effectiveCfg.Providers)
 	return allProviders, effectiveCfg.Proxy, nil
 }
 

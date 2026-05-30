@@ -123,11 +123,11 @@ func trimLeadingWhitespace(s string, n int) string {
 }
 
 func removeTrailingCursorGlyph(s string) string {
-	if strings.HasSuffix(s, " ▌") {
-		return strings.TrimSuffix(s, " ▌")
+	if before, ok := strings.CutSuffix(s, " ▌"); ok {
+		return before
 	}
-	if strings.HasSuffix(s, "▌") {
-		return strings.TrimSuffix(s, "▌")
+	if before, ok := strings.CutSuffix(s, "▌"); ok {
+		return before
 	}
 	return s
 }
@@ -321,8 +321,8 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 		code = ""
 	}
 	closing := strings.Repeat(string(fenceDelim), max(3, fenceLen))
-	if strings.HasSuffix(code, closing) {
-		code = strings.TrimSuffix(code, closing)
+	if before, ok := strings.CutSuffix(code, closing); ok {
+		code = before
 	} else if fence := strings.LastIndex(code, closing); fence >= 0 {
 		code = code[:fence]
 	}

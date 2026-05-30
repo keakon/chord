@@ -40,7 +40,7 @@ func benchmarkAssistantBlock() *Block {
 func benchmarkViewportWithSpill() *Viewport {
 	v := NewViewport(100, 12)
 	v.maxHotBytes = 1024
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		content := strings.Repeat("block ", 180)
 		if i == 9 {
 			content = strings.Repeat("tail ", 40)
@@ -66,7 +66,7 @@ func benchmarkAssistantStreamingBlock() *Block {
 func benchmarkLargeViewport(blocks int) *Viewport {
 	v := NewViewport(100, 24)
 	content := strings.Repeat("long transcript block ", 40)
-	for i := 0; i < blocks; i++ {
+	for i := range blocks {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: content})
 	}
 	v.ScrollToBottom()
@@ -80,7 +80,7 @@ func benchmarkModelForView() Model {
 	m.height = 40
 	m.layout = m.generateLayout(m.width, m.height)
 	m.viewport = NewViewport(m.layout.main.Dx(), m.layout.main.Dy())
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("view render block ", 60)})
 	}
 	m.recalcViewportSize()

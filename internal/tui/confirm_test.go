@@ -456,7 +456,7 @@ func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 		t.Fatalf("deny-reason input should not render a primary prompt, got:\n%s", plain)
 	}
 	var firstCol, secondCol = -1, -1
-	for _, line := range strings.Split(plain, "\n") {
+	for line := range strings.SplitSeq(plain, "\n") {
 		if col := strings.Index(line, "first line"); col >= 0 {
 			firstCol = col
 		}

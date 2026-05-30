@@ -457,7 +457,7 @@ func (m *Model) renderContentViewer() string {
 	innerWidth := contentViewerInnerWidth(width)
 	blank := ViewportLineStyle.Width(width).Render(strings.Repeat(" ", width))
 	rendered := make([]string, 0, height)
-	for i := 0; i < marginY; i++ {
+	for range marginY {
 		rendered = append(rendered, blank)
 	}
 	for i, line := range visible {

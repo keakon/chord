@@ -166,14 +166,14 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T
 	diagnostics := map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {},
 	}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(edited))] = append(diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(edited))], protocol.Diagnostic{
 			Severity: protocol.SeverityWarning,
 			Range:    protocol.Range{Start: protocol.Position{Line: uint32(i), Character: 0}},
 			Message:  fmt.Sprintf("edited warning %d", i),
 		})
 	}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		path := filepath.Join(tmp, fmt.Sprintf("other%d.py", i))
 		diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(path))] = []protocol.Diagnostic{
 			{Severity: protocol.SeverityWarning, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: fmt.Sprintf("other warning %d", i)},
@@ -197,7 +197,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T
 
 func countFormattedDiagnostics(s string) int {
 	count := 0
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.HasPrefix(line, "[E] ") || strings.HasPrefix(line, "[W] ") || strings.HasPrefix(line, "[I] ") || strings.HasPrefix(line, "[H] ") || strings.HasPrefix(line, "[?] ") {
 			count++
 		}
@@ -327,7 +327,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *test
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	diagnostics := map[protocol.DocumentURI][]protocol.Diagnostic{}
-	for i := 0; i < ToolOutputMaxOtherErrorFiles+1; i++ {
+	for i := range ToolOutputMaxOtherErrorFiles + 1 {
 		path := filepath.Join(tmp, fmt.Sprintf("other%d.py", i))
 		diagnostics[protocol.DocumentURI("file://"+filepath.ToSlash(path))] = []protocol.Diagnostic{
 			{Severity: protocol.SeverityInformation, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: fmt.Sprintf("info %d", i)},

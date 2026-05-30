@@ -44,7 +44,7 @@ func (t *LLMTranslator) TranslateChunk(ctx context.Context, targetLang, chunk st
 
 	start := time.Now()
 	var lastErr error
-	for i := 0; i < len(pool); i++ {
+	for i := range pool {
 		idx := (cursor + i) % len(pool)
 		client.SetModelPool(pool, idx)
 		selected := pool[idx]

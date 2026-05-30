@@ -76,7 +76,7 @@ func runSSEMemorySettleTest(t *testing.T, fixture sseBenchFixture, cfg sseMemSet
 func hermeticResponsesLargeSSEFixture() sseBenchFixture {
 	const repeats = 512
 	dataLines := make([]string, 0, repeats*4+1)
-	for i := 0; i < repeats; i++ {
+	for i := range repeats {
 		dataLines = append(dataLines,
 			fmt.Sprintf(`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_%d","status":"in_progress"}}`, i),
 			fmt.Sprintf(`{"type":"response.output_text.delta","output_index":0,"delta":"chunk-%03d-%s"}`, i, strings.Repeat("x", 128)),

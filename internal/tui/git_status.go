@@ -105,10 +105,7 @@ func (m *Model) advanceGitStatusRefreshDelay() {
 		return
 	}
 	maxDelay := m.currentGitStatusMaxInterval()
-	next := m.gitStatus.NextDelay * 2
-	if next > maxDelay {
-		next = maxDelay
-	}
+	next := min(m.gitStatus.NextDelay*2, maxDelay)
 	m.gitStatus.NextDelay = next
 }
 
@@ -284,7 +281,7 @@ func gitCommand(ctx context.Context, workDir string, args ...string) (string, er
 
 func countGitStashEntries(out string) int {
 	count := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) != "" {
 			count++
 		}
@@ -294,7 +291,7 @@ func countGitStashEntries(out string) int {
 
 func parseGitStatusPorcelainV2(out string) gitStatusInfo {
 	var info gitStatusInfo
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimRight(line, "\r")
 		switch {
 		case strings.HasPrefix(line, "# branch.head "):

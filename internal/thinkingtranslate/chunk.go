@@ -63,10 +63,7 @@ func splitIntoChunks(s string, maxChars int) []string {
 				} else {
 					runes := []rune(line)
 					for i := 0; i < len(runes); i += maxChars {
-						j := i + maxChars
-						if j > len(runes) {
-							j = len(runes)
-						}
+						j := min(i+maxChars, len(runes))
 						out = append(out, string(runes[i:j]))
 					}
 				}

@@ -11,7 +11,7 @@ import (
 func benchmarkDeferredStartupModel(b *testing.B, blocks int) *Model {
 	b.Helper()
 	messages := make([]message.Message, 0, blocks)
-	for i := 0; i < blocks; i++ {
+	for i := range blocks {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%04d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}

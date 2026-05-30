@@ -438,7 +438,7 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 	if b.ToolName == "Delete" {
 		displayResult = sanitizeToolDisplayText(displayResult)
 		nonEmpty := 0
-		for _, line := range strings.Split(strings.TrimRight(displayResult, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(displayResult, "\n"), "\n") {
 			if strings.TrimSpace(line) != "" {
 				nonEmpty++
 			}

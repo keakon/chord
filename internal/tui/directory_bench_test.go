@@ -9,7 +9,7 @@ func benchmarkModelForDirectoryView() Model {
 	m := benchmarkModelForView()
 	m.mode = ModeDirectory
 	entries := make([]DirectoryEntry, 0, 32)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		entries = append(entries, DirectoryEntry{BlockIndex: i, Summary: fmt.Sprintf("message summary line %02d", i+1)})
 	}
 	m.dirEntries = entries

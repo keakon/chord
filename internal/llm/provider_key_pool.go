@@ -279,10 +279,7 @@ func (p *ProviderConfig) SetRateLimiter(rpm int) {
 		return
 	}
 
-	burst := rpm / 5
-	if burst < 5 {
-		burst = 5
-	}
+	burst := max(rpm/5, 5)
 	p.limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), burst)
 }
 

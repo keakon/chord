@@ -103,9 +103,9 @@ func splitModelRef(ref string) (providerID, modelID, variant string) {
 		variant = strings.TrimSpace(base[at+1:])
 		base = strings.TrimSpace(base[:at])
 	}
-	if slash := strings.Index(base, "/"); slash >= 0 {
-		providerID = strings.TrimSpace(base[:slash])
-		modelID = strings.TrimSpace(base[slash+1:])
+	if before, after, ok := strings.Cut(base, "/"); ok {
+		providerID = strings.TrimSpace(before)
+		modelID = strings.TrimSpace(after)
 	} else {
 		modelID = base
 	}

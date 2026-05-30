@@ -1648,7 +1648,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	var keyFiles []string
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rel := filepath.Join("pkg", fmt.Sprintf("f%d.txt", i))
 		abs := filepath.Join(projectRoot, rel)
 		if err := os.WriteFile(abs, []byte(strings.Repeat("abcdefghij\n", 2048)), 0o644); err != nil {

@@ -20,8 +20,7 @@ func TestSpeculativeWritePromoteKeepsFile(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"speculative"}`)}
 	if !exec.Start(call) {
@@ -50,8 +49,7 @@ func TestSpeculativeWriteDiscardRemovesNewFile(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"discarded"}`)}
 	if !exec.Start(call) {
@@ -81,8 +79,7 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	call := message.ToolCall{ID: "edit-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"old_string":"before","new_string":"after"}`)}
 	if !exec.Start(call) {
@@ -111,8 +108,7 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	toolReturned := make(chan struct{})
 	releaseExecutor := make(chan struct{})
 	var releaseOnce sync.Once
@@ -153,8 +149,7 @@ func TestSpeculativeWriteDiscardWhileExecutingRetainsConflictUntilRollback(t *te
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.ReadTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	toolReturned := make(chan struct{})
 	releaseExecutor := make(chan struct{})
 	var releaseOnce sync.Once
@@ -242,8 +237,7 @@ func TestSpeculativeDeleteDiscardRestoresDeletedFile(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.DeleteTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	call := message.ToolCall{ID: "delete-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":[` + mustJSONString(t, path) + `],"reason":"test rollback"}`)}
 	if !exec.Start(call) {
@@ -262,8 +256,7 @@ func TestSpeculativeFileMutationConflictSkipsSecondEarlyExecution(t *testing.T) 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	first := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"first"}`)}
 	second := message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"second"}`)}
@@ -288,8 +281,7 @@ func TestSpeculativeReadSkipsDuringUnpromotedFileMutation(t *testing.T) {
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.ReadTool{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
 	write := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"uncommitted"}`)}
 	read := message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)}

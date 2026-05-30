@@ -132,7 +132,7 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t 
 
 	// Seed the row with styled content that should be cleared.
 	styled := uv.Cell{Content: "─", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
-	for x := 0; x < width; x++ {
+	for x := range width {
 		buf.SetCell(x, 0, &styled)
 	}
 
@@ -140,7 +140,7 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t 
 	m.drawCachedRenderableToClearedArea(buf, buf.Bounds(), &cache)
 
 	line := buf.Line(0)
-	for x := 0; x < width; x++ {
+	for x := range width {
 		if !line[x].Equal(&uv.EmptyCell) {
 			t.Fatalf("cell[%d] = %#v, want EmptyCell", x, line[x])
 		}
@@ -154,8 +154,8 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 	buf := uv.NewScreenBuffer(width, height)
 
 	styled := uv.Cell{Content: "X", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			buf.SetCell(x, y, &styled)
 		}
 	}
@@ -171,7 +171,7 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 	}
 	for y := 1; y < height; y++ {
 		row := buf.Line(y)
-		for x := 0; x < width; x++ {
+		for x := range width {
 			if !row[x].Equal(&uv.EmptyCell) {
 				t.Fatalf("cell[%d,%d] = %#v, want EmptyCell", x, y, row[x])
 			}

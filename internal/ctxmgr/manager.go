@@ -380,10 +380,7 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	if budget <= 0 {
 		budget = m.maxTokens
 	}
-	usable := budget - m.inputBudgetReserved
-	if usable < 0 {
-		usable = 0
-	}
+	usable := max(budget-m.inputBudgetReserved, 0)
 	thresholdTokens := 0
 	if m.threshold > 0 && usable > 0 {
 		thresholdTokens = int(m.threshold * float64(usable))

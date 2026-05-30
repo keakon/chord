@@ -404,10 +404,7 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 	const maxTotal = tools.SkillListingMaxTotal
 	const maxEntries = tools.SkillListingMaxEntries
 	intro := "## Available Skills\nThe `Skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `Skill` before proceeding.\n\n"
-	budget := maxTotal - len(intro)
-	if budget < 0 {
-		budget = 0
-	}
+	budget := max(maxTotal-len(intro), 0)
 	shown := 0
 	var sb strings.Builder
 	sb.WriteString(intro)

@@ -933,11 +933,11 @@ func compactionSummaryMarksTodosStale(summary string) bool {
 }
 
 func compactionSummarySection(summary, startMarker, endMarker string) string {
-	start := strings.Index(summary, startMarker)
-	if start < 0 {
+	_, after, ok := strings.Cut(summary, startMarker)
+	if !ok {
 		return ""
 	}
-	section := summary[start+len(startMarker):]
+	section := after
 	if end := strings.Index(section, endMarker); end >= 0 {
 		section = section[:end]
 	}

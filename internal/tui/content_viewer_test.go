@@ -192,7 +192,7 @@ func TestContentViewerTripleClickSelectsLine(t *testing.T) {
 		Y:      m.layout.main.Min.Y + marginY + 2,
 		Button: tea.MouseLeft,
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, handled := m.handleModalMouseMsg(click)
 		if !handled {
 			t.Fatalf("content viewer click %d was not handled", i+1)

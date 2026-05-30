@@ -25,10 +25,7 @@ type statusBarPlacedSegment struct {
 
 func writeStatusBarSpaces(b *strings.Builder, count int) {
 	for count > 0 {
-		chunk := count
-		if chunk > len(statusBarSpacePad) {
-			chunk = len(statusBarSpacePad)
-		}
+		chunk := min(count, len(statusBarSpacePad))
 		b.WriteString(statusBarSpacePad[:chunk])
 		count -= chunk
 	}

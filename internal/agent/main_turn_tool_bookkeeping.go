@@ -409,10 +409,7 @@ func (a *MainAgent) recordToolTraceSpeculativeStart(callID, name string, at time
 	}
 	// If we already have tool_use_end, log speculative start latency.
 	if !trace.ToolUseEndAt.IsZero() {
-		toolUseToStart := at.Sub(trace.ToolUseEndAt)
-		if toolUseToStart < 0 {
-			toolUseToStart = 0
-		}
+		toolUseToStart := max(at.Sub(trace.ToolUseEndAt), 0)
 		log.Debugf("streaming tool speculative start tool=%s call_id=%s agent_id=%s tool_use_end_to_speculative_start_ms=%d", trace.Name, trace.CallID, trace.Agent, toolUseToStart.Milliseconds())
 	}
 	a.toolTrace[callID] = trace
@@ -439,16 +436,10 @@ func (a *MainAgent) recordToolTraceFirstVisibleResult(callID, name string, at ti
 	}
 	// Compute metrics if we have a tool_use_end marker.
 	if !trace.ToolUseEndAt.IsZero() {
-		firstVisible := at.Sub(trace.ToolUseEndAt)
-		if firstVisible < 0 {
-			firstVisible = 0
-		}
+		firstVisible := max(at.Sub(trace.ToolUseEndAt), 0)
 		specStart := time.Duration(0)
 		if !trace.SpeculativeStartAt.IsZero() {
-			specStart = trace.SpeculativeStartAt.Sub(trace.ToolUseEndAt)
-			if specStart < 0 {
-				specStart = 0
-			}
+			specStart = max(trace.SpeculativeStartAt.Sub(trace.ToolUseEndAt), 0)
 		}
 		attrs := []any{
 			"tool", trace.Name,
@@ -481,10 +472,7 @@ func (a *MainAgent) recordToolTraceSpeculativeDiscard(info StreamingToolDiscardI
 	}
 	wasted := time.Duration(0)
 	if info.Started && !info.CompletedAt.IsZero() && !info.StartedAt.IsZero() {
-		wasted = info.CompletedAt.Sub(info.StartedAt)
-		if wasted < 0 {
-			wasted = 0
-		}
+		wasted = max(info.CompletedAt.Sub(info.StartedAt), 0)
 	}
 	log.Debugf("streaming tool speculative discarded tool=%s call_id=%s reason=%s started=%v completed=%v wasted_ms=%d", info.Name, info.CallID, info.Reason, info.Started, info.Completed, wasted.Milliseconds())
 }

@@ -115,7 +115,7 @@ func TestPoolSelectIndexAtUsesListBaseRow(t *testing.T) {
 
 func TestPoolSelectIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	pools := make([]string, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		pools = append(pools, fmt.Sprintf("pool-%02d", i))
 	}
 	backend := &sessionControlAgent{mainModelPoolNames: pools, mainModelPool: pools[0]}

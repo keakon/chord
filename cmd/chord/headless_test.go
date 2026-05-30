@@ -76,8 +76,8 @@ func (t *testOut) drain() []headlessEnvelope {
 	deadline := time.Now().Add(2 * time.Second)
 	var result []headlessEnvelope
 	for {
-		lines := bytes.Split(t.buf.snapshotAndReset(), []byte{'\n'})
-		for _, line := range lines {
+		lines := bytes.SplitSeq(t.buf.snapshotAndReset(), []byte{'\n'})
+		for line := range lines {
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
 				continue
@@ -1606,7 +1606,7 @@ func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 func decodeHeadlessJSONLines(t *testing.T, data []byte) []headlessEnvelope {
 	t.Helper()
 	var envs []headlessEnvelope
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue

@@ -709,7 +709,7 @@ func (c *Client) completeStreamWithRetry(
 			fallbackEnabled,
 			fallbackModels,
 		)
-		for ti := 0; ti < len(targets); ti++ {
+		for ti := range targets {
 			if err := abortIfCancelled(); err != nil {
 				return nil, err
 			}

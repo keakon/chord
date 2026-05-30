@@ -249,7 +249,6 @@ func BenchmarkSSEParseReplay(b *testing.B) {
 			benchmarkSSECorpusScanOnly(b, corpus)
 		})
 		for _, fixture := range corpus.Entries {
-			fixture := fixture
 			b.Run(provider+"/"+fixture.Name+"/full", func(b *testing.B) {
 				benchmarkSSEFixtureFull(b, fixture)
 			})

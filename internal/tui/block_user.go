@@ -21,10 +21,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	contentWidth := innerWidth - 4
-	if contentWidth > maxTextWidth {
-		contentWidth = maxTextWidth
-	}
+	contentWidth := min(innerWidth-4, maxTextWidth)
 
 	argsJSON, _ := json.Marshal(map[string]string{"command": b.UserLocalShellCmd})
 	argsStr := string(argsJSON)
@@ -134,10 +131,7 @@ func (b *Block) renderUserPlain(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	contentWidth := innerWidth - 2
-	if contentWidth > maxTextWidth {
-		contentWidth = maxTextWidth
-	}
+	contentWidth := min(innerWidth-2, maxTextWidth)
 
 	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 {
 		return nil

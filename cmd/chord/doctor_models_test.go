@@ -691,7 +691,6 @@ func TestRunDoctorModelsCanceledReturnsExit130(t *testing.T) {
 
 func TestRunDoctorModelsDoesNotRetryAuthOrClientErrors(t *testing.T) {
 	for _, status := range []int{400, 401, 403} {
-		status := status
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1024,7 +1023,7 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	accessA := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
 	accessB := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: refresh-a
     access: %s
     expires: 32503680000000
@@ -1033,7 +1032,7 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
     access: %s
     expires: 32503680000000
     account_id: acc-b
-`, accessA, accessB)), 0o600); err != nil {
+`, accessA, accessB), 0o600); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -1081,7 +1080,7 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	oldAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
 	siblingAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
 	newAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
     access: %s
     expires: 32503680000000
@@ -1090,7 +1089,7 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
     access: %s
     expires: 32503680000000
     account_id: acc-b
-`, oldAccess, siblingAccess)), 0o600); err != nil {
+`, oldAccess, siblingAccess), 0o600); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)

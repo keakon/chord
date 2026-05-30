@@ -563,10 +563,7 @@ func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		if seconds, err := strconv.Atoi(ra); err == nil {
 			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)
 		} else if t, err := http.ParseTime(ra); err == nil {
-			apiErr.RetryAfter = time.Until(t)
-			if apiErr.RetryAfter < 0 {
-				apiErr.RetryAfter = 0
-			}
+			apiErr.RetryAfter = max(time.Until(t), 0)
 		}
 	}
 	var errResp geminiErrorResponse

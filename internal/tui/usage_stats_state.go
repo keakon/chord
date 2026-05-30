@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -255,12 +256,7 @@ func (m *Model) currentUsageStatsViews() []statsView {
 }
 
 func (m *Model) currentUsageStatsScopeSupports(view statsView) bool {
-	for _, candidate := range m.currentUsageStatsViews() {
-		if candidate == view {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.currentUsageStatsViews(), view)
 }
 
 func (m *Model) usageStatsProjectRoot() string {
@@ -284,10 +280,7 @@ func (m *Model) usageStatsVisibleLines() int {
 }
 
 func (m *Model) usageStatsMaxWidth() int {
-	maxWidth := m.width - 12
-	if maxWidth > 110 {
-		maxWidth = 110
-	}
+	maxWidth := min(m.width-12, 110)
 	if maxWidth < 60 {
 		maxWidth = 60
 	}

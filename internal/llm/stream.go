@@ -127,14 +127,14 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		}
 
 		// Event type line.
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			eventType = after
 			continue
 		}
 
 		// Data line.
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
+		if after, ok := strings.CutPrefix(line, "data: "); ok {
+			data := after
 
 			if cb != nil {
 				progressBytes += int64(len(line) + 1)

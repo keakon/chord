@@ -158,7 +158,7 @@ type compactionHistoryMeta struct {
 	HistoryFile string    `json:"history_file"`
 	Status      string    `json:"status"`
 	ExportedAt  time.Time `json:"exported_at"`
-	AppliedAt   time.Time `json:"applied_at,omitempty"`
+	AppliedAt   time.Time `json:"applied_at"`
 }
 
 const (
@@ -183,10 +183,7 @@ func compactTextSnippet(s string, maxChars int) string {
 	if keepHead < 1 {
 		keepHead = maxChars
 	}
-	keepTail := maxChars - keepHead - len("\n...\n")
-	if keepTail < 0 {
-		keepTail = 0
-	}
+	keepTail := max(maxChars-keepHead-len("\n...\n"), 0)
 	if keepTail == 0 {
 		return strings.TrimSpace(s[:keepHead])
 	}
@@ -249,8 +246,8 @@ func extractDoneRejectedReason(text string) (string, bool) {
 	}
 	prefixes := []string{"Done rejected:", "Done rejected automatically:"}
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			reason := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if after, ok := strings.CutPrefix(trimmed, prefix); ok {
+			reason := strings.TrimSpace(after)
 			return reason, reason != ""
 		}
 	}
@@ -365,7 +362,7 @@ func (a *MainAgent) addEvidenceCandidate(item evidenceItem) {
 	a.evidenceCandidates = append(a.evidenceCandidates, item)
 	if len(a.evidenceCandidates) > 48 {
 		drop := len(a.evidenceCandidates) - 48
-		for i := 0; i < drop; i++ {
+		for i := range drop {
 			delete(a.evidenceCandidateSet, a.evidenceCandidates[i].Key)
 		}
 		a.evidenceCandidates = append([]evidenceItem(nil), a.evidenceCandidates[drop:]...)

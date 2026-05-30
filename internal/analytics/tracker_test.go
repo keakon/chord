@@ -404,14 +404,14 @@ func TestRecord_ConcurrentSafety(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
 			model := "model-a"
 			if id%2 == 0 {
 				model = "model-b"
 			}
-			for j := 0; j < callsPerGoroutine; j++ {
+			for range callsPerGoroutine {
 				tracker.Record(model, cost, message.TokenUsage{
 					InputTokens:  10,
 					OutputTokens: 5,
@@ -457,7 +457,7 @@ func TestRecord_ConcurrentReadsAndWrites(t *testing.T) {
 	wg.Add(iterations * 2) // writers + readers
 
 	// Writers
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		go func() {
 			defer wg.Done()
 			tracker.Record("model-a", cost, message.TokenUsage{
@@ -468,7 +468,7 @@ func TestRecord_ConcurrentReadsAndWrites(t *testing.T) {
 	}
 
 	// Concurrent readers
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		go func() {
 			defer wg.Done()
 			stats := tracker.SessionStats()
@@ -520,7 +520,7 @@ func TestRecord_CostAccumulation(t *testing.T) {
 	}
 
 	// Three calls
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tracker.Record("model-a", cost, message.TokenUsage{
 			InputTokens:      100_000,
 			OutputTokens:     10_000,

@@ -178,7 +178,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		}
 		if q.Question != "" {
 			qText := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
-			for _, line := range strings.Split(qText, "\n") {
+			for line := range strings.SplitSeq(qText, "\n") {
 				for _, wl := range wrapText("    "+line, contentWidth) {
 					result = append(result, paramValStyle.Render(wl))
 				}

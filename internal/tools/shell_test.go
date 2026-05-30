@@ -269,7 +269,7 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 
 func extractBackgroundID(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if after, ok := strings.CutPrefix(line, "id: "); ok {
 			return strings.TrimSpace(after)
 		}
@@ -378,17 +378,15 @@ func TestBashParametersCommandDescription(t *testing.T) {
 func TestCappedWriterConcurrentWriteAndString(t *testing.T) {
 	w := &cappedWriter{maxBytes: 1 << 20}
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 200; j++ {
+	for range 32 {
+		wg.Go(func() {
+			for range 200 {
 				if _, err := w.Write([]byte("abcdef")); err != nil {
 					t.Errorf("Write returned error: %v", err)
 				}
 				_ = w.String()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if got := w.total; got != 32*200*6 {

@@ -311,9 +311,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
 	a.pendingLoopContinuation = nil
-	a.outputWg.Add(1)
-	go func() {
-		defer a.outputWg.Done()
+	a.outputWg.Go(func() {
 		resp, err := a.callLLM(turnCtx, messages)
 		if err != nil {
 			if turnCtx.Err() != nil {
@@ -363,7 +361,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			TurnID:  turnID,
 			Payload: payload,
 		})
-	}()
+	})
 }
 
 func (a *MainAgent) handleCompactionReady(evt Event) {

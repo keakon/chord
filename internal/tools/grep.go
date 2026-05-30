@@ -279,8 +279,8 @@ func matchIncludePattern(name string, pattern string) (bool, error) {
 		if start < end {
 			prefix := pattern[:start]
 			suffix := pattern[end+1:]
-			alternatives := strings.Split(pattern[start+1:end], ",")
-			for _, alt := range alternatives {
+			alternatives := strings.SplitSeq(pattern[start+1:end], ",")
+			for alt := range alternatives {
 				expanded := prefix + strings.TrimSpace(alt) + suffix
 				matched, err := filepath.Match(expanded, name)
 				if err != nil {

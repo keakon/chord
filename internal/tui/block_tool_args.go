@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,9 +34,7 @@ func (b *Block) toolArgsParsed() (keys []string, vals map[string]string) {
 				delete(b.toolArgsCacheVals, k)
 			}
 		}
-		for k, v := range vals {
-			b.toolArgsCacheVals[k] = v
-		}
+		maps.Copy(b.toolArgsCacheVals, vals)
 		vals = b.toolArgsCacheVals
 	}
 	b.toolHeaderCacheToolName = ""
@@ -217,9 +216,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 		return vals
 	}
 	cloned := make(map[string]string, len(vals))
-	for k, v := range vals {
-		cloned[k] = v
-	}
+	maps.Copy(cloned, vals)
 	if path, ok := cloned["path"]; ok {
 		switch b.ToolName {
 		case "Grep", "Glob", "Lsp":

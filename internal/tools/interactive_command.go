@@ -349,7 +349,7 @@ func commandBase(s string) string {
 }
 
 func gitCommitAvoidsEditor(args []string) bool {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		arg := args[i]
 		if arg == "--" {
 			break
@@ -363,8 +363,8 @@ func gitCommitAvoidsEditor(args []string) bool {
 			}
 			continue
 		}
-		if strings.HasPrefix(arg, "--fixup=") {
-			if isNonInteractiveGitFixupValue(strings.TrimPrefix(arg, "--fixup=")) {
+		if after, ok := strings.CutPrefix(arg, "--fixup="); ok {
+			if isNonInteractiveGitFixupValue(after) {
 				return true
 			}
 		}

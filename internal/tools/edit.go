@@ -171,8 +171,8 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altNew string, altCount int, ok bool) {
 	// Only consider a single final "\n" variance.
-	if strings.HasSuffix(oldText, "\n") {
-		altOld = strings.TrimSuffix(oldText, "\n")
+	if before, ok0 := strings.CutSuffix(oldText, "\n"); ok0 {
+		altOld = before
 		if altOld == "" {
 			return "", "", 0, false
 		}

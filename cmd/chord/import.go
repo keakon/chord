@@ -149,10 +149,7 @@ func printImportWarnings(w io.Writer, warnings []string, reportPath string) {
 		return
 	}
 	fmt.Fprintln(w, "Warnings:")
-	shown := len(warnings)
-	if shown > maxImportWarningsShown {
-		shown = maxImportWarningsShown
-	}
+	shown := min(len(warnings), maxImportWarningsShown)
 	for _, warning := range warnings[:shown] {
 		fmt.Fprintf(w, "- %s\n", warning)
 	}

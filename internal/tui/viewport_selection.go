@@ -431,7 +431,7 @@ func sgrSetsBackground(params string) bool {
 		return false
 	}
 	parts := strings.Split(params, ";")
-	for idx := 0; idx < len(parts); idx++ {
+	for idx := range parts {
 		if parts[idx] != "48" {
 			continue
 		}

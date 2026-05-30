@@ -323,10 +323,7 @@ func (m *Model) openRules() tea.Cmd {
 
 // renderRulesList renders the /rules overlay.
 func (m *Model) renderRulesList() string {
-	maxWidth := m.width - 4
-	if maxWidth > 100 {
-		maxWidth = 100
-	}
+	maxWidth := min(m.width-4, 100)
 	if maxWidth < 40 {
 		maxWidth = 40
 	}

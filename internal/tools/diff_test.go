@@ -7,7 +7,7 @@ import (
 
 func TestGenerateUnifiedDiffSummaryCountsFullChangesBeforeTruncation(t *testing.T) {
 	var oldBuilder strings.Builder
-	for i := 0; i < 427; i++ {
+	for range 427 {
 		oldBuilder.WriteString("line old\n")
 	}
 	summary := GenerateUnifiedDiffSummary(oldBuilder.String(), "package tui\n\n// split\n", "confirm.go")

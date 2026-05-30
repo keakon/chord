@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -361,9 +362,7 @@ func (r *Registry) Clone() *Registry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	clone := NewRegistry()
-	for name, t := range r.tools {
-		clone.tools[name] = t
-	}
+	maps.Copy(clone.tools, r.tools)
 	return clone
 }
 

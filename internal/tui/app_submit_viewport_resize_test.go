@@ -70,7 +70,7 @@ func TestViewRecalcsViewportHeightFromLayoutBeforeRender(t *testing.T) {
 	m := NewModelWithSize(backend, 80, termHeight)
 	m.mode = ModeInsert
 
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockUser, Content: strings.Repeat("line ", 12) + fmt.Sprintf("tail-%02d", i)})
 	}
 	m.recalcViewportSize()

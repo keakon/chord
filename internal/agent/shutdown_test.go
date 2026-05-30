@@ -158,8 +158,7 @@ func TestShutdownWaitsForMainLLMEmittersBeforeClosingOutput(t *testing.T) {
 	client := llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "test-provider/test-model")
 
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
+	runCtx := t.Context()
 	runDone := make(chan error, 1)
 	go func() {
 		runDone <- a.Run(runCtx)

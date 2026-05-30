@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1415,13 +1416,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	if !strings.Contains(assessment.Message, "active subagents must finish before completion") {
 		t.Fatalf("assessment.Message = %q, want active-subagent completion guard", assessment.Message)
 	}
-	hasSubagentGuard := false
-	for _, reason := range assessment.Reasons {
-		if reason == "subagents_active" {
-			hasSubagentGuard = true
-			break
-		}
-	}
+	hasSubagentGuard := slices.Contains(assessment.Reasons, "subagents_active")
 	if !hasSubagentGuard {
 		t.Fatalf("assessment.Reasons = %v, want subagents_active", assessment.Reasons)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -219,13 +220,13 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 
 	if result.IsError {
 		// Collect error text.
-		var errText string
+		var errText strings.Builder
 		for _, c := range result.Content {
 			if c.Type == "text" {
-				errText += c.Text
+				errText.WriteString(c.Text)
 			}
 		}
-		return "", fmt.Errorf("mcp tool error: %s", errText)
+		return "", fmt.Errorf("mcp tool error: %s", errText.String())
 	}
 
 	// Concatenate all text content blocks.
@@ -895,9 +896,7 @@ func (m *Manager) Clients() map[string]*Client {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make(map[string]*Client, len(m.clients))
-	for k, v := range m.clients {
-		result[k] = v
-	}
+	maps.Copy(result, m.clients)
 	return result
 }
 

@@ -88,7 +88,7 @@ type TaskHandle struct {
 	Message            string     `json:"message"`
 	PlanTaskRef        string     `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey    string     `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope WriteScope `json:"expected_write_scope,omitempty"`
+	ExpectedWriteScope WriteScope `json:"expected_write_scope"`
 	ScopeConflict      bool       `json:"scope_conflict,omitempty"`
 	SuggestedTaskID    string     `json:"suggested_task_id,omitempty"`
 	SuggestedAgentID   string     `json:"suggested_agent_id,omitempty"`
@@ -125,7 +125,7 @@ type delegateArgs struct {
 	AgentType          string     `json:"agent_type"`
 	PlanTaskRef        string     `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey    string     `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope WriteScope `json:"expected_write_scope,omitempty"`
+	ExpectedWriteScope WriteScope `json:"expected_write_scope"`
 }
 
 func (DelegateTool) Name() string { return NameDelegate }

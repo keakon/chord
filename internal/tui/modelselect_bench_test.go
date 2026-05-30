@@ -9,7 +9,7 @@ func benchmarkModelForPoolSelectDialog() Model {
 	m := benchmarkModelForView()
 	m.mode = ModeModelSelect
 	poolNames := make([]string, 0, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		poolNames = append(poolNames, fmt.Sprintf("pool-%d", i+1))
 	}
 	m.modelSelect = modelSelectState{

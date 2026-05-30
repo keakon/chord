@@ -55,7 +55,7 @@ func loadAtMentionGitFiles(ctx context.Context, workDir string, limit int) ([]st
 	files := make([]string, 0, min(limit, 1024))
 	seen := make(map[string]bool)
 	add := func(out string) {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			if len(files) >= limit {
 				return
 			}
@@ -100,7 +100,7 @@ func skipAtMentionIndexedPath(path string) bool {
 	if path == "" {
 		return true
 	}
-	for _, part := range strings.Split(path, "/") {
+	for part := range strings.SplitSeq(path, "/") {
 		if part == "" || strings.HasPrefix(part, ".") || tools.IsSkippedDirName(part) {
 			return true
 		}

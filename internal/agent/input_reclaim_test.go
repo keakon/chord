@@ -90,7 +90,7 @@ func TestHandleUserMessageWhenBusyDoesNotDropQueuedUserInput(t *testing.T) {
 	if a.turn == nil {
 		t.Fatal("expected active turn after first user message")
 	}
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		a.handleUserMessage(Event{Payload: fmt.Sprintf("queued-%02d", i)})
 	}
 
@@ -113,7 +113,7 @@ func TestHandlePendingDraftUpsertWhenBusyDoesNotDropAtLargeQueueDepth(t *testing
 	if a.turn == nil {
 		t.Fatal("expected active turn after first user message")
 	}
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		a.handleUserMessage(Event{Payload: fmt.Sprintf("queued-%02d", i)})
 	}
 	a.handlePendingDraftUpsert(Event{

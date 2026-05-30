@@ -15,13 +15,13 @@ func SplitRunningModelRef(ref string) (provider, model, variant string) {
 	if ref == "" {
 		return "", "", ""
 	}
-	i := strings.Index(ref, "/")
-	if i < 0 {
+	before, after, ok := strings.Cut(ref, "/")
+	if !ok {
 		m, v := config.ParseModelRef(ref)
 		return "", m, v
 	}
-	provider = ref[:i]
-	rest := ref[i+1:]
+	provider = before
+	rest := after
 	m, v := config.ParseModelRef(rest)
 	return provider, m, v
 }
@@ -47,11 +47,11 @@ func runningModelRefDisplayWidth(provider, model, variant string) int {
 // stripFirstModelPathSegment removes the first '/'-delimited segment from model id
 // (e.g. anthropic/claude-opus-4.6 → claude-opus-4.6).
 func stripFirstModelPathSegment(model string) (newModel string, ok bool) {
-	i := strings.Index(model, "/")
-	if i < 0 {
+	_, after, ok0 := strings.Cut(model, "/")
+	if !ok0 {
 		return model, false
 	}
-	return model[i+1:], true
+	return after, true
 }
 
 // EnsureRefShowsVariant returns ref unchanged if it already has an inline @variant;

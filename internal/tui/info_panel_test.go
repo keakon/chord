@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -515,13 +516,7 @@ func TestRenderInfoPanelUsageShowsReasoningTokens(t *testing.T) {
 		"Think    5.6k",
 	}
 	for _, expected := range want {
-		found := false
-		for _, got := range usageLines {
-			if got == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(usageLines, expected)
 		if !found {
 			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
 		}
@@ -545,13 +540,7 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 		"Cache W  640",
 	}
 	for _, expected := range want {
-		found := false
-		for _, got := range usageLines {
-			if got == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(usageLines, expected)
 		if !found {
 			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
 		}

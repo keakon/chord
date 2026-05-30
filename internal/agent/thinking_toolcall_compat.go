@@ -88,12 +88,12 @@ func parseThinkingToolcalls(reasoning string) []message.ToolCall {
 		}
 
 		// Try to find arguments - either with marker or as raw JSON
-		argIdx := strings.Index(part, argBegin)
+		before, after, ok := strings.Cut(part, argBegin)
 		var header, argsStr string
-		if argIdx >= 0 {
+		if ok {
 			// Standard format: "functions.ToolName:ID <|tool_call_argument_begin|> {JSON}"
-			header = strings.TrimSpace(part[:argIdx])
-			argsStr = strings.TrimSpace(part[argIdx+len(argBegin):])
+			header = strings.TrimSpace(before)
+			argsStr = strings.TrimSpace(after)
 		} else {
 			// Alternative format: try to parse as "functions.ToolName:ID {JSON}"
 			// Find where the JSON starts by looking for { character

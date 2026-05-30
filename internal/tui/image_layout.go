@@ -196,10 +196,7 @@ func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
 	var sb strings.Builder
 	chunk := xkitty.MaxChunkSize
 	for start := 0; start < len(payload); start += chunk {
-		end := start + chunk
-		if end > len(payload) {
-			end = len(payload)
-		}
+		end := min(start+chunk, len(payload))
 		chunkOpts := opts
 		if start > 0 {
 			chunkOpts = []string{"q=2"}

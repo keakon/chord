@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -36,17 +37,17 @@ type Config struct {
 	Commands            map[string]string          `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
 	IMESwitchTarget     string                     `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
 	LogLevel            string                     `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
-	Paths               PathsConfig                `json:"paths,omitempty" yaml:"paths,omitempty"`                               // user-level state/cache/logs path overrides
-	Maintenance         MaintenanceConfig          `json:"maintenance,omitempty" yaml:"maintenance,omitempty"`                   // optional cleanup/status checks
+	Paths               PathsConfig                `json:"paths" yaml:"paths,omitempty"`                                         // user-level state/cache/logs path overrides
+	Maintenance         MaintenanceConfig          `json:"maintenance" yaml:"maintenance,omitempty"`                             // optional cleanup/status checks
 	LSP                 LSPConfig                  `json:"lsp" yaml:"lsp"`                                                       // LSP server config
-	Diagnostics         DiagnosticsConfig          `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`                   // post-tool diagnostics config
+	Diagnostics         DiagnosticsConfig          `json:"diagnostics" yaml:"diagnostics,omitempty"`                             // post-tool diagnostics config
 	MCP                 MCPConfig                  `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
-	Hooks               HookConfig                 `json:"hooks,omitempty" yaml:"hooks,omitempty"`                               // lifecycle hook configs
+	Hooks               HookConfig                 `json:"hooks" yaml:"hooks,omitempty"`                                         // lifecycle hook configs
 	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
 	StreamRetryRounds   int                        `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
 	Proxy               string                     `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
-	WebFetch            WebFetchConfig             `json:"web_fetch,omitempty" yaml:"web_fetch,omitempty"`                       // WebFetch-specific options
-	Worktree            WorktreeConfig             `json:"worktree,omitempty" yaml:"worktree,omitempty"`                         // git worktree integration options
+	WebFetch            WebFetchConfig             `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
+	Worktree            WorktreeConfig             `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
 	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
 }
 
@@ -363,12 +364,7 @@ func (m *ModelConfig) SupportsInput(modality string) bool {
 	if m.Modalities == nil {
 		return modality == "text" || modality == "image"
 	}
-	for _, v := range m.Modalities.Input {
-		if v == modality {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.Modalities.Input, modality)
 }
 
 func serviceTierSet(rawTiers []ServiceTier) map[ServiceTier]bool {
@@ -734,8 +730,8 @@ func (c *ModelCost) ResolvePricing(billableInputTokens int64, tier ServiceTier) 
 
 // ContextConfig controls automatic context compression behavior.
 type ContextConfig struct {
-	Compaction CompactionConfig       `json:"compaction,omitempty" yaml:"compaction,omitempty"`
-	Reduction  ContextReductionConfig `json:"reduction,omitempty" yaml:"reduction,omitempty"`
+	Compaction CompactionConfig       `json:"compaction" yaml:"compaction,omitempty"`
+	Reduction  ContextReductionConfig `json:"reduction" yaml:"reduction,omitempty"`
 }
 
 // ContextReductionConfig controls request-level context pruning.

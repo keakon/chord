@@ -56,7 +56,7 @@ func TestBuildFilePartsTruncatesLargeFiles(t *testing.T) {
 
 func TestBuildFilePartsWithOptionsHonorsTotalBudget(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		path := filepath.Join(root, fmt.Sprintf("f%d.txt", i))
 		if err := os.WriteFile(path, []byte(strings.Repeat("abcdefghij\n", 2048)), 0o644); err != nil {
 			t.Fatalf("WriteFile(%d): %v", i, err)

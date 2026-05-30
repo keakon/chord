@@ -112,10 +112,7 @@ func startupDeferredPageWindowRange(total, start, dir int) (nextStart, nextEnd i
 			return 0, 0, false
 		}
 		nextStart = max(0, start-windowCount)
-		nextEnd = nextStart + windowCount
-		if nextEnd > total {
-			nextEnd = total
-		}
+		nextEnd = min(nextStart+windowCount, total)
 		return nextStart, nextEnd, true
 	case dir > 0:
 		if start+windowCount >= total {
@@ -125,10 +122,7 @@ func startupDeferredPageWindowRange(total, start, dir int) (nextStart, nextEnd i
 		if nextStart > total-windowCount {
 			nextStart = max(0, total-windowCount)
 		}
-		nextEnd = nextStart + windowCount
-		if nextEnd > total {
-			nextEnd = total
-		}
+		nextEnd = min(nextStart+windowCount, total)
 		return nextStart, nextEnd, true
 	default:
 		return 0, 0, false

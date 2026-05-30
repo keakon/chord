@@ -13,7 +13,7 @@ func benchmarkModelForSessionSelectDialog() Model {
 	m.mode = ModeSessionSelect
 	options := make([]agent.SessionSummary, 0, 18)
 	baseTime := time.Date(2026, 4, 7, 12, 0, 0, 0, time.Local)
-	for i := 0; i < 18; i++ {
+	for i := range 18 {
 		options = append(options, agent.SessionSummary{
 			ID:               fmt.Sprintf("sess-%02d", i+1),
 			FirstUserMessage: fmt.Sprintf("session preview line %02d", i+1),

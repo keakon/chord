@@ -6,6 +6,7 @@ import (
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +31,7 @@ type DurableTaskRecord struct {
 	TaskDesc             string              `json:"task_desc,omitempty"`
 	PlanTaskRef          string              `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey      string              `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope   tools.WriteScope    `json:"expected_write_scope,omitempty"`
+	ExpectedWriteScope   tools.WriteScope    `json:"expected_write_scope"`
 	OwnerAgentID         string              `json:"owner_agent_id,omitempty"`
 	OwnerTaskID          string              `json:"owner_task_id,omitempty"`
 	Depth                int                 `json:"depth,omitempty"`
@@ -50,8 +51,8 @@ type DurableTaskRecord struct {
 	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
 	CreatedTurn          uint64              `json:"created_turn,omitempty"`
 	LastUpdatedTurn      uint64              `json:"last_updated_turn,omitempty"`
-	CreatedAt            time.Time           `json:"created_at,omitempty"`
-	UpdatedAt            time.Time           `json:"updated_at,omitempty"`
+	CreatedAt            time.Time           `json:"created_at"`
+	UpdatedAt            time.Time           `json:"updated_at"`
 	ClosedReason         string              `json:"closed_reason,omitempty"`
 }
 
@@ -296,10 +297,8 @@ func writeScopesOverlap(a, b tools.WriteScope) bool {
 		}
 	}
 	for _, ma := range a.Modules {
-		for _, mb := range b.Modules {
-			if ma == mb {
-				return true
-			}
+		if slices.Contains(b.Modules, ma) {
+			return true
 		}
 	}
 	return false

@@ -63,7 +63,7 @@ func extractReviewFilePaths(args json.RawMessage) []string {
 func parseDeleteReviewResult(text string) deleteResultGroups {
 	var groups deleteResultGroups
 	currentDeleted := false
-	for _, rawLine := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for rawLine := range strings.SplitSeq(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(rawLine)
 		switch {
 		case line == "Deleted:" || line == "Deleted (0):":

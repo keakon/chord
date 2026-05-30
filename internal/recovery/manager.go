@@ -62,7 +62,7 @@ type BackgroundObjectState struct {
 	StartedAt     time.Time `json:"started_at"`
 	MaxRuntimeSec int       `json:"max_runtime_sec,omitempty"`
 	Status        string    `json:"status"`
-	FinishedAt    time.Time `json:"finished_at,omitempty"`
+	FinishedAt    time.Time `json:"finished_at"`
 }
 
 // TodoState represents the persisted state of a single todo item.

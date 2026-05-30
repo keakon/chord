@@ -35,7 +35,7 @@ func wrapLiteralText(text string, width int) []string {
 		return []string{""}
 	}
 	var result []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if line == "" {
 			result = append(result, "")
 			continue
@@ -60,7 +60,7 @@ func wrapIndentedText(text string, width int) []string {
 		return []string{""}
 	}
 	var result []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if line == "" {
 			result = append(result, "")
 			continue
@@ -90,7 +90,7 @@ func appendQuestionAnswerLines(dst []string, text, firstPrefix, continuationPref
 		width = 80
 	}
 	first := true
-	for _, logicalLine := range strings.Split(text, "\n") {
+	for logicalLine := range strings.SplitSeq(text, "\n") {
 		prefix := continuationPrefix
 		if first {
 			prefix = firstPrefix

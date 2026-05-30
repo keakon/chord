@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -476,23 +477,24 @@ func writeSkillMDWithFM(t *testing.T, path string, fm map[string]any, body strin
 	if fm == nil {
 		fm = make(map[string]any)
 	}
-	data := "---\n"
+	var data strings.Builder
+	data.WriteString("---\n")
 	for k, v := range fm {
 		switch val := v.(type) {
 		case string:
-			data += fmt.Sprintf("%s: %q\n", k, val)
+			data.WriteString(fmt.Sprintf("%s: %q\n", k, val))
 		case []string:
-			data += k + ":\n"
+			data.WriteString(k + ":\n")
 			for _, item := range val {
-				data += fmt.Sprintf("  - %q\n", item)
+				data.WriteString(fmt.Sprintf("  - %q\n", item))
 			}
 		default:
-			data += fmt.Sprintf("%s: %v\n", k, v)
+			data.WriteString(fmt.Sprintf("%s: %v\n", k, v))
 		}
 	}
-	data += "---\n"
-	data += body
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+	data.WriteString("---\n")
+	data.WriteString(body)
+	if err := os.WriteFile(path, []byte(data.String()), 0644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

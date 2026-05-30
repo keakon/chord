@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -775,12 +776,7 @@ func normalizePath(path string) string {
 }
 
 func containsString(list []string, target string) bool {
-	for _, item := range list {
-		if item == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, target)
 }
 
 func intValue(v any) (int, bool) {

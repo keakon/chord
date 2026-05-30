@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -20,9 +21,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.toolArgsCacheKeys = append([]string(nil), src.toolArgsCacheKeys...)
 	if len(src.toolArgsCacheVals) > 0 {
 		clone.toolArgsCacheVals = make(map[string]string, len(src.toolArgsCacheVals))
-		for k, v := range src.toolArgsCacheVals {
-			clone.toolArgsCacheVals[k] = v
-		}
+		maps.Copy(clone.toolArgsCacheVals, src.toolArgsCacheVals)
 	}
 	clone.toolHeaderCacheParamLines = append([]string(nil), src.toolHeaderCacheParamLines...)
 	clone.displayWorkingDir = src.displayWorkingDir

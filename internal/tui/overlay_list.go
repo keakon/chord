@@ -193,7 +193,7 @@ func (l *OverlayList) HandleWheel(delta int) bool {
 		return false
 	}
 	if delta > 0 {
-		for i := 0; i < delta; i++ {
+		for range delta {
 			l.CursorDown()
 		}
 	} else {

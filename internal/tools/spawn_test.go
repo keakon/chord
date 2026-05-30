@@ -94,9 +94,9 @@ func TestSpawnUsesDetectedShellExecution(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	var logFile string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "log_file: ") {
-			logFile = strings.TrimSpace(strings.TrimPrefix(line, "log_file: "))
+	for line := range strings.SplitSeq(out, "\n") {
+		if after, ok := strings.CutPrefix(line, "log_file: "); ok {
+			logFile = strings.TrimSpace(after)
 			break
 		}
 	}

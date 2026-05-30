@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -87,7 +88,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   # primary oauth comment
   - refresh: old-refresh
     access: %s
@@ -101,7 +102,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
     expires: %d
     account_id: acc-2
     email: sibling@example.com
-`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires)), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(initial auth): %v", err)
 	}
 
@@ -128,7 +129,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 		},
 	}, "")
 
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   # primary oauth comment
   - refresh: old-refresh
     access: %s
@@ -142,7 +143,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
     expires: %d
     account_id: acc-2
     email: external@example.com
-`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires)), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(latest auth): %v", err)
 	}
 
@@ -299,12 +300,12 @@ func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T)
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
     access: %s
     expires: %d
     account_id: acc-1
-`, access, expires)), 0o600); err != nil {
+`, access, expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -342,11 +343,11 @@ func TestSelectKeyMissingRefreshTokenStillUsesExistingAccessToken(t *testing.T) 
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - access: %s
     expires: %d
     account_id: acc-1
-`, access, expires)), 0o600); err != nil {
+`, access, expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -381,7 +382,7 @@ func TestSelectKeyDoesNotSkipExpiredOAuthTokenBeforeProbe(t *testing.T) {
 	valid := time.Now().Add(time.Hour).UnixMilli()
 	expiredAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
 	validAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2","exp":4102444800}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
     access: %s
     expires: %d
@@ -390,7 +391,7 @@ func TestSelectKeyDoesNotSkipExpiredOAuthTokenBeforeProbe(t *testing.T) {
     access: %s
     expires: %d
     account_id: acc-2
-`, expiredAccess, expired, validAccess, valid)), 0o600); err != nil {
+`, expiredAccess, expired, validAccess, valid), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -451,7 +452,7 @@ func TestSelectKey_MultipleKeys_Sticky(t *testing.T) {
 	p := newTestProviderConfig([]string{"key-a", "key-b", "key-c"})
 
 	// Default strategy is sticky: always returns the same key until it cools down.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		key, _, err := p.SelectKeyWithContext(context.Background())
 		if err != nil {
 			t.Fatalf("call %d: unexpected error: %v", i, err)
@@ -945,7 +946,7 @@ func TestMarkDeactivated_keyNotSelected(t *testing.T) {
 	p := newTestProviderConfig([]string{"key-a", "key-b"})
 	p.MarkDeactivated("key-a")
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		key, _, err := p.SelectKeyWithContext(context.Background())
 		if err != nil {
 			t.Fatalf("SelectKeyWithContext: %v", err)
@@ -1034,17 +1035,15 @@ func TestSelectKey_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan string, 100)
 
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			key, _, err := p.SelectKeyWithContext(context.Background())
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
 			results <- key
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -1089,7 +1088,7 @@ func TestGetRetryDelay(t *testing.T) {
 
 func TestMarkCooldownSaturatesWithoutOverflow(t *testing.T) {
 	p := newTestProviderConfig([]string{"key-a"})
-	for i := 0; i < 80; i++ {
+	for range 80 {
 		p.MarkCooldown("key-a", time.Second)
 	}
 
@@ -1311,7 +1310,7 @@ func TestSelectKey_OnFailure_NoCooldown(t *testing.T) {
 		KeyRotation: config.KeyRotationOnFailure,
 	}, []string{"key-a", "key-b", "key-c"})
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key, _, err := cp.SelectKeyWithContext(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -1588,7 +1587,7 @@ func TestSelectKey_OnFailure_Random(t *testing.T) {
 	}
 
 	// Repeated calls should return the same key (pinned).
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key, _, err := cp.SelectKeyWithContext(context.Background())
 		if err != nil {
 			t.Fatalf("iteration %d: unexpected error: %v", i, err)
@@ -1616,14 +1615,14 @@ func TestSelectKey_OnFailure_RandomInitialization(t *testing.T) {
 	const iterations = 100
 	keyCount := 3
 	keyList := make([]string, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		keyList[i] = fmt.Sprintf("key-%d", i)
 	}
 
 	// Collect first key choices from multiple independent configs
 	firstChoices := make(map[string]int)
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		cp := NewProviderConfig("test", config.ProviderConfig{
 			KeyRotation: config.KeyRotationOnFailure,
 			KeyOrder:    config.KeyOrderRandom,
@@ -1636,11 +1635,8 @@ func TestSelectKey_OnFailure_RandomInitialization(t *testing.T) {
 
 		// Verify it's one of the keys
 		var found bool
-		for _, key := range keyList {
-			if key == first {
-				found = true
-				break
-			}
+		if slices.Contains(keyList, first) {
+			found = true
 		}
 		if !found {
 			t.Errorf("iteration %d: got unknown key %s", i, first)

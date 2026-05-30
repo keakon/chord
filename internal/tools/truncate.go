@@ -121,7 +121,7 @@ func cumulativeSizeOffsets(s string, offs []int, n int) int {
 		return 0
 	}
 	total := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		total += lineByteLen(s, offs, i)
 	}
 	if n > 1 {
@@ -254,34 +254,22 @@ func applyDirectionTruncationOffsets(s string, offs []int, totalLines int, opts 
 
 	switch opts.Direction {
 	case "tail":
-		from := totalLines - opts.MaxLines
-		if from < 0 {
-			from = 0
-		}
+		from := max(totalLines-opts.MaxLines, 0)
 		kept := materializeLineRange(s, offs, from, totalLines)
 		kept = truncateLines(kept)
 		marker := truncationMarker(omitted, savedPath)
 		return append([]string{marker}, kept...)
 
 	case "head":
-		headEnd := opts.MaxLines
-		if headEnd > totalLines {
-			headEnd = totalLines
-		}
+		headEnd := min(opts.MaxLines, totalLines)
 		kept := materializeLineRange(s, offs, 0, headEnd)
 		kept = truncateLines(kept)
 		marker := truncationMarker(omitted, savedPath)
 		return append(kept, marker)
 
 	default: // "head+tail"
-		headCount := opts.MaxLines * 2 / 5
-		if headCount > totalLines {
-			headCount = totalLines
-		}
-		tailCount := opts.MaxLines - headCount
-		if tailCount > totalLines-headCount {
-			tailCount = totalLines - headCount
-		}
+		headCount := min(opts.MaxLines*2/5, totalLines)
+		tailCount := min(opts.MaxLines-headCount, totalLines-headCount)
 
 		head := truncateLines(materializeLineRange(s, offs, 0, headCount))
 		tail := truncateLines(materializeLineRange(s, offs, totalLines-tailCount, totalLines))
@@ -385,34 +373,22 @@ func applyDirectionTruncation(lines []string, totalLines int, opts TruncateOptio
 
 	switch opts.Direction {
 	case "tail":
-		from := totalLines - opts.MaxLines
-		if from < 0 {
-			from = 0
-		}
+		from := max(totalLines-opts.MaxLines, 0)
 		kept := lines[from:]
 		kept = truncateLines(kept)
 		marker := truncationMarker(omitted, savedPath)
 		return append([]string{marker}, kept...)
 
 	case "head":
-		headEnd := opts.MaxLines
-		if headEnd > totalLines {
-			headEnd = totalLines
-		}
+		headEnd := min(opts.MaxLines, totalLines)
 		kept := lines[:headEnd]
 		kept = truncateLines(kept)
 		marker := truncationMarker(omitted, savedPath)
 		return append(kept, marker)
 
 	default: // "head+tail"
-		headCount := opts.MaxLines * 2 / 5
-		if headCount > totalLines {
-			headCount = totalLines
-		}
-		tailCount := opts.MaxLines - headCount
-		if tailCount > totalLines-headCount {
-			tailCount = totalLines - headCount
-		}
+		headCount := min(opts.MaxLines*2/5, totalLines)
+		tailCount := min(opts.MaxLines-headCount, totalLines-headCount)
 
 		head := truncateLines(lines[:headCount])
 		tail := truncateLines(lines[totalLines-tailCount:])

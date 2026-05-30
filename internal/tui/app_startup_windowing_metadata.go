@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"maps"
+	"strings"
+)
 
 func startupDeferredMetaSearchInnerOffset(meta startupDeferredBlockMeta, query string, width int) int {
 	if query == "" || strings.TrimSpace(meta.SearchableText) == "" {
@@ -31,9 +34,7 @@ func cloneLineCounts(src map[int]int) map[int]int {
 		return nil
 	}
 	dst := make(map[int]int, len(src))
-	for width, count := range src {
-		dst[width] = count
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 

@@ -37,7 +37,7 @@ func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
 
 func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	agents := make([]string, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		agents = append(agents, fmt.Sprintf("agent-%02d", i))
 	}
 	backend := &sessionControlAgent{availableAgents: agents}

@@ -78,7 +78,7 @@ func TestManager_Idempotency(t *testing.T) {
 	m := NewManager(backend)
 
 	// Repeated active should not cause multiple acquires.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		m.UpdateActivity("main", ActivityConnecting)
 	}
 	if backend.acquireCount() != 1 {
@@ -213,7 +213,7 @@ func (f *fakeBackend) releaseCount() int32 { return f.releaseCountV.Load() }
 
 // wait waits until the manager's debounce releases.
 func (f *fakeBackend) wait() {
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if !f.Acquired() {
 			return
 		}

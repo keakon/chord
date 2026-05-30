@@ -24,7 +24,7 @@ func (t benchmarkTool) IsReadOnly() bool                                        
 func benchmarkRegistry(size int) (*Registry, []string) {
 	r := NewRegistry()
 	names := make([]string, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		name := fmt.Sprintf("BenchTool%03d", i)
 		names[i] = name
 		r.Register(benchmarkTool{name: name})

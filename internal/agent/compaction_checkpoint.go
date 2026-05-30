@@ -95,7 +95,7 @@ func ensureCompactionSummaryKeyFiles(summary string, keyFiles []string) string {
 	}
 	section := summary[start:end]
 	existing := make(map[string]bool)
-	for _, line := range strings.Split(section, "\n") {
+	for line := range strings.SplitSeq(section, "\n") {
 		if path := normalizeSummaryBulletCandidate(line); path != "" {
 			existing[path] = true
 		}
@@ -177,7 +177,7 @@ func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
 	}
 	seen := make(map[string]bool)
 	var out []string
-	for _, rawLine := range strings.Split(section, "\n") {
+	for rawLine := range strings.SplitSeq(section, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if !strings.HasPrefix(line, "- ") {
 			continue

@@ -48,12 +48,9 @@ func TestWriteInitialConfigFileConcurrentSingleWinner(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(payloads))
 	for _, payload := range payloads {
-		payload := payload
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			errCh <- writeInitialConfigFile(path, payload)
-		}()
+		})
 	}
 	wg.Wait()
 	close(errCh)

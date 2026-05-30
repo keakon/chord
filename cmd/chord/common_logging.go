@@ -47,8 +47,8 @@ func logEffectiveProxy(effectiveProxy string) {
 }
 
 func proxyScheme(proxyURL string) string {
-	if i := strings.Index(proxyURL, "://"); i >= 0 {
-		return proxyURL[:i]
+	if before, _, ok := strings.Cut(proxyURL, "://"); ok {
+		return before
 	}
 	return "unknown"
 }

@@ -118,7 +118,7 @@ func TestRenderScreenBufferFullFrameRoundTripsTrailingSpaces(t *testing.T) {
 
 	roundTrip := newScreenBuffer(5, 1)
 	uv.NewStyledString(out).Draw(roundTrip, roundTrip.Bounds())
-	for x := 0; x < 5; x++ {
+	for x := range 5 {
 		got := roundTrip.Line(0)[x]
 		want := src.Line(0)[x]
 		if !got.Equal(&want) {
@@ -138,7 +138,7 @@ func TestRenderScreenBufferFullFrameRoundTripsWideCells(t *testing.T) {
 
 	roundTrip := newScreenBuffer(6, 1)
 	uv.NewStyledString(out).Draw(roundTrip, roundTrip.Bounds())
-	for x := 0; x < 6; x++ {
+	for x := range 6 {
 		got := roundTrip.Line(0)[x]
 		want := src.Line(0)[x]
 		if !got.Equal(&want) {

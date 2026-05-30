@@ -25,7 +25,7 @@ func TestSpawnFinishedEventUpdatesExistingSpilledStatusBlockAndRecomputesTotalLi
 	// Add enough content after the status card to force it off-screen and spilled.
 	status := &Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "job-7", AgentID: "builder-2"}
 	m.viewport.AppendBlock(status)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		m.viewport.AppendBlock(&Block{ID: 2 + i, Type: BlockAssistant, Content: strings.Repeat("tail ", 40)})
 	}
 	if !status.spillCold {

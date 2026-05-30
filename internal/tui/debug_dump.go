@@ -66,8 +66,8 @@ func tuiDiagnosticCoalesceKey(kind, detail string) string {
 	if kind != "tool-call-update" {
 		return detail
 	}
-	if idx := strings.Index(detail, " len="); idx >= 0 {
-		return detail[:idx]
+	if before, _, ok := strings.Cut(detail, " len="); ok {
+		return before
 	}
 	return detail
 }

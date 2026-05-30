@@ -38,7 +38,7 @@ func saturatingDoublingDuration(base, cap time.Duration, doublings int) time.Dur
 		return base
 	}
 	delay := base
-	for i := 0; i < doublings; i++ {
+	for range doublings {
 		if cap > 0 && delay >= cap {
 			return cap
 		}

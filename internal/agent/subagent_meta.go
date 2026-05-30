@@ -29,7 +29,7 @@ type subAgentMeta struct {
 	LastReplyToMailboxID    string              `json:"last_reply_to_mailbox_id,omitempty"`
 	LastReplyKind           string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary        string              `json:"last_reply_summary,omitempty"`
-	LastArtifact            tools.ArtifactRef   `json:"last_artifact,omitempty"`
+	LastArtifact            tools.ArtifactRef   `json:"last_artifact"`
 	UpdatedAt               time.Time           `json:"updated_at"`
 }
 

@@ -61,8 +61,8 @@ type SessionUsageSummary struct {
 	SessionID                           string                                `json:"session_id"`
 	ProjectID                           string                                `json:"project_id,omitempty"`
 	ProjectPath                         string                                `json:"project_path,omitempty"`
-	CreatedAt                           time.Time                             `json:"created_at,omitempty"`
-	LastUpdatedAt                       time.Time                             `json:"last_updated_at,omitempty"`
+	CreatedAt                           time.Time                             `json:"created_at"`
+	LastUpdatedAt                       time.Time                             `json:"last_updated_at"`
 	LastEventID                         string                                `json:"last_event_id,omitempty"`
 	EventCount                          int64                                 `json:"event_count,omitempty"`
 	Timezone                            string                                `json:"timezone,omitempty"`

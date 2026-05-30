@@ -82,10 +82,7 @@ func UsageSnapshotFromTokenUsage(usage message.TokenUsage) UsageSnapshot {
 
 // NormalizeBillingUsage converts raw provider usage into mutually-exclusive billing buckets.
 func NormalizeBillingUsage(raw UsageSnapshot) BillingUsage {
-	inputTokens := raw.InputTokens - raw.CacheReadTokens
-	if inputTokens < 0 {
-		inputTokens = 0
-	}
+	inputTokens := max(raw.InputTokens-raw.CacheReadTokens, 0)
 	out := BillingUsage{
 		InputTokens:        inputTokens,
 		OutputTokens:       raw.OutputTokens,

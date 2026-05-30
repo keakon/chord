@@ -102,8 +102,8 @@ func (m *Model) sessionSwitchStatusText(maxWidth int) string {
 	iconColor := NeonAccentColor(1800 * time.Millisecond)
 	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(iconColor))
 	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.StatusFg))
-	if strings.HasPrefix(text, "↺ ") {
-		return iconStyle.Render("↺") + " " + textStyle.Render(strings.TrimPrefix(text, "↺ "))
+	if after, ok := strings.CutPrefix(text, "↺ "); ok {
+		return iconStyle.Render("↺") + " " + textStyle.Render(after)
 	}
 	return textStyle.Render(text)
 }

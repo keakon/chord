@@ -95,12 +95,12 @@ func isBlockedDevicePath(path string) bool {
 	if _, ok := blockedDevicePaths[cleaned]; ok {
 		return true
 	}
-	if strings.HasPrefix(cleaned, "/dev/fd/") {
-		fd, err := strconv.Atoi(strings.TrimPrefix(cleaned, "/dev/fd/"))
+	if after, ok := strings.CutPrefix(cleaned, "/dev/fd/"); ok {
+		fd, err := strconv.Atoi(after)
 		return err == nil && fd >= 0 && fd <= 2
 	}
-	if strings.HasPrefix(cleaned, "/proc/") {
-		rel := strings.TrimPrefix(cleaned, "/proc/")
+	if after, ok := strings.CutPrefix(cleaned, "/proc/"); ok {
+		rel := after
 		parts := strings.Split(rel, "/")
 		if len(parts) == 3 && parts[1] == "fd" {
 			fd, fdErr := strconv.Atoi(parts[2])

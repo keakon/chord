@@ -238,8 +238,8 @@ func (a *MainAgent) handleModelsCommand(content string, busy bool) {
 		}
 		return
 	}
-	if strings.HasPrefix(arg, "--agent ") {
-		a.handleModelsSetAgent(strings.TrimSpace(strings.TrimPrefix(arg, "--agent ")))
+	if after, ok := strings.CutPrefix(arg, "--agent "); ok {
+		a.handleModelsSetAgent(strings.TrimSpace(after))
 		if !busy {
 			a.setIdleAndDrainPending()
 		}

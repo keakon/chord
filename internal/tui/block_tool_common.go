@@ -150,8 +150,8 @@ func compactToolPreviewDuplicatesResult(previewLine string, resultLines []string
 		return false
 	}
 	previewValueNorm := ""
-	if idx := strings.Index(previewLine, ":"); idx >= 0 {
-		previewValueNorm = normalizedCompactToolPreviewText(previewLine[idx+1:])
+	if _, after, ok := strings.Cut(previewLine, ":"); ok {
+		previewValueNorm = normalizedCompactToolPreviewText(after)
 	}
 	for _, line := range resultLines {
 		lineNorm := normalizedCompactToolPreviewText(line)
@@ -178,7 +178,7 @@ func toolPlainTextWrappedLineCount(text string, width int, limit int) (count int
 	if text == "" {
 		return 0, false
 	}
-	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(text, "\n"), "\n") {
 		lineCount := len(wrapText(line, width))
 		if lineCount == 0 {
 			lineCount = 1
@@ -376,11 +376,11 @@ func bashErrorBody(content string) string {
 		return ""
 	}
 	const marker = "after output:"
-	idx := strings.Index(trimmed, marker)
-	if idx < 0 {
+	_, after, ok := strings.Cut(trimmed, marker)
+	if !ok {
 		return trimmed
 	}
-	body := strings.TrimSpace(trimmed[idx+len(marker):])
+	body := strings.TrimSpace(after)
 	return body
 }
 
@@ -391,11 +391,11 @@ func bashTimeoutSummary(content string) string {
 	}
 	if strings.Contains(trimmed, "timed out after") {
 		prefix := strings.TrimPrefix(trimmed, "command ")
-		if i := strings.Index(prefix, " after output:"); i >= 0 {
-			return prefix[:i]
+		if before, _, ok := strings.Cut(prefix, " after output:"); ok {
+			return before
 		}
-		if i := strings.Index(prefix, "\n"); i >= 0 {
-			return prefix[:i]
+		if before, _, ok := strings.Cut(prefix, "\n"); ok {
+			return before
 		}
 		return prefix
 	}
@@ -415,7 +415,7 @@ func bashExitCodeFromError(content string) string {
 }
 
 func bashFirstNonEmptyLine(content string) string {
-	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line
@@ -478,7 +478,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		count := 0
-		for _, line := range strings.Split(strings.TrimRight(trimmed, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(trimmed, "\n"), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "(showing first ") {
 				continue
@@ -497,7 +497,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		count := 0
-		for _, line := range strings.Split(strings.TrimRight(trimmed, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(trimmed, "\n"), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "(showing first ") {
 				continue
@@ -745,7 +745,7 @@ func writeEditToolResultExtraVisible(b *Block) bool {
 
 func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 	var out []string
-	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(content, "\n"), "\n") {
 		var st lipgloss.Style
 		if m := lspSeverityRe.FindStringSubmatch(line); len(m) == 2 {
 			switch m[1] {

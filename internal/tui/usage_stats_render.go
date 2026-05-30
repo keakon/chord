@@ -13,10 +13,7 @@ import (
 func (m *Model) renderUsageStatsDialog() string {
 	innerWidth := m.usageStatsInnerWidth()
 	lines := m.usageStatsLines(innerWidth)
-	visible := m.usageStatsVisibleLines()
-	if visible > len(lines) {
-		visible = len(lines)
-	}
+	visible := min(m.usageStatsVisibleLines(), len(lines))
 	start := m.usageStats.scrollOffset
 	if start < 0 {
 		start = 0

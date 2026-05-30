@@ -24,8 +24,8 @@ func resolveCodexUsageURL(apiURL string) (string, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	path := strings.TrimRight(parsed.Path, "/")
-	if idx := strings.Index(path, "/backend-api"); idx >= 0 {
-		parsed.Path = path[:idx] + "/backend-api/wham/usage"
+	if before, _, ok := strings.Cut(path, "/backend-api"); ok {
+		parsed.Path = before + "/backend-api/wham/usage"
 		return parsed.String(), nil
 	}
 	parsed.Path = "/backend-api/wham/usage"

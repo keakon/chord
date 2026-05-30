@@ -9,15 +9,15 @@ func benchmarkOverlay() *Overlay {
 	o := NewOverlay()
 	o.SetActiveRole("builder")
 	base := make(Ruleset, 0, 64)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		base = append(base, Rule{Permission: "Shell", Pattern: fmt.Sprintf("cmd%d *", i), Action: ActionAsk})
 		base = append(base, Rule{Permission: "Read", Pattern: fmt.Sprintf("**/file%d.go", i), Action: ActionAllow})
 	}
 	o.SetBase(base)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		_ = o.AddPersistentRule("builder", Rule{Permission: "Shell", Pattern: fmt.Sprintf("git status %d", i), Action: ActionAllow}, ScopeProject, "project-agent.yaml")
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		o.AddSessionRule("builder", Rule{Permission: "Shell", Pattern: fmt.Sprintf("go test ./pkg%d", i), Action: ActionAllow})
 	}
 	return o

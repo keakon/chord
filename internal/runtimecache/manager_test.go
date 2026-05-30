@@ -110,7 +110,7 @@ func TestCleanupCandidatesKeepsOnlyMostRecentSessions(t *testing.T) {
 
 	oldestDir := ""
 	now := time.Now()
-	for i := 0; i < startupCleanupLimit+1; i++ {
+	for i := range startupCleanupLimit + 1 {
 		sessionID := "session-" + strconv.Itoa(i)
 		handle, err := mgr.OpenSession(projectRoot, sessionID)
 		if err != nil {

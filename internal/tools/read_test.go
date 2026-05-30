@@ -159,7 +159,7 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.txt")
 	var content strings.Builder
-	for i := 0; i < 1200; i++ {
+	for range 1200 {
 		content.WriteString(strings.Repeat("abcdefghij", 8))
 		content.WriteByte('\n')
 	}
@@ -190,7 +190,7 @@ func TestReadToolExecuteAllowsTargetedRangeWithinTokenBudget(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.txt")
 	var content strings.Builder
-	for i := 0; i < 1200; i++ {
+	for range 1200 {
 		content.WriteString(strings.Repeat("abcdefghij", 8))
 		content.WriteByte('\n')
 	}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -407,10 +408,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		iter--
 	}
 	if maxIter > 0 {
-		remaining := maxIter - iter
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(maxIter-iter, 0)
 		sections = append(sections, fmt.Sprintf("Automatic Done interceptions %d of %d (%d remaining).", iter, maxIter, remaining))
 		if remaining <= 2 {
 			sections = append(sections, "Automatic Done interception budget is nearly exhausted — the next failed Done attempts may require explicit user approval or denial.")
@@ -497,11 +495,8 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	if a.hasActiveSubAgents() {
 		instructionLines = append(instructionLines, "- If a subagent appears stuck or blocked, escalate or cancel it rather than waiting indefinitely")
 	}
-	for _, reason := range reasons {
-		if reason == "suspected_stall" {
-			instructionLines = append(instructionLines, "- WARNING: You appear to be stalling. Do NOT summarize, suggest, or analyze again. Execute a concrete step NOW.")
-			break
-		}
+	if slices.Contains(reasons, "suspected_stall") {
+		instructionLines = append(instructionLines, "- WARNING: You appear to be stalling. Do NOT summarize, suggest, or analyze again. Execute a concrete step NOW.")
 	}
 	instructionLines = append(instructionLines, "</loop-continuation>")
 	sections = append(sections, "", "Instruction:")

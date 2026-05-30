@@ -135,7 +135,7 @@ func layoutHelpBlocks(blocks [][]string, contentWidth int) []string {
 	lines := make([]string, 0, maxHeight)
 	for row := 0; row < maxHeight; row++ {
 		var parts []string
-		for col := 0; col < cols; col++ {
+		for col := range cols {
 			line := ""
 			if row < len(columns[col]) {
 				line = columns[col][row]

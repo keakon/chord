@@ -174,8 +174,8 @@ func skillToolBodyFromResult(result string) string {
 	if inner == "" {
 		return ""
 	}
-	if idx := strings.Index(inner, "\n\n"); idx >= 0 {
-		body := strings.TrimSpace(inner[idx+2:])
+	if _, after, ok := strings.Cut(inner, "\n\n"); ok {
+		body := strings.TrimSpace(after)
 		if body != "" {
 			return body
 		}

@@ -636,7 +636,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 	parent.delegation = config.DelegationConfig{MaxChildren: 20, MaxDepth: 2}
 
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{})
 		if err != nil {
 			t.Fatalf("CreateSubAgent(%d): %v", i, err)
@@ -1378,7 +1378,7 @@ func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	sub.setState(SubAgentStateWaitingMain, "need answer")
 	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
 
-	for i := uint64(0); i < waitingMainExpiryUserTurns; i++ {
+	for range waitingMainExpiryUserTurns {
 		a.explicitUserTurnCount++
 	}
 	a.sweepSubAgentLifecycle()

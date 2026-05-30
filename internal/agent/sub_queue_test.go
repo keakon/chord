@@ -1,15 +1,13 @@
 package agent
 
 import (
-	"context"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
 )
 
 func TestSubAgentInputOverflowPreservesOrder(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	sub := &SubAgent{
 		instanceID: "agent-1",
@@ -35,8 +33,7 @@ func TestSubAgentInputOverflowPreservesOrder(t *testing.T) {
 }
 
 func TestSubAgentContextAppendOverflowPreservesOrder(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	sub := &SubAgent{
 		instanceID:  "agent-1",

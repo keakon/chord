@@ -102,10 +102,7 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 		return m.sessionDeleteConfirm.renderCacheText
 	}
 	const maxDialogWidth = 90
-	maxWidth := m.width - 6
-	if maxWidth > maxDialogWidth {
-		maxWidth = maxDialogWidth
-	}
+	maxWidth := min(m.width-6, maxDialogWidth)
 	if maxWidth < 40 {
 		maxWidth = 40
 	}

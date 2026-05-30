@@ -107,7 +107,7 @@ func TestRepairForDisplayClosesOpenFence(t *testing.T) {
 
 func buildStreamingFrontierBenchmarkContent() string {
 	var b strings.Builder
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		b.WriteString("streaming paragraph line that should stay cheap until a blank line arrives\n")
 		if i%8 == 7 {
 			b.WriteByte('\n')

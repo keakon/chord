@@ -385,9 +385,6 @@ func (m *Model) renderImageViewerOverlay() string {
 		lines = append(lines, DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, m.imageViewer.Total)))
 	}
 	body := strings.Join(lines, "\n")
-	width := max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+4, 40)))
-	if width > m.width {
-		width = m.width
-	}
+	width := min(max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+4, 40))), m.width)
 	return DirectoryBorderStyle.Width(width).Render(body)
 }

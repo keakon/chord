@@ -193,7 +193,7 @@ func matchGitIgnorePattern(p gitIgnorePattern, relPath string) bool {
 		}
 		// Also try matching at any directory level.
 		parts := strings.Split(relPath, "/")
-		for i := 0; i < len(parts); i++ {
+		for i := range parts {
 			if matchGitIgnoreSegment(pattern, strings.Join(parts[i:], "/")) {
 				return true
 			}

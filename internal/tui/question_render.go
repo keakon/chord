@@ -69,10 +69,7 @@ func (m *Model) renderQuestionDialog() string {
 	}
 
 	// Cap dialog width for readability.
-	maxWidth := m.width - 6
-	if maxWidth > questionDialogMaxWidth {
-		maxWidth = questionDialogMaxWidth
-	}
+	maxWidth := min(m.width-6, questionDialogMaxWidth)
 	if maxWidth < 40 {
 		maxWidth = 40
 	}
@@ -95,7 +92,7 @@ func (m *Model) renderQuestionDialog() string {
 
 	// Question text — split on <br> and newlines for multi-line display.
 	qRaw := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
-	for _, qLine := range strings.Split(qRaw, "\n") {
+	for qLine := range strings.SplitSeq(qRaw, "\n") {
 		for _, wrapped := range wrapText(qLine, innerWidth-4) {
 			lines = append(lines, QuestionTextStyle.Render(wrapped))
 		}
@@ -202,7 +199,7 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 		available = 10
 	}
 	var lines []string
-	for _, line := range strings.Split(strings.ReplaceAll(description, "<br>", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(description, "<br>", "\n"), "\n") {
 		for _, wrapped := range wrapText(line, available) {
 			lines = append(lines, DimStyle.Render(prefix+wrapped))
 		}

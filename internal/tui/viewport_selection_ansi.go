@@ -7,12 +7,12 @@ import (
 func searchMatchHighlightTokens() (hiOn, hiOff string, ok bool) {
 	const marker = "x"
 	sample := SearchMatchStyle.Render(marker)
-	idx := strings.Index(sample, marker)
-	if idx < 0 {
+	before, after, ok0 := strings.Cut(sample, marker)
+	if !ok0 {
 		return "", "", false
 	}
-	hiOn = sample[:idx]
-	hiOff = sample[idx+len(marker):]
+	hiOn = before
+	hiOff = after
 	if hiOn == "" || hiOff == "" {
 		return "", "", false
 	}

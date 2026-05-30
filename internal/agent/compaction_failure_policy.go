@@ -98,10 +98,7 @@ func (a *MainAgent) recordUsageDrivenCompactionFailureClassified(err error, clas
 		return
 	}
 
-	newUntil := a.nextTurnID + usageDrivenCompactionSuppressTurns
-	if newUntil < state.SuppressedUntilTurn {
-		newUntil = state.SuppressedUntilTurn
-	}
+	newUntil := max(a.nextTurnID+usageDrivenCompactionSuppressTurns, state.SuppressedUntilTurn)
 	state.SuppressedUntilTurn = newUntil
 	a.clearUsageDrivenAutoCompactRequest()
 	a.emitToTUI(ToastEvent{

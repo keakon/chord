@@ -229,10 +229,7 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 
 	timeoutSec := 30
 	if a.Timeout > 0 {
-		timeoutSec = a.Timeout
-		if timeoutSec > 120 {
-			timeoutSec = 120
-		}
+		timeoutSec = min(a.Timeout, 120)
 	}
 
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
@@ -983,23 +980,17 @@ func firstNonEmpty(values ...string) string {
 func finalizeWebFetchResult(meta webFetchResult, extractedBody string, inputTruncated bool) (string, int, bool) {
 	body := extractedBody
 	outputTruncated := false
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		meta.Truncated = truncatedStateLabel(inputTruncated, outputTruncated)
 		meta.ReturnedBodyBytes = len([]byte(body))
 		header := formatWebFetchHeader(meta)
-		available := meta.OutputLimit - len([]byte(header))
-		if available < 0 {
-			available = 0
-		}
+		available := max(meta.OutputLimit-len([]byte(header)), 0)
 		nextBody, nextOutputTruncated := fitBodyToBudget(extractedBody, available)
 		if nextBody == body && nextOutputTruncated == outputTruncated {
 			meta.Truncated = truncatedStateLabel(inputTruncated, nextOutputTruncated)
 			meta.ReturnedBodyBytes = len([]byte(nextBody))
 			finalHeader := formatWebFetchHeader(meta)
-			available = meta.OutputLimit - len([]byte(finalHeader))
-			if available < 0 {
-				available = 0
-			}
+			available = max(meta.OutputLimit-len([]byte(finalHeader)), 0)
 			nextBody, nextOutputTruncated = fitBodyToBudget(extractedBody, available)
 			meta.Truncated = truncatedStateLabel(inputTruncated, nextOutputTruncated)
 			meta.ReturnedBodyBytes = len([]byte(nextBody))
@@ -1012,10 +1003,7 @@ func finalizeWebFetchResult(meta webFetchResult, extractedBody string, inputTrun
 	meta.Truncated = truncatedStateLabel(inputTruncated, outputTruncated)
 	meta.ReturnedBodyBytes = len([]byte(body))
 	finalHeader := formatWebFetchHeader(meta)
-	available := meta.OutputLimit - len([]byte(finalHeader))
-	if available < 0 {
-		available = 0
-	}
+	available := max(meta.OutputLimit-len([]byte(finalHeader)), 0)
 	body, outputTruncated = fitBodyToBudget(extractedBody, available)
 	meta.Truncated = truncatedStateLabel(inputTruncated, outputTruncated)
 	meta.ReturnedBodyBytes = len([]byte(body))

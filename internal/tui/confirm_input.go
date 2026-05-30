@@ -35,10 +35,7 @@ func isConfirmGenericShortcut(key string) bool {
 }
 
 func confirmDialogWidth(totalWidth int) int {
-	maxWidth := totalWidth - 6
-	if maxWidth > confirmDialogMaxWidth {
-		maxWidth = confirmDialogMaxWidth
-	}
+	maxWidth := min(totalWidth-6, confirmDialogMaxWidth)
 	if maxWidth < 40 {
 		maxWidth = 40
 	}

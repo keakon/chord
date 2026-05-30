@@ -11,13 +11,13 @@ func splitProviderModelRef(ref string) (provider, model, variant string) {
 	if ref == "" {
 		return "", "", ""
 	}
-	i := strings.Index(ref, "/")
-	if i < 0 {
+	before, after, ok := strings.Cut(ref, "/")
+	if !ok {
 		m, v := config.ParseModelRef(ref)
 		return "", m, v
 	}
-	provider = ref[:i]
-	m, v := config.ParseModelRef(ref[i+1:])
+	provider = before
+	m, v := config.ParseModelRef(after)
 	return provider, m, v
 }
 

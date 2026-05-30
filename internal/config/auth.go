@@ -68,10 +68,10 @@ type oauthTokenClaims struct {
 	} `json:"organizations,omitempty"`
 	OpenAIAuth struct {
 		ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
-	} `json:"https://api.openai.com/auth,omitempty"`
+	} `json:"https://api.openai.com/auth"`
 	OpenAIProfile struct {
 		Email string `json:"email,omitempty"`
-	} `json:"https://api.openai.com/profile,omitempty"`
+	} `json:"https://api.openai.com/profile"`
 }
 
 func extractOAuthAccountIDFromClaims(claims oauthTokenClaims) string {
@@ -152,7 +152,7 @@ func isRetainedProviderCredential(c ProviderCredential) bool {
 
 // MarshalYAML implements union serialization.
 // OAuth credentials are serialized as a mapping; API keys as a scalar string.
-func (c ProviderCredential) MarshalYAML() (interface{}, error) {
+func (c ProviderCredential) MarshalYAML() (any, error) {
 	if c.OAuth != nil {
 		return c.OAuth, nil
 	}

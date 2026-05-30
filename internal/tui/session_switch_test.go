@@ -254,7 +254,7 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 
 func TestSessionRestoredRebuildSchedulesStartupDeferredTranscriptPreheat(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+32)
-	for i := 0; i < startupTranscriptWindowMinBlocks+32; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 32 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -273,7 +273,7 @@ func TestSessionRestoredRebuildSchedulesStartupDeferredTranscriptPreheat(t *test
 
 func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -323,7 +323,7 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 
 func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 24))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -376,7 +376,7 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 
 func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolPath(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -425,7 +425,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 
 func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -485,7 +485,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 
 func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterialization(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -548,7 +548,7 @@ func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterial
 
 func TestDeferredStartupTranscriptPageUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
-	for i := 0; i < startupTranscriptWindowMinBlocks+140; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -574,7 +574,7 @@ func TestDeferredStartupTranscriptPageUpSwitchesWindowBeforeExactTopOffset(t *te
 
 func TestDeferredStartupTranscriptScrollUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
-	for i := 0; i < startupTranscriptWindowMinBlocks+140; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -600,7 +600,7 @@ func TestDeferredStartupTranscriptScrollUpSwitchesWindowBeforeExactTopOffset(t *
 
 func TestDeferredStartupTranscriptMouseWheelUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
-	for i := 0; i < startupTranscriptWindowMinBlocks+140; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -639,7 +639,7 @@ func TestDeferredStartupTranscriptMouseWheelUpSwitchesWindowBeforeExactTopOffset
 
 func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWheelWindowSwitch(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
-	for i := 0; i < startupTranscriptWindowMinBlocks+140; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -726,7 +726,7 @@ func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWhee
 
 func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -790,7 +790,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 
 func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages, message.Message{
@@ -828,7 +828,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 
 func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+4)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -881,7 +881,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 
 func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
-	for i := 0; i < startupTranscriptWindowMinBlocks+110; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
 	}
 	messages = append(messages,
@@ -953,7 +953,7 @@ func TestEscClearsActiveSearchPillInNormalMode(t *testing.T) {
 
 func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
-	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -995,7 +995,7 @@ func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T
 
 func TestDeferredStartupTranscriptForkKeepsOriginalVisibleMsgIndexAfterSendDraft(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
-	for i := 0; i < startupTranscriptWindowMinBlocks+40; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 40 {
 		if i%2 == 0 {
 			messages = append(messages, message.Message{Role: "user", Content: fmt.Sprintf("user-%03d", i)})
 			continue
@@ -1095,7 +1095,7 @@ func TestHandleInsertKeyRoutesNewSessionCommandViaControlAPI(t *testing.T) {
 func TestHandleAgentEventLoopNoticeNearBottomScrollsToBottom(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 8)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha\n", 2)})
 	}
 	m.viewport.ScrollToBottom()
@@ -2057,7 +2057,7 @@ func TestNewModelShowsStartupResumeStatusAndKeepsInteractionSuppressedUntilResto
 
 func TestStartupRestoredLargeTranscriptUsesWindowedTailUntilHistoryNeeded(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
-	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2103,7 +2103,7 @@ func TestStartupRestoredLargeTranscriptUsesWindowedTailUntilHistoryNeeded(t *tes
 
 func TestDeferredStartupTranscriptLiveAppendOutsideTailKeepsPagingContiguous(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
-	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2163,7 +2163,7 @@ func TestDeferredStartupTranscriptLiveAppendOutsideTailKeepsPagingContiguous(t *
 
 func TestDeferredStartupTranscriptWindowSwitchKeepsStreamingAssistantContent(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
-	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2211,7 +2211,7 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsStreamingAssistantContent(t *
 
 func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
-	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2275,7 +2275,7 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) 
 
 func TestDeferredStartupTranscriptWindowSwitchDoesNotResurrectRolledBackAssistant(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
-	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2312,11 +2312,11 @@ func TestDeferredStartupTranscriptWindowSwitchDoesNotResurrectRolledBackAssistan
 
 func TestFocusedAgentSwitchRebuildsFullTranscriptAfterDeferredStartup(t *testing.T) {
 	mainMessages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
-	for i := 0; i < startupTranscriptWindowMinBlocks+24; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		mainMessages = append(mainMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("main-%03d", i)})
 	}
 	subMessages := make([]message.Message, 0, 70)
-	for i := 0; i < 70; i++ {
+	for i := range 70 {
 		subMessages = append(subMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("sub-%03d", i)})
 	}
 	backend := &sessionControlAgent{
@@ -2335,7 +2335,7 @@ func TestFocusedAgentSwitchRebuildsFullTranscriptAfterDeferredStartup(t *testing
 	if !m.hasDeferredStartupTranscript() {
 		t.Fatal("large startup transcript should remain deferred before focus switch")
 	}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		m.viewport.AppendBlock(&Block{
 			ID:      1000 + i,
 			Type:    BlockAssistant,
@@ -2368,7 +2368,7 @@ func TestFocusedAgentSwitchRebuildsFullTranscriptAfterDeferredStartup(t *testing
 
 func TestDeferredStartupTranscriptCountedJumpBuildsTargetWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2393,7 +2393,7 @@ func TestDeferredStartupTranscriptCountedJumpBuildsTargetWindow(t *testing.T) {
 
 func TestDeferredStartupTranscriptScrollAndPageMoveBetweenWindows(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2430,7 +2430,7 @@ func TestDeferredStartupTranscriptScrollAndPageMoveBetweenWindows(t *testing.T) 
 
 func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2479,7 +2479,7 @@ func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *test
 
 func TestDeferredStartupTranscriptPrevBlockAtTopDoesNotJumpToStaleAnchor(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2511,7 +2511,7 @@ func TestDeferredStartupTranscriptPrevBlockAtTopDoesNotJumpToStaleAnchor(t *test
 
 func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2534,7 +2534,7 @@ func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *test
 	}
 
 	prev := -1
-	for step := 0; step < 140; step++ {
+	for step := range 140 {
 		cmd = m.handleNormalKey(modelSelectKey("j"))
 		applyTestCmd(t, &m, cmd)
 		if m.focusedBlockID < 0 {
@@ -2557,7 +2557,7 @@ func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *test
 
 func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBottom(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
-	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2630,7 +2630,7 @@ func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBo
 
 func TestDeferredStartupTranscriptMouseWheelDownAt197CardTailDoesNotJumpToWindowStart(t *testing.T) {
 	messages := make([]message.Message, 0, 197)
-	for i := 0; i < 197; i++ {
+	for i := range 197 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2683,7 +2683,7 @@ func TestDeferredStartupTranscriptMouseWheelDownAt197CardTailDoesNotJumpToWindow
 
 func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
-	for i := 0; i < startupTranscriptWindowMinBlocks+40; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 40 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2737,7 +2737,7 @@ func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing
 
 func TestDeferredStartupTranscriptCountedPrevNextRemainContiguousAcrossWindows(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2799,7 +2799,7 @@ func TestDeferredStartupTranscriptCountedPrevNextRemainContiguousAcrossWindows(t
 
 func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
-	for i := 0; i < startupTranscriptWindowMinBlocks+120; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2834,7 +2834,7 @@ func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T)
 
 func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBounded(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
-	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -2912,7 +2912,7 @@ func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBou
 
 func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+80)
-	for i := 0; i < startupTranscriptWindowMinBlocks+79; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 79 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	messages = append(messages, message.Message{Role: "assistant", Content: strings.Repeat("tail line\n", 80)})
@@ -2951,7 +2951,7 @@ func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testi
 
 func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
-	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3010,7 +3010,7 @@ func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t
 
 func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTailWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
-	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3032,7 +3032,7 @@ func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTai
 		t.Fatalf("tail window after G = [%d,%d), want [%d,%d)", state.windowStart, state.windowEnd, wantStart, len(messages))
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		m.viewport.ScrollUp(m.viewport.height)
 	}
 	beforeStart, beforeEnd := state.windowStart, state.windowEnd
@@ -3075,7 +3075,7 @@ func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTai
 
 func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
-	for i := 0; i < startupTranscriptWindowMinBlocks+220; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3095,7 +3095,7 @@ func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testin
 
 	theoretical := 0
 	rng := rand.New(rand.NewSource(42))
-	for step := 0; step < 60; step++ {
+	for step := range 60 {
 		count := rng.Intn(180) + 1
 		dir := 1
 		key := "j"
@@ -3127,7 +3127,7 @@ func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testin
 
 func TestDeferredStartupTranscriptCountedNavigationMaintainsWindowInvariant(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+260)
-	for i := 0; i < startupTranscriptWindowMinBlocks+260; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 260 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3160,7 +3160,7 @@ func TestDeferredStartupTranscriptCountedNavigationMaintainsWindowInvariant(t *t
 func TestNormalModeCountedBoundaryNavigationSaturatesAtEdges(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 24)
 	m.mode = ModeNormal
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: fmt.Sprintf("message-%03d", i)})
 	}
 	m.viewport.offset = 0
@@ -3188,7 +3188,7 @@ func TestNormalModeCountedBoundaryNavigationSaturatesAtEdges(t *testing.T) {
 
 func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3227,7 +3227,7 @@ func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
 
 func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3265,7 +3265,7 @@ func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T)
 
 func TestDeferredStartupTranscriptRetentionShrinksViewportHotBudgetUntilHydrate(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 64))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3294,7 +3294,7 @@ func TestDeferredStartupTranscriptRetentionShrinksViewportHotBudgetUntilHydrate(
 
 func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 64))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
@@ -3343,7 +3343,7 @@ func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t
 
 func TestDeferredStartupTranscriptSearchAndDirectorySurviveViewportResize(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
-	for i := 0; i < startupTranscriptWindowMinBlocks+200; i++ {
+	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 48))})
 	}
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}

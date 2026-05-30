@@ -81,7 +81,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	accessA := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`)
 	accessB := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-b","exp":4102444800}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: refresh-a
     access: %s
     expires: 32503680000000
@@ -90,7 +90,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
     access: %s
     expires: 32503680000000
     account_id: acc-b
-`, accessA, accessB)), 0o600); err != nil {
+`, accessA, accessB), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -164,7 +164,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	accessA := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`)
 	accessB := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-b","exp":4102444800}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: refresh-a
     access: %s
     expires: 32503680000000
@@ -173,7 +173,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
     access: %s
     expires: 32503680000000
     account_id: acc-b
-`, accessA, accessB)), 0o600); err != nil {
+`, accessA, accessB), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -449,12 +449,12 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: refresh-token
     access: %s
     expires: 32503680000000
     account_id: acc-1
-`, access)), 0o600); err != nil {
+`, access), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	auth, err := config.LoadAuthConfig(authPath)

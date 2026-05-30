@@ -104,7 +104,7 @@ func parseDeleteHeaderPaths(vals map[string]string) []string {
 				return out
 			}
 		}
-		for _, line := range strings.Split(raw, "\n") {
+		for line := range strings.SplitSeq(raw, "\n") {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
 			if line != "" {
 				return []string{line}

@@ -250,7 +250,7 @@ func TestClient_AllocID_Monotonic(t *testing.T) {
 	client := NewClientWithInfo("test", ft, testClientInfo)
 
 	ids := make(map[int]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id := client.allocID()
 		if ids[id] {
 			t.Fatalf("duplicate ID: %d", id)
@@ -844,12 +844,10 @@ func TestClient_AllocID_Concurrent(t *testing.T) {
 	allIDs := make(map[int]bool)
 	var wg sync.WaitGroup
 
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range goroutines {
+		wg.Go(func() {
 			localIDs := make([]int, 0, idsPerGoroutine)
-			for i := 0; i < idsPerGoroutine; i++ {
+			for range idsPerGoroutine {
 				localIDs = append(localIDs, client.allocID())
 			}
 			mu.Lock()
@@ -860,7 +858,7 @@ func TestClient_AllocID_Concurrent(t *testing.T) {
 				allIDs[id] = true
 			}
 			mu.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()

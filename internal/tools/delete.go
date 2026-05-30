@@ -141,7 +141,7 @@ func ParseDeleteResult(text string) DeleteResultGroups {
 	var groups DeleteResultGroups
 	var current *[]string
 
-	for _, rawLine := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for rawLine := range strings.SplitSeq(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(rawLine)
 		switch line {
 		case "Deleted (0):", "Deleted:":

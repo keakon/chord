@@ -100,9 +100,9 @@ func parseLoopOnCommand(content string) (target string, maxIterations int, maxSe
 		return "Continue and finish all remaining tasks in the current session.", 0, false, nil
 	}
 	const flag = "--max-iterations"
-	if idx := strings.Index(rest, flag); idx >= 0 {
-		before := strings.TrimSpace(rest[:idx])
-		after := strings.TrimSpace(rest[idx+len(flag):])
+	if before, after, ok := strings.Cut(rest, flag); ok {
+		before := strings.TrimSpace(before)
+		after := strings.TrimSpace(after)
 		if after == "" {
 			return "", 0, false, fmt.Errorf("missing value for %s", flag)
 		}

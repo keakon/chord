@@ -386,7 +386,7 @@ func atMentionHiddenSegmentsAllowed(query string) bool {
 	if strings.HasSuffix(normalized, "/.") || strings.HasSuffix(normalized, "/..") {
 		return true
 	}
-	for _, segment := range strings.Split(normalized, "/") {
+	for segment := range strings.SplitSeq(normalized, "/") {
 		if segment == "" || segment == "." || segment == ".." || segment == "~" {
 			continue
 		}
@@ -402,7 +402,7 @@ func atMentionIsHiddenPath(path string) bool {
 	if normalized == "" {
 		return false
 	}
-	for _, segment := range strings.Split(normalized, "/") {
+	for segment := range strings.SplitSeq(normalized, "/") {
 		if segment == "" || segment == "." || segment == ".." || segment == "~" {
 			continue
 		}
@@ -558,15 +558,15 @@ func atMentionSegmentScore(segmentLower, querySeg string) (int, bool) {
 		if strings.HasPrefix(segmentStem, queryStem) {
 			return 25 + stemLengthPenalty, true
 		}
-		if idx := strings.Index(segmentStem, queryStem); idx >= 0 {
-			return 125 + utf8.RuneCountInString(segmentStem[:idx])*25 + stemLengthPenalty, true
+		if before, _, ok := strings.Cut(segmentStem, queryStem); ok {
+			return 125 + utf8.RuneCountInString(before)*25 + stemLengthPenalty, true
 		}
 	}
 	if strings.HasPrefix(segmentLower, querySeg) {
 		return 50 + lengthPenalty, true
 	}
-	if idx := strings.Index(segmentLower, querySeg); idx >= 0 {
-		return 150 + utf8.RuneCountInString(segmentLower[:idx])*20 + lengthPenalty, true
+	if before, _, ok := strings.Cut(segmentLower, querySeg); ok {
+		return 150 + utf8.RuneCountInString(before)*20 + lengthPenalty, true
 	}
 	positions, ok := atMentionSubsequencePositions(segmentLower, querySeg)
 	if !ok {
@@ -644,15 +644,15 @@ func atMentionScoreBasic(fileLower, query string) (int, bool) {
 	if strings.HasPrefix(basename, query) {
 		setBest(-4000 + lengthPenalty)
 	}
-	if idx := strings.Index(basename, query); idx >= 0 {
-		setBest(-3000 + utf8.RuneCountInString(basename[:idx])*20 + lengthPenalty)
+	if before, _, ok := strings.Cut(basename, query); ok {
+		setBest(-3000 + utf8.RuneCountInString(before)*20 + lengthPenalty)
 	}
 	if strings.HasPrefix(fileLower, query) {
 		setBest(-2500 + lengthPenalty)
 	}
-	if idx := strings.Index(fileLower, query); idx >= 0 {
-		score := -2000 + utf8.RuneCountInString(fileLower[:idx])*10 + lengthPenalty
-		if utf8.RuneCountInString(fileLower[:idx]) >= basenameStart {
+	if before, _, ok := strings.Cut(fileLower, query); ok {
+		score := -2000 + utf8.RuneCountInString(before)*10 + lengthPenalty
+		if utf8.RuneCountInString(before) >= basenameStart {
 			score -= 200
 		}
 		setBest(score)

@@ -691,10 +691,7 @@ func (m *Model) renderContextGauge(width int, percent float64) string {
 		return ""
 	}
 	innerWidth := width - 2
-	fullSize := int(float64(innerWidth) * percent)
-	if fullSize > innerWidth {
-		fullSize = innerWidth
-	}
+	fullSize := min(int(float64(innerWidth)*percent), innerWidth)
 	emptySize := innerWidth - fullSize
 
 	style := GaugeFull

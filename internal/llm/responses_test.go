@@ -1657,7 +1657,7 @@ func TestResponsesProvider_CodexWSProtocolCloseDoesNotDisableFutureWebSocketAtte
 		return nil, false, &websocket.CloseError{Code: websocket.ClosePolicyViolation, Text: "parse_failed"}
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		resp, err := r.CompleteStream(
 			context.Background(), "oauth-key", "gpt-5", "system",
 			[]message.Message{{Role: "user", Content: "hello"}},

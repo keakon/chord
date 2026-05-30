@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -263,10 +264,8 @@ func recordClaudeSidechainAgent(stats *ClaudeImportReport, agentID string) {
 	if agentID == "" {
 		return
 	}
-	for _, existing := range stats.SidechainAgentIDs {
-		if existing == agentID {
-			return
-		}
+	if slices.Contains(stats.SidechainAgentIDs, agentID) {
+		return
 	}
 	stats.SidechainAgentIDs = append(stats.SidechainAgentIDs, agentID)
 }
@@ -916,11 +915,4 @@ func parseTombstoneTargetUUID(raw json.RawMessage) string {
 		return strings.TrimSpace(payload.Target.UUID)
 	}
 	return ""
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

@@ -352,7 +352,7 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, p
 		return prepared
 	}
 	limit := min(len(prefix), len(prepared))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		prepared[i] = cloneMessageForRequestShape(prefix[i])
 	}
 	a.setContextReductionStats(stats)
@@ -526,8 +526,8 @@ func compactWebFetchOutputSummary(argsJSON, content string) string {
 }
 
 func stripWebFetchResultHeaders(content string) string {
-	if idx := strings.Index(content, "\n\n"); idx >= 0 {
-		return content[idx+2:]
+	if _, after, ok := strings.Cut(content, "\n\n"); ok {
+		return after
 	}
 	return content
 }
@@ -740,7 +740,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
-	for attempts := 0; attempts < 6; attempts++ {
+	for attempts := range 6 {
 		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(normalized, budget, attempts*512)
 		if len(trimmed) == 0 {
 			continue

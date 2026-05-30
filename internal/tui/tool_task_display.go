@@ -187,8 +187,8 @@ func extractReadableTarget(taskID string) string {
 	if taskID == "" {
 		return ""
 	}
-	if strings.HasPrefix(taskID, "adhoc-") {
-		return strings.TrimPrefix(taskID, "adhoc-")
+	if after, ok := strings.CutPrefix(taskID, "adhoc-"); ok {
+		return after
 	}
 	return taskID
 }

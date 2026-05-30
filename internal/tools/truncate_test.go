@@ -11,7 +11,7 @@ import (
 // generateLines returns n lines joined by "\n", each with format "line-NNNN".
 func generateLines(n int) string {
 	var b strings.Builder
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
@@ -24,7 +24,7 @@ func generateLines(n int) string {
 // lineLen bytes with format "line-NNNN:" followed by 'x' padding.
 func generatePaddedLines(n, lineLen int) string {
 	var b strings.Builder
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte('\n')
 		}

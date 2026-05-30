@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,7 +43,7 @@ type DiagnosticsPayload struct {
 }
 
 // BroadcastFunc is called to send an LSP event (e.g. type + payload for Hub.Broadcast).
-type BroadcastFunc func(eventType string, payload interface{})
+type BroadcastFunc func(eventType string, payload any)
 
 // SidebarStatusPayload is JSON-marshaled for Hub.Broadcast (TUI sidebar).
 type SidebarStatusPayload struct {
@@ -103,7 +104,7 @@ type diagCounts struct {
 // If cfg.LSP is nil or empty, no LSPs are started.
 func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc) *Manager {
 	if broadcast == nil {
-		broadcast = func(string, interface{}) {}
+		broadcast = func(string, any) {}
 	}
 	return &Manager{
 		projectRoot:    projectRoot,
@@ -334,9 +335,7 @@ func (m *Manager) SidebarEntries() []SidebarServerEntry {
 
 	m.startFailMu.Lock()
 	failMap := make(map[string]string, len(m.startFail))
-	for k, v := range m.startFail {
-		failMap[k] = v
-	}
+	maps.Copy(failMap, m.startFail)
 	m.startFailMu.Unlock()
 
 	var out []SidebarServerEntry

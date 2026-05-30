@@ -41,7 +41,7 @@ func TestInputTripleClickSelectsLine(t *testing.T) {
 		Y:      m.layout.input.Min.Y + 1,
 		Button: tea.MouseLeft,
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_ = m.handleMouseMsg(click)
 	}
 

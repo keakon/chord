@@ -205,9 +205,7 @@ func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoc
 	}
 	original := block.Original
 	blockIndex := block.BlockIndex
-	a.outputWg.Add(1)
-	go func() {
-		defer a.outputWg.Done()
+	a.outputWg.Go(func() {
 		trigger, meta := svc.ShouldTranslate(userLang, original)
 		if !trigger {
 			log.Debugf("thinking translation skipped message=%s block=%d reason=%s detected=%s confidence=%.2f latin_ratio=%.2f", messageKey, blockIndex, meta.Reason, meta.DetectedLang, meta.Confidence, meta.LatinRatio)
@@ -240,5 +238,5 @@ func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoc
 			log.Debugf("thinking translation persist failed message=%s block=%d err=%v", messageKey, blockIndex, err)
 		}
 		a.emitToTUI(ThinkingTranslatedEvent{AgentID: "", MessageID: messageKey, BlockIndex: blockIndex, Translated: out, TargetLang: meta.TargetLang})
-	}()
+	})
 }

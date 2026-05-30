@@ -233,7 +233,7 @@ func TestLoadAtMentionFilesIncludesDeeperRepoPaths(t *testing.T) {
 
 func TestLoadAtMentionFilesCapsAtNewLimit(t *testing.T) {
 	wd := t.TempDir()
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		mustWriteFile(t, filepath.Join(wd, "files", fmt.Sprintf("file-%05d.txt", i)), "x")
 	}
 

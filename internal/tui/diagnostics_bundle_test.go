@@ -81,7 +81,7 @@ func TestCollectDiagnosticLogTailFallsBackToRotatedSharedLog(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	rotatedPath := filepath.Join(dir, "chord.log.1")
-	if err := os.WriteFile(rotatedPath, []byte(fmt.Sprintf("[I 2026-05-02 01:52:58 common:1 pwd=%s pid=2 sid=rot-session] rotated\n", baseDir)), 0o644); err != nil {
+	if err := os.WriteFile(rotatedPath, fmt.Appendf(nil, "[I 2026-05-02 01:52:58 common:1 pwd=%s pid=2 sid=rot-session] rotated\n", baseDir), 0o644); err != nil {
 		t.Fatalf("WriteFile(rotated): %v", err)
 	}
 	currentPath := filepath.Join(dir, "chord.log")

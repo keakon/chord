@@ -447,12 +447,12 @@ func TestCollapsedBashDoesNotDuplicateDescriptionInSummary(t *testing.T) {
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// Description "List temp files" should appear in the header line, not
 	// repeated in the summary line.
-	headerIdx := strings.Index(joined, "List temp files")
-	if headerIdx < 0 {
+	_, after, ok := strings.Cut(joined, "List temp files")
+	if !ok {
 		t.Fatalf("expected description in header; got:\n%s", joined)
 	}
 	// Check it does not appear a second time after the header.
-	remainder := joined[headerIdx+len("List temp files"):]
+	remainder := after
 	if strings.Contains(remainder, "List temp files") {
 		t.Fatalf("description should not be duplicated in summary; got:\n%s", joined)
 	}
@@ -1964,12 +1964,12 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 	if emailLine == "" || chatLine == "" {
 		t.Fatalf("expected both option lines, got:\n%s", plain)
 	}
-	emailIdx := strings.Index(emailLine, "1.")
-	chatIdx := strings.Index(chatLine, "2.")
-	if emailIdx < 0 || chatIdx < 0 {
+	emailBefore, _, emailOK := strings.Cut(emailLine, "1.")
+	chatBefore, _, chatOK := strings.Cut(chatLine, "2.")
+	if !emailOK || !chatOK {
 		t.Fatalf("expected option numbers in both lines, got:\n%s", plain)
 	}
-	if got, want := ansi.StringWidth(emailLine[:emailIdx]), ansi.StringWidth(chatLine[:chatIdx]); got != want {
+	if got, want := ansi.StringWidth(emailBefore), ansi.StringWidth(chatBefore); got != want {
 		t.Fatalf("expected option numbers to align, got email=%d chat=%d\n%s", got, want, plain)
 	}
 	if strings.Contains(plain, "↳ Answer:") || strings.Contains(plain, "↳ Answers:") {

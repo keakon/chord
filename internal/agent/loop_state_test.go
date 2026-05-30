@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,13 +38,7 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	if a.loopState.State != LoopStateAssessing {
 		t.Fatalf("loopState.State = %q, want %q", a.loopState.State, LoopStateAssessing)
 	}
-	found := false
-	for _, reason := range assessment.Reasons {
-		if reason == "missing_done_tool" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(assessment.Reasons, "missing_done_tool")
 	if !found {
 		t.Fatalf("assessment.Reasons = %v, want missing_done_tool", assessment.Reasons)
 	}
@@ -76,13 +71,7 @@ Done: allow
 	if !strings.Contains(assessment.Message, "Done") {
 		t.Fatalf("assessment.Message = %q, want Done guard", assessment.Message)
 	}
-	found := false
-	for _, reason := range assessment.Reasons {
-		if reason == "missing_done_tool" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(assessment.Reasons, "missing_done_tool")
 	if !found {
 		t.Fatalf("assessment.Reasons = %v, want missing_done_tool", assessment.Reasons)
 	}
@@ -237,7 +226,7 @@ Read: allow
 
 	call := message.ToolCall{ID: "read-repeat-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		result, err := a.executeToolCall(context.Background(), call)
 		if err == nil {
 			t.Fatalf("attempt %d err = nil, want file-not-found or execution error before interception", i+1)
@@ -285,7 +274,7 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 	}
 
 	call := message.ToolCall{ID: "read-repeat-confirm", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, ok := a.maybeInterceptRepeatedToolCall(context.Background(), call); ok {
 			t.Fatalf("attempt %d intercepted early, want no intercept before third repeated call", i+1)
 		}
@@ -372,7 +361,7 @@ func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
 	}
 
 	call := message.ToolCall{ID: "read-repeat-confirm-approve", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, ok := a.maybeInterceptRepeatedToolCall(context.Background(), call); ok {
 			t.Fatalf("attempt %d intercepted early, want no intercept before third repeated call", i+1)
 		}
@@ -663,8 +652,7 @@ Done: ask
 `),
 	}
 	a.rebuildRuleset()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	reason := "line 1\npath C:\\\\temp\\\"quoted\\\""
 	respCh := make(chan ConfirmResponse, 1)
 	errCh := make(chan error, 1)
@@ -942,13 +930,7 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 	if !strings.Contains(assessment.Message, "active subagents must finish before completion") {
 		t.Fatalf("assessment.Message = %q, want active-subagent completion guard", assessment.Message)
 	}
-	found := false
-	for _, reason := range assessment.Reasons {
-		if reason == "subagents_active" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(assessment.Reasons, "subagents_active")
 	if !found {
 		t.Fatalf("assessment.Reasons = %v, want subagents_active", assessment.Reasons)
 	}
@@ -988,13 +970,7 @@ Read: allow
 	if !strings.Contains(assessment.Message, "Done") || !strings.Contains(assessment.Message, "only tool call") {
 		t.Fatalf("assessment.Message = %q, want Done mixed-batch guidance", assessment.Message)
 	}
-	found := false
-	for _, reason := range assessment.Reasons {
-		if reason == "done_mixed_with_other_tools" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(assessment.Reasons, "done_mixed_with_other_tools")
 	if !found {
 		t.Fatalf("assessment.Reasons = %v, want done_mixed_with_other_tools", assessment.Reasons)
 	}

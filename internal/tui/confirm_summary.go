@@ -657,7 +657,7 @@ func wrapConfirmLiteralText(text string, width int) []string {
 	}
 
 	var result []string
-	for _, rawLine := range strings.Split(text, "\n") {
+	for rawLine := range strings.SplitSeq(text, "\n") {
 		if rawLine == "" {
 			result = append(result, "")
 			continue

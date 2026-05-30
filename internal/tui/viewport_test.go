@@ -125,7 +125,7 @@ func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
 func TestViewportRenderWithBlockStartsCacheMatchesLinearPath(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	v := NewViewport(32, 6)
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("cached render equivalence ", 8)})
 	}
 	_ = v.Render("", nil, -1, -1, "")
@@ -753,9 +753,9 @@ func TestExtractSelectionTextMouseInclusiveEndpointKeepsLastCharacter(t *testing
 	startCol := -1
 	for i, line := range lines {
 		plain := stripANSI(line)
-		if idx := strings.Index(plain, "app_id/app_secret"); idx >= 0 {
+		if before, _, ok := strings.Cut(plain, "app_id/app_secret"); ok {
 			target = i
-			startCol = ansi.StringWidth(plain[:idx])
+			startCol = ansi.StringWidth(before)
 			break
 		}
 	}
@@ -796,9 +796,9 @@ func TestExtractSelectionTextHydratesSpilledBlocks(t *testing.T) {
 	startCol := -1
 	for i, line := range block.Render(v.width, "") {
 		plain := stripANSI(line)
-		if idx := strings.Index(plain, "alpha"); idx >= 0 {
+		if before, _, ok := strings.Cut(plain, "alpha"); ok {
 			lineWithAlpha = i
-			startCol = ansi.StringWidth(plain[:idx])
+			startCol = ansi.StringWidth(before)
 			break
 		}
 	}
@@ -902,7 +902,7 @@ func TestViewportUpdateBlockRecalcForNonLastBlock(t *testing.T) {
 
 func TestViewportScrollDownNoopAtBottomPreservesManualNonStickyState(t *testing.T) {
 	v := NewViewport(20, 4)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("gamma ", 12)})
 	}
 
@@ -966,7 +966,7 @@ func TestVisibleBlocksCacheInvalidatesOnMutationAndFilter(t *testing.T) {
 
 func TestViewportSetSizeKeepsBottomAnchorWhenSticky(t *testing.T) {
 	v := NewViewport(20, 4)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 12)})
 	}
 
@@ -990,7 +990,7 @@ func TestViewportSetSizeKeepsBottomAnchorWhenSticky(t *testing.T) {
 
 func TestViewportSetSizePreservesManualScrollWhenNotSticky(t *testing.T) {
 	v := NewViewport(20, 4)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("beta ", 12)})
 	}
 

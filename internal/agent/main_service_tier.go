@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -91,13 +92,7 @@ func (a *MainAgent) handleTierCommand(content string, busy bool) {
 		return
 	}
 	supported := client.SupportedServiceTiersForModelRef(client.RunningModelRef())
-	supportedTier := false
-	for _, candidate := range supported {
-		if candidate == tier {
-			supportedTier = true
-			break
-		}
-	}
+	supportedTier := slices.Contains(supported, tier)
 	if !supportedTier {
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Service tier %s is not supported by the current model", tier), Level: "error"})
 		if !busy {

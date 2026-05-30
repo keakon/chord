@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,7 +43,7 @@ type AgentConfig struct {
 	DelegationPolicy string           `json:"delegation_policy,omitempty" yaml:"delegation_policy,omitempty"`
 	Permission       yaml.Node        `json:"-" yaml:"permission"`
 	MCP              MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
-	Delegation       DelegationConfig `json:"delegation,omitempty" yaml:"delegation,omitempty"`
+	Delegation       DelegationConfig `json:"delegation" yaml:"delegation,omitempty"`
 	Prompt           string           `json:"-" yaml:"prompt,omitempty"`
 	PromptAlt        string           `json:"-" yaml:"system_prompt,omitempty"`
 	SystemPrompt     string           `json:"-" yaml:"-"`
@@ -197,16 +198,16 @@ func loadMarkdownAgentConfig(path string, data []byte) (*AgentConfig, error) {
 	} else if len(rest) > 1 && rest[0] == '\r' && rest[1] == '\n' {
 		rest = rest[2:]
 	}
-	idx := bytes.Index(rest, []byte("\n---"))
-	if idx < 0 {
+	before, after, ok := bytes.Cut(rest, []byte("\n---"))
+	if !ok {
 		return nil, fmt.Errorf("agent config %s: missing frontmatter closing delimiter", path)
 	}
-	frontmatter := rest[:idx]
+	frontmatter := before
 	if err := yaml.Unmarshal(frontmatter, &cfg); err != nil {
 		return nil, fmt.Errorf("parse agent config frontmatter %s: %w", path, err)
 	}
 	// Everything after the closing "---\n" is the body.
-	bodyRaw := rest[idx+4:] // skip "\n---"
+	bodyRaw := after // skip "\n---"
 	if len(bodyRaw) > 0 && bodyRaw[0] == '\n' {
 		bodyRaw = bodyRaw[1:]
 	} else if len(bodyRaw) > 1 && bodyRaw[0] == '\r' && bodyRaw[1] == '\n' {
@@ -397,18 +398,14 @@ func ResolveAgentConfigs(projectDir, globalDir string) (map[string]*AgentConfig,
 	if err != nil {
 		return nil, fmt.Errorf("load global agent configs: %w", err)
 	}
-	for name, cfg := range globalConfigs {
-		merged[name] = cfg
-	}
+	maps.Copy(merged, globalConfigs)
 
 	// Layer project-level configs (highest priority).
 	projectConfigs, err := LoadAgentConfigs(projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("load project agent configs: %w", err)
 	}
-	for name, cfg := range projectConfigs {
-		merged[name] = cfg
-	}
+	maps.Copy(merged, projectConfigs)
 
 	return merged, nil
 }

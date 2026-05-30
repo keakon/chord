@@ -52,7 +52,7 @@ func GenerateUnifiedDiffSummary(oldContent, newContent, filename string) DiffSum
 	lineCount := 0
 	truncated := false
 	for _, h := range hunks {
-		for _, l := range strings.Split(h, "\n") {
+		for l := range strings.SplitSeq(h, "\n") {
 			if lineCount >= maxDiffOutputLines {
 				truncated = true
 				break
@@ -271,10 +271,7 @@ func buildHunks(ops []editOp, old, new []string, ctx int) []string {
 
 	var hunks []string
 	for _, r := range ranges {
-		start := r.start - ctx
-		if start < 0 {
-			start = 0
-		}
+		start := max(r.start-ctx, 0)
 		end := r.end + ctx
 		if end >= len(ops) {
 			end = len(ops) - 1

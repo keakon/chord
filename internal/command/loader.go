@@ -58,12 +58,12 @@ func parseMDFile(data []byte) (frontmatter, string, error) {
 	if len(rest) > 0 && rest[0] == '\n' {
 		rest = rest[1:]
 	}
-	closingIdx := strings.Index(rest, "\n---")
-	if closingIdx < 0 {
+	before, after, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return fm, s, nil
 	}
-	fmContent := rest[:closingIdx]
-	body := rest[closingIdx+4:] // skip "\n---"
+	fmContent := before
+	body := after // skip "\n---"
 	if len(body) > 0 && body[0] == '\n' {
 		body = body[1:]
 	} else if len(body) > 1 && body[0] == '\r' && body[1] == '\n' {

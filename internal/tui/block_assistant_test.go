@@ -345,10 +345,7 @@ func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 		t.Fatalf("missing summary label in %q", strings.Join(plain, "\n"))
 	}
 	if idx+1 >= len(plain) || strings.TrimSpace(plain[idx+1]) != "" {
-		end := idx + 3
-		if end > len(plain) {
-			end = len(plain)
-		}
+		end := min(idx+3, len(plain))
 		t.Fatalf("expected blank line after label, got %q", strings.Join(plain[idx:end], " | "))
 	}
 	joined := strings.Join(plain, "\n")

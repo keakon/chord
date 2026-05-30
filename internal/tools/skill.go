@@ -69,10 +69,7 @@ func BuildSkillListing(entries []SkillListingEntry, header string) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	budget := SkillListingMaxTotal - len(header)
-	if budget < 0 {
-		budget = 0
-	}
+	budget := max(SkillListingMaxTotal-len(header), 0)
 
 	shown := 0
 	var sb strings.Builder
