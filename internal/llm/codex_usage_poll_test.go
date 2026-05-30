@@ -260,29 +260,6 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 	}
 }
 
-func waitForOAuthStatusInAuth(t *testing.T, authPath, access string, want config.OAuthCredentialStatus) {
-	t.Helper()
-	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
-	accountID := config.ExtractOAuthAccountIDFromToken(access)
-	deadline := time.Now().Add(2 * time.Second)
-	var lastStatus config.OAuthCredentialStatus
-	for time.Now().Before(deadline) {
-		state, err := config.LoadAuthState(statePath)
-		if err != nil {
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		if rec, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: accountID}); ok {
-			lastStatus = rec.Status
-		}
-		if lastStatus == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("OAuth credential %q status = %q, want %q", access, lastStatus, want)
-}
-
 func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing.T) {
 	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
