@@ -121,7 +121,10 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 			authStatePath = strings.TrimSuffix(c.authPath, ".yaml") + ".state.yaml"
 		}
 		effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, globalProxy)
-		oauthMap, backfills := oauthCredentialMap(creds)
+		oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
+		if oauthErr != nil {
+			return nil, fmt.Errorf("build OAuth credential map for provider %q: %w", provName, oauthErr)
+		}
 		p.SetOAuthRefresher(tokenURL, clientID, c.authPath, authStatePath, &c.auth, &c.authMu, oauthMap, effectiveProxy)
 		if len(backfills) > 0 {
 			if saveErr := persistOAuthMetadataBackfills(c.authPath, &c.auth, &c.authMu, provName, backfills); saveErr != nil {

@@ -348,13 +348,13 @@ func TestExtractAPIKeys_OAuthDeactivatedStillIncludedForDeferredFiltering(t *tes
 	}
 }
 
-func TestExtractAPIKeys_OAuthWithoutAccountIDStillIncluded(t *testing.T) {
+func TestExtractAPIKeys_OAuthWithoutAccountIDSkipped(t *testing.T) {
 	creds := []ProviderCredential{
 		{OAuth: &OAuthCredential{Access: testJWT(`{"exp":4102444800}`), Expires: 9999999999000, Email: "user@example.com"}},
 	}
 	keys := ExtractAPIKeys(creds)
-	if len(keys) != 1 || keys[0] == "" {
-		t.Fatalf("expected OAuth access token without account_id to remain selectable, got %v", keys)
+	if len(keys) != 0 {
+		t.Fatalf("expected OAuth access token without account_id to be skipped, got %v", keys)
 	}
 }
 

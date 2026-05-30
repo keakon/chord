@@ -88,6 +88,7 @@ type OAuthKeySetup struct {
 	AccountID             string
 	Email                 string
 	Access                string
+	RefreshSHA256         string
 	Expires               int64
 	Status                config.OAuthCredentialStatus
 	CodexPrimaryResetAt   int64
@@ -104,6 +105,7 @@ type OAuthKeyInfo struct {
 	AccountID             string
 	Email                 string
 	Access                string
+	RefreshSHA256         string
 	Status                config.OAuthCredentialStatus
 	CodexPrimaryResetAt   int64
 	CodexSecondaryResetAt int64

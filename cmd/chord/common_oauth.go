@@ -14,7 +14,11 @@ type oauthMetadataBackfill struct {
 	Email     string
 }
 
-func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuthKeySetup, []oauthMetadataBackfill) {
+func oauthRefreshStateKey(refresh string) string {
+	return config.OAuthRefreshStateKey(refresh)
+}
+
+func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuthKeySetup, []oauthMetadataBackfill, error) {
 	result := make(map[string]llm.OAuthKeySetup)
 	var backfills []oauthMetadataBackfill
 	keySlot := 0
@@ -30,27 +34,27 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 		email := ""
 		if access != "" {
 			accountID = config.ExtractOAuthAccountIDFromToken(access)
-			if cred.OAuth.AccountID != "" {
-				if accountID != "" && cred.OAuth.AccountID != accountID {
-					continue
-				}
-				accountID = cred.OAuth.AccountID
+			if accountID == "" {
+				return nil, nil, fmt.Errorf("OAuth access token at credential %d is missing account_id claim", credIdx)
+			}
+			if cred.OAuth.AccountID != "" && cred.OAuth.AccountID != accountID {
+				return nil, nil, fmt.Errorf("OAuth access token account_id %q does not match configured account_id %q at credential %d", accountID, cred.OAuth.AccountID, credIdx)
 			}
 			email = config.ExtractOAuthEmailFromToken(access)
 			if cred.OAuth.Expires == 0 {
 				cred.OAuth.Expires = config.ExtractOAuthExpiresAtFromToken(access)
 			}
-		} else if cred.OAuth.Refresh == "" {
-			continue
-		}
-		if accountID == "" {
+		} else {
+			if cred.OAuth.Refresh == "" {
+				continue
+			}
 			accountID = cred.OAuth.AccountID
 		}
 		if email == "" {
 			email = cred.OAuth.Email
 		}
 		needsBackfill := false
-		if cred.OAuth.AccountID == "" && accountID != "" {
+		if cred.OAuth.AccountID == "" {
 			cred.OAuth.AccountID = accountID
 			needsBackfill = true
 		}
@@ -67,21 +71,26 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 		}
 		key := access
 		if key == "" {
-			key = fmt.Sprintf("key_slot:%d", keySlot)
+			key = oauthRefreshStateKey(cred.OAuth.Refresh)
 		}
 		keySlot++
+		refreshSHA256 := ""
+		if access == "" && cred.OAuth.Refresh != "" {
+			refreshSHA256 = oauthRefreshStateKey(cred.OAuth.Refresh)
+		}
 		result[key] = llm.OAuthKeySetup{
 			CredentialIndex:       credIdx,
 			AccountID:             accountID,
 			Email:                 email,
 			Access:                access,
+			RefreshSHA256:         refreshSHA256,
 			Expires:               cred.OAuth.Expires,
 			Status:                cred.OAuth.Status,
 			CodexPrimaryResetAt:   cred.OAuth.CodexPrimaryResetAt,
 			CodexSecondaryResetAt: cred.OAuth.CodexSecondaryResetAt,
 		}
 	}
-	return result, backfills
+	return result, backfills, nil
 }
 
 func persistOAuthMetadataBackfills(

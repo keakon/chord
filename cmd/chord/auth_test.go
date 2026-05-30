@@ -733,7 +733,7 @@ func TestAuthStateListOnlyPrintsInvalidEntries(t *testing.T) {
 		t.Fatalf("ReadAll(stdout): %v", err)
 	}
 	got := string(output)
-	if !strings.Contains(got, "Found 1 expired/deactivated OAuth accounts") || !strings.Contains(got, "expired@example.com") {
+	if !strings.Contains(got, "Found 1 invalid OAuth accounts") || !strings.Contains(got, "expired@example.com") {
 		t.Fatalf("expected only expired state in output, got %q", got)
 	}
 	if strings.Contains(got, "normal@example.com") {
@@ -847,7 +847,7 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	if err != nil {
 		t.Fatalf("ReadAll(stdout): %v", err)
 	}
-	if !strings.Contains(string(output), "Removed 1 expired/deactivated OAuth credentials") {
+	if !strings.Contains(string(output), "Removed 1 invalid OAuth credentials") {
 		t.Fatalf("expected clean to remove one auth credential, got %q", string(output))
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -866,6 +866,68 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	}
 	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok {
 		t.Fatal("expired state record should be removed")
+	}
+}
+
+func TestAuthStateCleanKeepsMatchedRefreshOnlyState(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	authPath, err := config.AuthPath()
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(auth dir): %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-only
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	refreshStateKey := config.OAuthRefreshStateKey("refresh-only")
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", RefreshSHA256: refreshStateKey}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	defer r.Close()
+	if err := cmd.Execute(); err != nil {
+		_ = w.Close()
+		t.Fatalf("Execute: %v", err)
+	}
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout): %v", err)
+	}
+	if !strings.Contains(string(output), "Removed 0 invalid/orphan OAuth state entries") {
+		t.Fatalf("expected clean to keep matched refresh-only state, got %q", string(output))
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", RefreshSHA256: refreshStateKey}); !ok {
+		t.Fatal("matched refresh-only state record should remain")
 	}
 }
 
@@ -999,7 +1061,8 @@ func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 	}{
 		{name: "nil", cred: nil, want: false},
 		{name: "account id", cred: &config.OAuthCredential{AccountID: "acct-1"}, want: true},
-		{name: "email", cred: &config.OAuthCredential{Email: "user@example.com"}, want: true},
+		{name: "email only does not match", cred: &config.OAuthCredential{Email: "user@example.com"}, want: false},
+		{name: "different account with same email does not match", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "user@example.com"}, want: false},
 		{name: "empty fields do not match", cred: &config.OAuthCredential{}, want: false},
 		{name: "different", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "other@example.com", Access: "other"}, want: false},
 	}
@@ -1014,7 +1077,10 @@ func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 
 func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token"}, "email": "token@example.com"}`)
-	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access}}})
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access}}})
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
 
 	setup, ok := got[access]
 	if !ok {
@@ -1028,43 +1094,45 @@ func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	}
 }
 
-func TestOAuthCredentialMapIncludesAccessTokenWithoutAccountID(t *testing.T) {
+func TestOAuthCredentialMapRejectsAccessTokenWithoutAccountID(t *testing.T) {
 	access := testUnsignedJWT(`{"exp":4102444800,"email":"token@example.com"}`)
-	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Email: "stored@example.com"}}})
-
-	setup, ok := got[access]
-	if !ok {
-		t.Fatalf("OAuth map missing access token without account_id: %#v", got)
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Email: "stored@example.com"}}})
+	if err == nil {
+		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want missing account_id error", got, backfills)
 	}
-	if setup.AccountID != "" || setup.Email != "token@example.com" {
-		t.Fatalf("setup metadata = (%q, %q), want empty account and token email", setup.AccountID, setup.Email)
-	}
-	if len(backfills) != 0 {
-		t.Fatalf("backfills = %#v, want none without account_id", backfills)
+	if !strings.Contains(err.Error(), "missing account_id") {
+		t.Fatalf("error = %v, want missing account_id", err)
 	}
 }
 
-func TestOAuthCredentialMapSkipsMismatchedAccountID(t *testing.T) {
+func TestOAuthCredentialMapRejectsMismatchedAccountID(t *testing.T) {
 	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token"}}`)
-	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-other"}}})
-	if len(got) != 0 || len(backfills) != 0 {
-		t.Fatalf("expected mismatched account_id OAuth token to be skipped, got map=%#v backfills=%#v", got, backfills)
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-other"}}})
+	if err == nil {
+		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want mismatch error", got, backfills)
+	}
+	if !strings.Contains(err.Error(), "does not match configured account_id") {
+		t.Fatalf("error = %v, want mismatch", err)
 	}
 }
 
-func TestOAuthCredentialMapRefreshOnlyUsesKeySlot(t *testing.T) {
-	got, backfills := oauthCredentialMap([]config.ProviderCredential{
+func TestOAuthCredentialMapRefreshOnlyUsesRefreshStateKey(t *testing.T) {
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{
 		{APIKey: "", ExplicitEmpty: true},
 		{OAuth: &config.OAuthCredential{Refresh: "refresh-only", AccountID: "acc-refresh"}},
 	})
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
 	if _, ok := got["key_slot:0"]; ok {
 		t.Fatalf("explicit empty API key slot should not be mapped as OAuth: %#v", got)
 	}
-	setup, ok := got["key_slot:1"]
+	stateKey := config.OAuthRefreshStateKey("refresh-only")
+	setup, ok := got[stateKey]
 	if !ok {
-		t.Fatalf("refresh-only OAuth setup missing key_slot:1: %#v", got)
+		t.Fatalf("refresh-only OAuth setup missing %s: %#v", stateKey, got)
 	}
-	if setup.CredentialIndex != 1 || setup.AccountID != "acc-refresh" {
+	if setup.CredentialIndex != 1 || setup.AccountID != "acc-refresh" || setup.RefreshSHA256 != stateKey {
 		t.Fatalf("unexpected refresh-only setup: %#v", setup)
 	}
 	if len(backfills) != 0 {
@@ -1074,7 +1142,10 @@ func TestOAuthCredentialMapRefreshOnlyUsesKeySlot(t *testing.T) {
 
 func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.T) {
 	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-existing"}, "email": "token@example.com"}`)
-	got, backfills := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-existing", Email: "existing@example.com"}}})
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-existing", Email: "existing@example.com"}}})
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
 
 	setup := got[access]
 	if setup.AccountID != "acct-existing" || setup.Email != "token@example.com" {

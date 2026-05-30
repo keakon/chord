@@ -503,7 +503,10 @@ func resolveModelRef(
 				var authMu sync.Mutex
 				authStatePath := strings.TrimSuffix(authConfigPath, ".yaml") + ".state.yaml"
 				effectiveProxy := llm.ResolveEffectiveProxy(normalizedProviderCfg.Proxy, globalProxy)
-				oauthMap, backfills := oauthCredentialMap(creds)
+				oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
+				if oauthErr != nil {
+					return nil, nil, "", 0, 0, fmt.Errorf("build OAuth credential map for provider %q: %w", provName, oauthErr)
+				}
 				provCfg.SetOAuthRefresher(
 					tokenURL,
 					clientID,

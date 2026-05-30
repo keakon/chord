@@ -18,10 +18,14 @@ func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
 	if ks == nil || ks.OAuthInfo == nil {
 		return config.OAuthStateKey{}
 	}
+	if strings.TrimSpace(ks.OAuthInfo.AccountID) == "" && strings.TrimSpace(ks.OAuthInfo.RefreshSHA256) == "" {
+		return config.OAuthStateKey{}
+	}
 	return config.OAuthStateKey{
-		Provider:  p.name,
-		AccountID: ks.OAuthInfo.AccountID,
-		Email:     ks.OAuthInfo.Email,
+		Provider:      p.name,
+		AccountID:     ks.OAuthInfo.AccountID,
+		RefreshSHA256: ks.OAuthInfo.RefreshSHA256,
+		Email:         ks.OAuthInfo.Email,
 	}
 }
 
@@ -232,9 +236,16 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		}
 	}
 	p.mu.Unlock()
+	if strings.TrimSpace(stateKey.AccountID) == "" && strings.TrimSpace(stateKey.RefreshSHA256) == "" {
+		return
+	}
 	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
-		record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
+		if stateKey.AccountID != "" {
+			record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
+		} else {
+			record.RefreshSHA256 = firstNonEmptyOAuthAccess(stateKey.RefreshSHA256, record.RefreshSHA256)
+		}
 		record.Expires = expires
 		record.Status = status
 		codexSnapshotToOAuthStateRecord(record, snap, warmupAt)

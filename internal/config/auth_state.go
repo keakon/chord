@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -13,17 +14,20 @@ import (
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
-// AccountID is required and is used directly as the key below the provider.
+// AccountID is used directly as the account-level key below the provider.
+// RefreshSHA256 is only used for refresh-only credentials before account_id is known.
 type OAuthStateKey struct {
-	Provider  string
-	AccountID string
-	Email     string
+	Provider      string
+	AccountID     string
+	RefreshSHA256 string
+	Email         string
 }
 
 // OAuthStateRecord stores dynamic OAuth runtime state shared across processes.
 type OAuthStateRecord struct {
 	AccountID               string                `yaml:"account_id,omitempty"`
 	Email                   string                `yaml:"email,omitempty"`
+	RefreshSHA256           string                `yaml:"refresh_sha256,omitempty"`
 	Expires                 int64                 `yaml:"expires,omitempty"`
 	Status                  OAuthCredentialStatus `yaml:"status,omitempty"`
 	UpdatedAt               int64                 `yaml:"updated_at,omitempty"`
@@ -44,7 +48,7 @@ func (r OAuthStateRecord) IsValid() bool {
 	return r.Status.IsValid()
 }
 
-// AuthStateFile is the on-disk shared runtime state keyed by provider then unique id.
+// AuthStateFile is the on-disk shared runtime state keyed by provider then account_id.
 type AuthStateFile map[string]map[string]OAuthStateRecord
 
 func AuthStatePath() (string, error) {
@@ -55,8 +59,26 @@ func AuthStatePath() (string, error) {
 	return filepath.Join(h, "auth.state.yaml"), nil
 }
 
+func OAuthRefreshStateKey(refresh string) string {
+	return "refresh_sha256:" + fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(refresh))))
+}
+
 func OAuthStateRecordKey(key OAuthStateKey) string {
+	if key.RefreshSHA256 != "" {
+		return normalizeOAuthRefreshStateKey(key.RefreshSHA256)
+	}
 	return strings.TrimSpace(key.AccountID)
+}
+
+func normalizeOAuthRefreshStateKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "refresh_sha256:") {
+		return value
+	}
+	return "refresh_sha256:" + value
 }
 
 func LoadAuthState(path string) (AuthStateFile, error) {
@@ -156,12 +178,15 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 	if recordKey == "" {
 		return nil, nil, false, fmt.Errorf("oauth state key is empty")
 	}
+	provider := strings.TrimSpace(key.Provider)
+	if provider == "" {
+		return nil, nil, false, fmt.Errorf("oauth state provider is empty")
+	}
 	var updated OAuthStateRecord
 	state, changed, err := UpdateAuthStateFile(path, func(state AuthStateFile) (bool, error) {
 		if state == nil {
 			state = make(AuthStateFile)
 		}
-		provider := strings.TrimSpace(key.Provider)
 		if state[provider] == nil {
 			state[provider] = make(map[string]OAuthStateRecord)
 		}
@@ -212,11 +237,12 @@ func RemoveOAuthStateRecord(path string, key OAuthStateKey) (AuthStateFile, bool
 
 // RemovedOAuthStateEntry describes an invalid runtime-state entry removed from auth.state.yaml.
 type RemovedOAuthStateEntry struct {
-	Provider  string
-	StateKey  string
-	AccountID string
-	Email     string
-	Status    OAuthCredentialStatus
+	Provider      string
+	StateKey      string
+	AccountID     string
+	RefreshSHA256 string
+	Email         string
+	Status        OAuthCredentialStatus
 }
 
 func (e RemovedOAuthStateEntry) DisplayName() string {
@@ -234,15 +260,22 @@ func (e RemovedOAuthStateEntry) DisplayName() string {
 
 func RemovedOAuthStateEntryFromRecord(provider, stateKey string, record OAuthStateRecord) RemovedOAuthStateEntry {
 	accountID := strings.TrimSpace(record.AccountID)
-	if accountID == "" {
+	refreshSHA256 := strings.TrimSpace(record.RefreshSHA256)
+	if refreshSHA256 == "" && strings.HasPrefix(stateKey, "refresh_sha256:") {
+		refreshSHA256 = strings.TrimSpace(stateKey)
+	} else if refreshSHA256 != "" {
+		refreshSHA256 = normalizeOAuthRefreshStateKey(refreshSHA256)
+	}
+	if accountID == "" && refreshSHA256 == "" {
 		accountID = strings.TrimSpace(stateKey)
 	}
 	return RemovedOAuthStateEntry{
-		Provider:  provider,
-		StateKey:  stateKey,
-		AccountID: accountID,
-		Email:     record.Email,
-		Status:    record.Status,
+		Provider:      provider,
+		StateKey:      stateKey,
+		AccountID:     accountID,
+		RefreshSHA256: refreshSHA256,
+		Email:         record.Email,
+		Status:        record.Status,
 	}
 }
 
@@ -290,11 +323,21 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 		normalizedEntries := make(map[string]OAuthStateRecord)
 		for rawKey, record := range entries {
 			recordKey := strings.TrimSpace(rawKey)
-			if recordKey == "" || strings.Contains(recordKey, ":") {
+			if recordKey == "" {
+				continue
+			}
+			record.Email = strings.TrimSpace(record.Email)
+			if strings.HasPrefix(recordKey, "refresh_sha256:") {
+				record.AccountID = ""
+				record.RefreshSHA256 = recordKey
+				normalizedEntries[recordKey] = record
+				continue
+			}
+			if strings.Contains(recordKey, ":") {
 				continue
 			}
 			record.AccountID = ""
-			record.Email = strings.TrimSpace(record.Email)
+			record.RefreshSHA256 = ""
 			normalizedEntries[recordKey] = record
 		}
 		if len(normalizedEntries) > 0 {
@@ -305,7 +348,7 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 }
 
 func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRecord, bool) {
-	if len(state) == 0 || strings.TrimSpace(key.AccountID) == "" {
+	if len(state) == 0 {
 		return OAuthStateRecord{}, false
 	}
 	provider := strings.TrimSpace(key.Provider)
@@ -313,9 +356,14 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 	if len(entries) == 0 {
 		return OAuthStateRecord{}, false
 	}
-	record, ok := entries[OAuthStateRecordKey(OAuthStateKey{AccountID: key.AccountID})]
+	recordKey := OAuthStateRecordKey(key)
+	if recordKey == "" {
+		return OAuthStateRecord{}, false
+	}
+	record, ok := entries[recordKey]
 	if ok {
 		record.AccountID = strings.TrimSpace(key.AccountID)
+		record.RefreshSHA256 = strings.TrimSpace(key.RefreshSHA256)
 	}
 	return record, ok
 }
@@ -323,6 +371,9 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord) OAuthStateRecord {
 	if incoming.AccountID != "" {
 		existing.AccountID = incoming.AccountID
+	}
+	if incoming.RefreshSHA256 != "" {
+		existing.RefreshSHA256 = incoming.RefreshSHA256
 	}
 	if incoming.Email != "" {
 		existing.Email = incoming.Email
@@ -350,7 +401,7 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 }
 
 func EqualOAuthStateRecord(a, b OAuthStateRecord) bool {
-	if a.AccountID != b.AccountID || a.Email != b.Email || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
+	if a.AccountID != b.AccountID || a.RefreshSHA256 != b.RefreshSHA256 || a.Email != b.Email || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
 		return false
 	}
 	if (a.CodexHasCredits == nil) != (b.CodexHasCredits == nil) {

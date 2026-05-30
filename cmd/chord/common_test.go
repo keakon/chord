@@ -252,7 +252,10 @@ func TestTestProvidersWiresOAuthMetadataForCodexPreset(t *testing.T) {
 	}
 	auth := config.AuthConfig{"codex": creds}
 	var authMu sync.Mutex
-	oauthMap, _ := oauthCredentialMap(creds)
+	oauthMap, _, err := oauthCredentialMap(creds)
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
 	if _, found := oauthMap[apiKeys[0]]; !found {
 		t.Fatal("expected oauthCredentialMap to contain OAuth access token")
 	}

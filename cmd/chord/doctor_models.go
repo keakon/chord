@@ -761,7 +761,10 @@ func configureDoctorModelsOAuthRefresher(runtimeCfg *doctorModelsRuntimeConfig, 
 	if !ok {
 		return nil
 	}
-	oauthMap, backfills := oauthCredentialMap(creds)
+	oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
+	if oauthErr != nil {
+		return fmt.Errorf("build OAuth credential map for provider %q: %w", providerName, oauthErr)
+	}
 	authStatePath := strings.TrimSuffix(runtimeCfg.AuthPath, ".yaml") + ".state.yaml"
 	llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, authStatePath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, effectiveProxy)
 	if len(backfills) > 0 {

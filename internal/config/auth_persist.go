@@ -20,6 +20,7 @@ import (
 type OAuthCredentialMatch struct {
 	AccountID       string
 	Access          string
+	RefreshSHA256   string
 	CredentialIndex *int
 }
 
@@ -531,6 +532,9 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 			continue
 		}
 		if accessMatch == nil && match.Access != "" && oauth.Access == match.Access {
+			accessMatch = &refs[i]
+		}
+		if accessMatch == nil && match.RefreshSHA256 != "" && oauth.Refresh != "" && OAuthRefreshStateKey(oauth.Refresh) == match.RefreshSHA256 {
 			accessMatch = &refs[i]
 		}
 		if indexMatch == nil && match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {

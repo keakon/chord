@@ -102,7 +102,7 @@ func newAuthStateCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "state", Short: "Manage shared OAuth runtime state"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
-		Short: "List expired or deactivated OAuth accounts from auth.state.yaml",
+		Short: "List expired, deactivated, or invalidated OAuth accounts from auth.state.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			statePath, err := config.AuthStatePath()
@@ -114,7 +114,7 @@ func newAuthStateCmd() *cobra.Command {
 				return fmt.Errorf("load auth state: %w", err)
 			}
 			entries := listInvalidOAuthStateEntries(state)
-			fmt.Fprintf(os.Stdout, "Found %d expired/deactivated OAuth accounts in %s\n", len(entries), statePath)
+			fmt.Fprintf(os.Stdout, "Found %d invalid OAuth accounts in %s\n", len(entries), statePath)
 			for _, entry := range entries {
 				fmt.Fprintf(os.Stdout, "- %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
@@ -176,7 +176,7 @@ func newAuthStateCmd() *cobra.Command {
 			for _, entry := range removedState {
 				fmt.Fprintf(os.Stdout, "- state: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
-			fmt.Fprintf(os.Stdout, "Removed %d expired/deactivated OAuth credentials from %s\n", len(removedCreds), authPath)
+			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth credentials from %s\n", len(removedCreds), authPath)
 			for _, entry := range removedCreds {
 				fmt.Fprintf(os.Stdout, "- auth: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
@@ -241,13 +241,8 @@ func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config
 	if cred == nil {
 		return false
 	}
-	if cred.AccountID != "" && entry.AccountID != "" && cred.AccountID == entry.AccountID {
-		return true
-	}
-	if cred.Email != "" && entry.Email != "" && cred.Email == entry.Email {
-		return true
-	}
-	return false
+	return (cred.AccountID != "" && entry.AccountID != "" && cred.AccountID == entry.AccountID) ||
+		(cred.Refresh != "" && entry.RefreshSHA256 != "" && config.OAuthRefreshStateKey(cred.Refresh) == entry.RefreshSHA256)
 }
 
 func bindAuthLoginFlags(cmd *cobra.Command) {

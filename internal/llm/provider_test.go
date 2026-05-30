@@ -188,19 +188,23 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	}
 }
 
-func TestSetOAuthRefresherRefreshOnlyBindsByKeySlot(t *testing.T) {
+func TestSetOAuthRefresherRefreshOnlyBindsByRefreshStateKey(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses}, []string{"", ""})
-	auth := config.AuthConfig{}
+	auth := config.AuthConfig{"openai": {
+		{APIKey: "", ExplicitEmpty: true},
+		{OAuth: &config.OAuthCredential{Refresh: "refresh-only"}},
+	}}
 	var authMu sync.Mutex
+	stateKey := config.OAuthRefreshStateKey("refresh-only")
 	p.SetOAuthRefresher("https://example.invalid/token", "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"key_slot:1": {CredentialIndex: 1, AccountID: "acc-refresh", Status: config.OAuthStatusNormal},
+		stateKey: {CredentialIndex: 1, RefreshSHA256: stateKey, Status: config.OAuthStatusNormal},
 	}, "")
 
 	if p.keyStates[0].OAuthInfo != nil {
 		t.Fatalf("explicit empty key slot should not receive OAuth info: %#v", p.keyStates[0].OAuthInfo)
 	}
-	if p.keyStates[1].OAuthInfo == nil || p.keyStates[1].OAuthInfo.AccountID != "acc-refresh" {
-		t.Fatalf("refresh-only OAuth slot not bound by key slot: %#v", p.keyStates[1].OAuthInfo)
+	if p.keyStates[1].OAuthInfo == nil || p.keyStates[1].OAuthInfo.RefreshSHA256 != stateKey {
+		t.Fatalf("refresh-only OAuth slot not bound by refresh state key: %#v", p.keyStates[1].OAuthInfo)
 	}
 }
 
@@ -233,6 +237,61 @@ func TestSelectKeyUsesExistingOAuthAccessTokenWithoutPreRefresh(t *testing.T) {
 	}
 	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusNormal {
 		t.Fatalf("OAuth status = %q, want normal", got)
+	}
+}
+
+func TestSelectKeyRefreshOnlyUnrecoverableFailurePersistsRefreshState(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.yaml")
+	statePath := filepath.Join(dir, "auth.state.yaml")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-only
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var authMu sync.Mutex
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"code":"invalid_grant","message":"refresh token expired"}}`)
+	}))
+	defer refreshServer.Close()
+
+	refreshStateKey := config.OAuthRefreshStateKey("refresh-only")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{""})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		refreshStateKey: {CredentialIndex: 0, RefreshSHA256: refreshStateKey, Status: config.OAuthStatusNormal},
+	}, "")
+
+	_, _, err = p.SelectKeyWithContext(context.Background())
+	if err == nil {
+		t.Fatal("expected unrecoverable refresh failure")
+	}
+
+	if got := auth["openai"][0].OAuth; got == nil || got.Status != config.OAuthStatusExpired {
+		t.Fatalf("expected in-memory refresh-only OAuth credential status=expired, got %#v", got)
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", RefreshSHA256: refreshStateKey})
+	if !ok {
+		t.Fatalf("expected refresh-only failure state under %q, got %#v", refreshStateKey, state)
+	}
+	if record.Status != config.OAuthStatusExpired || record.RefreshSHA256 != refreshStateKey {
+		t.Fatalf("refresh-only failure state = %#v, want expired refresh_sha256 state", record)
+	}
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("ReadFile(auth): %v", err)
+	}
+	if strings.Contains(string(data), "status:") {
+		t.Fatalf("auth.yaml should not persist OAuth status, got:\n%s", data)
 	}
 }
 
