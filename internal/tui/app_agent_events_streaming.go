@@ -68,11 +68,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
-		if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
-			effects.addFollowup(m.requestStreamBoundaryFlush())
-		} else {
-			effects.addFollowup(m.scheduleStreamFlush(0))
-		}
+		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
 	case agent.ThinkingStartedEvent:
 		if m.thinkingStartTime.IsZero() {
@@ -104,11 +100,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
-		if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
-			effects.addFollowup(m.requestStreamBoundaryFlush())
-		} else {
-			effects.addFollowup(m.scheduleStreamFlush(0))
-		}
+		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
 	case agent.StreamThinkingEvent:
 		if strings.TrimSpace(evt.Text) != "" {
@@ -128,11 +120,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 			m.exitRenderFreeze()
 			m.markStreamRenderDirty()
-			if m.displayState == stateForeground && strings.Contains(evt.Text, "\n") {
-				effects.addFollowup(m.requestStreamBoundaryFlush())
-			} else {
-				effects.addFollowup(m.scheduleStreamFlush(0))
-			}
+			effects.addFollowup(m.scheduleStreamFlush(0))
 		}
 		if m.currentThinkingBlock != nil {
 			m.currentThinkingBlock.Streaming = false

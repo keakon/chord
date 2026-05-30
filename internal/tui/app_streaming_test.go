@@ -3,6 +3,10 @@ package tui
 import (
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 func TestScheduleStreamFlushCoalescesUntilConsumed(t *testing.T) {
@@ -79,5 +83,72 @@ func TestScheduleStreamFlushRejectsStaleGeneration(t *testing.T) {
 	}
 	if !m.streamFlushScheduled {
 		t.Fatal("stale generation should not clear scheduled flag")
+	}
+}
+
+func TestStreamDeltaNewlineUsesCoalescedFlushAfterInitialBoundary(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	assertNewlineDeltaUsesCoalescedFlushAfterInitialBoundary(t, &m, "stream text", func(text string) tea.Cmd {
+		return m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: text}})
+	})
+}
+
+func TestStreamThinkingDeltaNewlineUsesCoalescedFlushAfterInitialBoundary(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	assertNewlineDeltaUsesCoalescedFlushAfterInitialBoundary(t, &m, "thinking delta", func(text string) tea.Cmd {
+		return m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: text}})
+	})
+}
+
+func TestStreamThinkingEventFinalBoundaryKeepsUrgentFlush(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "first"}})
+	if cmd == nil {
+		t.Fatal("initial thinking delta should schedule boundary flush")
+	}
+	if !m.consumeStreamFlush(streamFlushTickMsg{generation: m.streamFlushGeneration}) {
+		t.Fatal("expected to consume initial stream flush")
+	}
+
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "\nsecond"}})
+	if cmd == nil {
+		t.Fatal("stream thinking event should schedule final boundary flush")
+	}
+	if m.streamFlushDelay != 1*time.Millisecond {
+		t.Fatalf("stream thinking final flush delay = %s, want 1ms", m.streamFlushDelay)
+	}
+	if !m.streamRenderForceView || m.streamRenderDeferred || m.streamRenderDeferNext {
+		t.Fatalf("final thinking invalidation = force:%v deferred:%v next:%v, want forced boundary render", m.streamRenderForceView, m.streamRenderDeferred, m.streamRenderDeferNext)
+	}
+}
+
+func assertNewlineDeltaUsesCoalescedFlushAfterInitialBoundary(t *testing.T, m *Model, label string, send func(string) tea.Cmd) {
+	t.Helper()
+
+	cmd := send("first")
+	if cmd == nil {
+		t.Fatalf("first %s should schedule initial boundary flush", label)
+	}
+	if m.streamFlushDelay != 1*time.Millisecond {
+		t.Fatalf("initial %s flush delay = %s, want 1ms", label, m.streamFlushDelay)
+	}
+
+	if !m.consumeStreamFlush(streamFlushTickMsg{generation: m.streamFlushGeneration}) {
+		t.Fatal("expected to consume initial stream flush")
+	}
+	m.streamRenderForceView = false
+	m.streamRenderDeferred = true
+	m.streamRenderDeferNext = true
+	m.lastHostRedrawAt = time.Now()
+
+	cmd = send("\nsecond")
+	if cmd == nil {
+		t.Fatalf("newline %s should schedule coalesced flush", label)
+	}
+	if m.streamFlushDelay != foregroundCadence.contentFlushDelay {
+		t.Fatalf("newline %s flush delay = %s, want %s", label, m.streamFlushDelay, foregroundCadence.contentFlushDelay)
+	}
+	if !m.streamRenderDeferred || !m.streamRenderDeferNext || m.streamRenderForceView {
+		t.Fatalf("%s stream invalidation = force:%v deferred:%v next:%v, want deferred coalesced path", label, m.streamRenderForceView, m.streamRenderDeferred, m.streamRenderDeferNext)
 	}
 }
