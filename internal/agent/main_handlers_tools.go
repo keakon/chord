@@ -464,7 +464,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						a.loopState.State = LoopStateCompleted
 						a.emitLoopStateChanged()
 						a.loopState.disable()
-						a.refreshSystemPrompt()
 						a.emitLoopStateChanged()
 						a.emitActivity("main", ActivityIdle, "")
 						a.setIdleAndDrainPending()
