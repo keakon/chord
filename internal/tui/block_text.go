@@ -36,6 +36,16 @@ func tuiStringWidth(s string) int {
 	return tuiWidthMethod.StringWidth(s)
 }
 
+func plainASCIIWidth(s string) (int, bool) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f {
+			return 0, false
+		}
+	}
+	return len(s), true
+}
+
 func tuiCut(s string, left, right int) string {
 	return tuiWidthMethod.Cut(s, left, right)
 }
@@ -201,6 +211,9 @@ func preserveBackground(line, bgColor string) string {
 	if bgColor == "" || line == "" {
 		return line
 	}
+	if !strings.Contains(line, "\x1b[") {
+		return line
+	}
 	bgSeq := colorToANSIBgSeq(bgColor)
 	if bgSeq == "" {
 		return line
@@ -235,6 +248,19 @@ func hasExplicitStyleColor(c color.Color) bool {
 	}
 	_, isNoColor := c.(lipgloss.NoColor)
 	return !isNoColor
+}
+
+func styleHasTextAttributes(style lipgloss.Style) bool {
+	return style.GetBold() ||
+		style.GetFaint() ||
+		style.GetItalic() ||
+		style.GetUnderline() ||
+		style.GetBlink() ||
+		style.GetReverse() ||
+		style.GetStrikethrough() ||
+		hasExplicitStyleColor(style.GetForeground()) ||
+		hasExplicitStyleColor(style.GetBackground()) ||
+		hasExplicitStyleColor(style.GetUnderlineColor())
 }
 
 // ansiSeqForStyle builds an ANSI SGR sequence for the explicitly configured
@@ -389,7 +415,10 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 	}
 	for _, line := range lines {
 		line = preserveBackground(line, bgColorNum)
-		lineDisplayWidth := tuiStringWidth(line)
+		lineDisplayWidth, plainASCII := plainASCIIWidth(line)
+		if !plainASCII {
+			lineDisplayWidth = tuiStringWidth(line)
+		}
 		var rendered string
 		if lineDisplayWidth > innerWidth {
 			line = truncateLineToDisplayWidth(line, innerWidth)

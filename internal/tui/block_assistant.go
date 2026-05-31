@@ -639,10 +639,11 @@ func (b *Block) renderAssistant(width int) []string {
 			assistantSoftWraps = append(assistantSoftWraps, false)
 		}
 
+		styleStreamingTail := styleHasTextAttributes(MessageContentStyle)
 		appendAssistantSegment := func(lines []string, synthetic []int, softWraps []bool, styleTail bool) {
 			for i, cl := range lines {
 				line := cl
-				if styleTail {
+				if styleTail && styleStreamingTail {
 					line = MessageContentStyle.Render(cl)
 				}
 				assistantLines = append(assistantLines, assistantContentPrefix+line)
