@@ -214,6 +214,8 @@ type Block struct {
 	// Render caches - invalidated when content or width changes
 	mdCache                      []string
 	mdCacheWidth                 int
+	mdCacheContent               string
+	mdCacheThemeVersion          uint64
 	mdCacheSyntheticPrefixWidths []int
 	mdCacheSoftWrapContinuations []bool
 	// thinkingStreamSettled caches the rendered settled markdown prefix for each

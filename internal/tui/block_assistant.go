@@ -545,7 +545,7 @@ func (b *Block) renderAssistant(width int) []string {
 		var contentLines []string
 		var contentSynthetic []int
 		var contentSoftWraps []bool
-		if b.mdCache == nil || b.mdCacheWidth != width {
+		if b.mdCache == nil || b.mdCacheWidth != width || (!b.Streaming && (b.mdCacheContent != bodyContent || b.mdCacheThemeVersion != appliedThemeVersion)) {
 			var settledLines []string
 			var settledSynthetic []int
 			var settledSoftWraps []bool
@@ -606,6 +606,8 @@ func (b *Block) renderAssistant(width int) []string {
 			} else {
 				b.InvalidateStreamingSettledCache()
 				b.mdCache, b.mdCacheSyntheticPrefixWidths, b.mdCacheSoftWrapContinuations = renderAssistantMarkdownContent(bodyContent, bodyContent, contentWidth, continuationExtra, &b.codeHL)
+				b.mdCacheContent = bodyContent
+				b.mdCacheThemeVersion = appliedThemeVersion
 			}
 			b.mdCacheWidth = width
 		}

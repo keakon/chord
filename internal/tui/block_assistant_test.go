@@ -765,6 +765,36 @@ These accounts need to sign in again before new tokens can be issued.`}
 	}
 }
 
+func TestRenderAssistantMarkdownCacheInvalidatesOnContentChange(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockAssistant, Content: "first **bold**"}
+	_ = block.Render(100, "")
+	block.Content = "second **bold**"
+	block.InvalidateCache()
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.Contains(joined, "first") {
+		t.Fatalf("render reused stale assistant markdown cache: %q", joined)
+	}
+	if !strings.Contains(joined, "second") {
+		t.Fatalf("render did not include updated assistant content: %q", joined)
+	}
+}
+
+func TestRenderAssistantMarkdownCacheInvalidatesOnThemeChange(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockAssistant, Content: "prefix **bold**"}
+	_ = block.Render(100, "")
+	version := block.mdCacheThemeVersion
+
+	ApplyTheme(DefaultTheme())
+	block.InvalidateCache()
+	_ = block.Render(100, "")
+	if block.mdCacheThemeVersion == version {
+		t.Fatalf("mdCacheThemeVersion did not update after theme change: got %d", block.mdCacheThemeVersion)
+	}
+}
+
 func colorOfTheme(term string) interface{ RGBA() (r, g, b, a uint32) } {
 	return lipgloss.Color(term)
 }

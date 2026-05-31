@@ -86,6 +86,8 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.lastAccess = 0
 	payloadBlock.mdCache = nil
 	payloadBlock.mdCacheWidth = 0
+	payloadBlock.mdCacheContent = ""
+	payloadBlock.mdCacheThemeVersion = 0
 	payloadBlock.lineCache = nil
 	payloadBlock.lineCacheWidth = 0
 	payloadBlock.lineCountCache = 0
@@ -326,6 +328,8 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.InvalidateStreamingSettledCache()
 	block.mdCache = nil
 	block.mdCacheWidth = 0
+	block.mdCacheContent = ""
+	block.mdCacheThemeVersion = 0
 	block.lineCache = nil
 	block.lineCacheWidth = 0
 	block.lineCountCache = 0

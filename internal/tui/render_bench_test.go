@@ -358,6 +358,17 @@ func BenchmarkRenderAssistantCard(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderAssistantCardCachedWarm(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkAssistantBlock()
+	_ = block.Render(100, "")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = block.Render(100, "")
+	}
+}
+
 // BenchmarkRenderAssistantStreamingCard measures the cheap streaming fallback
 // path, which should stay noticeably lighter than settled glamour rendering.
 func BenchmarkRenderAssistantStreamingCard(b *testing.B) {

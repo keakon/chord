@@ -2,12 +2,15 @@ package tui
 
 import "charm.land/lipgloss/v2"
 
+var appliedThemeVersion uint64
+
 func init() {
 	ApplyTheme(DefaultTheme())
 }
 
 // ApplyTheme rebuilds all package-level styles from the given Theme.
 func ApplyTheme(t Theme) {
+	appliedThemeVersion++
 	currentTheme = t
 	applyBlockStyles(t)
 	applyPanelStyles(t)

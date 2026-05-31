@@ -33,6 +33,8 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.ImageParts = append([]BlockImagePart(nil), src.ImageParts...)
 	clone.ThinkingParts = append([]string(nil), src.ThinkingParts...)
 	clone.mdCache = append([]string(nil), src.mdCache...)
+	clone.mdCacheContent = src.mdCacheContent
+	clone.mdCacheThemeVersion = src.mdCacheThemeVersion
 	clone.mdCacheSyntheticPrefixWidths = append([]int(nil), src.mdCacheSyntheticPrefixWidths...)
 	clone.mdCacheSoftWrapContinuations = append([]bool(nil), src.mdCacheSoftWrapContinuations...)
 	clone.streamSettledLines = append([]string(nil), src.streamSettledLines...)
@@ -281,10 +283,14 @@ func (b *Block) InvalidateCache() {
 	b.lineCache = nil
 	b.lineCacheWidth = 0
 	b.lineCountCache = 0
-	b.mdCache = nil
-	b.mdCacheWidth = 0
-	b.mdCacheSyntheticPrefixWidths = nil
-	b.mdCacheSoftWrapContinuations = nil
+	if b.Streaming {
+		b.mdCache = nil
+		b.mdCacheWidth = 0
+		b.mdCacheContent = ""
+		b.mdCacheThemeVersion = 0
+		b.mdCacheSyntheticPrefixWidths = nil
+		b.mdCacheSoftWrapContinuations = nil
+	}
 	b.streamSettledLineCount = 0
 	b.viewportCache = nil
 	b.viewportCacheWidth = 0
