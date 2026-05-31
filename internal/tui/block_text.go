@@ -89,26 +89,6 @@ func padLineToDisplayWidth(line string, width int) string {
 	return line + padding
 }
 
-// padLineToDisplayWidthForOuterBg pads line to width without trying to keep any
-// inner trailing style active across the appended spaces. This is used when an
-// outer container will immediately wrap the whole line with its own background
-// (eg renderPrewrappedCard): trailing spaces should belong to the outer card,
-// not inherit an inner sub-surface such as a fenced code block background.
-func padLineToDisplayWidthForOuterBg(line string, width int) string {
-	w := tuiStringWidth(line)
-	if w >= width {
-		return line
-	}
-	return line + strings.Repeat(" ", width-w)
-}
-
-func lineLooksAlreadyFullWidth(line string, width int) bool {
-	if width <= 0 || line == "" {
-		return false
-	}
-	return tuiStringWidth(line) >= width
-}
-
 // ensureStyledLineReset appends a final SGR reset when a styled line still ends
 // with an active style sequence. This is especially important for assistant
 // fenced code lines, where we deliberately re-apply the code-block background
@@ -409,14 +389,14 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 	}
 	for _, line := range lines {
 		line = preserveBackground(line, bgColorNum)
+		lineDisplayWidth := tuiStringWidth(line)
 		var rendered string
-		if lineLooksAlreadyFullWidth(line, innerWidth) {
-			rendered = wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq)
-		} else {
+		if lineDisplayWidth > innerWidth {
 			line = truncateLineToDisplayWidth(line, innerWidth)
-			line = padLineToDisplayWidthForOuterBg(line, innerWidth)
-			rendered = wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq)
+		} else if lineDisplayWidth < innerWidth {
+			line += strings.Repeat(" ", innerWidth-lineDisplayWidth)
 		}
+		rendered = wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq)
 		out = append(out, rendered)
 	}
 	for range padBottom {

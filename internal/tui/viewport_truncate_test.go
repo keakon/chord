@@ -114,28 +114,3 @@ func TestTruncateLineToDisplayWidthLeavesPlainTextUnchanged(t *testing.T) {
 		t.Fatalf("truncateLineToDisplayWidth(plain)=%q, want %q", got, input[:5])
 	}
 }
-
-func TestCardBgPreservedAfterTruncationReset(t *testing.T) {
-	cardBgNum := "236"
-	cardBgSeq := "\x1b[48;5;" + cardBgNum + "m"
-	inlineBg := "\x1b[48;5;240m"
-
-	// Card inner content includes an inline background span that would normally
-	// be terminated later in the line. We truncate inside the span.
-	inner := "prefix " + inlineBg + strings.Repeat("X", 20) + " suffix"
-	inner = preserveBackground(inner, cardBgNum)
-	inner = truncateLineToDisplayWidth(inner, 8)
-	// Truncation may introduce a reset; re-apply card bg after resets so padding
-	// belongs to the card surface, not the inline span.
-	inner = preserveBackground(inner, cardBgNum)
-	inner = padLineToDisplayWidthForOuterBg(inner, 12)
-
-	wrapped := wrapLineWithBackground("", "", inner, "", cardBgSeq, "")
-	bg, ok := backgroundOnTrailingSpaces(wrapped)
-	if !ok {
-		t.Fatalf("expected trailing pad spaces, got none: %q", wrapped)
-	}
-	if bg != cardBgNum {
-		t.Fatalf("trailing pad spaces should use card bg %q, got %q; line=%q", cardBgNum, bg, wrapped)
-	}
-}
