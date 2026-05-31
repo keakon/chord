@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -9,7 +10,7 @@ import (
 )
 
 // RebuildTouchedPathsFromMessages reconstructs the session-scoped touched-file set
-// from persisted tool history. Successful Write/Edit add files; successful Delete
+// from persisted tool history. Successful Write/ApplyPatch add files; successful Delete
 // removes files. Read-only tools are ignored.
 func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 	type callInfo struct {
@@ -22,10 +23,10 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "Edit" && tc.Name != "Delete" {
+			if tc.Name != "Write" && tc.Name != "ApplyPatch" && tc.Name != "Delete" {
 				continue
 			}
-			paths := extractHookFilePaths(tc.Args)
+			paths := extractHookFilePaths(tc.Args, os.Getenv("CHORD_PROJECT_ROOT"))
 			if len(paths) == 0 {
 				continue
 			}
@@ -45,7 +46,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 			continue
 		}
 		switch info.name {
-		case "Write", "Edit":
+		case "Write", "ApplyPatch":
 			for _, path := range info.paths {
 				paths[path] = struct{}{}
 			}

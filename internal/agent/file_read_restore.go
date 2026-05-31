@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -150,7 +151,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 
 			switch call.name {
 			case tools.NameRead:
-				path, key, ok := restoreSinglePathAndKey(args)
+				path, key, ok := restoreSinglePathAndKey(args, call.name)
 				if !ok {
 					result.skipInvalidPath()
 					continue
@@ -162,8 +163,32 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				}
 				candidates[key] = restoreReadCandidate{path: key, hash: hash, durable: durable}
 
-			case tools.NameEdit, tools.NameWrite:
-				path, key, ok := restoreSinglePathAndKey(args)
+			case tools.NameApplyPatch:
+				path, key, ok := restoreSinglePathAndKey(args, call.name)
+				if !ok {
+					result.skipInvalidPath()
+					continue
+				}
+				if statePath, durable := restoreApplyPatchWriteStatePath(msg.FileState, key); durable {
+					path = statePath
+					key = restoreNormalizeTrackedPath(path)
+				}
+				candidate, exists := candidates[key]
+				if !exists {
+					continue
+				}
+				hash, durable := restoreWriteStateHashForPath(msg.FileState, path)
+				if msg.FileState != nil && len(msg.FileState.Writes) > 0 && !durable {
+					delete(candidates, key)
+					result.skipStateMismatch()
+					continue
+				}
+				candidate.hash = hash
+				candidate.durable = durable
+				candidates[key] = candidate
+
+			case tools.NameWrite:
+				path, key, ok := restoreSinglePathAndKey(args, call.name)
 				if !ok {
 					result.skipInvalidPath()
 					continue
@@ -245,7 +270,7 @@ func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) rest
 
 func isTrackedRestoreTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case tools.NameRead, tools.NameEdit, tools.NameWrite, tools.NameDelete:
+	case tools.NameRead, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
 		return true
 	default:
 		return false
@@ -279,8 +304,12 @@ func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMe
 	return append(json.RawMessage(nil), call.args...), true
 }
 
-func restoreSinglePathAndKey(args json.RawMessage) (string, string, bool) {
+func restoreSinglePathAndKey(args json.RawMessage, toolName string) (string, string, bool) {
 	path, ok := parseRestoreSinglePath(args)
+	if !ok && toolName == tools.NameApplyPatch {
+		path = tools.ExtractApplyPatchPathFromArgsInDir(args, os.Getenv("CHORD_PROJECT_ROOT"))
+		ok = path != ""
+	}
 	if !ok {
 		return "", "", false
 	}
@@ -330,6 +359,35 @@ func restoreDeletePaths(msg message.Message, args json.RawMessage) []string {
 	return tools.NormalizeDeletePaths(parsed.Paths)
 }
 
+func restoreWriteStatePathForKey(state *message.ToolFileState, key string) (string, bool) {
+	if state == nil || len(state.Writes) == 0 || key == "" {
+		return "", false
+	}
+	for _, st := range state.Writes {
+		if !st.Exists || strings.TrimSpace(st.SHA256) == "" {
+			continue
+		}
+		if restoreNormalizeTrackedPath(st.Path) == key {
+			return strings.TrimSpace(st.Path), true
+		}
+	}
+	return "", false
+}
+
+func restoreApplyPatchWriteStatePath(state *message.ToolFileState, key string) (string, bool) {
+	if path, ok := restoreWriteStatePathForKey(state, key); ok {
+		return path, true
+	}
+	if state == nil || len(state.Writes) != 1 {
+		return "", false
+	}
+	st := state.Writes[0]
+	if !st.Exists || strings.TrimSpace(st.SHA256) == "" || strings.TrimSpace(st.Path) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(st.Path), true
+}
+
 func restoreReadStateHashForPath(state *message.ToolFileState, path string) (string, bool) {
 	if state == nil {
 		return "", false
@@ -367,6 +425,9 @@ func restoreNormalizeTrackedPath(raw string) string {
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+	}
+	if eval, err := filepath.EvalSymlinks(path); err == nil {
+		path = eval
 	}
 	path = filepath.Clean(path)
 	if path == "." {

@@ -379,7 +379,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 			// Finalize hook: on_tool_call. This must not be fired speculatively, but must
 			// be applied before deciding whether speculative args drifted.
 			hookModified := false
-			if hookResult, hookErr := a.fireHook(turn.Ctx, hook.OnToolCall, turnID, buildToolHookData(effective)); hookErr == nil && hookResult != nil {
+			if hookResult, hookErr := a.fireHook(turn.Ctx, hook.OnToolCall, turnID, buildToolHookData(effective, a.projectRoot)); hookErr == nil && hookResult != nil {
 				switch hookResult.Action {
 				case hook.ActionBlock:
 					msg := "blocked by hook"

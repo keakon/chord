@@ -14,7 +14,7 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
 				{ID: "write-1", Name: "Write", Args: json.RawMessage(`{"path":"a.go","content":"package main"}`)},
-				{ID: "edit-1", Name: "Edit", Args: json.RawMessage(`{"path":"b.go","old_string":"old","new_string":"new"}`)},
+				{ID: "patch-1", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: b.go\n@@\n-old\n+new\n*** End Patch\n"}`)},
 				{ID: "delete-1", Name: "Delete", Args: json.RawMessage(`{"paths":["a.go"],"reason":"cleanup"}`)},
 			},
 		},
@@ -26,8 +26,8 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 		},
 		{
 			Role:       "tool",
-			ToolCallID: "edit-1",
-			Content:    "Edit completed.",
+			ToolCallID: "patch-1",
+			Content:    "ApplyPatch completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 3}},
 		},
 		{
@@ -51,25 +51,25 @@ func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "edit-stale", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","old_string":"old","new_string":"bad"}`)},
+				{ID: "patch-stale", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n@@\n-old\n+bad\n*** End Patch\n"}`)},
 			},
 		},
 		{
 			Role:       "tool",
-			ToolCallID: "edit-stale",
-			Content:    "Edit completed.",
+			ToolCallID: "patch-stale",
+			Content:    "ApplyPatch completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 		},
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "edit-clean", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","old_string":"bad","new_string":"good"}`)},
+				{ID: "patch-clean", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n@@\n-bad\n+good\n*** End Patch\n"}`)},
 			},
 		},
 		{
 			Role:       "tool",
-			ToolCallID: "edit-clean",
-			Content:    "Edit completed.",
+			ToolCallID: "patch-clean",
+			Content:    "ApplyPatch completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}},
 		},
 	}

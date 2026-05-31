@@ -40,11 +40,15 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if hasVisibleTool(visible, "Read") {
 		lines = append(lines, "- Use `Read` for file contents.")
 	}
-	if hasVisibleTool(visible, "Edit") {
-		lines = append(lines, "- Use `Edit` for localized file edits.")
+	if hasVisibleTool(visible, "ApplyPatch") {
+		lines = append(lines, "- Use `ApplyPatch` to modify the contents of one existing file.")
+		lines = append(lines, "- For `ApplyPatch`, keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
 	}
 	if hasVisibleTool(visible, "Write") {
 		lines = append(lines, "- Use `Write` for whole-file writes.")
+	}
+	if hasVisibleTool(visible, "ApplyPatch") && hasVisibleTool(visible, "Write") {
+		lines = append(lines, "- Do not use `Write` for local edits to existing files; use `ApplyPatch` instead.")
 	}
 	if hasVisibleTool(visible, "Delete") {
 		lines = append(lines, "- Use `Delete` to remove files.")
@@ -75,6 +79,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 			"- Use `Shell` mainly for tests, builds, git, and system commands.",
 			"- For native filesystem operations with no dedicated built-in tool, `Shell` is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		)
+		lines = append(lines, "- Do not use `Shell` to run apply_patch.")
 	}
 	if len(discoveryTools) > 0 || hasVisibleTool(visible, "Read") {
 		lines = append(lines, "- Run independent reads/searches in parallel; run dependent operations sequentially.")
@@ -121,7 +126,7 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 		return ""
 	}
 
-	hasEdit := hasVisibleTool(visible, "Edit")
+	hasEdit := hasVisibleTool(visible, "ApplyPatch")
 	hasWrite := hasVisibleTool(visible, "Write")
 	hasDelete := hasVisibleTool(visible, "Delete")
 	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(ruleset) {
@@ -195,7 +200,7 @@ func hasScopedFilePermissions(ruleset permission.Ruleset) bool {
 		return false
 	}
 
-	for _, permName := range []string{"Write", "Edit", "Delete"} {
+	for _, permName := range []string{"Write", "ApplyPatch", "Delete"} {
 		if toolHasScopedRestriction(ruleset, permName) {
 			return true
 		}

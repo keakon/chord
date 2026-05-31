@@ -66,6 +66,9 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 		for key, raw := range obj {
 			childSchema, ok := props[key].(map[string]any)
 			if !ok {
+				if disallowAdditionalProperties(schema) {
+					return fmt.Errorf("%s.%s is not allowed", path, key)
+				}
 				continue
 			}
 			if err := validateValueAgainstSchema(raw, childSchema, path+"."+key); err != nil {
@@ -111,6 +114,11 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 	default:
 		return nil
 	}
+}
+
+func disallowAdditionalProperties(schema map[string]any) bool {
+	v, ok := schema["additionalProperties"].(bool)
+	return ok && !v
 }
 
 func requiredFields(raw any) []string {

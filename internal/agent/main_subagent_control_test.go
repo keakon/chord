@@ -27,7 +27,7 @@ func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string)
 		ParentCtx:    ctx,
 		Cancel:       cancel,
 		BaseTools:    parent.tools,
-		WorkDir:      t.TempDir(),
+		WorkDir:      parent.projectRoot,
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})

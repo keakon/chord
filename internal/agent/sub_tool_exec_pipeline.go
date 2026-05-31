@@ -30,6 +30,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit:         emit,
 		guidance:     subToolOutputGuidance,
 		logPrefix:    "SubAgent:",
+		projectRoot:  s.parent.projectRoot,
 		currentRuleset: func() permission.Ruleset {
 			return s.ruleset
 		},

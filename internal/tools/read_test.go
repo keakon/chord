@@ -32,7 +32,8 @@ func TestReadToolDescriptionExplainsDisplayedGutterForLspPositions(t *testing.T)
 		"truncated to fit",
 		"The displayed line-number gutter and separator tab are not part of the file content",
 		"copy exact text from the raw source portion only",
-		"Before Edit, re-read the smallest unique block you plan to replace",
+		"Before ApplyPatch, read the file first",
+		"re-read the smallest unique block before retrying",
 		"Read output normalizes line endings to LF",
 		"When using Lsp line/character positions, count from the raw source line only",
 	} {

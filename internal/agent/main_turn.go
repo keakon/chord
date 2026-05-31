@@ -373,6 +373,7 @@ func (a *MainAgent) newTurn() {
 	}
 	a.newTurnOversizeRecoveryCount = 0
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
+	a.turn.streamingToolExec.SetProjectRoot(a.projectRoot)
 	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()

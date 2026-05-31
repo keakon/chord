@@ -88,7 +88,7 @@ type Manager struct {
 	diagByServer   map[string]map[string]diagCounts
 	reviewByServer map[string]map[string]reviewCounts
 
-	// touchedPaths tracks files modified by successful Write/Edit calls in the current
+	// touchedPaths tracks files modified by successful Write/ApplyPatch calls in the current
 	// session. Successful Delete removes a file from this set.
 	touchedMu    sync.RWMutex
 	touchedPaths map[string]struct{}

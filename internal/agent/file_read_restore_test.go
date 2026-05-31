@@ -21,14 +21,14 @@ func TestRestoreTrackedFileStateDurableReadAllowsEdit(t *testing.T) {
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := restoreReadMessages(t, "read-1", path, computeFileHash(path), nil)
 	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want one durable usable restore", result)
 	}
 
-	mustExecuteEdit(t, a, path, "before", "after")
+	mustExecuteApplyPatch(t, a, path, "before", "after")
 	if got := readTestFile(t, path); got != "after" {
 		t.Fatalf("file content = %q, want after", got)
 	}
@@ -40,14 +40,14 @@ func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *test
 	historicalHash := sha256String("before")
 	writeTestFile(t, path, "changed")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := restoreReadMessages(t, "read-1", path, historicalHash, nil)
 	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
 	if result.RestoredStale != 1 || result.RestoredUsable != 0 {
 		t.Fatalf("restore result = %+v, want one stale durable restore", result)
 	}
 
-	err := executeEdit(t, a, path, "changed", "after")
+	err := executeApplyPatch(t, a, path, "changed", "after")
 	if err == nil {
 		t.Fatal("expected stale restore to block edit")
 	}
@@ -61,7 +61,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := []message.Message{
 		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path}, nil),
 		{Role: "tool", ToolCallID: "read-1", ToolStatus: string(ToolResultStatusError), Content: "Error: failed"},
@@ -71,7 +71,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
 		t.Fatalf("restore result = %+v, want no usable restore", result)
 	}
 
-	err := executeEdit(t, a, path, "before", "after")
+	err := executeApplyPatch(t, a, path, "before", "after")
 	if err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
@@ -84,7 +84,7 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 	writeTestFile(t, oldPath, "old")
 	writeTestFile(t, realPath, "real")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	oldArgs := mustJSONRaw(t, map[string]any{"path": oldPath})
 	realArgs := mustJSONText(t, map[string]any{"path": realPath})
 	msgs := []message.Message{
@@ -107,10 +107,10 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 		t.Fatalf("restore result = %+v, want real path restored", result)
 	}
 
-	if err := executeEdit(t, a, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, a, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("old path edit error = %v, want unread-file error", err)
 	}
-	mustExecuteEdit(t, a, realPath, "real", "updated")
+	mustExecuteApplyPatch(t, a, realPath, "real", "updated")
 }
 
 func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T) {
@@ -118,7 +118,7 @@ func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T)
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	imported := &message.MessageProvenance{Source: "import:claude", Imported: true}
 	msgs := restoreReadMessages(t, "read-1", path, computeFileHash(path), imported)
 	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
@@ -126,7 +126,7 @@ func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T)
 		t.Fatalf("restore result = %+v, want no imported restore", result)
 	}
 
-	err := executeEdit(t, a, path, "before", "after")
+	err := executeApplyPatch(t, a, path, "before", "after")
 	if err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
@@ -138,7 +138,7 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 	historicalHash := sha256String("before")
 	writeTestFile(t, path, "recreated")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := append(restoreReadMessages(t, "read-1", path, historicalHash, nil),
 		restoreAssistantCall(t, "delete-1", tools.NameDelete, map[string]any{"paths": []string{path}, "reason": "cleanup"}, nil),
 		message.Message{
@@ -154,25 +154,25 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 		t.Fatalf("restore result = %+v, want delete to remove candidate", result)
 	}
 
-	err := executeEdit(t, a, path, "recreated", "after")
+	err := executeApplyPatch(t, a, path, "recreated", "after")
 	if err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
 }
 
-func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
+func TestRestoreTrackedFileStateReadThenApplyPatchUsesPostWriteHash(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	readHash := sha256String("before")
 	postHash := sha256String("after")
 	writeTestFile(t, path, "after")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
-		restoreAssistantCall(t, "edit-1", tools.NameEdit, map[string]any{"path": path, "old_string": "before", "new_string": "after"}, nil),
+		restoreAssistantCall(t, "patch-1", tools.NameApplyPatch, map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"}, nil),
 		message.Message{
 			Role:       "tool",
-			ToolCallID: "edit-1",
+			ToolCallID: "patch-1",
 			ToolStatus: string(ToolResultStatusSuccess),
 			Content:    "Updated " + path,
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
@@ -183,7 +183,7 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 		t.Fatalf("restore result = %+v, want post-write hash usable", result)
 	}
 
-	mustExecuteEdit(t, a, path, "after", "final")
+	mustExecuteApplyPatch(t, a, path, "after", "final")
 }
 
 func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T) {
@@ -191,7 +191,7 @@ func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	otherPath := filepath.Join(projectRoot, "other.txt")
 	writeTestFile(t, otherPath, "other")
 	a.fileTrack.TrackRead(otherPath, a.instanceID, computeFileHash(otherPath))
@@ -205,8 +205,8 @@ func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T
 	}
 	a.activateLoadedSession(loaded)
 
-	mustExecuteEdit(t, a, path, "before", "after")
-	if err := executeEdit(t, a, otherPath, "other", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	mustExecuteApplyPatch(t, a, path, "before", "after")
+	if err := executeApplyPatch(t, a, otherPath, "other", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("other path edit error = %v, want tracker reset to drop old session", err)
 	}
 }
@@ -218,7 +218,7 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 	writeTestFile(t, oldPath, "old")
 	writeTestFile(t, realPath, "real")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
 	a.hookEngine = &modifyReadPathHookEngine{path: realPath}
 
@@ -282,15 +282,15 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 		t.Fatalf("restored audit = %#v, want effective args %s", restored[1].Audit, realArgs)
 	}
 
-	b := newRestoreEditTestAgent(t, projectRoot)
+	b := newRestoreApplyPatchTestAgent(t, projectRoot)
 	result := restoreTrackedFileStateFromMessages(b.fileTrack, b.instanceID, restored)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want one usable restore from persisted effective args", result)
 	}
-	if err := executeEdit(t, b, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, b, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("old path edit error = %v, want unread-file error", err)
 	}
-	mustExecuteEdit(t, b, realPath, "real", "updated")
+	mustExecuteApplyPatch(t, b, realPath, "real", "updated")
 }
 
 func TestToolMessageFileStateJSONOmitEmpty(t *testing.T) {
@@ -326,7 +326,7 @@ func TestRestoreTrackedFileStateSkipReasonCounters(t *testing.T) {
 	badMetaPath := filepath.Join(projectRoot, "bad-meta.txt")
 	writeTestFile(t, badMetaPath, "bad")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	msgs := []message.Message{
 		restoreAssistantCall(t, "imported-read", tools.NameRead, map[string]any{"path": goodPath}, nil),
 		{Role: "tool", ToolCallID: "imported-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok", Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true}},
@@ -391,10 +391,18 @@ func (e *modifyReadPathHookEngine) RunAutomation(context.Context, hook.Envelope)
 	return nil, nil
 }
 
-func newRestoreEditTestAgent(t *testing.T, projectRoot string) *MainAgent {
+func newRestoreApplyPatchTestAgent(t *testing.T, projectRoot string) *MainAgent {
 	t.Helper()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.fileTrack = filelock.NewFileTracker()
 	return a
 }
@@ -423,17 +431,17 @@ func restoreAssistantCall(t *testing.T, callID, name string, args map[string]any
 	}
 }
 
-func executeEdit(t *testing.T, a *MainAgent, path, oldString, newString string) error {
+func executeApplyPatch(t *testing.T, a *MainAgent, path, oldString, newString string) error {
 	t.Helper()
-	args := mustJSONRaw(t, map[string]any{"path": path, "old_string": oldString, "new_string": newString})
-	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "edit-test", Name: tools.NameEdit, Args: args})
+	args := mustJSONRaw(t, map[string]any{"patch": "*** Begin Patch\n*** Update File: " + filepath.Base(path) + "\n@@\n-" + oldString + "\n+" + newString + "\n*** End Patch\n"})
+	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NameApplyPatch, Args: args})
 	return err
 }
 
-func mustExecuteEdit(t *testing.T, a *MainAgent, path, oldString, newString string) {
+func mustExecuteApplyPatch(t *testing.T, a *MainAgent, path, oldString, newString string) {
 	t.Helper()
-	if err := executeEdit(t, a, path, oldString, newString); err != nil {
-		t.Fatalf("Edit(%s) failed: %v", path, err)
+	if err := executeApplyPatch(t, a, path, oldString, newString); err != nil {
+		t.Fatalf("ApplyPatch(%s) failed: %v", path, err)
 	}
 }
 

@@ -1962,7 +1962,7 @@ Path: %s
 // extractToolArgument returns the string used for permission pattern matching.
 //
 // For Shell the full command string is used (e.g. "git push origin main").
-// For file tools (Read/Write/Edit) the path argument is extracted so that
+// For file tools (Read/Write/ApplyPatch) the path argument is extracted so that
 // path-based rules like `Write: { "/etc/*": deny }` work correctly.
 // For search tools (Grep/Glob) the pattern argument is extracted.
 // All other tools fall back to "*" (whole-tool match).

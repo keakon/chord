@@ -18,6 +18,14 @@ import (
 
 func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 	projectRoot := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWD) }()
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
 	a := newTestMainAgent(t, projectRoot)
 	tools.StopAllSpawnedForShutdown()
 	resetSpawnRegistryForAgentTests(t)
@@ -621,7 +629,7 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 	writeTestFile(t, alphaPath, "alpha")
 	writeTestFile(t, betaPath, "beta")
 
-	a := newRestoreEditTestAgent(t, projectRoot)
+	a := newRestoreApplyPatchTestAgent(t, projectRoot)
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
@@ -644,11 +652,11 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 
 	a.handleForkSessionCommand(3)
 
-	mustExecuteEdit(t, a, alphaPath, "alpha", "alpha-updated")
+	mustExecuteApplyPatch(t, a, alphaPath, "alpha", "alpha-updated")
 	if a.fileTrack.HasRead(betaPath, a.instanceID) {
 		t.Fatal("fork should not preserve tracked reads that occur after the fork prefix")
 	}
-	if err := executeEdit(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
 		t.Fatalf("beta edit error = %v, want unread-file error after fork", err)
 	}
 }

@@ -32,19 +32,19 @@ func TestWriteToolMarksTouchedFile(t *testing.T) {
 	}
 }
 
-func TestEditToolMarksTouchedFile(t *testing.T) {
+func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "legacy.txt")
+	path := filepath.Join(dir, "patched.txt")
 	if _, err := (WriteTool{}).Execute(context.Background(), mustJSON(t, map[string]any{"path": path, "content": "before\n"})); err != nil {
 		t.Fatalf("seed WriteTool.Execute: %v", err)
 	}
 	mgr := lsp.NewManager(&config.Config{}, dir, nil)
-	args, err := json.Marshal(map[string]any{"path": path, "old_string": "before", "new_string": "after"})
+	args, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: patched.txt\n@@\n-before\n+after\n*** End Patch\n"})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if _, err := (EditTool{LSP: mgr}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (ApplyPatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("ApplyPatchTool.Execute: %v", err)
 	}
 	want := []string{path}
 	if got := mgr.TouchedPaths(); !reflect.DeepEqual(got, want) {

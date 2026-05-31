@@ -58,7 +58,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 
 		// Finalize hook: on_tool_call (must not fire speculatively).
 		hookModified := false
-		if hookResult, hookErr := s.fireHook(batchCtx, hook.OnToolCall, turn.ID, buildToolHookData(effective)); hookErr == nil && hookResult != nil {
+		if hookResult, hookErr := s.fireHook(batchCtx, hook.OnToolCall, turn.ID, buildToolHookData(effective, s.parent.projectRoot)); hookErr == nil && hookResult != nil {
 			switch hookResult.Action {
 			case hook.ActionBlock:
 				msg := "blocked by hook"

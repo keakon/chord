@@ -232,7 +232,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Edit", Args: json.RawMessage(`{"path":"a.py"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n*** End Patch\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -252,7 +252,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLi
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nDiagnostics status: backend=LSP, new=1, resolved=0, current=1 errors, 0 warnings (best effort).\n[E] 10:1 [F821] Undefined name `x`"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Edit", Args: json.RawMessage(`{"path":"a.py"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n*** End Patch\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -1151,7 +1151,7 @@ func TestFitCompactionInputToContextLimitReturnsErrorForGrosslyOversizedPrompt(t
 		GoalAnchor:       "- improve extraction",
 		ConstraintAnchor: "- do not hardcode",
 		DecisionAnchor:   "- classify issues before changing implementation",
-		ProgressAnchor:   "- latest error: old_string not found",
+		ProgressAnchor:   "- latest error: patch not found",
 	}
 	_, err := fitCompactionInputToContextLimit(head, input, 20000, "history-1.md", nil, nil, nil, nil, compactReservedOutput)
 	if err == nil {
@@ -1163,7 +1163,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	head := []message.Message{
 		{Role: "user", Content: "Improve extraction quality and prioritize candidate filtering."},
 		{Role: "assistant", Content: "Classify the failure source before changing prompts or rules."},
-		{Role: "tool", Content: "Error: old_string not found"},
+		{Role: "tool", Content: "Error: patch not found"},
 	}
 	evidence := []evidenceItem{{Kind: evidenceUserCorrection, Title: "constraint", Excerpt: "do not hardcode"}}
 	tail := []message.Message{{Role: "user", Content: "Continue and prioritize candidate containment handling."}}
@@ -1193,7 +1193,7 @@ func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 			GoalAnchor:       "- improve extraction quality",
 			ConstraintAnchor: "- do not hardcode",
 			DecisionAnchor:   "- classify failures before choosing the next layer",
-			ProgressAnchor:   "- latest error: old_string not found",
+			ProgressAnchor:   "- latest error: patch not found",
 		},
 		"history-1.md",
 		nil,

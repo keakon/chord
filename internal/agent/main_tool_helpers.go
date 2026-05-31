@@ -60,6 +60,10 @@ func wrapEditedArgsPermissionDenied(toolName string) error {
 }
 
 func extractToolArgument(toolName string, args []byte) string {
+	return extractToolArgumentInDir(toolName, args, "")
+}
+
+func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) string {
 	switch toolName {
 	case "Shell":
 		var parsed struct {
@@ -68,7 +72,11 @@ func extractToolArgument(toolName string, args []byte) string {
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Command != "" {
 			return parsed.Command
 		}
-	case "Read", "Write", "Edit":
+	case tools.NameApplyPatch:
+		if path := tools.ExtractApplyPatchPathFromArgsInDir(args, projectRoot); path != "" {
+			return path
+		}
+	case "Read", "Write":
 		var parsed struct {
 			Path string `json:"path"`
 		}

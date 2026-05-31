@@ -31,6 +31,9 @@ type deleteResultGroups struct {
 }
 
 func extractReviewFilePaths(args json.RawMessage) []string {
+	if path := extractReviewApplyPatchPath(args); path != "" {
+		return []string{path}
+	}
 	var parsed struct {
 		Path  string   `json:"path"`
 		Paths []string `json:"paths"`
@@ -58,6 +61,21 @@ func extractReviewFilePaths(args json.RawMessage) []string {
 		out = append(out, path)
 	}
 	return out
+}
+
+func extractReviewApplyPatchPath(args json.RawMessage) string {
+	var parsed struct {
+		Patch string `json:"patch"`
+	}
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(strings.ReplaceAll(parsed.Patch, "\r\n", "\n"), "\n") {
+		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "*** Update File: "); ok {
+			return strings.TrimSpace(path)
+		}
+	}
+	return ""
 }
 
 func parseDeleteReviewResult(text string) deleteResultGroups {
@@ -320,7 +338,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "Edit" && tc.Name != "Delete" {
+			if tc.Name != "Write" && tc.Name != "ApplyPatch" && tc.Name != "Delete" {
 				continue
 			}
 			paths := extractReviewFilePaths(tc.Args)
@@ -353,7 +371,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 					}
 				}
 			}
-		case "Write", "Edit":
+		case "Write", "ApplyPatch":
 			if strings.TrimSpace(info.path) == "" {
 				continue
 			}

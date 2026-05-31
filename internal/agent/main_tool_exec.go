@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -31,6 +32,9 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 }
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
+	if a.projectRoot != "" {
+		_ = os.Setenv("CHORD_PROJECT_ROOT", a.projectRoot)
+	}
 	return toolExecutionPipeline{
 		agentID:      a.instanceID,
 		eventAgentID: "",
@@ -39,6 +43,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		fileTrack:    a.fileTrack,
 		eventSender:  a,
 		emit:         a.emitToTUI,
+		projectRoot:  a.projectRoot,
 		guidance:     mainToolOutputGuidance,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()

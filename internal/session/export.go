@@ -36,7 +36,7 @@ type ExportedMessage struct {
 	Role            string                  `json:"role"`
 	Content         string                  `json:"content"`
 	ToolCallID      string                  `json:"tool_call_id,omitempty"`
-	ToolDiff        string                  `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
+	ToolDiff        string                  `json:"tool_diff,omitempty"`         // unified diff for Write/ApplyPatch results
 	ToolDiffAdded   int                     `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
 	ToolDiffRemoved int                     `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
 	ToolDurationMs  int64                   `json:"tool_duration_ms,omitempty"`

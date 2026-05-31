@@ -81,7 +81,7 @@ type ToolResultPayload struct {
 	Error            error
 	TurnID           uint64
 	Duration         time.Duration
-	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
+	Diff             string              // unified diff for Write/ApplyPatch tools; not sent to LLM
 	DiffAdded        int                 // full added-line count before any diff truncation
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
@@ -322,7 +322,7 @@ type ToolResultEvent struct {
 	DoneReport  string
 	Status      ToolResultStatus
 	AgentID     string // originating agent ("" = main agent)
-	Diff        string // unified diff for Write/Edit tools (not sent to LLM)
+	Diff        string // unified diff for Write/ApplyPatch tools (not sent to LLM)
 	DiffAdded   int    // full added-line count before any diff truncation
 	DiffRemoved int    // full removed-line count before any diff truncation
 	FileCreated bool   // true when Write created a file that did not previously exist

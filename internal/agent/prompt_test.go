@@ -818,7 +818,7 @@ Read: allow
 func TestMainAgentCapabilityPromptBlock_UsesVisibleToolsOnly(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
@@ -950,7 +950,7 @@ Question: deny
 func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
@@ -958,7 +958,7 @@ func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 "*": deny
 Read: allow
 Shell: allow
-Edit:
+ApplyPatch:
   "*": deny
   "internal/tui/*": allow
 Write:
@@ -983,14 +983,14 @@ Delete: deny
 func TestMainAgentCapabilityPromptBlock_OnlyTightenedPathsDoesNotImplyScopedWrites(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
 Shell: allow
-Edit:
+ApplyPatch:
   "*": allow
   "internal/tui/*": ask
 Write:
@@ -1170,7 +1170,7 @@ Notify: allow
 func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	reg.Register(tools.EditTool{})
+	reg.Register(tools.ApplyPatchTool{})
 	reg.Register(tools.NewShellTool("bash"))
 	reg.Register(tools.NewQuestionTool(nil))
 	permNode := parsePermissionNode(t, `
@@ -1178,7 +1178,7 @@ func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testin
 Read: allow
 Shell: allow
 Question: allow
-Edit:
+ApplyPatch:
   "*": deny
   "internal/tui/*": allow
 `)

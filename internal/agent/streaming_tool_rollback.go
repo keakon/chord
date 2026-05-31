@@ -41,11 +41,21 @@ type speculativeFileMutation struct {
 	rolledBack bool
 }
 
-func prepareSpeculativeToolCall(tc message.ToolCall, track *filelock.FileTracker, agentID string) (*speculativeToolHooks, error) {
+func prepareSpeculativeToolCall(tc message.ToolCall, track *filelock.FileTracker, agentID, projectRoot string) (*speculativeToolHooks, error) {
 	switch strings.TrimSpace(tc.Name) {
-	case tools.NameWrite, tools.NameEdit:
+	case tools.NameWrite:
 		path, ok := singlePathToolPath(tc.Args)
 		if !ok {
+			return nil, nil
+		}
+		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path})
+		if err != nil {
+			return nil, err
+		}
+		return mutation.hooks(), nil
+	case tools.NameApplyPatch:
+		path := tools.ExtractApplyPatchPathFromArgsInDir(tc.Args, projectRoot)
+		if path == "" {
 			return nil, nil
 		}
 		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path})
@@ -312,7 +322,7 @@ func speculativeWriteToolLSPReviews(registry *tools.Registry, toolName, path str
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}
-	case tools.EditTool:
+	case tools.ApplyPatchTool:
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}

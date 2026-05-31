@@ -148,7 +148,7 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 		return ""
 	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
-- When LSP diagnostics are available after your ` + "`Edit`" + ` or ` + "`Write`" + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+- When LSP diagnostics are available after your ` + "`ApplyPatch`" + ` or ` + "`Write`" + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
 - If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
 }
 
@@ -157,7 +157,7 @@ func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
 	if len(visible) == 0 {
 		return false
 	}
-	if _, ok := visible["Edit"]; !ok {
+	if _, ok := visible["ApplyPatch"]; !ok {
 		if _, ok := visible["Write"]; !ok {
 			return false
 		}

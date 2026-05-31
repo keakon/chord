@@ -5,7 +5,7 @@ import "strings"
 const (
 	NameRead         = "Read"
 	NameWrite        = "Write"
-	NameEdit         = "Edit"
+	NameApplyPatch   = "ApplyPatch"
 	NameDelete       = "Delete"
 	NameGrep         = "Grep"
 	NameGlob         = "Glob"
@@ -43,7 +43,7 @@ func IsReadLike(name string) bool {
 // IsFileMutation reports whether the tool mutates files in the workspace.
 func IsFileMutation(name string) bool {
 	switch strings.TrimSpace(name) {
-	case NameWrite, NameEdit, NameDelete:
+	case NameWrite, NameApplyPatch, NameDelete:
 		return true
 	default:
 		return false

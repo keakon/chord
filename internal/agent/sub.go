@@ -44,7 +44,7 @@ type toolResult struct {
 	Error            error
 	TurnID           uint64
 	Duration         time.Duration
-	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
+	Diff             string              // unified diff for Write/ApplyPatch tools; not sent to LLM
 	DiffAdded        int                 // full added-line count before any diff truncation
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
@@ -202,7 +202,7 @@ type SubAgentConfig struct {
 	Parent        *MainAgent
 	ParentCtx     context.Context
 	Cancel        context.CancelFunc
-	BaseTools     *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
+	BaseTools     *tools.Registry // shared base tool registry (Read, Write, ApplyPatch, Shell, Grep, Glob, etc.)
 	ExtraMCPTools []tools.Tool    // agent-specific MCP tools
 	Ruleset       permission.Ruleset
 	WorkDir       string
@@ -252,6 +252,11 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		default:
 			// Skip MainAgent-only tools.
 			if cfg.Ruleset.IsDisabled(t.Name()) {
+				continue
+			}
+			if ap, ok := t.(tools.ApplyPatchTool); ok && ap.BaseDir == "" {
+				ap.BaseDir = cfg.WorkDir
+				subTools.Register(ap)
 				continue
 			}
 			subTools.Register(t)
@@ -635,6 +640,7 @@ func (s *SubAgent) newTurn() *Turn {
 		activeToolBatchCancel: nil,
 	}
 	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
+	s.turn.streamingToolExec.SetProjectRoot(s.parent.projectRoot)
 	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
 	return s.turn

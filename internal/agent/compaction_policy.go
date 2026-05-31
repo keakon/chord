@@ -103,7 +103,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= 1 {
 			meta := callMeta[prepared[i].ToolCallID]
-			if (strings.TrimSpace(meta.Name) == tools.NameEdit || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
+			if (strings.TrimSpace(meta.Name) == tools.NameApplyPatch || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
 				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
 					prepared[i].Content = compacted
 					noteReduction(original, prepared[i].Content)

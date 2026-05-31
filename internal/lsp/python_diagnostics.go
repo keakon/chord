@@ -125,7 +125,7 @@ func (m *Manager) pythonQuickBackendAvailable(pyCfg config.PythonDiagnosticsConf
 	}
 	// Resolve on every call so a binary that is installed (or uninstalled)
 	// mid-session is picked up without restarting Chord. exec.LookPath only
-	// stat's PATH entries, so it is cheap relative to the Edit/Write tool
+	// stat's PATH entries, so it is cheap relative to the ApplyPatch/Write tool
 	// invocation that triggers this check.
 	_, err := lookPath(cmd)
 	return err == nil

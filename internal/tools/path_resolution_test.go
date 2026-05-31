@@ -233,34 +233,6 @@ func TestSaveArtifactToolRejectsSymlinkOverwrite(t *testing.T) {
 	}
 }
 
-func TestEditToolSupportsTildePaths(t *testing.T) {
-	home := t.TempDir()
-	setHomeEnvForTest(t, home)
-	target := filepath.Join(home, "edit.txt")
-	if err := os.WriteFile(target, []byte("before\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	out, err := (EditTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
-		"path":       tildePathForTest("edit.txt"),
-		"old_string": "before",
-		"new_string": "after",
-	}))
-	if err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
-	}
-	if !strings.Contains(out, "Replaced 1 occurrence") {
-		t.Fatalf("unexpected output %q", out)
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if string(data) != "after\n" {
-		t.Fatalf("edited content = %q, want %q", string(data), "after\n")
-	}
-}
-
 func TestDeleteToolSupportsTildePaths(t *testing.T) {
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)

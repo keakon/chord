@@ -91,6 +91,24 @@ func TestValidateToolArgsRejectsEnumMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateToolArgsRejectsAdditionalPropertiesWhenDisallowed(t *testing.T) {
+	tool := validationStubTool{
+		name: "ApplyPatch",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"patch": map[string]any{"type": "string"},
+			},
+			"required":             []string{"patch"},
+			"additionalProperties": false,
+		},
+	}
+	err := ValidateToolArgs(tool, json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+b\n*** End Patch\n","path":"a.txt"}`))
+	if err == nil || !strings.Contains(err.Error(), "args.path is not allowed") {
+		t.Fatalf("err = %v, want additional-property error", err)
+	}
+}
+
 func TestValidateToolArgsAcceptsValidArgs(t *testing.T) {
 	tool := validationStubTool{
 		name: "Shell",

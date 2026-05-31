@@ -38,7 +38,7 @@ var (
 	}
 )
 
-// AfterWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
+// AfterWriteToolResult runs the LSP pipeline after Write/ApplyPatch succeeds: Start, DidChange,
 // WaitDiagnosticsNotify, logs startup/sync failures, then appends LSP error diagnostics
 // (if any). includeOtherFiles is true for Write. If no LSP is configured for this file
 // type, LSP is not invoked and base is returned as-is.

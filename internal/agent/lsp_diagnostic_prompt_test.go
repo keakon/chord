@@ -29,12 +29,12 @@ func TestBuildSystemPrompt_IncludesLSPDiagnosticGuidanceOnlyWhenLSPConfiguredAnd
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 Write: deny
-Edit: deny
+ApplyPatch: deny
 `)}
 	a.rebuildRuleset()
 	got = a.buildSystemPrompt()
 	if strings.Contains(got, "## LSP diagnostic follow-up") {
-		t.Fatalf("buildSystemPrompt() unexpectedly included LSP diagnostic guidance without Edit/Write permission: %q", got)
+		t.Fatalf("buildSystemPrompt() unexpectedly included LSP diagnostic guidance without ApplyPatch/Write permission: %q", got)
 	}
 }
 
@@ -84,10 +84,10 @@ func TestShouldQueueLSPDiagnosticOverlay_RequiresRelevantChangedDiagnostics(t *t
 
 func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	payload := &ToolResultPayload{
-		Name:       tools.NameEdit,
+		Name:       tools.NameApplyPatch,
 		ArgsJSON:   `{"path":"pkg/foo.go"}`,
 		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/foo.go", Exists: true}}},
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 2, Warnings: 1}},
@@ -124,7 +124,7 @@ func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericReminder(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.tools.Register(tools.WriteTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	first := &ToolResultPayload{
 		Name:       tools.NameWrite,
@@ -133,7 +133,7 @@ func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericRemi
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 	}
 	second := &ToolResultPayload{
-		Name:       tools.NameEdit,
+		Name:       tools.NameApplyPatch,
 		ArgsJSON:   `{"path":"pkg/bar.go"}`,
 		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/bar.go", Exists: true}}},
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 2}},
@@ -165,7 +165,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 		}
 		a.queueLSPDiagnosticOverlay(nil, payload)
-		a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, "\n\"*\": deny\nWrite: deny\nEdit: deny\n")}
+		a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, "\n\"*\": deny\nWrite: deny\nApplyPatch: deny\n")}
 		a.rebuildRuleset()
 
 		for _, o := range a.buildTurnOverlayMessages() {
@@ -174,7 +174,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 			}
 		}
 		if a.pendingLSPDiagnosticOverlay != "" {
-			t.Fatal("expected stale LSP diagnostic overlay to be cleared when current role lacks Edit/Write")
+			t.Fatal("expected stale LSP diagnostic overlay to be cleared when current role lacks ApplyPatch/Write")
 		}
 	})
 

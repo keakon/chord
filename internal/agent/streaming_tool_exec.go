@@ -54,10 +54,11 @@ type StreamingToolDiscardInfo struct {
 }
 
 type StreamingToolExecutor struct {
-	turnID  uint64
-	ctx     context.Context
-	execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)
-	emit    func(AgentEvent)
+	turnID      uint64
+	ctx         context.Context
+	execute     func(context.Context, message.ToolCall) (ToolExecutionResult, error)
+	emit        func(AgentEvent)
+	projectRoot string
 
 	onSpeculativeStart     func(callID, toolName string, at time.Time)
 	onFirstVisibleResult   func(callID, toolName string, at time.Time)
@@ -86,11 +87,17 @@ func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName 
 	e.onSpeculativeDiscarded = onDiscard
 }
 
+func (e *StreamingToolExecutor) SetProjectRoot(projectRoot string) {
+	if e != nil {
+		e.projectRoot = strings.TrimSpace(projectRoot)
+	}
+}
+
 func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 	if e == nil || call.ID == "" || e.ctx == nil || e.execute == nil {
 		return false
 	}
-	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call), state: streamingToolQueued, done: make(chan struct{})}
+	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call, e.projectRoot), state: streamingToolQueued, done: make(chan struct{})}
 	e.mu.Lock()
 	if _, exists := e.entries[call.ID]; exists {
 		e.mu.Unlock()
@@ -500,17 +507,21 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 
 func isFileMutationTool(name string) bool {
 	switch name {
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+	case tools.NameWrite, tools.NameApplyPatch, tools.NameDelete:
 		return true
 	default:
 		return false
 	}
 }
 
-func speculativeConflictKeys(call message.ToolCall) []string {
+func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string {
 	switch call.Name {
-	case tools.NameWrite, tools.NameEdit:
+	case tools.NameWrite:
 		if path, ok := singlePathToolPath(call.Args); ok {
+			return []string{"file:" + path}
+		}
+	case tools.NameApplyPatch:
+		if path := tools.ExtractApplyPatchPathFromArgsInDir(call.Args, projectRoot); path != "" {
 			return []string{"file:" + path}
 		}
 	case tools.NameDelete:

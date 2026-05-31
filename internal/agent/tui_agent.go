@@ -236,7 +236,7 @@ type LSPServerDisplay struct {
 }
 
 // LSPStateProvider is an optional interface for agents that can expose per-file
-// last-review LSP diagnostics (Write/Edit target file only, excluding related files)
+// last-review LSP diagnostics (Write/ApplyPatch target file only, excluding related files)
 // to the TUI info panel.
 type LSPStateProvider interface {
 	// LSPServerList returns configured language servers; nil/empty hides the LSP block.

@@ -125,27 +125,25 @@ func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyP
 	var parsed struct {
 		Path string `json:"path"`
 	}
-	policy := ConcurrencyPolicy{}
 	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
-		return policy
+		return ConcurrencyPolicy{}
 	}
-	if strings.TrimSpace(parsed.Path) == "" {
-		return policy
+	return filePathConcurrencyPolicy(parsed.Path, readOnly)
+}
+
+func filePathConcurrencyPolicy(path string, readOnly bool) ConcurrencyPolicy {
+	if strings.TrimSpace(path) == "" {
+		return ConcurrencyPolicy{}
 	}
-	resolved, err := resolveToolPath(parsed.Path)
-	if err != nil {
-		return policy
+	resolved, err := resolveToolPath(path)
+	if err != nil || resolved == "." || resolved == "" {
+		return ConcurrencyPolicy{}
 	}
-	if resolved == "." || resolved == "" {
-		return policy
-	}
-	policy.Resource = "file:" + resolved
+	mode := ConcurrencyModeWrite
 	if readOnly {
-		policy.Mode = ConcurrencyModeRead
-	} else {
-		policy.Mode = ConcurrencyModeWrite
+		mode = ConcurrencyModeRead
 	}
-	return policy
+	return ConcurrencyPolicy{Resource: "file:" + resolved, Mode: mode}
 }
 
 func deleteToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {

@@ -33,7 +33,7 @@ type ExternalModificationError struct {
 
 func (e *ExternalModificationError) Error() string { return e.Message }
 
-// UnreadFileError is returned when an Edit attempts to modify a file that this
+// UnreadFileError is returned when ApplyPatch attempts to modify a file that this
 // agent has not successfully Read in the current conversation.
 type UnreadFileError struct {
 	Path    string
@@ -68,6 +68,9 @@ func normalizeTrackedPath(raw string) string {
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+	}
+	if eval, err := filepath.EvalSymlinks(path); err == nil {
+		path = eval
 	}
 	path = filepath.Clean(path)
 	if path == "." {
