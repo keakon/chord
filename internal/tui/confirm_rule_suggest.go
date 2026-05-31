@@ -7,6 +7,8 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // PatternCandidate represents a suggested rule pattern for a tool invocation.
@@ -26,7 +28,7 @@ func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd 
 	switch strings.ToLower(toolName) {
 	case "shell":
 		return suggestShellPatterns(argsJSON, needsApproval)
-	case "edit", "write":
+	case "applypatch", "write":
 		return suggestFilePatterns(toolName, argsJSON, cwd)
 	case "webfetch":
 		return suggestWebFetchPatterns(argsJSON)
@@ -153,7 +155,7 @@ func isHighRiskBashCommand(command string) bool {
 	return false
 }
 
-// suggestFilePatterns generates pattern candidates for Edit/Write tools.
+// suggestFilePatterns generates pattern candidates for ApplyPatch/Write tools.
 func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 	filePath := extractFilePath(argsJSON)
 	if filePath == "" {
@@ -379,8 +381,11 @@ func extractShellCommand(argsJSON string) string {
 	return strings.TrimSpace(parsed.Command)
 }
 
-// extractFilePath extracts the file path from Edit/Write tool args JSON.
+// extractFilePath extracts the file path from ApplyPatch/Write tool args JSON.
 func extractFilePath(argsJSON string) string {
+	if path := tools.ExtractApplyPatchPathFromArgs([]byte(argsJSON)); path != "" {
+		return path
+	}
 	var parsed struct {
 		Path       string `json:"path"`
 		TargetFile string `json:"TargetFile"`

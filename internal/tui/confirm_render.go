@@ -174,7 +174,7 @@ func (m Model) renderConfirmOptions() string {
 		ConfirmAllowStyle.Render("[Enter/A] Allow"),
 		ConfirmDenyStyle.Render("[Esc/D] Deny"),
 		ConfirmDenyStyle.Render("[R] Deny+Reason"),
-		ConfirmEditStyle.Render("[E] Edit"),
+		ConfirmEditStyle.Render("[E] Modify args"),
 	}
 	parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
 	return strings.Join(parts, "  ")

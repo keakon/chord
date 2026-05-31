@@ -120,19 +120,34 @@ func hasMultiRunWordTokenChange(line string, changeSpans []diffSegmentSpan) bool
 	return false
 }
 
-func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style) string {
+func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style, hl *codeHighlighter) string {
 	var buf strings.Builder
 	for _, seg := range segs {
 		if seg.Kind == changeKind {
 			buf.WriteString(changeStyle.Render(seg.Text))
 			continue
 		}
-		buf.WriteString(seg.Text)
+		if hl != nil {
+			buf.WriteString(hl.highlightLine(seg.Text, ""))
+		} else {
+			buf.WriteString(seg.Text)
+		}
 	}
 	return buf.String()
 }
 
-func renderInlineDiffLine(oldLine, newLine string, diffWidth int) []string {
+func buildOneSidedInlineContentANSI(line string, span diffOneSidedSpan, changeStyle lipgloss.Style, hl *codeHighlighter) string {
+	if hl == nil {
+		return span.Prefix + changeStyle.Render(span.Change) + span.Suffix
+	}
+	startByte, endByte := findColumnByteOffsets(line, span.StartCol, span.EndCol)
+	if startByte < 0 || endByte < startByte {
+		return hl.highlightLine(line, "")
+	}
+	return hl.highlightLine(line[:startByte], "") + changeStyle.Render(line[startByte:endByte]) + hl.highlightLine(line[endByte:], "")
+}
+
+func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *codeHighlighter) []string {
 	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
 	oldSpans := buildDiffSegmentSpans(oldSegs)
 	newSpans := buildDiffSegmentSpans(newSegs)
@@ -146,7 +161,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int) []string {
 	}
 	if len(insertSpans) > 0 && len(deleteSpans) == 0 {
 		if span, ok := oneSidedSpanFromLines(oldLine, newLine); ok {
-			content := span.Prefix + DiffAddInlineStyle.Render(span.Change) + span.Suffix
+			content := buildOneSidedInlineContentANSI(newLine, span, DiffAddInlineStyle, hl)
 			if span.LineWidth+1 <= diffWidth {
 				return []string{"+" + content}
 			}
@@ -159,7 +174,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int) []string {
 		if hasMultiRunWordTokenChange(newLine, insertSpans) {
 			return nil
 		}
-		content := buildInlineContentANSI(newSegs, "insert", DiffAddInlineStyle)
+		content := buildInlineContentANSI(newSegs, "insert", DiffAddInlineStyle, hl)
 		if ansi.StringWidth(content)+1 <= diffWidth {
 			return []string{"+" + content}
 		}
@@ -171,7 +186,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int) []string {
 	}
 	if len(deleteSpans) > 0 && len(insertSpans) == 0 {
 		if span, ok := oneSidedSpanFromLines(oldLine, newLine); ok {
-			content := span.Prefix + DiffDelInlineStyle.Render(span.Change) + span.Suffix
+			content := buildOneSidedInlineContentANSI(oldLine, span, DiffDelInlineStyle, hl)
 			if span.LineWidth+1 <= diffWidth {
 				return []string{"-" + content}
 			}
@@ -184,7 +199,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int) []string {
 		if hasMultiRunWordTokenChange(oldLine, deleteSpans) {
 			return nil
 		}
-		content := buildInlineContentANSI(oldSegs, "delete", DiffDelInlineStyle)
+		content := buildInlineContentANSI(oldSegs, "delete", DiffDelInlineStyle, hl)
 		if ansi.StringWidth(content)+1 <= diffWidth {
 			return []string{"-" + content}
 		}

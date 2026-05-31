@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // Selection highlight unit tests: validates findColumnByteOffsets, applyHighlightToLine, selectionColRange
@@ -557,9 +559,9 @@ func TestNormalizeLineNumberPrefix(t *testing.T) {
 		{"empty", "", ""},
 		{"no match", "  no digits here", "  no digits here"},
 		{"indented numeric content not a tool line", "  2026-03-19", "  2026-03-19"},
-		{"Edit block one line", "   582              }", "582\t            }"},
-		{"Edit block multi", "   582     }\n   583 }\n   584 }", "582\t   }\n583\t}\n584\t}"},
-		{"Edit add del markers", "   582 -old\n   583 +new", "582\t-old\n583\t+new"},
+		{"ApplyPatch block one line", "   582              }", "582\t            }"},
+		{"ApplyPatch block multi", "   582     }\n   583 }\n   584 }", "582\t   }\n583\t}\n584\t}"},
+		{"ApplyPatch add del markers", "   582 -old\n   583 +new", "582\t-old\n583\t+new"},
 		{"Read block style", "     582  return x", "582\treturn x"},
 		{"Read block preserves code indent", "     582      return x", "582\t    return x"},
 	}
@@ -619,13 +621,13 @@ func TestExtractSelectionTextStripsRenderedIndentForReadBlock(t *testing.T) {
 	}
 }
 
-func TestExtractSelectionTextEditDiffPreservesLineNumAndMarker(t *testing.T) {
+func TestExtractSelectionTextApplyPatchDiffPreservesLineNumAndMarker(t *testing.T) {
 	v := NewViewport(120, 24)
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Edit",
-		Content:  `{"path":"example.py"}`,
+		ToolName: tools.NameApplyPatch,
+		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +
@@ -657,7 +659,7 @@ func TestExtractSelectionTextEditDiffPreservesLineNumAndMarker(t *testing.T) {
 	})
 	want := "10\t+        \"added\","
 	if got != want {
-		t.Fatalf("ExtractSelectionText() Edit diff\n got %q\nwant %q", got, want)
+		t.Fatalf("ExtractSelectionText() ApplyPatch diff\n got %q\nwant %q", got, want)
 	}
 }
 

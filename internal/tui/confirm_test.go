@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
@@ -273,7 +274,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
 	}
-	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Edit") {
+	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Modify args") {
 		t.Fatalf("expected confirm actions to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "more lines hidden") {
@@ -305,7 +306,7 @@ func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
 func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.workingDir = "/tmp/project"
-	m.confirm.request = &ConfirmRequest{ToolName: "Edit", ArgsJSON: `{"path":"internal/tui/confirm_render.go","old_string":"old","new_string":"new"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: tools.NameApplyPatch, ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: internal/tui/confirm_render.go\n@@\n-old\n+new\n*** End Patch\n"}`}
 
 	summary := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(summary, "[M] Add rule…") {
@@ -322,7 +323,7 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	}
 
 	picker := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(picker, "⚠ Add rule — Edit") {
+	if !strings.Contains(picker, "⚠ Add rule — ApplyPatch") {
 		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
 	}
 	if !strings.Contains(picker, "Pattern:") {
@@ -555,7 +556,7 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
 	}
-	if strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[M] Add rule") || strings.Contains(plain, "Press E") {
+	if strings.Contains(plain, "[E] Modify args") || strings.Contains(plain, "[M] Add rule") || strings.Contains(plain, "Press E") {
 		t.Fatalf("Done confirm should not show generic actions or edit hints:\n%s", plain)
 	}
 }
@@ -568,7 +569,7 @@ func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	if !strings.Contains(plain, "[Esc/R] Deny+Reason required") {
 		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
 	}
-	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Edit") || strings.Contains(plain, "[M] Add rule") {
+	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Modify args") || strings.Contains(plain, "[M] Add rule") {
 		t.Fatalf("forced deny confirm should not show allow or generic actions:\n%s", plain)
 	}
 }

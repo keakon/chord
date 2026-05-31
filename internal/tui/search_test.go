@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestFindMatchesAtWidthSearchesToolAndResultText(t *testing.T) {
@@ -99,12 +101,12 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 		t.Fatal("generic tool forced done by search should set SettledAt to freeze elapsed rendering")
 	}
 
-	fileEdit := &Block{Type: BlockToolCall, ToolName: "Edit", Collapsed: true, ResultContent: "done"}
-	if !revealSearchMatchedBlock(fileEdit) {
-		t.Fatal("Edit tool reveal should report changed state")
+	filePatch := &Block{Type: BlockToolCall, ToolName: tools.NameApplyPatch, Collapsed: true, ResultContent: "done"}
+	if !revealSearchMatchedBlock(filePatch) {
+		t.Fatal("ApplyPatch tool reveal should report changed state")
 	}
-	if fileEdit.Collapsed {
-		t.Fatal("Edit tool should expand when revealed by search")
+	if filePatch.Collapsed {
+		t.Fatal("ApplyPatch tool should expand when revealed by search")
 	}
 
 	summary := &Block{

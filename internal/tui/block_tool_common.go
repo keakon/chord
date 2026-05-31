@@ -76,7 +76,7 @@ const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {
-	case "Write", "Edit", "Read", "TodoWrite", "Question", "Delegate":
+	case "Write", "ApplyPatch", "Read", "TodoWrite", "Question", "Delegate":
 		return false
 	}
 	return true
@@ -726,8 +726,8 @@ func diffContentSample(diff string) string {
 	return strings.Join(sample, "\n")
 }
 
-func writeEditToolResultExtraVisible(b *Block) bool {
-	if b.ToolName != "Write" && b.ToolName != "Edit" && b.ToolName != "Delete" {
+func writeToolResultExtraVisible(b *Block) bool {
+	if b.ToolName != "Write" && b.ToolName != "Delete" {
 		return false
 	}
 	if b.toolResultIsError() || b.toolResultIsCancelled() || !b.ResultDone || strings.TrimSpace(b.ResultContent) == "" {

@@ -61,7 +61,7 @@ func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 		return false
 	}
 	switch evt.Name {
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+	case tools.NameWrite, tools.NameApplyPatch, tools.NameDelete:
 		return true
 	case tools.NameShell:
 		var args struct {
@@ -143,15 +143,10 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 					effects.refreshSidebar = true
 					effects.invalidateUsage = true
 				}
-			} else {
-				var args struct {
-					Path string `json:"path"`
-				}
-				if err := json.Unmarshal([]byte(evt.ArgsJSON), &args); err == nil && args.Path != "" {
-					m.sidebar.AddFileEdit(evt.AgentID, args.Path, evt.DiffAdded, evt.DiffRemoved)
-					effects.refreshSidebar = true
-					effects.invalidateUsage = true
-				}
+			} else if path := editedFilePathFromToolResult(evt); path != "" {
+				m.sidebar.AddFileEdit(evt.AgentID, path, evt.DiffAdded, evt.DiffRemoved)
+				effects.refreshSidebar = true
+				effects.invalidateUsage = true
 			}
 		}
 		if shouldRefreshGitStatusAfterToolResult(evt) {
@@ -191,6 +186,19 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	effects.addFollowup(m.requestStreamBoundaryFlush())
 	return effects
+}
+
+func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
+	if evt.Name == tools.NameApplyPatch {
+		return tools.ExtractApplyPatchPathFromArgs(json.RawMessage(evt.ArgsJSON))
+	}
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(evt.ArgsJSON), &args); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(args.Path)
 }
 
 func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {

@@ -275,8 +275,8 @@ func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	m.oscNotifyOut = &buf
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ConfirmRequestEvent{
-		ToolName:  "Edit",
-		ArgsJSON:  `{"path":"internal/tui/app.go"}`,
+		ToolName:  tools.NameApplyPatch,
+		ArgsJSON:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/app.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		RequestID: "req-1",
 	}})
 	if cmd == nil {

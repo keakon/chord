@@ -221,7 +221,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 		switch b.ToolName {
 		case "Grep", "Glob", "Lsp":
 			cloned["path"] = b.displayToolDir(path)
-		case "Read", "Write", "Edit", "Delete":
+		case "Read", "Write", "ApplyPatch", "Delete":
 			cloned["path"] = b.displayToolPath(path)
 		}
 	}

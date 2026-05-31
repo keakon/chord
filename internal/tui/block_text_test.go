@@ -202,13 +202,13 @@ func TestRenderUserPlainPreservesCodeIndentationForPreformattedContent(t *testin
 	}
 }
 
-func TestRenderUserPlainSessionLikePastedEditDiffUsesPreformattedPath(t *testing.T) {
+func TestRenderUserPlainSessionLikePastedPatchDiffUsesPreformattedPath(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		ID:   1,
 		Type: BlockUser,
 		Content: "Here is the card content:\n" +
-			`{"path": "cmd/chord/common_provider_cache.go", "new_string": "\tcase \"chat-completions\":\n\t\t// Auto-switch to responses provider if needed"}` +
+			`{"patch": "*** Begin Patch\n*** Update File: cmd/chord/common_provider_cache.go\n@@\n- old\n+ new\n*** End Patch\n"}` +
 			"\n\nDiff:\n" +
 			"--- cmd/chord/common_provider_cache.go\n" +
 			"+++ cmd/chord/common_provider_cache.go\n" +
@@ -223,7 +223,7 @@ func TestRenderUserPlainSessionLikePastedEditDiffUsesPreformattedPath(t *testing
 	if !strings.Contains(plain, "  Here is the card content:") {
 		t.Fatalf("rendered user card missing intro text: %q", plain)
 	}
-	if !strings.Contains(plain, `  {"path": "cmd/chord/common_provider_cache.go"`) {
+	if !strings.Contains(plain, `  {"patch": "*** Begin Patch`) {
 		t.Fatalf("rendered user card missing pasted JSON payload: %q", plain)
 	}
 	if !strings.Contains(plain, "  --- cmd/chord/common_provider_cache.go") {

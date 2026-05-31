@@ -94,10 +94,10 @@ func TestSuggestRulePatterns_WriteFile(t *testing.T) {
 	}
 }
 
-func TestSuggestRulePatterns_EditFile(t *testing.T) {
-	candidates := suggestRulePatterns("Edit", `{"path":"docs/README.md"}`, nil, "/home/user/project")
+func TestSuggestRulePatterns_ApplyPatchFile(t *testing.T) {
+	candidates := suggestRulePatterns("ApplyPatch", `{"patch":"*** Begin Patch\n*** Update File: docs/README.md\n@@\n-old\n+new\n*** End Patch\n"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
-		t.Fatal("expected candidates for Edit tool")
+		t.Fatal("expected candidates for ApplyPatch tool")
 	}
 
 	// Should have *.md pattern

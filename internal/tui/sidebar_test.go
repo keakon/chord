@@ -117,8 +117,8 @@ func TestShouldTrackSidebarFileEdit(t *testing.T) {
 	if !shouldTrackSidebarFileEdit("Write") {
 		t.Fatal("Write should be tracked as a sidebar file edit")
 	}
-	if !shouldTrackSidebarFileEdit("Edit") {
-		t.Fatal("Edit should be tracked as a sidebar file edit")
+	if !shouldTrackSidebarFileEdit("ApplyPatch") {
+		t.Fatal("ApplyPatch should be tracked as a sidebar file edit")
 	}
 	if !shouldTrackSidebarFileEdit("Delete") {
 		t.Fatal("Delete should be tracked as a sidebar file edit")

@@ -797,12 +797,12 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 		Role:           "assistant",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: ""}},
 		ToolCalls: []message.ToolCall{{
-			ID:   "call-edit-1",
-			Name: "Edit",
-			Args: []byte(`{"path":"internal/tui/search_test.go","old_string":"before","new_string":"needle output"}`),
+			ID:   "call-patch-1",
+			Name: tools.NameApplyPatch,
+			Args: []byte(`{"patch":"*** Begin Patch\n*** Update File: internal/tui/search_test.go\n@@\n-before\n+needle output\n*** End Patch\n"}`),
 		}},
 	})
-	messages = append(messages, message.Message{Role: "tool", ToolCallID: "call-edit-1", Content: "success"})
+	messages = append(messages, message.Message{Role: "tool", ToolCallID: "call-patch-1", Content: "success"})
 	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
 	m := NewModelWithSize(backend, 120, 24)
 

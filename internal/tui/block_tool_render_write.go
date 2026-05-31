@@ -64,7 +64,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		}
 	}
 
-	if writeEditToolResultExtraVisible(b) {
+	if writeToolResultExtraVisible(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}

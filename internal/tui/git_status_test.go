@@ -3,6 +3,9 @@ package tui
 import (
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestGitStatusRefreshDelayBackoffAndProfileSwitches(t *testing.T) {
@@ -111,5 +114,14 @@ func TestShellCommandMayRunGit(t *testing.T) {
 		if shellCommandMayRunGit(cmd) {
 			t.Fatalf("%q should not be detected as git command", cmd)
 		}
+	}
+}
+
+func TestShouldRefreshGitStatusAfterApplyPatchResult(t *testing.T) {
+	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameApplyPatch, Status: agent.ToolResultStatusSuccess}) {
+		t.Fatal("successful ApplyPatch should refresh git status")
+	}
+	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameApplyPatch, Status: agent.ToolResultStatusError}) {
+		t.Fatal("failed ApplyPatch should not refresh git status")
 	}
 }

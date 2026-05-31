@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -60,10 +61,10 @@ type diffOneSidedSpan struct {
 	LineWidth int
 }
 
-// appendEditToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
-func appendEditToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
+// appendPatchToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
+func appendPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
-	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth); lines != nil {
+	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
 			*result = append(*result, "  "+DimStyle.Render(formatLineNum(newLineNum))+lines[0])
 		} else {
@@ -81,18 +82,15 @@ func appendEditToolUnifiedDiffPair(result *[]string, oldLine, newLine string, ol
 	return 2
 }
 
-// renderFileDiffCall renders an Edit tool call with a unified diff view.
+// renderFileDiffCall renders an ApplyPatch tool call with a unified diff view.
 func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
-	var filePath string
-	var parsed struct {
-		Path string `json:"path"`
-	}
-	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-		filePath = b.displayToolPath(parsed.Path)
+	filePath := b.diffToolFilePath()
+	if filePath != "" {
+		filePath = b.displayToolPath(filePath)
 	}
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string
@@ -180,7 +178,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 									result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
 									break diffLoop
 								}
-								shownLines += appendEditToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
+								shownLines += appendPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
 								oldLineNum++
 								newLineNum++
 							}
@@ -196,7 +194,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 							result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
 							break diffLoop
 						}
-						shownLines += appendEditToolUnifiedDiffPair(&result, line[1:], next[1:], oldLineNum, newLineNum, diffWidth, hl)
+						shownLines += appendPatchToolUnifiedDiffPair(&result, line[1:], next[1:], oldLineNum, newLineNum, diffWidth, hl)
 						oldLineNum++
 						newLineNum++
 						i++
@@ -248,7 +246,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if writeEditToolResultExtraVisible(b) || (b.ToolName == tools.NameEdit && strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
+	if b.ToolName == tools.NameApplyPatch && strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}
@@ -264,4 +262,21 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	result = appendToolElapsedFooter(result, b)
 
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+func (b *Block) diffToolFilePath() string {
+	if b.ToolName == tools.NameApplyPatch {
+		path := tools.ExtractApplyPatchPathFromArgs(json.RawMessage(b.Content))
+		if rel, err := filepath.Rel(".", path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+			return rel
+		}
+		return path
+	}
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(b.Content), &parsed) != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Path)
 }

@@ -255,7 +255,7 @@ func remapInlinePastesAfterEdit(before, after string, pastes []inlineLargePaste)
 			p.End += delta
 			remapped[idx] = p
 		default:
-			// Edit intersects placeholder; caller must drop preservation.
+			// Input intersects placeholder; caller must drop preservation.
 			return nil, false
 		}
 		if p.Start < 0 || p.End < p.Start || p.End > len(afterRunes) {

@@ -1733,14 +1733,14 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 	}
 }
 
-func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
+func TestApplyPatchErrorPreservesExampleBlockIndentation(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Edit",
-		Content:  `{"path":"internal/tui/sidebar_render.go","old_string":"for _, fe := range files {\nbaseName := filepath.Base(fe.Path)\nvar parts string","new_string":""}`,
+		ToolName: tools.NameApplyPatch,
+		Content:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/sidebar_render.go\n@@\n-for _, fe := range files {\n-baseName := filepath.Base(fe.Path)\n-var parts string\n*** End Patch\n"}`,
 		ResultContent: strings.Join([]string{
-			"old_string not found in file. Indentation mismatch? A unique match exists if leading whitespace is ignored. Example block:",
+			"hunk not found. Indentation mismatch? A unique match exists if leading whitespace is ignored. Example block:",
 			"\t\t\tfor _, fe := range files {",
 			"\t\t\t\tbaseName := filepath.Base(fe.Path)",
 			"\t\t\t\tvar parts string",
@@ -1761,12 +1761,12 @@ func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
 	}
 }
 
-func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
+func TestCancelledApplyPatchCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Edit",
-		Content:       `{"path":"foo.txt","old_string":"a","new_string":"b"}`,
+		ToolName:      tools.NameApplyPatch,
+		Content:       `{"patch":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-a\n+b\n*** End Patch\n"}`,
 		Diff:          "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		ResultContent: "Cancelled",
 		ResultStatus:  agent.ToolResultStatusCancelled,
@@ -1774,17 +1774,17 @@ func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *test
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Edit foo.txt") {
-		t.Fatalf("expected Edit header to include file path, got:\n%s", plain)
+	if !strings.Contains(plain, "ApplyPatch") || !strings.Contains(plain, "foo.txt") {
+		t.Fatalf("expected ApplyPatch header to include file path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "-a") || strings.Contains(plain, "+b") {
-		t.Fatalf("expected cancelled Edit card to suppress diff preview, got:\n%s", plain)
+		t.Fatalf("expected cancelled ApplyPatch card to suppress diff preview, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "↳ Cancelled:") {
-		t.Fatalf("expected cancelled Edit card to omit duplicate cancelled detail header, got:\n%s", plain)
+		t.Fatalf("expected cancelled ApplyPatch card to omit duplicate cancelled detail header, got:\n%s", plain)
 	}
 	if strings.Count(plain, "Cancelled") != 1 {
 		t.Fatalf("expected exactly one visible Cancelled marker, got:\n%s", plain)

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestExtractPlainByColumns(t *testing.T) {
@@ -87,13 +89,13 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 		t.Fatalf("ExtractSelectionText() tabbed line\n got %q\nwant %q", got, want)
 	}
 }
-func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
+func TestExtractSelectionTextApplyPatchToolKeepsRenderedColumnsAligned(t *testing.T) {
 	v := NewViewport(120, 20)
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Edit",
-		Content:  `{"path":"internal/tui/block_tool_render_write.go"}`,
+		ToolName: tools.NameApplyPatch,
+		Content:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/block_tool_render_write.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff: strings.Join([]string{
 			"@@ -1,4 +1,4 @@",
 			"-\t\tblockStyle2 := ToolBlockStyle",
@@ -120,7 +122,7 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 		}
 	}
 	if targetLine < 0 {
-		t.Fatalf("target line not found in rendered edit tool card: %q", want)
+		t.Fatalf("target line not found in rendered ApplyPatch tool card: %q", want)
 	}
 
 	got := v.ExtractSelectionText(SelectionRange{
@@ -132,6 +134,6 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 		EndCol:       endCol,
 	})
 	if got != want {
-		t.Fatalf("ExtractSelectionText() edit tool line\n got %q\nwant %q", got, want)
+		t.Fatalf("ExtractSelectionText() ApplyPatch tool line\n got %q\nwant %q", got, want)
 	}
 }

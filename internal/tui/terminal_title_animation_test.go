@@ -94,7 +94,7 @@ func TestConfirmRequestUsesStaticForegroundRequestTitle(t *testing.T) {
 	m.animRunning = true
 	m.terminalTitleTickRunning = true
 
-	cmd := m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: "Edit", RequestID: "req-1"}})
+	cmd := m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameApplyPatch, RequestID: "req-1"}})
 	if cmd == nil {
 		t.Fatal("confirm request should schedule follow-up work")
 	}
@@ -177,7 +177,7 @@ func TestResolveConfirmRestoresSpinnerWhenBusyWorkRemains(t *testing.T) {
 	m.terminalTitleBase = "keep working"
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.confirm = confirmState{
-		request:  &ConfirmRequest{ToolName: "Edit", ArgsJSON: `{}`},
+		request:  &ConfirmRequest{ToolName: tools.NameApplyPatch, ArgsJSON: `{}`},
 		prevMode: ModeNormal,
 	}
 

@@ -173,7 +173,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "Edit" {
+			if tc.Name != "Write" && tc.Name != "ApplyPatch" {
 				continue
 			}
 			paths := extractTranscriptToolPaths(tc.Args)
@@ -199,6 +199,9 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 }
 
 func extractTranscriptToolPaths(args json.RawMessage) []string {
+	if path := tools.ExtractApplyPatchPathFromArgs(args); path != "" {
+		return []string{path}
+	}
 	var parsed struct {
 		Path string `json:"path"`
 	}

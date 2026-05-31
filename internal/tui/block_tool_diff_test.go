@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,33 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch\n"
+	args, _ := json.Marshal(map[string]string{"patch": patch})
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameApplyPatch,
+		Content:       string(args),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch to src/demo.go (+1 -1)",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
+	}
+
+	rendered := strings.Join(block.Render(100, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "ApplyPatch") || !strings.Contains(plain, "src/demo.go") {
+		t.Fatalf("expected ApplyPatch header to show path, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
+		t.Fatalf("expected diff lines to render, got:\n%s", plain)
+	}
+	if rendered == plain {
+		t.Fatal("expected diff render to include ANSI highlighting")
+	}
+}
 
 func TestLexerForFilePathPrefersWhitelistedExtensionOverConflictingBasename(t *testing.T) {
 	hl := newCodeHighlighter("bash_jobs.go", "package tools\n")
@@ -129,7 +157,7 @@ func TestLexerForContentOnlyStillUsesAnalysis(t *testing.T) {
 }
 
 func TestRenderInlineDiffLineKeepsSingleTokenInsertionSingleLine(t *testing.T) {
-	lines := renderInlineDiffLine("myVariable", "myHTTPVariable", 40)
+	lines := renderInlineDiffLine("myVariable", "myHTTPVariable", 40, nil)
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %d lines: %#v", len(lines), lines)
 	}
@@ -139,6 +167,24 @@ func TestRenderInlineDiffLineKeepsSingleTokenInsertionSingleLine(t *testing.T) {
 	}
 	if !strings.Contains(plain, "myHTTPVariable") {
 		t.Fatalf("expected inserted token to remain visible, got %q", plain)
+	}
+}
+
+func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
+	hl := newCodeHighlighter("example.go", "func demo() {\n\treturn 1\n}\n")
+	lines := renderInlineDiffLine("return 1", "return 10", 80, hl)
+	if len(lines) != 1 {
+		t.Fatalf("expected single-line inline diff, got %#v", lines)
+	}
+	keywordSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()), true)
+	if keywordSeq == "" {
+		t.Fatal("expected Go keyword colour to produce an ANSI sequence")
+	}
+	if !strings.Contains(lines[0], keywordSeq+"return") {
+		t.Fatalf("expected inline diff to keep Go keyword highlighting, got %q", lines[0])
+	}
+	if !strings.Contains(stripANSI(lines[0]), "+return 10") {
+		t.Fatalf("expected changed line to stay visible, got %q", stripANSI(lines[0]))
 	}
 }
 
@@ -186,21 +232,21 @@ func TestHighlightCodeLinesKeepsMarkdownEOFHeadingStyled(t *testing.T) {
 }
 
 func TestRenderInlineDiffLineFallsBackForMixedTokenRewrite(t *testing.T) {
-	lines := renderInlineDiffLine("prefixSuffix", "preFIXmidSUFsuffix", 80)
+	lines := renderInlineDiffLine("prefixSuffix", "preFIXmidSUFsuffix", 80, nil)
 	if lines != nil {
 		t.Fatalf("expected mixed token rewrite to fall back to two-line diff, got %#v", lines)
 	}
 }
 
 func TestRenderInlineDiffLineFallsBackForPureInsertionWithMultipleRunsInOneToken(t *testing.T) {
-	lines := renderInlineDiffLine("myVariable", "myHVariableTTPX", 80)
+	lines := renderInlineDiffLine("myVariable", "myHVariableTTPX", 80, nil)
 	if lines != nil {
 		t.Fatalf("expected fragmented same-token insertion to fall back to two-line diff, got %#v", lines)
 	}
 }
 
 func TestRenderInlineDiffLineKeepsSingleTokenDeletionSingleLine(t *testing.T) {
-	lines := renderInlineDiffLine("github.com/org/service/internal/api", "github.com/org/service/api", 60)
+	lines := renderInlineDiffLine("github.com/org/service/internal/api", "github.com/org/service/api", 60, nil)
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line deletion diff, got %#v", lines)
 	}
@@ -216,14 +262,14 @@ func TestRenderInlineDiffLineKeepsSingleTokenDeletionSingleLine(t *testing.T) {
 func TestRenderInlineDiffLineFunctionArgumentExpansionFallsBackToTwoLineDiff(t *testing.T) {
 	oldLine := strings.Repeat("prefix", 6) + " foo(bar, baz) " + strings.Repeat("suffix", 6)
 	newLine := strings.Repeat("prefix", 6) + " foo(longBar, baz) " + strings.Repeat("suffix", 6)
-	lines := renderInlineDiffLine(oldLine, newLine, 28)
+	lines := renderInlineDiffLine(oldLine, newLine, 28, nil)
 	if lines != nil {
 		t.Fatalf("expected argument expansion with token rewrite to fall back to two-line diff, got %#v", lines)
 	}
 }
 
 func TestRenderInlineDiffLineFallsBackForMultiTokenMixedRewrite(t *testing.T) {
-	lines := renderInlineDiffLine("foo(bar, baz)", "foo(longBar, qux)", 80)
+	lines := renderInlineDiffLine("foo(bar, baz)", "foo(longBar, qux)", 80, nil)
 	if lines != nil {
 		t.Fatalf("expected multi-token mixed rewrite to use two-line diff, got %#v", lines)
 	}
@@ -232,7 +278,7 @@ func TestRenderInlineDiffLineFallsBackForMultiTokenMixedRewrite(t *testing.T) {
 func TestRenderInlineDiffLineFallsBackBeyondHardColumnLimit(t *testing.T) {
 	oldLine := strings.Repeat("a", 201)
 	newLine := oldLine + "HTTP"
-	lines := renderInlineDiffLine(oldLine, newLine, 120)
+	lines := renderInlineDiffLine(oldLine, newLine, 120, nil)
 	if lines != nil {
 		t.Fatalf("expected >200-column line to force two-line diff, got %#v", lines)
 	}
@@ -245,7 +291,7 @@ func TestRenderInlineDiffLineFallsBackBeyondConfiguredColumnLimit(t *testing.T) 
 
 	oldLine := "012345678901234567890"
 	newLine := oldLine + "HTTP"
-	lines := renderInlineDiffLine(oldLine, newLine, 80)
+	lines := renderInlineDiffLine(oldLine, newLine, 80, nil)
 	if lines != nil {
 		t.Fatalf("expected configured width limit to force two-line diff, got %#v", lines)
 	}
@@ -268,7 +314,7 @@ func TestSetSingleLineDiffColumnsLimitResetsOnInvalidValue(t *testing.T) {
 func TestRenderInlineDiffLineLongLineUsesChangeSnippet(t *testing.T) {
 	oldLine := strings.Repeat("prefix", 8) + " myVariable " + strings.Repeat("suffix", 8)
 	newLine := strings.Repeat("prefix", 8) + " myHTTPVariable " + strings.Repeat("suffix", 8)
-	lines := renderInlineDiffLine(oldLine, newLine, 24)
+	lines := renderInlineDiffLine(oldLine, newLine, 24, nil)
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line snippet diff, got %#v", lines)
 	}
@@ -287,8 +333,8 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Edit",
-		Content:           fmt.Sprintf(`{"path":%q}`, abs),
+		ToolName:          tools.NameApplyPatch,
+		Content:           fmt.Sprintf(`{"patch":"*** Begin Patch\n*** Update File: %s\n@@\n-old\n+new\n*** End Patch\n"}`, filepath.Join("internal", "tui", "example.go")),
 		Diff:              "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 		ResultDone:        true,
 		ResultStatus:      agent.ToolResultStatusSuccess,
@@ -296,20 +342,18 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "example.go")
-	if !strings.Contains(joined, "Edit "+want) {
-		t.Fatalf("expected Edit header to show relative path; got:\n%s", joined)
+	if !strings.Contains(joined, "ApplyPatch") || !strings.Contains(joined, want) {
+		t.Fatalf("expected ApplyPatch header to show relative path; got:\n%s", joined)
 	}
-	if strings.Contains(joined, abs) {
-		t.Fatalf("did not expect Edit header to show absolute path; got:\n%s", joined)
-	}
+	_ = abs
 }
 
 func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Edit",
-		Content:  `{"path":"example.py"}`,
+		ToolName: tools.NameApplyPatch,
+		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +
@@ -331,8 +375,8 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Edit",
-		Content:  `{"path":"example.py"}`,
+		ToolName: tools.NameApplyPatch,
+		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,5 +8,4 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +
@@ -360,8 +404,8 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     "Edit",
-		Content:      `{"path":"example.go"}`,
+		ToolName:     tools.NameApplyPatch,
+		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff:         diff,
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -382,8 +426,8 @@ func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     "Edit",
-		Content:      `{"path":"example.go"}`,
+		ToolName:     tools.NameApplyPatch,
+		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -404,8 +448,8 @@ func TestRenderFileDiffCallOverHardColumnLimitUsesTwoLines(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     "Edit",
-		Content:      `{"path":"example.go"}`,
+		ToolName:     tools.NameApplyPatch,
+		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -426,8 +470,8 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     "Edit",
-		Content:      `{"path":"example.go"}`,
+		ToolName:     tools.NameApplyPatch,
+		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,

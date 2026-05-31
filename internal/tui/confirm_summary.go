@@ -108,8 +108,8 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 	switch strings.ToLower(toolName) {
 	case "shell":
 		buildBashConfirmSummary(&summary, parsed)
-	case "edit":
-		buildEditConfirmSummary(&summary, parsed)
+	case "applypatch":
+		buildApplyPatchConfirmSummary(&summary, parsed)
 	case "write":
 		buildWriteConfirmSummary(&summary, parsed)
 	case "delete":
@@ -232,40 +232,23 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	appendUnhandledConfirmFields(summary, parsed, handled)
 }
 
-func buildEditConfirmSummary(summary *confirmSummary, parsed map[string]any) {
+func buildApplyPatchConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	handled := map[string]bool{}
-	summary.Warnings = append(summary.Warnings, "Edits existing file content")
+	summary.Warnings = append(summary.Warnings, "Patches existing file content")
 
-	filePath, ok := confirmString(parsed, "path")
-	handled["path"] = true
-	if !ok || filePath == "" {
-		if targetFile, targetOK := confirmString(parsed, "TargetFile"); targetOK {
-			filePath = targetFile
-			handled["TargetFile"] = true
-		}
+	patchText, _ := confirmString(parsed, "patch")
+	handled["patch"] = true
+	filePath := ""
+	if patchText != "" {
+		args, _ := json.Marshal(map[string]any{"patch": patchText})
+		filePath = tools.ExtractApplyPatchPathFromArgs(args)
 	}
 	if filePath == "" {
 		filePath = "(unspecified)"
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("File", filePath, true))
-
-	replaceAll, ok := confirmBool(parsed, "replace_all")
-	handled["replace_all"] = true
-	if !ok {
-		replaceAll = false
-	}
-	appendConfirmField(&summary.Fields, newConfirmField("Replace all", confirmYesNo(replaceAll), true))
-	if replaceAll {
-		summary.Warnings = append(summary.Warnings, "Will replace all matching occurrences")
-	}
-
-	if oldText, ok := confirmString(parsed, "old_string"); ok {
-		handled["old_string"] = true
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("Old text preview", oldText, true, 2, 6))
-	}
-	if newText, ok := confirmString(parsed, "new_string"); ok {
-		handled["new_string"] = true
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("New text preview", newText, true, 2, 6))
+	if patchText != "" {
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("Patch preview", patchText, true, 4, 10))
 	}
 
 	appendUnhandledConfirmFields(summary, parsed, handled)
@@ -420,10 +403,6 @@ func confirmFieldForKey(key string, value any, important bool) confirmSummaryFie
 		return newConfirmLiteralField(label, confirmFormatValue(value), important)
 	case "content":
 		return newConfirmPreviewField("Content preview", confirmFormatValue(value), important, 3, 8)
-	case "old_string":
-		return newConfirmPreviewField("Old text preview", confirmFormatValue(value), important, 2, 6)
-	case "new_string":
-		return newConfirmPreviewField("New text preview", confirmFormatValue(value), important, 2, 6)
 	case "paths":
 		return newConfirmLiteralField("Files", confirmFormatValue(value), important)
 	default:
@@ -443,12 +422,6 @@ func confirmFieldLabel(key string) string {
 		return "URL"
 	case "workdir":
 		return "Workdir"
-	case "replace_all":
-		return "Replace all"
-	case "old_string":
-		return "Old text"
-	case "new_string":
-		return "New text"
 	case "raw":
 		return "Raw response"
 	default:

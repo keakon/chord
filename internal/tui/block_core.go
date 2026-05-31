@@ -244,13 +244,6 @@ func (b *Block) ToggleAtWidth(width int) {
 			b.InvalidateCache()
 			return
 		}
-		if b.Type == BlockToolCall && b.ToolName == tools.NameEdit {
-			if b.Collapsed {
-				b.Collapsed = false
-				b.InvalidateCache()
-			}
-			return
-		}
 		if b.Type == BlockToolCall && toolUsesCompactDetailToggle(b.ToolName) {
 			if b.ToolCallDetailExpanded && width > 0 && b.compactToolResultForceExpandedForRenderWidth(width) {
 				return

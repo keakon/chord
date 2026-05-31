@@ -233,7 +233,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameWrite {
 		return b.renderWriteCall(width, spinnerFrame)
 	}
-	if b.ToolName == tools.NameEdit {
+	if b.ToolName == tools.NameApplyPatch {
 		return b.renderFileDiffCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameRead {
