@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -226,6 +227,67 @@ func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
 
 func (a *MainAgent) resetContextReductionStats() {
 	a.setContextReductionStats(ContextReductionStats{})
+}
+
+type contextContributor struct {
+	Index  int
+	Role   string
+	Tool   string
+	Bytes  int
+	Tokens int
+}
+
+func contextContributorLabel(c contextContributor) string {
+	if c.Tool != "" {
+		return fmt.Sprintf("#%d %s/%s bytes=%d tokens_est=%d", c.Index, c.Role, c.Tool, c.Bytes, c.Tokens)
+	}
+	return fmt.Sprintf("#%d %s bytes=%d tokens_est=%d", c.Index, c.Role, c.Bytes, c.Tokens)
+}
+
+func contextContributorBytes(msg message.Message) int {
+	n := len(msg.Content)
+	for _, part := range msg.Parts {
+		n += len(part.Text)
+	}
+	for _, tc := range msg.ToolCalls {
+		n += len(tc.Args)
+	}
+	for _, tb := range msg.ThinkingBlocks {
+		n += len(tb.Thinking)
+	}
+	return n
+}
+
+func topContextContributors(messages []message.Message, limit int) []contextContributor {
+	if limit <= 0 || len(messages) == 0 {
+		return nil
+	}
+	callMeta := buildToolCallMeta(messages)
+	contributors := make([]contextContributor, 0, len(messages))
+	for i, msg := range messages {
+		bytes := contextContributorBytes(msg)
+		if bytes <= 0 {
+			continue
+		}
+		toolName := ""
+		if msg.Role == "tool" {
+			toolName = strings.TrimSpace(callMeta[msg.ToolCallID].Name)
+		}
+		contributors = append(contributors, contextContributor{
+			Index:  i,
+			Role:   msg.Role,
+			Tool:   toolName,
+			Bytes:  bytes,
+			Tokens: ctxmgr.EstimateMessageTokens(msg),
+		})
+	}
+	sort.SliceStable(contributors, func(i, j int) bool {
+		return contributors[i].Bytes > contributors[j].Bytes
+	})
+	if len(contributors) > limit {
+		contributors = contributors[:limit]
+	}
+	return contributors
 }
 
 func (a *MainAgent) clearLoopFrozenReductionPrefix() {

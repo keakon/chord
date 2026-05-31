@@ -227,6 +227,25 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 }
 
+func TestTopContextContributorsIncludesToolNames(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "small"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("match\n", 100)},
+	}
+
+	contributors := topContextContributors(msgs, 1)
+	if len(contributors) != 1 {
+		t.Fatalf("len(contributors) = %d, want 1", len(contributors))
+	}
+	if contributors[0].Role != "tool" || contributors[0].Tool != tools.NameGrep || contributors[0].Index != 2 {
+		t.Fatalf("top contributor = %+v, want Grep tool result at index 2", contributors[0])
+	}
+	if !strings.Contains(contextContributorLabel(contributors[0]), "tool/Grep") {
+		t.Fatalf("label missing tool name: %q", contextContributorLabel(contributors[0]))
+	}
+}
+
 func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	a := &MainAgent{}
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
@@ -1690,6 +1709,33 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		if !strings.Contains(parts[i].Text, "showing first 12 KB only") {
 			t.Fatalf("expected per-file truncation note in part %d, got %q", i, parts[i].Text)
 		}
+	}
+}
+
+func TestInjectCompactionFileContextSkipsWhenRequestBudgetIsExhausted(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "pkg"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "pkg", "f.txt"), []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr.SetTokenBudgets(16384, 128, 0)
+	summary := buildCompactionCheckpointMessage(
+		"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n- pkg/f.txt\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
+		[]string{".chord/sessions/test/history-1.md"},
+		"model_summary",
+		nil,
+	)
+	msgs := []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: summary},
+		{Role: "user", Content: strings.Repeat("already large ", 80)},
+	}
+
+	got := a.injectCompactionFileContext(msgs)
+	if len(got) != len(msgs) {
+		t.Fatalf("len(got) = %d, want unchanged %d", len(got), len(msgs))
 	}
 }
 

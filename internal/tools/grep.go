@@ -24,7 +24,10 @@ type grepArgs struct {
 	Include  string `json:"glob,omitempty"`
 }
 
-const maxGrepMatches = 250
+const (
+	maxGrepMatches     = 120
+	maxGrepOutputBytes = 12 * 1024
+)
 
 var errMaxGrepMatchesReached = errors.New("max grep matches reached")
 
@@ -91,6 +94,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 
 	var matches []string
+	var outputBytes int
 	var scannedFiles int64
 	truncated := false
 
@@ -103,11 +107,13 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
 			return "No matches found.", nil
 		}
-		fileMatches, err := searchFile(resolvedSearchPath, re)
+		fileMatches, truncatedByBytes, err := searchFile(resolvedSearchPath, re, maxGrepMatches, maxGrepOutputBytes)
 		if err != nil {
 			return "", err
 		}
 		matches = fileMatches
+		outputBytes = joinedLinesBytes(matches)
+		truncated = truncatedByBytes
 		scannedFiles = 1
 		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
 	} else {
@@ -165,18 +171,25 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 				return nil
 			}
 
-			fileMatches, err := searchFile(path, re)
+			remainingMatches := maxGrepMatches - len(matches)
+			remainingBytes := maxGrepOutputBytes - outputBytes
+			if remainingMatches <= 0 || remainingBytes <= 0 {
+				truncated = true
+				return errMaxGrepMatchesReached
+			}
+			fileMatches, truncatedByBytes, err := searchFile(path, re, remainingMatches, remainingBytes)
 			if err != nil {
 				return nil // skip files we can't read
 			}
 			matches = append(matches, fileMatches...)
+			outputBytes = joinedLinesBytes(matches)
 			scannedFiles++
 			if scannedFiles <= 5 || scannedFiles%10 == 0 {
 				reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
 			}
 
 			// Stop early if we have enough matches.
-			if len(matches) >= maxGrepMatches {
+			if len(matches) >= maxGrepMatches || truncatedByBytes || outputBytes >= maxGrepOutputBytes {
 				truncated = true
 				return errMaxGrepMatchesReached
 			}
@@ -201,8 +214,8 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 
 	result := strings.Join(matches, "\n")
-	if len(matches) == maxGrepMatches {
-		result += fmt.Sprintf("\n\n(showing first %d matches)", maxGrepMatches)
+	if truncated || len(matches) == maxGrepMatches || len(result) >= maxGrepOutputBytes {
+		result += fmt.Sprintf("\n\n(showing first %d matches within %d KiB; narrow path/glob/pattern for more precise results)", len(matches), maxGrepOutputBytes/1024)
 	}
 	logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
 	return result, nil
@@ -211,10 +224,10 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 // searchFile reads a file and returns matching lines in "path:linenum:content" format.
 // Binary files are skipped to avoid producing mojibake / stray terminal control
 // sequences in the tool output.
-func searchFile(path string, re *regexp.Regexp) ([]string, error) {
+func searchFile(path string, re *regexp.Regexp, maxMatches, maxBytes int) ([]string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 
@@ -224,13 +237,14 @@ func searchFile(path string, re *regexp.Regexp) ([]string, error) {
 	head := make([]byte, binarySampleBytes)
 	n, _ := io.ReadFull(f, head)
 	if looksBinary(head[:n]) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	var matches []string
+	var outputBytes int
 	scanner := bufio.NewScanner(f)
 	// Increase scanner buffer for long lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -245,11 +259,37 @@ func searchFile(path string, re *regexp.Regexp) ([]string, error) {
 			if len(display) > MaxLineLength {
 				display = display[:MaxLineLength] + "..."
 			}
-			matches = append(matches, fmt.Sprintf("%s:%d:%s", path, lineNum, display))
+			match := fmt.Sprintf("%s:%d:%s", path, lineNum, display)
+			matchBytes := len(match)
+			if len(matches) > 0 {
+				matchBytes++
+			}
+			if maxBytes > 0 && len(matches) > 0 && outputBytes+matchBytes > maxBytes {
+				return matches, true, scanner.Err()
+			}
+			matches = append(matches, match)
+			outputBytes += matchBytes
+			if maxMatches > 0 && len(matches) >= maxMatches {
+				return matches, true, scanner.Err()
+			}
+			if maxBytes > 0 && outputBytes >= maxBytes {
+				return matches, true, scanner.Err()
+			}
 		}
 	}
 
-	return matches, scanner.Err()
+	return matches, false, scanner.Err()
+}
+
+func joinedLinesBytes(lines []string) int {
+	if len(lines) == 0 {
+		return 0
+	}
+	n := len(lines) - 1
+	for _, line := range lines {
+		n += len(line)
+	}
+	return n
 }
 
 // sanitizeGrepLine strips C0 control characters (except tab) and replaces

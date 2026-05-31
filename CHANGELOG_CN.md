@@ -4,7 +4,8 @@
 
 ## 未发布
 
-- Tools / ApplyPatch：当前局部文件编辑工具面已切换为原生单文件 `ApplyPatch`，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`Write` 继续负责完整写入，`Delete` 继续负责整文件删除。ApplyPatch 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection；hunk 失败也会给出更可执行的重试提示，例如重复匹配时附带候选行号，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
+- Tools / ApplyPatch：当前局部文件编辑工具面已切换为原生单文件 `ApplyPatch`，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`Write` 继续负责完整写入，`Delete` 继续负责整文件删除。ApplyPatch 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection，并按当前搜索位置之后的第一个 hunk 匹配应用补丁；如果某个 hunk 匹配到多个位置，会在成功输出中附带候选行提示，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
+- Tools / Grep & Glob：降低搜索/路径列表输出的默认结果上限并新增字节上限（`Grep` 现在最多返回 120 条匹配 / 约 12 KiB，`Glob` 最多返回 250 个路径 / 约 16 KiB），避免过宽的搜索结果挤占更相关的上下文。
 - Session import：Codex、Claude Code 与 OpenCode 导入现在会尽量把可识别的外部工具转换成最接近的当前 Chord 工具卡（`Read`、`Shell`、`Grep`、`Glob`、`ApplyPatch`、`Write`、`Delete`）；参数不足或无法识别的工具仍保留为 unsupported tool card。导入 provenance 仍会在内部保留，因此外部文件修改不会恢复 Chord FileTracker 的 read/write 状态；导入后继续编辑前仍应重新 Read 相关文件。
 - LLM / Codex：Codex OAuth access token 现在必须包含可解析的 account ID；缺失 account ID 的 token 会被拒绝，不再当作可用凭据。尚不知道账号的 refresh-only Codex OAuth 凭据仍可先参与选择；如果 refresh 在账号未知前发生不可恢复失败，Chord 会在 `auth.state.yaml` 中写入 `refresh_sha256` 状态，之后由用户执行 `chord auth state clean` 清理不可用凭据，而不是在请求处理中直接删除 `auth.yaml`。`token_invalidated`、revoked、无法解析认证 token，以及 refresh token 返回 401 等情况现在会被归类为不可恢复的 OAuth 失败，并避免无意义的重复 refresh。
 - LLM / Codex：Codex `key_order: smart` 现在把缓存的额度快照仅作为调度提示：只有报告为 `100%` 的窗口会被放到最后尝试，`99%` 仍视为有可用额度，并且 primary / secondary 窗口会分开比较，让短窗口额度能在过期前优先使用，而不会和周额度混为一个分数。

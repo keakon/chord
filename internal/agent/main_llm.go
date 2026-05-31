@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
@@ -502,6 +503,20 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	streamState := &mainLLMStreamState{}
 	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState)
 	callback := streamReducer.Handle
+
+	// Request-context telemetry helps diagnose oversized prompts without changing the request surface.
+	if log.IsEnabledFor(golog.DebugLevel) {
+		contributors := topContextContributors(messages, 5)
+		labels := make([]string, 0, len(contributors))
+		for _, c := range contributors {
+			labels = append(labels, contextContributorLabel(c))
+		}
+		stats := a.GetContextReductionStats()
+		a.llmMu.RLock()
+		installedPrompt := a.installedSysPrompt
+		a.llmMu.RUnlock()
+		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, labels)
+	}
 
 	// Hook: on_before_llm_call (before LLM call).
 	hookResult, hookErr := a.fireHook(ctx, hook.OnBeforeLLMCall, turnID, map[string]any{

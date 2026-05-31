@@ -19,7 +19,10 @@ type globArgs struct {
 	FilePath string `json:"path,omitempty"`
 }
 
-const maxGlobResults = 1000
+const (
+	maxGlobResults     = 250
+	maxGlobOutputBytes = 16 * 1024
+)
 
 func (GlobTool) Name() string { return "Glob" }
 
@@ -81,6 +84,7 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	// Filter out excluded directory entries and .gitignore matches.
 	ignore := newGitIgnoreMatcher(resolvedBaseDir)
 	filtered := make([]string, 0, len(matches))
+	outputBytes := 0
 	truncated := false
 	for _, m := range matches {
 		if isExcludedPath(m) {
@@ -93,8 +97,17 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 				continue
 			}
 		}
+		matchBytes := len(m)
+		if len(filtered) > 0 {
+			matchBytes++
+		}
+		if len(filtered) > 0 && outputBytes+matchBytes > maxGlobOutputBytes {
+			truncated = true
+			break
+		}
 		filtered = append(filtered, m)
-		if len(filtered) >= maxGlobResults {
+		outputBytes += matchBytes
+		if len(filtered) >= maxGlobResults || outputBytes >= maxGlobOutputBytes {
 			truncated = true
 			break
 		}
@@ -106,8 +119,8 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	}
 
 	result := strings.Join(filtered, "\n")
-	if len(filtered) == maxGlobResults {
-		result += fmt.Sprintf("\n\n(showing first %d results)", maxGlobResults)
+	if truncated || len(filtered) == maxGlobResults || len(result) >= maxGlobOutputBytes {
+		result += fmt.Sprintf("\n\n(showing first %d results within %d KiB; refine pattern/path to narrow results)", len(filtered), maxGlobOutputBytes/1024)
 	}
 	logSlowSearch("Glob", resolvedBaseDir, a.Pattern, "", startedAt, "candidate_count", len(matches), len(filtered), truncated)
 	return result, nil

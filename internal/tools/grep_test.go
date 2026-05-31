@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -134,6 +135,48 @@ func TestGrepInvalidRegexExplainsEscaping(t *testing.T) {
 	}
 }
 
+func TestGrepLargeResultIsBoundedWithRefineHint(t *testing.T) {
+	dir := t.TempDir()
+	for i := range maxGrepMatches + 5 {
+		path := filepath.Join(dir, "f"+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(path, []byte("needle\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": dir})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := strings.Count(out, "needle"); got <= 0 || got > maxGrepMatches {
+		t.Fatalf("match count = %d, want within 1..%d", got, maxGrepMatches)
+	}
+	if !strings.Contains(out, "narrow path/glob/pattern") {
+		t.Fatalf("missing refine hint in output:\n%s", out)
+	}
+}
+
+func TestGrepLongLinesAreBoundedByBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.txt")
+	line := "needle " + strings.Repeat("x", maxGrepOutputBytes/2)
+	content := strings.Join([]string{line, line, line, line, line, line, line, line, line, line}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": path})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := strings.Count(out, "needle"); got <= 0 || got >= 10 {
+		t.Fatalf("match count = %d, want byte-bounded subset of 10; output length=%d", got, len(out))
+	}
+	if !strings.Contains(out, "within 12 KiB") || !strings.Contains(out, "narrow path/glob/pattern") {
+		t.Fatalf("missing byte-bound refine hint in output:\n%s", out)
+	}
+}
+
 func TestGlobInvalidPatternExplainsGlobSyntax(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"pattern": "[", "path": "."})
 	_, err := GlobTool{}.Execute(context.Background(), raw)
@@ -144,5 +187,49 @@ func TestGlobInvalidPatternExplainsGlobSyntax(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err.Error(), want)
 		}
+	}
+}
+
+func TestGlobLargeResultIsBoundedWithRefineHint(t *testing.T) {
+	dir := t.TempDir()
+	for i := range maxGlobResults + 5 {
+		path := filepath.Join(dir, "f"+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "*.txt", "path": dir})
+	out, err := GlobTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if got := len(lines) - 2; got != maxGlobResults {
+		t.Fatalf("result line count = %d, want %d; output:\n%s", got, maxGlobResults, out)
+	}
+	if !strings.Contains(out, "refine pattern/path") {
+		t.Fatalf("missing refine hint in output:\n%s", out)
+	}
+}
+
+func TestGlobLongPathsAreBoundedByBytes(t *testing.T) {
+	dir := t.TempDir()
+	longName := strings.Repeat("nested", 35)
+	for i := range 200 {
+		path := filepath.Join(dir, longName+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "*.txt", "path": dir})
+	out, err := GlobTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(out) > maxGlobOutputBytes+200 {
+		t.Fatalf("output length = %d, want near byte budget %d", len(out), maxGlobOutputBytes)
+	}
+	if !strings.Contains(out, "within 16 KiB") || !strings.Contains(out, "refine pattern/path") {
+		t.Fatalf("missing byte-bound refine hint in output:\n%s", out)
 	}
 }
