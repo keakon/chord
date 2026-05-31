@@ -180,37 +180,39 @@ Chord handles two transcript-height accounting risks:
 - Late updates to older status cards could leave the viewport shorter than the real transcript.
 - Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
-## Edit reports `file ... has not been read in this conversation`
+## ApplyPatch reports `file ... has not been read in this conversation`
 
-Chord requires `Edit` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
+Chord requires `ApplyPatch` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
 
 If you see this error:
 
 - run `Read` on the target file first;
-- copy `old_string` from the raw source portion only, not the displayed line-number gutter;
+- retry with a small patch hunk that has enough unique `@@` context;
 - re-read the smallest unique 2-4 line block before retrying if any earlier edit or external tool may have changed the file.
 
-## Edit reports `changed on disk since the last read` even when the previous Edit succeeded
+## ApplyPatch reports `changed on disk since the last read` even when the previous patch succeeded
 
 This error comes from Chord's in-process optimistic file locking. It means Chord believes the file no longer matches the last content hash it recorded for this agent.
 
 Common causes:
 
-- the file was modified by another process (editor/formatter) between `Read` and `Edit`;
+- the file was modified by another process (editor/formatter) between `Read` and `ApplyPatch`;
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
-- the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped `path` is not tracked correctly, capture logs and the session JSONL.
+- the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
 
 If this persists, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
 
-## Edit reports `old_string not found` even though the file already contains the expected new content
+## ApplyPatch reports `hunk not found` or `hunk is not unique`
 
-When troubleshooting a dev build with streaming tool execution enabled, you may see `Edit` report `old_string not found` while the target file already contains the expected content. This usually means a speculative `Write` / `Edit` / `Delete` executed before the LLM finalized, was later discarded due to args drift, filtering, or rollback, and the finalized path then tried to re-run before the speculative file change had finished rolling back.
+`ApplyPatch` matches hunks line-by-line. It can tolerate common whitespace and Unicode punctuation differences, but each hunk still must identify exactly one location in the already-read file.
 
-Chord synchronously rolls back completed speculative file changes before allowing the finalized execution path to retry. If you still see this:
+If you see this:
 
-- look for `args_drift`, `filtered`, `rollback`, `length_recovery` in the logs as speculative discard reasons
-- confirm the finalized `Edit` did not reuse a stale `old_string` from an earlier file snapshot
-- keep the session JSONL and current file diff to inspect speculative discard/rollback ordering
+- re-run `Read` on the file and rebuild the patch from the latest content;
+- if the error says the hunk is not unique, use the candidate line numbers in the error to `Read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk;
+- if the error says the hunk was not found, re-copy the target block from the latest `Read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
+- split a broad patch into smaller single-file patches or smaller hunks;
+- do not run external `apply_patch` through `Shell`; use Chord's native `ApplyPatch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 
 ## Performance issues
 

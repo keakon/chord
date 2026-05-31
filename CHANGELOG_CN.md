@@ -4,6 +4,8 @@
 
 ## 未发布
 
+- Tools / ApplyPatch：当前局部文件编辑工具面已切换为原生单文件 `ApplyPatch`，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`Write` 继续负责完整写入，`Delete` 继续负责整文件删除。ApplyPatch 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection；hunk 失败也会给出更可执行的重试提示，例如重复匹配时附带候选行号，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
+- Session import：Codex、Claude Code 与 OpenCode 导入现在会尽量把可识别的外部工具转换成最接近的当前 Chord 工具卡（`Read`、`Shell`、`Grep`、`Glob`、`ApplyPatch`、`Write`、`Delete`）；参数不足或无法识别的工具仍保留为 unsupported tool card。导入 provenance 仍会在内部保留，因此外部文件修改不会恢复 Chord FileTracker 的 read/write 状态；导入后继续编辑前仍应重新 Read 相关文件。
 - LLM / Codex：Codex OAuth access token 现在必须包含可解析的 account ID；缺失 account ID 的 token 会被拒绝，不再当作可用凭据。尚不知道账号的 refresh-only Codex OAuth 凭据仍可先参与选择；如果 refresh 在账号未知前发生不可恢复失败，Chord 会在 `auth.state.yaml` 中写入 `refresh_sha256` 状态，之后由用户执行 `chord auth state clean` 清理不可用凭据，而不是在请求处理中直接删除 `auth.yaml`。`token_invalidated`、revoked、无法解析认证 token，以及 refresh token 返回 401 等情况现在会被归类为不可恢复的 OAuth 失败，并避免无意义的重复 refresh。
 - LLM / Codex：Codex `key_order: smart` 现在把缓存的额度快照仅作为调度提示：只有报告为 `100%` 的窗口会被放到最后尝试，`99%` 仍视为有可用额度，并且 primary / secondary 窗口会分开比较，让短窗口额度能在过期前优先使用，而不会和周额度混为一个分数。
 - LLM / Codex：Codex WebSocket 返回 400 且错误信息表明服务端增量会话状态与本地 input 不一致（例如 `No tool call found for function call output with call_id …`，或消息中包含 `previous_response_id`）时，Chord 现在会清空 WebSocket 链状态并立即在同一 WS 上以**全量、不带 `previous_response_id`**的方式重发一次；只有原始 400 属于链状态不一致才会触发该重试，重试仍失败时直接返回错误、不再回退 HTTP，因为 HTTP 会发送相同的 input、注定同样失败。
@@ -13,7 +15,6 @@
 - LLM / Codex：Codex WebSocket 返回 usage-limit / quota exhausted 类错误时，现在会跳过 HTTP fallback，直接进入 key quota/cooldown 处理，避免先等到响应头超时才切换下一个账号或 fallback 模型。
 - LLM / 兼容网关：非官方兼容网关返回看起来是临时态的 HTTP 400（例如 `Concurrency limit exceeded`）时，现在会冷却当前 key、轮换到下一个 key，并允许跨完整池继续重试；官方 API 的 400 以及请求参数/模型不兼容类 400（包括 `Store must be set to false` / `Stream must be set to true`）仍立即停止。
 - Runtime / 压缩：fallback 压缩摘要现在会把最新 `Done rejected:` 原因作为当前请求锚点；当模型不可用、无法做 TODO 相关性判断时，会把压缩前 TODO 移入 stale/superseded。Loop continuation prompt 也会包含精确的 Done 拒绝原因，避免用户拒绝中变更范围后被降级成泛泛的“继续当前目标”。恢复会话时，如果最新压缩摘要明确将旧 TODO 标为 stale/superseded，会丢弃这些压缩前 TODO；但会保留压缩后新 TodoWrite 写入的列表。非 Done 工具的用户拒绝原因如果包含可执行的新指令，也会作为 latest-request evidence 保留。
-- Tools / Edit：当 `old_string` 匹配多处时，错误现在会附带匹配起始行号，并提示围绕目标位置重新 Read 后补充唯一上下文，减少重复片段导致的重试。
 - CLI / 清理：`chord cleanup sessions` 现在会在删除会话目录后，把只剩 `project.json` 的项目会话目录也一并移除，因此旧会话清理不会留下空的 per-project 容器。`--older-than` 现在使用删除子目录前的项目会话目录时间戳，确保删除旧会话后项目容器变空时，dry-run 预览与 `--yes` 实际清理保持一致。
 - Tools / Shell：`git stash show -p`、`git stash list --patch` 等非交互式 `git stash` 子命令不再被识别为交互式补丁流程；只有在无管道输入时的 `git stash push -p` 和 `git stash save --patch` 仍会被拦截。
 - TUI / Service tier：`/tier` slash 补全现在和 `Ctrl+R` 快捷键保持一致——预测的下一个 tier 相同；如果当前唯一支持的 tier 就是已生效的 `standard`，`/tier` 会从补全列表隐藏，快捷键也变为 no-op。

@@ -34,7 +34,7 @@ Chord 将行为配置与凭据配置分开管理。
 模型仍在流式输出响应、工具参数刚完整时，Chord 会提前执行一小批安全的只读工具，而不必等服务商完成最终确认（`CompleteStream()` 返回）后才开始。这能显著缩短最终确认阶段的体感等待时间。
 
 - 始终启用，无 `early_tool_execution` 开关。
-- 允许早执行的工具：`Read`、`Grep`、`Glob`，支持回滚的文件编辑工具（`Write`、`Edit`、`Delete`），以及 `Shell` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
+- 允许早执行的工具：`Read`、`Grep`、`Glob`，支持回滚的文件编辑工具（`Write`、`ApplyPatch`、`Delete`），以及 `Shell` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
   - `pwd`、`ls`、`cat`、`which`
   - `git status|log|diff|show|branch|rev-parse`
 - 不允许早执行：非只读 `Shell`、交互/控制类工具，以及权限为 `ask` 的工具调用。
@@ -716,7 +716,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  Edit: ask
+  ApplyPatch: ask
 ---
 
 你是一个专注于后端开发的 Agent。
@@ -730,7 +730,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  Edit: ask
+  ApplyPatch: ask
 prompt: |
   你是一个专注于后端开发的 Agent。
 ```
@@ -761,7 +761,7 @@ permission:
   WebFetch:
     "http://localhost:8000/*": ask
   Shell: allow
-  Edit: ask
+  ApplyPatch: ask
   Write: ask
 ```
 
@@ -938,7 +938,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
-| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `Edit` / `Write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `ApplyPatch` / `Write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |

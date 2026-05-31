@@ -306,7 +306,7 @@ chord resume 20260428064910975
 
 Claude Code 导入会尽力重建**非 sidechain 的主会话**，而不是盲目导入最新的原始叶子节点。compact 边界会用于重建，但不会渲染为可见 transcript 消息。sidechain/sub-agent 条目默认会从主导入 session 中排除；检测到时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在存在 sidechain agent ID 时一并记录。
 
-没有安全 Chord 映射但仍可见的 Claude transcript artifacts，会尽量保留为可读的 assistant fallback 消息，而不是原始 JSON。
+可识别的导入工具会尽量显示成最接近的当前 Chord 工具卡，包括把文件修改显示为 `ApplyPatch`、`Write` 或 `Delete`。无法转换的工具仍会保留为 unsupported tool card，或尽量渲染为可读的 assistant fallback 消息，而不是原始 JSON。转换后的导入工具不会恢复 Chord FileTracker 的 read/write 状态；从导入会话继续编辑文件前仍需要重新 `Read`。
 
 ### Flag
 

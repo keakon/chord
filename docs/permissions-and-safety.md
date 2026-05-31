@@ -91,7 +91,7 @@ Recommendations:
 
 ## File modification risk
 
-`Write`, `Edit`, and `Delete` directly modify workspace files. `Read` and `Grep` are read-only, but they still operate on local filesystem paths and intentionally reject blocked device-style paths such as standard-stream device files (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and similar) instead of treating them as normal files.
+`ApplyPatch`, `Write`, and `Delete` directly modify workspace files. `ApplyPatch` is for local changes to one existing file, `Write` creates or intentionally replaces a whole file, and `Delete` removes whole files. `Read` and `Grep` are read-only, but they still operate on local filesystem paths and intentionally reject blocked device-style paths such as standard-stream device files (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and similar) instead of treating them as normal files.
 
 Recommendations:
 

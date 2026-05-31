@@ -15,11 +15,11 @@ Chord 有两条主要使用路径：
 
 启动后输入框默认聚焦，直接输入消息按 `Enter` 发送。
 
-工具调用卡片会尽量保持路径简洁：`Read`、`Write`、`Edit` 等文件工具在路径位于当前工作目录内时优先显示相对路径；位于当前目录之外则显示绝对路径。
+工具调用卡片会尽量保持路径简洁：`Read`、`ApplyPatch`、`Write`、`Delete` 等文件工具在路径位于当前工作目录内时优先显示相对路径；位于当前目录之外则显示绝对路径。
 
 工具参数和工具结果按终端安全的纯文本展示。外部输出中的 ANSI/control sequence 会被转义成字面内容，不会当作终端样式执行；看起来像 Markdown 的普通工具结果也会保持原始文本，不会被重新排版成 assistant Markdown。
 
-`Read` 和 `Write` 工具卡片会用带行号、语法高亮的预览展示文件内容。`Edit` 卡片会在识别文件类型时为 unified diff 做语法高亮；`.mdx` 文件会复用 Markdown 高亮，即使是不支持的扩展名，diff 删除/新增行的红/绿色背景也会保留。内容较长时默认只显示前 10 行，并给出 `[space] toggle expand/collapse` 提示；聚焦卡片后按 `Space`、`Enter` 或 `o` 可展开或折叠。
+`Read` 和 `Write` 工具卡片会用带行号、语法高亮的预览展示文件内容。`ApplyPatch` 卡片会在识别文件类型时为 unified diff 做语法高亮；`.mdx` 文件会复用 Markdown 高亮，即使是不支持的扩展名，diff 删除/新增行的红/绿色背景也会保留。内容较长时默认只显示前 10 行，并给出 `[space] toggle expand/collapse` 提示；聚焦卡片后按 `Space`、`Enter` 或 `o` 可展开或折叠。
 
 Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终端标题栏会显示一次性的 `✅` 完成标记。重新聚焦终端会清除该标记；普通的标签页/窗口焦点切换不会重复添加，除非之后又有新的后台工作完成。
 
@@ -86,7 +86,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 说明：
 
-- **Tools**：默认策略按来源区分。Codex 使用保守的 `auto` 工具导入，只在高置信度映射时保留结构化工具；OpenCode 会把 tool/shell payload 导入为可读纯文本，不支持 `--tool-mode structured`；Claude 默认使用 `--tool-mode auto`，仅在具备 signed thinking 时保留结构化工具调用，否则降级为纯文本。
+- **Tools**：默认策略按来源区分。Chord 会在参数能标准化时，把可识别的外部工具调用转换成最接近的当前 Chord 工具卡：Codex、Claude Code 与 OpenCode 记录中的对应工具会显示为 `Read`、`Shell`、`Grep`、`Glob`、`ApplyPatch`、`Write` 或 `Delete`。未知、参数缺失或暂不支持的来源工具仍会作为 unsupported tool card 保留，而不是丢弃。导入 provenance 会在内部保留，因此这些转换后的工具卡只代表 transcript/history，不会恢复 Chord FileTracker 的 read/write 状态；导入后继续修改相关文件前仍需要重新 `Read`。
 - **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
 - **Claude 主会话重建**：Claude 导入会尽力重建非 sidechain 的主会话连续片段，而不是简单选择最新的原始叶子节点。compact 边界会参与重建，但不会作为普通 transcript 消息渲染。
 - **Claude sidechain**：sidechain / sub-agent transcript 条目默认不会导入到主 session。存在这些条目时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在可用时记录 sidechain agent ID。

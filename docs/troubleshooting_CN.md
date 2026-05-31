@@ -118,7 +118,7 @@ Python 还需要注意：
 - 小文件使用 `diagnostics.python.semantic_backend`，通常是 `lsp.pyright`。请确认 `diagnostics.python.semantic_backend.server` 与 `lsp` 下的 server key 一致。
 - 大 Python 文件在 `PATH` 中能找到 `ruff` 时使用 Ruff quick diagnostics。
 - 如果大 Python 文件提示因为 Ruff 不可用而跳过诊断，可以安装 Ruff，或设置 `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true`，强制大文件也运行 Pyright。
-- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `Edit`/`Write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
+- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `ApplyPatch`/`Write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
 
 推荐 Python 配置骨架：
 
@@ -136,7 +136,7 @@ diagnostics:
       command: ruff
 ```
 
-完整推荐配置见 [配置 — Edit/Write 后诊断](./configuration_CN.md#editwrite-后诊断)。
+完整推荐配置见 [配置 — Provider/model 诊断](./configuration_CN.md#providermodel-诊断)。
 
 ## 会话恢复异常
 
@@ -226,37 +226,39 @@ Chord 会处理两类转录高度统计风险：
 - 较早的状态卡后续更新时，viewport 高度可能小于真实转录内容。
 - 后台缓存丢弃时可能漏算空行偏移，造成滚动逐步漂移。
 
-## Edit 报 `file ... has not been read in this conversation`
+## ApplyPatch 报 `file ... has not been read in this conversation`
 
-Chord 要求：当前会话里必须先对同一文件执行过一次被跟踪的 `Read`，`Edit` 才会继续。这样可以减少“盲改”导致的 stale edit 和无效重试。
+Chord 要求：当前会话里必须先对同一文件执行过一次被跟踪的 `Read`，`ApplyPatch` 才会继续。这样可以减少“盲改”导致的 stale edit 和无效重试。
 
 看到这个错误时：
 
 - 先对目标文件执行一次 `Read`；
-- 复制 `old_string` 时只取原始源码部分，不要带上显示出来的行号 gutter 和分隔 tab；
-- 如果之前已有 `Edit`、格式化器或其他外部工具可能改过文件，重试前重新读取最小且唯一的 2-4 行块。
+- 使用足够唯一的 `@@` 上下文重试一个小 patch hunk；
+- 如果之前已有修改、格式化器或其他外部工具可能改过文件，重试前重新读取最小且唯一的 2-4 行块。
 
-## Edit 报 `changed on disk since the last read`（即使上一次 Edit 已成功）
+## ApplyPatch 报 `changed on disk since the last read`（即使上一次 patch 已成功）
 
 这个错误来自 Chord 进程内的乐观文件锁（FileTracker）：Chord 认为当前磁盘内容已经不再匹配本 agent 上一次 `Read` 时记录的内容哈希。
 
 常见原因：
 
-- 你在 `Read` 与 `Edit` 之间用编辑器/格式化器等外部进程改动了文件；
+- 你在 `Read` 与 `ApplyPatch` 之间用编辑器/格式化器等外部进程改动了文件；
 - speculative 工具调用被丢弃/回滚，finalize 阶段的工具调用与其发生竞态；
-- provider 将 tool arguments 以 JSON 字符串形式包了一层（wrapped arguments）。Chord 会一致地对 tool arguments 做 unwrap；如果 `path` 没有被正确跟踪，请保留日志和 session JSONL。
+- provider 将 tool arguments 以 JSON 字符串形式包了一层（wrapped arguments）。Chord 会一致地对 tool arguments 做 unwrap；如果路径没有被正确跟踪，请保留日志和 session JSONL。
 
 如果仍能复现，请同时提供 session JSONL 和当前文件 diff，便于检查 tool-call 的顺序与被跟踪的路径。
 
-## 流式工具卡片已改文件后，`Edit` 又报 `old_string not found`
+## ApplyPatch 报 `hunk not found` 或 `hunk is not unique`
 
-在排查启用了 streaming tool execution 的开发构建时，可能会看到 `Edit` 报错，但目标文件里已经包含预期的新内容。这通常表示某个 speculative `Write` / `Edit` / `Delete` 在 LLM finalize 前提前执行，随后因为 args drift、过滤或回滚被丢弃，而 finalized 路径在 speculative 文件变更完成回滚前又尝试正式重跑。
+`ApplyPatch` 按行匹配 hunk。它可以容忍常见空白和 Unicode 标点差异，但每个 hunk 仍必须在已读取文件中唯一定位。
 
-Chord 会在允许 finalized 执行路径重跑前，同步回滚已完成的 speculative 文件变更。如果仍然看到这类现象：
+看到这个错误时：
 
-- 在日志中查找 `args_drift`、`filtered`、`rollback`、`length_recovery` 等 speculative discard 原因
-- 确认 finalized `Edit` 没有复用来自更早文件快照的 stale `old_string`
-- 保留 session JSONL 和当前文件 diff，便于检查 speculative discard / rollback 的先后顺序
+- 重新 `Read` 目标文件，并基于最新内容重建 patch；
+- 如果错误提示 hunk 不唯一，使用错误中的候选行号去 `Read` 目标位置附近，并在 `@@` hunk 中加入附近未变化的唯一上下文行；
+- 如果错误提示找不到 hunk，从最新 `Read` 输出中重新复制目标块，并确认 context/removal 行没有带上展示用行号 gutter，且缩进与当前文件一致；
+- 把过大的 patch 拆成更小的单文件 patch 或更小的 hunk；
+- 不要通过 `Shell` 执行外部 `apply_patch`；请使用 Chord 原生 `ApplyPatch`，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
 
 ## 性能问题
 

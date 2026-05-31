@@ -62,7 +62,7 @@ hooks:
 
   on_tool_batch_complete:
     - name: golangci-lint
-      tools: ["Edit", "Write", "Delete"]
+      tools: ["ApplyPatch", "Write", "Delete"]
       paths: ["**/*.go"]
       min_changed_files: 1
       command: ["./scripts/chord-hooks/run-golangci-lint.sh"]
