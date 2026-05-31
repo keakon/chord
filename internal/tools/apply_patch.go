@@ -33,6 +33,19 @@ type ApplyPatchPlan struct {
 	Diff    string
 	Added   int
 	Removed int
+	Matches []ApplyPatchMatchSummary
+}
+
+type ApplyPatchMatchSummary struct {
+	HunkIndex            int
+	Line                 int
+	CandidateLines       []int
+	Layer                string
+	WeakContext          bool
+	Header               string
+	HeaderLine           int
+	HeaderCandidateLines []int
+	HeaderLayer          string
 }
 
 type applyPatchPlanContextKey struct{}
@@ -52,7 +65,8 @@ type parsedApplyPatch struct {
 }
 
 type applyPatchHunk struct {
-	Lines []applyPatchLine
+	Header string
+	Lines  []applyPatchLine
 }
 
 type applyPatchLine struct {
@@ -83,7 +97,7 @@ func applyPatchConcurrencyPath(args json.RawMessage) string {
 }
 
 func (t ApplyPatchTool) Description() string {
-	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"patch\":\"...\"} containing a single Codex-style patch with exactly one Update File section. Use small hunks with unique unchanged context; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, read the file first; if the file changed since it was read, read it again before patching. Do not use Shell to run apply_patch."
+	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"patch\":\"...\"} containing a single Codex-style patch with exactly one Update File section. The Update File path may be absolute or relative and supports ~ for the current user's home directory. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, read the file first; if the file changed since it was read, read it again before patching. Do not use Shell to run apply_patch."
 }
 
 func (t ApplyPatchTool) Parameters() map[string]any {
@@ -92,7 +106,7 @@ func (t ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Single-file patch text in Codex apply_patch format. Must contain exactly one *** Update File: <relative path> section between *** Begin Patch and *** End Patch. Use context lines with a leading space, removed lines with -, and added lines with +. Keep hunks small and include enough unique unchanged context to disambiguate repeated blocks, such as the enclosing function, test, or case name.",
+				"description": "Single-file patch text in Codex apply_patch format. Must contain exactly one *** Update File: <path> section between *** Begin Patch and *** End Patch. Paths may be absolute or relative and support ~ for the current user's home directory. Use context lines with a leading space, removed lines with -, and added lines with +. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
 			},
 		},
 		"required":             []string{"patch"},
@@ -153,6 +167,9 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if decodedFile.Encoding.Name != "utf-8" {
 		out += fmt.Sprintf(", encoding=%s", decodedFile.Encoding.Name)
 	}
+	if summary := formatApplyPatchMatchSummary(plan.Matches); summary != "" {
+		out += "\n" + summary
+	}
 	if t.LSP != nil {
 		absPath, absErr := filepath.Abs(resolvedPath)
 		if absErr == nil {
@@ -203,12 +220,12 @@ func buildApplyPatchPlan(patchText, baseDir string) (ApplyPatchPlan, error) {
 		}
 		return ApplyPatchPlan{}, fmt.Errorf("reading file: %w. No files were modified", err)
 	}
-	after, err := applyParsedPatch(decodedFile.Text, parsed)
+	after, matches, err := applyParsedPatch(decodedFile.Text, parsed)
 	if err != nil {
 		return ApplyPatchPlan{}, err
 	}
 	diff := GenerateUnifiedDiffSummary(decodedFile.Text, after, parsed.Path)
-	return ApplyPatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed}, nil
+	return ApplyPatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, Matches: matches}, nil
 }
 
 func ParseApplyPatch(patchText string) (parsedApplyPatch, error) {
@@ -245,7 +262,8 @@ func ParseApplyPatch(patchText string) (parsedApplyPatch, error) {
 			if !seenUpdate {
 				return parsedApplyPatch{}, fmt.Errorf("invalid patch: hunk appears before Update File. No files were modified")
 			}
-			parsed.Hunks = append(parsed.Hunks, applyPatchHunk{})
+			header := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
+			parsed.Hunks = append(parsed.Hunks, applyPatchHunk{Header: header})
 			current = &parsed.Hunks[len(parsed.Hunks)-1]
 		default:
 			if !seenUpdate || current == nil {
@@ -325,22 +343,14 @@ func validateApplyPatchPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("invalid patch path: path is required. No files were modified")
 	}
-	if strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
-		return "", fmt.Errorf("invalid patch path %q: ApplyPatch requires a relative path. No files were modified", path)
-	}
 	clean := filepath.Clean(path)
 	if clean == "." || clean == "" {
 		return "", fmt.Errorf("invalid patch path %q: path is required. No files were modified", path)
 	}
-	for _, part := range strings.Split(clean, string(filepath.Separator)) {
-		if part == ".." {
-			return "", fmt.Errorf("invalid patch path %q: parent directory escapes are not allowed. No files were modified", path)
-		}
-	}
 	return clean, nil
 }
 
-func applyParsedPatch(content string, patch parsedApplyPatch) (string, error) {
+func applyParsedPatch(content string, patch parsedApplyPatch) (string, []ApplyPatchMatchSummary, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -351,13 +361,30 @@ func applyParsedPatch(content string, patch parsedApplyPatch) (string, error) {
 	if finalNewline {
 		fileLines = fileLines[:len(fileLines)-1]
 	}
+	matches := make([]ApplyPatchMatchSummary, 0, len(patch.Hunks))
 	searchStart := 0
-	for _, hunk := range patch.Hunks {
-		oldSeq := hunkOldSequence(hunk)
-		match, err := findUniqueHunkMatch(fileLines, oldSeq, searchStart)
-		if err != nil {
-			return "", err
+	for i, hunk := range patch.Hunks {
+		summary := ApplyPatchMatchSummary{HunkIndex: i + 1, Header: hunk.Header}
+		if hunk.Header != "" {
+			headerMatch, headerResult, err := findFirstHunkMatch(fileLines, []string{hunk.Header}, searchStart)
+			if err != nil {
+				return "", nil, fmt.Errorf("failed to locate @@ header %q: %w", hunk.Header, err)
+			}
+			summary.HeaderLine = headerMatch + 1
+			summary.HeaderCandidateLines = toPatchLineNumbers(headerResult.Candidates)
+			summary.HeaderLayer = headerResult.Layer
+			searchStart = headerMatch + 1
 		}
+		oldSeq := hunkOldSequence(hunk)
+		match, result, err := findFirstHunkMatch(fileLines, oldSeq, searchStart)
+		if err != nil {
+			return "", nil, err
+		}
+		summary.Line = match + 1
+		summary.CandidateLines = toPatchLineNumbers(result.Candidates)
+		summary.Layer = result.Layer
+		summary.WeakContext = isWeakHunkContext(oldSeq)
+		matches = append(matches, summary)
 		newSeq := buildHunkReplacement(fileLines[match:match+len(oldSeq)], hunk)
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
 		replaced = append(replaced, fileLines[:match]...)
@@ -376,7 +403,7 @@ func applyParsedPatch(content string, patch parsedApplyPatch) (string, error) {
 	if newline == "\r\n" {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	return out, nil
+	return out, matches, nil
 }
 
 func hunkOldSequence(h applyPatchHunk) []string {
@@ -421,9 +448,14 @@ func trailingContextLineCount(h applyPatchHunk) int {
 	return count
 }
 
-func findUniqueHunkMatch(fileLines, oldSeq []string, start int) (int, error) {
+type hunkMatchResult struct {
+	Layer      string
+	Candidates []int
+}
+
+func findFirstHunkMatch(fileLines, oldSeq []string, start int) (int, hunkMatchResult, error) {
 	if len(oldSeq) == 0 {
-		return 0, fmt.Errorf("hunk has no context or removed lines; add unchanged lines under @@ so the insertion point is unique. Re-read the target area and include one or two nearby unchanged lines before or after the change. No files were modified")
+		return 0, hunkMatchResult{}, fmt.Errorf("hunk has no context or removed lines; add unchanged lines in the same @@ hunk so the insertion point is clear. For inserting a new function/test, include the previous function's ending lines, the added block, and the next function signature in one hunk. Re-read the target area before rebuilding the patch. No files were modified")
 	}
 	if start < 0 {
 		start = 0
@@ -439,27 +471,104 @@ func findUniqueHunkMatch(fileLines, oldSeq []string, start int) (int, error) {
 	}
 	for _, layer := range layers {
 		idxs := findMatchesWithNorm(fileLines, oldSeq, start, layer.norm)
-		switch len(idxs) {
-		case 1:
-			return idxs[0], nil
-		case 0:
+		if len(idxs) == 0 {
 			continue
-		default:
-			return 0, fmt.Errorf("hunk is not unique %s; matching candidates start near line(s): %s. Re-read around the intended occurrence and include nearby unique unchanged context in the same @@ hunk as the changed lines; a separate earlier @@ hunk does not anchor a later hunk. If changing repeated blocks, split the patch into smaller hunks with different local context. No files were modified", layer.name, formatPatchLineNumbers(idxs))
 		}
+		return idxs[0], hunkMatchResult{Layer: layer.name, Candidates: idxs}, nil
 	}
-	return 0, fmt.Errorf("hunk not found. Re-read the target area and rebuild the hunk from the latest file contents; make sure context/removal lines omit Read's line-number gutter, match the current indentation and surrounding lines, and keep the hunk small and unique. No files were modified")
+	return 0, hunkMatchResult{}, fmt.Errorf("hunk not found. Re-read the target area and rebuild the hunk from the latest file contents; make sure context/removal lines omit Read's line-number gutter, match the current indentation and surrounding lines, and keep the hunk small. No files were modified")
 }
 
-func formatPatchLineNumbers(idxs []int) string {
-	if len(idxs) == 0 {
-		return "unknown"
+func formatApplyPatchMatchSummary(matches []ApplyPatchMatchSummary) string {
+	if len(matches) == 0 {
+		return ""
 	}
-	parts := make([]string, 0, len(idxs))
-	for _, idx := range idxs {
-		parts = append(parts, fmt.Sprintf("%d", idx+1))
+	lines := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if match.Line <= 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%d", match.Line))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	out := "Matched hunk"
+	if len(lines) > 1 {
+		out += "s"
+	}
+	out += " near line(s): " + strings.Join(lines, ", ")
+	var notes []string
+	for _, match := range matches {
+		if len(match.CandidateLines) > 1 {
+			notes = append(notes, formatApplyPatchAmbiguousNote("hunk", match.HunkIndex, match.CandidateLines, match.WeakContext))
+		}
+		if len(match.HeaderCandidateLines) > 1 {
+			notes = append(notes, formatApplyPatchAmbiguousNote("@@ header", match.HunkIndex, match.HeaderCandidateLines, false))
+		}
+	}
+	if len(notes) > 0 {
+		out += "\n" + strings.Join(notes, "\n")
+	}
+	return out
+}
+
+func formatApplyPatchAmbiguousNote(kind string, hunkIndex int, candidates []int, weak bool) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	other := candidates[1:]
+	note := fmt.Sprintf("Note: %s %d matched multiple locations; applied the first match near line %d after the current search position", kind, hunkIndex, candidates[0])
+	if len(other) > 0 {
+		note += ". Other candidate line(s): " + formatIntList(other)
+	}
+	if weak {
+		note += ". The hunk used weak context such as a brace, parenthesis, bracket, or blank line; verify the matched location if needed"
+	}
+	return note + "."
+}
+
+func formatIntList(values []int) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprintf("%d", value))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func isWeakHunkContext(oldSeq []string) bool {
+	if len(oldSeq) > 2 {
+		return false
+	}
+	for _, line := range oldSeq {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		weak := true
+		for _, r := range trimmed {
+			switch r {
+			case '{', '}', '(', ')', '[', ']', ',', ';':
+			default:
+				weak = false
+			}
+		}
+		if !weak {
+			return false
+		}
+	}
+	return true
+}
+
+func toPatchLineNumbers(idxs []int) []int {
+	if len(idxs) == 0 {
+		return nil
+	}
+	out := make([]int, len(idxs))
+	for i, idx := range idxs {
+		out[i] = idx + 1
+	}
+	return out
 }
 
 func findMatchesWithNorm(fileLines, oldSeq []string, start int, norm func(string) string) []int {

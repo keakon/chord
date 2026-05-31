@@ -202,14 +202,14 @@ Common causes:
 
 If this persists, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
 
-## ApplyPatch reports `hunk not found` or `hunk is not unique`
+## ApplyPatch reports `hunk not found` or `matched multiple locations`
 
-`ApplyPatch` matches hunks line-by-line. It can tolerate common whitespace and Unicode punctuation differences, but each hunk still must identify exactly one location in the already-read file.
+`ApplyPatch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
 - re-run `Read` on the file and rebuild the patch from the latest content;
-- if the error says the hunk is not unique, use the candidate line numbers in the error to `Read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk;
+- if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `Read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
 - if the error says the hunk was not found, re-copy the target block from the latest `Read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
 - split a broad patch into smaller single-file patches or smaller hunks;
 - do not run external `apply_patch` through `Shell`; use Chord's native `ApplyPatch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.

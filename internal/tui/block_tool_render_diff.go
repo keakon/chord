@@ -267,6 +267,17 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 func (b *Block) diffToolFilePath() string {
 	if b.ToolName == tools.NameApplyPatch {
 		path := tools.ExtractApplyPatchPathFromArgs(json.RawMessage(b.Content))
+		if path == "" {
+			var parsed struct {
+				Path string `json:"path"`
+			}
+			if json.Unmarshal([]byte(b.Content), &parsed) == nil {
+				path = strings.TrimSpace(parsed.Path)
+			}
+		}
+		if path == "" {
+			return ""
+		}
 		if rel, err := filepath.Rel(".", path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return rel
 		}

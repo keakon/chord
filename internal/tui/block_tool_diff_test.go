@@ -42,6 +42,23 @@ func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	}
 }
 
+func TestApplyPatchLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
+	displayArgs := liveToolDisplayArgs(tools.NameApplyPatch, `{"patch":"*** Begin Patch\n*** Update File:`, "")
+	if displayArgs != "" {
+		t.Fatalf("display args = %q, want empty until path is parsed", displayArgs)
+	}
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameApplyPatch,
+		Content:  displayArgs,
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.Contains(plain, "ApplyPatch .") {
+		t.Fatalf("expected incomplete ApplyPatch args not to render dot path, got:\n%s", plain)
+	}
+}
+
 func TestLexerForFilePathPrefersWhitelistedExtensionOverConflictingBasename(t *testing.T) {
 	hl := newCodeHighlighter("bash_jobs.go", "package tools\n")
 	lexer := hl.getLexer("package tools\n")

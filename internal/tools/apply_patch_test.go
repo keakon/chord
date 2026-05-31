@@ -33,11 +33,20 @@ func TestApplyPatchParserRejectsUnsupportedOperations(t *testing.T) {
 	}
 }
 
-func TestApplyPatchParserRejectsUnsafePaths(t *testing.T) {
-	for _, path := range []string{"", "/tmp/a.txt", "~/a.txt", "../a.txt", "a/../../b.txt"} {
+func TestApplyPatchParserRejectsInvalidPaths(t *testing.T) {
+	for _, path := range []string{"", "."} {
 		patch := "*** Begin Patch\n*** Update File: " + path + "\n@@\n-a\n+b\n*** End Patch\n"
 		if _, err := ParseApplyPatch(patch); err == nil {
-			t.Fatalf("ParseApplyPatch accepted unsafe path %q", path)
+			t.Fatalf("ParseApplyPatch accepted invalid path %q", path)
+		}
+	}
+}
+
+func TestApplyPatchParserAcceptsExternalPathForms(t *testing.T) {
+	for _, path := range []string{filepath.Join("..", "a.txt"), filepath.Join("a", "..", "..", "b.txt"), filepath.Join(string(filepath.Separator), "tmp", "a.txt"), "~/a.txt"} {
+		patch := "*** Begin Patch\n*** Update File: " + path + "\n@@\n-a\n+b\n*** End Patch\n"
+		if _, err := ParseApplyPatch(patch); err != nil {
+			t.Fatalf("ParseApplyPatch rejected external path form %q: %v", path, err)
 		}
 	}
 }
@@ -64,6 +73,71 @@ func TestApplyPatchToolReplacesInsertsAndDeletes(t *testing.T) {
 	}
 	if !strings.Contains(out, "Applied patch") {
 		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestApplyPatchToolSupportsParentDirectoryPath(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "repo")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "outside.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n*** Update File: ../outside.txt\n@@\n-old\n+new\n*** End Patch\n"
+	args, _ := json.Marshal(map[string]string{"patch": patch})
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("ApplyPatchTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "new\n" {
+		t.Fatalf("file = %q", got)
+	}
+	if !strings.Contains(out, "Applied patch") {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestApplyPatchToolUsesHunkHeaderAsAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.go")
+	content := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n}\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n*** Update File: demo.go\n@@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n*** End Patch\n"
+	args, _ := json.Marshal(map[string]string{"patch": patch})
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("ApplyPatchTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	want := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n\tprintln(\"y\")\n}\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+}
+
+func TestApplyPatchAmbiguousWeakContextAppliesFirstMatchWithHint(t *testing.T) {
+	got, matches, err := applyParsedPatch("func a() {\n}\n\nfunc b() {\n}\n", parsedApplyPatch{
+		Path: "demo.go",
+		Hunks: []applyPatchHunk{{Lines: []applyPatchLine{
+			{Kind: ' ', Text: "}"},
+			{Kind: '+', Text: ""},
+			{Kind: '+', Text: "func c() {"},
+			{Kind: '+', Text: "}"},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("applyParsedPatch: %v", err)
+	}
+	if got != "func a() {\n}\n\nfunc c() {\n}\n\nfunc b() {\n}\n" {
+		t.Fatalf("file = %q", got)
+	}
+	if len(matches) != 1 || matches[0].Line != 2 || !matches[0].WeakContext || len(matches[0].CandidateLines) != 2 {
+		t.Fatalf("matches = %+v", matches)
 	}
 }
 
@@ -109,7 +183,7 @@ func TestApplyPatchToolPreservesCRLF(t *testing.T) {
 	}
 }
 
-func TestApplyPatchToolAmbiguousHunkDoesNotWrite(t *testing.T) {
+func TestApplyPatchToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -121,13 +195,16 @@ func TestApplyPatchToolAmbiguousHunkDoesNotWrite(t *testing.T) {
 	}
 	patch := "*** Begin Patch\n*** Update File: demo.txt\n@@\n-same\n+changed\n*** End Patch\n"
 	args, _ := json.Marshal(map[string]string{"patch": patch})
-	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), args)
-	if err == nil || !strings.Contains(err.Error(), "not unique") || !strings.Contains(err.Error(), "line(s): 1, 2") || !strings.Contains(err.Error(), "same @@ hunk") || !strings.Contains(err.Error(), "separate earlier @@ hunk does not anchor") {
-		t.Fatalf("err = %v", err)
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("ApplyPatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("demo.txt")
-	if string(got) != "same\nsame\n" {
-		t.Fatalf("file modified: %q", got)
+	if string(got) != "changed\nsame\n" {
+		t.Fatalf("file = %q", got)
+	}
+	if !strings.Contains(out, "Matched hunk near line(s): 1") || !strings.Contains(out, "matched multiple locations") || !strings.Contains(out, "Other candidate line(s): 2") {
+		t.Fatalf("output = %q", out)
 	}
 }
 

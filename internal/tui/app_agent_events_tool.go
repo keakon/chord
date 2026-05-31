@@ -9,6 +9,20 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func liveToolDisplayArgs(toolName, argsJSON, result string) string {
+	if toolName == tools.NameApplyPatch {
+		path := tools.ExtractApplyPatchPathFromArgs([]byte(argsJSON))
+		if path == "" {
+			return ""
+		}
+		b, err := json.Marshal(map[string]string{"path": path})
+		if err == nil {
+			return string(b)
+		}
+	}
+	return eventToolDisplayArgs(toolName, argsJSON, result)
+}
+
 func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state agent.ToolCallExecutionState, includeArgProgress bool) (*Block, bool) {
 	if m == nil || m.viewport == nil || strings.TrimSpace(id) == "" {
 		return nil, false
@@ -19,7 +33,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	block := &Block{
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
-		Content:            eventToolDisplayArgs(name, argsJSON, ""),
+		Content:            liveToolDisplayArgs(name, argsJSON, ""),
 		ToolName:           name,
 		ToolID:             id,
 		Collapsed:          true,
@@ -121,7 +135,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 				m.expectedAgentClose = true
 			}
 		}
-		if displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
+		if displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
 			block.Content = displayArgs
 		}
 		block.ResultStatus = evt.Status
@@ -251,7 +265,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		updated := false
 		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
-		displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		if displayArgs != "" && displayArgs != block.Content {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
 			block.Content = displayArgs
@@ -310,7 +324,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		updated := false
-		displayArgs := eventToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		if displayArgs != "" && displayArgs != block.Content {
 			block.Content = displayArgs
 			updated = true
