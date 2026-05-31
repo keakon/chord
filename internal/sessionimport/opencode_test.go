@@ -92,6 +92,41 @@ func TestConvertOpenCodeExport_ParsesCurrentExportPartsAndToolFallback(t *testin
 	}
 }
 
+func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
+	data := []byte(`{
+  "messages": [
+    {
+      "info": {"role": "assistant"},
+      "parts": [
+        {"type":"tool","callID":"call-read","tool":"read_file","state":{"status":"completed","input":{"path":"README.md"},"output":"contents"}},
+        {"type":"tool","callID":"call-patch","tool":"apply_patch","state":{"status":"completed","input":{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"},"output":"ok"}},
+        {"type":"tool","callID":"call-unknown","tool":"unknown-tool","state":{"status":"completed","input":{"path":"main.go"},"output":"ok"}}
+      ]
+    }
+  ]
+}`)
+	var report ImportReport
+	msgs, err := convertOpenCodeExport(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertOpenCodeExport: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("msgs len=%d, want 1", len(msgs))
+	}
+	content := msgs[0].Content
+	for _, want := range []string{"[Imported tool: Read]", `"tool": "Read"`, `"path": "README.md"`, "[Imported tool: ApplyPatch]", `"tool": "ApplyPatch"`, "[Imported unsupported tool: unknown-tool]"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("content missing %q:\n%s", want, content)
+		}
+	}
+	if report.ToolEntriesRendered != 3 {
+		t.Fatalf("ToolEntriesRendered=%d, want 3", report.ToolEntriesRendered)
+	}
+	if report.UnsupportedToolCalls != 1 {
+		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
+	}
+}
+
 func TestConvertOpenCodeExport_CountsSkippedReasoningOnlyParts(t *testing.T) {
 	data := []byte(`{
   "messages": [

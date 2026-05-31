@@ -746,6 +746,18 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 		if norm := normalizeClaudeReadArgs(block.Input); norm != nil {
 			return message.ToolCall{ID: block.ID, Name: "Read", Args: norm}, false
 		}
+	case "Write":
+		if norm := normalizeClaudeWriteArgs(block.Input); norm != nil {
+			return message.ToolCall{ID: block.ID, Name: "Write", Args: norm}, false
+		}
+	case "Delete", "Remove":
+		if norm := normalizeClaudeDeleteArgs(block.Input); norm != nil {
+			return message.ToolCall{ID: block.ID, Name: "Delete", Args: norm}, false
+		}
+	case "Edit", "MultiEdit", "Update":
+		if norm := normalizeClaudeApplyPatchArgs(name, block.Input); norm != nil {
+			return message.ToolCall{ID: block.ID, Name: "ApplyPatch", Args: norm}, false
+		}
 	}
 	if name == "" {
 		name = "unknown"
@@ -823,6 +835,32 @@ func claudePickString(m map[string]any, keys ...string) string {
 	return ""
 }
 
+func claudePickStringList(m map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if s := strings.TrimSpace(t); s != "" {
+				return []string{s}
+			}
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, strings.TrimSpace(s))
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+	return nil
+}
+
 func claudePickFloat(m map[string]any, keys ...string) float64 {
 	for _, key := range keys {
 		switch v := m[key].(type) {
@@ -856,6 +894,92 @@ func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) m
 		fields = append(fields, "Content:", content)
 	}
 	return message.Message{Role: "assistant", Content: renderImportedFallbackBlock("[Imported Claude transcript entry]", fields...), Provenance: importedClaudeProvenance()}
+}
+
+func normalizeClaudeWriteArgs(raw json.RawMessage) json.RawMessage {
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil
+	}
+	path := claudePickString(args, "path", "file_path", "file")
+	content := claudePickString(args, "content", "text")
+	if path == "" {
+		return nil
+	}
+	result := map[string]any{"path": path, "content": content}
+	b, _ := json.Marshal(result)
+	return b
+}
+
+func normalizeClaudeDeleteArgs(raw json.RawMessage) json.RawMessage {
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil
+	}
+	paths := claudePickStringList(args, "paths", "path", "file_path", "file")
+	if len(paths) == 0 {
+		return nil
+	}
+	reason := claudePickString(args, "reason")
+	if reason == "" {
+		reason = "Imported Claude file deletion"
+	}
+	result := map[string]any{"paths": paths, "reason": reason}
+	b, _ := json.Marshal(result)
+	return b
+}
+
+func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMessage {
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil
+	}
+	if strings.EqualFold(name, "Update") {
+		if patch := claudePickString(args, "patch", "input"); patch != "" {
+			b, _ := json.Marshal(map[string]any{"patch": patch})
+			return b
+		}
+	}
+	path := claudePickString(args, "path", "file_path", "file")
+	if path == "" {
+		return nil
+	}
+	if strings.EqualFold(name, "MultiEdit") {
+		edits, ok := args["edits"].([]any)
+		if !ok || len(edits) == 0 {
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString("*** Begin Patch\n")
+		b.WriteString("*** Update File: ")
+		b.WriteString(path)
+		b.WriteString("\n")
+		for _, rawEdit := range edits {
+			edit, ok := rawEdit.(map[string]any)
+			if !ok {
+				return nil
+			}
+			oldText := claudePickString(edit, "old_string", "old", "old_text")
+			newText := claudePickString(edit, "new_string", "new", "new_text")
+			if oldText == "" {
+				return nil
+			}
+			b.WriteString("@@\n")
+			writePatchLines(&b, "-", oldText)
+			writePatchLines(&b, "+", newText)
+		}
+		b.WriteString("*** End Patch")
+		out, _ := json.Marshal(map[string]any{"patch": b.String()})
+		return out
+	}
+	oldText := claudePickString(args, "old_string", "old", "old_text")
+	newText := claudePickString(args, "new_string", "new", "new_text")
+	if oldText == "" {
+		return nil
+	}
+	patch := buildSingleUpdatePatch(path, oldText, newText)
+	out, _ := json.Marshal(map[string]any{"patch": patch})
+	return out
 }
 
 func rawContentString(raw json.RawMessage) string {

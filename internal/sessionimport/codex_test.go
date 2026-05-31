@@ -462,7 +462,7 @@ func TestConvertCodexRollout_RealisticFixtureReportAndLineage(t *testing.T) {
 	}
 }
 
-func TestConvertCodexRollout_UnsupportedWriteToolRestoresAsUnsupportedToolCard(t *testing.T) {
+func TestConvertCodexRollout_WriteToolConvertsToWrite(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"write the file"}]}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"function_call","name":"write_file","arguments":"{\"path\":\"notes.txt\",\"content\":\"hello\"}","call_id":"call_w"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call_output","output":"ok","call_id":"call_w"}}
@@ -476,16 +476,22 @@ func TestConvertCodexRollout_UnsupportedWriteToolRestoresAsUnsupportedToolCard(t
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "write_file" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Write" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
-	assertCodexUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
+	var args map[string]any
+	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if args["path"] != "notes.txt" || args["content"] != "hello" {
+		t.Fatalf("args=%#v", args)
+	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_w" || !strings.Contains(msgs[2].Content, "ok") {
 		t.Fatalf("msg2=%+v", msgs[2])
 	}
 }
 
-func TestConvertCodexRollout_UnsupportedEditToolRestoresAsUnsupportedToolCard(t *testing.T) {
+func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"edit the file"}]}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"function_call","name":"edit_file","arguments":"{\"path\":\"notes.txt\",\"old_string\":\"hello\",\"new_string\":\"hi\",\"replace_all\":true}","call_id":"call_e"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call_output","output":"ok","call_id":"call_e"}}
@@ -499,16 +505,23 @@ func TestConvertCodexRollout_UnsupportedEditToolRestoresAsUnsupportedToolCard(t 
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "edit_file" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "ApplyPatch" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
-	assertCodexUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
+	var args map[string]any
+	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	patch, _ := args["patch"].(string)
+	if !strings.Contains(patch, "*** Update File: notes.txt") || !strings.Contains(patch, "-hello") || !strings.Contains(patch, "+hi") {
+		t.Fatalf("patch=%q", patch)
+	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_e" || !strings.Contains(msgs[2].Content, "ok") {
 		t.Fatalf("msg2=%+v", msgs[2])
 	}
 }
 
-func TestConvertCodexRollout_ApplyPatchCustomToolRestoresAsUnsupportedToolCard(t *testing.T) {
+func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToApplyPatch(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"patch it"}],"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch","call_id":"call_patch","turn_id":"turn-1"}}
@@ -527,24 +540,21 @@ func TestConvertCodexRollout_ApplyPatchCustomToolRestoresAsUnsupportedToolCard(t
 		t.Fatalf("apply_patch not restored as tool card: %+v", msgs[1])
 	}
 	call := msgs[1].ToolCalls[0]
-	if call.Name != "apply_patch" || call.ID != "call_patch" {
-		t.Fatalf("tool call=%+v, want apply_patch call_patch", call)
+	if call.Name != "ApplyPatch" || call.ID != "call_patch" {
+		t.Fatalf("tool call=%+v, want ApplyPatch call_patch", call)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		t.Fatalf("unmarshal args: %v", err)
 	}
-	if args["unsupported"] != true || args["source"] != "codex" || args["reason"] == "" {
-		t.Fatalf("unsupported metadata missing: %#v", args)
-	}
-	arguments, ok := args["arguments"].(map[string]any)
-	if !ok || !strings.Contains(arguments["input"].(string), "*** Begin Patch") {
-		t.Fatalf("original arguments not preserved: %#v", args["arguments"])
+	patch, _ := args["patch"].(string)
+	if !strings.Contains(patch, "*** Begin Patch") || !strings.Contains(patch, "*** Update File: a.txt") {
+		t.Fatalf("patch not preserved: %#v", args)
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_patch" || !strings.Contains(msgs[2].Content, "Success") {
 		t.Fatalf("tool result not linked: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 0 || report.UnsupportedToolCalls != 1 || report.UnsupportedToolResults != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 || report.UnsupportedToolResults != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }

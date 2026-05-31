@@ -984,8 +984,15 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 var codexToolMapping = map[string]string{
 	"exec_command": "Shell",
 	"shell":        "Shell",
+	"apply_patch":  "ApplyPatch",
 	"read_file":    "Read",
 	"file_read":    "Read",
+	"write_file":   "Write",
+	"file_write":   "Write",
+	"edit_file":    "ApplyPatch",
+	"delete_file":  "Delete",
+	"file_delete":  "Delete",
+	"remove_file":  "Delete",
 	"grep":         "Grep",
 	"search":       "Grep",
 	"glob":         "Glob",
@@ -1014,14 +1021,19 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 
 	switch chordName {
+	case "ApplyPatch":
+		if strings.EqualFold(codexName, "edit_file") {
+			return codexNormalizeEditFileArgs(args)
+		}
+		return codexNormalizeApplyPatchArgs(args)
 	case "Shell":
 		return codexNormalizeShellArgs(args)
 	case "Read":
 		return codexNormalizeReadArgs(args)
 	case "Write":
 		return codexNormalizeWriteArgs(args)
-	case "Edit":
-		return codexNormalizeEditArgs(args)
+	case "Delete":
+		return codexNormalizeDeleteArgs(args)
 	case "Grep":
 		return codexNormalizeGrepArgs(args)
 	case "Glob":
@@ -1029,6 +1041,29 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	default:
 		return nil
 	}
+}
+
+func codexNormalizeApplyPatchArgs(args map[string]any) json.RawMessage {
+	patch := codexPickString(args, "patch", "input")
+	if patch == "" {
+		return nil
+	}
+	result := map[string]any{"patch": patch}
+	b, _ := json.Marshal(result)
+	return b
+}
+
+func codexNormalizeEditFileArgs(args map[string]any) json.RawMessage {
+	path := codexPickString(args, "path", "file_path", "file")
+	oldText := codexPickString(args, "old_string", "old", "old_text")
+	newText := codexPickString(args, "new_string", "new", "new_text")
+	if path == "" || oldText == "" {
+		return nil
+	}
+	patch := buildSingleUpdatePatch(path, oldText, newText)
+	result := map[string]any{"patch": patch}
+	b, _ := json.Marshal(result)
+	return b
 }
 
 func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
@@ -1077,21 +1112,16 @@ func codexNormalizeWriteArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeEditArgs(args map[string]any) json.RawMessage {
-	path := codexPickString(args, "path", "file_path", "file")
-	oldStr := codexPickString(args, "old_string", "old", "find")
-	newStr := codexPickString(args, "new_string", "new", "replace")
-	if path == "" || oldStr == "" {
+func codexNormalizeDeleteArgs(args map[string]any) json.RawMessage {
+	paths := codexPickStringList(args, "paths", "path", "file_path", "file")
+	if len(paths) == 0 {
 		return nil
 	}
-	result := map[string]any{
-		"path":       path,
-		"old_string": oldStr,
-		"new_string": newStr,
+	reason := codexPickString(args, "reason")
+	if reason == "" {
+		reason = "Imported Codex file deletion"
 	}
-	if replaceAll, ok := args["replace_all"]; ok {
-		result["replace_all"] = replaceAll
-	}
+	result := map[string]any{"paths": paths, "reason": reason}
 	b, _ := json.Marshal(result)
 	return b
 }
@@ -1154,6 +1184,61 @@ func codexPickFloat(m map[string]any, keys ...string) float64 {
 		}
 	}
 	return 0
+}
+
+func codexPickStringList(m map[string]any, keys ...string) []string {
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if s := strings.TrimSpace(t); s != "" {
+				return []string{s}
+			}
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, strings.TrimSpace(s))
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+	return nil
+}
+
+func buildSingleUpdatePatch(path, oldText, newText string) string {
+	var b strings.Builder
+	b.WriteString("*** Begin Patch\n")
+	b.WriteString("*** Update File: ")
+	b.WriteString(path)
+	b.WriteString("\n@@\n")
+	writePatchLines(&b, "-", oldText)
+	writePatchLines(&b, "+", newText)
+	b.WriteString("*** End Patch")
+	return b.String()
+}
+
+func writePatchLines(b *strings.Builder, prefix, text string) {
+	if text == "" {
+		return
+	}
+	lines := strings.SplitAfter(text, "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		b.WriteString(prefix)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 }
 
 // ---------------------------------------------------------------------------

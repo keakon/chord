@@ -47,7 +47,7 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 
 	var out []message.Message
 	for idx, raw := range file.Messages {
-		msg, skipped, toolRenderedCount, reasoningSkipped, warns, err := convertOpenCodeMessage(raw, reasoningMode)
+		msg, skipped, toolRenderedCount, unsupportedToolCount, reasoningSkipped, warns, err := convertOpenCodeMessage(raw, reasoningMode)
 		for _, w := range warns {
 			report.warnf("opencode message[%d]: %s", idx, w)
 		}
@@ -56,7 +56,7 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 		}
 		if toolRenderedCount > 0 {
 			report.ToolEntriesRendered += toolRenderedCount
-			report.UnsupportedToolCalls += toolRenderedCount
+			report.UnsupportedToolCalls += unsupportedToolCount
 		}
 		if reasoningSkipped {
 			report.ReasoningBlocksSkipped++
@@ -75,10 +75,10 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 	return out, nil
 }
 
-func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg message.Message, skipped bool, toolRenderedCount int, reasoningSkipped bool, warns []string, err error) {
+func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg message.Message, skipped bool, toolRenderedCount int, unsupportedToolCount int, reasoningSkipped bool, warns []string, err error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return msg, false, 0, false, nil, fmt.Errorf("parse message object: %w", err)
+		return msg, false, 0, 0, false, nil, fmt.Errorf("parse message object: %w", err)
 	}
 
 	kind := pickStringField(obj, "type", "kind", "role")
@@ -102,7 +102,7 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 	// Ignore model-switched/compaction markers; the importer is report-only for these.
 	switch kind {
 	case "model-switched", "model_switched", "model_switched_event", "compaction", "session-event", "event":
-		return msg, true, 0, false, []string{"skipped non-conversation event type=" + kind}, nil
+		return msg, true, 0, 0, false, []string{"skipped non-conversation event type=" + kind}, nil
 	}
 
 	if role != "user" && role != "assistant" {
@@ -117,13 +117,14 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 
 	var contentText string
 	if rawParts, ok := obj["parts"]; ok {
-		partsText, partsToolCount, partsReasoningSkipped, partWarns, partErr := extractOpenCodePartsOrdered(rawParts, reasoningMode)
+		partsText, partsToolCount, partsUnsupportedToolCount, partsReasoningSkipped, partWarns, partErr := extractOpenCodePartsOrdered(rawParts, reasoningMode)
 		warns = append(warns, partWarns...)
 		if partErr != nil {
-			return msg, false, 0, false, warns, partErr
+			return msg, false, 0, 0, false, warns, partErr
 		}
 		contentText = partsText
 		toolRenderedCount = partsToolCount
+		unsupportedToolCount = partsUnsupportedToolCount
 		reasoningSkipped = partsReasoningSkipped
 	} else {
 		var contentTypes []string
@@ -132,7 +133,7 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		contentText, contentTypes, w, e = extractOpenCodeContent(obj)
 		warns = append(warns, w...)
 		if e != nil {
-			return msg, false, 0, false, warns, e
+			return msg, false, 0, 0, false, warns, e
 		}
 
 		// Reasoning handling: OpenCode exports often include separate reasoning.
@@ -141,7 +142,7 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		reasoningText, rWarns, rErr := extractReasoningText(obj, contentTypes)
 		warns = append(warns, rWarns...)
 		if rErr != nil {
-			return msg, false, 0, false, warns, rErr
+			return msg, false, 0, 0, false, warns, rErr
 		}
 		if strings.TrimSpace(reasoningText) != "" {
 			switch reasoningMode {
@@ -161,18 +162,20 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		if strings.TrimSpace(toolText) != "" {
 			contentText = joinNonEmpty(contentText, toolText)
 			toolRenderedCount = countOpenCodeToolishParts(obj)
+			unsupportedToolCount = toolRenderedCount
 			if toolRenderedCount == 0 {
 				toolRenderedCount = 1
+				unsupportedToolCount = 1
 			}
 		}
 	}
 
 	contentText = strings.TrimSpace(contentText)
 	if contentText == "" {
-		return msg, true, toolRenderedCount, reasoningSkipped, warns, nil
+		return msg, true, toolRenderedCount, unsupportedToolCount, reasoningSkipped, warns, nil
 	}
 
-	return message.Message{Role: role, Content: contentText, Provenance: importedOpenCodeProvenance()}, false, toolRenderedCount, reasoningSkipped, warns, nil
+	return message.Message{Role: role, Content: contentText, Provenance: importedOpenCodeProvenance()}, false, toolRenderedCount, unsupportedToolCount, reasoningSkipped, warns, nil
 }
 
 func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
@@ -248,10 +251,10 @@ func extractTextFromBlock(m map[string]any) (text string, typ string, ok bool) {
 	return "", typ, false
 }
 
-func extractOpenCodePartsOrdered(raw json.RawMessage, reasoningMode string) (text string, toolCount int, reasoningSkipped bool, warns []string, err error) {
+func extractOpenCodePartsOrdered(raw json.RawMessage, reasoningMode string) (text string, toolCount int, unsupportedToolCount int, reasoningSkipped bool, warns []string, err error) {
 	var parts []map[string]any
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", 0, false, nil, fmt.Errorf("parse parts array: %w", err)
+		return "", 0, 0, false, nil, fmt.Errorf("parse parts array: %w", err)
 	}
 	var rendered []string
 	for _, part := range parts {
@@ -264,16 +267,11 @@ func extractOpenCodePartsOrdered(raw json.RawMessage, reasoningMode string) (tex
 			}
 		case "tool", "tool-invocation":
 			toolCount++
-			payload, _ := json.MarshalIndent(part, "", "  ")
-			var b strings.Builder
-			b.WriteString("[Imported unsupported tool")
-			if name := openCodeToolName(part); name != "" {
-				b.WriteString(": ")
-				b.WriteString(name)
+			renderedTool, unsupported := renderOpenCodeToolPart(part)
+			if unsupported {
+				unsupportedToolCount++
 			}
-			b.WriteString("]\n")
-			b.Write(payload)
-			rendered = append(rendered, b.String())
+			rendered = append(rendered, renderedTool)
 		case "reasoning", "thinking":
 			if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
 				switch reasoningMode {
@@ -298,7 +296,7 @@ func extractOpenCodePartsOrdered(raw json.RawMessage, reasoningMode string) (tex
 	if toolCount > 0 {
 		warns = append(warns, "tool parts were imported as text")
 	}
-	return strings.TrimSpace(strings.Join(rendered, "\n\n")), toolCount, reasoningSkipped, warns, nil
+	return strings.TrimSpace(strings.Join(rendered, "\n\n")), toolCount, unsupportedToolCount, reasoningSkipped, warns, nil
 }
 
 func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string) (string, []string, error) {
@@ -314,6 +312,100 @@ func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string)
 		}
 	}
 	return "", nil, nil
+}
+
+func renderOpenCodeToolPart(part map[string]any) (string, bool) {
+	name := openCodeToolName(part)
+	args := openCodeToolArgs(part)
+	if chordName, ok := openCodeToolMapping[strings.ToLower(name)]; ok {
+		rawArgs, _ := json.Marshal(args)
+		if norm := codexNormalizeToolArgs(name, chordName, rawArgs); norm != nil {
+			payload := map[string]any{
+				"tool":   chordName,
+				"args":   json.RawMessage(norm),
+				"callID": openCodeToolCallID(part),
+			}
+			if output := openCodeToolOutput(part); output != "" {
+				payload["output"] = output
+			}
+			pretty, _ := json.MarshalIndent(payload, "", "  ")
+			return "[Imported tool: " + chordName + "]\n" + string(pretty), false
+		}
+	}
+	payload, _ := json.MarshalIndent(part, "", "  ")
+	var b strings.Builder
+	b.WriteString("[Imported unsupported tool")
+	if name != "" {
+		b.WriteString(": ")
+		b.WriteString(name)
+	}
+	b.WriteString("]\n")
+	b.Write(payload)
+	return b.String(), true
+}
+
+var openCodeToolMapping = map[string]string{
+	"bash":         "Shell",
+	"shell":        "Shell",
+	"exec":         "Shell",
+	"exec_command": "Shell",
+	"read":         "Read",
+	"read_file":    "Read",
+	"file_read":    "Read",
+	"write":        "Write",
+	"write_file":   "Write",
+	"file_write":   "Write",
+	"edit":         "ApplyPatch",
+	"edit_file":    "ApplyPatch",
+	"apply_patch":  "ApplyPatch",
+	"update":       "ApplyPatch",
+	"delete":       "Delete",
+	"remove":       "Delete",
+	"delete_file":  "Delete",
+	"file_delete":  "Delete",
+	"grep":         "Grep",
+	"search":       "Grep",
+	"glob":         "Glob",
+	"list_files":   "Glob",
+}
+
+func openCodeToolArgs(part map[string]any) map[string]any {
+	if state, ok := part["state"].(map[string]any); ok {
+		if input, ok := state["input"].(map[string]any); ok {
+			return input
+		}
+	}
+	if input, ok := part["input"].(map[string]any); ok {
+		return input
+	}
+	if args, ok := part["args"].(map[string]any); ok {
+		return args
+	}
+	return map[string]any{}
+}
+
+func openCodeToolCallID(part map[string]any) string {
+	for _, key := range []string{"callID", "callId", "toolCallID", "toolCallId", "id"} {
+		if s, ok := part[key].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+func openCodeToolOutput(part map[string]any) string {
+	if state, ok := part["state"].(map[string]any); ok {
+		if s, ok := state["output"].(string); ok {
+			return s
+		}
+		if result, ok := state["result"].(string); ok {
+			return result
+		}
+	}
+	if s, ok := part["output"].(string); ok {
+		return s
+	}
+	return ""
 }
 
 func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (string, []string) {

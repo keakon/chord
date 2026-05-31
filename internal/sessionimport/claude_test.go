@@ -1,9 +1,24 @@
 package sessionimport
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func assertClaudeUnsupportedToolArgs(t *testing.T, raw []byte) {
+	t.Helper()
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal unsupported args: %v", err)
+	}
+	if args["unsupported"] != true || args["source"] != "claude" || strings.TrimSpace(args["reason"].(string)) == "" {
+		t.Fatalf("unsupported metadata missing: %#v", args)
+	}
+	if _, ok := args["arguments"]; !ok {
+		t.Fatalf("original arguments missing: %#v", args)
+	}
+}
 
 func TestConvertClaudeTranscript_AcceptsStringContentMessages(t *testing.T) {
 	data := []byte(`{"uuid":"u1","message":{"role":"user","content":"plain question"}}
@@ -103,6 +118,93 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 		t.Fatalf("Read not restored as tool card: %+v", msgs[3])
 	}
 	if report.StructuredToolCalls != 2 || report.Claude == nil || report.Claude.StructuredToolCalls != 2 || report.UnsupportedToolCalls != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestConvertClaudeTranscript_UnsupportedToolPreservesMetadata(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"search"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_unknown","name":"WebSearch","input":{"query":"golang"}}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 {
+		t.Fatalf("msgs=%+v, want unsupported tool card", msgs)
+	}
+	if msgs[1].ToolCalls[0].Name != "WebSearch" {
+		t.Fatalf("tool name=%q, want WebSearch", msgs[1].ToolCalls[0].Name)
+	}
+	assertClaudeUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
+	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"modify files"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_edit","name":"Edit","input":{"file_path":"a.txt","old_string":"old","new_string":"new"}},{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"x","new_string":"y"}]}},{"type":"tool_use","id":"toolu_write","name":"Write","input":{"file_path":"c.txt","content":"hello"}},{"type":"tool_use","id":"toolu_update","name":"Update","input":{"file_path":"d.txt","patch":"*** Begin Patch\n*** Update File: d.txt\n@@\n-old\n+new\n*** End Patch"}}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_edit","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_multi","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_write","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_update","content":"ok"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 6 {
+		t.Fatalf("msgs len=%d, want 6: %+v", len(msgs), msgs)
+	}
+	if len(msgs[1].ToolCalls) != 4 {
+		t.Fatalf("tool calls=%+v, want 4", msgs[1].ToolCalls)
+	}
+	wantNames := []string{"ApplyPatch", "ApplyPatch", "Write", "ApplyPatch"}
+	for i, call := range msgs[1].ToolCalls {
+		if call.Name != wantNames[i] {
+			t.Fatalf("tool call %d name=%q, want %q", i, call.Name, wantNames[i])
+		}
+	}
+	var editArgs map[string]any
+	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &editArgs); err != nil {
+		t.Fatalf("unmarshal edit args: %v", err)
+	}
+	if patch, _ := editArgs["patch"].(string); !strings.Contains(patch, "*** Update File: a.txt") || !strings.Contains(patch, "-old") || !strings.Contains(patch, "+new") {
+		t.Fatalf("edit patch=%q", patch)
+	}
+	var writeArgs map[string]any
+	if err := json.Unmarshal(msgs[1].ToolCalls[2].Args, &writeArgs); err != nil {
+		t.Fatalf("unmarshal write args: %v", err)
+	}
+	if writeArgs["path"] != "c.txt" || writeArgs["content"] != "hello" {
+		t.Fatalf("write args=%#v", writeArgs)
+	}
+	if report.StructuredToolCalls != 4 || report.UnsupportedToolCalls != 0 || report.Claude == nil || report.Claude.StructuredToolCalls != 4 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatch(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"delete text"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"remove me\n","new_string":""}]}}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "ApplyPatch" {
+		t.Fatalf("msgs=%+v, want ApplyPatch tool card", msgs)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	patch, _ := args["patch"].(string)
+	if !strings.Contains(patch, "*** Update File: b.txt") || !strings.Contains(patch, "-remove me") || strings.Contains(patch, "+remove me") {
+		t.Fatalf("patch=%q", patch)
+	}
+	if report.StructuredToolCalls != 1 || report.UnsupportedToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
