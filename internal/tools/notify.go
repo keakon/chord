@@ -37,7 +37,7 @@ type notifyArgs struct {
 	Kind         string `json:"kind,omitempty"`
 }
 
-func (NotifyTool) Name() string { return "Notify" }
+func (NotifyTool) Name() string { return NameNotify }
 
 func (t *NotifyTool) Description() string {
 	switch {
@@ -87,14 +87,14 @@ func (t *NotifyTool) IsAvailable() bool {
 }
 
 func (t *NotifyTool) VisibleWithRuleset(ruleset permission.Ruleset) bool {
-	notifyVisible := !ruleset.IsDisabled("Notify")
+	notifyVisible := !ruleset.IsDisabled(NameNotify)
 	if !notifyVisible {
 		return false
 	}
 	if t.allowOwner {
 		return true
 	}
-	return t.allowTarget && !ruleset.IsDisabled("Delegate")
+	return t.allowTarget && !ruleset.IsDisabled(NameDelegate)
 }
 
 func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

@@ -262,9 +262,9 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 	}
 	message := "You appear to be idle. If the task is complete, call Complete with a summary. "
 	switch {
-	case sub.hasVisibleTool("Escalate"):
+	case sub.hasVisibleTool(tools.NameEscalate):
 		message += "If you need help, call Escalate. "
-	case sub.hasVisibleTool("Notify"):
+	case sub.hasVisibleTool(tools.NameNotify):
 		message += "If you need help or owner-agent input, use Notify because Escalate is unavailable in this role. "
 	default:
 		message += "If you are blocked and no control tool is available, explain the blocker clearly in assistant text. "

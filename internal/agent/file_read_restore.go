@@ -163,13 +163,13 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				}
 				candidates[key] = restoreReadCandidate{path: key, hash: hash, durable: durable}
 
-			case tools.NameApplyPatch:
+			case tools.NameEdit:
 				path, key, ok := restoreSinglePathAndKey(args, call.name)
 				if !ok {
 					result.skipInvalidPath()
 					continue
 				}
-				if statePath, durable := restoreApplyPatchWriteStatePath(msg.FileState, key); durable {
+				if statePath, durable := restoreEditWriteStatePath(msg.FileState, key); durable {
 					path = statePath
 					key = restoreNormalizeTrackedPath(path)
 				}
@@ -270,7 +270,7 @@ func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) rest
 
 func isTrackedRestoreTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case tools.NameRead, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
+	case tools.NameRead, tools.NameEdit, tools.NameWrite, tools.NameDelete:
 		return true
 	default:
 		return false
@@ -306,8 +306,8 @@ func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMe
 
 func restoreSinglePathAndKey(args json.RawMessage, toolName string) (string, string, bool) {
 	path, ok := parseRestoreSinglePath(args)
-	if !ok && toolName == tools.NameApplyPatch {
-		path = tools.ExtractApplyPatchPathFromArgsInDir(args, os.Getenv("CHORD_PROJECT_ROOT"))
+	if !ok && toolName == tools.NameEdit {
+		path = tools.ExtractEditPathFromArgsInDir(args, os.Getenv("CHORD_PROJECT_ROOT"))
 		ok = path != ""
 	}
 	if !ok {
@@ -374,7 +374,7 @@ func restoreWriteStatePathForKey(state *message.ToolFileState, key string) (stri
 	return "", false
 }
 
-func restoreApplyPatchWriteStatePath(state *message.ToolFileState, key string) (string, bool) {
+func restoreEditWriteStatePath(state *message.ToolFileState, key string) (string, bool) {
 	if path, ok := restoreWriteStatePathForKey(state, key); ok {
 		return path, true
 	}

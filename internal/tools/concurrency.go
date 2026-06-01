@@ -150,7 +150,7 @@ func deleteToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	if _, err := DecodeDeleteRequest(args); err != nil {
 		return ConcurrencyPolicy{}
 	}
-	return defaultConcurrencyPolicy("Delete")
+	return defaultConcurrencyPolicy(NameDelete)
 }
 
 func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPolicy {

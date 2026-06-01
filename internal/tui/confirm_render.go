@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // renderConfirmDialog produces the confirmation dialog as a bordered overlay
@@ -95,7 +96,7 @@ func (m *Model) renderConfirmDialog() string {
 
 func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerWidth int) []string {
 	lines := []string{title, ""}
-	if strings.EqualFold(summary.ToolName, "Done") {
+	if toolNameKey(summary.ToolName) == tools.NameDone {
 		if strings.TrimSpace(summary.DoneReport) != "" {
 			lines = append(lines, renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil)...)
 		}
@@ -103,7 +104,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 	}
 	lines = append(lines, ConfirmToolStyle.Render("Tool: "+summary.ToolName))
 	lines = append(lines, ConfirmToolStyle.Render("Action: "+summary.Action))
-	if strings.EqualFold(summary.ToolName, "Delete") {
+	if toolNameKey(summary.ToolName) == tools.NameDelete {
 		lines = append(lines, DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
 		for _, warning := range summary.Warnings {
 			for _, line := range wrapText(warning, max(10, innerWidth-2)) {
@@ -156,7 +157,7 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 }
 
 func (m Model) renderConfirmOptions() string {
-	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+	if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 		if m.confirm.request.ForceDenyReason {
 			return strings.Join([]string{
 				ConfirmEditStyle.Render("[V] View"),

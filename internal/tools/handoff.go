@@ -18,7 +18,7 @@ type handoffArgs struct {
 	PlanPath string `json:"plan_path"`
 }
 
-func (HandoffTool) Name() string { return "Handoff" }
+func (HandoffTool) Name() string { return NameHandoff }
 
 func (HandoffTool) Description() string {
 	return "Signal that planning is complete and hand off to another agent for execution. " +

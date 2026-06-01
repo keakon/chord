@@ -25,14 +25,14 @@ type readArgs struct {
 	Limit  *int   `json:"limit,omitempty"`  // number of lines; defaults to 2000
 }
 
-func (ReadTool) Name() string { return "Read" }
+func (ReadTool) Name() string { return NameRead }
 
 func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy("Read", fileToolConcurrencyPolicy(args, true))
+	return normalizeConcurrencyPolicy(NameRead, fileToolConcurrencyPolicy(args, true))
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, and do not copy the gutter into ApplyPatch hunks. Before ApplyPatch, the file must have been observed via Read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For ApplyPatch, include a few unchanged source lines around the intended change. Read output normalizes line endings to LF; ApplyPatch preserves the file's existing line-ending style when writing. When using Lsp line/character positions, count from the raw source line only."
+	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, and do not copy the gutter into Edit hunks. Before Edit, the file must have been observed via Read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For Edit, include a few unchanged source lines around the intended change. Read output normalizes line endings to LF; Edit preserves the file's existing line-ending style when writing. When using Lsp line/character positions, count from the raw source line only."
 }
 
 func (ReadTool) Parameters() map[string]any {

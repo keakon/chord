@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type capabilityPromptAudience int
@@ -37,51 +38,51 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 
 	lines := make([]string, 0, 9)
 	lines = append(lines, "- Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.")
-	if hasVisibleTool(visible, "Read") {
+	if hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Use `Read` for file contents.")
 	}
-	if hasVisibleTool(visible, "ApplyPatch") {
-		lines = append(lines, "- Use `ApplyPatch` to modify the contents of one existing file.")
-		lines = append(lines, "- For `ApplyPatch`, keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
+	if hasVisibleTool(visible, tools.NameEdit) {
+		lines = append(lines, "- Use `Edit` to modify the contents of one existing file.")
+		lines = append(lines, "- For `Edit`, keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
 	}
-	if hasVisibleTool(visible, "Write") {
+	if hasVisibleTool(visible, tools.NameWrite) {
 		lines = append(lines, "- Use `Write` for whole-file writes.")
 	}
-	if hasVisibleTool(visible, "ApplyPatch") && hasVisibleTool(visible, "Write") {
-		lines = append(lines, "- Do not use `Write` for local edits to existing files; use `ApplyPatch` instead.")
+	if hasVisibleTool(visible, tools.NameEdit) && hasVisibleTool(visible, tools.NameWrite) {
+		lines = append(lines, "- Do not use `Write` for local edits to existing files; use `Edit` instead.")
 	}
-	if hasVisibleTool(visible, "Delete") {
+	if hasVisibleTool(visible, tools.NameDelete) {
 		lines = append(lines, "- Use `Delete` to remove files.")
 	}
-	if hasVisibleTool(visible, "Write") && hasVisibleTool(visible, "Delete") {
+	if hasVisibleTool(visible, tools.NameWrite) && hasVisibleTool(visible, tools.NameDelete) {
 		lines = append(lines, "- Choose file tools by final state: use `Write` directly when a path should still exist afterward with new full contents, and use `Delete` only when the path should no longer exist.")
 		lines = append(lines, "- Do not `Delete` a path just to recreate it with `Write`; that adds unnecessary risk and tool churn.")
 	}
 
 	discoveryTools := make([]string, 0, 3)
-	if hasVisibleTool(visible, "Glob") {
+	if hasVisibleTool(visible, tools.NameGlob) {
 		discoveryTools = append(discoveryTools, "`Glob`")
 	}
-	if hasVisibleTool(visible, "Grep") {
+	if hasVisibleTool(visible, tools.NameGrep) {
 		discoveryTools = append(discoveryTools, "`Grep`")
 	}
-	if hasVisibleTool(visible, "Lsp") {
+	if hasVisibleTool(visible, tools.NameLsp) {
 		discoveryTools = append(discoveryTools, "`Lsp`")
 	}
 	if len(discoveryTools) > 0 {
 		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
 	}
-	if hasVisibleTool(visible, "Skill") {
+	if hasVisibleTool(visible, tools.NameSkill) {
 		lines = append(lines, "- Use `Skill` to load additional skill instructions on demand when one of the available skills clearly matches the task.")
 	}
-	if hasVisibleTool(visible, "Shell") {
+	if hasVisibleTool(visible, tools.NameShell) {
 		lines = append(lines,
 			"- Use `Shell` mainly for tests, builds, git, and system commands.",
 			"- For native filesystem operations with no dedicated built-in tool, `Shell` is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		)
-		lines = append(lines, "- Do not use `Shell` to run apply_patch.")
+		lines = append(lines, "- Do not use `Shell` to run edit.")
 	}
-	if len(discoveryTools) > 0 || hasVisibleTool(visible, "Read") {
+	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Run independent reads/searches in parallel; run dependent operations sequentially.")
 	}
 	if len(lines) == 0 {
@@ -95,10 +96,10 @@ func fileInspectionConstraintsPromptBlock(visible map[string]struct{}, ruleset p
 		return ""
 	}
 
-	hasRead := hasVisibleTool(visible, "Read")
-	hasGrep := hasVisibleTool(visible, "Grep")
-	hasGlob := hasVisibleTool(visible, "Glob")
-	hasLsp := hasVisibleTool(visible, "Lsp")
+	hasRead := hasVisibleTool(visible, tools.NameRead)
+	hasGrep := hasVisibleTool(visible, tools.NameGrep)
+	hasGlob := hasVisibleTool(visible, tools.NameGlob)
+	hasLsp := hasVisibleTool(visible, tools.NameLsp)
 	if hasRead && hasGrep && hasGlob && hasLsp && !hasScopedInspectionPermissions(ruleset) {
 		return ""
 	}
@@ -126,9 +127,9 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 		return ""
 	}
 
-	hasEdit := hasVisibleTool(visible, "ApplyPatch")
-	hasWrite := hasVisibleTool(visible, "Write")
-	hasDelete := hasVisibleTool(visible, "Delete")
+	hasEdit := hasVisibleTool(visible, tools.NameEdit)
+	hasWrite := hasVisibleTool(visible, tools.NameWrite)
+	hasDelete := hasVisibleTool(visible, tools.NameDelete)
 	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(ruleset) {
 		return ""
 	}
@@ -156,9 +157,9 @@ func riskAndReportingPromptBlock(visible map[string]struct{}, audience capabilit
 		"- Be more conservative with irreversible, destructive, shared-state, or high-blast-radius actions.",
 	}
 	if audience == capabilityPromptAudienceSub {
-		hasQuestion := hasVisibleTool(visible, "Question")
-		hasEscalate := hasVisibleTool(visible, "Escalate")
-		hasNotify := hasVisibleTool(visible, "Notify")
+		hasQuestion := hasVisibleTool(visible, tools.NameQuestion)
+		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
+		hasNotify := hasVisibleTool(visible, tools.NameNotify)
 		switch {
 		case hasQuestion && hasEscalate:
 			lines = append(lines, "- Use permission approval for execution authorization. Use `Question` only when the user must choose between materially different options; otherwise use `Escalate` when owner-agent intervention or a decision is required.")
@@ -173,7 +174,7 @@ func riskAndReportingPromptBlock(visible map[string]struct{}, audience capabilit
 		default:
 			lines = append(lines, "- Use permission approval for execution authorization. If a materially different decision or owner-agent intervention is required, explain the blocker clearly in assistant text because neither `Question`, `Notify`, nor `Escalate` is available in this role.")
 		}
-	} else if hasVisibleTool(visible, "Question") {
+	} else if hasVisibleTool(visible, tools.NameQuestion) {
 		lines = append(lines, "- Use permission approval for execution authorization; see Structured User Confirmation for when to use `Question` versus plain assistant text.")
 	} else {
 		lines = append(lines, "- Use permission approval for execution authorization, and ask the user for clarification when they need to choose between materially different options.")
@@ -187,7 +188,7 @@ func hasScopedInspectionPermissions(ruleset permission.Ruleset) bool {
 		return false
 	}
 
-	for _, permName := range []string{"Read", "Grep", "Glob", "Lsp"} {
+	for _, permName := range []string{tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp} {
 		if toolHasScopedRestriction(ruleset, permName) {
 			return true
 		}
@@ -200,7 +201,7 @@ func hasScopedFilePermissions(ruleset permission.Ruleset) bool {
 		return false
 	}
 
-	for _, permName := range []string{"Write", "ApplyPatch", "Delete"} {
+	for _, permName := range []string{tools.NameWrite, tools.NameEdit, tools.NameDelete} {
 		if toolHasScopedRestriction(ruleset, permName) {
 			return true
 		}
@@ -247,8 +248,8 @@ func hasVisibleTool(visible map[string]struct{}, name string) bool {
 
 func inspectionLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {
 	if audience == capabilityPromptAudienceSub {
-		hasEscalate := hasVisibleTool(visible, "Escalate")
-		hasNotify := hasVisibleTool(visible, "Notify")
+		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
+		hasNotify := hasVisibleTool(visible, tools.NameNotify)
 		switch {
 		case hasEscalate && limited:
 			return "- Explain the limitation and use `Escalate` when the owner agent needs to adjust permissions, scope, or approach for out-of-scope inspection or navigation."
@@ -270,8 +271,8 @@ func inspectionLimitationEscalation(visible map[string]struct{}, audience capabi
 
 func modificationLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {
 	if audience == capabilityPromptAudienceSub {
-		hasEscalate := hasVisibleTool(visible, "Escalate")
-		hasNotify := hasVisibleTool(visible, "Notify")
+		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
+		hasNotify := hasVisibleTool(visible, tools.NameNotify)
 		switch {
 		case hasEscalate && limited:
 			return "- Explain the limitation and use `Escalate` when the owner agent needs to adjust permissions, scope, or approach for out-of-scope changes."

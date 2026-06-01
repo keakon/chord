@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	agentrt "github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (m *Model) setFocusedAgent(id string) {
@@ -205,7 +206,7 @@ func (m *Model) isViewingReadOnlySubAgent() bool {
 }
 
 func (m *Model) maybeSwitchToTaskAgent(block *Block) {
-	if block == nil || block.Type != BlockToolCall || block.ToolName != "Delegate" || block.LinkedAgentID == "" {
+	if block == nil || block.Type != BlockToolCall || block.ToolName != tools.NameDelegate || block.LinkedAgentID == "" {
 		return
 	}
 	m.setFocusedAgent(block.LinkedAgentID)

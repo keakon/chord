@@ -57,8 +57,8 @@ func prepareSpeculativeToolCall(tc message.ToolCall, track *filelock.FileTracker
 			return nil, err
 		}
 		return mutation.hooks(), nil
-	case tools.NameApplyPatch:
-		path := tools.ExtractApplyPatchPathFromArgsInDir(tc.Args, projectRoot)
+	case tools.NameEdit:
+		path := tools.ExtractEditPathFromArgsInDir(tc.Args, projectRoot)
 		if path == "" {
 			return nil, nil
 		}
@@ -333,7 +333,7 @@ func speculativeWriteToolLSPReviews(registry *tools.Registry, toolName, path str
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}
-	case tools.ApplyPatchTool:
+	case tools.EditTool:
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}

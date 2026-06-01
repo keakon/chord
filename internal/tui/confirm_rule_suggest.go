@@ -7,6 +7,8 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // PatternCandidate represents a suggested rule pattern for a tool invocation.
@@ -23,16 +25,16 @@ type PatternCandidate struct {
 // needsApproval: explicit paths that need approval (for Delete)
 // cwd: current working directory (for relative path generation)
 func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
-	switch strings.ToLower(toolName) {
-	case "shell":
+	switch toolNameKey(toolName) {
+	case tools.NameShell:
 		return suggestShellPatterns(argsJSON, needsApproval)
-	case "applypatch", "write":
+	case tools.NameEdit, tools.NameWrite:
 		return suggestFilePatterns(toolName, argsJSON, cwd)
-	case "webfetch":
+	case tools.NameWebFetch:
 		return suggestWebFetchPatterns(argsJSON)
-	case "delete":
+	case tools.NameDelete:
 		return suggestDeletePatterns(argsJSON, needsApproval)
-	case "read", "grep", "glob", "lsp", "skill":
+	case tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameSkill:
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
 		})
@@ -153,7 +155,7 @@ func isHighRiskBashCommand(command string) bool {
 	return false
 }
 
-// suggestFilePatterns generates pattern candidates for ApplyPatch/Write tools.
+// suggestFilePatterns generates pattern candidates for Edit/Write tools.
 func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 	filePath := extractFilePath(argsJSON)
 	if filePath == "" {
@@ -379,7 +381,7 @@ func extractShellCommand(argsJSON string) string {
 	return strings.TrimSpace(parsed.Command)
 }
 
-// extractFilePath extracts the file path from ApplyPatch/Write tool args JSON.
+// extractFilePath extracts the file path from Edit/Write tool args JSON.
 func extractFilePath(argsJSON string) string {
 	var parsed struct {
 		Path       string `json:"path"`

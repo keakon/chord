@@ -15,14 +15,14 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal(args, &parsed); err != nil || strings.TrimSpace(parsed.Command) == "" {
-		arg := extractToolArgument("Shell", args)
-		decision.Action = ruleset.Evaluate("Shell", arg)
+		arg := extractToolArgument(tools.NameShell, args)
+		decision.Action = ruleset.Evaluate(tools.NameShell, arg)
 		decision.MatchArgument = arg
 		return decision
 	}
 
 	rawCommand := strings.TrimSpace(parsed.Command)
-	if exact := ruleset.LastExactPatternMatch("Shell", rawCommand); exact.Found {
+	if exact := ruleset.LastExactPatternMatch(tools.NameShell, rawCommand); exact.Found {
 		decision.Action = exact.Rule.Action
 		decision.MatchArgument = rawCommand
 		switch exact.Rule.Action {
@@ -36,7 +36,7 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 
 	analysis, err := tools.AnalyzeShellCommand(rawCommand)
 	if err != nil || len(analysis.Subcommands) == 0 {
-		decision.Action = ruleset.Evaluate("Shell", rawCommand)
+		decision.Action = ruleset.Evaluate(tools.NameShell, rawCommand)
 		decision.MatchArgument = rawCommand
 		switch decision.Action {
 		case permission.ActionAsk:
@@ -55,7 +55,7 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		}
 		items = append(items, permissionAggregateItem{
 			Argument: source,
-			Action:   ruleset.Evaluate("Shell", source),
+			Action:   ruleset.Evaluate(tools.NameShell, source),
 		})
 		last := &items[len(items)-1]
 		switch last.Action {
@@ -66,7 +66,7 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		}
 	}
 	if len(items) == 0 {
-		decision.Action = ruleset.Evaluate("Shell", rawCommand)
+		decision.Action = ruleset.Evaluate(tools.NameShell, rawCommand)
 		decision.MatchArgument = rawCommand
 		return decision
 	}

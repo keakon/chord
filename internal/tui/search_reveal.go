@@ -15,7 +15,7 @@ func revealSearchMatchedBlock(block *Block) bool {
 	switch block.Type {
 	case BlockToolCall:
 		switch block.ToolName {
-		case "Write", "ApplyPatch", "Read", "Delete":
+		case tools.NameWrite, tools.NameEdit, tools.NameRead, tools.NameDelete:
 			if block.Collapsed {
 				block.Collapsed = false
 				changed = true
@@ -24,7 +24,7 @@ func revealSearchMatchedBlock(block *Block) bool {
 				block.ReadContentExpanded = true
 				changed = true
 			}
-		case "Delegate":
+		case tools.NameDelegate:
 			if block.Collapsed {
 				block.Collapsed = false
 				changed = true

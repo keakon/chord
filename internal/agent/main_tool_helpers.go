@@ -66,44 +66,44 @@ func extractToolArgument(toolName string, args []byte) string {
 
 func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) string {
 	switch toolName {
-	case "Shell":
+	case tools.NameShell:
 		var parsed struct {
 			Command string `json:"command"`
 		}
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Command != "" {
 			return parsed.Command
 		}
-	case tools.NameApplyPatch:
-		if path := tools.ExtractApplyPatchPathFromArgsInDir(args, projectRoot); path != "" {
+	case tools.NameEdit:
+		if path := tools.ExtractEditPathFromArgsInDir(args, projectRoot); path != "" {
 			return path
 		}
-	case "Read", "Write":
+	case tools.NameRead, tools.NameWrite:
 		var parsed struct {
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Path != "" {
 			return parsed.Path
 		}
-	case "WebFetch":
+	case tools.NameWebFetch:
 		var parsed struct {
 			URL string `json:"url"`
 		}
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.URL != "" {
 			return parsed.URL
 		}
-	case "Skill":
+	case tools.NameSkill:
 		var parsed struct {
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Name != "" {
 			return parsed.Name
 		}
-	case "Delete":
+	case tools.NameDelete:
 		req, err := tools.DecodeDeleteRequest(llm.UnwrapToolArgs(args))
 		if err == nil && len(req.Paths) > 0 {
 			return req.Paths[0]
 		}
-	case "Grep", "Glob":
+	case tools.NameGrep, tools.NameGlob:
 		var parsed struct {
 			Pattern string `json:"pattern"`
 		}

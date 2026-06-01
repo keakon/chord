@@ -9,18 +9,18 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func applyPatchReadPreconditionError(path string) error {
+func editReadPreconditionError(path string) error {
 	return &filelock.UnreadFileError{
 		Path: path,
 		Message: fmt.Sprintf(
-			"file %s has not been observed in this conversation; use Read or a system-resolved @file mention before ApplyPatch, then retry with a small unique patch hunk",
+			"file %s has not been observed in this conversation; use Read or a system-resolved @file mention before Edit, then retry with a small unique patch hunk",
 			path,
 		),
 	}
 }
 
-func ensureTrackedApplyPatchPreconditions(track *filelock.FileTracker, agentID, path, toolName string) error {
-	if toolName != tools.NameApplyPatch {
+func ensureTrackedEditPreconditions(track *filelock.FileTracker, agentID, path, toolName string) error {
+	if toolName != tools.NameEdit {
 		return nil
 	}
 	path = strings.TrimSpace(path)
@@ -30,7 +30,7 @@ func ensureTrackedApplyPatchPreconditions(track *filelock.FileTracker, agentID, 
 	if track.HasRead(path, agentID) {
 		return nil
 	}
-	return applyPatchReadPreconditionError(path)
+	return editReadPreconditionError(path)
 }
 
 func wrapTrackedWriteError(err error) error {

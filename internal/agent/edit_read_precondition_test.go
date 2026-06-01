@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestMainAgent_ApplyPatchRequiresObservationFirst(t *testing.T) {
+func TestMainAgent_EditRequiresObservationFirst(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -30,13 +30,13 @@ func TestMainAgent_ApplyPatchRequiresObservationFirst(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -44,7 +44,7 @@ func TestMainAgent_ApplyPatchRequiresObservationFirst(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.PreFilePath != "" || result.PreContent != "" || result.PreExisted {
-		t.Fatalf("unread ApplyPatch captured pre-write state before read precondition: path=%q existed=%v content=%q", result.PreFilePath, result.PreExisted, result.PreContent)
+		t.Fatalf("unread Edit captured pre-write state before read precondition: path=%q existed=%v content=%q", result.PreFilePath, result.PreExisted, result.PreContent)
 	}
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
@@ -55,12 +55,12 @@ func TestMainAgent_ApplyPatchRequiresObservationFirst(t *testing.T) {
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameApplyPatch, Args: patchArgs}); err != nil {
-		t.Fatalf("ApplyPatch after Read failed: %v", err)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+		t.Fatalf("Edit after Read failed: %v", err)
 	}
 }
 
-func TestMainAgent_FailedUnreadApplyPatchDoesNotGrantObservation(t *testing.T) {
+func TestMainAgent_FailedUnreadEditDoesNotGrantObservation(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -68,17 +68,17 @@ func TestMainAgent_FailedUnreadApplyPatchDoesNotGrantObservation(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	for i := 0; i < 2; i++ {
-		err := executeApplyPatch(t, a, path, "before", "after")
+		err := executeEdit(t, a, path, "before", "after")
 		if err == nil || !strings.Contains(err.Error(), "has not been observed") {
 			t.Fatalf("attempt %d error = %v, want unread-file error", i+1, err)
 		}
 	}
 }
 
-func TestMainAgent_ApplyPatchAfterWriteUsesWriteAsObservation(t *testing.T) {
+func TestMainAgent_EditAfterWriteUsesWriteAsObservation(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 
@@ -93,7 +93,7 @@ func TestMainAgent_ApplyPatchAfterWriteUsesWriteAsObservation(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	writeArgs, err := json.Marshal(map[string]any{"path": path, "content": "before\n"})
 	if err != nil {
@@ -107,8 +107,8 @@ func TestMainAgent_ApplyPatchAfterWriteUsesWriteAsObservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}); err != nil {
-		t.Fatalf("ApplyPatch after Write failed: %v", err)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+		t.Fatalf("Edit after Write failed: %v", err)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestMainAgent_ApplyPatchAfterWriteUsesWriteAsObservation(t *testing.T) {
 	}
 }
 
-func TestMainAgent_ApplyPatchAfterFileMentionObservation(t *testing.T) {
+func TestMainAgent_EditAfterFileMentionObservation(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
@@ -136,15 +136,15 @@ func TestMainAgent_ApplyPatchAfterFileMentionObservation(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 	a.recordCommittedUserMessage(message.Message{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: `<file path="` + path + `">` + "\nbefore\n</file>"}}})
 
 	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}); err != nil {
-		t.Fatalf("ApplyPatch after @file mention failed: %v", err)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+		t.Fatalf("Edit after @file mention failed: %v", err)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestFileRefPathFromContentUnescapesQuotedPath(t *testing.T) {
 	}
 }
 
-func TestMainAgent_ApplyPatchStaleCreatesBackup(t *testing.T) {
+func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
@@ -174,7 +174,7 @@ func TestMainAgent_ApplyPatchStaleCreatesBackup(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -191,9 +191,9 @@ func TestMainAgent_ApplyPatchStaleCreatesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
 	if err != nil {
-		t.Fatalf("ApplyPatch after stale file failed: %v", err)
+		t.Fatalf("Edit after stale file failed: %v", err)
 	}
 	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
@@ -208,7 +208,7 @@ func TestMainAgent_ApplyPatchStaleCreatesBackup(t *testing.T) {
 	}
 }
 
-func TestMainAgent_ApplyPatchBackupFailureDoesNotBlockEdit(t *testing.T) {
+func TestMainAgent_EditBackupFailureDoesNotBlockEdit(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "large.txt")
 	largeTail := strings.Repeat("x", maxSingleToolBackupBytes+1)
@@ -227,7 +227,7 @@ func TestMainAgent_ApplyPatchBackupFailureDoesNotBlockEdit(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path, "limit": 1})
 	if err != nil {
@@ -245,9 +245,9 @@ func TestMainAgent_ApplyPatchBackupFailureDoesNotBlockEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
 	if err != nil {
-		t.Fatalf("ApplyPatch with backup failure should continue: %v", err)
+		t.Fatalf("Edit with backup failure should continue: %v", err)
 	}
 	if !strings.Contains(result.Result, "No backup was created: the file exceeds the backup size limit") {
 		t.Fatalf("result missing no-backup warning: %q", result.Result)

@@ -101,12 +101,12 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 		t.Fatal("generic tool forced done by search should set SettledAt to freeze elapsed rendering")
 	}
 
-	filePatch := &Block{Type: BlockToolCall, ToolName: tools.NameApplyPatch, Collapsed: true, ResultContent: "done"}
+	filePatch := &Block{Type: BlockToolCall, ToolName: tools.NameEdit, Collapsed: true, ResultContent: "done"}
 	if !revealSearchMatchedBlock(filePatch) {
-		t.Fatal("ApplyPatch tool reveal should report changed state")
+		t.Fatal("Edit tool reveal should report changed state")
 	}
 	if filePatch.Collapsed {
-		t.Fatal("ApplyPatch tool should expand when revealed by search")
+		t.Fatal("Edit tool should expand when revealed by search")
 	}
 
 	summary := &Block{

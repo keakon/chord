@@ -99,7 +99,7 @@ func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
       "info": {"role": "assistant"},
       "parts": [
         {"type":"tool","callID":"call-read","tool":"read_file","state":{"status":"completed","input":{"path":"README.md"},"output":"contents"}},
-        {"type":"tool","callID":"call-patch","tool":"apply_patch","state":{"status":"completed","input":{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"},"output":"ok"}},
+        {"type":"tool","callID":"call-patch","tool":"edit","state":{"status":"completed","input":{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"},"output":"ok"}},
         {"type":"tool","callID":"call-unknown","tool":"unknown-tool","state":{"status":"completed","input":{"path":"main.go"},"output":"ok"}}
       ]
     }
@@ -114,7 +114,7 @@ func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
 		t.Fatalf("msgs len=%d, want 1", len(msgs))
 	}
 	content := msgs[0].Content
-	for _, want := range []string{"[Imported tool: Read]", `"tool": "Read"`, `"path": "README.md"`, "[Imported tool: ApplyPatch]", `"tool": "ApplyPatch"`, "[Imported unsupported tool: unknown-tool]"} {
+	for _, want := range []string{"[Imported tool: Read]", `"tool": "Read"`, `"path": "README.md"`, "[Imported tool: Edit]", `"tool": "Edit"`, "[Imported unsupported tool: unknown-tool]"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content missing %q:\n%s", want, content)
 		}

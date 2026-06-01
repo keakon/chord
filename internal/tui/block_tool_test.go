@@ -1733,11 +1733,11 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 	}
 }
 
-func TestApplyPatchErrorPreservesExampleBlockIndentation(t *testing.T) {
+func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
+		ToolName: tools.NameEdit,
 		Content:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/sidebar_render.go\n@@\n-for _, fe := range files {\n-baseName := filepath.Base(fe.Path)\n-var parts string\n*** End Patch\n"}`,
 		ResultContent: strings.Join([]string{
 			"hunk not found. Indentation mismatch? A unique match exists if leading whitespace is ignored. Example block:",
@@ -1761,11 +1761,11 @@ func TestApplyPatchErrorPreservesExampleBlockIndentation(t *testing.T) {
 	}
 }
 
-func TestCancelledApplyPatchCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
+func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      tools.NameApplyPatch,
+		ToolName:      tools.NameEdit,
 		Content:       `{"path":"foo.txt","patch":"@@\n-a\n+b\n"}`,
 		Diff:          "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		ResultContent: "Cancelled",
@@ -1774,17 +1774,17 @@ func TestCancelledApplyPatchCallSuppressesDiffPreviewAndDuplicateCancelledText(t
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "ApplyPatch") || !strings.Contains(plain, "foo.txt") {
-		t.Fatalf("expected ApplyPatch header to include file path, got:\n%s", plain)
+	if !strings.Contains(plain, "Edit") || !strings.Contains(plain, "foo.txt") {
+		t.Fatalf("expected Edit header to include file path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "-a") || strings.Contains(plain, "+b") {
-		t.Fatalf("expected cancelled ApplyPatch card to suppress diff preview, got:\n%s", plain)
+		t.Fatalf("expected cancelled Edit card to suppress diff preview, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "↳ Cancelled:") {
-		t.Fatalf("expected cancelled ApplyPatch card to omit duplicate cancelled detail header, got:\n%s", plain)
+		t.Fatalf("expected cancelled Edit card to omit duplicate cancelled detail header, got:\n%s", plain)
 	}
 	if strings.Count(plain, "Cancelled") != 1 {
 		t.Fatalf("expected exactly one visible Cancelled marker, got:\n%s", plain)

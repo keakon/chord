@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,6 +125,35 @@ func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 	if !strings.Contains(plain, "line 1") || !strings.Contains(plain, "line 2") {
 		t.Fatalf("expected preview content in summary view, got:\n%s", plain)
 	}
+}
+
+func TestBuildConfirmSummaryShowsStructuredEditFields(t *testing.T) {
+	summary := buildConfirmSummary(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
+
+	if summary.Action != "Replace text in file" {
+		t.Fatalf("Edit action = %q, want structured Edit action", summary.Action)
+	}
+	if summary.Risk != confirmRiskMedium {
+		t.Fatalf("Edit risk = %v, want %v", summary.Risk, confirmRiskMedium)
+	}
+	if !slices.Contains(summary.Warnings, "Patches existing file content") {
+		t.Fatalf("Edit warnings = %v, want patch warning", summary.Warnings)
+	}
+	if !confirmSummaryHasField(summary, "File") {
+		t.Fatalf("Edit summary fields = %+v, want File field", summary.Fields)
+	}
+	if !confirmSummaryHasField(summary, "Patch preview") {
+		t.Fatalf("Edit summary fields = %+v, want Patch preview field", summary.Fields)
+	}
+}
+
+func confirmSummaryHasField(summary confirmSummary, label string) bool {
+	for _, field := range summary.Fields {
+		if field.Label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRenderConfirmSummaryShowsDeleteFilePathAndReason(t *testing.T) {
@@ -306,7 +336,7 @@ func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
 func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.workingDir = "/tmp/project"
-	m.confirm.request = &ConfirmRequest{ToolName: tools.NameApplyPatch, ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: internal/tui/confirm_render.go\n@@\n-old\n+new\n*** End Patch\n"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: internal/tui/confirm_render.go\n@@\n-old\n+new\n*** End Patch\n"}`}
 
 	summary := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(summary, "[M] Add rule…") {
@@ -323,7 +353,7 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	}
 
 	picker := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(picker, "⚠ Add rule — ApplyPatch") {
+	if !strings.Contains(picker, "⚠ Add rule — Edit") {
 		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
 	}
 	if !strings.Contains(picker, "Pattern:") {

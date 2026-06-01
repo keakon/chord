@@ -65,7 +65,7 @@ type Field struct {
 
 const (
 	unknown           = "unknown"
-	DefaultDevVersion = "v0.6.1-dev"
+	DefaultDevVersion = "v0.6.2-dev"
 )
 
 // current is the cached result of [computeCurrent]. The build identity does

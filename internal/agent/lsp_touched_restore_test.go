@@ -8,11 +8,11 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestRebuildTouchedPathsFromMessagesTracksWritesApplyPatchesAndDeletes(t *testing.T) {
+func TestRebuildTouchedPathsFromMessagesTracksWritesEditesAndDeletes(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{
 			{ID: "write-1", Name: "Write", Args: mustToolArgs(t, map[string]any{"path": "foo.go"})},
-			{ID: "patch-1", Name: "ApplyPatch", Args: mustToolArgs(t, map[string]any{"path": "bar.go", "patch": "@@\n-old\n+new\n"})},
+			{ID: "patch-1", Name: "Edit", Args: mustToolArgs(t, map[string]any{"path": "bar.go", "patch": "@@\n-old\n+new\n"})},
 			{ID: "delete-1", Name: "Delete", Args: mustToolArgs(t, map[string]any{"paths": []string{"foo.go"}, "reason": "cleanup"})},
 			{ID: "delete-2", Name: "Delete", Args: mustToolArgs(t, map[string]any{"paths": []string{"baz.go"}, "reason": "cleanup"})},
 		}},

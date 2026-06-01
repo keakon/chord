@@ -28,7 +28,7 @@ type cancelArgs struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
-func (CancelTool) Name() string { return "Cancel" }
+func (CancelTool) Name() string { return NameCancel }
 
 func (CancelTool) Description() string {
 	return "Cancel a delegated worker identified by target_task_id. " +
@@ -56,10 +56,10 @@ func (CancelTool) Parameters() map[string]any {
 func (CancelTool) IsReadOnly() bool { return false }
 
 func (CancelTool) VisibleWithRuleset(ruleset permission.Ruleset) bool {
-	if ruleset.IsDisabled("Cancel") {
+	if ruleset.IsDisabled(NameCancel) {
 		return false
 	}
-	return !ruleset.IsDisabled("Delegate")
+	return !ruleset.IsDisabled(NameDelegate)
 }
 
 func (t *CancelTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

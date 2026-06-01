@@ -233,25 +233,25 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameWrite {
 		return b.renderWriteCall(width, spinnerFrame)
 	}
-	if b.ToolName == tools.NameApplyPatch {
+	if b.ToolName == tools.NameEdit {
 		return b.renderFileDiffCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameRead {
 		return b.renderReadCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Question" {
+	if b.ToolName == tools.NameQuestion {
 		return b.renderQuestionCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Delegate" {
+	if b.ToolName == tools.NameDelegate {
 		return b.renderTaskCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Done" {
+	if b.ToolName == tools.NameDone {
 		return b.renderDoneCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Cancel" {
+	if b.ToolName == tools.NameCancel {
 		return b.renderCancelCall(width, spinnerFrame)
 	}
-	if b.ToolName == "Notify" {
+	if b.ToolName == tools.NameNotify {
 		return b.renderNotifyCall(width, spinnerFrame)
 	}
 	if toolUsesCompactDetailToggle(b.ToolName) {
@@ -317,7 +317,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
 		}
 		result = append(result, headerLine)
-		if paramSummary == "" || b.ToolName == "Shell" {
+		if paramSummary == "" || b.ToolName == tools.NameShell {
 			_, _, _, _, _, _, paramLines := b.toolHeaderMeta()
 			for _, line := range paramLines {
 				for _, wrapped := range wrapText(sanitizeToolDisplayText(line), contentWidth) {
@@ -435,7 +435,7 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 		return 0
 	}
 	displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
-	if b.ToolName == "Delete" {
+	if b.ToolName == tools.NameDelete {
 		displayResult = sanitizeToolDisplayText(displayResult)
 		nonEmpty := 0
 		for line := range strings.SplitSeq(strings.TrimRight(displayResult, "\n"), "\n") {
@@ -457,13 +457,13 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 }
 
 func compactToolHiddenParamLines(toolName string, keys []string, vals map[string]string, mainPart string, contentWidth int, expanded bool) int {
-	if expanded || mainPart != "" || len(keys) == 0 || toolName == "Skill" {
+	if expanded || mainPart != "" || len(keys) == 0 || toolName == tools.NameSkill {
 		return 0
 	}
 	// In compact mode we show only the first param line; Complete shows no param
 	// lines until expanded.
 	start := 1
-	if toolName == "Complete" {
+	if toolName == tools.NameComplete {
 		start = 0
 	}
 	if start >= len(keys) {
@@ -510,20 +510,20 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 	// Result differences.
 	if strings.TrimSpace(b.ResultContent) != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
 		switch b.ToolName {
-		case "Shell":
+		case tools.NameShell:
 			if shellCollapsedResultIsShort(b, contentWidth) {
 				hidden += bashCollapsedShortDetailHiddenLines(b, vals, contentWidth)
 			} else {
 				hidden += compactToolHiddenResultLines(b, contentWidth)
 			}
-		case "Skill":
+		case tools.NameSkill:
 			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
 				hidden += toolCollapsedVisibleLineCount(displayResult, contentWidth)
 			} else {
 				hidden += compactToolHiddenResultLines(b, contentWidth)
 			}
-		case "Complete":
+		case tools.NameComplete:
 			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				if more := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; more > 0 {
 					hidden += more
@@ -576,7 +576,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
 	}
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
-	if b.ToolName == "Shell" && !expanded && collapsedOK {
+	if b.ToolName == tools.NameShell && !expanded && collapsedOK {
 		mainPart, grayPart = collapsedMain, collapsedGray
 	}
 
@@ -595,14 +595,14 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
-	if b.ToolName == "Shell" {
+	if b.ToolName == tools.NameShell {
 		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded, expanded)
 		if expanded {
 			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
 		}
-	} else if mainPart == "" && len(keys) > 0 && b.ToolName != "Skill" && !(b.ToolName == "Complete" && !expanded) {
+	} else if mainPart == "" && len(keys) > 0 && b.ToolName != tools.NameSkill && !(b.ToolName == tools.NameComplete && !expanded) {
 		if expanded {
 			for _, k := range keys {
 				line := fmt.Sprintf("%s: %s", k, vals[k])
@@ -621,10 +621,10 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	}
 
 	if b.ResultContent != "" || b.DoneSummary != "" || b.toolExecutionIsQueued() {
-		if summary := formatToolResultSummaryLine(b); summary != "" && !b.toolExecutionIsQueued() && !(b.ToolName == "Shell" && !expanded) {
+		if summary := formatToolResultSummaryLine(b); summary != "" && !b.toolExecutionIsQueued() && !(b.ToolName == tools.NameShell && !expanded) {
 			result = append(result, toolSummaryLine(summary))
 		}
-		if b.ToolName == "Shell" {
+		if b.ToolName == tools.NameShell {
 			if expanded {
 				appendBashExpandedResult(&result, b, contentWidth)
 			} else if !shellCollapsedResultIsShort(b, contentWidth) {
@@ -741,7 +741,7 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		}
 		return pendingToolGlyph
 	}
-	if b.ToolName == "Delegate" {
+	if b.ToolName == tools.NameDelegate {
 		if b.toolResultIsError() {
 			return "✗"
 		}
@@ -766,11 +766,11 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		if b.toolResultIsError() {
 			return "✗"
 		}
-		if b.ToolName == "Done" && doneResultIsRejected(b.ResultContent) {
+		if b.ToolName == tools.NameDone && doneResultIsRejected(b.ResultContent) {
 			return "✗"
 		}
 		if b.toolResultIsCancelled() {
-			if b.ToolName == "Done" {
+			if b.ToolName == tools.NameDone {
 				return "✗"
 			}
 			return "◌"

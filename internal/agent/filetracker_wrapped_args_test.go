@@ -11,7 +11,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestMainAgent_ApplyPatchRequiresPriorRead(t *testing.T) {
+func TestMainAgent_EditRequiresPriorRead(t *testing.T) {
 	projectRoot := t.TempDir()
 	oldWD, err := os.Getwd()
 	if err != nil {
@@ -27,19 +27,19 @@ func TestMainAgent_ApplyPatchRequiresPriorRead(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
+	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
 	if err == nil {
-		t.Fatal("expected ApplyPatch precondition error")
+		t.Fatal("expected Edit precondition error")
 	}
 	for _, want := range []string{
 		"has not been observed in this conversation",
-		"use Read or a system-resolved @file mention before ApplyPatch",
+		"use Read or a system-resolved @file mention before Edit",
 		"small unique patch hunk",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -48,7 +48,7 @@ func TestMainAgent_ApplyPatchRequiresPriorRead(t *testing.T) {
 	}
 }
 
-func TestMainAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
+func TestMainAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -66,7 +66,7 @@ func TestMainAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsolute
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	readArgs, err := json.Marshal(map[string]any{"path": "./demo.txt"})
 	if err != nil {
@@ -80,12 +80,12 @@ func TestMainAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsolute
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}); err != nil {
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
 		t.Fatalf("equivalent paths should satisfy read precondition: %v", err)
 	}
 }
 
-func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t *testing.T) {
+func TestMainAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleRead(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -94,7 +94,7 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -113,8 +113,8 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch1 args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: wrapped1}); err != nil {
-		t.Fatalf("ApplyPatch-1 failed: %v", err)
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: wrapped1}); err != nil {
+		t.Fatalf("Edit-1 failed: %v", err)
 	}
 
 	patch2Obj := map[string]any{"path": filepath.Base(path), "patch": "@@\n-after\n+final\n"}
@@ -126,8 +126,8 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch2 args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-2", Name: tools.NameApplyPatch, Args: wrapped2}); err != nil {
-		t.Fatalf("ApplyPatch-2 failed: %v", err)
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: wrapped2}); err != nil {
+		t.Fatalf("Edit-2 failed: %v", err)
 	}
 
 	data, err := os.ReadFile(path)
@@ -139,7 +139,7 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 	}
 }
 
-func TestMainAgent_ApplyPatchReportsDiskDriftWithRereadGuidance(t *testing.T) {
+func TestMainAgent_EditReportsDiskDriftWithRereadGuidance(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -148,7 +148,7 @@ func TestMainAgent_ApplyPatchReportsDiskDriftWithRereadGuidance(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -166,7 +166,7 @@ func TestMainAgent_ApplyPatchReportsDiskDriftWithRereadGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
+	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
 	if err == nil {
 		t.Fatal("expected stale-read/disk-drift error")
 	}

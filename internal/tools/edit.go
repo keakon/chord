@@ -13,31 +13,31 @@ import (
 	"github.com/keakon/chord/internal/lsp"
 )
 
-const applyPatchUnsupportedOperationHint = "ApplyPatch only updates one existing file. Use Write to create files and Delete to remove whole files."
+const editUnsupportedOperationHint = "Edit only updates one existing file. Use Write to create files and Delete to remove whole files."
 
-// ApplyPatchTool applies a single-file update patch to an existing text file.
+// EditTool applies a single-file update patch to an existing text file.
 // If LSP is set, notifies LSP of the change after a successful patch.
-type ApplyPatchTool struct {
+type EditTool struct {
 	LSP     *lsp.Manager // nil when LSP not configured
 	BaseDir string       // optional base directory for relative patch paths
 }
 
-type applyPatchArgs struct {
+type editArgs struct {
 	Path  string `json:"path"`
 	Patch string `json:"patch"`
 }
 
-type ApplyPatchPlan struct {
+type EditPlan struct {
 	Path    string
 	Before  string
 	After   string
 	Diff    string
 	Added   int
 	Removed int
-	Matches []ApplyPatchMatchSummary
+	Matches []EditMatchSummary
 }
 
-type ApplyPatchMatchSummary struct {
+type EditMatchSummary struct {
 	HunkIndex            int
 	Line                 int
 	CandidateLines       []int
@@ -49,43 +49,43 @@ type ApplyPatchMatchSummary struct {
 	HeaderLayer          string
 }
 
-type applyPatchPlanContextKey struct{}
+type editPlanContextKey struct{}
 
-func ContextWithApplyPatchPlan(ctx context.Context, plan ApplyPatchPlan) context.Context {
-	return context.WithValue(ctx, applyPatchPlanContextKey{}, plan)
+func ContextWithEditPlan(ctx context.Context, plan EditPlan) context.Context {
+	return context.WithValue(ctx, editPlanContextKey{}, plan)
 }
 
-func applyPatchPlanFromContext(ctx context.Context) (ApplyPatchPlan, bool) {
-	plan, ok := ctx.Value(applyPatchPlanContextKey{}).(ApplyPatchPlan)
+func editPlanFromContext(ctx context.Context) (EditPlan, bool) {
+	plan, ok := ctx.Value(editPlanContextKey{}).(EditPlan)
 	return plan, ok
 }
 
-type parsedApplyPatch struct {
+type parsedEdit struct {
 	Path  string
-	Hunks []applyPatchHunk
+	Hunks []editHunk
 }
 
-type applyPatchHunk struct {
+type editHunk struct {
 	Header string
-	Lines  []applyPatchLine
+	Lines  []editLine
 }
 
-type applyPatchLine struct {
+type editLine struct {
 	Kind byte
 	Text string
 }
 
-func (t ApplyPatchTool) Name() string { return NameApplyPatch }
+func (t EditTool) Name() string { return NameEdit }
 
-func (ApplyPatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameApplyPatch, fileToolConcurrencyPolicy(args, false))
+func (EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameEdit, fileToolConcurrencyPolicy(args, false))
 }
 
-func (t ApplyPatchTool) Description() string {
-	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
+func (t EditTool) Description() string {
+	return "Edit one existing file with patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before Edit, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
 }
 
-func (t ApplyPatchTool) Parameters() map[string]any {
+func (t EditTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -103,17 +103,17 @@ func (t ApplyPatchTool) Parameters() map[string]any {
 	}
 }
 
-func (t ApplyPatchTool) IsReadOnly() bool { return false }
+func (t EditTool) IsReadOnly() bool { return false }
 
-func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a applyPatchArgs
+func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	var a editArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	plan, ok := applyPatchPlanFromContext(ctx)
+	plan, ok := editPlanFromContext(ctx)
 	if !ok {
 		var err error
-		plan, err = BuildApplyPatchPlanInDir(a.Path, a.Patch, t.BaseDir)
+		plan, err = BuildEditPlanInDir(a.Path, a.Patch, t.BaseDir)
 		if err != nil {
 			return "", err
 		}
@@ -122,11 +122,11 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("patch makes no changes. No files were modified")
 	}
 	baseDir := t.BaseDir
-	resolvedPath, err := resolveApplyPatchPathForBase(plan.Path, baseDir)
+	resolvedPath, err := resolveEditPathForBase(plan.Path, baseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w. No files were modified", err)
 	}
-	decodedFile, _, err := ReadAndDecodeTextFile(resolvedPath)
+	decodedFile, err := ReadDecodedTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s. No files were modified", plan.Path)
@@ -153,7 +153,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if decodedFile.Encoding.Name != "utf-8" {
 		out += fmt.Sprintf(", encoding=%s", decodedFile.Encoding.Name)
 	}
-	if summary := formatApplyPatchMatchSummary(plan.Matches); summary != "" {
+	if summary := formatEditMatchSummary(plan.Matches); summary != "" {
 		out += "\n" + summary
 	}
 	if t.LSP != nil {
@@ -166,102 +166,102 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	return out, nil
 }
 
-func BuildApplyPatchPlanInDir(path, patchText, baseDir string) (ApplyPatchPlan, error) {
-	return buildApplyPatchPlan(path, patchText, baseDir)
+func BuildEditPlanInDir(path, patchText, baseDir string) (EditPlan, error) {
+	return buildEditPlan(path, patchText, baseDir)
 }
 
-func BuildApplyPatchPlan(path, patchText string) (ApplyPatchPlan, error) {
-	return buildApplyPatchPlan(path, patchText, "")
+func BuildEditPlan(path, patchText string) (EditPlan, error) {
+	return buildEditPlan(path, patchText, "")
 }
 
-func buildApplyPatchPlan(path, patchText, baseDir string) (ApplyPatchPlan, error) {
-	parsed, err := ParseApplyPatch(path, patchText)
+func buildEditPlan(path, patchText, baseDir string) (EditPlan, error) {
+	parsed, err := ParseEdit(path, patchText)
 	if err != nil {
-		return ApplyPatchPlan{}, err
+		return EditPlan{}, err
 	}
-	resolvedPath, err := resolveApplyPatchPathForBase(parsed.Path, baseDir)
+	resolvedPath, err := resolveEditPathForBase(parsed.Path, baseDir)
 	if err != nil {
-		return ApplyPatchPlan{}, fmt.Errorf("resolve path: %w. No files were modified", err)
+		return EditPlan{}, fmt.Errorf("resolve path: %w. No files were modified", err)
 	}
 	if isBlockedDevicePath(resolvedPath) {
-		return ApplyPatchPlan{}, fmt.Errorf("cannot patch blocked device path: %s. No files were modified", parsed.Path)
+		return EditPlan{}, fmt.Errorf("cannot patch blocked device path: %s. No files were modified", parsed.Path)
 	}
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ApplyPatchPlan{}, fmt.Errorf("file not found: %s. ApplyPatch only updates one existing file. Use Write to create files. No files were modified", parsed.Path)
+			return EditPlan{}, fmt.Errorf("file not found: %s. Edit only updates one existing file. Use Write to create files. No files were modified", parsed.Path)
 		}
-		return ApplyPatchPlan{}, fmt.Errorf("accessing path: %w. No files were modified", err)
+		return EditPlan{}, fmt.Errorf("accessing path: %w. No files were modified", err)
 	}
 	if err := ensureRegularFilePath(parsed.Path, info); err != nil {
-		return ApplyPatchPlan{}, fmt.Errorf("%w. No files were modified", err)
+		return EditPlan{}, fmt.Errorf("%w. No files were modified", err)
 	}
 	decodedFile, err := ReadDecodedTextFile(resolvedPath)
 	if err != nil {
 		if errors.Is(err, ErrBinaryFile) {
-			return ApplyPatchPlan{}, fmt.Errorf("cannot patch binary file: %s. No files were modified", parsed.Path)
+			return EditPlan{}, fmt.Errorf("cannot patch binary file: %s. No files were modified", parsed.Path)
 		}
-		return ApplyPatchPlan{}, fmt.Errorf("reading file: %w. No files were modified", err)
+		return EditPlan{}, fmt.Errorf("reading file: %w. No files were modified", err)
 	}
 	after, matches, err := applyParsedPatch(decodedFile.Text, parsed)
 	if err != nil {
-		return ApplyPatchPlan{}, err
+		return EditPlan{}, err
 	}
 	diff := GenerateUnifiedDiffSummary(decodedFile.Text, after, parsed.Path)
-	return ApplyPatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, Matches: matches}, nil
+	return EditPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, Matches: matches}, nil
 }
 
-func ParseApplyPatch(path, patchText string) (parsedApplyPatch, error) {
-	cleanPath, err := validateApplyPatchPath(path)
+func ParseEdit(path, patchText string) (parsedEdit, error) {
+	cleanPath, err := validateEditPath(path)
 	if err != nil {
-		return parsedApplyPatch{}, err
+		return parsedEdit{}, err
 	}
-	patchText = stripApplyPatchEnvelopeMarkers(cleanPath, patchText)
+	patchText = stripEditEnvelopeMarkers(cleanPath, patchText)
 	if strings.TrimSpace(patchText) == "" {
-		return parsedApplyPatch{}, fmt.Errorf("patch is required")
+		return parsedEdit{}, fmt.Errorf("patch is required")
 	}
 	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
-	parsed := parsedApplyPatch{Path: cleanPath}
-	var current *applyPatchHunk
+	parsed := parsedEdit{Path: cleanPath}
+	var current *editHunk
 	for _, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "*** Add File:") || strings.HasPrefix(line, "*** Delete File:") || strings.HasPrefix(line, "*** Move to:") || strings.HasPrefix(line, "*** Update File:"):
-			return parsedApplyPatch{}, fmt.Errorf("unsupported patch operation. %s No files were modified", applyPatchUnsupportedOperationHint)
+			return parsedEdit{}, fmt.Errorf("unsupported patch operation. %s No files were modified", editUnsupportedOperationHint)
 		case strings.HasPrefix(line, "***"):
-			return parsedApplyPatch{}, fmt.Errorf("unsupported patch operation %q. %s No files were modified", line, applyPatchUnsupportedOperationHint)
+			return parsedEdit{}, fmt.Errorf("unsupported patch operation %q. %s No files were modified", line, editUnsupportedOperationHint)
 		case strings.HasPrefix(line, "@@"):
 			header := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
-			parsed.Hunks = append(parsed.Hunks, applyPatchHunk{Header: header})
+			parsed.Hunks = append(parsed.Hunks, editHunk{Header: header})
 			current = &parsed.Hunks[len(parsed.Hunks)-1]
 		default:
 			if current == nil {
 				if strings.TrimSpace(line) == "" {
 					continue
 				}
-				return parsedApplyPatch{}, fmt.Errorf("invalid patch: expected @@ hunk before patch lines. No files were modified")
+				return parsedEdit{}, fmt.Errorf("invalid patch: expected @@ hunk before patch lines. No files were modified")
 			}
 			if line == "" {
-				return parsedApplyPatch{}, fmt.Errorf("invalid patch line: hunk lines must start with space, +, or -. No files were modified")
+				return parsedEdit{}, fmt.Errorf("invalid patch line: hunk lines must start with space, +, or -. No files were modified")
 			}
 			kind := line[0]
 			if kind != ' ' && kind != '+' && kind != '-' {
-				return parsedApplyPatch{}, fmt.Errorf("invalid patch line %q: hunk lines must start with space, +, or -. No files were modified", line)
+				return parsedEdit{}, fmt.Errorf("invalid patch line %q: hunk lines must start with space, +, or -. No files were modified", line)
 			}
-			current.Lines = append(current.Lines, applyPatchLine{Kind: kind, Text: line[1:]})
+			current.Lines = append(current.Lines, editLine{Kind: kind, Text: line[1:]})
 		}
 	}
 	if len(parsed.Hunks) == 0 {
-		return parsedApplyPatch{}, fmt.Errorf("invalid patch: missing hunk. No files were modified")
+		return parsedEdit{}, fmt.Errorf("invalid patch: missing hunk. No files were modified")
 	}
 	for _, h := range parsed.Hunks {
 		if len(h.Lines) == 0 {
-			return parsedApplyPatch{}, fmt.Errorf("invalid patch: empty hunk. No files were modified")
+			return parsedEdit{}, fmt.Errorf("invalid patch: empty hunk. No files were modified")
 		}
 	}
 	return parsed, nil
 }
 
-func stripApplyPatchEnvelopeMarkers(path, patchText string) string {
+func stripEditEnvelopeMarkers(path, patchText string) string {
 	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
 	cleaned := make([]string, 0, len(lines))
 	seenHunk := false
@@ -274,7 +274,7 @@ func stripApplyPatchEnvelopeMarkers(path, patchText string) string {
 			continue
 		case !seenHunk && strings.HasPrefix(trimmed, "*** Update File:"):
 			updatePath := strings.TrimSpace(strings.TrimPrefix(trimmed, "*** Update File:"))
-			if cleanUpdatePath, err := validateApplyPatchPath(updatePath); err == nil && cleanUpdatePath == path {
+			if cleanUpdatePath, err := validateEditPath(updatePath); err == nil && cleanUpdatePath == path {
 				changed = true
 				continue
 			}
@@ -290,24 +290,24 @@ func stripApplyPatchEnvelopeMarkers(path, patchText string) string {
 	return strings.Join(cleaned, "\n")
 }
 
-func ExtractApplyPatchPathFromArgs(args json.RawMessage) string {
-	return ExtractApplyPatchPathFromArgsInDir(args, "")
+func ExtractEditPathFromArgs(args json.RawMessage) string {
+	return ExtractEditPathFromArgsInDir(args, "")
 }
 
-func ExtractApplyPatchPathFromArgsInDir(args json.RawMessage, baseDir string) string {
-	var parsed applyPatchArgs
+func ExtractEditPathFromArgsInDir(args json.RawMessage, baseDir string) string {
+	var parsed editArgs
 	if json.Unmarshal(unwrapToolArgs(args), &parsed) != nil {
 		return ""
 	}
 	path := parsed.Path
 	if path == "" {
-		path = extractLegacyApplyPatchEnvelopePath(parsed.Patch)
+		path = extractLegacyEditEnvelopePath(parsed.Patch)
 	}
-	path, err := validateApplyPatchPath(path)
+	path, err := validateEditPath(path)
 	if err != nil {
 		return ""
 	}
-	resolved, err := resolveApplyPatchPathForBase(path, baseDir)
+	resolved, err := resolveEditPathForBase(path, baseDir)
 	if err != nil {
 		return path
 	}
@@ -321,7 +321,7 @@ func ExtractApplyPatchPathFromArgsInDir(args json.RawMessage, baseDir string) st
 	return filepath.Clean(resolved)
 }
 
-func extractLegacyApplyPatchEnvelopePath(patchText string) string {
+func extractLegacyEditEnvelopePath(patchText string) string {
 	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
 		return ""
@@ -334,7 +334,7 @@ func extractLegacyApplyPatchEnvelopePath(patchText string) string {
 	return ""
 }
 
-func resolveApplyPatchPathForBase(path, baseDir string) (string, error) {
+func resolveEditPathForBase(path, baseDir string) (string, error) {
 	resolved, err := resolveToolPath(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
@@ -345,7 +345,7 @@ func resolveApplyPatchPathForBase(path, baseDir string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func validateApplyPatchPath(path string) (string, error) {
+func validateEditPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("path is required. No files were modified")
 	}
@@ -359,7 +359,7 @@ func validateApplyPatchPath(path string) (string, error) {
 	return clean, nil
 }
 
-func applyParsedPatch(content string, patch parsedApplyPatch) (string, []ApplyPatchMatchSummary, error) {
+func applyParsedPatch(content string, patch parsedEdit) (string, []EditMatchSummary, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -370,10 +370,10 @@ func applyParsedPatch(content string, patch parsedApplyPatch) (string, []ApplyPa
 	if finalNewline {
 		fileLines = fileLines[:len(fileLines)-1]
 	}
-	matches := make([]ApplyPatchMatchSummary, 0, len(patch.Hunks))
+	matches := make([]EditMatchSummary, 0, len(patch.Hunks))
 	searchStart := 0
 	for i, hunk := range patch.Hunks {
-		summary := ApplyPatchMatchSummary{HunkIndex: i + 1, Header: hunk.Header}
+		summary := EditMatchSummary{HunkIndex: i + 1, Header: hunk.Header}
 		if hunk.Header != "" {
 			headerMatch, headerResult, err := findFirstHunkMatch(fileLines, []string{hunk.Header}, searchStart)
 			if err != nil {
@@ -415,7 +415,7 @@ func applyParsedPatch(content string, patch parsedApplyPatch) (string, []ApplyPa
 	return out, matches, nil
 }
 
-func hunkOldSequence(h applyPatchHunk) []string {
+func hunkOldSequence(h editHunk) []string {
 	var seq []string
 	for _, line := range h.Lines {
 		if line.Kind == ' ' || line.Kind == '-' {
@@ -425,7 +425,7 @@ func hunkOldSequence(h applyPatchHunk) []string {
 	return seq
 }
 
-func buildHunkReplacement(matchedOld []string, h applyPatchHunk) []string {
+func buildHunkReplacement(matchedOld []string, h editHunk) []string {
 	seq := make([]string, 0, len(h.Lines))
 	oldIdx := 0
 	for _, line := range h.Lines {
@@ -446,7 +446,7 @@ func buildHunkReplacement(matchedOld []string, h applyPatchHunk) []string {
 	return seq
 }
 
-func trailingContextLineCount(h applyPatchHunk) int {
+func trailingContextLineCount(h editHunk) int {
 	count := 0
 	for i := len(h.Lines) - 1; i >= 0; i-- {
 		if h.Lines[i].Kind != ' ' {
@@ -488,7 +488,7 @@ func findFirstHunkMatch(fileLines, oldSeq []string, start int) (int, hunkMatchRe
 	return 0, hunkMatchResult{}, fmt.Errorf("hunk not found. Re-read the target area and rebuild the hunk from the latest file contents; make sure context/removal lines omit Read's line-number gutter, match the current indentation and surrounding lines, and keep the hunk small. No files were modified")
 }
 
-func formatApplyPatchMatchSummary(matches []ApplyPatchMatchSummary) string {
+func formatEditMatchSummary(matches []EditMatchSummary) string {
 	if len(matches) == 0 {
 		return ""
 	}
@@ -510,10 +510,10 @@ func formatApplyPatchMatchSummary(matches []ApplyPatchMatchSummary) string {
 	var notes []string
 	for _, match := range matches {
 		if len(match.CandidateLines) > 1 {
-			notes = append(notes, formatApplyPatchAmbiguousNote("hunk", match.HunkIndex, match.CandidateLines, match.WeakContext))
+			notes = append(notes, formatEditAmbiguousNote("hunk", match.HunkIndex, match.CandidateLines, match.WeakContext))
 		}
 		if len(match.HeaderCandidateLines) > 1 {
-			notes = append(notes, formatApplyPatchAmbiguousNote("@@ header", match.HunkIndex, match.HeaderCandidateLines, false))
+			notes = append(notes, formatEditAmbiguousNote("@@ header", match.HunkIndex, match.HeaderCandidateLines, false))
 		}
 	}
 	if len(notes) > 0 {
@@ -522,7 +522,7 @@ func formatApplyPatchMatchSummary(matches []ApplyPatchMatchSummary) string {
 	return out
 }
 
-func formatApplyPatchAmbiguousNote(kind string, hunkIndex int, candidates []int, weak bool) string {
+func formatEditAmbiguousNote(kind string, hunkIndex int, candidates []int, weak bool) string {
 	if len(candidates) == 0 {
 		return ""
 	}

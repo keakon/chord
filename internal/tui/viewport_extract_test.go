@@ -89,12 +89,12 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 		t.Fatalf("ExtractSelectionText() tabbed line\n got %q\nwant %q", got, want)
 	}
 }
-func TestExtractSelectionTextApplyPatchToolKeepsRenderedColumnsAligned(t *testing.T) {
+func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	v := NewViewport(120, 20)
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
+		ToolName: tools.NameEdit,
 		Content:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/block_tool_render_write.go\n@@\n-old\n+new\n*** End Patch\n"}`,
 		Diff: strings.Join([]string{
 			"@@ -1,4 +1,4 @@",
@@ -122,7 +122,7 @@ func TestExtractSelectionTextApplyPatchToolKeepsRenderedColumnsAligned(t *testin
 		}
 	}
 	if targetLine < 0 {
-		t.Fatalf("target line not found in rendered ApplyPatch tool card: %q", want)
+		t.Fatalf("target line not found in rendered Edit tool card: %q", want)
 	}
 
 	got := v.ExtractSelectionText(SelectionRange{
@@ -134,6 +134,6 @@ func TestExtractSelectionTextApplyPatchToolKeepsRenderedColumnsAligned(t *testin
 		EndCol:       endCol,
 	})
 	if got != want {
-		t.Fatalf("ExtractSelectionText() ApplyPatch tool line\n got %q\nwant %q", got, want)
+		t.Fatalf("ExtractSelectionText() Edit tool line\n got %q\nwant %q", got, want)
 	}
 }

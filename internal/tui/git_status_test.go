@@ -117,11 +117,11 @@ func TestShellCommandMayRunGit(t *testing.T) {
 	}
 }
 
-func TestShouldRefreshGitStatusAfterApplyPatchResult(t *testing.T) {
-	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameApplyPatch, Status: agent.ToolResultStatusSuccess}) {
-		t.Fatal("successful ApplyPatch should refresh git status")
+func TestShouldRefreshGitStatusAfterEditResult(t *testing.T) {
+	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: agent.ToolResultStatusSuccess}) {
+		t.Fatal("successful Edit should refresh git status")
 	}
-	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameApplyPatch, Status: agent.ToolResultStatusError}) {
-		t.Fatal("failed ApplyPatch should not refresh git status")
+	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: agent.ToolResultStatusError}) {
+		t.Fatal("failed Edit should not refresh git status")
 	}
 }

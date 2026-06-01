@@ -330,7 +330,7 @@ Glob: allow
 Shell: allow
 Write:
   .chord/plans/*: allow
-ApplyPatch:
+Edit:
   .chord/plans/*: allow
 Handoff: allow
 Skill: allow

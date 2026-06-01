@@ -24,11 +24,11 @@ func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
 		},
 		{perm: "Write", pattern: "docs/plan.md", want: permission.ActionDeny},
 		{
-			perm:    "ApplyPatch",
+			perm:    "Edit",
 			pattern: ".chord/plans/plan-001.md",
 			want:    permission.ActionAllow,
 		},
-		{perm: "ApplyPatch", pattern: "docs/plan.md", want: permission.ActionDeny},
+		{perm: "Edit", pattern: "docs/plan.md", want: permission.ActionDeny},
 		{perm: "Handoff", pattern: "*", want: permission.ActionAllow},
 	}
 	for _, tt := range checks {
@@ -57,7 +57,7 @@ func TestDefaultBuilderAgentUsesAllowAllBaselineWithOverrides(t *testing.T) {
 	}{
 		{perm: "Read", pattern: "internal/agent/main.go", want: permission.ActionAllow},
 		{perm: "Write", pattern: "docs/notes.md", want: permission.ActionAllow},
-		{perm: "ApplyPatch", pattern: "docs/notes.md", want: permission.ActionAllow},
+		{perm: "Edit", pattern: "docs/notes.md", want: permission.ActionAllow},
 		{perm: "Shell", pattern: "go test ./...", want: permission.ActionAllow},
 		{perm: "Delete", pattern: "tmp/build.out", want: permission.ActionAsk},
 		{perm: "Delegate", pattern: "*", want: permission.ActionDeny},

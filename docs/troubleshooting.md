@@ -180,9 +180,9 @@ Chord handles two transcript-height accounting risks:
 - Late updates to older status cards could leave the viewport shorter than the real transcript.
 - Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
-## ApplyPatch reports `file ... has not been observed in this conversation`
+## Edit reports `file ... has not been observed in this conversation`
 
-Chord requires `ApplyPatch` to have an observed target file earlier in the conversation. An observation can come from `Read`, a successful `Write`/`ApplyPatch` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `Read` when you need more surrounding context.
+Chord requires `Edit` to have an observed target file earlier in the conversation. An observation can come from `Read`, a successful `Write`/`Edit` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `Read` when you need more surrounding context.
 
 If you see this error:
 
@@ -192,19 +192,19 @@ If you see this error:
 
 ## A file-edit tool warns that the file changed since it was observed
 
-This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `ApplyPatch` still validates hunks against the current file contents, while `Write` and `Delete` back up risky non-empty pre-write contents before continuing.
+This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `Edit` still validates hunks against the current file contents, while `Write` and `Delete` back up risky non-empty pre-write contents before continuing.
 
 Common causes:
 
-- the file was modified by another process (editor/formatter) between `Read` and `ApplyPatch`;
+- the file was modified by another process (editor/formatter) between `Read` and `Edit`;
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
 - the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
 
 If a backup was created, the tool result includes its path under the current session directory. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Backups are removed when the session directory is deleted.
 
-## ApplyPatch reports `hunk not found` or `matched multiple locations`
+## Edit reports `hunk not found` or `matched multiple locations`
 
-`ApplyPatch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
+`Edit` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
@@ -212,7 +212,7 @@ If you see this:
 - if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `Read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
 - if the error says the hunk was not found, re-copy the target block from the latest `Read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
 - split a broad patch into smaller single-file patches or smaller hunks;
-- do not run external `apply_patch` through `Shell`; use Chord's native `ApplyPatch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
+- do not run external `apply_patch` through `Shell`; use Chord's native `Edit` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 
 ## Performance issues
 

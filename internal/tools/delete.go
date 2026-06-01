@@ -40,12 +40,12 @@ type deleteExecutionResult struct {
 	NotAttempted  []string
 }
 
-func (t DeleteTool) Name() string { return "Delete" }
+func (t DeleteTool) Name() string { return NameDelete }
 
 func (DeleteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	// Delete may target multiple files. Until runtime batching grows native
 	// multi-resource support, keep it conservatively exclusive.
-	return normalizeConcurrencyPolicy("Delete", deleteToolConcurrencyPolicy(args))
+	return normalizeConcurrencyPolicy(NameDelete, deleteToolConcurrencyPolicy(args))
 }
 
 func (t DeleteTool) Description() string {

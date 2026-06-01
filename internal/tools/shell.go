@@ -138,7 +138,7 @@ func ResolveSpawnTimeoutValue(requestedSec int, hasTimeout bool) ShellTimeoutInf
 	return info
 }
 
-func (ShellTool) Name() string { return "Shell" }
+func (ShellTool) Name() string { return NameShell }
 
 func (ShellTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
 	return ConcurrencyPolicy{
@@ -171,16 +171,16 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	parts := []string{shellDesc}
 	if len(visible) > 0 {
 		discoveryHints := make([]string, 0, 4)
-		if _, ok := visible["Lsp"]; ok {
+		if _, ok := visible[NameLsp]; ok {
 			discoveryHints = append(discoveryHints, "use LSP first for symbol-aware navigation such as definitions, references, and implementations")
 		}
-		if _, ok := visible["Grep"]; ok {
+		if _, ok := visible[NameGrep]; ok {
 			discoveryHints = append(discoveryHints, "use Grep for repo text search before reaching for rg")
 		}
-		if _, ok := visible["Glob"]; ok {
+		if _, ok := visible[NameGlob]; ok {
 			discoveryHints = append(discoveryHints, "use Glob for file or path discovery before reaching for rg --files or find")
 		}
-		if _, ok := visible["Read"]; ok {
+		if _, ok := visible[NameRead]; ok {
 			discoveryHints = append(discoveryHints, "use Read once you have narrowed the target files")
 		}
 		if len(discoveryHints) > 0 {
@@ -289,7 +289,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		output := buf.String()
 		if err != nil {
 			if ClassifyNonInteractiveRuntimeFailure(a.Command, err, output) != nil {
-				return output, FormatNonInteractiveRuntimeError("Shell", a.Command, err, output)
+				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, output)
 			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				return output, shellExitError(exitErr)

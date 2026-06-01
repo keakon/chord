@@ -105,18 +105,18 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 		return summary
 	}
 
-	switch strings.ToLower(toolName) {
-	case "shell":
+	switch toolNameKey(toolName) {
+	case tools.NameShell:
 		buildBashConfirmSummary(&summary, parsed)
-	case "applypatch":
-		buildApplyPatchConfirmSummary(&summary, parsed)
-	case "write":
+	case tools.NameEdit:
+		buildEditConfirmSummary(&summary, parsed)
+	case tools.NameWrite:
 		buildWriteConfirmSummary(&summary, parsed)
-	case "delete":
+	case tools.NameDelete:
 		buildDeleteConfirmSummary(&summary, parsed, needsApproval, alreadyAllowed)
-	case "webfetch":
+	case tools.NameWebFetch:
 		buildWebFetchConfirmSummary(&summary, parsed)
-	case "done":
+	case tools.NameDone:
 		buildDoneConfirmSummary(&summary, parsed, summary.DoneReport)
 	default:
 		buildGenericConfirmSummary(&summary, parsed)
@@ -124,12 +124,43 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 
 	ensureConfirmImportantFields(&summary)
 	if len(summary.Fields) == 0 {
-		if strings.EqualFold(toolName, "Done") && strings.TrimSpace(summary.DoneReport) != "" {
+		if toolNameKey(toolName) == tools.NameDone && strings.TrimSpace(summary.DoneReport) != "" {
 			return summary
 		}
 		summary.Fields = []confirmSummaryField{newConfirmField("Arguments", "(none)", true)}
 	}
 	return summary
+}
+
+func toolNameKey(toolName string) string {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case strings.ToLower(tools.NameRead):
+		return tools.NameRead
+	case strings.ToLower(tools.NameWrite):
+		return tools.NameWrite
+	case strings.ToLower(tools.NameEdit):
+		return tools.NameEdit
+	case strings.ToLower(tools.NameDelete):
+		return tools.NameDelete
+	case strings.ToLower(tools.NameGrep):
+		return tools.NameGrep
+	case strings.ToLower(tools.NameGlob):
+		return tools.NameGlob
+	case strings.ToLower(tools.NameWebFetch):
+		return tools.NameWebFetch
+	case strings.ToLower(tools.NameShell):
+		return tools.NameShell
+	case strings.ToLower(tools.NameSpawn):
+		return tools.NameSpawn
+	case strings.ToLower(tools.NameSpawnStop):
+		return tools.NameSpawnStop
+	case strings.ToLower(tools.NameLsp):
+		return tools.NameLsp
+	case strings.ToLower(tools.NameDone):
+		return tools.NameDone
+	default:
+		return strings.TrimSpace(toolName)
+	}
 }
 
 func parseConfirmArgs(argsJSON string) (map[string]any, error) {
@@ -148,28 +179,28 @@ func parseConfirmArgs(argsJSON string) (map[string]any, error) {
 }
 
 func confirmActionText(toolName string) string {
-	switch strings.ToLower(toolName) {
-	case "shell":
+	switch toolNameKey(toolName) {
+	case tools.NameShell:
 		return "Execute shell command"
-	case "spawn":
+	case tools.NameSpawn:
 		return "Start background process"
-	case "spawnstop":
+	case tools.NameSpawnStop:
 		return "Stop background process"
-	case "edit":
+	case tools.NameEdit:
 		return "Replace text in file"
-	case "write":
+	case tools.NameWrite:
 		return "Write file contents"
-	case "delete":
+	case tools.NameDelete:
 		return "Delete files"
-	case "webfetch":
+	case tools.NameWebFetch:
 		return "Fetch URL"
-	case "read":
+	case tools.NameRead:
 		return "Read file"
-	case "grep":
+	case tools.NameGrep:
 		return "Search file contents"
-	case "glob":
+	case tools.NameGlob:
 		return "Find matching files"
-	case "lsp":
+	case tools.NameLsp:
 		return "Query language server"
 	default:
 		if toolName == "" {
@@ -180,12 +211,12 @@ func confirmActionText(toolName string) string {
 }
 
 func confirmRiskForTool(toolName string) confirmRiskLevel {
-	switch strings.ToLower(toolName) {
-	case "shell", "spawn", "spawnstop":
+	switch toolNameKey(toolName) {
+	case tools.NameShell, tools.NameSpawn, tools.NameSpawnStop:
 		return confirmRiskHigh
-	case "edit", "write", "delete":
+	case tools.NameEdit, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
-	case "read", "grep", "glob", "lsp", "webfetch":
+	case tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
 		return confirmRiskLow
 	default:
 		return confirmRiskMedium
@@ -232,7 +263,7 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	appendUnhandledConfirmFields(summary, parsed, handled)
 }
 
-func buildApplyPatchConfirmSummary(summary *confirmSummary, parsed map[string]any) {
+func buildEditConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	handled := map[string]bool{}
 	summary.Warnings = append(summary.Warnings, "Patches existing file content")
 
@@ -241,7 +272,7 @@ func buildApplyPatchConfirmSummary(summary *confirmSummary, parsed map[string]an
 	filePath := ""
 	if patchText != "" {
 		args, _ := json.Marshal(map[string]any{"patch": patchText})
-		filePath = tools.ExtractApplyPatchPathFromArgs(args)
+		filePath = tools.ExtractEditPathFromArgs(args)
 	}
 	if filePath == "" {
 		filePath = "(unspecified)"

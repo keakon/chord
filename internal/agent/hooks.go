@@ -66,7 +66,7 @@ func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
 	if parsed.Path != "" {
 		return []string{parsed.Path}
 	}
-	if path := tools.ExtractApplyPatchPathFromArgsInDir(args, projectRoot); path != "" {
+	if path := tools.ExtractEditPathFromArgsInDir(args, projectRoot); path != "" {
 		return []string{path}
 	}
 	return tools.NormalizeDeletePaths(parsed.Paths)

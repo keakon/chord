@@ -35,7 +35,7 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 	if strings.TrimSpace(toolName) == "" {
 		return decision
 	}
-	if toolName == "Cancel" && ruleset.IsDisabled("Delegate") {
+	if toolName == tools.NameCancel && ruleset.IsDisabled(tools.NameDelegate) {
 		return decision
 	}
 
@@ -57,15 +57,15 @@ func evaluateDeleteToolPermission(ruleset permission.Ruleset, args json.RawMessa
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	req, err := tools.DecodeDeleteRequest(args)
 	if err != nil {
-		arg := extractToolArgument("Delete", args)
-		decision.Action = ruleset.Evaluate("Delete", arg)
+		arg := extractToolArgument(tools.NameDelete, args)
+		decision.Action = ruleset.Evaluate(tools.NameDelete, arg)
 		decision.MatchArgument = arg
 		return decision
 	}
 
 	items := make([]permissionAggregateItem, 0, len(req.Paths))
 	for _, path := range req.Paths {
-		action := ruleset.Evaluate("Delete", path)
+		action := ruleset.Evaluate(tools.NameDelete, path)
 		item := permissionAggregateItem{
 			Argument: path,
 			Action:   action,

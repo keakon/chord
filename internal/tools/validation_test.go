@@ -93,7 +93,7 @@ func TestValidateToolArgsRejectsEnumMismatch(t *testing.T) {
 
 func TestValidateToolArgsRejectsAdditionalPropertiesWhenDisallowed(t *testing.T) {
 	tool := validationStubTool{
-		name: "ApplyPatch",
+		name: "Edit",
 		schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

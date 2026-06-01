@@ -104,7 +104,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= 1 {
 			meta := callMeta[prepared[i].ToolCallID]
-			if (strings.TrimSpace(meta.Name) == tools.NameApplyPatch || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
+			if (strings.TrimSpace(meta.Name) == tools.NameEdit || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
 				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
 					prepared[i].Content = compacted
 					noteReduction(original, prepared[i].Content)
@@ -114,7 +114,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
 			meta := callMeta[prepared[i].ToolCallID]
-			if strings.TrimSpace(meta.Name) == "Shell" {
+			if strings.TrimSpace(meta.Name) == tools.NameShell {
 				prepared[i].Content = "[Older Shell output omitted to save context; re-run the command if needed.]"
 				prepared[i].ToolDiff = ""
 				noteReduction(original, prepared[i].Content)

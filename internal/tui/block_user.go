@@ -8,10 +8,11 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
-	const toolName = "Shell"
+	const toolName = tools.NameShell
 	style := UserCardStyle
 	boxWidth := width - style.GetHorizontalMargins()
 	if boxWidth < 10 {

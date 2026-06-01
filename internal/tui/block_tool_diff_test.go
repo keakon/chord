@@ -15,13 +15,13 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
+func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	patch := "@@\n-old\n+new\n"
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": patch})
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      tools.NameApplyPatch,
+		ToolName:      tools.NameEdit,
 		Content:       string(args),
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
@@ -31,8 +31,8 @@ func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 
 	rendered := strings.Join(block.Render(100, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "ApplyPatch") || !strings.Contains(plain, "src/demo.go") {
-		t.Fatalf("expected ApplyPatch header to show path, got:\n%s", plain)
+	if !strings.Contains(plain, "Edit") || !strings.Contains(plain, "src/demo.go") {
+		t.Fatalf("expected Edit header to show path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected diff lines to render, got:\n%s", plain)
@@ -42,20 +42,46 @@ func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	}
 }
 
-func TestApplyPatchLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
-	displayArgs := liveToolDisplayArgs(tools.NameApplyPatch, `{"patch":"*** Begin Patch\n*** Update File:`, "")
+func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
+	block := &Block{
+		ID:           1,
+		Type:         BlockToolCall,
+		ToolName:     tools.NameEdit,
+		Content:      `{"path":"internal/config/config_project_test.go","patch":"@@\n-old\n+new\n"}`,
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultContent: strings.Join([]string{
+			"Applied patch to internal/config/config_project_test.go (+3 -2)",
+			"",
+			"Diagnostics summary:",
+			"[E] 34:36 [UndeclaredName] undefined: DefaultContextReductionConfig",
+		}, "\n"),
+		Diff: "--- internal/config/config_project_test.go\n+++ internal/config/config_project_test.go\n@@ -1 +1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "Diagnostics summary:") {
+		t.Fatalf("expected diagnostics summary to render with edit diff, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "undefined: DefaultContextReductionConfig") {
+		t.Fatalf("expected diagnostic detail to render with edit diff, got:\n%s", plain)
+	}
+}
+
+func TestEditLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
+	displayArgs := liveToolDisplayArgs(tools.NameEdit, `{"patch":"*** Begin Patch\n*** Update File:`, "")
 	if displayArgs != "" {
 		t.Fatalf("display args = %q, want empty until path is parsed", displayArgs)
 	}
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
+		ToolName: tools.NameEdit,
 		Content:  displayArgs,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if strings.Contains(plain, "ApplyPatch .") {
-		t.Fatalf("expected incomplete ApplyPatch args not to render dot path, got:\n%s", plain)
+	if strings.Contains(plain, "Edit .") {
+		t.Fatalf("expected incomplete Edit args not to render dot path, got:\n%s", plain)
 	}
 }
 
@@ -350,7 +376,7 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          tools.NameApplyPatch,
+		ToolName:          tools.NameEdit,
 		Content:           fmt.Sprintf(`{"path":"%s","patch":"@@\n-old\n+new\n"}`, filepath.Join("internal", "tui", "example.go")),
 		Diff:              "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 		ResultDone:        true,
@@ -359,8 +385,8 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "example.go")
-	if !strings.Contains(joined, "ApplyPatch") || !strings.Contains(joined, want) {
-		t.Fatalf("expected ApplyPatch header to show relative path; got:\n%s", joined)
+	if !strings.Contains(joined, "Edit") || !strings.Contains(joined, want) {
+		t.Fatalf("expected Edit header to show relative path; got:\n%s", joined)
 	}
 	_ = abs
 }
@@ -369,7 +395,7 @@ func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
+		ToolName: tools.NameEdit,
 		Content:  `{"path":"example.py","patch":"@@\n-old\n+new\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
 			" def build_items():\n" +
@@ -392,7 +418,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
+		ToolName: tools.NameEdit,
 		Content:  `{"path":"example.py","patch":"@@\n-old\n+new\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,5 +8,4 @@\n" +
 			" def build_items():\n" +
@@ -421,7 +447,7 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     tools.NameApplyPatch,
+		ToolName:     tools.NameEdit,
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         diff,
 		ResultDone:   true,
@@ -443,7 +469,7 @@ func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     tools.NameApplyPatch,
+		ToolName:     tools.NameEdit,
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
@@ -465,7 +491,7 @@ func TestRenderFileDiffCallOverHardColumnLimitUsesTwoLines(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     tools.NameApplyPatch,
+		ToolName:     tools.NameEdit,
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
@@ -487,7 +513,7 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     tools.NameApplyPatch,
+		ToolName:     tools.NameEdit,
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,

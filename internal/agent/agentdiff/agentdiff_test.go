@@ -16,7 +16,7 @@ func toolCall(name string, args any) message.ToolCall {
 	return message.ToolCall{Name: name, Args: b}
 }
 
-func applyPatchArgs(path string) map[string]string {
+func editArgs(path string) map[string]string {
 	return map[string]string{"path": filepath.ToSlash(path), "patch": "@@\n before\n-after\n+AFTER\n"}
 }
 
@@ -28,7 +28,7 @@ func TestCapturePreWriteState(t *testing.T) {
 	}
 
 	missing := filepath.Join(dir, "missing.txt")
-	gotPath, content, existed := CapturePreWriteState(toolCall(tools.NameApplyPatch, applyPatchArgs(missing)))
+	gotPath, content, existed := CapturePreWriteState(toolCall(tools.NameEdit, editArgs(missing)))
 	if gotPath != "" || content != "" || existed {
 		t.Fatalf("CapturePreWriteState missing = (%q, %q, %v)", gotPath, content, existed)
 	}
@@ -44,7 +44,7 @@ func TestCapturePreWriteState(t *testing.T) {
 	}
 }
 
-func TestGenerateToolDiffForApplyPatch(t *testing.T) {
+func TestGenerateToolDiffForEdit(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -63,13 +63,13 @@ func TestGenerateToolDiffForApplyPatch(t *testing.T) {
 	if decoded, err := tools.ReadDecodedTextFile(path); err != nil || decoded.Text != "before\nAFTER\n" {
 		t.Fatalf("ReadDecodedTextFile = %q, %v", decoded.Text, err)
 	}
-	call := toolCall(tools.NameApplyPatch, applyPatchArgs(path))
-	summary := GenerateToolDiff(call, preContent, tools.ExtractApplyPatchPathFromArgs(call.Args))
+	call := toolCall(tools.NameEdit, editArgs(path))
+	summary := GenerateToolDiff(call, preContent, tools.ExtractEditPathFromArgs(call.Args))
 	if summary.Added != 1 || summary.Removed != 1 || !strings.Contains(summary.Text, "+AFTER") {
-		t.Fatalf("unexpected ApplyPatch diff: %+v", summary)
+		t.Fatalf("unexpected Edit diff: %+v", summary)
 	}
 
-	if got := GenerateToolDiff(toolCall(tools.NameApplyPatch, applyPatchArgs("missing.txt")), "before", ""); got != (Summary{}) {
+	if got := GenerateToolDiff(toolCall(tools.NameEdit, editArgs("missing.txt")), "before", ""); got != (Summary{}) {
 		t.Fatalf("missing captured path diff = %+v", got)
 	}
 }
@@ -87,9 +87,9 @@ func TestGenerateToolDiffUsesCapturedPath(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before\nAFTER\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	call := toolCall(tools.NameApplyPatch, applyPatchArgs("file.txt"))
+	call := toolCall(tools.NameEdit, editArgs("file.txt"))
 	summary := GenerateToolDiff(call, "before\nafter\n", path)
 	if summary.Added != 1 || summary.Removed != 1 || !strings.Contains(summary.Text, "+AFTER") {
-		t.Fatalf("unexpected ApplyPatch diff with captured path: %+v", summary)
+		t.Fatalf("unexpected Edit diff with captured path: %+v", summary)
 	}
 }

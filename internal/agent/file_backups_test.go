@@ -13,7 +13,7 @@ func TestFileBackupManagerPrunesPerPathInCreationOrder(t *testing.T) {
 	mgr := newFileBackupManager(dir)
 	path := filepath.Join(dir, "target.txt")
 	for i := 0; i < maxToolBackupsPerPath+2; i++ {
-		if _, err := mgr.Backup(path, "ApplyPatch", []byte(fmt.Sprintf("backup-%02d", i))); err != nil {
+		if _, err := mgr.Backup(path, "Edit", []byte(fmt.Sprintf("backup-%02d", i))); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)
 		}
 	}
@@ -66,7 +66,7 @@ func TestFileBackupManagerRejectsSessionByteLimit(t *testing.T) {
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	_, err := mgr.Backup(path, "ApplyPatch", make([]byte, maxToolBackupBytesPerSession+1))
+	_, err := mgr.Backup(path, "Edit", make([]byte, maxToolBackupBytesPerSession+1))
 	if err == nil || !strings.Contains(err.Error(), "exceeds the backup size limit") {
 		t.Fatalf("Backup huge error = %v, want single-file size-limit error", err)
 	}

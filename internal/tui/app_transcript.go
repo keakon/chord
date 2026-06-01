@@ -173,7 +173,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "ApplyPatch" {
+			if tc.Name != tools.NameWrite && tc.Name != tools.NameEdit {
 				continue
 			}
 			paths := extractTranscriptToolPaths(tc.Args)
@@ -199,7 +199,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 }
 
 func extractTranscriptToolPaths(args json.RawMessage) []string {
-	if path := tools.ExtractApplyPatchPathFromArgs(args); path != "" {
+	if path := tools.ExtractEditPathFromArgs(args); path != "" {
 		return []string{path}
 	}
 	var parsed struct {
@@ -541,7 +541,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				if msg.ToolDurationMs > 0 {
 					b.PersistedDuration = time.Duration(msg.ToolDurationMs) * time.Millisecond
 				}
-				if b.ToolName == "Skill" {
+				if b.ToolName == tools.NameSkill {
 					b.Content = eventToolDisplayArgs(b.ToolName, b.Content, b.ResultContent)
 				}
 				if msg.ToolDiff != "" {
@@ -553,7 +553,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				if b.ToolName == tools.NameRead {
 					b.Collapsed = false
 				}
-				if b.ToolName == "Delegate" && b.ResultStatus != agent.ToolResultStatusError && strings.TrimSpace(b.ResultContent) != "" {
+				if b.ToolName == tools.NameDelegate && b.ResultStatus != agent.ToolResultStatusError && strings.TrimSpace(b.ResultContent) != "" {
 					if handle, ok := parseTaskToolHandle(b.ResultContent); ok {
 						if handle.AgentID != "" {
 							b.LinkedAgentID = handle.AgentID

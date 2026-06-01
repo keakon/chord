@@ -142,7 +142,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleConfirmDenyReasonKey(msg)
 	}
 
-	if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+	if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 		if msg.String() == "v" || msg.String() == "V" {
 			return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
 		}
@@ -216,7 +216,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return textareaBlinkCmd()
 
 	case "e", "E":
-		if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") {
+		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 			return nil
 		}
 		m.confirm.editing = true
@@ -380,7 +380,7 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		reason := normalizeConfirmDenyReason(m.confirm.denyReasonInput.Value())
-		if m.confirm.request != nil && strings.EqualFold(m.confirm.request.ToolName, "Done") && reason == "" {
+		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone && reason == "" {
 			m.confirm.editError = "Done rejection requires a reason."
 			m.recalcViewportSize()
 			return nil

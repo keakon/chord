@@ -507,7 +507,7 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 
 func isFileMutationTool(name string) bool {
 	switch name {
-	case tools.NameWrite, tools.NameApplyPatch, tools.NameDelete:
+	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
 		return true
 	default:
 		return false
@@ -520,8 +520,8 @@ func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string
 		if path, ok := singlePathToolPath(call.Args); ok {
 			return []string{"file:" + path}
 		}
-	case tools.NameApplyPatch:
-		if path := tools.ExtractApplyPatchPathFromArgsInDir(call.Args, projectRoot); path != "" {
+	case tools.NameEdit:
+		if path := tools.ExtractEditPathFromArgsInDir(call.Args, projectRoot); path != "" {
 			return []string{"file:" + path}
 		}
 	case tools.NameDelete:

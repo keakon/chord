@@ -200,7 +200,7 @@ func TestStartPlanExecutionResetsTrackedReadState(t *testing.T) {
 	if a.fileTrack.HasRead(stalePath, a.instanceID) {
 		t.Fatal("plan execution should reset tracked reads from the previous session runtime")
 	}
-	if err := ensureTrackedApplyPatchPreconditions(a.fileTrack, a.instanceID, stalePath, tools.NameApplyPatch); err == nil || !strings.Contains(err.Error(), "has not been observed") {
+	if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, stalePath, tools.NameEdit); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("edit precondition error = %v, want unread-file error after execution session reset", err)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// FileEdit records a single changed-file event (Write, ApplyPatch, or Delete tool call).
+// FileEdit records a single changed-file event (Write, Edit, or Delete tool call).
 type FileEdit struct {
 	Path    string // file path
 	Added   int    // added lines

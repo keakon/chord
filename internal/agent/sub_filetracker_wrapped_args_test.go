@@ -11,7 +11,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInFinalizePath(t *testing.T) {
+func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinalizePath(t *testing.T) {
 	projectRoot := t.TempDir()
 	oldWD, err := os.Getwd()
 	if err != nil {
@@ -28,7 +28,7 @@ func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInF
 
 	parent := newTestMainAgent(t, projectRoot)
 	parent.tools.Register(tools.ReadTool{})
-	parent.tools.Register(tools.ApplyPatchTool{})
+	parent.tools.Register(tools.EditTool{})
 
 	sub := newControllableTestSubAgent(t, parent, "task-1")
 
@@ -41,7 +41,7 @@ func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInF
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	// Two consecutive ApplyPatches whose args are JSON-string-wrapped.
+	// Two consecutive Edites whose args are JSON-string-wrapped.
 	patch1Obj := map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}
 	patch1Raw, err := json.Marshal(patch1Obj)
 	if err != nil {
@@ -51,8 +51,8 @@ func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInF
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch1 args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: wrapped1}, false); err != nil {
-		t.Fatalf("ApplyPatch-1 failed: %v", err)
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: wrapped1}, false); err != nil {
+		t.Fatalf("Edit-1 failed: %v", err)
 	}
 
 	patch2Obj := map[string]any{"path": "demo.txt", "patch": "@@\n-after\n+final\n"}
@@ -64,8 +64,8 @@ func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInF
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch2 args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameApplyPatch, Args: wrapped2}, false); err != nil {
-		t.Fatalf("ApplyPatch-2 failed: %v", err)
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: wrapped2}, false); err != nil {
+		t.Fatalf("Edit-2 failed: %v", err)
 	}
 
 	data, err := os.ReadFile(path)
@@ -77,7 +77,7 @@ func TestSubAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleReadInF
 	}
 }
 
-func TestSubAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
+func TestSubAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -95,7 +95,7 @@ func TestSubAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsoluteP
 
 	parent := newTestMainAgent(t, projectRoot)
 	parent.tools.Register(tools.ReadTool{})
-	parent.tools.Register(tools.ApplyPatchTool{})
+	parent.tools.Register(tools.EditTool{})
 	sub := newControllableTestSubAgent(t, parent, "task-1")
 
 	readArgs, err := json.Marshal(map[string]any{"path": "./demo.txt"})
@@ -110,7 +110,7 @@ func TestSubAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsoluteP
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}, false); err != nil {
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}, false); err != nil {
 		t.Fatalf("equivalent paths should satisfy read precondition: %v", err)
 	}
 }

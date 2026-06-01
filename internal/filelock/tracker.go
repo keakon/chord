@@ -23,7 +23,7 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string { return e.Message }
 
-// UnreadFileError is returned when ApplyPatch attempts to modify a file that this
+// UnreadFileError is returned when Edit attempts to modify a file that this
 // agent has not successfully Read in the current conversation.
 type UnreadFileError struct {
 	Path    string

@@ -2731,18 +2731,18 @@ func TestToolUpdateAfterExecutionStartsDoesNotRestoreReceivedCharCount(t *testin
 	}
 }
 
-func TestApplyPatchToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
+func TestEditToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-patch-progress-hide-1",
-		Name:     tools.NameApplyPatch,
+		Name:     tools.NameEdit,
 		AgentID:  "",
 		ArgsJSON: `{"path":"demo.txt","patch":"@@\n-old\n+abcdef\n"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-patch-progress-hide-1",
-		Name:     tools.NameApplyPatch,
+		Name:     tools.NameEdit,
 		AgentID:  "",
 		ArgsJSON: `{"path":"demo.txt","patch":"@@\n-old\n+abcdef\n"}`,
 		State:    agent.ToolCallExecutionStateRunning,
@@ -2750,14 +2750,14 @@ func TestApplyPatchToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 
 	block, ok := m.viewport.FindBlockByToolID("call-patch-progress-hide-1")
 	if !ok {
-		t.Fatal("expected ApplyPatch tool block")
+		t.Fatal("expected Edit tool block")
 	}
 	if block.ToolProgress != nil {
-		t.Fatalf("expected ApplyPatch temp char count to be cleared, got %+v", *block.ToolProgress)
+		t.Fatalf("expected Edit temp char count to be cleared, got %+v", *block.ToolProgress)
 	}
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
-		t.Fatalf("expected ApplyPatch tool to hide temp char count after execution starts; got:\n%s", joined)
+		t.Fatalf("expected Edit tool to hide temp char count after execution starts; got:\n%s", joined)
 	}
 }
 
@@ -3081,7 +3081,7 @@ func TestConfirmRequestForcesPriorityBoundaryFlush(t *testing.T) {
 	m.streamRenderDeferNext = true
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ConfirmRequestEvent{
-		ToolName:  tools.NameApplyPatch,
+		ToolName:  tools.NameEdit,
 		RequestID: "req-1",
 	}})
 	if cmd == nil {
@@ -3220,7 +3220,7 @@ func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T
 	}
 }
 
-func TestToolResultEventApplyPatchTracksEditedFile(t *testing.T) {
+func TestToolResultEventEditTracksEditedFile(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.sidebar.Update(nil, "main", "builder")
 	patch := "@@\n-old\n+new\n"
@@ -3228,12 +3228,12 @@ func TestToolResultEventApplyPatchTracksEditedFile(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-apply-patch-1",
-		Name:     tools.NameApplyPatch,
+		Name:     tools.NameEdit,
 		ArgsJSON: string(args),
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:      "call-apply-patch-1",
-		Name:        tools.NameApplyPatch,
+		Name:        tools.NameEdit,
 		ArgsJSON:    string(args),
 		Result:      "Applied patch to src/demo.go (+1 -1)",
 		Status:      agent.ToolResultStatusSuccess,
@@ -3402,7 +3402,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 	if block.ResultContent != "Cancelled" {
 		t.Fatalf("ResultContent = %q, want Cancelled", block.ResultContent)
 	}
-	if block.ToolName != "Write" {
+	if block.ToolName != tools.NameWrite {
 		t.Fatalf("ToolName = %q, want Write", block.ToolName)
 	}
 	if m.currentThinkingBlock != nil || m.currentAssistantBlock != nil {
@@ -4720,10 +4720,10 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	}
 }
 
-func TestMessagesToBlocksRestoredApplyPatchWithoutToolDiffShowsResult(t *testing.T) {
+func TestMessagesToBlocksRestoredEditWithoutToolDiffShowsResult(t *testing.T) {
 	nextID := 1
 	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameApplyPatch, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
 		{Role: "tool", ToolCallID: "patch-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(agent.ToolResultStatusSuccess)},
 	}
 
@@ -4732,16 +4732,16 @@ func TestMessagesToBlocksRestoredApplyPatchWithoutToolDiffShowsResult(t *testing
 		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 	}
 	block := blocks[0]
-	if block.ToolName != tools.NameApplyPatch || !block.ResultDone || block.Diff != "" {
-		t.Fatalf("restored block = %#v, want completed ApplyPatch without diff", block)
+	if block.ToolName != tools.NameEdit || !block.ResultDone || block.Diff != "" {
+		t.Fatalf("restored block = %#v, want completed Edit without diff", block)
 	}
 	if block.Collapsed {
-		t.Fatal("restored ApplyPatch should use the same expanded terminal state as live ApplyPatch results")
+		t.Fatal("restored Edit should use the same expanded terminal state as live Edit results")
 	}
 
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "↳ Result:") || !strings.Contains(plain, "Applied patch") {
-		t.Fatalf("restored ApplyPatch without ToolDiff should show result content, got:\n%s", plain)
+		t.Fatalf("restored Edit without ToolDiff should show result content, got:\n%s", plain)
 	}
 }
 
@@ -4764,7 +4764,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 		},
 		{
 			name:     "apply patch error",
-			toolName: tools.NameApplyPatch,
+			toolName: tools.NameEdit,
 			args:     json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
 			content:  "hunk not found; re-read the file before applying the patch",
 			status:   agent.ToolResultStatusError,
@@ -6572,7 +6572,7 @@ func TestResolveConfirmRestoresInsertModeWithIMERestore(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
-		request:  &ConfirmRequest{ToolName: tools.NameApplyPatch},
+		request:  &ConfirmRequest{ToolName: tools.NameEdit},
 		prevMode: ModeInsert,
 	}
 	m.imeBeforeNormal = "zh-orig"
@@ -6919,7 +6919,7 @@ func TestConfirmRequestMsgSwitchesIMEWhenEnteringConfirm(t *testing.T) {
 	m.mode = ModeInsert
 	m.imeSwitchTarget = "com.apple.keylayout.ABC"
 
-	updated, cmd := m.Update(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameApplyPatch}})
+	updated, cmd := m.Update(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
 	model, ok := updated.(*Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want *Model", updated)

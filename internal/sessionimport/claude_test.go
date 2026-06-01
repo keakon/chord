@@ -159,7 +159,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if len(msgs[1].ToolCalls) != 4 {
 		t.Fatalf("tool calls=%+v, want 4", msgs[1].ToolCalls)
 	}
-	wantNames := []string{"ApplyPatch", "ApplyPatch", "Write", "ApplyPatch"}
+	wantNames := []string{"Edit", "Edit", "Write", "Edit"}
 	for i, call := range msgs[1].ToolCalls {
 		if call.Name != wantNames[i] {
 			t.Fatalf("tool call %d name=%q, want %q", i, call.Name, wantNames[i])
@@ -204,8 +204,8 @@ func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatc
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
-	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "ApplyPatch" {
-		t.Fatalf("msgs=%+v, want ApplyPatch tool card", msgs)
+	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Edit" {
+		t.Fatalf("msgs=%+v, want Edit tool card", msgs)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {

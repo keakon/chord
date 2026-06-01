@@ -115,7 +115,7 @@ func TestSpeculativeWriteDiscardRemovesNewFile(t *testing.T) {
 	waitForMissingFile(t, path)
 }
 
-func TestSpeculativeApplyPatchDiscardRestoresExistingFile(t *testing.T) {
+func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "existing.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -123,9 +123,9 @@ func TestSpeculativeApplyPatchDiscardRestoresExistingFile(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
-	// Baseline Read so ApplyPatch satisfies the read-before-patch precondition.
+	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
 	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -133,7 +133,7 @@ func TestSpeculativeApplyPatchDiscardRestoresExistingFile(t *testing.T) {
 
 	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
@@ -144,7 +144,7 @@ func TestSpeculativeApplyPatchDiscardRestoresExistingFile(t *testing.T) {
 	waitForFileContent(t, path, "before")
 }
 
-func TestSpeculativeApplyPatchDiscardWhileExecutingRestoresExistingFile(t *testing.T) {
+func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "existing.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -152,9 +152,9 @@ func TestSpeculativeApplyPatchDiscardWhileExecutingRestoresExistingFile(t *testi
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
 
-	// Baseline Read so ApplyPatch satisfies the read-before-patch precondition.
+	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
 	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -175,7 +175,7 @@ func TestSpeculativeApplyPatchDiscardWhileExecutingRestoresExistingFile(t *testi
 		}
 		return result, err
 	})
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}

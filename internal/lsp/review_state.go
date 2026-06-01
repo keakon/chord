@@ -11,6 +11,12 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const (
+	reviewToolWrite  = "Write"
+	reviewToolEdit   = "Edit"
+	reviewToolDelete = "Delete"
+)
+
 type ReviewedFileSnapshot struct {
 	Path     string
 	ServerID string
@@ -31,7 +37,7 @@ type deleteResultGroups struct {
 }
 
 func extractReviewFilePaths(args json.RawMessage) []string {
-	if path := extractReviewApplyPatchPath(args); path != "" {
+	if path := extractReviewEditPath(args); path != "" {
 		return []string{path}
 	}
 	var parsed struct {
@@ -63,7 +69,7 @@ func extractReviewFilePaths(args json.RawMessage) []string {
 	return out
 }
 
-func extractReviewApplyPatchPath(args json.RawMessage) string {
+func extractReviewEditPath(args json.RawMessage) string {
 	var parsed struct {
 		Path  string `json:"path"`
 		Patch string `json:"patch"`
@@ -334,7 +340,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Write" && tc.Name != "ApplyPatch" && tc.Name != "Delete" {
+			if tc.Name != reviewToolWrite && tc.Name != reviewToolEdit && tc.Name != reviewToolDelete {
 				continue
 			}
 			paths := extractReviewFilePaths(tc.Args)
@@ -358,7 +364,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			continue
 		}
 		switch info.name {
-		case "Delete":
+		case reviewToolDelete:
 			groups := parseDeleteReviewResult(msg.Content)
 			for _, path := range groups.Deleted {
 				for key, snap := range byKey {
@@ -367,7 +373,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 					}
 				}
 			}
-		case "Write", "ApplyPatch":
+		case reviewToolWrite, reviewToolEdit:
 			if strings.TrimSpace(info.path) == "" {
 				continue
 			}

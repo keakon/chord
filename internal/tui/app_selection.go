@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func isSelectableBlockType(t BlockType) bool {
@@ -587,7 +588,7 @@ func toolCallMarkdownContent(b *Block) string {
 	if toolName == "" {
 		toolName = "unknown"
 	}
-	if strings.EqualFold(toolName, "Done") {
+	if toolNameKey(toolName) == tools.NameDone {
 		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
 	}
 

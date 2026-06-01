@@ -2,6 +2,8 @@ package tui
 
 import (
 	"testing"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestSuggestRulePatterns_BashSimple(t *testing.T) {
@@ -94,10 +96,10 @@ func TestSuggestRulePatterns_WriteFile(t *testing.T) {
 	}
 }
 
-func TestSuggestRulePatterns_ApplyPatchFile(t *testing.T) {
-	candidates := suggestRulePatterns("ApplyPatch", `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, "/home/user/project")
+func TestSuggestRulePatterns_EditFile(t *testing.T) {
+	candidates := suggestRulePatterns(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
-		t.Fatal("expected candidates for ApplyPatch tool")
+		t.Fatal("expected candidates for Edit tool")
 	}
 
 	// Should have *.md pattern

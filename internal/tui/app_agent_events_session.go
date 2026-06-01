@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
@@ -47,7 +48,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			if block, ok := m.findLastPendingToolBlockByName(evt.ToolName); ok {
 				m.recordTUIDiagnostic("confirm-request", "tool=%s block=%d args_len=%d", evt.ToolName, block.ID, len(evt.ArgsJSON))
 				block.Content = evt.ArgsJSON
-				if strings.EqualFold(evt.ToolName, "Done") && strings.TrimSpace(evt.DoneReport) != "" {
+				if toolNameKey(evt.ToolName) == tools.NameDone && strings.TrimSpace(evt.DoneReport) != "" {
 					block.DoneReport = evt.DoneReport
 				}
 				block.InvalidateCache()

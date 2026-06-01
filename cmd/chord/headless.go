@@ -24,6 +24,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/protocol"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -313,7 +314,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 	case agent.ToolResultEvent:
 		state.updatedAt = time.Now()
-		if strings.EqualFold(e.Name, "Done") && e.AgentID == "" {
+		if strings.EqualFold(e.Name, tools.NameDone) && e.AgentID == "" {
 			reason, report := protocol.ParseDoneArgs(e.ArgsJSON)
 			if strings.TrimSpace(e.DoneReport) != "" {
 				report = strings.TrimSpace(e.DoneReport)

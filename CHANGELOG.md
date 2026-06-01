@@ -2,6 +2,10 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## 0.6.2-dev - Unreleased
+
+- **Breaking / Tools:** renamed the native localized file-editing tool from `ApplyPatch` to `Edit`, including the model-visible tool name, permission/config examples, TUI rendering, hooks, restored tool cards, and internal implementation names. The old Chord-native `ApplyPatch` tool name is not retained as a compatibility alias. External session import still recognizes source tool names such as Codex `apply_patch` and maps them to current `Edit` cards.
+
 ## 0.6.1 - 2026-06-01
 
 - TUI / File mentions: `@` file completion now falls back to direct root-directory prefix matching for non-empty queries like `@A`, so root files such as `AGENTS.md` can complete even when excluded from the cached Git-based index by `.gitignore` or local excludes. Explicit path-like queries such as `@docs/` or `@.config/` continue to use direct filesystem completion for the addressed directory instead of the cached index.

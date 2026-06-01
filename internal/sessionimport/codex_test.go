@@ -491,7 +491,7 @@ func TestConvertCodexRollout_WriteToolConvertsToWrite(t *testing.T) {
 	}
 }
 
-func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
+func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"edit the file"}]}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"function_call","name":"edit_file","arguments":"{\"path\":\"notes.txt\",\"old_string\":\"hello\",\"new_string\":\"hi\",\"replace_all\":true}","call_id":"call_e"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call_output","output":"ok","call_id":"call_e"}}
@@ -505,7 +505,7 @@ func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "ApplyPatch" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Edit" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	var args map[string]any
@@ -521,7 +521,7 @@ func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
 	}
 }
 
-func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToApplyPatch(t *testing.T) {
+func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"patch it"}],"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File:a.txt\n@@\n-old\n+new\n*** End Patch","call_id":"call_patch","turn_id":"turn-1"}}
@@ -537,11 +537,11 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToApplyPatch(t *testing
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
 	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || strings.TrimSpace(msgs[1].Content) != "" {
-		t.Fatalf("apply_patch not restored as tool card: %+v", msgs[1])
+		t.Fatalf("apply_patch not restored as Edit tool card: %+v", msgs[1])
 	}
 	call := msgs[1].ToolCalls[0]
-	if call.Name != "ApplyPatch" || call.ID != "call_patch" {
-		t.Fatalf("tool call=%+v, want ApplyPatch call_patch", call)
+	if call.Name != "Edit" || call.ID != "call_patch" {
+		t.Fatalf("tool call=%+v, want Edit call_patch", call)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(call.Args, &args); err != nil {

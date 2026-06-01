@@ -629,7 +629,7 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 	writeTestFile(t, alphaPath, "alpha")
 	writeTestFile(t, betaPath, "beta")
 
-	a := newRestoreApplyPatchTestAgent(t, projectRoot)
+	a := newRestoreEditTestAgent(t, projectRoot)
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
@@ -652,11 +652,11 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 
 	a.handleForkSessionCommand(3)
 
-	mustExecuteApplyPatch(t, a, alphaPath, "alpha", "alpha-updated")
+	mustExecuteEdit(t, a, alphaPath, "alpha", "alpha-updated")
 	if a.fileTrack.HasRead(betaPath, a.instanceID) {
 		t.Fatal("fork should not preserve tracked reads that occur after the fork prefix")
 	}
-	if err := executeApplyPatch(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
+	if err := executeEdit(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("beta edit error = %v, want unread-file error after fork", err)
 	}
 }

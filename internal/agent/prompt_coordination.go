@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
@@ -84,14 +86,14 @@ func (a *MainAgent) hasDelegateAccess() bool {
 	if a.tools == nil {
 		return false
 	}
-	if _, ok := a.tools.Get("Delegate"); !ok {
+	if _, ok := a.tools.Get(tools.NameDelegate); !ok {
 		return false
 	}
 	ruleset := a.effectiveRuleset()
 	if len(ruleset) == 0 {
 		return true
 	}
-	return !ruleset.IsDisabled("Delegate")
+	return !ruleset.IsDisabled(tools.NameDelegate)
 }
 
 func (a *MainAgent) hasDelegateWorkflowAccess() bool {
@@ -102,7 +104,7 @@ func (a *MainAgent) hasDelegateWorkflowAccess() bool {
 	if len(visible) == 0 {
 		return false
 	}
-	if _, ok := visible["Delegate"]; !ok {
+	if _, ok := visible[tools.NameDelegate]; !ok {
 		return false
 	}
 	return len(a.availableSubAgentsForPrompt()) > 0

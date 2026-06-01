@@ -84,9 +84,9 @@ type Message struct {
 	ReasoningContent    string             `json:"reasoning_content,omitempty"`     // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
 	ToolCalls           []ToolCall         `json:"tool_calls,omitempty"`            // non-nil for assistant tool_use
 	ToolCallID          string             `json:"tool_call_id,omitempty"`          // non-empty for tool results
-	ToolDiff            string             `json:"tool_diff,omitempty"`             // unified diff for Write/ApplyPatch tool results
-	ToolDiffAdded       int                `json:"tool_diff_added,omitempty"`       // total added lines for Write/ApplyPatch; computed before diff truncation
-	ToolDiffRemoved     int                `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/ApplyPatch; computed before diff truncation
+	ToolDiff            string             `json:"tool_diff,omitempty"`             // unified diff for Write/Edit tool results
+	ToolDiffAdded       int                `json:"tool_diff_added,omitempty"`       // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved     int                `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/Edit; computed before diff truncation
 	ToolDurationMs      int64              `json:"tool_duration_ms,omitempty"`      // final tool elapsed time in milliseconds for restored footer display
 	ToolStatus          string             `json:"tool_status,omitempty"`           // terminal tool status: success|error|cancelled
 	FileState           *ToolFileState     `json:"file_state,omitempty"`            // durable file-state metadata for restore-time safety sentinels

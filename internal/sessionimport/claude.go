@@ -755,8 +755,8 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 			return message.ToolCall{ID: block.ID, Name: "Delete", Args: norm}, false
 		}
 	case "Edit", "MultiEdit", "Update":
-		if norm := normalizeClaudeApplyPatchArgs(name, block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "ApplyPatch", Args: norm}, false
+		if norm := normalizeClaudeEditArgs(name, block.Input); norm != nil {
+			return message.ToolCall{ID: block.ID, Name: "Edit", Args: norm}, false
 		}
 	}
 	if name == "" {
@@ -929,14 +929,14 @@ func normalizeClaudeDeleteArgs(raw json.RawMessage) json.RawMessage {
 	return b
 }
 
-func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMessage {
+func normalizeClaudeEditArgs(name string, raw json.RawMessage) json.RawMessage {
 	var args map[string]any
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil
 	}
 	if strings.EqualFold(name, "Update") {
 		if patch := claudePickString(args, "patch", "input"); patch != "" {
-			path, body, ok := splitImportedApplyPatchEnvelope(patch)
+			path, body, ok := splitImportedEditEnvelope(patch)
 			if !ok {
 				return nil
 			}

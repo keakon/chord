@@ -10,8 +10,8 @@ import (
 )
 
 func liveToolDisplayArgs(toolName, argsJSON, result string) string {
-	if toolName == tools.NameApplyPatch {
-		path := tools.ExtractApplyPatchPathFromArgs([]byte(argsJSON))
+	if toolName == tools.NameEdit {
+		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
 		if path == "" {
 			return ""
 		}
@@ -75,7 +75,7 @@ func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 		return false
 	}
 	switch evt.Name {
-	case tools.NameWrite, tools.NameApplyPatch, tools.NameDelete:
+	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
 		return true
 	case tools.NameShell:
 		var args struct {
@@ -112,7 +112,7 @@ func shellCommandMayRunGit(command string) bool {
 
 func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
 	var effects agentEventEffects
-	if evt.Name == "Delegate" && evt.AgentID == "" {
+	if evt.Name == tools.NameDelegate && evt.AgentID == "" {
 		m.sidebar.ResolvePendingTask()
 		effects.refreshSidebar = true
 		m.recalcViewportSize()
@@ -125,7 +125,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		block.ResultContent = evt.Result
 		block.Audit = evt.Audit.Clone()
-		if strings.EqualFold(evt.Name, "Done") {
+		if toolNameKey(evt.Name) == tools.NameDone {
 			if strings.TrimSpace(evt.DoneReport) != "" {
 				block.DoneReport = evt.DoneReport
 			} else if parsed, err := tools.ParseDoneArgs(json.RawMessage(evt.ArgsJSON)); err == nil && strings.TrimSpace(parsed.Report) != "" {
@@ -166,7 +166,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		if shouldRefreshGitStatusAfterToolResult(evt) {
 			effects.addFollowup(m.requestGitStatusRefresh())
 		}
-		if evt.Name == "Delegate" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
+		if evt.Name == tools.NameDelegate && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
 			if handle, ok := parseTaskToolHandle(evt.Result); ok {
 				if handle.AgentID != "" {
 					block.LinkedAgentID = handle.AgentID
@@ -178,7 +178,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 				block.LinkedAgentID = id
 			}
 		}
-		if evt.Name == "Notify" && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
+		if evt.Name == tools.NameNotify && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
 			if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
 				if taskBlock, ok := m.findBlockByLinkedTask(handle.TaskID); ok {
 					taskBlock.LinkedAgentID = handle.AgentID
@@ -203,8 +203,8 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 }
 
 func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
-	if evt.Name == tools.NameApplyPatch {
-		return tools.ExtractApplyPatchPathFromArgs(json.RawMessage(evt.ArgsJSON))
+	if evt.Name == tools.NameEdit {
+		return tools.ExtractEditPathFromArgs(json.RawMessage(evt.ArgsJSON))
 	}
 	var args struct {
 		Path string `json:"path"`
@@ -229,7 +229,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 			m.recordToolArgRender(evt.ID, evt.ArgsJSON, time.Now())
 		}
-		if created && evt.Name == "Delegate" && evt.AgentID == "" {
+		if created && evt.Name == tools.NameDelegate && evt.AgentID == "" {
 			m.sidebar.AddPendingTask()
 			effects.refreshSidebar = true
 			m.recalcViewportSize()

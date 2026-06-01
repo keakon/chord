@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type skillToolArgs struct {
@@ -127,12 +128,12 @@ func skillSourcePrefixDisplay(path string) string {
 
 func toolCollapsedResultContent(toolName, result string) string {
 	switch toolName {
-	case "Skill":
+	case tools.NameSkill:
 		if path := skillToolPathFromResult(result); path != "" {
 			return shortenSkillDisplayPath(path)
 		}
 		return result
-	case "Delegate":
+	case tools.NameDelegate:
 		if summary := taskToolCollapsedHandleSummary(result); summary != "" {
 			return summary
 		}
@@ -144,7 +145,7 @@ func toolCollapsedResultContent(toolName, result string) string {
 
 func toolExpandedResultContent(toolName, result string) string {
 	switch toolName {
-	case "Skill":
+	case tools.NameSkill:
 		if body := skillToolBodyFromResult(result); body != "" {
 			return body
 		}
@@ -152,7 +153,7 @@ func toolExpandedResultContent(toolName, result string) string {
 			return path
 		}
 		return result
-	case "Delegate":
+	case tools.NameDelegate:
 		lines := taskToolExpandedHandleLines(result)
 		if len(lines) == 0 {
 			return result

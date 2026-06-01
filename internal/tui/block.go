@@ -106,7 +106,7 @@ type Block struct {
 	// report instead of the synthetic Done tool result text.
 	DoneReport string
 
-	// Diff holds a unified diff string for Write/ApplyPatch tool calls.
+	// Diff holds a unified diff string for Write/Edit tool calls.
 	// Not sent to the LLM; used only for TUI display.
 	Diff string
 
@@ -114,12 +114,12 @@ type Block struct {
 	// When false, Read shows at most maxReadDefaultLines (10) with a "[space to expand]" hint.
 	ReadContentExpanded bool
 
-	// ToolCallDetailExpanded: for generic tools (not Write/ApplyPatch/Read/Todo/Question), space toggles
+	// ToolCallDetailExpanded: for generic tools (not Write/Edit/Read/Todo/Question), space toggles
 	// between compact (first param + 10 result lines) and full (all params + full output).
 	ToolCallDetailExpanded bool
 
 	// codeHL is a lazily-initialised syntax highlighter shared by code-like
-	// tool renderers (Read/Write/ApplyPatch) and assistant markdown code blocks. It
+	// tool renderers (Read/Write/Edit) and assistant markdown code blocks. It
 	// caches lexer detection and rendered snippets across renders of the same block.
 	codeHL *codeHighlighter
 

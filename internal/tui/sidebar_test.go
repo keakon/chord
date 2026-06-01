@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestSidebarAddFileEditUsesExplicitStats(t *testing.T) {
@@ -114,16 +115,16 @@ func TestSidebarUpdatePreservesEditedFiles(t *testing.T) {
 }
 
 func TestShouldTrackSidebarFileEdit(t *testing.T) {
-	if !shouldTrackSidebarFileEdit("Write") {
+	if !shouldTrackSidebarFileEdit(tools.NameWrite) {
 		t.Fatal("Write should be tracked as a sidebar file edit")
 	}
-	if !shouldTrackSidebarFileEdit("ApplyPatch") {
-		t.Fatal("ApplyPatch should be tracked as a sidebar file edit")
+	if !shouldTrackSidebarFileEdit(tools.NameEdit) {
+		t.Fatal("Edit should be tracked as a sidebar file edit")
 	}
-	if !shouldTrackSidebarFileEdit("Delete") {
+	if !shouldTrackSidebarFileEdit(tools.NameDelete) {
 		t.Fatal("Delete should be tracked as a sidebar file edit")
 	}
-	if shouldTrackSidebarFileEdit("Read") {
+	if shouldTrackSidebarFileEdit(tools.NameRead) {
 		t.Fatal("Read should not be tracked as a sidebar file edit")
 	}
 }

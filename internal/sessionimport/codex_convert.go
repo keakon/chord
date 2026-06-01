@@ -984,12 +984,12 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 var codexToolMapping = map[string]string{
 	"exec_command": "Shell",
 	"shell":        "Shell",
-	"apply_patch":  "ApplyPatch",
+	"apply_patch":  "Edit",
 	"read_file":    "Read",
 	"file_read":    "Read",
 	"write_file":   "Write",
 	"file_write":   "Write",
-	"edit_file":    "ApplyPatch",
+	"edit_file":    "Edit",
 	"delete_file":  "Delete",
 	"file_delete":  "Delete",
 	"remove_file":  "Delete",
@@ -1021,11 +1021,11 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 
 	switch chordName {
-	case "ApplyPatch":
+	case "Edit":
 		if strings.EqualFold(codexName, "edit_file") {
 			return codexNormalizeEditFileArgs(args)
 		}
-		return codexNormalizeApplyPatchArgs(args)
+		return codexNormalizeEditArgs(args)
 	case "Shell":
 		return codexNormalizeShellArgs(args)
 	case "Read":
@@ -1043,7 +1043,7 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 }
 
-func codexNormalizeApplyPatchArgs(args map[string]any) json.RawMessage {
+func codexNormalizeEditArgs(args map[string]any) json.RawMessage {
 	patch := codexPickString(args, "patch", "input")
 	if patch == "" {
 		return nil
@@ -1051,7 +1051,7 @@ func codexNormalizeApplyPatchArgs(args map[string]any) json.RawMessage {
 	path := codexPickString(args, "path", "file_path", "file")
 	if path == "" {
 		var ok bool
-		path, patch, ok = splitImportedApplyPatchEnvelope(patch)
+		path, patch, ok = splitImportedEditEnvelope(patch)
 		if !ok {
 			return nil
 		}
@@ -1228,7 +1228,7 @@ func buildSingleUpdatePatch(oldText, newText string) string {
 	return b.String()
 }
 
-func splitImportedApplyPatchEnvelope(patch string) (string, string, bool) {
+func splitImportedEditEnvelope(patch string) (string, string, bool) {
 	lines := strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n")
 	if len(lines) < 4 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
 		return "", "", false

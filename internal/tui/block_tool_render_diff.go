@@ -82,7 +82,7 @@ func appendPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, o
 	return 2
 }
 
-// renderFileDiffCall renders an ApplyPatch tool call with a unified diff view.
+// renderFileDiffCall renders an Edit tool call with a unified diff view.
 func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
@@ -246,7 +246,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if b.ToolName == tools.NameApplyPatch && strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+	if b.ToolName == tools.NameEdit && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}
@@ -265,8 +265,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 }
 
 func (b *Block) diffToolFilePath() string {
-	if b.ToolName == tools.NameApplyPatch {
-		path := tools.ExtractApplyPatchPathFromArgs(json.RawMessage(b.Content))
+	if b.ToolName == tools.NameEdit {
+		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
 		if path == "" {
 			var parsed struct {
 				Path string `json:"path"`

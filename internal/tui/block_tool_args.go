@@ -11,6 +11,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (b *Block) toolArgsParsed() (keys []string, vals map[string]string) {
@@ -89,7 +91,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	if !b.toolHeaderCacheParamLinesOK {
 		paramVals := vals
 		switch b.ToolName {
-		case "Read", "Delete", "Grep", "Glob", "Shell", "Spawn", "Lsp":
+		case tools.NameRead, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
 			paramVals = cloneToolValsWithDisplayDirs(b, vals)
 		}
 		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
@@ -219,9 +221,9 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 	maps.Copy(cloned, vals)
 	if path, ok := cloned["path"]; ok {
 		switch b.ToolName {
-		case "Grep", "Glob", "Lsp":
+		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
 			cloned["path"] = b.displayToolDir(path)
-		case "Read", "Write", "ApplyPatch", "Delete":
+		case tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameDelete:
 			cloned["path"] = b.displayToolPath(path)
 		}
 	}
@@ -240,13 +242,13 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 		return "", ""
 	}
 	switch toolName {
-	case "Shell":
+	case tools.NameShell:
 		mainPart, grayPart := bashSummaryParts(vals)
 		if mainPart == "" {
 			return "", ""
 		}
 		return mainPart, grayPart
-	case "Spawn":
+	case tools.NameSpawn:
 		cmd := firstDisplayLine(vals["command"])
 		if cmd == "" {
 			return "", ""
@@ -255,12 +257,12 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return cmd, "(" + d + ")"
 		}
 		return cmd, ""
-	case "SpawnStop":
+	case tools.NameSpawnStop:
 		if id := vals["id"]; id != "" {
 			return id, ""
 		}
 		return "", ""
-	case "Grep":
+	case tools.NameGrep:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return "", ""
@@ -277,7 +279,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return pattern, ""
 		}
 		return pattern, "(" + strings.Join(opts, ", ") + ")"
-	case "Glob":
+	case tools.NameGlob:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return "", ""
@@ -287,7 +289,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return pattern, "(path=" + filePath + ")"
 		}
 		return pattern, ""
-	case "WebFetch":
+	case tools.NameWebFetch:
 		url := vals["url"]
 		if url == "" {
 			return "", ""
@@ -303,7 +305,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return url, ""
 		}
 		return url, "(" + strings.Join(opts, ", ") + ")"
-	case "Delete":
+	case tools.NameDelete:
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
 			return "", ""
@@ -313,7 +315,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return filePaths[0], gray
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
-	case "Skill":
+	case tools.NameSkill:
 		name := strings.TrimSpace(vals["name"])
 		if name == "" {
 			return "", ""
@@ -335,7 +337,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 		return formatToolHeaderPartsWithParsed("", keys, vals)
 	}
 	switch b.ToolName {
-	case "Delete":
+	case tools.NameDelete:
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
 			return "", ""
@@ -345,7 +347,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			return b.displayToolPath(filePaths[0]), gray
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
-	case "Grep", "Glob", "Shell", "Spawn", "Lsp":
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
@@ -360,7 +362,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 		return ""
 	}
 	switch b.ToolName {
-	case "Read":
+	case tools.NameRead:
 		path := b.displayToolPath(vals["path"])
 		if path == "" {
 			return ""
@@ -376,7 +378,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return path
 		}
 		return path + " (" + strings.Join(opts, ", ") + ")"
-	case "Delete":
+	case tools.NameDelete:
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
 			return ""
@@ -394,7 +396,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return summary + " " + gray
 		}
 		return summary
-	case "Grep":
+	case tools.NameGrep:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return ""
@@ -411,7 +413,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return pattern
 		}
 		return pattern + " (" + strings.Join(opts, ", ") + ")"
-	case "Glob":
+	case tools.NameGlob:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return ""
@@ -421,7 +423,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return pattern + " (path=" + filePath + ")"
 		}
 		return pattern
-	case "Shell", "Spawn", "Lsp":
+	case tools.NameShell, tools.NameSpawn, tools.NameLsp:
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
 		return formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
@@ -441,7 +443,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 		return ""
 	}
 	switch toolName {
-	case "Read":
+	case tools.NameRead:
 		path := vals["path"]
 		if path == "" {
 			return ""
@@ -457,7 +459,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return path
 		}
 		return path + " (" + strings.Join(opts, ", ") + ")"
-	case "Delete":
+	case tools.NameDelete:
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
 			return ""
@@ -474,7 +476,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return summary + " " + gray
 		}
 		return summary
-	case "Grep":
+	case tools.NameGrep:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return ""
@@ -491,7 +493,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return pattern
 		}
 		return pattern + " (" + strings.Join(opts, ", ") + ")"
-	case "Glob":
+	case tools.NameGlob:
 		pattern := vals["pattern"]
 		if pattern == "" {
 			return ""
@@ -501,7 +503,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return pattern + " (path=" + filePath + ")"
 		}
 		return pattern
-	case "Shell":
+	case tools.NameShell:
 		cmd := firstDisplayLine(vals["command"])
 		if cmd == "" {
 			return ""
@@ -514,7 +516,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return cmd
 		}
 		return cmd + " (" + gray + ")"
-	case "Spawn":
+	case tools.NameSpawn:
 		cmd := firstDisplayLine(vals["command"])
 		if cmd == "" {
 			return ""
@@ -526,12 +528,12 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return cmd + " (" + d + ")"
 		}
 		return cmd
-	case "SpawnStop":
+	case tools.NameSpawnStop:
 		if id := vals["id"]; id != "" {
 			return id
 		}
 		return ""
-	case "Skill":
+	case tools.NameSkill:
 		name := strings.TrimSpace(vals["name"])
 		if name == "" {
 			return ""
@@ -616,12 +618,12 @@ func extractToolParams(argsJSON string, maxWidth int) string {
 }
 
 func extractToolParamsLinesWithParsed(toolName string, keys []string, vals map[string]string) []string {
-	if toolName == "Skill" {
+	if toolName == tools.NameSkill {
 		return nil
 	}
 	var lines []string
 	for _, k := range keys {
-		if toolName == "Shell" && k == "command" {
+		if toolName == tools.NameShell && k == "command" {
 			cmd := vals[k]
 			first := firstDisplayLine(cmd)
 			if len(keys) == 1 {

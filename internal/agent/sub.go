@@ -44,7 +44,7 @@ type toolResult struct {
 	Error            error
 	TurnID           uint64
 	Duration         time.Duration
-	Diff             string              // unified diff for Write/ApplyPatch tools; not sent to LLM
+	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
 	DiffAdded        int                 // full added-line count before any diff truncation
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
@@ -202,7 +202,7 @@ type SubAgentConfig struct {
 	Parent        *MainAgent
 	ParentCtx     context.Context
 	Cancel        context.CancelFunc
-	BaseTools     *tools.Registry // shared base tool registry (Read, Write, ApplyPatch, Shell, Grep, Glob, etc.)
+	BaseTools     *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
 	ExtraMCPTools []tools.Tool    // agent-specific MCP tools
 	Ruleset       permission.Ruleset
 	WorkDir       string
@@ -226,25 +226,25 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	subTools := tools.NewRegistry()
 	hasSkillTool := false
 	delegationEnabled := cfg.Depth < cfg.Delegation.EffectiveMaxDepth()
-	delegateVisible := delegationEnabled && !cfg.Ruleset.IsDisabled("Delegate")
-	notifyVisible := !cfg.Ruleset.IsDisabled("Notify")
+	delegateVisible := delegationEnabled && !cfg.Ruleset.IsDisabled(tools.NameDelegate)
+	notifyVisible := !cfg.Ruleset.IsDisabled(tools.NameNotify)
 
 	// Copy all base tools EXCEPT MainAgent-only tools that never belong in a
 	// SubAgent (`TodoWrite`, `Handoff`) plus delegation/control-plane tools
 	// when this instance's depth/config does not allow nested delegation.
 	for _, t := range cfg.BaseTools.ListTools() {
 		switch t.Name() {
-		case "TodoWrite", "Handoff", "ReadArtifact", "SaveArtifact":
+		case tools.NameTodoWrite, tools.NameHandoff, tools.NameReadArtifact, tools.NameSaveArtifact:
 			// Skip MainAgent-only tools.
-		case "Notify":
+		case tools.NameNotify:
 			// SubAgents get a dedicated Notify tool so owner-notify and
 			// targeted-notify availability can diverge by permission group.
-		case "Skill":
+		case tools.NameSkill:
 			// Register a SubAgent-scoped Skill provider after the SubAgent is
 			// fully constructed, so listing/visibility aligns with this
 			// SubAgent's own ruleset.
 			hasSkillTool = true
-		case "Delegate", "Cancel":
+		case tools.NameDelegate, tools.NameCancel:
 			if !delegateVisible {
 				continue
 			}
@@ -254,7 +254,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}
-			if ap, ok := t.(tools.ApplyPatchTool); ok && ap.BaseDir == "" {
+			if ap, ok := t.(tools.EditTool); ok && ap.BaseDir == "" {
 				ap.BaseDir = cfg.WorkDir
 				subTools.Register(ap)
 				continue
@@ -283,7 +283,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	subTools.Register(tools.CompleteTool{})
 	subTools.Register(tools.SaveArtifactTool{})
 	subTools.Register(tools.ReadArtifactTool{})
-	if !cfg.Ruleset.IsDisabled("Escalate") {
+	if !cfg.Ruleset.IsDisabled(tools.NameEscalate) {
 		subTools.Register(tools.NewEscalateTool(sender))
 	}
 	if notifyVisible || delegateVisible {
@@ -698,14 +698,14 @@ func (s *SubAgent) hasVisibleTool(name string) bool {
 func (s *SubAgent) subAgentCoordinationPromptBlock() string {
 	visible := s.visibleToolNames()
 	lines := []string{"## SubAgent Coordination"}
-	if hasVisibleTool(visible, "Notify") {
+	if hasVisibleTool(visible, tools.NameNotify) {
 		lines = append(lines, "- Use `Notify` to surface progress, clarifications, or intermediate results that the owner agent should know before the task is finished")
 	} else {
 		lines = append(lines, "- `Notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent")
 	}
-	if hasVisibleTool(visible, "Escalate") {
+	if hasVisibleTool(visible, tools.NameEscalate) {
 		lines = append(lines, "- Call `Escalate` when owner-agent intervention, a cross-task dependency, or a decision is required")
-	} else if hasVisibleTool(visible, "Notify") {
+	} else if hasVisibleTool(visible, tools.NameNotify) {
 		lines = append(lines, "- `Escalate` is unavailable in this role; use `Notify` to surface blockers or owner-agent decisions when you cannot proceed independently")
 	} else {
 		lines = append(lines, "- `Escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up")
@@ -717,9 +717,9 @@ func (s *SubAgent) subAgentCoordinationPromptBlock() string {
 func (s *SubAgent) taskCompletionInstruction() string {
 	base := "Focus only on this task. Call `Complete` when done."
 	switch {
-	case s.hasVisibleTool("Escalate"):
+	case s.hasVisibleTool(tools.NameEscalate):
 		return base + " Call `Escalate` if you are blocked."
-	case s.hasVisibleTool("Notify"):
+	case s.hasVisibleTool(tools.NameNotify):
 		return base + " Use `Notify` if you are blocked or need owner-agent input because `Escalate` is unavailable in this role."
 	default:
 		return base + " If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up."
@@ -782,7 +782,7 @@ func (s *SubAgent) delegationPromptBlock() string {
 	if s == nil || s.parent == nil {
 		return ""
 	}
-	if _, ok := s.tools.Get("Delegate"); !ok {
+	if _, ok := s.tools.Get(tools.NameDelegate); !ok {
 		return ""
 	}
 	agents := s.parent.availableSubAgentsForPrompt()

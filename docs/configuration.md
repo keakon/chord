@@ -42,7 +42,7 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 
 - Always enabled; there is no `early_tool_execution` toggle.
 - Eligible tools: `Read`, `Grep`, `Glob`, rollback-safe file mutation tools
-  (`Write`, `ApplyPatch`, `Delete`), plus a conservative read-only subset of
+  (`Write`, `Edit`, `Delete`), plus a conservative read-only subset of
   `Shell` (single command only; no pipes/redirects/`&&`/`;`):
   - `pwd`, `ls`, `cat`, `which`
   - `git status|log|diff|show|branch|rev-parse`
@@ -58,9 +58,9 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 - Speculative results may be shown early in the UI, but they are only appended to
   the conversation context after finalize validation.
 
-### ApplyPatch arguments, matching, and display
+### Edit arguments, matching, and display
 
-`ApplyPatch` receives the target file path as a structured `path` argument. Its
+`Edit` receives the target file path as a structured `path` argument. Its
 `patch` argument normally contains hunk text: `@@` hunk headers, leading-space
 context lines, `-` removed lines, and `+` added lines. If a model accidentally
 includes Codex `apply_patch` envelope lines, Chord strips standalone
@@ -68,7 +68,7 @@ includes Codex `apply_patch` envelope lines, Chord strips standalone
 line when it matches the structured `path`. Add/delete/move operations,
 multi-file patches, and mismatched update paths are still rejected.
 
-`ApplyPatch` uses Codex-style ordered matching for the hunk body: each hunk, and
+`Edit` uses Codex-style ordered matching for the hunk body: each hunk, and
 any `@@` function/class/test header attached to that hunk, matches the first
 occurrence after the current search position. When a hunk has multiple candidate
 locations, Chord applies the first match and includes the matched line number
@@ -76,7 +76,7 @@ plus any other candidate line numbers in the tool result so the model can read
 back the area if needed. Hunks with no context/removal lines fail because there
 is no insertion point to match.
 
-While arguments stream, an `ApplyPatch` tool card follows `Write`-style path
+While arguments stream, an `Edit` tool card follows `Write`-style path
 display: no file path is shown until Chord can parse the structured `path`;
 once parsed, the path is shown in the card header.
 
@@ -809,7 +809,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  ApplyPatch: ask
+  Edit: ask
 ---
 
 You are an agent focused on backend development.
@@ -823,7 +823,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  ApplyPatch: ask
+  Edit: ask
 prompt: |
   You are an agent focused on backend development.
 ```
@@ -855,7 +855,7 @@ permission:
   WebFetch:
     "http://localhost:8000/*": ask
   Shell: allow
-  ApplyPatch: ask
+  Edit: ask
   Write: ask
 ```
 
@@ -1107,7 +1107,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
 | `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](#context-compaction) and [Context reduction](#context-reduction). |
-| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global / project     | Post-tool diagnostics appended to `ApplyPatch` / `Write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
+| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global / project     | Post-tool diagnostics appended to `Edit` / `Write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |

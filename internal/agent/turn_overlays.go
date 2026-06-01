@@ -7,7 +7,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent ApplyPatch/Write tool calls. Review the affected tool results' LSPReviews, treat blocking diagnostics in directly modified files as regressions to fix before finishing unless the user explicitly asked for a partial/WIP result, and keep any cleanup small and low-risk without expanding scope to unrelated untouched files."
+const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent Edit/Write tool calls. Review the affected tool results' LSPReviews, treat blocking diagnostics in directly modified files as regressions to fix before finishing unless the user explicitly asked for a partial/WIP result, and keep any cleanup small and low-risk without expanding scope to unrelated untouched files."
 
 // buildTurnOverlayMessages assembles per-request meta user messages that
 // deliver transient context — SubAgent mailbox, bug triage hint, loop
@@ -127,7 +127,7 @@ func shouldQueueLSPDiagnosticOverlay(history []message.Message, payload *ToolRes
 	if payload == nil {
 		return false
 	}
-	if payload.Name != tools.NameApplyPatch && payload.Name != tools.NameWrite {
+	if payload.Name != tools.NameEdit && payload.Name != tools.NameWrite {
 		return false
 	}
 	if len(payload.LSPReviews) == 0 || !hasNonZeroLSPReviews(payload.LSPReviews) {

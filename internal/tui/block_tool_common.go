@@ -8,6 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 var (
@@ -76,7 +78,7 @@ const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {
-	case "Write", "ApplyPatch", "Read", "TodoWrite", "Question", "Delegate":
+	case tools.NameWrite, tools.NameEdit, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
 		return false
 	}
 	return true
@@ -437,7 +439,7 @@ func formatToolResultSummaryLine(b *Block) string {
 
 	trimmed := strings.TrimSpace(b.ResultContent)
 	switch b.ToolName {
-	case "Shell":
+	case tools.NameShell:
 		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
 		if b.toolResultIsError() {
 			return ""
@@ -446,17 +448,17 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		return ""
-	case "Spawn":
+	case tools.NameSpawn:
 		if b.toolResultIsError() {
 			return "Failed"
 		}
 		return "Started"
-	case "SpawnStop":
+	case tools.NameSpawnStop:
 		if b.toolResultIsError() {
 			return "Failed"
 		}
 		return "Stopped"
-	case "Delegate":
+	case tools.NameDelegate:
 		if b.DoneSummary != "" {
 			return "Done"
 		}
@@ -470,7 +472,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			return "Spawned"
 		}
 		return "Running"
-	case "Grep":
+	case tools.NameGrep:
 		if b.toolResultIsError() {
 			return "Search failed"
 		}
@@ -489,7 +491,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		return fmt.Sprintf("%d matches", count)
-	case "Glob":
+	case tools.NameGlob:
 		if b.toolResultIsError() {
 			return "Search failed"
 		}
@@ -508,7 +510,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		return fmt.Sprintf("%d files", count)
-	case "Cancel":
+	case tools.NameCancel:
 		if b.toolResultIsError() {
 			return "Failed"
 		}
@@ -524,7 +526,7 @@ func formatToolResultSummaryLine(b *Block) string {
 			}
 		}
 		return "Stopped"
-	case "Notify":
+	case tools.NameNotify:
 		if b.toolResultIsError() {
 			return "Failed"
 		}
@@ -727,7 +729,7 @@ func diffContentSample(diff string) string {
 }
 
 func writeToolResultExtraVisible(b *Block) bool {
-	if b.ToolName != "Write" && b.ToolName != "Delete" {
+	if b.ToolName != tools.NameWrite && b.ToolName != tools.NameDelete {
 		return false
 	}
 	if b.toolResultIsError() || b.toolResultIsCancelled() || !b.ResultDone || strings.TrimSpace(b.ResultContent) == "" {

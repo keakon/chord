@@ -34,20 +34,20 @@ Chord 将行为配置与凭据配置分开管理。
 模型仍在流式输出响应、工具参数刚完整时，Chord 会提前执行一小批安全的只读工具，而不必等服务商完成最终确认（`CompleteStream()` 返回）后才开始。这能显著缩短最终确认阶段的体感等待时间。
 
 - 始终启用，无 `early_tool_execution` 开关。
-- 允许早执行的工具：`Read`、`Grep`、`Glob`，支持回滚的文件编辑工具（`Write`、`ApplyPatch`、`Delete`），以及 `Shell` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
+- 允许早执行的工具：`Read`、`Grep`、`Glob`，支持回滚的文件编辑工具（`Write`、`Edit`、`Delete`），以及 `Shell` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
   - `pwd`、`ls`、`cat`、`which`
   - `git status|log|diff|show|branch|rev-parse`
 - 不允许早执行：非只读 `Shell`、交互/控制类工具，以及权限为 `ask` 的工具调用。
 - 提前执行的文件变更会真实落盘，但运行时会先捕获变更前状态；若最终确认阶段丢弃了该调用，则自动回滚。同一回合内若多个提前执行的文件变更命中同一路径，后续冲突调用会跳过，留给正式路径处理。同一回合内只要有任意尚未提交的提前执行文件变更（不限路径），后续的读类早执行都会跳过——这避免了读取未提交状态，代价是读早执行会被进行中的写早执行短暂阻塞。
 - 提前执行的结果可能提前显示在界面上，但只有在最终确认通过后才会追加进对话上下文；未通过的结果会被丢弃，界面显示为「推测执行，已丢弃（不属于上下文）」。
 
-### ApplyPatch 参数、匹配与展示
+### Edit 参数、匹配与展示
 
-`ApplyPatch` 通过结构化的 `path` 参数接收目标文件路径；`patch` 参数通常包含 hunk 文本：`@@` hunk header、前导空格的上下文行、`-` 删除行和 `+` 新增行。如果模型意外带上 Codex `apply_patch` envelope 行，Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch` 标记，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行。新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记仍会被拒绝。
+`Edit` 通过结构化的 `path` 参数接收目标文件路径；`patch` 参数通常包含 hunk 文本：`@@` hunk header、前导空格的上下文行、`-` 删除行和 `+` 新增行。如果模型意外带上 Codex `apply_patch` envelope 行，Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch` 标记，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行。新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记仍会被拒绝。
 
-`ApplyPatch` 对 hunk body 采用 Codex 风格的顺序匹配：每个 hunk，以及附在该 hunk 上的 `@@` 函数 / 类 / 测试 header，都会从当前搜索位置之后选择第一处匹配。当某个 hunk 有多个候选位置时，Chord 会应用第一处匹配，并在工具结果中附带实际匹配行号和其他候选行号，方便模型按需重新 `Read` 验证。没有任何上下文/删除行的 hunk 会失败，因为工具无法确定插入位置。
+`Edit` 对 hunk body 采用 Codex 风格的顺序匹配：每个 hunk，以及附在该 hunk 上的 `@@` 函数 / 类 / 测试 header，都会从当前搜索位置之后选择第一处匹配。当某个 hunk 有多个候选位置时，Chord 会应用第一处匹配，并在工具结果中附带实际匹配行号和其他候选行号，方便模型按需重新 `Read` 验证。没有任何上下文/删除行的 hunk 会失败，因为工具无法确定插入位置。
 
-参数流式输出期间，`ApplyPatch` 工具卡采用与 `Write` 类似的路径展示：在 Chord 能解析出结构化 `path` 前不显示文件路径；解析成功后再在工具卡标题中显示该路径。
+参数流式输出期间，`Edit` 工具卡采用与 `Write` 类似的路径展示：在 Chord 能解析出结构化 `path` 前不显示文件路径；解析成功后再在工具卡标题中显示该路径。
 
 ## 最小 provider 配置
 
@@ -724,7 +724,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  ApplyPatch: ask
+  Edit: ask
 ---
 
 你是一个专注于后端开发的 Agent。
@@ -738,7 +738,7 @@ description: Backend developer
 mode: subagent
 permission:
   Write: ask
-  ApplyPatch: ask
+  Edit: ask
 prompt: |
   你是一个专注于后端开发的 Agent。
 ```
@@ -769,7 +769,7 @@ permission:
   WebFetch:
     "http://localhost:8000/*": ask
   Shell: allow
-  ApplyPatch: ask
+  Edit: ask
   Write: ask
 ```
 
@@ -946,7 +946,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
-| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `ApplyPatch` / `Write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `Edit` / `Write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |

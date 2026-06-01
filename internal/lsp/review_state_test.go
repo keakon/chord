@@ -14,7 +14,7 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
 				{ID: "write-1", Name: "Write", Args: json.RawMessage(`{"path":"a.go","content":"package main"}`)},
-				{ID: "patch-1", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"b.go","patch":"@@\n-old\n+new\n"}`)},
+				{ID: "patch-1", Name: "Edit", Args: json.RawMessage(`{"path":"b.go","patch":"@@\n-old\n+new\n"}`)},
 				{ID: "delete-1", Name: "Delete", Args: json.RawMessage(`{"paths":["a.go"],"reason":"cleanup"}`)},
 			},
 		},
@@ -27,7 +27,7 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 		{
 			Role:       "tool",
 			ToolCallID: "patch-1",
-			Content:    "ApplyPatch completed.",
+			Content:    "Edit completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 3}},
 		},
 		{
@@ -51,25 +51,25 @@ func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "patch-stale", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-old\n+bad\n"}`)},
+				{ID: "patch-stale", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-old\n+bad\n"}`)},
 			},
 		},
 		{
 			Role:       "tool",
 			ToolCallID: "patch-stale",
-			Content:    "ApplyPatch completed.",
+			Content:    "Edit completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 		},
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "patch-clean", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-bad\n+good\n"}`)},
+				{ID: "patch-clean", Name: "Edit", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-bad\n+good\n"}`)},
 			},
 		},
 		{
 			Role:       "tool",
 			ToolCallID: "patch-clean",
-			Content:    "ApplyPatch completed.",
+			Content:    "Edit completed.",
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}},
 		},
 	}

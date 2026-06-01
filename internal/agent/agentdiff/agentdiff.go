@@ -9,7 +9,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-var errNotApplyPatchTool = errors.New("not an ApplyPatch tool call")
+var errNotEditTool = errors.New("not an Edit tool call")
 
 // Summary carries both the display diff text and the exact full change counts
 // computed before any truncation is applied.
@@ -24,34 +24,34 @@ type Summary struct {
 // Returns the file path, existing content (empty string if file does not exist),
 // and whether the file existed before execution.
 func CapturePreWriteState(tc message.ToolCall) (filePath, content string, existed bool) {
-	if tc.Name != tools.NameApplyPatch {
+	if tc.Name != tools.NameEdit {
 		return
 	}
-	plan, err := CaptureApplyPatchPlan(tc, "")
+	plan, err := CaptureEditPlan(tc, "")
 	if err == nil {
 		return plan.Path, plan.Before, true
 	}
 	return
 }
 
-func CaptureApplyPatchPlan(tc message.ToolCall, baseDir string) (tools.ApplyPatchPlan, error) {
+func CaptureEditPlan(tc message.ToolCall, baseDir string) (tools.EditPlan, error) {
 	switch tc.Name {
-	case tools.NameApplyPatch:
+	case tools.NameEdit:
 		var args struct {
 			Path  string `json:"path"`
 			Patch string `json:"patch"`
 		}
 		rawArgs := llm.UnwrapToolArgs(tc.Args)
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return tools.ApplyPatchPlan{}, err
+			return tools.EditPlan{}, err
 		}
-		plan, err := tools.BuildApplyPatchPlanInDir(args.Path, args.Patch, baseDir)
+		plan, err := tools.BuildEditPlanInDir(args.Path, args.Patch, baseDir)
 		if err != nil {
-			return tools.ApplyPatchPlan{}, err
+			return tools.EditPlan{}, err
 		}
 		return plan, nil
 	default:
-		return tools.ApplyPatchPlan{}, errNotApplyPatchTool
+		return tools.EditPlan{}, errNotEditTool
 	}
 }
 
@@ -60,7 +60,7 @@ func CaptureApplyPatchPlan(tc message.ToolCall, baseDir string) (tools.ApplyPatc
 // CapturePreWriteState. Returns zero values for other tools or on any parse error.
 func GenerateToolDiff(tc message.ToolCall, preContent, preFilePath string) Summary {
 	switch tc.Name {
-	case tools.NameApplyPatch:
+	case tools.NameEdit:
 		if preFilePath == "" {
 			return Summary{}
 		}

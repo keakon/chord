@@ -289,7 +289,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		payload.Audit,
 	))
 
-	if payload.Name == "Handoff" && payload.Error == nil {
+	if payload.Name == tools.NameHandoff && payload.Error == nil {
 		var pcData struct {
 			PlanPath string `json:"plan_path"`
 		}

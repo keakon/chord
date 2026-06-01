@@ -798,7 +798,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: ""}},
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-patch-1",
-			Name: tools.NameApplyPatch,
+			Name: tools.NameEdit,
 			Args: []byte(`{"patch":"*** Begin Patch\n*** Update File: internal/tui/search_test.go\n@@\n-before\n+needle output\n*** End Patch\n"}`),
 		}},
 	})
