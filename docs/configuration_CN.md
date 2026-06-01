@@ -123,6 +123,8 @@ context:
   reduction: {}
 ```
 
+不支持 `context.reduction: false`；不写 `context.reduction`，或使用 `true` / `{}`，都会保留默认的请求级剪裁行为。
+
 当前默认值：
 
 ```yaml

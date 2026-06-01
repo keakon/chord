@@ -154,6 +154,8 @@ context:
   reduction: {}
 ```
 
+`context.reduction: false` is not supported; omit `context.reduction` or use `true` / `{}` to keep the default request-level reduction behavior.
+
 Current defaults:
 
 ```yaml

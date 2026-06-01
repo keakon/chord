@@ -902,8 +902,6 @@ func normalizeContextReductionShorthand(raw map[string]any) bool {
 	}
 	if enabled {
 		contextRaw["reduction"] = map[string]any{}
-	} else {
-		delete(contextRaw, "reduction")
 	}
 	raw["context"] = contextRaw
 	return true
@@ -935,6 +933,10 @@ var projectScopedTopLevelKeys = map[string]bool{
 
 func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string) (*Config, error) {
 	baseMap, err := configToYAMLMap(base)
+	if err != nil {
+		return nil, err
+	}
+	overrideData, err = normalizeConfigShorthands(overridePath, overrideData)
 	if err != nil {
 		return nil, err
 	}

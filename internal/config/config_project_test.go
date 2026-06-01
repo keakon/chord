@@ -23,6 +23,20 @@ func TestLoadConfigOverrideFromPathDoesNotApplyDefaults(t *testing.T) {
 	}
 }
 
+func TestMergeProjectConfigNormalizesContextReductionTrue(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "context:\n  reduction: true\n")
+
+	_, mergedCfg, err := MergeProjectConfig(DefaultConfig(), projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	defaults := DefaultConfig().Context.Reduction
+	if mergedCfg.Context.Reduction != defaults {
+		t.Fatalf("merged context.reduction = %+v, want defaults %+v", mergedCfg.Context.Reduction, defaults)
+	}
+}
+
 func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *testing.T) {
 	globalPath := filepath.Join(t.TempDir(), "global.yaml")
 	writeTestFile(t, globalPath, `providers:

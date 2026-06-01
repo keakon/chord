@@ -314,6 +314,43 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	}
 }
 
+func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessAgeTurns: 1,
+		ShellSuccessBytes:    10,
+		CacheAwareMinUsage:   0.75,
+		WarmupMessageLimit:   32,
+	}}}
+	a.providerModelRef = "test/model"
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model", 1024, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model"
+	a.llmMu.Unlock()
+	largeOutput := strings.Repeat("test output line\n", 20)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != largeOutput {
+		t.Fatalf("expected warm low-usage prompt surface to remain intact, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if !stats.Protected || stats.Messages != 0 || stats.Bytes != 0 || stats.TokensBefore != stats.TokensAfter {
+		t.Fatalf("context reduction stats = %+v, want protected no-op stats", stats)
+	}
+}
+
 func TestTopContextContributorsIncludesToolNames(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "small"},

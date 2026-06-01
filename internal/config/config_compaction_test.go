@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,23 @@ func TestLoadConfigFromPathContextReductionTrueUsesDefaultTuning(t *testing.T) {
 	defaults := DefaultConfig().Context.Reduction
 	if cfg.Context.Reduction != defaults {
 		t.Fatalf("context.reduction = %+v, want defaults %+v", cfg.Context.Reduction, defaults)
+	}
+}
+
+func TestLoadConfigFromPathContextReductionFalseIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  reduction: false\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := LoadConfigFromPath(path)
+	if err == nil {
+		t.Fatal("LoadConfigFromPath succeeded, want parse error for context.reduction: false")
+	}
+	if got := err.Error(); !strings.Contains(got, "cannot unmarshal") || !strings.Contains(got, "ContextReductionConfig") {
+		t.Fatalf("LoadConfigFromPath error = %q, want bool-to-ContextReductionConfig parse error", got)
 	}
 }
 
