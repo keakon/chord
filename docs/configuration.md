@@ -1038,15 +1038,20 @@ each with its own age and size thresholds.
 
 How to read the age and size parameters:
 
-- `*_age_turns` counts the number of **user turns** (times you send a message)
-  after the tool result. For example, `read_like_age_turns: 1` means a large
-  read result may be trimmed starting with your next message.
+- `*_age_turns` is an **effective age** threshold. A tool result becomes older
+  either when more user turns happen after it, or when a long single user turn
+  keeps adding later assistant/tool messages. Internally, Chord uses the larger
+  of "user turns after this result" and "later message progress converted to
+  effective turns". For example, `read_like_age_turns: 1` means a large read
+  result may be trimmed after your next message, and can also be trimmed within
+  the same user turn after enough later tool work has made it stale.
 - `*_bytes` is the **minimum output size in bytes** for that category to be
   eligible for trimming. Smaller outputs stay intact — short output doesn't
   need reduction.
 - `min_tool_results_prune` (default 8) is a **safety gate**: Chord won't start
   trimming until the conversation has at least this many tool-result messages,
-  preventing small conversations from being touched prematurely.
+  preventing small conversations from being touched prematurely. It does not
+  control how message progress is converted into effective age.
 
 **Tuning guidance**:
 

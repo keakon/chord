@@ -198,7 +198,7 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Repeated Read output omitted") {
+	if !strings.Contains(prepared[2].Content, "Repeated "+tools.NameRead+" output omitted") {
 		t.Fatalf("expected repeated tool output to be pruned, got %q", prepared[2].Content)
 	}
 	if prepared[8].Content != "[Older tool error omitted]" {
@@ -219,11 +219,48 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older Read output truncated to save context; file=a.go") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated to save context; file=a.go") {
 		t.Fatalf("expected old read output to keep path hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, "large read output") {
 		t.Fatalf("expected old read output to keep a small excerpt, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *testing.T) {
+	a := &MainAgent{}
+	const (
+		largeShellOutputLines = compactBashSuccessBytes
+		largeReadOutputCopies = compactReadLikeOutputBytes
+		fillerToolCalls       = compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns
+	)
+	largeShellOutput := strings.Repeat("test output line\n", largeShellOutputLines)
+	largeReadOutput := strings.Repeat("large read output ", largeReadOutputCopies)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeShellOutput},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: largeReadOutput},
+	}
+	for i := range fillerToolCalls {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted to save context; re-run the command if needed.]" {
+		t.Fatalf("expected early shell output in same user turn to be pruned, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated to save context; file=a.go") {
+		t.Fatalf("expected early read output in same user turn to be pruned, got %q", prepared[4].Content)
+	}
+	lastIndex := len(prepared) - 1
+	if prepared[lastIndex].Content != "short read output" {
+		t.Fatalf("latest tool output should remain intact, got %q", prepared[lastIndex].Content)
 	}
 }
 
@@ -241,7 +278,7 @@ func TestTopContextContributorsIncludesToolNames(t *testing.T) {
 	if contributors[0].Role != "tool" || contributors[0].Tool != tools.NameGrep || contributors[0].Index != 2 {
 		t.Fatalf("top contributor = %+v, want Grep tool result at index 2", contributors[0])
 	}
-	if !strings.Contains(contextContributorLabel(contributors[0]), "tool/Grep") {
+	if !strings.Contains(contextContributorLabel(contributors[0]), "tool/"+tools.NameGrep) {
 		t.Fatalf("label missing tool name: %q", contextContributorLabel(contributors[0]))
 	}
 }
@@ -301,7 +338,7 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older Shell output omitted to save context; re-run the command if needed.]" {
+	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted to save context; re-run the command if needed.]" {
 		t.Fatalf("expected old successful Shell output to be pruned, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
@@ -398,7 +435,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			tt.agent.loopState.Enabled = true
 			prepared := tt.agent.prepareMessagesForLLM(msgs)
-			if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+			if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 				t.Fatalf("loop mode should keep context pruning enabled, got %q", prepared[2].Content)
 			}
 			if msgs[2].Content != largeOutput {
@@ -466,7 +503,7 @@ func TestPrepareMessagesForLLM_LoopGateIgnoresFocusedSubAgentProvider(t *testing
 		focusTestSubAgent(t, a, "sub-1", "subcodex", config.ProviderPresetCodex)
 
 		prepared := a.prepareMessagesForLLM(msgs)
-		if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+		if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 			t.Fatalf("focused subagent quota should not disable main pruning, got %q", prepared[2].Content)
 		}
 	})
@@ -546,7 +583,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 
 	firstPrepared := a.prepareMessagesForLLM(msgs)
 	firstStats := a.GetContextReductionStats()
-	if !strings.Contains(firstPrepared[2].Content, "Older Shell output omitted") {
+	if !strings.Contains(firstPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
 	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
@@ -580,7 +617,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a.DisableLoopMode()
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
 	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
-	if !strings.Contains(afterLoopPrepared[7].Content, "Older Shell output omitted") {
+	if !strings.Contains(afterLoopPrepared[7].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
 	}
 }
@@ -613,7 +650,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
 	firstPrepared := a.prepareMessagesForLLM(msgs)
 	firstStats := a.GetContextReductionStats()
-	if !strings.Contains(firstPrepared[2].Content, "Older Shell output omitted") {
+	if !strings.Contains(firstPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
 	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
@@ -664,7 +701,7 @@ func TestPrepareMessagesForLLM_UserBoundaryRefreshesLowQuotaCodexReduction(t *te
 
 	a.allowContextSurfaceRefreshAtUserBoundary()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older Shell output omitted") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("user boundary should temporarily allow low-quota codex pruning, got %q", prepared[2].Content)
 	}
 }

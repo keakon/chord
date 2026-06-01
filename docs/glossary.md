@@ -40,7 +40,7 @@ An extended reasoning or chain-of-thought phase that some models perform before 
 
 ## Turn
 
-A single user-to-agent interaction round: you send a message → Chord processes it → the model responds with text and/or tool calls → tools execute → the model potentially responds again → the agent becomes idle. Many age-based settings (especially reduction thresholds) use *user turns* as the unit: one user turn is one complete message you send.
+A single user-to-agent interaction round: you send a message → Chord processes it → the model responds with text and/or tool calls → tools execute → the model potentially responds again → the agent becomes idle. Context reduction `*_age_turns` settings are effective-age thresholds: user turns are one source of age, and long single-turn assistant/tool message progress can also make earlier tool output stale.
 
 ## Session
 

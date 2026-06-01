@@ -11,31 +11,32 @@ import (
 
 const (
 	// Raw evidence pack: small continuation stabilizer (checkpoint-first design).
-	compactEvidenceMinTokens     = 512
-	compactEvidenceMaxTokens     = 2048
-	compactEvidencePercentNumer  = 2 // ~2% of context window
-	compactEvidencePercentDenom  = 100
-	compactRecentTailMinTokens   = 768
-	compactRecentTailMaxTokens   = 3072
-	compactRecentTailTurns       = 2
-	compactPromptOverhead        = 4096
-	compactReservedOutput        = 4096
-	compactPreflightBufferMin    = 1024
-	compactPreflightBufferRatio  = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
-	compactConfirmAgeTurns       = 2
-	compactErrorAgeTurns         = 3
-	compactBashSuccessAgeTurns   = 2
-	compactReadLikeAgeTurns      = 1
-	compactStaleAgeTurns         = 4
-	compactBashSuccessBytes      = 8000
-	compactReadLikeOutputBytes   = 4000
-	compactReadSnippetChars      = 500
-	compactStaleOutputBytes      = 1500
-	compactMinToolResultsPrune   = 8
-	compactSummaryMinChars       = 160
-	compactPromptSubAgentLimit   = 6
-	compactPromptDescMaxChars    = 240
-	compactPromptSummaryMaxChars = 320
+	compactEvidenceMinTokens        = 512
+	compactEvidenceMaxTokens        = 2048
+	compactEvidencePercentNumer     = 2 // ~2% of context window
+	compactEvidencePercentDenom     = 100
+	compactRecentTailMinTokens      = 768
+	compactRecentTailMaxTokens      = 3072
+	compactRecentTailTurns          = 2
+	compactPromptOverhead           = 4096
+	compactReservedOutput           = 4096
+	compactPreflightBufferMin       = 1024
+	compactPreflightBufferRatio     = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
+	compactConfirmAgeTurns          = 2
+	compactErrorAgeTurns            = 3
+	compactBashSuccessAgeTurns      = 2
+	compactReadLikeAgeTurns         = 1
+	compactStaleAgeTurns            = 4
+	compactBashSuccessBytes         = 8000
+	compactReadLikeOutputBytes      = 4000
+	compactReadSnippetChars         = 500
+	compactStaleOutputBytes         = 1500
+	compactMinToolResultsPrune      = 8
+	compactMessagesPerEffectiveTurn = 8
+	compactSummaryMinChars          = 160
+	compactPromptSubAgentLimit      = 6
+	compactPromptDescMaxChars       = 240
+	compactPromptSummaryMaxChars    = 320
 	// Budget ratio for compaction input - use 1/6 of context window
 	// to reduce transcript size and speed up model calls.
 	compactBudgetRatio = 6

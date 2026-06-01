@@ -74,6 +74,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 
 	callMeta := buildToolCallMeta(prepared)
 	turnsAfter := userTurnsAfter(prepared)
+	messageAge := messageProgressTurnsAfter(prepared, compactMessagesPerEffectiveTurn)
 	repeated := detectRepeatedToolOutputs(prepared, callMeta)
 	toolResults := countToolResults(prepared)
 
@@ -82,10 +83,10 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			continue
 		}
 		original := prepared[i].Content
-		age := turnsAfter[i]
+		age := max(turnsAfter[i], messageAge[i])
 		if repeated[i] && age >= 1 {
 			meta := callMeta[prepared[i].ToolCallID]
-			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(meta.Name))
+			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(contextReductionToolName(meta.Name)))
 			prepared[i].ToolDiff = ""
 			noteReduction(original, prepared[i].Content)
 			continue
@@ -104,7 +105,8 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= 1 {
 			meta := callMeta[prepared[i].ToolCallID]
-			if (strings.TrimSpace(meta.Name) == tools.NameEdit || strings.TrimSpace(meta.Name) == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
+			name := contextReductionToolName(meta.Name)
+			if (name == tools.NameEdit || name == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
 				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
 					prepared[i].Content = compacted
 					noteReduction(original, prepared[i].Content)
@@ -114,8 +116,8 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
 			meta := callMeta[prepared[i].ToolCallID]
-			if strings.TrimSpace(meta.Name) == tools.NameShell {
-				prepared[i].Content = "[Older Shell output omitted to save context; re-run the command if needed.]"
+			if contextReductionToolName(meta.Name) == tools.NameShell {
+				prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell)
 				prepared[i].ToolDiff = ""
 				noteReduction(original, prepared[i].Content)
 				continue
@@ -123,8 +125,9 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if age >= policy.ReadLikeAgeTurns && len(prepared[i].Content) > policy.ReadLikeOutputBytes {
 			meta := callMeta[prepared[i].ToolCallID]
-			if tools.IsReadLike(meta.Name) {
-				prepared[i].Content = compactReadLikeOutputSummary(meta.Name, meta.Args, prepared[i].Content)
+			name := contextReductionToolName(meta.Name)
+			if contextReductionIsReadLike(name) {
+				prepared[i].Content = compactReadLikeOutputSummary(name, meta.Args, prepared[i].Content)
 				prepared[i].ToolDiff = ""
 				noteReduction(original, prepared[i].Content)
 				continue
@@ -478,6 +481,26 @@ func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {
 	return meta
 }
 
+func contextReductionToolName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	for _, candidate := range []string{tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameWebFetch, tools.NameShell, tools.NameEdit, tools.NameWrite} {
+		if toolNameKey(trimmed) == toolNameKey(candidate) {
+			return candidate
+		}
+	}
+	return trimmed
+}
+
+func contextReductionIsReadLike(name string) bool {
+	name = contextReductionToolName(name)
+	return name == tools.NameRead || name == tools.NameGrep || name == tools.NameGlob || name == tools.NameWebFetch
+}
+
+func toolNameKey(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.ReplaceAll(name, "_", "")
+}
+
 func extractReadToolPath(argsJSON string) string {
 	if strings.TrimSpace(argsJSON) == "" {
 		return ""
@@ -498,9 +521,9 @@ func compactReadOutputSummary(argsJSON, content string) string {
 		snippet = "(no preserved excerpt)"
 	}
 	if path == "" {
-		return "[Older Read output truncated to save context]\n" + snippet + "\n\n[Re-run Read with offset/limit if needed.]"
+		return "[Older " + tools.NameRead + " output truncated to save context]\n" + snippet + "\n\n[Re-run " + tools.NameRead + " with offset/limit if needed.]"
 	}
-	return fmt.Sprintf("[Older Read output truncated to save context; file=%s]\n%s\n\n[Re-run Read(path=%q, offset, limit) if needed.]", path, snippet, path)
+	return fmt.Sprintf("[Older %s output truncated to save context; file=%s]\n%s\n\n[Re-run %s(path=%q, offset, limit) if needed.]", tools.NameRead, path, snippet, tools.NameRead, path)
 }
 
 func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
@@ -531,11 +554,13 @@ func compactGrepOutputSummary(argsJSON, content string) string {
 	}
 	filePath := strings.TrimSpace(parsed.FilePath)
 	return fmt.Sprintf(
-		"[Older Grep output truncated to save context; pattern=%q path=%q glob=%q]\n%s\n\n[Re-run Grep(pattern=%q, path=%q, glob=%q) if needed.]",
+		"[Older %s output truncated to save context; pattern=%q path=%q glob=%q]\n%s\n\n[Re-run %s(pattern=%q, path=%q, glob=%q) if needed.]",
+		tools.NameGrep,
 		strings.TrimSpace(parsed.Pattern),
 		blankToDefault(filePath, "."),
 		strings.TrimSpace(parsed.Glob),
 		snippet,
+		tools.NameGrep,
 		strings.TrimSpace(parsed.Pattern),
 		blankToDefault(filePath, "."),
 		strings.TrimSpace(parsed.Glob),
@@ -604,6 +629,23 @@ func userTurnsAfter(messages []message.Message) []int {
 		}
 	}
 	return turnsAfter
+}
+
+// messageProgressTurnsAfter converts later message progress into an effective
+// age measured in the same units as the user-facing *_age_turns settings. This
+// prevents long single-turn tool chains from keeping early large outputs forever
+// just because no later user message has arrived yet.
+func messageProgressTurnsAfter(messages []message.Message, messagesPerEffectiveTurn int) []int {
+	ages := make([]int, len(messages))
+	if messagesPerEffectiveTurn <= 0 {
+		return ages
+	}
+	seenMessages := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		ages[i] = seenMessages / messagesPerEffectiveTurn
+		seenMessages++
+	}
+	return ages
 }
 
 func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolCallMeta) map[int]bool {

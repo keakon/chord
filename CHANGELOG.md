@@ -5,6 +5,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ## 0.6.2-dev - Unreleased
 
 - **Breaking / Tools:** renamed the native localized file-editing tool from `ApplyPatch` to `Edit`, including the model-visible tool name, permission/config examples, TUI rendering, hooks, restored tool cards, and internal implementation names. The old Chord-native `ApplyPatch` tool name is not retained as a compatibility alias. External session import still recognizes source tool names such as Codex `apply_patch` and maps them to current `Edit` cards.
+- Runtime / Context reduction: request-level pruning now treats `*_age_turns` as effective age thresholds instead of only counting later user messages. Long single-turn tool chains can now trim earlier stale Shell/read-like/tool outputs as later assistant/tool messages accumulate, while reusing the existing `context.reduction` settings and preserving recent tool output. Configuration docs and the glossary now describe the effective-age semantics.
 
 ## 0.6.1 - 2026-06-01
 

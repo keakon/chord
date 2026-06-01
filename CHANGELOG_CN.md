@@ -5,6 +5,7 @@
 ## 0.6.2-dev - 未发布
 
 - **Breaking / Tools：** 原生局部文件编辑工具已从 `ApplyPatch` 重命名为 `Edit`，包括模型可见工具名、权限/配置示例、TUI 渲染、hooks、恢复后的工具卡片以及内部实现命名。旧的 Chord 原生 `ApplyPatch` 工具名不会作为兼容别名保留。外部会话导入仍会识别 Codex `apply_patch` 等来源工具名，并映射为当前的 `Edit` 工具卡。
+- Runtime / 上下文剪裁：请求级剪裁现在会把 `*_age_turns` 视为等效年龄阈值，而不是只统计后续用户消息。很长的单轮工具调用链会随着后续 assistant/tool 消息累积，继续裁剪更早的陈旧 Shell、read-like 和其它工具大输出；同时复用现有 `context.reduction` 配置并保留最近工具输出。配置文档和术语表已同步说明等效年龄语义。
 
 ## 0.6.1 - 2026-06-01
 
