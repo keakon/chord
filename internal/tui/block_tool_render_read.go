@@ -16,7 +16,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
-	contentWidth, codeWidth := numberedToolPreviewWidths(cardWidth)
+	contentWidth := numberedToolPreviewWidth(cardWidth)
 
 	var filePath string
 	var readArgs struct {
@@ -60,7 +60,6 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			rows:                rows,
 			sourceSample:        sourceSample,
 			contentWidth:        contentWidth,
-			codeWidth:           codeWidth,
 			defaultVisibleLines: maxReadDefaultLines,
 			expanded:            b.ReadContentExpanded,
 			highlighter:         &b.codeHL,

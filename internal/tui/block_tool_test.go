@@ -2308,6 +2308,114 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 	}
 }
 
+func TestReadCallAlignsLineNumberGutterAcrossDigitWidths(t *testing.T) {
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "Read",
+		Content:    `{"path":"sample.go","limit":3}`,
+		ResultDone: true,
+		ResultContent: strings.Join([]string{
+			"     9\tpackage main",
+			"    10\timport \"fmt\"",
+			"   100\tfunc main() {}",
+		}, "\n"),
+	}
+
+	plainLines := strings.Split(stripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
+	var cols []int
+	for _, line := range plainLines {
+		for _, marker := range []string{"package main", "import \"fmt\"", "func main() {}"} {
+			if idx := strings.Index(line, marker); idx >= 0 {
+				cols = append(cols, idx)
+			}
+		}
+	}
+	if len(cols) != 3 {
+		t.Fatalf("expected three rendered source rows, got columns %v in:\n%s", cols, strings.Join(plainLines, "\n"))
+	}
+	if cols[0] != cols[1] || cols[1] != cols[2] {
+		t.Fatalf("source columns should align across line-number digit widths, got %v in:\n%s", cols, strings.Join(plainLines, "\n"))
+	}
+}
+
+func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
+	twoDigitBlock := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "Read",
+		Content:    `{"path":"sample.go","limit":2}`,
+		ResultDone: true,
+		ResultContent: strings.Join([]string{
+			"    10\talpha",
+			"    11\tbeta",
+		}, "\n"),
+	}
+	threeDigitBlock := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "Read",
+		Content:    `{"path":"sample.go","limit":2}`,
+		ResultDone: true,
+		ResultContent: strings.Join([]string{
+			"    99\talpha",
+			"   100\tbeta",
+		}, "\n"),
+	}
+
+	twoDigitLines := strings.Split(stripANSI(strings.Join(twoDigitBlock.renderReadCall(100, ""), "\n")), "\n")
+	threeDigitLines := strings.Split(stripANSI(strings.Join(threeDigitBlock.renderReadCall(100, ""), "\n")), "\n")
+	twoDigitCol := renderedMarkerColumn(twoDigitLines, "alpha")
+	threeDigitCol := renderedMarkerColumn(threeDigitLines, "alpha")
+	if twoDigitCol < 0 || threeDigitCol < 0 {
+		t.Fatalf("expected rendered source rows, got two-digit=%d three-digit=%d\ntwo-digit:\n%s\nthree-digit:\n%s", twoDigitCol, threeDigitCol, strings.Join(twoDigitLines, "\n"), strings.Join(threeDigitLines, "\n"))
+	}
+	if got, want := threeDigitCol-twoDigitCol, 1; got != want {
+		t.Fatalf("two-digit gutter should not reserve a third digit, column delta=%d want %d\ntwo-digit:\n%s\nthree-digit:\n%s", got, want, strings.Join(twoDigitLines, "\n"), strings.Join(threeDigitLines, "\n"))
+	}
+}
+
+func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
+	lines := make([]string, 1000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("%6d\tline %d", i+1, i+1)
+	}
+	block := &Block{
+		ID:                  1,
+		Type:                BlockToolCall,
+		ToolName:            "Read",
+		Content:             `{"path":"sample.go"}`,
+		ResultDone:          true,
+		ReadContentExpanded: true,
+		ResultContent:       strings.Join(lines, "\n"),
+	}
+
+	plainLines := strings.Split(stripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
+	line1Col := renderedMarkerColumn(plainLines, "line 1")
+	line200Col := renderedMarkerColumn(plainLines, "line 200")
+	if line1Col < 0 || line200Col < 0 {
+		t.Fatalf("expected visible rows 1 and 200, got columns %d/%d in:\n%s", line1Col, line200Col, strings.Join(plainLines, "\n"))
+	}
+	if line1Col != line200Col {
+		t.Fatalf("visible rows should align, got line 1 column %d and line 200 column %d in:\n%s", line1Col, line200Col, strings.Join(plainLines, "\n"))
+	}
+	if line1000Col := renderedMarkerColumn(plainLines, "line 1000"); line1000Col >= 0 {
+		t.Fatalf("line 1000 should be beyond the render limit, got column %d in:\n%s", line1000Col, strings.Join(plainLines, "\n"))
+	}
+	if got, want := line1Col-renderedMarkerColumn(plainLines, "1  line 1"), len("1  "); got != want {
+		t.Fatalf("gutter should be based on visible max line 200, not hidden line 1000; got separator offset %d want %d in:\n%s", got, want, strings.Join(plainLines, "\n"))
+	}
+}
+
+func renderedMarkerColumn(lines []string, marker string) int {
+	for _, line := range lines {
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return idx
+		}
+	}
+	return -1
+}
+
 func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,

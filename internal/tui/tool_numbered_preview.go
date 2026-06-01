@@ -7,29 +7,22 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const numberedToolPreviewLineNumberWidth = 6
-
 type numberedToolPreviewOptions struct {
 	filePath            string
 	rows                []readDisplayLine
 	sourceSample        string
 	contentWidth        int
-	codeWidth           int
 	defaultVisibleLines int
 	expanded            bool
 	highlighter         **codeHighlighter
 }
 
-func numberedToolPreviewWidths(cardWidth int) (contentWidth, codeWidth int) {
-	contentWidth = cardWidth - 4
+func numberedToolPreviewWidth(cardWidth int) int {
+	contentWidth := cardWidth - 4
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	codeWidth = contentWidth - numberedToolPreviewLineNumberWidth - 2
-	if codeWidth < 10 {
-		codeWidth = 10
-	}
-	return contentWidth, codeWidth
+	return contentWidth
 }
 
 func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
@@ -46,6 +39,16 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 	}
 	visibleRows := opts.rows[:cap]
 	hidden := len(opts.rows) - cap
+	gutterWidth := 0
+	for _, row := range visibleRows {
+		if row.IsCode {
+			gutterWidth = max(gutterWidth, ansi.StringWidth(row.LineNo))
+		}
+	}
+	codeWidth := opts.contentWidth - gutterWidth - 2
+	if codeWidth < 10 {
+		codeWidth = 10
+	}
 
 	codeLines := make([]string, 0, len(visibleRows))
 	for _, row := range visibleRows {
@@ -67,8 +70,8 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 				highlighted = highlightedCodeLines[codeIndex]
 			}
 			codeIndex++
-			highlighted = ansi.Truncate(highlighted, opts.codeWidth, "…")
-			result = append(result, "  "+DimStyle.Render(row.LineNo)+"  "+highlighted)
+			highlighted = ansi.Truncate(highlighted, codeWidth, "…")
+			result = append(result, "  "+DimStyle.Render(fmt.Sprintf("%*s", gutterWidth, row.LineNo))+"  "+highlighted)
 		} else {
 			wrapped := ansi.Truncate(row.Content, opts.contentWidth, "…")
 			result = append(result, "  "+DimStyle.Render(wrapped))
