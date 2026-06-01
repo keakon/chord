@@ -41,14 +41,16 @@ func (m *Model) refreshAtMentionList() {
 	} else if atMentionShouldUsePathMatches(m.atMentionFiles, m.atMentionQuery) {
 		matches = atMentionPathMatches(m.atMentionQuery, m.workingDir)
 	} else {
+		rootMatches := atMentionRootPrefixMatches(m.atMentionQuery, m.workingDir)
 		if !m.atMentionLoaded || len(m.atMentionFiles) == 0 {
-			m.atMentionList = nil
-			return
-		}
-		if exact, ok := atMentionExactIndexedMatch(m.atMentionFiles, m.atMentionQuery); ok {
-			matches = []atMentionOption{exact}
+			matches = rootMatches
 		} else {
-			matches = atMentionFuzzyMatches(m.atMentionFiles, m.atMentionQuery)
+			if exact, ok := atMentionExactIndexedMatch(m.atMentionFiles, m.atMentionQuery); ok {
+				matches = []atMentionOption{exact}
+			} else {
+				matches = atMentionFuzzyMatches(m.atMentionFiles, m.atMentionQuery)
+			}
+			matches = mergeAtMentionOptions(matches, atMentionOptionsMissingFromIndex(rootMatches, m.atMentionFiles))
 		}
 	}
 

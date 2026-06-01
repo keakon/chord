@@ -448,6 +448,141 @@ func TestRefreshAtMentionListPrefersExactFilesystemMatchOutsideCache(t *testing.
 	}
 }
 
+func TestRefreshAtMentionListIncludesIgnoredRootPrefixMatch(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
+	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "AGENTS.md\n")
+	mustWriteFile(t, filepath.Join(wd, ".env"), "secret")
+	mustWriteFile(t, filepath.Join(wd, "app.png"), "png")
+
+	m := NewModel(nil)
+	m.workingDir = wd
+	m.atMentionLoaded = true
+	m.atMentionFiles = []string{"docs/guide.md"}
+	m.atMentionOpen = true
+	m.atMentionQuery = "A"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want root prefix result")
+	}
+	item, ok := m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() ok = false, want true")
+	}
+	match, _ := item.Value.(atMentionOption)
+	if match.Path != "AGENTS.md" || match.IsDir {
+		t.Fatalf("selected match = %+v, want AGENTS.md file", match)
+	}
+	if got := m.atMentionList.Len(); got != 1 {
+		t.Fatalf("atMentionList.Len() = %d, want only safe root prefix result", got)
+	}
+
+	m.atMentionQuery = ""
+	m.refreshAtMentionList()
+	if m.atMentionList == nil {
+		t.Fatal("bare @ list = nil, want indexed results")
+	}
+	if got := m.atMentionList.Len(); got != 1 {
+		t.Fatalf("bare @ list length = %d, want indexed result only", got)
+	}
+	item, ok = m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() for bare @ ok = false, want true")
+	}
+	match, _ = item.Value.(atMentionOption)
+	if match.Path == "AGENTS.md" {
+		t.Fatal("bare @ should not include root filesystem fallback result")
+	}
+}
+
+func TestRefreshAtMentionListKeepsIndexedOrderBeforeRootFallback(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "Makefile"), "all:\n\t@true\n")
+	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "Makefile\n")
+
+	m := NewModel(nil)
+	m.workingDir = wd
+	m.atMentionLoaded = true
+	m.atMentionFiles = []string{"main.go", "misc.md"}
+	m.atMentionOpen = true
+	m.atMentionQuery = "m"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want indexed and fallback results")
+	}
+	item, ok := m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() ok = false, want true")
+	}
+	match, _ := item.Value.(atMentionOption)
+	if match.Path != "main.go" {
+		t.Fatalf("selected match = %+v, want indexed fuzzy result main.go first", match)
+	}
+	if got := m.atMentionList.Len(); got != 3 {
+		t.Fatalf("atMentionList.Len() = %d, want 3 merged results", got)
+	}
+	if got := m.atMentionList.items[2].Value.(atMentionOption).Path; got != "Makefile" {
+		t.Fatalf("last merged result = %q, want appended root fallback Makefile", got)
+	}
+}
+
+func TestAtMentionRootPrefixMatches(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
+	mustWriteFile(t, filepath.Join(wd, "Alpha", "note.txt"), "note")
+	mustWriteFile(t, filepath.Join(wd, ".env"), "secret")
+	mustWriteFile(t, filepath.Join(wd, "app.png"), "png")
+
+	for _, query := range []string{"", "notes/x", "./A", "~/A", ".env"} {
+		if got := atMentionRootPrefixMatches(query, wd); got != nil {
+			t.Fatalf("atMentionRootPrefixMatches(%q) = %#v, want nil", query, got)
+		}
+	}
+
+	got := atMentionRootPrefixMatches("A", wd)
+	want := []atMentionOption{{Path: "Alpha/", IsDir: true}, {Path: "AGENTS.md", IsDir: false}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionRootPrefixMatches(%q) = %#v, want %#v", "A", got, want)
+	}
+}
+
+func TestMergeAtMentionOptions(t *testing.T) {
+	primary := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}}
+	secondary := []atMentionOption{{Path: "misc.md"}, {Path: "Makefile"}}
+	got := mergeAtMentionOptions(primary, secondary)
+	want := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}, {Path: "Makefile"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("mergeAtMentionOptions() = %#v, want %#v", got, want)
+	}
+
+	primary = make([]atMentionOption, 0, 49)
+	for i := range 49 {
+		primary = append(primary, atMentionOption{Path: fmt.Sprintf("p-%02d", i)})
+	}
+	secondary = []atMentionOption{{Path: "tail-0"}, {Path: "tail-1"}}
+	got = mergeAtMentionOptions(primary, secondary)
+	if len(got) != 50 {
+		t.Fatalf("len(mergeAtMentionOptions()) = %d, want 50", len(got))
+	}
+	if got[49].Path != "tail-0" {
+		t.Fatalf("mergeAtMentionOptions()[49] = %q, want %q", got[49].Path, "tail-0")
+	}
+}
+
+func TestAtMentionOptionsMissingFromIndex(t *testing.T) {
+	options := []atMentionOption{{Path: "main.go"}, {Path: "Makefile"}, {Path: "docs/"}}
+	files := []string{"main.go", "misc.md"}
+	got := atMentionOptionsMissingFromIndex(options, files)
+	want := []atMentionOption{{Path: "Makefile"}, {Path: "docs/"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionOptionsMissingFromIndex() = %#v, want %#v", got, want)
+	}
+}
+
 func TestAtMentionFuzzyMatchesMultiStepPath(t *testing.T) {
 	query := "docs/file.md"
 	matches := atMentionFuzzyMatches([]string{
@@ -503,10 +638,19 @@ func TestAtMentionFuzzyMatchesHidesHiddenPathsUntilQueryIncludesDotSegment(t *te
 
 func TestAtMentionPathMatchesHideHiddenEntriesUntilPrefixIncludesDot(t *testing.T) {
 	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, ".env"), "secret")
 	mustWriteFile(t, filepath.Join(wd, ".cursor", "rules.md"), "rules")
 	mustWriteFile(t, filepath.Join(wd, "docs", "guide.md"), "guide")
 
-	got := atMentionPathMatches("./", wd)
+	got := atMentionPathMatches(".", wd)
+	if len(got) == 0 {
+		t.Fatal(". returned no hidden matches")
+	}
+	if got[0].Path != ".cursor/" || !got[0].IsDir {
+		t.Fatalf(". first match = %#v, want .cursor/", got)
+	}
+
+	got = atMentionPathMatches("./", wd)
 	if len(got) != 1 {
 		t.Fatalf("len(matches) = %d, want 1 visible entry", len(got))
 	}
@@ -520,6 +664,11 @@ func TestAtMentionPathMatchesHideHiddenEntriesUntilPrefixIncludesDot(t *testing.
 	}
 	if got[0].Path != "./.cursor/" || !got[0].IsDir {
 		t.Fatalf("./. first match = %#v, want ./.cursor/", got)
+	}
+
+	got = atMentionPathMatches("..", wd)
+	if len(got) != 1 || got[0].Path != "../" || !got[0].IsDir {
+		t.Fatalf(".. matches = %#v, want only ../", got)
 	}
 }
 

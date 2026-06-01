@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- TUI / 文件引用：`@` 文件补全现在会在非空根目录前缀查询（如 `@A`）时，回退到直接检查工作区根目录，因此像 `AGENTS.md` 这类即使被 `.gitignore` 或本地 excludes 排除出缓存的 Git 索引，也仍可补全。像 `@docs/`、`@.config/` 这样的显式路径型查询则继续直接读取对应目录的文件系统补全，而不是停留在缓存索引上。
 - Tools / ApplyPatch：当前局部文件编辑工具面已切换为原生单文件 `ApplyPatch`，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`Write` 继续负责完整写入，`Delete` 继续负责整文件删除。ApplyPatch 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection，并按当前搜索位置之后的第一个 hunk 匹配应用补丁；如果某个 hunk 匹配到多个位置，会在成功输出中附带候选行提示，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
 - Tools / 文件编辑：`ApplyPatch` 现在接受通过 `Read`、之前成功的 `Write` / `ApplyPatch`，或系统解析的 `@file` mention 观察过的文件。如果文件在观察后发生变化，只要工具仍能基于当前内容验证操作，文件编辑工具会警告而不是直接拒绝；有风险的非空写前内容会备份到会话目录，并在工具结果中提示备份路径。空文件和无风险的连续 agent-owned 编辑不会创建备份。备份上限为每 path 10 个、每 session 200 个、单文件 10 MiB、每 session 总计 50 MiB；备份失败会在工具结果中说明但不阻塞编辑，备份会随会话目录删除而清理。
 - Tools / Grep & Glob：降低搜索/路径列表输出的默认结果上限并新增字节上限（`Grep` 现在最多返回 120 条匹配 / 约 12 KiB，`Glob` 最多返回 250 个路径 / 约 16 KiB），避免过宽的搜索结果挤占更相关的上下文。

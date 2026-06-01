@@ -417,14 +417,42 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 	if !isPathLikeAtMentionQuery(query) {
 		return nil
 	}
-	if query == "." {
-		return []atMentionOption{{Path: "./", IsDir: true}}
-	}
 	if query == ".." {
 		return []atMentionOption{{Path: "../", IsDir: true}}
 	}
 	if query == "~" {
 		return []atMentionOption{{Path: "~/", IsDir: true}}
+	}
+	if query == "." {
+		entries, err := os.ReadDir(workingDir)
+		if err != nil {
+			return nil
+		}
+		matches := make([]atMentionOption, 0, len(entries))
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, ".") || name == "." || name == ".." {
+				continue
+			}
+			path := escapeAtMentionPath(name)
+			if entry.IsDir() {
+				path += "/"
+			}
+			matches = append(matches, atMentionOption{Path: path, IsDir: entry.IsDir()})
+		}
+		slices.SortFunc(matches, func(a, b atMentionOption) int {
+			if a.IsDir != b.IsDir {
+				if a.IsDir {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a.Path, b.Path)
+		})
+		if len(matches) > 50 {
+			matches = matches[:50]
+		}
+		return matches
 	}
 	if exact, ok := atMentionExactPathMatch(query, workingDir); ok {
 		return []atMentionOption{exact}
@@ -478,6 +506,99 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 		matches = matches[:50]
 	}
 	return matches
+}
+
+func atMentionRootPrefixMatches(query, workingDir string) []atMentionOption {
+	normalized := normalizeAtMentionQuery(query)
+	if normalized == "" || isPathLikeAtMentionQuery(normalized) {
+		return nil
+	}
+	if workingDir == "" {
+		workingDir = "."
+	}
+	entries, err := os.ReadDir(workingDir)
+	if err != nil {
+		return nil
+	}
+	prefix := strings.ToLower(normalized)
+	out := make([]atMentionOption, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(strings.ToLower(name), prefix) {
+			continue
+		}
+		if skipAtMentionIndexedPath(name) {
+			continue
+		}
+		path := escapeAtMentionPath(name)
+		if entry.IsDir() {
+			path += "/"
+		}
+		out = append(out, atMentionOption{Path: path, IsDir: entry.IsDir()})
+	}
+	slices.SortFunc(out, func(a, b atMentionOption) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	return out
+}
+
+func mergeAtMentionOptions(primary, secondary []atMentionOption) []atMentionOption {
+	if len(primary) == 0 {
+		return secondary
+	}
+	if len(secondary) == 0 {
+		return primary
+	}
+	seen := make(map[string]bool, len(primary)+len(secondary))
+	out := make([]atMentionOption, 0, len(primary)+len(secondary))
+	appendUnique := func(options []atMentionOption) {
+		for _, option := range options {
+			if seen[option.Path] {
+				continue
+			}
+			seen[option.Path] = true
+			out = append(out, option)
+			if len(out) >= 50 {
+				return
+			}
+		}
+	}
+	appendUnique(primary)
+	if len(out) < 50 {
+		appendUnique(secondary)
+	}
+	return out
+}
+
+func atMentionOptionsMissingFromIndex(options []atMentionOption, files []string) []atMentionOption {
+	if len(options) == 0 {
+		return nil
+	}
+	if len(files) == 0 {
+		return options
+	}
+	indexed := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		indexed[file] = struct{}{}
+	}
+	out := make([]atMentionOption, 0, len(options))
+	for _, option := range options {
+		path := strings.TrimSuffix(unescapeAtMentionPath(option.Path), "/")
+		if _, ok := indexed[path]; ok {
+			continue
+		}
+		out = append(out, option)
+	}
+	return out
 }
 
 func atMentionSubsequencePositions(haystack, needle string) ([]int, bool) {
