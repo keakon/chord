@@ -21,6 +21,7 @@ type deleteLockSet struct {
 	agent  string
 	track  *filelock.FileTracker
 	mode   deleteLockReleaseMode
+	stale  bool
 	result tools.DeleteResultGroups
 }
 
@@ -37,23 +38,28 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 	}
 
 	locked := make([]string, 0, len(req.Paths))
+	stale := false
 	for _, path := range req.Paths {
 		currentHash := computeFileHash(path)
 		if currentHash == "" {
 			continue // already absent; DeleteTool treats this as warning, not blocker
 		}
-		if err := tracker.AcquireWrite(path, agentID, currentHash); err != nil {
+		status, err := tracker.AcquireWriteStatus(path, agentID, currentHash)
+		if err != nil {
 			for i := len(locked) - 1; i >= 0; i-- {
 				tracker.AbortWrite(locked[i], agentID)
 			}
 			return nil, err
+		}
+		if status.ExternalChanged {
+			stale = true
 		}
 		locked = append(locked, path)
 	}
 	if len(locked) == 0 {
 		return nil, nil
 	}
-	return &deleteLockSet{paths: locked, agent: agentID, track: tracker}, nil
+	return &deleteLockSet{paths: locked, agent: agentID, track: tracker, stale: stale}, nil
 }
 
 func (s *deleteLockSet) Release() {

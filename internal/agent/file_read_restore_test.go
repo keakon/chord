@@ -47,13 +47,7 @@ func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *test
 		t.Fatalf("restore result = %+v, want one stale durable restore", result)
 	}
 
-	err := executeApplyPatch(t, a, path, "changed", "after")
-	if err == nil {
-		t.Fatal("expected stale restore to block edit")
-	}
-	if !strings.Contains(err.Error(), "changed on disk since the last read") {
-		t.Fatalf("edit error = %q, want disk-change guidance", err.Error())
-	}
+	mustExecuteApplyPatch(t, a, path, "changed", "after")
 }
 
 func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
@@ -72,7 +66,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
 	}
 
 	err := executeApplyPatch(t, a, path, "before", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
 }
@@ -107,7 +101,7 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 		t.Fatalf("restore result = %+v, want real path restored", result)
 	}
 
-	if err := executeApplyPatch(t, a, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, a, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("old path edit error = %v, want unread-file error", err)
 	}
 	mustExecuteApplyPatch(t, a, realPath, "real", "updated")
@@ -127,7 +121,7 @@ func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T)
 	}
 
 	err := executeApplyPatch(t, a, path, "before", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
 }
@@ -155,7 +149,7 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 	}
 
 	err := executeApplyPatch(t, a, path, "recreated", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("edit error = %v, want unread-file error", err)
 	}
 }
@@ -206,7 +200,7 @@ func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T
 	a.activateLoadedSession(loaded)
 
 	mustExecuteApplyPatch(t, a, path, "before", "after")
-	if err := executeApplyPatch(t, a, otherPath, "other", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, a, otherPath, "other", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("other path edit error = %v, want tracker reset to drop old session", err)
 	}
 }
@@ -287,7 +281,7 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want one usable restore from persisted effective args", result)
 	}
-	if err := executeApplyPatch(t, b, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, b, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("old path edit error = %v, want unread-file error", err)
 	}
 	mustExecuteApplyPatch(t, b, realPath, "real", "updated")

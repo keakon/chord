@@ -13,7 +13,7 @@ func applyPatchReadPreconditionError(path string) error {
 	return &filelock.UnreadFileError{
 		Path: path,
 		Message: fmt.Sprintf(
-			"file %s has not been read in this conversation; use Read on this file before ApplyPatch, then retry with a small unique patch hunk",
+			"file %s has not been observed in this conversation; use Read or a system-resolved @file mention before ApplyPatch, then retry with a small unique patch hunk",
 			path,
 		),
 	}
@@ -39,10 +39,6 @@ func wrapTrackedWriteError(err error) error {
 	}
 	var unread *filelock.UnreadFileError
 	if errors.As(err, &unread) {
-		return err
-	}
-	var ext *filelock.ExternalModificationError
-	if errors.As(err, &ext) {
 		return err
 	}
 	return fmt.Errorf("file conflict: %w", err)

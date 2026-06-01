@@ -99,6 +99,7 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 			Text: compactionFileCtxPrefix + " for continuation.\n",
 		}}, result.Parts...),
 	}
+	a.trackObservedFileParts(injected.Parts)
 
 	out := make([]message.Message, 0, len(messages)+1)
 	out = append(out, messages[:checkpointIdx+1]...)

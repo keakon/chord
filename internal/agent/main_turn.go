@@ -115,6 +115,7 @@ func pendingUserMessageText(p pendingUserMessage) string {
 
 func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 	a.ctxMgr.Append(userMsg)
+	a.trackObservedFileParts(userMsg.Parts)
 	a.recordEvidenceFromMessage(userMsg)
 	if a.usageLedger != nil {
 		if err := a.usageLedger.SetFirstUserMessage(message.UserPromptPlainText(userMsg)); err != nil {

@@ -383,6 +383,7 @@ type MainAgent struct {
 	taskRecords              map[string]*DurableTaskRecord // taskID → durable task record
 	sem                      chan struct{}                 // bounded concurrency semaphore (cap = 10)
 	fileTrack                *filelock.FileTracker         // file write conflict detection
+	fileBackups              *fileBackupManager            // session-scoped risky write backups
 	recovery                 *recovery.RecoveryManager     // session persistence and crash recovery
 	sessionLock              *recovery.SessionLock         // cross-process exclusive ownership of sessionDir
 	sessionArtifactsDirFn    func() string                 // active session artifacts directory for exports / dumps
@@ -642,6 +643,7 @@ func NewMainAgent(
 		taskRecords:              make(map[string]*DurableTaskRecord),
 		sem:                      make(chan struct{}, 10),
 		fileTrack:                filelock.NewFileTracker(),
+		fileBackups:              newFileBackupManager(sessionDir),
 		nudgeCounts:              make(map[string]int),
 		subAgentInbox:            newSubAgentInbox(),
 		ownedSubAgentMailboxes:   make(map[string][]SubAgentMailboxMessage),

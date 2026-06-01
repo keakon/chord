@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -30,6 +29,7 @@ type toolExecutionPipeline struct {
 	sessionDir   string
 	registry     *tools.Registry
 	fileTrack    *filelock.FileTracker
+	fileBackups  *fileBackupManager
 	eventSender  tools.EventSender
 	emit         func(AgentEvent)
 	guidance     string
@@ -74,17 +74,21 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err != nil {
 		return execResult, err
 	}
+	if tc.Name == tools.NameApplyPatch {
+		if err := ensureTrackedApplyPatchPreconditions(p.fileTrack, p.agentID, trackedFilePath, tc.Name); err != nil {
+			return execResult, wrapTrackedWriteError(err)
+		}
+	}
 	if deleteLocks != nil {
 		defer deleteLocks.Release()
 	}
-	if err := ensureTrackedApplyPatchPreconditions(p.fileTrack, p.agentID, trackedFilePath, tc.Name); err != nil {
-		return execResult, wrapTrackedWriteError(err)
-	}
-	if releaseWrite, err := acquireTrackedWriteLock(p.fileTrack, p.agentID, trackedFilePath, tc.Name); err != nil {
+	releaseWrite, writeStatus, err := acquireTrackedWriteLock(p.fileTrack, p.agentID, trackedFilePath, tc.Name)
+	if err != nil {
 		return execResult, err
 	} else if releaseWrite != nil {
 		defer releaseWrite()
 	}
+	staleWrite := writeStatus.ExternalChanged || (deleteLocks != nil && deleteLocks.stale)
 	if tc.Name == tools.NameApplyPatch {
 		plan, err := agentdiff.CaptureApplyPatchPlan(tc, p.projectRoot)
 		if err != nil {
@@ -95,6 +99,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	} else {
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
 	}
+
+	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
 
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	if err != nil {
@@ -108,6 +114,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
 	p.applySuccessfulFileState(&execResult, tc, trackedFilePath)
+	result = appendBackupNotes(result, staleWrite, staleWritePathCount(trackedFilePath, deleteLocks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
 	return execResult, nil
 }
@@ -143,6 +150,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
 	}
 	artifactKey := toolCallArtifactKey(tc)
+	staleWrite := hooks != nil && hooks.stale
+	trackedFilePath := speculativeTrackedFilePath(tc.Name, execResult.PreFilePath, hooks)
+	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, speculativeDeleteLocks(tc.Name, hooks))
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	if err != nil {
 		rollbackSpeculativeToolHooks(execResult)
@@ -152,8 +162,33 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		return execResult, err
 	}
 	applySpeculativeFileState(&execResult, p.registry, tc, result, p.projectRoot)
+	result = appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
 	return execResult, nil
+}
+
+func speculativeTrackedFilePath(toolName, preFilePath string, hooks *speculativeToolHooks) string {
+	if toolName != tools.NameDelete && hooks != nil && len(hooks.paths) == 1 {
+		return hooks.paths[0]
+	}
+	return preFilePath
+}
+
+func speculativeDeleteLocks(toolName string, hooks *speculativeToolHooks) *deleteLockSet {
+	if toolName != tools.NameDelete || hooks == nil || len(hooks.paths) == 0 {
+		return nil
+	}
+	return &deleteLockSet{paths: hooks.paths}
+}
+
+func speculativeStaleWritePathCount(toolName, trackedPath string, hooks *speculativeToolHooks) int {
+	if toolName == tools.NameDelete && hooks != nil {
+		return len(hooks.paths)
+	}
+	if strings.TrimSpace(trackedPath) != "" {
+		return 1
+	}
+	return 0
 }
 
 func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
@@ -279,6 +314,11 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 	}
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameApplyPatch) && trackedFilePath != "" {
 		execResult.FileState = buildWriteFileState(trackedFilePath)
+		if p.fileTrack != nil {
+			if hash := firstWriteHashForPath(execResult.FileState, trackedFilePath); hash != "" {
+				p.fileTrack.TrackRead(trackedFilePath, p.agentID, hash)
+			}
+		}
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(p.registry, tc.Name, trackedFilePath)
 	}
 }
@@ -321,10 +361,6 @@ func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall)
 	case tools.NameDelete:
 		locks, err := acquireDeleteLocks(p.fileTrack, p.agentID, tc.Args)
 		if err != nil {
-			var ext *filelock.ExternalModificationError
-			if errors.As(err, &ext) {
-				return "", nil, err
-			}
 			return "", nil, fmt.Errorf("file conflict: %w", err)
 		}
 		return "", locks, nil
@@ -337,18 +373,91 @@ func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall)
 	}
 }
 
-func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolName string) (func(), error) {
+func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolName string) (func(), filelock.WriteStatus, error) {
+	var status filelock.WriteStatus
 	if track == nil || path == "" || (toolName != tools.NameWrite && toolName != tools.NameApplyPatch) {
-		return nil, nil
+		return nil, status, nil
 	}
 	currentHash := computeFileHash(path)
-	if err := track.AcquireWrite(path, agentID, currentHash); err != nil {
-		return nil, wrapTrackedWriteError(err)
+	var err error
+	status, err = track.AcquireWriteStatus(path, agentID, currentHash)
+	if err != nil {
+		return nil, status, wrapTrackedWriteError(err)
 	}
 	return func() {
 		newHash := computeFileHash(path)
 		track.ReleaseWrite(path, agentID, newHash)
-	}, nil
+	}, status, nil
+}
+
+func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, trackedPath string, stale bool, preContent string, preExisted bool, deleteLocks *deleteLockSet) fileBackupOutcome {
+	if p.fileBackups == nil || !isTrackedFileMutationTool(tc.Name) {
+		return fileBackupOutcome{}
+	}
+	switch tc.Name {
+	case tools.NameApplyPatch:
+		if !stale || !preExisted || preContent == "" || trackedPath == "" {
+			return fileBackupOutcome{}
+		}
+		backup, err := p.fileBackups.Backup(trackedPath, tc.Name, []byte(preContent))
+		if err != nil {
+			return fileBackupOutcome{Warning: err.Error()}
+		}
+		return fileBackupOutcome{Records: nonEmptyBackupRecords(backup)}
+	case tools.NameWrite:
+		if !stale || trackedPath == "" {
+			return fileBackupOutcome{}
+		}
+		data, existed, err := readPreWriteBytes(trackedPath)
+		if err != nil {
+			return fileBackupOutcome{Warning: err.Error()}
+		}
+		if !existed || len(data) == 0 {
+			return fileBackupOutcome{}
+		}
+		backup, err := p.fileBackups.Backup(trackedPath, tc.Name, data)
+		if err != nil {
+			return fileBackupOutcome{Warning: err.Error()}
+		}
+		return fileBackupOutcome{Records: nonEmptyBackupRecords(backup)}
+	case tools.NameDelete:
+		if deleteLocks == nil || len(deleteLocks.paths) == 0 {
+			return fileBackupOutcome{}
+		}
+		if !stale {
+			return fileBackupOutcome{}
+		}
+		backups := make([]fileBackupRecord, 0, len(deleteLocks.paths))
+		var warnings []string
+		for _, path := range deleteLocks.paths {
+			data, existed, err := readPreWriteBytes(path)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
+				continue
+			}
+			if !existed || len(data) == 0 {
+				continue
+			}
+			backup, err := p.fileBackups.Backup(path, tc.Name, data)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
+				continue
+			}
+			if backup.Path != "" {
+				backups = append(backups, backup)
+			}
+		}
+		return fileBackupOutcome{Records: backups, Warning: strings.Join(warnings, "; ")}
+	default:
+		return fileBackupOutcome{}
+	}
+}
+
+func nonEmptyBackupRecords(backup fileBackupRecord) []fileBackupRecord {
+	if strings.TrimSpace(backup.Path) == "" {
+		return nil
+	}
+	return []fileBackupRecord{backup}
 }
 
 func toolPathFromArgs(args json.RawMessage) string {

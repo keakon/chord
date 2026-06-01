@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -124,6 +125,24 @@ func computeFileHash(path string) string {
 		return ""
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func normalizeAgentFilePath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if eval, err := filepath.EvalSymlinks(path); err == nil {
+		path = eval
+	}
+	path = filepath.Clean(path)
+	if path == "." {
+		return ""
+	}
+	return path
 }
 
 func isInternalControlTool(_ string) bool { return false }

@@ -656,7 +656,7 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 	if a.fileTrack.HasRead(betaPath, a.instanceID) {
 		t.Fatal("fork should not preserve tracked reads that occur after the fork prefix")
 	}
-	if err := executeApplyPatch(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been read") {
+	if err := executeApplyPatch(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
 		t.Fatalf("beta edit error = %v, want unread-file error after fork", err)
 	}
 }

@@ -51,6 +51,50 @@ func TestSpeculativeWritePromoteKeepsFile(t *testing.T) {
 	}
 }
 
+func TestSpeculativeWriteOnStaleFileWarnsAndBacksUp(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "stale.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.WriteTool{})
+
+	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("external"), 0o644); err != nil {
+		t.Fatalf("external WriteFile: %v", err)
+	}
+
+	ctx := t.Context()
+	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
+	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"speculative"}`)}
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift {
+		t.Fatal("Promote reported drift")
+	}
+	if !ok || payload == nil || payload.Error != nil {
+		t.Fatalf("Promote payload=%#v ok=%v", payload, ok)
+	}
+	if !strings.Contains(payload.Result, "Warning: the file changed on disk") || !strings.Contains(payload.Result, "Backup saved to:") {
+		t.Fatalf("result missing stale warning/backup: %q", payload.Result)
+	}
+	backupPath := strings.TrimSpace(payload.Result[strings.LastIndex(payload.Result, "Backup saved to:")+len("Backup saved to:"):])
+	backup, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile backup %q: %v", backupPath, err)
+	}
+	if string(backup) != "external" {
+		t.Fatalf("backup content = %q, want external", backup)
+	}
+}
+
 func TestSpeculativeWriteDiscardRemovesNewFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "new.txt")

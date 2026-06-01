@@ -231,6 +231,9 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
 	a.sessionDir = sessionDir
+	if a.fileBackups != nil {
+		a.fileBackups.SetSessionDir(sessionDir)
+	}
 	a.recovery = recovery.NewRecoveryManager(sessionDir)
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
 	a.setTaskRecords(nil)

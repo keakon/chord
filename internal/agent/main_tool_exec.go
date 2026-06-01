@@ -41,6 +41,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		sessionDir:   a.sessionDir,
 		registry:     a.tools,
 		fileTrack:    a.fileTrack,
+		fileBackups:  a.fileBackups,
 		eventSender:  a,
 		emit:         a.emitToTUI,
 		projectRoot:  a.projectRoot,

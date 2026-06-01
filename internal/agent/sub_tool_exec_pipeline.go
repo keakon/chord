@@ -9,12 +9,14 @@ import (
 func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 	var (
 		fileTrack   *filelock.FileTracker
+		fileBackups *fileBackupManager
 		eventSender tools.EventSender
 		emit        func(AgentEvent)
 		confirm     ConfirmFunc
 	)
 	if s.parent != nil {
 		fileTrack = s.parent.fileTrack
+		fileBackups = s.parent.fileBackups
 		eventSender = s.parent
 		emit = s.parent.emitToTUI
 		confirm = s.parent.confirmFn
@@ -26,6 +28,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		sessionDir:   s.sessionDir,
 		registry:     s.tools,
 		fileTrack:    fileTrack,
+		fileBackups:  fileBackups,
 		eventSender:  eventSender,
 		emit:         emit,
 		guidance:     subToolOutputGuidance,

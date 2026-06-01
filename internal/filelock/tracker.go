@@ -23,16 +23,6 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string { return e.Message }
 
-// ExternalModificationError is returned when on-disk content no longer matches
-// what the agent last recorded via TrackRead: another in-process writer, an
-// external editor, or any other process may have changed the file.
-type ExternalModificationError struct {
-	Path    string
-	Message string
-}
-
-func (e *ExternalModificationError) Error() string { return e.Message }
-
 // UnreadFileError is returned when ApplyPatch attempts to modify a file that this
 // agent has not successfully Read in the current conversation.
 type UnreadFileError struct {
@@ -41,6 +31,11 @@ type UnreadFileError struct {
 }
 
 func (e *UnreadFileError) Error() string { return e.Message }
+
+// WriteStatus reports non-blocking risk detected while acquiring a write lock.
+type WriteStatus struct {
+	ExternalChanged bool
+}
 
 // readDiskHash computes the SHA-256 hash of the file at path.
 // Returns "" if the file does not exist or cannot be read.
@@ -81,9 +76,8 @@ func normalizeTrackedPath(raw string) string {
 
 // FileTracker provides in-process optimistic concurrency control for file
 // access. It prevents write-write conflicts (two agents writing the same file
-// simultaneously), detects when another agent invalidated a read sentinel, and
-// returns [ExternalModificationError] when on-disk content no longer matches
-// the hash last recorded for this agent (another writer, external editor, etc.).
+// simultaneously) and reports when on-disk content no longer matches the hash
+// last recorded for this agent (another writer, external editor, etc.).
 //
 // All methods are goroutine-safe.
 type FileTracker struct {
@@ -153,17 +147,23 @@ func (t *FileTracker) HasRead(path, agentID string) bool {
 // It checks conditions in order:
 //  1. Write-write conflict: another goroutine (even from the same agent)
 //     currently holds write permission.
-//  2. Stale read: this agent's tracked read hash is empty (another agent
-//     wrote) or does not match currentHash (typically the current disk hash).
-//  3. Disk drift: if the caller's currentHash matched the tracked read hash but
-//     the file on disk changed before this method could verify (rare race).
+//  2. Stale/external changes are returned as [WriteStatus] by
+//     [AcquireWriteStatus], not rejected.
 //
 // currentHash is the hash of the file as computed immediately before calling
 // AcquireWrite (i.e. the hash the caller already has).
 func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
+	_, err := t.AcquireWriteStatus(path, agentID, currentHash)
+	return err
+}
+
+// AcquireWriteStatus acquires write permission and reports stale/external-change
+// risk without rejecting it. Concurrent write-write conflicts are still rejected.
+func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (WriteStatus, error) {
+	var status WriteStatus
 	path = normalizeTrackedPath(path)
 	if path == "" {
-		return nil
+		return status, nil
 	}
 	// Read disk hash outside the lock to avoid holding the mutex during I/O.
 	// We capture the diskReadHash under the lock first, then do the I/O.
@@ -189,7 +189,7 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 
 	// Write-write conflict.
 	if owner, ok := t.writers[path]; ok {
-		return &ConflictError{
+		return status, &ConflictError{
 			Path:       path,
 			ModifiedBy: owner,
 			Message:    fmt.Sprintf("file %s is being written by %s", path, owner),
@@ -200,20 +200,7 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 	// the caller sees now (typically the current on-disk file).
 	if hashes, ok := t.readHashes[path]; ok {
 		if readHash, tracked := hashes[agentID]; tracked && currentHash != readHash {
-			if readHash == "" {
-				// Sentinel from ReleaseWrite: another agent wrote this path.
-				return &ConflictError{
-					Path:    path,
-					Message: fmt.Sprintf("file %s was modified after your last read; re-read this file before editing and retry with the latest content", path),
-				}
-			}
-			return &ExternalModificationError{
-				Path: path,
-				Message: fmt.Sprintf(
-					"file %s changed on disk since the last read; re-read this file before editing and retry with the latest content",
-					path,
-				),
-			}
+			status.ExternalChanged = true
 		}
 	}
 
@@ -226,18 +213,12 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 			}
 		}
 		if diskReadHash != "" && actualDiskHash != "" && actualDiskHash != diskReadHash {
-			return &ExternalModificationError{
-				Path: path,
-				Message: fmt.Sprintf(
-					"file %s changed on disk since the last read; re-read this file before editing and retry with the latest content",
-					path,
-				),
-			}
+			status.ExternalChanged = true
 		}
 	}
 
 	t.writers[path] = agentID
-	return nil
+	return status, nil
 }
 
 // AbortWrite releases write permission for a single file without updating read

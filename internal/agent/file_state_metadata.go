@@ -73,3 +73,19 @@ func firstReadHashForPath(state *message.ToolFileState, path string) string {
 	}
 	return ""
 }
+
+func firstWriteHashForPath(state *message.ToolFileState, path string) string {
+	if state == nil {
+		return ""
+	}
+	key := restoreNormalizeTrackedPath(path)
+	if key == "" {
+		return ""
+	}
+	for _, write := range state.Writes {
+		if restoreNormalizeTrackedPath(write.Path) == key && write.Exists && strings.TrimSpace(write.SHA256) != "" {
+			return strings.TrimSpace(write.SHA256)
+		}
+	}
+	return ""
+}

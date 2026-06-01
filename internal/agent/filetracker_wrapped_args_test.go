@@ -38,8 +38,8 @@ func TestMainAgent_ApplyPatchRequiresPriorRead(t *testing.T) {
 		t.Fatal("expected ApplyPatch precondition error")
 	}
 	for _, want := range []string{
-		"has not been read in this conversation",
-		"use Read on this file before ApplyPatch",
+		"has not been observed in this conversation",
+		"use Read or a system-resolved @file mention before ApplyPatch",
 		"small unique patch hunk",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -171,9 +171,8 @@ func TestMainAgent_ApplyPatchReportsDiskDriftWithRereadGuidance(t *testing.T) {
 		t.Fatal("expected stale-read/disk-drift error")
 	}
 	for _, want := range []string{
-		"changed on disk since the last read",
-		"re-read this file before editing",
-		"latest content",
+		"hunk not found",
+		"Re-read the target area",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("err = %q, want substring %q", err.Error(), want)

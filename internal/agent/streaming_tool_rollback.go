@@ -22,6 +22,8 @@ type speculativeToolHooks struct {
 	commit       func()
 	rollback     func() error
 	captureAfter func()
+	stale        bool
+	paths        []string
 }
 
 type speculativeFileSnapshot struct {
@@ -37,6 +39,8 @@ type speculativeFileMutation struct {
 	agentID    string
 	track      *filelock.FileTracker
 	files      []speculativeFileSnapshot
+	stale      bool
+	paths      []string
 	commit     bool
 	rolledBack bool
 }
@@ -118,13 +122,18 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 			return nil, err
 		}
 		if track != nil && snap.Existed {
-			if err := track.AcquireWrite(path, agentID, snap.Hash); err != nil {
+			status, err := track.AcquireWriteStatus(path, agentID, snap.Hash)
+			if err != nil {
 				for i := len(locked) - 1; i >= 0; i-- {
 					track.AbortWrite(locked[i], agentID)
 				}
 				return nil, err
 			}
+			if status.ExternalChanged {
+				mutation.stale = true
+			}
 			locked = append(locked, path)
+			mutation.paths = append(mutation.paths, path)
 		}
 		mutation.files = append(mutation.files, snap)
 	}
@@ -205,6 +214,8 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 			return m.Rollback()
 		},
 		captureAfter: func() { m.CaptureAfter() },
+		stale:        m.stale,
+		paths:        append([]string(nil), m.paths...),
 	}
 }
 

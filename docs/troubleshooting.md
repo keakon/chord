@@ -180,19 +180,19 @@ Chord handles two transcript-height accounting risks:
 - Late updates to older status cards could leave the viewport shorter than the real transcript.
 - Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
-## ApplyPatch reports `file ... has not been read in this conversation`
+## ApplyPatch reports `file ... has not been observed in this conversation`
 
-Chord requires `ApplyPatch` to have a tracked `Read` of the same file earlier in the conversation. This avoids stale blind edits and makes retries more reliable.
+Chord requires `ApplyPatch` to have an observed target file earlier in the conversation. An observation can come from `Read`, a successful `Write`/`ApplyPatch` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `Read` when you need more surrounding context.
 
 If you see this error:
 
-- run `Read` on the target file first;
+- run `Read` on the target file or mention it with `@file` first;
 - retry with a small patch hunk that has enough unique `@@` context;
 - re-read the smallest unique 2-4 line block before retrying if any earlier edit or external tool may have changed the file.
 
-## ApplyPatch reports `changed on disk since the last read` even when the previous patch succeeded
+## A file-edit tool warns that the file changed since it was observed
 
-This error comes from Chord's in-process optimistic file locking. It means Chord believes the file no longer matches the last content hash it recorded for this agent.
+This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `ApplyPatch` still validates hunks against the current file contents, while `Write` and `Delete` back up risky non-empty pre-write contents before continuing.
 
 Common causes:
 
@@ -200,7 +200,7 @@ Common causes:
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
 - the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
 
-If this persists, capture the session JSONL and current file diff so the tool-call ordering and tracked paths can be inspected.
+If a backup was created, the tool result includes its path under the current session directory. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Backups are removed when the session directory is deleted.
 
 ## ApplyPatch reports `hunk not found` or `matched multiple locations`
 

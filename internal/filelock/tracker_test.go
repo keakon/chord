@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -147,30 +146,23 @@ func TestAcquireWrite_StaleReadDetection(t *testing.T) {
 	ft.ReleaseWrite("main.go", "agent-2", "hash-v2")
 
 	// agent-1's read hash was invalidated by ReleaseWrite (empty sentinel).
-	err := ft.AcquireWrite("main.go", "agent-1", "hash-v2")
-	if err == nil {
-		t.Fatal("expected stale-read conflict error")
+	status, err := ft.AcquireWriteStatus("main.go", "agent-1", "hash-v2")
+	if err != nil {
+		t.Fatalf("stale read should warn but still acquire: %v", err)
 	}
-	var stale *ConflictError
-	if !errors.As(err, &stale) {
-		t.Fatalf("expected ConflictError, got %T: %v", err, err)
+	if !status.ExternalChanged {
+		t.Fatal("expected stale read to report ExternalChanged")
 	}
-	if !strings.Contains(stale.Error(), "re-read this file before editing") {
-		t.Fatalf("stale error = %q, want re-read guidance", stale.Error())
-	}
+	ft.AbortWrite("main.go", "agent-1")
 
 	ft2 := NewFileTracker()
 	ft2.TrackRead("f.go", "a1", "h1")
-	err = ft2.AcquireWrite("f.go", "a1", "h2")
-	if err == nil {
-		t.Fatal("expected external-modification error")
+	status, err = ft2.AcquireWriteStatus("f.go", "a1", "h2")
+	if err != nil {
+		t.Fatalf("external modification should warn but still acquire: %v", err)
 	}
-	var ext *ExternalModificationError
-	if !errors.As(err, &ext) {
-		t.Fatalf("expected ExternalModificationError, got %T: %v", err, err)
-	}
-	if !strings.Contains(ext.Error(), "re-read this file before editing") {
-		t.Fatalf("external-modification error = %q, want re-read guidance", ext.Error())
+	if !status.ExternalChanged {
+		t.Fatal("expected external modification to report ExternalChanged")
 	}
 }
 
@@ -237,10 +229,15 @@ func TestReleaseWrite_InvalidatesOtherReadHashes(t *testing.T) {
 	ft.ReleaseWrite("f.go", "agent-1", "v2")
 
 	// agent-2's read hash was set to "" sentinel by ReleaseWrite.
-	// They CANNOT acquire write with v2 because "" != "v2" (stale read detected).
-	if err := ft.AcquireWrite("f.go", "agent-2", "v2"); err == nil {
-		t.Fatal("agent-2 should NOT be able to write without re-reading (stale read sentinel)")
+	// They can acquire, but the status reports stale/external changes.
+	status, err := ft.AcquireWriteStatus("f.go", "agent-2", "v2")
+	if err != nil {
+		t.Fatalf("agent-2 stale write should warn but acquire: %v", err)
 	}
+	if !status.ExternalChanged {
+		t.Fatal("agent-2 stale write should report ExternalChanged")
+	}
+	ft.AbortWrite("f.go", "agent-2")
 
 	// agent-2 must re-read the file first, then can write.
 	ft.TrackRead("f.go", "agent-2", "v2")
