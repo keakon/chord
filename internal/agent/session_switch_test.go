@@ -536,7 +536,7 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	}
 	msgs := []message.Message{
 		{Role: "user", Content: "task list"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "todo-call-1", Name: "TodoWrite", Args: todoArgs}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "todo-call-1", Name: "todo_write", Args: todoArgs}}},
 		{Role: "user", Content: "edit me"},
 	}
 	a.ctxMgr.RestoreMessages(msgs)
@@ -560,8 +560,8 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	if gotMsgs[0].Role != "user" || gotMsgs[0].Content != "task list" {
 		t.Fatalf("first message = %+v, want original prefix user", gotMsgs[0])
 	}
-	if len(gotMsgs[1].ToolCalls) != 1 || gotMsgs[1].ToolCalls[0].Name != "TodoWrite" {
-		t.Fatalf("second message = %+v, want TodoWrite assistant", gotMsgs[1])
+	if len(gotMsgs[1].ToolCalls) != 1 || gotMsgs[1].ToolCalls[0].Name != "todo_write" {
+		t.Fatalf("second message = %+v, want todo_write assistant", gotMsgs[1])
 	}
 	if got := len(a.GetTodos()); got != 1 {
 		t.Fatalf("len(GetTodos()) = %d, want 1", got)

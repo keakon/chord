@@ -105,7 +105,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	}
 
 	var finalLines []string
-	label := "LOCAL SHELL"
+	label := "TERMINAL"
 	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.ID)))
 	finalLines = append(finalLines, "")
 	finalLines = append(finalLines, bashLines...)

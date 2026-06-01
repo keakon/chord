@@ -558,7 +558,7 @@ func TestHandleInsertKeyEmptyComposerIgnoresStalePendingToolCardWhenIdle(t *test
 	m.viewport.AppendBlock(&Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		ToolID:     "call-stale",
 		Content:    `{"path":"main.go"}`,
 		ResultDone: false,

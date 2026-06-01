@@ -35,7 +35,7 @@ func TestNormalizeRestoredMessages_PreservesPairedToolCalls(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "call_1", Name: "Read"},
+				{ID: "call_1", Name: "read"},
 			},
 		},
 		{Role: "tool", ToolCallID: "call_1", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
@@ -55,7 +55,7 @@ func TestNormalizeRestoredMessages_SynthesizesOrphanToolResult(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "call_orphan", Name: "Shell"},
+				{ID: "call_orphan", Name: "shell"},
 			},
 		},
 		{Role: "user", Content: "ping"},
@@ -82,8 +82,8 @@ func TestNormalizeRestoredMessages_SynthesizesOrphansAtTail(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "call_a", Name: "Shell"},
-				{ID: "call_b", Name: "Shell"},
+				{ID: "call_a", Name: "shell"},
+				{ID: "call_b", Name: "shell"},
 			},
 		},
 		{Role: "tool", ToolCallID: "call_a", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
@@ -103,7 +103,7 @@ func TestNormalizeRestoredMessages_DropsDuplicateToolResults(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "call_a", Name: "Shell"},
+				{ID: "call_a", Name: "shell"},
 			},
 		},
 		{Role: "tool", ToolCallID: "call_a", Content: "first", ToolStatus: string(ToolResultStatusSuccess)},
@@ -123,7 +123,7 @@ func TestNormalizeRestoredMessages_DoesNotMutateToolContentText(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "call_x", Name: "Shell"},
+				{ID: "call_x", Name: "shell"},
 			},
 		},
 		{

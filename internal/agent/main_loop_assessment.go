@@ -243,11 +243,11 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 		}
 		if doneCount > 0 && mixedWithOtherTools {
 			reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "done_mixed_with_other_tools", "terminal_reply"))
-			return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: `Done` must be the only tool call in the final batch that requests loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
+			return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: " + toolPromptName(tools.NameDone) + " must be the only tool call in the final batch that requests loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 		}
 	}
 	reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_done_tool", "terminal_reply"))
-	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a `Done` tool call to request loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
+	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a " + toolPromptName(tools.NameDone) + " tool call to request loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 }
 
 // nextLoopAssessmentFromAssistant evaluates the loop state after an assistant message
@@ -446,9 +446,9 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		case "terminal_reply":
 			addGap("latest assistant reply stopped before loop completion criteria were met")
 		case "missing_done_tool":
-			addGap("end the round with a final `Done` tool call after writing the completion response")
+			addGap("end the round with a final " + toolPromptName(tools.NameDone) + " tool call after writing the completion response")
 		case "done_mixed_with_other_tools":
-			addGap("`Done` must be the only tool call in the final exit-request batch")
+			addGap(toolPromptName(tools.NameDone) + " must be the only tool call in the final exit-request batch")
 		case "progress_continuation":
 			addGap("the task made progress and should continue toward completion")
 		case "context_continue":

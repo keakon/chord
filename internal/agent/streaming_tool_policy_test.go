@@ -138,8 +138,8 @@ func TestSpeculativeExecutionPolicyRejectsReadOnlyWhenPriorCallNeedsApproval(t *
 	if decision.Allowed {
 		t.Fatal("git status allowed for speculative execution behind prior ask-gated commit, want reject")
 	}
-	if decision.Reason != "prior_pending_non_read_only:Shell" {
-		t.Fatalf("reason = %q, want prior_pending_non_read_only:Shell", decision.Reason)
+	if decision.Reason != "prior_pending_non_read_only:shell" {
+		t.Fatalf("reason = %q, want prior_pending_non_read_only:shell", decision.Reason)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestSpeculativeExecutionPolicyRejectsReadOnlyWhenPriorCallIsMutating(t *tes
 	if decision.Allowed {
 		t.Fatal("Read allowed for speculative execution behind prior mutating tool, want reject")
 	}
-	if decision.Reason != "prior_pending_non_read_only:Write" {
-		t.Fatalf("reason = %q, want prior_pending_non_read_only:Write", decision.Reason)
+	if decision.Reason != "prior_pending_non_read_only:write" {
+		t.Fatalf("reason = %q, want prior_pending_non_read_only:write", decision.Reason)
 	}
 }
 

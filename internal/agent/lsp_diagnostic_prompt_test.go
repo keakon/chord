@@ -28,8 +28,8 @@ func TestBuildSystemPrompt_IncludesLSPDiagnosticGuidanceOnlyWhenLSPConfiguredAnd
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Write: deny
-Edit: deny
+write: deny
+edit: deny
 `)}
 	a.rebuildRuleset()
 	got = a.buildSystemPrompt()

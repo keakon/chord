@@ -590,8 +590,8 @@ func (s *SubAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (To
 // isSubAgentInternalTool reports whether a tool is required for SubAgent
 // control flow and must not be blocked by user permission rules.
 func isSubAgentInternalTool(toolName string) bool {
-	switch toolName {
-	case "Complete":
+	switch tools.NormalizeName(toolName) {
+	case tools.NameComplete:
 		return true
 	default:
 		return false
@@ -699,28 +699,28 @@ func (s *SubAgent) subAgentCoordinationPromptBlock() string {
 	visible := s.visibleToolNames()
 	lines := []string{"## SubAgent Coordination"}
 	if hasVisibleTool(visible, tools.NameNotify) {
-		lines = append(lines, "- Use `Notify` to surface progress, clarifications, or intermediate results that the owner agent should know before the task is finished")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameNotify)+" to surface progress, clarifications, or intermediate results that the owner agent should know before the task is finished")
 	} else {
-		lines = append(lines, "- `Notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent")
+		lines = append(lines, "- "+toolPromptName(tools.NameNotify)+" is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent")
 	}
 	if hasVisibleTool(visible, tools.NameEscalate) {
-		lines = append(lines, "- Call `Escalate` when owner-agent intervention, a cross-task dependency, or a decision is required")
+		lines = append(lines, "- Call "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention, a cross-task dependency, or a decision is required")
 	} else if hasVisibleTool(visible, tools.NameNotify) {
-		lines = append(lines, "- `Escalate` is unavailable in this role; use `Notify` to surface blockers or owner-agent decisions when you cannot proceed independently")
+		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" is unavailable in this role; use "+toolPromptName(tools.NameNotify)+" to surface blockers or owner-agent decisions when you cannot proceed independently")
 	} else {
-		lines = append(lines, "- `Escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up")
+		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up")
 	}
-	lines = append(lines, "- Call `Complete` when the task is done; plain text alone does not mark the task complete")
+	lines = append(lines, "- Call "+toolPromptName(tools.NameComplete)+" when the task is done; plain text alone does not mark the task complete")
 	return strings.Join(lines, "\n")
 }
 
 func (s *SubAgent) taskCompletionInstruction() string {
-	base := "Focus only on this task. Call `Complete` when done."
+	base := "Focus only on this task. Call " + toolPromptName(tools.NameComplete) + " when done."
 	switch {
 	case s.hasVisibleTool(tools.NameEscalate):
-		return base + " Call `Escalate` if you are blocked."
+		return base + " Call " + toolPromptName(tools.NameEscalate) + " if you are blocked."
 	case s.hasVisibleTool(tools.NameNotify):
-		return base + " Use `Notify` if you are blocked or need owner-agent input because `Escalate` is unavailable in this role."
+		return base + " Use " + toolPromptName(tools.NameNotify) + " if you are blocked or need owner-agent input because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
 	default:
 		return base + " If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up."
 	}

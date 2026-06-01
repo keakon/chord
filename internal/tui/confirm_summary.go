@@ -133,34 +133,7 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 }
 
 func toolNameKey(toolName string) string {
-	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case strings.ToLower(tools.NameRead):
-		return tools.NameRead
-	case strings.ToLower(tools.NameWrite):
-		return tools.NameWrite
-	case strings.ToLower(tools.NameEdit):
-		return tools.NameEdit
-	case strings.ToLower(tools.NameDelete):
-		return tools.NameDelete
-	case strings.ToLower(tools.NameGrep):
-		return tools.NameGrep
-	case strings.ToLower(tools.NameGlob):
-		return tools.NameGlob
-	case strings.ToLower(tools.NameWebFetch):
-		return tools.NameWebFetch
-	case strings.ToLower(tools.NameShell):
-		return tools.NameShell
-	case strings.ToLower(tools.NameSpawn):
-		return tools.NameSpawn
-	case strings.ToLower(tools.NameSpawnStop):
-		return tools.NameSpawnStop
-	case strings.ToLower(tools.NameLsp):
-		return tools.NameLsp
-	case strings.ToLower(tools.NameDone):
-		return tools.NameDone
-	default:
-		return strings.TrimSpace(toolName)
-	}
+	return tools.NormalizeName(toolName)
 }
 
 func parseConfirmArgs(argsJSON string) (map[string]any, error) {

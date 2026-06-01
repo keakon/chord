@@ -80,8 +80,8 @@ func TestSubAgentRejectsCompleteAndEscalateInSameBatch(t *testing.T) {
 		turnID: 1,
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "call-1", "Complete", map[string]any{"summary": "done"}),
-				mustJSONToolCall(t, "call-2", "Escalate", map[string]any{"reason": "need help"}),
+				mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "done"}),
+				mustJSONToolCall(t, "call-2", "escalate", map[string]any{"reason": "need help"}),
 			}),
 		},
 	})
@@ -99,7 +99,7 @@ func TestSubAgentCompleteToolResultUsesRawSummary(t *testing.T) {
 		turnID: 1,
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "call-1", "Complete", map[string]any{"summary": "Status: success\nFiles modified: []"}),
+				mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "Status: success\nFiles modified: []"}),
 			}),
 		},
 	})
@@ -127,7 +127,7 @@ func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
 		turnID: 1,
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "call-1", "Escalate", map[string]any{"reason": "need help"}),
+				mustJSONToolCall(t, "call-1", "escalate", map[string]any{"reason": "need help"}),
 				mustJSONToolCall(t, "call-2", "Dummy", map[string]any{"value": "x"}),
 			}),
 		},
@@ -207,7 +207,7 @@ func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *test
 		turnID: 1,
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "call-1", "Complete", map[string]any{"summary": "final summary"}),
+				mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "final summary"}),
 			}),
 		},
 	})

@@ -24,6 +24,7 @@ func liveToolDisplayArgs(toolName, argsJSON, result string) string {
 }
 
 func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state agent.ToolCallExecutionState, includeArgProgress bool) (*Block, bool) {
+	name = tools.NormalizeName(name)
 	if m == nil || m.viewport == nil || strings.TrimSpace(id) == "" {
 		return nil, false
 	}
@@ -53,6 +54,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 }
 
 func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
+	evt.Name = tools.NormalizeName(evt.Name)
 	if m == nil || m.viewport == nil {
 		return nil
 	}
@@ -71,6 +73,7 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 }
 
 func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
+	evt.Name = tools.NormalizeName(evt.Name)
 	if evt.Status == agent.ToolResultStatusError {
 		return false
 	}
@@ -112,6 +115,7 @@ func shellCommandMayRunGit(command string) bool {
 
 func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
 	var effects agentEventEffects
+	evt.Name = tools.NormalizeName(evt.Name)
 	if evt.Name == tools.NameDelegate && evt.AgentID == "" {
 		m.sidebar.ResolvePendingTask()
 		effects.refreshSidebar = true
@@ -219,6 +223,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.ToolCallStartEvent:
+		evt.Name = tools.NormalizeName(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
 		m.finalizeAssistantBlock()
 		m.markRequestProgressBaseline(evt.AgentID)
@@ -236,6 +241,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToolCallUpdateEvent:
+		evt.Name = tools.NormalizeName(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
 		now := time.Now()
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, !evt.ArgsStreamingDone)
@@ -307,6 +313,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToolCallExecutionEvent:
+		evt.Name = tools.NormalizeName(evt.Name)
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
 		if block != nil {

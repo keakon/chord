@@ -265,14 +265,14 @@ func NewRegistry() *Registry {
 func (r *Registry) Register(tool Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[tool.Name()] = tool
+	r.tools[NormalizeName(tool.Name())] = tool
 }
 
 // Unregister removes a tool from the registry by name.
 func (r *Registry) Unregister(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.tools, name)
+	delete(r.tools, NormalizeName(name))
 }
 
 // UnregisterPrefix removes every tool whose name has the given prefix.
@@ -297,7 +297,7 @@ func (r *Registry) UnregisterPrefix(prefix string) int {
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	t, ok := r.tools[name]
+	t, ok := r.tools[NormalizeName(name)]
 	return t, ok
 }
 
@@ -318,7 +318,7 @@ func (r *Registry) ListTools() []Tool {
 func toolNamesSet(tools []Tool) map[string]struct{} {
 	visible := make(map[string]struct{}, len(tools))
 	for _, t := range tools {
-		visible[t.Name()] = struct{}{}
+		visible[NormalizeName(t.Name())] = struct{}{}
 	}
 	return visible
 }
@@ -347,7 +347,7 @@ func (r *Registry) ListDefinitions() []message.ToolDefinition {
 	defs := make([]message.ToolDefinition, len(tools))
 	for i, t := range tools {
 		defs[i] = message.ToolDefinition{
-			Name:        t.Name(),
+			Name:        NormalizeName(t.Name()),
 			Description: toolDescription(t, visible),
 			InputSchema: t.Parameters(),
 		}
@@ -369,6 +369,7 @@ func (r *Registry) Clone() *Registry {
 // Execute looks up a tool by name and runs it. Returns an error if the tool is
 // not found.
 func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	name = NormalizeName(name)
 	r.mu.RLock()
 	t, ok := r.tools[name]
 	r.mu.RUnlock()

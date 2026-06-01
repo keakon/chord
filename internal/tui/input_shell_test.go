@@ -106,7 +106,7 @@ func TestHandleInsertKeyBangLargePasteUsesRawCommand(t *testing.T) {
 	}
 }
 
-func TestLocalShellContextMessageKeepsReadablePartsAndPersistedContent(t *testing.T) {
+func TestTerminalContextMessageKeepsReadablePartsAndPersistedContent(t *testing.T) {
 	msg := localShellContextMessage("!echo hi", "echo hi", "ok", nil)
 	readable := convformat.BlockString(convformat.LabelUser, convformat.UserShellReadableBody("!echo hi", "echo hi", "ok", false))
 	persisted := convformat.BlockString(convformat.LabelUser, convformat.UserShellPersistedBody("!echo hi", "echo hi", "ok", false))

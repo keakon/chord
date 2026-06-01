@@ -57,7 +57,7 @@ func NewQuestionTool(fn QuestionFunc) *QuestionTool {
 	return &QuestionTool{questionFn: fn}
 }
 
-func (QuestionTool) Name() string { return "Question" }
+func (QuestionTool) Name() string { return NameQuestion }
 
 func (QuestionTool) Description() string {
 	return "Ask the user one or more questions and wait for their answers. " +

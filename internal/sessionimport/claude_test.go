@@ -56,8 +56,8 @@ func TestConvertClaudeTranscript_StructuredThinkingAndTools(t *testing.T) {
 	if msgs[1].Role != "assistant" || len(msgs[1].ThinkingBlocks) != 1 || len(msgs[1].ToolCalls) != 1 {
 		t.Fatalf("assistant msg=%+v", msgs[1])
 	}
-	if msgs[1].ToolCalls[0].Name != "Shell" {
-		t.Fatalf("imported tool name=%q, want Shell", msgs[1].ToolCalls[0].Name)
+	if msgs[1].ToolCalls[0].Name != "shell" {
+		t.Fatalf("imported tool name=%q, want shell", msgs[1].ToolCalls[0].Name)
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "toolu_1" || msgs[2].Content != "/tmp" {
 		t.Fatalf("tool msg=%+v", msgs[2])
@@ -111,10 +111,10 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 	if len(msgs) != 4 {
 		t.Fatalf("msgs len=%d, want 4: %+v", len(msgs), msgs)
 	}
-	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Shell" {
-		t.Fatalf("Bash not mapped to Shell: %+v", msgs[1])
+	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" {
+		t.Fatalf("Bash not mapped to shell: %+v", msgs[1])
 	}
-	if len(msgs[3].ToolCalls) != 1 || msgs[3].ToolCalls[0].Name != "Read" {
+	if len(msgs[3].ToolCalls) != 1 || msgs[3].ToolCalls[0].Name != "read" {
 		t.Fatalf("Read not restored as tool card: %+v", msgs[3])
 	}
 	if report.StructuredToolCalls != 2 || report.Claude == nil || report.Claude.StructuredToolCalls != 2 || report.UnsupportedToolCalls != 0 {
@@ -145,7 +145,7 @@ func TestConvertClaudeTranscript_UnsupportedToolPreservesMetadata(t *testing.T) 
 
 func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing.T) {
 	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"modify files"}]}}
-{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_edit","name":"Edit","input":{"file_path":"a.txt","old_string":"old","new_string":"new"}},{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"x","new_string":"y"}]}},{"type":"tool_use","id":"toolu_write","name":"Write","input":{"file_path":"c.txt","content":"hello"}},{"type":"tool_use","id":"toolu_update","name":"Update","input":{"file_path":"d.txt","patch":"*** Begin Patch\n*** Update File:d.txt\n@@\n-old\n+new\n*** End Patch"}}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_edit","name":"edit","input":{"file_path":"a.txt","old_string":"old","new_string":"new"}},{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"x","new_string":"y"}]}},{"type":"tool_use","id":"toolu_write","name":"Write","input":{"file_path":"c.txt","content":"hello"}},{"type":"tool_use","id":"toolu_update","name":"Update","input":{"file_path":"d.txt","patch":"*** Begin Patch\n*** Update File:d.txt\n@@\n-old\n+new\n*** End Patch"}}]}}
 {"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_edit","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_multi","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_write","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_update","content":"ok"}]}}
 `)
 	var report ImportReport
@@ -159,7 +159,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if len(msgs[1].ToolCalls) != 4 {
 		t.Fatalf("tool calls=%+v, want 4", msgs[1].ToolCalls)
 	}
-	wantNames := []string{"Edit", "Edit", "Write", "Edit"}
+	wantNames := []string{"edit", "edit", "write", "edit"}
 	for i, call := range msgs[1].ToolCalls {
 		if call.Name != wantNames[i] {
 			t.Fatalf("tool call %d name=%q, want %q", i, call.Name, wantNames[i])
@@ -204,8 +204,8 @@ func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatc
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
-	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Edit" {
-		t.Fatalf("msgs=%+v, want Edit tool card", msgs)
+	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "edit" {
+		t.Fatalf("msgs=%+v, want edit tool card", msgs)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
@@ -232,8 +232,8 @@ func TestConvertClaudeTranscript_AutoKeepsUnsignedToolTurnAsToolCard(t *testing.
 	if len(msgs) != 2 {
 		t.Fatalf("msgs len=%d, want 2", len(msgs))
 	}
-	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Shell" {
-		t.Fatalf("expected Bash mapped to Shell tool card, got %+v", msgs[1].ToolCalls)
+	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" {
+		t.Fatalf("expected Bash mapped to shell tool card, got %+v", msgs[1].ToolCalls)
 	}
 	if msgs[1].Content != "" {
 		t.Fatalf("did not expect imported tool marker content: %q", msgs[1].Content)

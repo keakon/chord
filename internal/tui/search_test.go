@@ -10,7 +10,7 @@ import (
 func TestFindMatchesAtWidthSearchesToolAndResultText(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockAssistant, Content: "plain text"},
-		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result"},
+		{Type: BlockToolCall, ToolName: "shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result"},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "needle", 80)
@@ -44,8 +44,8 @@ func TestFindMatchesAtWidthSearchesImageFilenameAndThinking(t *testing.T) {
 
 func TestFindMatchesAtWidthSkipsDiagnosticArtifactBlocks(t *testing.T) {
 	blocks := []*Block{
-		{Type: BlockToolCall, ToolName: "Read", Content: `{"path":"~/.local/state/chord/logs/tui-dumps/tui-dump.log","limit":120}`, ResultContent: "1\tfind artifact line", ResultDone: true},
-		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"rg -n find internal/tui"}`, ResultContent: "real find result", ResultDone: true},
+		{Type: BlockToolCall, ToolName: "read", Content: `{"path":"~/.local/state/chord/logs/tui-dumps/tui-dump.log","limit":120}`, ResultContent: "1\tfind artifact line", ResultDone: true},
+		{Type: BlockToolCall, ToolName: "shell", Content: `{"command":"rg -n find internal/tui"}`, ResultContent: "real find result", ResultDone: true},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "find", 80)
@@ -60,7 +60,7 @@ func TestFindMatchesAtWidthSkipsDiagnosticArtifactBlocks(t *testing.T) {
 func TestFindMatchesAtWidthSkipsInvisibleThinkingBlocks(t *testing.T) {
 	blocks := []*Block{
 		{Type: BlockThinking, Content: ""},
-		{Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result", ResultDone: true},
+		{Type: BlockToolCall, ToolName: "shell", Content: `{"command":"echo hi"}`, ResultContent: "needle from result", ResultDone: true},
 	}
 
 	matches := FindMatchesAtWidth(blocks, "needle", 80)
@@ -73,18 +73,18 @@ func TestFindMatchesAtWidthSkipsInvisibleThinkingBlocks(t *testing.T) {
 }
 
 func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
-	tool := &Block{Type: BlockToolCall, ToolName: "Read", Collapsed: true, ResultContent: "1\tneedle\n2\tother"}
+	tool := &Block{Type: BlockToolCall, ToolName: "read", Collapsed: true, ResultContent: "1\tneedle\n2\tother"}
 	if !revealSearchMatchedBlock(tool) {
-		t.Fatal("Read tool reveal should report changed state")
+		t.Fatal("read tool reveal should report changed state")
 	}
 	if tool.Collapsed {
-		t.Fatal("Read tool should expand when revealed by search")
+		t.Fatal("read tool should expand when revealed by search")
 	}
 	if !tool.ReadContentExpanded {
-		t.Fatal("Read tool should show full content when revealed by search")
+		t.Fatal("read tool should show full content when revealed by search")
 	}
 
-	generic := &Block{Type: BlockToolCall, ToolName: "Shell", ToolCallDetailExpanded: false, ResultContent: "needle from result", ResultDone: false, Collapsed: true}
+	generic := &Block{Type: BlockToolCall, ToolName: "shell", ToolCallDetailExpanded: false, ResultContent: "needle from result", ResultDone: false, Collapsed: true}
 	if !revealSearchMatchedBlock(generic) {
 		t.Fatal("generic tool reveal should report changed state")
 	}
@@ -103,10 +103,10 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 
 	filePatch := &Block{Type: BlockToolCall, ToolName: tools.NameEdit, Collapsed: true, ResultContent: "done"}
 	if !revealSearchMatchedBlock(filePatch) {
-		t.Fatal("Edit tool reveal should report changed state")
+		t.Fatal("edit tool reveal should report changed state")
 	}
 	if filePatch.Collapsed {
-		t.Fatal("Edit tool should expand when revealed by search")
+		t.Fatal("edit tool should expand when revealed by search")
 	}
 
 	summary := &Block{
@@ -124,7 +124,7 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 }
 
 func TestApproximateSearchMatchInnerOffsetForReadResult(t *testing.T) {
-	block := &Block{Type: BlockToolCall, ToolName: "Read", ResultContent: "1\talpha\n2\tbeta\n3\tneedle line\n4\tdelta"}
+	block := &Block{Type: BlockToolCall, ToolName: "read", ResultContent: "1\talpha\n2\tbeta\n3\tneedle line\n4\tdelta"}
 	if got := approximateSearchMatchInnerOffset(block, "needle line", 80); got <= 0 {
 		t.Fatalf("approximateSearchMatchInnerOffset() = %d, want > 0 for later line", got)
 	}
@@ -133,7 +133,7 @@ func TestApproximateSearchMatchInnerOffsetForReadResult(t *testing.T) {
 func TestRenderedSearchMatchInnerOffsetUsesRenderedToolLayout(t *testing.T) {
 	block := &Block{
 		Type:                BlockToolCall,
-		ToolName:            "Read",
+		ToolName:            "read",
 		Content:             `{"path":"internal/tui/app.go","limit":20,"offset":0}`,
 		ResultContent:       "1\talpha\n2\tbeta\n3\tgamma\n4\tdelta\n5\tepsilon\n6\tzeta\n7\teta\n8\ttheta\n9\tiota\n10\tkappa\n11\tneedle line\n12\tomega",
 		ResultDone:          true,

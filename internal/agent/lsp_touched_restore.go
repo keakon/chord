@@ -23,14 +23,15 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != tools.NameWrite && tc.Name != tools.NameEdit && tc.Name != tools.NameDelete {
+			name := tools.NormalizeName(tc.Name)
+			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameDelete {
 				continue
 			}
 			paths := extractHookFilePaths(tc.Args, os.Getenv("CHORD_PROJECT_ROOT"))
 			if len(paths) == 0 {
 				continue
 			}
-			calls[tc.ID] = callInfo{name: tc.Name, paths: paths}
+			calls[tc.ID] = callInfo{name: name, paths: paths}
 		}
 	}
 	if len(calls) == 0 {

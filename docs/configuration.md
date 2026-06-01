@@ -41,12 +41,12 @@ is still streaming (as soon as tool arguments are complete), instead of waiting
 for the provider to fully finalize the response. This reduces the "finalize gap".
 
 - Always enabled; there is no `early_tool_execution` toggle.
-- Eligible tools: `Read`, `Grep`, `Glob`, rollback-safe file mutation tools
-  (`Write`, `Edit`, `Delete`), plus a conservative read-only subset of
-  `Shell` (single command only; no pipes/redirects/`&&`/`;`):
+- Eligible tools: `read`, `grep`, `glob`, rollback-safe file mutation tools
+  (`write`, `edit`, `delete`), plus a conservative read-only subset of
+  `shell` (single command only; no pipes/redirects/`&&`/`;`):
   - `pwd`, `ls`, `cat`, `which`
   - `git status|log|diff|show|branch|rev-parse`
-- Not eligible: non-read-only `Shell`, interactive/control tools, or any call that
+- Not eligible: non-read-only `shell`, interactive/control tools, or any call that
   requires permission action `ask`.
 - Speculative file mutations are real on-disk writes/deletes, but the runtime
   captures pre-state first and rolls them back if finalize discards the call.
@@ -60,7 +60,7 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 
 ### Edit arguments, matching, and display
 
-`Edit` receives the target file path as a structured `path` argument. Its
+`edit` receives the target file path as a structured `path` argument. Its
 `patch` argument normally contains hunk text: `@@` hunk headers, leading-space
 context lines, `-` removed lines, and `+` added lines. If a model accidentally
 includes Codex `apply_patch` envelope lines, Chord strips standalone
@@ -68,7 +68,7 @@ includes Codex `apply_patch` envelope lines, Chord strips standalone
 line when it matches the structured `path`. Add/delete/move operations,
 multi-file patches, and mismatched update paths are still rejected.
 
-`Edit` uses Codex-style ordered matching for the hunk body: each hunk, and
+`edit` uses Codex-style ordered matching for the hunk body: each hunk, and
 any `@@` function/class/test header attached to that hunk, matches the first
 occurrence after the current search position. When a hunk has multiple candidate
 locations, Chord applies the first match and includes the matched line number
@@ -76,7 +76,7 @@ plus any other candidate line numbers in the tool result so the model can read
 back the area if needed. Hunks with no context/removal lines fail because there
 is no insertion point to match.
 
-While arguments stream, an `Edit` tool card follows `Write`-style path
+While arguments stream, an `edit` tool card follows `write`-style path
 display: no file path is shown until Chord can parse the structured `path`;
 once parsed, the path is shown in the card header.
 
@@ -725,7 +725,7 @@ prevent_sleep: true
 
 ## WebFetch
 
-`WebFetch` uses a built-in browser-like `User-Agent` by default. You can override it in config when a site needs a different header:
+`web_fetch` uses a built-in browser-like `User-Agent` by default. You can override it in config when a site needs a different header:
 
 ```yaml
 web_fetch:
@@ -745,7 +745,7 @@ web_fetch:
 - `proxy: ""` (empty string) — explicitly disables proxy ("direct" mode)
 - `proxy: "http://..."`, `"https://..."`, `"socks5://..."` — uses specified proxy
 
-`WebFetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
+`web_fetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
 ## MCP
 
@@ -808,8 +808,8 @@ name: backend-coder
 description: Backend developer
 mode: subagent
 permission:
-  Write: ask
-  Edit: ask
+  write: ask
+  edit: ask
 ---
 
 You are an agent focused on backend development.
@@ -822,8 +822,8 @@ name: backend-coder
 description: Backend developer
 mode: subagent
 permission:
-  Write: ask
-  Edit: ask
+  write: ask
+  edit: ask
 prompt: |
   You are an agent focused on backend development.
 ```
@@ -836,7 +836,7 @@ Common fields include:
 - `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
-- `permission`: per-tool permission policy for this agent. Permissions live directly in agent config files; when the confirmation popup remembers a rule, `project` updates the current project's `.chord/agents/<role>.yaml`, and `global` updates the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). Chord no longer writes a separate permissions directory. Some orchestration tools have special semantics (`Delegate` also gates delegated-work controls such as `Cancel`; `Handoff` and `Done` treat `allow` and `ask` as workflow-available states with Chord's own confirmation gates). See [Permissions & Safety](./permissions-and-safety.md#special-permission-semantics) before relying on fine-grained control-tool rules.
+- `permission`: per-tool permission policy for this agent. Permissions live directly in agent config files; when the confirmation popup remembers a rule, `project` updates the current project's `.chord/agents/<role>.yaml`, and `global` updates the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). Chord no longer writes a separate permissions directory. Some orchestration tools have special semantics (`delegate` also gates delegated-work controls such as `cancel`; `handoff` and `done` treat `allow` and `ask` as workflow-available states with Chord's own confirmation gates). See [Permissions & Safety](./permissions-and-safety.md#special-permission-semantics) before relying on fine-grained control-tool rules.
 - `mcp`: MCP config scoped to this agent.
 - `delegation`: limits such as `max_children`, `max_depth`, and `child_join`.
 - `prompt` / `system_prompt`: system prompt for plain YAML files.
@@ -849,14 +849,14 @@ mode: main
 model_pools: [default]
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  WebFetch:
+  read: allow
+  grep: allow
+  glob: allow
+  web_fetch:
     "http://localhost:8000/*": ask
-  Shell: allow
-  Edit: ask
-  Write: ask
+  shell: allow
+  edit: ask
+  write: ask
 ```
 
 ## Context management: Compaction vs. Reduction
@@ -1033,7 +1033,7 @@ each with its own age and size thresholds.
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
 | Shell success | `git`, `go test`, `npm run` output | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 8000) | Build/test output can be important context but is usually reproducible |
-| Read / search | `Read`, `Grep`, `Glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; most aggressive trimming |
+| Read / search | `read`, `grep`, `glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; most aggressive trimming |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
 How to read the age and size parameters:
@@ -1112,7 +1112,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
 | `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](#context-compaction) and [Context reduction](#context-reduction). |
-| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global / project     | Post-tool diagnostics appended to `Edit` / `Write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
+| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global / project     | Post-tool diagnostics appended to `edit` / `write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |

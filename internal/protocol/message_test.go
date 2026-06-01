@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -353,7 +354,7 @@ func TestFromAgentEvent_ToolCallExecutionPayload(t *testing.T) {
 func TestFromAgentEvent_DoneCompletionPayload(t *testing.T) {
 	env, err := FromAgentEvent(agent.ToolResultEvent{
 		CallID:     "call-done",
-		Name:       "Done",
+		Name:       tools.NameDone,
 		ArgsJSON:   `{"reason":"ready","report":"fallback"}`,
 		DoneReport: "## Summary\nDone",
 		Status:     agent.ToolResultStatusSuccess,
@@ -380,7 +381,7 @@ func TestFromAgentEvent_DoneCompletionPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("event = %T, want ToolResultEvent", got)
 	}
-	if ev.Name != "Done" || ev.DoneReport != "## Summary\nDone" || ev.Result != "## Summary\nDone" || ev.Status != agent.ToolResultStatusSuccess {
+	if ev.Name != tools.NameDone || ev.DoneReport != "## Summary\nDone" || ev.Result != "## Summary\nDone" || ev.Status != agent.ToolResultStatusSuccess {
 		t.Fatalf("event mismatch: %+v", ev)
 	}
 }

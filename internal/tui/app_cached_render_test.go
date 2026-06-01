@@ -46,7 +46,7 @@ func TestInvalidateDrawCachesPreservesRuntimeState(t *testing.T) {
 		t.Fatalf("terminal title ticker state = generation %d running %t blinkOff %t, want generation 13 running true blinkOff true", m.terminalTitleTickGeneration, m.terminalTitleTickRunning, m.terminalTitleRequestBlinkOff)
 	}
 	if got, ok := m.viewport.LatestVisiblePendingUserLocalShellStartedAt(); !ok || !got.Equal(startedAt) {
-		t.Fatalf("pending local shell start = %v ok=%t, want %v true", got, ok, startedAt)
+		t.Fatalf("pending terminal start = %v ok=%t, want %v true", got, ok, startedAt)
 	}
 	if m.startupDeferredTranscript != deferred || m.startupDeferredPreheatGeneration != 17 {
 		t.Fatalf("startup deferred state = %p generation %d, want %p generation 17", m.startupDeferredTranscript, m.startupDeferredPreheatGeneration, deferred)

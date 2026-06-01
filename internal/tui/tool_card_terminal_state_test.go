@@ -15,27 +15,27 @@ func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
 	}{
 		{
 			name: "cancelled generic",
-			blk:  &Block{ToolName: "Write", ResultDone: true, ResultStatus: agent.ToolResultStatusCancelled, ResultContent: "cancelled"},
+			blk:  &Block{ToolName: "write", ResultDone: true, ResultStatus: agent.ToolResultStatusCancelled, ResultContent: "cancelled"},
 			want: "Cancelled",
 		},
 		{
 			name: "spawn failed",
-			blk:  &Block{ToolName: "Spawn", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "spawn", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
 			want: "Failed",
 		},
 		{
 			name: "spawn started",
-			blk:  &Block{ToolName: "Spawn", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "job started"},
+			blk:  &Block{ToolName: "spawn", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "job started"},
 			want: "Started",
 		},
 		{
 			name: "delegate done summary",
-			blk:  &Block{ToolName: "Delegate", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, DoneSummary: "done"},
+			blk:  &Block{ToolName: "delegate", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, DoneSummary: "done"},
 			want: "Done",
 		},
 		{
 			name: "grep count",
-			blk:  &Block{ToolName: "Grep", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "a.go:1:one\nb.go:2:two"},
+			blk:  &Block{ToolName: "grep", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "a.go:1:one\nb.go:2:two"},
 			want: "2 matches",
 		},
 	}
@@ -51,14 +51,14 @@ func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
 func TestExpandedToolResultRendersTerminalStateSummary(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
-		ToolName:      "Spawn",
+		ToolName:      "spawn",
 		Collapsed:     false,
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultContent: "spawn failed",
 	}
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	for _, want := range []string{"Spawn", "Failed", "Error:", "spawn failed"} {
+	for _, want := range []string{"spawn", "Failed", "Error:", "spawn failed"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expanded tool card missing %q; got:\n%s", want, joined)
 		}

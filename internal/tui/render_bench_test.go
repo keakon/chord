@@ -91,7 +91,7 @@ func benchmarkToolBlock() *Block {
 	return &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Read",
+		ToolName:      "read",
 		Content:       `{"path":"internal/tui/render_bench_test.go","limit":120}`,
 		ResultContent: strings.Repeat("package tui\n", 40),
 		ResultDone:    true,
@@ -103,7 +103,7 @@ func benchmarkCompactToolBlock() *Block {
 	return &Block{
 		ID:                     2,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"git diff -- internal/tui/block_tool.go && go test ./internal/tui -run TestTool -count=1","description":"Inspect tool card rendering","timeout":120,"workdir":"."}`,
 		ResultContent:          strings.Repeat("diff line\n", 20),
 		ResultDone:             true,
@@ -136,7 +136,7 @@ func BenchmarkRenderInfoPanelCacheHit(b *testing.B) {
 	backend.contextCurrent = 50_000
 	backend.contextLimit = 200_000
 	backend.todos = []tools.TodoItem{
-		{Status: "in_progress", Content: "Write unit tests"},
+		{Status: "in_progress", Content: "write unit tests"},
 		{Status: "pending", Content: "Review PR"},
 	}
 	m := NewModel(backend)
@@ -156,7 +156,7 @@ func BenchmarkRenderInfoPanelCacheMiss(b *testing.B) {
 	backend.contextCurrent = 50_000
 	backend.contextLimit = 200_000
 	backend.todos = []tools.TodoItem{
-		{Status: "in_progress", Content: "Write unit tests"},
+		{Status: "in_progress", Content: "write unit tests"},
 		{Status: "pending", Content: "Review PR"},
 	}
 	m := NewModel(backend)
@@ -474,7 +474,7 @@ func BenchmarkFindMatchesAtWidth(b *testing.B) {
 	blocks := []*Block{
 		benchmarkAssistantBlock(),
 		{ID: 2, Type: BlockAssistant, Content: strings.Repeat("needle ", 80)},
-		{ID: 3, Type: BlockToolCall, ToolName: "Read", Content: `{"path":"foo"}`, ResultContent: strings.Repeat("alpha beta gamma\n", 30), ResultDone: true},
+		{ID: 3, Type: BlockToolCall, ToolName: "read", Content: `{"path":"foo"}`, ResultContent: strings.Repeat("alpha beta gamma\n", 30), ResultDone: true},
 	}
 	for _, block := range blocks {
 		block.LineCount(100)
@@ -618,7 +618,7 @@ func TestFindMatchesAtWidthAllocsGuard(t *testing.T) {
 	blocks := []*Block{
 		benchmarkAssistantBlock(),
 		{ID: 2, Type: BlockAssistant, Content: strings.Repeat("needle ", 80)},
-		{ID: 3, Type: BlockToolCall, ToolName: "Read", Content: `{"path":"foo"}`, ResultContent: strings.Repeat("alpha beta gamma\n", 30), ResultDone: true},
+		{ID: 3, Type: BlockToolCall, ToolName: "read", Content: `{"path":"foo"}`, ResultContent: strings.Repeat("alpha beta gamma\n", 30), ResultDone: true},
 	}
 	for _, block := range blocks {
 		block.LineCount(100)

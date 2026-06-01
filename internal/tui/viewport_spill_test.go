@@ -168,7 +168,7 @@ func TestViewportSpillHydratePreservesToolDisplayWorkingDir(t *testing.T) {
 	tool := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Read",
+		ToolName: "read",
 		Content:  `{"path":"` + filepath.Join(v.workingDir, "internal", "tui", "block_tool.go") + `","limit":20,"offset":5}`,
 	}
 	v.AppendBlock(tool)

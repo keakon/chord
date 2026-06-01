@@ -29,12 +29,12 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 	// Start speculative execution for two tools
 	call1 := message.ToolCall{
 		ID:   "call_1",
-		Name: "Read",
+		Name: "read",
 		Args: json.RawMessage(`{"path":"file1.txt"}`),
 	}
 	call2 := message.ToolCall{
 		ID:   "call_2",
-		Name: "Shell",
+		Name: "shell",
 		Args: json.RawMessage(`{"command":"echo test"}`),
 	}
 
@@ -58,11 +58,11 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 	if payload, ok := results["call_1"]; !ok {
 		t.Error("Missing result for call_1")
 	} else {
-		if payload.Name != "Read" {
-			t.Errorf("Expected Name=Read, got %s", payload.Name)
+		if payload.Name != "read" {
+			t.Errorf("Expected Name=read, got %s", payload.Name)
 		}
-		if payload.Result != "test result for Read" {
-			t.Errorf("Expected result 'test result for Read', got %s", payload.Result)
+		if payload.Result != "test result for read" {
+			t.Errorf("Expected result 'test result for read', got %s", payload.Result)
 		}
 		if payload.Error != nil {
 			t.Errorf("Expected no error, got %v", payload.Error)
@@ -72,8 +72,8 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 	if payload, ok := results["call_2"]; !ok {
 		t.Error("Missing result for call_2")
 	} else {
-		if payload.Name != "Shell" {
-			t.Errorf("Expected Name=Shell, got %s", payload.Name)
+		if payload.Name != "shell" {
+			t.Errorf("Expected Name=shell, got %s", payload.Name)
 		}
 	}
 }
@@ -98,7 +98,7 @@ func TestStreamingToolExecutor_DrainCompletedResults_IgnoresIncomplete(t *testin
 	// Start speculative execution
 	call := message.ToolCall{
 		ID:   "call_slow",
-		Name: "Read",
+		Name: "read",
 		Args: json.RawMessage(`{"path":"file.txt"}`),
 	}
 

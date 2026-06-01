@@ -78,7 +78,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
-| `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except Handoff, Delegate, Cancel, and Done                 |
+| `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except handoff, delegate, cancel, and done                 |
 | `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 

@@ -130,7 +130,7 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
   "final_args_json": "{\"path\":\"...\"}",
   "edit_summary": "",
   "deny_reason": "",
-  "rule_pattern": "Shell:^git status$",
+  "rule_pattern": "shell:^git status$",
   "rule_scope": "session"
 }
 ```
@@ -223,7 +223,7 @@ If an input line on stdin exceeds the protocol line limit, Chord emits an `error
 For convenience, headless also accepts these via `send` so you can drive Chord from a chat surface that only has a single text input:
 
 - `/models status`, `/models <pool>`, `/models --agent <name> <pool>`
-- `/help`, `/stats`, `/compact`, `/loop on`, `/loop off` (only when the active MainAgent role can use the `Done` tool)
+- `/help`, `/stats`, `/compact`, `/loop on`, `/loop off` (only when the active MainAgent role can use the `done` tool)
 
 Bare `/models` is treated as `/models status`. Some slash commands are TUI-only (e.g. `/new`, `/resume` — they require an interactive picker); attempting them in headless mode returns an `error` envelope explaining "X is only available in local TUI mode".
 

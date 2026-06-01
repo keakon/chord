@@ -132,7 +132,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 	}()
 
 	a.newTurn()
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "Shell", ArgsJSON: `{"command":"sleep 10"}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "shell", ArgsJSON: `{"command":"sleep 10"}`})
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 
@@ -181,7 +181,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-9",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://missing.example"}`),
 		}},
 	}
@@ -194,7 +194,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 		EffectiveArgsJSON: `{"url":"https://missing.example"}`,
 		UserModified:      true,
 	}
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-9", Name: "WebFetch", ArgsJSON: `{"url":"https://missing.example"}`, Audit: audit})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-9", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example"}`, Audit: audit})
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 	a.flushPersist()
@@ -238,7 +238,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-sub-cancel",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://slow.example"}`),
 		}},
 	}
@@ -247,7 +247,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
-	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-sub-cancel", Name: "WebFetch", ArgsJSON: `{"url":"https://slow.example"}`, AgentID: sub.instanceID})
+	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-sub-cancel", Name: "web_fetch", ArgsJSON: `{"url":"https://slow.example"}`, AgentID: sub.instanceID})
 
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true")
@@ -279,7 +279,7 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-sub-error",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://missing.example"}`),
 		}},
 	}
@@ -288,7 +288,7 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
-	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-sub-error", Name: "WebFetch", ArgsJSON: `{"url":"https://missing.example"}`, AgentID: sub.instanceID})
+	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-sub-error", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example"}`, AgentID: sub.instanceID})
 	a.mu.Lock()
 	a.subAgents[sub.instanceID] = sub
 	a.mu.Unlock()
@@ -338,7 +338,7 @@ func TestMainExecuteToolCallRejectsSubAgentOnlyCompleteTool(t *testing.T) {
 	a.tools.Register(tools.CompleteTool{})
 
 	_, err := a.executeToolCall(context.Background(), message.ToolCall{
-		Name: "Complete",
+		Name: "complete",
 		Args: json.RawMessage(`{"summary":"done"}`),
 	})
 	if err == nil {
@@ -353,7 +353,7 @@ func TestMainExecuteToolCallSameAgentWriteIsSerialized(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	stub := blockingToolStub{
-		name:    "Write",
+		name:    "write",
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
@@ -364,7 +364,7 @@ func TestMainExecuteToolCallSameAgentWriteIsSerialized(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		_, err := a.executeToolCall(context.Background(), message.ToolCall{
-			Name: "Write",
+			Name: "write",
 			Args: json.RawMessage([]byte(`{"path":` + quoteJSON(filePath) + `,"content":"first"}`)),
 		})
 		firstDone <- err
@@ -372,7 +372,7 @@ func TestMainExecuteToolCallSameAgentWriteIsSerialized(t *testing.T) {
 	<-stub.started
 
 	_, err := a.executeToolCall(context.Background(), message.ToolCall{
-		Name: "Write",
+		Name: "write",
 		Args: json.RawMessage([]byte(`{"path":` + quoteJSON(filePath) + `,"content":"second"}`)),
 	})
 	if err == nil {
@@ -463,7 +463,7 @@ func TestWrapToolRejectedByUserIncludesDenyReasonOnce(t *testing.T) {
 
 func TestSubAgentDrainPendingToolFailureSets(t *testing.T) {
 	s := &SubAgent{instanceID: "agent-1", turn: &Turn{ID: 7, PendingToolMeta: make(map[string]PendingToolCall)}}
-	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-7", Name: "Read", ArgsJSON: `{"path":"x"}`, AgentID: s.instanceID})
+	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-7", Name: "read", ArgsJSON: `{"path":"x"}`, AgentID: s.instanceID})
 	s.turn.PendingToolCalls.Store(1)
 
 	emit, persist := s.drainPendingToolFailureSets(context.Canceled)
@@ -485,7 +485,7 @@ func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 	var events []AgentEvent
 	emitFailedToolResults(func(evt AgentEvent) {
 		events = append(events, evt)
-	}, []PendingToolCall{{CallID: "tool-2", Name: "Shell", ArgsJSON: `{"command":"echo hi"}`, AgentID: "main"}}, context.DeadlineExceeded)
+	}, []PendingToolCall{{CallID: "tool-2", Name: "shell", ArgsJSON: `{"command":"echo hi"}`, AgentID: "main"}}, context.DeadlineExceeded)
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
@@ -505,7 +505,7 @@ func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 func TestDiscardSpeculativeStreamToolsEmitsCancelledResult(t *testing.T) {
 	var events []AgentEvent
 	turn := &Turn{}
-	turn.recordStreamingToolCall(PendingToolCall{CallID: "tool-spec-1", Name: "Read", ArgsJSON: `{"path":"internal/llm/provider.go"}`})
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "tool-spec-1", Name: "read", ArgsJSON: `{"path":"internal/llm/provider.go"}`})
 
 	emit := func(evt AgentEvent) {
 		events = append(events, evt)

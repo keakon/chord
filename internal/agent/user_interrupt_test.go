@@ -21,7 +21,7 @@ func TestCancelCurrentTurnKeepsPendingInputsQueuedAndFailsToolCalls(t *testing.T
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-user-cancel",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://slow.example"}`),
 		}},
 	}
@@ -31,7 +31,7 @@ func TestCancelCurrentTurnKeepsPendingInputsQueuedAndFailsToolCalls(t *testing.T
 	a.turn.PendingToolCalls.Store(1)
 	a.turn.recordPendingToolCall(PendingToolCall{
 		CallID:   "tool-user-cancel",
-		Name:     "WebFetch",
+		Name:     "web_fetch",
 		ArgsJSON: `{"url":"https://slow.example"}`,
 	})
 	a.pendingUserMessages = []pendingUserMessage{{
@@ -101,7 +101,7 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-sub-interrupt",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://slow.example"}`),
 		}},
 	}
@@ -112,7 +112,7 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 	sub.turn.PendingToolCalls.Store(1)
 	sub.turn.recordPendingToolCall(PendingToolCall{
 		CallID:   "tool-sub-interrupt",
-		Name:     "WebFetch",
+		Name:     "web_fetch",
 		ArgsJSON: `{"url":"https://slow.example"}`,
 		AgentID:  sub.instanceID,
 	})

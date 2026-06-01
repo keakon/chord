@@ -23,12 +23,12 @@ type completeArgs struct {
 	Artifacts            []ArtifactRef `json:"artifacts,omitempty"`
 }
 
-func (CompleteTool) Name() string { return "Complete" }
+func (CompleteTool) Name() string { return NameComplete }
 
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only after all non-blocked work is finished. " +
 		"Provide a concise summary plus structured completion details when available: actual files changed, verification run, non-blocking limitations/risks, recommended follow-up, and artifact references. " +
-		"If a true blocker prevents completion, use Escalate/Notify/blocked flow instead of Complete. This is the ONLY way to signal completion — do NOT simply stop responding."
+		"If a true blocker prevents completion, use escalate/notify/blocked flow instead of complete. This is the ONLY way to signal completion — do NOT simply stop responding."
 }
 
 func (CompleteTool) Parameters() map[string]any {
@@ -51,7 +51,7 @@ func (CompleteTool) Parameters() map[string]any {
 			},
 			"remaining_limitations": map[string]any{
 				"type":        "array",
-				"description": "Non-blocking limitations, caveats, or unverified items. True blockers should use Escalate/Notify instead of Complete.",
+				"description": "Non-blocking limitations, caveats, or unverified items. True blockers should use escalate/notify instead of complete.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"known_risks": map[string]any{

@@ -15,13 +15,13 @@ Most personal development workflows should start with the local TUI.
 
 After startup, the input box is focused by default. Type a message and press `Enter` to send.
 
-Tool-call cards try to keep file paths concise: for file tools such as `Read`, `Edit`, `Write`, and `Delete`, paths inside the current working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
+Tool-call cards try to keep file paths concise: for file tools such as `read`, `edit`, `write`, and `delete`, paths inside the current working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
 
 Tool arguments and results are displayed as terminal-safe plain text. Chord escapes embedded ANSI/control sequences from external output instead of executing them as terminal styling, and generic tool results that look like Markdown remain literal output rather than being reformatted as assistant Markdown.
 
-Discovery tools use stable LLM-facing output caps before results enter session history: `Grep` returns at most 120 matches and 12 KiB of text; `Glob` returns at most 250 paths and 16 KiB of text. These caps are fixed rather than based on the current remaining context window, so the same tool call stays reproducible across model switches and unrelated history growth. The byte caps are the primary guard because context pressure tracks bytes/tokens more closely than line count: using Chord's rough `1 token ~= 3 bytes` estimate, 12 KiB keeps one Grep result around 4k tokens, while 16 KiB keeps one Glob result around 5.3k tokens. The match/path caps are secondary guards against floods of very short lines.
+Discovery tools use stable LLM-facing output caps before results enter session history: `grep` returns at most 120 matches and 12 KiB of text; `glob` returns at most 250 paths and 16 KiB of text. These caps are fixed rather than based on the current remaining context window, so the same tool call stays reproducible across model switches and unrelated history growth. The byte caps are the primary guard because context pressure tracks bytes/tokens more closely than line count: using Chord's rough `1 token ~= 3 bytes` estimate, 12 KiB keeps one Grep result around 4k tokens, while 16 KiB keeps one Glob result around 5.3k tokens. The match/path caps are secondary guards against floods of very short lines.
 
-`Read` and `Write` tool cards show file contents as numbered, syntax-highlighted previews. `Edit` cards render unified diffs with syntax highlighting when the file type is known; `.mdx` files fall back to Markdown highlighting, and red/green diff line backgrounds remain visible even for unsupported extensions. Long previews show the first 10 lines by default with a `[space] toggle expand/collapse` hint; focus the card and press `Space`, `Enter`, or `o` to expand or collapse it.
+`read` and `write` tool cards show file contents as numbered, syntax-highlighted previews. `edit` cards render unified diffs with syntax highlighting when the file type is known; `.mdx` files fall back to Markdown highlighting, and red/green diff line backgrounds remain visible even for unsupported extensions. Long previews show the first 10 lines by default with a `[space] toggle expand/collapse` hint; focus the card and press `Space`, `Enter`, or `o` to expand or collapse it.
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
@@ -98,7 +98,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- **Tools**: defaults are source-specific. Chord converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `Read`, `Shell`, `Grep`, `Glob`, `Edit`, `Write`, and `Delete` are used for matching Codex, Claude Code, and OpenCode records. Unknown, malformed, or unsupported source tools remain visible as unsupported tool cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker read/write state; re-run `Read` before continuing edits on imported files.
+- **Tools**: defaults are source-specific. Chord converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Unknown, malformed, or unsupported source tools remain visible as unsupported tool cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker read/write state; re-run `read` before continuing edits on imported files.
 - **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
 - **Claude main-session reconstruction**: Claude imports rebuild the best-effort main non-sidechain conversation span instead of simply choosing the latest raw leaf. Compact boundaries participate in reconstruction, but are not rendered as ordinary transcript messages.
 - **Claude sidechains**: sidechain / sub-agent transcript entries are excluded from the main imported session by default. When present, CLI output reports the skipped count, and `import-report.json` records Claude-specific diagnostics plus sidechain agent IDs when available.
@@ -144,7 +144,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers. Runtime changes take effect for the next LLM request, not the currently in-flight request.
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Configuration — Context compaction](./configuration.md#context-compaction)
 - `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier. If you enter a tier that the current provider/model does not support, Chord leaves the current tier unchanged and shows an error.
-- `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping Handoff, Delegate, Cancel, and Done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
+- `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping handoff, delegate, cancel, and done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
 When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model. Slash completion for `/tier` predicts the same next tier as `Ctrl+R`; when the only available tier is the already-active `standard`, `/tier` is omitted from slash completions.
@@ -207,7 +207,7 @@ The confirmation popup also supports adding a remembered rule with `M`. In the r
 
 Continuous execution mode keeps the agent working after each round without you having to nudge it. Suitable for one-shot instructions like "implement feature X" — you send one message and the agent iterates, verifies, and pushes through until the work is done, genuinely blocked, or you explicitly confirm exit.
 
-`/loop` is available only when the current MainAgent role can use the `Done` tool. If `Done` is denied or hidden for that role, `/loop` is unavailable.
+`/loop` is available only when the current MainAgent role can use the `done` tool. If `done` is denied or hidden for that role, `/loop` is unavailable.
 
 Enabling:
 
@@ -225,24 +225,24 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 1. **executing**: carrying out the task, calling tools to do real work
 2. **assessing**: evaluating current progress, deciding the next step
 3. **verifying**: running checks (tests, lint, etc.)
-4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `Done` tool
+4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `done` tool
 
-When `Done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `Done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report argument is still streaming, the Done tool card shows the same live `chars received` progress as other streaming tool arguments; once the argument stream finishes, that temporary progress indicator is hidden. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
+When `done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report argument is still streaming, the Done tool card shows the same live `chars received` progress as other streaming tool arguments; once the argument stream finishes, that temporary progress indicator is hidden. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
 
-`Done` is deliberately treated as loop control rather than an ordinary permission-bypassable tool. `/loop` is available only when the active MainAgent role can use `Done`, and YOLO does not override `Done` permissions. This keeps roles that are not allowed to finish/exit from silently taking over loop termination, and it preserves the local confirmation gate that prevents premature completion.
+`done` is deliberately treated as loop control rather than an ordinary permission-bypassable tool. `/loop` is available only when the active MainAgent role can use `done`, and YOLO does not override `done` permissions. This keeps roles that are not allowed to finish/exit from silently taking over loop termination, and it preserves the local confirmation gate that prevents premature completion.
 
 Loop mode also guards against a stalled tool-call loop. If the MainAgent emits the same tool call three times in a row — same tool name and identical arguments — Chord rejects that tool result automatically, injects guidance to stop repeating the unchanged call and continue toward the loop target, and counts it as one loop interception. The check uses a sliding window: if the fourth call is still identical, it is rejected again immediately. Once the loop interception limit is reached, Chord shows the same local confirmation flow so you can decide whether to stop or continue.
 
 Runtime-injected user continuation messages are used only after a terminal assistant turn that ended with an `end_turn` / `stop` / `done`-style stop reason and no tool calls. If the model already returned tool calls in that turn, loop continuation stays inside the tool-call flow: Chord records tool results, updates loop state, and may show loop guidance in the TUI, but it does not append a synthetic user message unless you manually send one.
 
-**Using `/loop` + `Done` to get more value from Codex quota:** loop mode does not create extra quota, but it helps spend existing quota on end-to-end progress instead of repeated human re-prompting. In normal mode, the model often stops after one local milestone and waits for your next message; that burns another turn later just to say "continue", rerun checks, or pick up unfinished cleanup. With `/loop`, the agent keeps iterating inside the same task until it either reaches a real stop condition or asks to exit through `Done`. The `Done` gate matters here: it prevents premature stopping, so the agent is pushed to finish the whole chain — implement → test → fix failures → verify again → summarize — before giving control back.
+**Using `/loop` + `done` to get more value from Codex quota:** loop mode does not create extra quota, but it helps spend existing quota on end-to-end progress instead of repeated human re-prompting. In normal mode, the model often stops after one local milestone and waits for your next message; that burns another turn later just to say "continue", rerun checks, or pick up unfinished cleanup. With `/loop`, the agent keeps iterating inside the same task until it either reaches a real stop condition or asks to exit through `done`. The `done` gate matters here: it prevents premature stopping, so the agent is pushed to finish the whole chain — implement → test → fix failures → verify again → summarize — before giving control back.
 
 A good pattern for Codex-heavy work is:
 
 1. turn on loop with a concrete target (`/loop on implement feature X with tests`)
 2. give one complete instruction with success criteria
 3. let the agent continue through edits, test failures, and follow-up fixes
-4. only confirm the final `Done` request when the work is actually complete
+4. only confirm the final `done` request when the work is actually complete
 
 This usually improves quota efficiency for multi-step coding tasks because fewer turns are wasted on manual nudges like "continue", "run the tests too", or "fix the failing case and try again". Do **not** use `/loop` just to keep the model running aimlessly; if the task is exploratory, ambiguous, or likely to need frequent product decisions, normal mode is often cheaper and easier to control.
 
@@ -256,18 +256,18 @@ You can also define **custom** slash commands (per project or globally). See [Cu
 
 ## YOLO and protected control tools
 
-YOLO is a convenience mode for trusted local work: it bypasses ordinary MainAgent permission checks so tools such as file edits, reads, shell commands, and web requests can run without repeated confirmations. It does **not** bypass permissions for `Handoff`, `Delegate`, `Cancel`, or `Done`.
+YOLO is a convenience mode for trusted local work: it bypasses ordinary MainAgent permission checks so tools such as file edits, reads, shell commands, and web requests can run without repeated confirmations. It does **not** bypass permissions for `handoff`, `delegate`, `cancel`, or `done`.
 
 Those four tools are protected because they control agent orchestration rather than just local side effects:
 
-- `Handoff` can transfer work/plans between roles, so it changes who is responsible for the task.
-- `Delegate` can start or manage delegated workstreams and may run work in parallel.
-- `Cancel` can interrupt the active turn.
-- `Done` completes a turn or requests loop exit and carries the final report.
+- `handoff` can transfer work/plans between roles, so it changes who is responsible for the task.
+- `delegate` can start or manage delegated workstreams and may run work in parallel.
+- `cancel` can interrupt the active turn.
+- `done` completes a turn or requests loop exit and carries the final report.
 
-Keeping these permissions enforced under YOLO prevents a broad "allow tools" switch from also granting workflow-control powers. In loop mode this matters especially for `Done`: loop exit remains gated by the active role's `Done` permission, loop exit-condition checks, and local confirmation, so YOLO cannot accidentally let the model terminate a long-running loop early.
+Keeping these permissions enforced under YOLO prevents a broad "allow tools" switch from also granting workflow-control powers. In loop mode this matters especially for `done`: loop exit remains gated by the active role's `done` permission, loop exit-condition checks, and local confirmation, so YOLO cannot accidentally let the model terminate a long-running loop early.
 
-Under YOLO, these protected tools still need explicit permissions. A broad default such as `"*": allow` is treated as part of the bypassed ordinary permission surface and does not by itself grant `Handoff`, `Delegate`, `Cancel`, or `Done`; configure those tools directly when a role should use them.
+Under YOLO, these protected tools still need explicit permissions. A broad default such as `"*": allow` is treated as part of the bypassed ordinary permission surface and does not by itself grant `handoff`, `delegate`, `cancel`, or `done`; configure those tools directly when a role should use them.
 
 ## Multi-agent focus switching
 
@@ -278,8 +278,8 @@ Chord supports cooperation between MainAgent and SubAgents.
 
 In a SubAgent view, you can inspect that agent's context and output. Finished SubAgent views are read-only.
 
-When `TodoWrite` is enabled but no `Delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
-When `Delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
+When `todo_write` is enabled but no `delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
+When `delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
 
 ## Images
 

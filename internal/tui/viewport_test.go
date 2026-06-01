@@ -559,11 +559,11 @@ func TestNormalizeLineNumberPrefix(t *testing.T) {
 		{"empty", "", ""},
 		{"no match", "  no digits here", "  no digits here"},
 		{"indented numeric content not a tool line", "  2026-03-19", "  2026-03-19"},
-		{"Edit block one line", "   582              }", "582\t            }"},
-		{"Edit block multi", "   582     }\n   583 }\n   584 }", "582\t   }\n583\t}\n584\t}"},
-		{"Edit add del markers", "   582 -old\n   583 +new", "582\t-old\n583\t+new"},
-		{"Read block style", "     582  return x", "582\treturn x"},
-		{"Read block preserves code indent", "     582      return x", "582\t    return x"},
+		{"edit block one line", "   582              }", "582\t            }"},
+		{"edit block multi", "   582     }\n   583 }\n   584 }", "582\t   }\n583\t}\n584\t}"},
+		{"edit add del markers", "   582 -old\n   583 +new", "582\t-old\n583\t+new"},
+		{"read block style", "     582  return x", "582\treturn x"},
+		{"read block preserves code indent", "     582      return x", "582\t    return x"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestExtractSelectionTextStripsRenderedIndentForReadBlock(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Read",
+		ToolName: "read",
 		Content:  `{"path":"main.go"}`,
 		ResultContent: "     1\tfunc main() {\n" +
 			"     2\t    return\n" +
@@ -878,7 +878,7 @@ func TestViewportGetBlockAndLineAtNeverReturnsNegativeLine(t *testing.T) {
 
 func TestViewportUpdateBlockRecalcForNonLastBlock(t *testing.T) {
 	v := NewViewport(40, 5)
-	first := &Block{ID: 1, Type: BlockToolCall, ToolName: "Delegate", Collapsed: true, Content: `{"description":"short"}`}
+	first := &Block{ID: 1, Type: BlockToolCall, ToolName: "delegate", Collapsed: true, Content: `{"description":"short"}`}
 	second := &Block{ID: 2, Type: BlockAssistant, Content: "tail"}
 	v.AppendBlock(first)
 	v.AppendBlock(second)

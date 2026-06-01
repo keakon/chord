@@ -11,9 +11,10 @@ import (
 	"unicode"
 
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/toolname"
 )
 
-const editUnsupportedOperationHint = "Edit only updates one existing file. Use Write to create files and Delete to remove whole files."
+const editUnsupportedOperationHint = "edit only updates one existing file. Use write to create files and delete to remove whole files."
 
 // EditTool applies a single-file update patch to an existing text file.
 // If LSP is set, notifies LSP of the change after a successful patch.
@@ -82,7 +83,7 @@ func (EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t EditTool) Description() string {
-	return "Edit one existing file with patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before Edit, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
+	return "Edit one existing file with patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...), only after verifying that exact header exists in the current file. Do not guess or approximate anchors, and do not use a separate @@ hunk only as an anchor. Use " + toolname.Write + " to create a new file or intentionally replace an entire file, and " + toolname.Delete + " to remove whole files. Before " + toolname.Edit + ", make sure the file has been observed via " + toolname.Read + " or a system-resolved @file mention; if you need more surrounding context, " + toolname.Read + " the target area. If " + toolname.Edit + " fails, diagnose the reported cause first; re-read or grep stale text/anchors before retrying, and do not retry the same hunk unchanged. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use " + toolname.Shell + " to run apply_patch."
 }
 
 func (t EditTool) Parameters() map[string]any {
@@ -95,7 +96,7 @@ func (t EditTool) Parameters() map[string]any {
 			},
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Patch hunk text. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
+				"description": "Patch hunk text. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk, but only after verifying that exact header exists in the current file with read/grep; do not guess or approximate anchors, and do not use a separate earlier @@ hunk only as an anchor. If an edit fails, diagnose the error first, re-read/grep stale text or anchors, and do not retry the same hunk unchanged.",
 			},
 		},
 		"required":             []string{"path", "patch"},
@@ -189,7 +190,7 @@ func buildEditPlan(path, patchText, baseDir string) (EditPlan, error) {
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return EditPlan{}, fmt.Errorf("file not found: %s. Edit only updates one existing file. Use Write to create files. No files were modified", parsed.Path)
+			return EditPlan{}, fmt.Errorf("file not found: %s. edit only updates one existing file. Use write to create files. No files were modified", parsed.Path)
 		}
 		return EditPlan{}, fmt.Errorf("accessing path: %w. No files were modified", err)
 	}

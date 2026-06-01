@@ -39,7 +39,7 @@ func TestImport_CodexStructured_WritesRecoverableSession(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Shell" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" {
 		t.Fatalf("msgs[1]=%+v", msgs[1])
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_1" {

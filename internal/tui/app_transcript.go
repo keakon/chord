@@ -514,15 +514,16 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				if argsStr == "" {
 					argsStr = "{}"
 				}
+				toolName := tools.NormalizeName(tc.Name)
 				b := &Block{
 					ID:        *nextID,
 					Type:      BlockToolCall,
-					Content:   eventToolDisplayArgs(tc.Name, argsStr, ""),
-					ToolName:  tc.Name,
+					Content:   eventToolDisplayArgs(toolName, argsStr, ""),
+					ToolName:  toolName,
 					ToolID:    tc.ID,
 					Collapsed: true,
 				}
-				if tc.Name == tools.NameDone {
+				if toolName == tools.NameDone {
 					if parsed, err := tools.ParseDoneArgs(tc.Args); err == nil {
 						b.DoneReport = strings.TrimSpace(parsed.Report)
 					}

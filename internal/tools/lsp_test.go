@@ -27,10 +27,10 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 	desc := (LspTool{}).Description()
 	for _, want := range []string{
 		"Use this tool first for definition, references, and implementation at a known file position.",
-		"Prefer it over Grep/Glob once the file path and cursor position are known",
-		"Use Grep/Glob only to discover candidate files or positions when the location is not known yet.",
+		"Prefer it over grep/glob once the file path and cursor position are known",
+		"Use grep/glob only to discover candidate files or positions when the location is not known yet.",
 		"Use 1-based line and character from the raw file content.",
-		"do not count Read's left line-number gutter or separator tab",
+		"do not count the read output's left line-number gutter or separator tab",
 		"count tabs in the source line as a single character",
 		"prefer the start of the target identifier",
 	} {
@@ -50,7 +50,7 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 	desc := character["description"].(string)
 	for _, want := range []string{
 		"raw source line",
-		"do not count Read's left line-number gutter or separator tab",
+		"do not count the read output's left line-number gutter or separator tab",
 		"count tabs in the source line as a single character",
 	} {
 		if !strings.Contains(desc, want) {
@@ -65,7 +65,7 @@ func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 		"pattern uses regex syntax, not glob syntax or plain text",
 		"Use glob only to filter filenames by basename.",
 		"Best for discovering candidate files, symbols, or text matches when the exact location is not known yet.",
-		"For semantic navigation at a known position (definition, references, implementations), prefer the Lsp tool",
+		"For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
@@ -77,7 +77,7 @@ func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GlobTool{}).Description()
 	for _, want := range []string{
 		"pattern is a path glob, not a regular expression and not a file-contents search.",
-		"Best for discovering candidate files by path or extension before using Read, Grep, or Lsp.",
+		"Best for discovering candidate files by path or extension before using read, grep, or lsp.",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)

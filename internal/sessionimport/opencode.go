@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type openCodeExportFile struct {
@@ -345,28 +346,28 @@ func renderOpenCodeToolPart(part map[string]any) (string, bool) {
 }
 
 var openCodeToolMapping = map[string]string{
-	"bash":         "Shell",
-	"shell":        "Shell",
-	"exec":         "Shell",
-	"exec_command": "Shell",
-	"read":         "Read",
-	"read_file":    "Read",
-	"file_read":    "Read",
-	"write":        "Write",
-	"write_file":   "Write",
-	"file_write":   "Write",
-	"edit":         "Edit",
-	"edit_file":    "Edit",
-	"apply_patch":  "Edit",
-	"update":       "Edit",
-	"delete":       "Delete",
-	"remove":       "Delete",
-	"delete_file":  "Delete",
-	"file_delete":  "Delete",
-	"grep":         "Grep",
-	"search":       "Grep",
-	"glob":         "Glob",
-	"list_files":   "Glob",
+	"bash":         tools.NameShell,
+	"shell":        tools.NameShell,
+	"exec":         tools.NameShell,
+	"exec_command": tools.NameShell,
+	"read":         tools.NameRead,
+	"read_file":    tools.NameRead,
+	"file_read":    tools.NameRead,
+	"write":        tools.NameWrite,
+	"write_file":   tools.NameWrite,
+	"file_write":   tools.NameWrite,
+	"edit":         tools.NameEdit,
+	"edit_file":    tools.NameEdit,
+	"apply_patch":  tools.NameEdit,
+	"update":       tools.NameEdit,
+	"delete":       tools.NameDelete,
+	"remove":       tools.NameDelete,
+	"delete_file":  tools.NameDelete,
+	"file_delete":  tools.NameDelete,
+	"grep":         tools.NameGrep,
+	"search":       tools.NameGrep,
+	"glob":         tools.NameGlob,
+	"list_files":   tools.NameGlob,
 }
 
 func openCodeToolArgs(part map[string]any) map[string]any {

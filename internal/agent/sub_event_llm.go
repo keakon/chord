@@ -188,7 +188,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	var wakeMainReason string
 	var wakeMainArgsJSON string
 	for _, tc := range validCalls {
-		if tc.Name == "Complete" {
+		if tools.NormalizeName(tc.Name) == tools.NameComplete {
 			var args struct {
 				Summary              string              `json:"summary"`
 				FilesChanged         []string            `json:"files_changed,omitempty"`
@@ -229,7 +229,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 	}
 	for _, tc := range validCalls {
-		if tc.Name == "Escalate" {
+		if tools.NormalizeName(tc.Name) == tools.NameEscalate {
 			var args struct {
 				Reason string `json:"reason"`
 			}
@@ -272,7 +272,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		s.turn.removeStreamingToolCall(wakeMainCallID)
 		s.parent.emitToTUI(ToolResultEvent{
 			CallID:   wakeMainCallID,
-			Name:     "Escalate",
+			Name:     tools.NameEscalate,
 			ArgsJSON: wakeMainArgsJSON,
 			Result:   resultContent,
 			Status:   ToolResultStatusSuccess,
@@ -283,7 +283,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Collect non-Complete valid tool calls for finalize-time batching.
 	var regularToolCalls []message.ToolCall
 	for _, tc := range validCalls {
-		if tc.Name != "Complete" && tc.Name != "Escalate" {
+		name := tools.NormalizeName(tc.Name)
+		if name != tools.NameComplete && name != tools.NameEscalate {
+			tc.Name = name
 			regularToolCalls = append(regularToolCalls, tc)
 		}
 	}

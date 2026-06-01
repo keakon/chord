@@ -210,7 +210,7 @@ func TestApplyPendingCompactionResumeOverlaysForContinueRestoresOversizeRetryCou
 func TestChooseCompactionResumeModeUsesSyntheticContinueWhenToolSideEffectsPending(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.newTurn()
-	a.turn.PendingToolMeta["call-1"] = PendingToolCall{CallID: "call-1", Name: "Write"}
+	a.turn.PendingToolMeta["call-1"] = PendingToolCall{CallID: "call-1", Name: "write"}
 	if got := a.chooseCompactionResumeMode("finish the refactor safely"); got != compactionResumeModeSyntheticContinue {
 		t.Fatalf("chooseCompactionResumeMode() = %q, want synthetic_continue", got)
 	}

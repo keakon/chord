@@ -19,10 +19,10 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 	}
 
 	filtered := make([]toolpkg.Tool, 0, len(allTools))
-	spawnDisabled := ruleset.IsDisabled("Spawn")
+	spawnDisabled := ruleset.IsDisabled(toolpkg.NameSpawn)
 	for _, tool := range allTools {
-		name := tool.Name()
-		if (name == "SpawnStop" || name == "SpawnStatus") && spawnDisabled {
+		name := toolpkg.NormalizeName(tool.Name())
+		if (name == toolpkg.NameSpawnStop || name == toolpkg.NameSpawnStatus) && spawnDisabled {
 			continue
 		}
 		if controlled, ok := tool.(toolpkg.RulesetAwareVisibilityTool); ok && !controlled.VisibleWithRuleset(ruleset) {
@@ -54,8 +54,9 @@ func filterVisibleTools(tools []toolpkg.Tool, deny func(string) bool) []toolpkg.
 }
 
 func isMainAgentReservedTool(toolName string) bool {
+	toolName = toolpkg.NormalizeName(toolName)
 	switch toolName {
-	case "Complete":
+	case toolpkg.NameComplete:
 		return true
 	default:
 		return false
@@ -73,7 +74,7 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 func toolNamesFromVisibleTools(visibleTools []toolpkg.Tool) map[string]struct{} {
 	visible := make(map[string]struct{}, len(visibleTools))
 	for _, tool := range visibleTools {
-		visible[tool.Name()] = struct{}{}
+		visible[toolpkg.NormalizeName(tool.Name())] = struct{}{}
 	}
 	return visible
 }
@@ -96,7 +97,7 @@ func llmToolDefinitionsFromVisibleTools(visibleTools []toolpkg.Tool) []message.T
 			description = descriptive.DescriptionForTools(visibleNames)
 		}
 		defs[i] = message.ToolDefinition{
-			Name:        tool.Name(),
+			Name:        toolpkg.NormalizeName(tool.Name()),
 			Description: description,
 			InputSchema: tool.Parameters(),
 		}

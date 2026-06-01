@@ -15,14 +15,14 @@ func TestUpsertAgentPermissionRuleConvertsScalarToolRule(t *testing.T) {
 name: planner
 permission:
   "*": deny
-  Write: ask
+  write: ask
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 
 	changed, err := UpsertAgentPermissionRule(path, permission.Rule{
-		Permission: "Write",
+		Permission: "write",
 		Pattern:    ".chord/plans/*",
 		Action:     permission.ActionAllow,
 	})
@@ -40,7 +40,7 @@ permission:
 	for _, want := range []string{
 		"# planner agent",
 		"name: planner",
-		"Write:",
+		"write:",
 		".chord/plans/*: allow",
 	} {
 		if !strings.Contains(text, want) {
@@ -56,14 +56,14 @@ func TestUpsertAgentPermissionRuleDeduplicatesAndUpdatesExistingPattern(t *testi
 	path := filepath.Join(t.TempDir(), "planner.yaml")
 	body := `name: planner
 permission:
-  Write:
+  write:
     .chord/plans/*: ask
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	rule := permission.Rule{Permission: "Write", Pattern: ".chord/plans/*", Action: permission.ActionAllow}
+	rule := permission.Rule{Permission: "write", Pattern: ".chord/plans/*", Action: permission.ActionAllow}
 	changed, err := UpsertAgentPermissionRule(path, rule)
 	if err != nil {
 		t.Fatalf("UpsertAgentPermissionRule(update): %v", err)
@@ -93,7 +93,7 @@ permission:
 func TestUpsertAgentPermissionRuleCreatesMissingFileFromBaseAgent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "planner.yaml")
 	base := DefaultPlannerAgent()
-	rule := permission.Rule{Permission: "Write", Pattern: "docs/*", Action: permission.ActionAllow}
+	rule := permission.Rule{Permission: "write", Pattern: "docs/*", Action: permission.ActionAllow}
 
 	changed, err := UpsertAgentPermissionRuleForAgent(path, base, rule)
 	if err != nil {
@@ -112,10 +112,10 @@ func TestUpsertAgentPermissionRuleCreatesMissingFileFromBaseAgent(t *testing.T) 
 		"description: Planning agent",
 		"mode: main",
 		"permission:",
-		"Read: allow",
+		"read: allow",
 		".chord/plans/*: allow",
 		"docs/*: allow",
-		"Handoff: allow",
+		"handoff: allow",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("created agent config missing %q in:\n%s", want, text)
@@ -127,7 +127,7 @@ func TestRemoveAgentPermissionRule(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "planner.yaml")
 	body := `name: planner
 permission:
-  Write:
+  write:
     "*": ask
     .chord/plans/*: allow
 `
@@ -136,7 +136,7 @@ permission:
 	}
 
 	changed, err := RemoveAgentPermissionRule(path, permission.Rule{
-		Permission: "Write",
+		Permission: "write",
 		Pattern:    ".chord/plans/*",
 		Action:     permission.ActionAllow,
 	})

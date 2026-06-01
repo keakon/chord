@@ -45,7 +45,7 @@ func (s *SubAgent) availableSkillsPromptBlock() string {
 	if len(entries) == 0 {
 		return ""
 	}
-	header := "## Available Skills\nThe `Skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `Skill` before proceeding.\n\n"
+	header := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
 	return tools.BuildSkillListing(entries, header)
 }
 

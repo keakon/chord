@@ -406,7 +406,7 @@ func applyDirectionTruncation(lines []string, totalLines int, opts TruncateOptio
 func truncationMarker(omitted int, savedPath string) string {
 	if ref := artifactReference(savedPath); ref != "" {
 		return fmt.Sprintf(
-			"\n\n... [%d lines truncated. %s Use Grep to search or Read with offset/limit to view specific sections.] ...\n",
+			"\n\n... [%d lines truncated. %s Use grep to search or read with offset/limit to view specific sections.] ...\n",
 			omitted, ref,
 		)
 	}

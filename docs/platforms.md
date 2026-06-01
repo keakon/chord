@@ -136,7 +136,7 @@ Chord runs on Windows but is not the primary platform. Concretely:
 - `prevent_sleep` is a no-op — use Windows power settings.
 - `ime_switch_target` works with `im-select.exe`.
 - File paths in tool calls follow Windows conventions; backslashes are preserved verbatim.
-- `Shell` and `Spawn` remain non-interactive on Windows too, but timeout/cancellation cleanup uses direct process termination instead of Unix-style session/process-group control; descendant process cleanup may therefore be less complete than on Unix.
+- `shell` and `spawn` remain non-interactive on Windows too, but timeout/cancellation cleanup uses direct process termination instead of Unix-style session/process-group control; descendant process cleanup may therefore be less complete than on Unix.
 - If you hit a Windows-specific bug, it is more likely to be undiscovered than a deliberate limitation. Capture a diagnostics bundle with `Ctrl+G` and report it.
 
 ## What WSL users should expect

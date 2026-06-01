@@ -150,7 +150,7 @@ Session resume itself is fully supported. Internal transport cleanup does not af
 
 If a tool card, local shell result, question dialog, or confirmation summary shows unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:
 
-- retry the same `Read`, `Shell`, `WebFetch`, or local shell action
+- retry the same `read`, `shell`, `web_fetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
 Chord displays ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.
@@ -182,21 +182,21 @@ Chord handles two transcript-height accounting risks:
 
 ## Edit reports `file ... has not been observed in this conversation`
 
-Chord requires `Edit` to have an observed target file earlier in the conversation. An observation can come from `Read`, a successful `Write`/`Edit` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `Read` when you need more surrounding context.
+Chord requires `edit` to have an observed target file earlier in the conversation. An observation can come from `read`, a successful `write`/`edit` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `read` when you need more surrounding context.
 
 If you see this error:
 
-- run `Read` on the target file or mention it with `@file` first;
+- run `read` on the target file or mention it with `@file` first;
 - retry with a small patch hunk that has enough unique `@@` context;
 - re-read the smallest unique 2-4 line block before retrying if any earlier edit or external tool may have changed the file.
 
 ## A file-edit tool warns that the file changed since it was observed
 
-This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `Edit` still validates hunks against the current file contents, while `Write` and `Delete` back up risky non-empty pre-write contents before continuing.
+This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `edit` still validates hunks against the current file contents, while `write` and `delete` back up risky non-empty pre-write contents before continuing.
 
 Common causes:
 
-- the file was modified by another process (editor/formatter) between `Read` and `Edit`;
+- the file was modified by another process (editor/formatter) between `read` and `edit`;
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
 - the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
 
@@ -204,15 +204,15 @@ If a backup was created, the tool result includes its path under the current ses
 
 ## Edit reports `hunk not found` or `matched multiple locations`
 
-`Edit` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
+`edit` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
-- re-run `Read` on the file and rebuild the patch from the latest content;
-- if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `Read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
-- if the error says the hunk was not found, re-copy the target block from the latest `Read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
+- re-run `read` on the file and rebuild the patch from the latest content;
+- if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
+- if the error says the hunk was not found, re-copy the target block from the latest `read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
 - split a broad patch into smaller single-file patches or smaller hunks;
-- do not run external `apply_patch` through `Shell`; use Chord's native `Edit` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
+- do not run external `apply_patch` through `shell`; use Chord's native `edit` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 
 ## Performance issues
 

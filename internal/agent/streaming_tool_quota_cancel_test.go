@@ -32,7 +32,7 @@ func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T
 		}
 	}()
 
-	call := message.ToolCall{ID: "tool-1", Name: "Read", Args: []byte(`{"path":"README.md"}`)}
+	call := message.ToolCall{ID: "tool-1", Name: "read", Args: []byte(`{"path":"README.md"}`)}
 	turn.recordPendingToolCall(PendingToolCall{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args)})
 
 	turn.toolExecutionBatches = []toolExecutionBatch{{Calls: []message.ToolCall{call}, AbortSiblingsOnError: true}}
@@ -93,7 +93,7 @@ func TestMainAgentAcquireExecutionSlotTurnCancelDoesNotEmitToolResult(t *testing
 		}
 	}()
 
-	call := message.ToolCall{ID: "tool-turn-cancel", Name: "Read", Args: []byte(`{"path":"README.md"}`)}
+	call := message.ToolCall{ID: "tool-turn-cancel", Name: "read", Args: []byte(`{"path":"README.md"}`)}
 	a.ctxMgr.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{call}})
 	turn.recordPendingToolCall(PendingToolCall{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args)})
 	turn.toolExecutionBatches = []toolExecutionBatch{{Calls: []message.ToolCall{call}, AbortSiblingsOnError: true}}
@@ -175,7 +175,7 @@ func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T)
 		loadedSkills: nil,
 	}
 
-	call := message.ToolCall{ID: "tool-1", Name: "Read", Args: []byte(`{"path":"README.md"}`)}
+	call := message.ToolCall{ID: "tool-1", Name: "read", Args: []byte(`{"path":"README.md"}`)}
 	turn.recordPendingToolCall(PendingToolCall{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), AgentID: s.instanceID})
 	turn.toolExecutionBatches = []toolExecutionBatch{{Calls: []message.ToolCall{call}, AbortSiblingsOnError: true}}
 	turn.nextToolBatch = 0

@@ -13,7 +13,7 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 
 	m := NewModelWithSize(nil, 120, 40)
 	req := &ConfirmRequest{
-		ToolName:   "Done",
+		ToolName:   "done",
 		DoneReport: "**Title**: `list[str]` → JSON\n\n```text\nhello\n```\n",
 	}
 	m.confirm.request = req

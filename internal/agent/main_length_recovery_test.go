@@ -91,7 +91,7 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -111,12 +111,12 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 	if a.turn.MalformedCount != 0 {
 		t.Fatalf("MalformedCount = %d, want 0 during recovery path", a.turn.MalformedCount)
 	}
-	if got := a.turn.LastTruncatedToolName; got != "Shell" {
-		t.Fatalf("LastTruncatedToolName = %q, want Shell", got)
+	if got := a.turn.LastTruncatedToolName; got != "shell" {
+		t.Fatalf("LastTruncatedToolName = %q, want shell", got)
 	}
 	if got := a.pendingRecoveryPrompt; got == "" {
 		t.Fatal("expected recovery prompt to be set as turn overlay")
-	} else if want := `tool "Shell"`; !strings.Contains(got, want) {
+	} else if want := `tool "shell"`; !strings.Contains(got, want) {
 		t.Fatalf("recovery prompt %q does not contain %q", got, want)
 	}
 }
@@ -133,7 +133,7 @@ func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUn
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -170,7 +170,7 @@ func TestHandleLLMResponseTruncatedMalformedSchedulesCompactionBeforeAbort(t *te
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: json.RawMessage(`{"error":"malformed tool call arguments from model"}`),
 		}},
 		StopReason: "length",
@@ -442,8 +442,8 @@ func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
 
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{
-			{ID: "call-1", Name: "Read", Args: json.RawMessage(`{"path":"a","offset":0,"limit":1}`)},
-			{ID: "call-2", Name: "Read", Args: json.RawMessage(`{"path":"b","offset":0,"limit":1}`)},
+			{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"a","offset":0,"limit":1}`)},
+			{ID: "call-2", Name: "read", Args: json.RawMessage(`{"path":"b","offset":0,"limit":1}`)},
 		},
 		StopReason: "stop",
 	}

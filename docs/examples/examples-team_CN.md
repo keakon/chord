@@ -56,13 +56,13 @@ context:
 hooks:
   on_tool_call:
     - name: audit-shell
-      tools: ["Shell"]
+      tools: ["shell"]
       command: ["./scripts/chord-hooks/audit-shell.sh"]
       timeout: 5
 
   on_tool_batch_complete:
     - name: golangci-lint
-      tools: ["Edit", "Write", "Delete"]
+      tools: ["edit", "write", "delete"]
       paths: ["**/*.go"]
       min_changed_files: 1
       command: ["./scripts/chord-hooks/run-golangci-lint.sh"]
@@ -73,7 +73,7 @@ hooks:
 
   on_before_tool_result_append:
     - name: redact-keys
-      tools: ["Shell", "WebFetch", "Read"]
+      tools: ["shell", "web_fetch", "read"]
       command: ["./scripts/chord-hooks/redact-keys.sh"]
       timeout: 3
 
@@ -102,9 +102,9 @@ model_pools:
   - thinking
 permission:
   "*": allow
-  Handoff: deny
-  Delete: ask
-  Shell:
+  handoff: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -159,7 +159,7 @@ chord --version
 ## 常见失败原因
 
 - Hook command not found：复制了 hook 条目，但没有创建 `./scripts/chord-hooks/*`。
-- 团队权限提示过宽：先把高风险 `Shell` 规则从 `ask` 改成 `deny`，只对工作流确需的命令逐步放开。
+- 团队权限提示过宽：先把高风险 `shell` 规则从 `ask` 改成 `deny`，只对工作流确需的命令逐步放开。
 - Agents 不出现：确认文件在 `<repo>/.chord/agents/` 或全局 agents 目录下，并包含合法 front matter。
 
 ## `<repo>/.chord/agents/coder.md`
@@ -173,10 +173,10 @@ model_pools:
   - fast
 permission:
   "*": allow
-  TodoWrite: deny
-  Delegate: deny
-  Delete: ask
-  Shell:
+  todo_write: deny
+  delegate: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -208,10 +208,10 @@ model_pools:
   - thinking
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Shell:
+  read: allow
+  grep: allow
+  glob: allow
+  shell:
     "*": allow
     "rm *": deny
     "mv *": deny
@@ -239,10 +239,10 @@ model_pools:
   - fast
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Shell:
+  read: allow
+  grep: allow
+  glob: allow
+  shell:
     "*": allow
     "rm *": deny
     "mv *": deny
@@ -270,10 +270,10 @@ model_pools:
   - thinking
 permission:
   "*": allow
-  TodoWrite: deny
-  Delegate: deny
-  Delete: ask
-  Shell:
+  todo_write: deny
+  delegate: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask

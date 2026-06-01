@@ -53,7 +53,7 @@ type escalateArgs struct {
 	Reason string `json:"reason"`
 }
 
-func (EscalateTool) Name() string { return "Escalate" }
+func (EscalateTool) Name() string { return NameEscalate }
 
 func (EscalateTool) Description() string {
 	return "Request parent-agent intervention or escalation through the coordination chain. Use when: " +
@@ -61,7 +61,7 @@ func (EscalateTool) Description() string {
 		"(2) you need information from another task's output, " +
 		"(3) you are blocked and need the task to be reassigned or split, " +
 		"(4) you need a decision that is beyond your scope. " +
-		"Unlike Complete, this does NOT end your task — you remain active."
+		"Unlike complete, this does NOT end your task — you remain active."
 }
 
 func (EscalateTool) Parameters() map[string]any {

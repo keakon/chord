@@ -31,7 +31,7 @@ type skillArgs struct {
 	Args string `json:"args,omitempty"`
 }
 
-func (SkillTool) Name() string { return "Skill" }
+func (SkillTool) Name() string { return NameSkill }
 
 func (SkillTool) Description() string {
 	return "Load a skill's full instructions on demand when a task matches an available skill."
@@ -108,7 +108,7 @@ func buildSkillListing(list []*skill.Meta) string {
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 	base := []string{
 		"Load a skill's full instructions on demand when a task clearly matches an available skill.",
-		"When a user's request matches one of the skills listed below, call `Skill` before proceeding.",
+		"When a user's request matches one of the skills listed below, call `skill` before proceeding.",
 		"The loaded result includes the skill body plus the skill root directory so relative `scripts/`, `references/`, and `assets/` paths are unambiguous.",
 		"Relative paths mentioned by a skill should be interpreted relative to the reported `<root>` directory.",
 	}

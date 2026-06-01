@@ -41,7 +41,7 @@ func TestCallLLMShowsKeySwitchToastOnFirstToolCallToken(t *testing.T) {
 				resp: &message.Response{
 					ToolCalls: []message.ToolCall{{
 						ID:   "call-1",
-						Name: "Read",
+						Name: "read",
 						Args: []byte(`{"path":"README.md"}`),
 					}},
 					StopReason: "tool_use",
@@ -93,14 +93,14 @@ func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 	providerImpl := &blockingStreamProvider{
 		calls: []scriptedStreamCall{{
 			streams: []message.StreamDelta{
-				{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "Read", Input: `{"path":"READ`}},
-				{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "Read", Input: `ME.md"}`}},
-				{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "Read"}},
+				{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "read", Input: `{"path":"READ`}},
+				{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "read", Input: `ME.md"}`}},
+				{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "read"}},
 			},
 			resp: &message.Response{
 				ToolCalls: []message.ToolCall{{
 					ID:   "call-1",
-					Name: "Read",
+					Name: "read",
 					Args: []byte(`{"path":"README.md"}`),
 				}},
 				StopReason: "tool_use",

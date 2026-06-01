@@ -53,7 +53,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`           | 恢复本项目最近一个非空会话                                                                                                                                  |
 | `-r`, `--resume <id>`        | 恢复指定 session id 的会话                                                                                                                                  |
-| `--yolo`                     | 启动时启用 YOLO 模式：临时绕过 MainAgent 工具权限，但不影响 Handoff、Delegate、Cancel 和 Done 权限                                                       |
+| `--yolo`                     | 启动时启用 YOLO 模式：临时绕过 MainAgent 工具权限，但不影响 handoff、delegate、cancel 和 done 权限                                                       |
 | `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
 
 `--continue` 与 `--resume` 互斥。
@@ -306,7 +306,7 @@ chord resume 20260428064910975
 
 Claude Code 导入会尽力重建**非 sidechain 的主会话**，而不是盲目导入最新的原始叶子节点。compact 边界会用于重建，但不会渲染为可见 transcript 消息。sidechain/sub-agent 条目默认会从主导入 session 中排除；检测到时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在存在 sidechain agent ID 时一并记录。
 
-可识别的导入工具会尽量显示成最接近的当前 Chord 工具卡，包括把文件修改显示为 `Edit`、`Write` 或 `Delete`。无法转换的工具仍会保留为 unsupported tool card，或尽量渲染为可读的 assistant fallback 消息，而不是原始 JSON。转换后的导入工具不会恢复 Chord FileTracker 的 read/write 状态；从导入会话继续编辑文件前仍需要重新 `Read`。
+可识别的导入工具会尽量显示成最接近的当前 Chord 工具卡，包括把文件修改显示为 `edit`、`write` 或 `delete`。无法转换的工具仍会保留为 unsupported tool card，或尽量渲染为可读的 assistant fallback 消息，而不是原始 JSON。转换后的导入工具不会恢复 Chord FileTracker 的 read/write 状态；从导入会话继续编辑文件前仍需要重新 `read`。
 
 ### Flag
 

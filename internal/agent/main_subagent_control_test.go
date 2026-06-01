@@ -1230,7 +1230,7 @@ func TestCancelSubAgentCancelsPendingToolAndReleasesSlot(t *testing.T) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Read",
+			Name: "read",
 			Args: []byte(`{"path":"README.md"}`),
 		}},
 	})
@@ -1238,7 +1238,7 @@ func TestCancelSubAgentCancelsPendingToolAndReleasesSlot(t *testing.T) {
 		ID:              1,
 		Ctx:             context.Background(),
 		Cancel:          func() {},
-		PendingToolMeta: map[string]PendingToolCall{"call-1": {CallID: "call-1", Name: "Read", ArgsJSON: `{"path":"README.md"}`, AgentID: sub.instanceID}},
+		PendingToolMeta: map[string]PendingToolCall{"call-1": {CallID: "call-1", Name: "read", ArgsJSON: `{"path":"README.md"}`, AgentID: sub.instanceID}},
 	}
 	sub.turn.PendingToolCalls.Store(1)
 	sub.semHeld = true

@@ -73,8 +73,8 @@ func TestConvertCodexRollout_ParsesNewPayloadSchema(t *testing.T) {
 	if msgs[2].Role != "assistant" || len(msgs[2].ToolCalls) != 1 {
 		t.Fatalf("msg2=%+v", msgs[2])
 	}
-	if msgs[2].ToolCalls[0].Name != "Shell" {
-		t.Fatalf("tool name=%q, want Shell", msgs[2].ToolCalls[0].Name)
+	if msgs[2].ToolCalls[0].Name != "shell" {
+		t.Fatalf("tool name=%q, want shell", msgs[2].ToolCalls[0].Name)
 	}
 	if msgs[3].Role != "tool" || msgs[3].ToolCallID != "call_1" {
 		t.Fatalf("msg3=%+v", msgs[3])
@@ -149,8 +149,8 @@ func TestConvertCodexRollout_StructuredShellTool(t *testing.T) {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	tc := msgs[1].ToolCalls[0]
-	if tc.Name != "Shell" {
-		t.Fatalf("tool name=%q, want Shell", tc.Name)
+	if tc.Name != "shell" {
+		t.Fatalf("tool name=%q, want shell", tc.Name)
 	}
 	// Verify normalized args contain command and workdir.
 	var args map[string]any
@@ -400,7 +400,7 @@ func TestConvertCodexRollout_AutoModeStructuresMappedAndDowngradesUnknown(t *tes
 	if len(msgs) != 5 {
 		t.Fatalf("msgs len=%d, want 5: %+v", len(msgs), msgs)
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Shell" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" {
 		t.Fatalf("mapped auto tool not structured: %+v", msgs[1])
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_shell" {
@@ -476,7 +476,7 @@ func TestConvertCodexRollout_WriteToolConvertsToWrite(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Write" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "write" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	var args map[string]any
@@ -505,7 +505,7 @@ func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "Edit" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "edit" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	var args map[string]any
@@ -540,8 +540,8 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 		t.Fatalf("apply_patch not restored as Edit tool card: %+v", msgs[1])
 	}
 	call := msgs[1].ToolCalls[0]
-	if call.Name != "Edit" || call.ID != "call_patch" {
-		t.Fatalf("tool call=%+v, want Edit call_patch", call)
+	if call.Name != "edit" || call.ID != "call_patch" {
+		t.Fatalf("tool call=%+v, want edit call_patch", call)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(call.Args, &args); err != nil {

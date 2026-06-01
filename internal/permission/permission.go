@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/keakon/chord/internal/toolname"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,7 +57,7 @@ func ParsePermission(node *yaml.Node) Ruleset {
 
 	var rules Ruleset
 	for i := 0; i < len(node.Content); i += 2 {
-		toolName := node.Content[i].Value
+		toolName := toolname.Normalize(node.Content[i].Value)
 		valNode := node.Content[i+1]
 
 		switch valNode.Kind {
@@ -84,9 +86,10 @@ func ParsePermission(node *yaml.Node) Ruleset {
 // Both permission (tool name) and pattern (argument) support glob wildcards (* and ?).
 // Returns ActionDeny if no rule matches.
 func (rs Ruleset) Evaluate(permission, pattern string) Action {
+	permission = toolname.Normalize(permission)
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
-		if !globMatch(permission, r.Permission) || !globMatch(pattern, r.Pattern) {
+		if !globMatch(permission, toolname.Normalize(r.Permission)) || !globMatch(pattern, r.Pattern) {
 			continue
 		}
 		if r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
@@ -101,9 +104,10 @@ func (rs Ruleset) Evaluate(permission, pattern string) Action {
 // Used to exclude tools from the LLM's tool list entirely.
 // Scans in reverse to find the last rule matching the tool name.
 func (rs Ruleset) IsDisabled(toolName string) bool {
+	toolName = toolname.Normalize(toolName)
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
-		if globMatch(toolName, r.Permission) {
+		if globMatch(toolName, toolname.Normalize(r.Permission)) {
 			return r.Pattern == "*" && r.Action == ActionDeny
 		}
 	}
@@ -124,7 +128,7 @@ func Merge(rulesets ...Ruleset) Ruleset {
 var globCache sync.Map // pattern string → *regexp.Regexp
 
 func shellCompoundCommandNeedsReview(permission, command, rulePattern string) bool {
-	if !strings.EqualFold(strings.TrimSpace(permission), "Shell") {
+	if toolname.Normalize(permission) != toolname.Shell {
 		return false
 	}
 	if strings.TrimSpace(rulePattern) == "*" {

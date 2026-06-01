@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/session"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -83,10 +84,11 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			continue
 		}
 		original := prepared[i].Content
+		meta := callMeta[prepared[i].ToolCallID]
+		toolName := toolname.Normalize(meta.Name)
 		age := max(turnsAfter[i], messageAge[i])
 		if repeated[i] && age >= 1 {
-			meta := callMeta[prepared[i].ToolCallID]
-			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(contextReductionToolName(meta.Name)))
+			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(toolName))
 			prepared[i].ToolDiff = ""
 			noteReduction(original, prepared[i].Content)
 			continue
@@ -104,8 +106,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			continue
 		}
 		if age >= 1 {
-			meta := callMeta[prepared[i].ToolCallID]
-			name := contextReductionToolName(meta.Name)
+			name := toolName
 			if (name == tools.NameEdit || name == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
 				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
 					prepared[i].Content = compacted
@@ -115,8 +116,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			}
 		}
 		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
-			meta := callMeta[prepared[i].ToolCallID]
-			if contextReductionToolName(meta.Name) == tools.NameShell {
+			if toolName == tools.NameShell {
 				prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell)
 				prepared[i].ToolDiff = ""
 				noteReduction(original, prepared[i].Content)
@@ -124,8 +124,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			}
 		}
 		if age >= policy.ReadLikeAgeTurns && len(prepared[i].Content) > policy.ReadLikeOutputBytes {
-			meta := callMeta[prepared[i].ToolCallID]
-			name := contextReductionToolName(meta.Name)
+			name := toolName
 			if contextReductionIsReadLike(name) {
 				prepared[i].Content = compactReadLikeOutputSummary(name, meta.Args, prepared[i].Content)
 				prepared[i].ToolDiff = ""
@@ -481,24 +480,8 @@ func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {
 	return meta
 }
 
-func contextReductionToolName(name string) string {
-	trimmed := strings.TrimSpace(name)
-	for _, candidate := range []string{tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameWebFetch, tools.NameShell, tools.NameEdit, tools.NameWrite} {
-		if toolNameKey(trimmed) == toolNameKey(candidate) {
-			return candidate
-		}
-	}
-	return trimmed
-}
-
 func contextReductionIsReadLike(name string) bool {
-	name = contextReductionToolName(name)
-	return name == tools.NameRead || name == tools.NameGrep || name == tools.NameGlob || name == tools.NameWebFetch
-}
-
-func toolNameKey(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	return strings.ReplaceAll(name, "_", "")
+	return tools.IsReadLike(name)
 }
 
 func extractReadToolPath(argsJSON string) string {
@@ -579,10 +562,12 @@ func compactGlobOutputSummary(argsJSON, content string) string {
 	}
 	filePath := strings.TrimSpace(parsed.FilePath)
 	return fmt.Sprintf(
-		"[Older Glob output truncated to save context; pattern=%q path=%q]\n%s\n\n[Re-run Glob(pattern=%q, path=%q) if needed.]",
+		"[Older %s output truncated to save context; pattern=%q path=%q]\n%s\n\n[Re-run %s(pattern=%q, path=%q) if needed.]",
+		tools.NameGlob,
 		strings.TrimSpace(parsed.Pattern),
 		blankToDefault(filePath, "."),
 		snippet,
+		tools.NameGlob,
 		strings.TrimSpace(parsed.Pattern),
 		blankToDefault(filePath, "."),
 	)
@@ -601,11 +586,13 @@ func compactWebFetchOutputSummary(argsJSON, content string) string {
 		snippet = "(no preserved excerpt)"
 	}
 	return fmt.Sprintf(
-		"[Older WebFetch output truncated to save context; url=%q raw=%t timeout=%d]\n%s\n\n[Re-run WebFetch(url=%q, raw=%t, timeout=%d) if needed.]",
+		"[Older %s output truncated to save context; url=%q raw=%t timeout=%d]\n%s\n\n[Re-run %s(url=%q, raw=%t, timeout=%d) if needed.]",
+		tools.NameWebFetch,
 		strings.TrimSpace(parsed.URL),
 		parsed.Raw,
 		parsed.Timeout,
 		snippet,
+		tools.NameWebFetch,
 		strings.TrimSpace(parsed.URL),
 		parsed.Raw,
 		parsed.Timeout,

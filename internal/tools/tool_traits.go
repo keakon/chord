@@ -1,38 +1,42 @@
 package tools
 
-import "strings"
+import (
+	"github.com/keakon/chord/internal/toolname"
+)
 
 const (
-	NameRead         = "Read"
-	NameWrite        = "Write"
-	NameEdit         = "Edit"
-	NameDelete       = "Delete"
-	NameGrep         = "Grep"
-	NameGlob         = "Glob"
-	NameWebFetch     = "WebFetch"
-	NameShell        = "Shell"
-	NameSpawn        = "Spawn"
-	NameSpawnStatus  = "SpawnStatus"
-	NameSpawnStop    = "SpawnStop"
-	NameLsp          = "Lsp"
-	NameTodoWrite    = "TodoWrite"
-	NameQuestion     = "Question"
-	NameDone         = "Done"
-	NameDelegate     = "Delegate"
-	NameNotify       = "Notify"
-	NameSkill        = "Skill"
-	NameHandoff      = "Handoff"
-	NameEscalate     = "Escalate"
-	NameCancel       = "Cancel"
-	NameComplete     = "Complete"
-	NameSaveArtifact = "SaveArtifact"
-	NameReadArtifact = "ReadArtifact"
+	NameRead         = toolname.Read
+	NameWrite        = toolname.Write
+	NameEdit         = toolname.Edit
+	NameDelete       = toolname.Delete
+	NameGrep         = toolname.Grep
+	NameGlob         = toolname.Glob
+	NameWebFetch     = toolname.WebFetch
+	NameShell        = toolname.Shell
+	NameSpawn        = toolname.Spawn
+	NameSpawnStatus  = toolname.SpawnStatus
+	NameSpawnStop    = toolname.SpawnStop
+	NameLsp          = toolname.Lsp
+	NameTodoWrite    = toolname.TodoWrite
+	NameQuestion     = toolname.Question
+	NameDone         = toolname.Done
+	NameDelegate     = toolname.Delegate
+	NameNotify       = toolname.Notify
+	NameSkill        = toolname.Skill
+	NameHandoff      = toolname.Handoff
+	NameEscalate     = toolname.Escalate
+	NameCancel       = toolname.Cancel
+	NameComplete     = toolname.Complete
+	NameSaveArtifact = toolname.SaveArtifact
+	NameReadArtifact = toolname.ReadArtifact
 )
+
+var NormalizeName = toolname.Normalize
 
 // IsReadLike reports whether tool output should be treated as read-only context
 // that can be compacted into a re-runnable summary.
 func IsReadLike(name string) bool {
-	switch strings.TrimSpace(name) {
+	switch NormalizeName(name) {
 	case NameRead, NameGrep, NameGlob, NameWebFetch:
 		return true
 	default:
@@ -42,7 +46,7 @@ func IsReadLike(name string) bool {
 
 // IsFileMutation reports whether the tool mutates files in the workspace.
 func IsFileMutation(name string) bool {
-	switch strings.TrimSpace(name) {
+	switch NormalizeName(name) {
 	case NameWrite, NameEdit, NameDelete:
 		return true
 	default:
@@ -52,6 +56,6 @@ func IsFileMutation(name string) bool {
 
 // ShouldExpandResult reports whether TUI should expand the tool result by default.
 func ShouldExpandResult(name string) bool {
-	name = strings.TrimSpace(name)
+	name = NormalizeName(name)
 	return name == NameRead || IsFileMutation(name)
 }

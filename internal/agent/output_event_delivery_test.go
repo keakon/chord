@@ -17,7 +17,7 @@ func TestEmitToTUIToolResultWaitsForSpaceInsteadOfDropping(t *testing.T) {
 
 	delivered := make(chan struct{})
 	go func() {
-		a.emitToTUI(ToolResultEvent{CallID: "tool-1", Name: "Shell", Result: "ok", Status: ToolResultStatusSuccess})
+		a.emitToTUI(ToolResultEvent{CallID: "tool-1", Name: "shell", Result: "ok", Status: ToolResultStatusSuccess})
 		close(delivered)
 	}()
 
@@ -60,7 +60,7 @@ func TestEmitToTUIToolCallStartWaitsForSpaceInsteadOfDropping(t *testing.T) {
 
 	delivered := make(chan struct{})
 	go func() {
-		a.emitToTUI(ToolCallStartEvent{ID: "tool-1", Name: "Shell", ArgsJSON: `{"command":"pwd"}`})
+		a.emitToTUI(ToolCallStartEvent{ID: "tool-1", Name: "shell", ArgsJSON: `{"command":"pwd"}`})
 		close(delivered)
 	}()
 
@@ -88,8 +88,8 @@ func TestEmitToTUIToolCallStartWaitsForSpaceInsteadOfDropping(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want ToolCallStartEvent", evt)
 	}
-	if start.ID != "tool-1" || start.Name != "Shell" {
-		t.Fatalf("tool start = %+v, want id=tool-1 name=Shell", start)
+	if start.ID != "tool-1" || start.Name != "shell" {
+		t.Fatalf("tool start = %+v, want id=tool-1 name=shell", start)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestEmitToTUIControlEventsWaitForSpaceInsteadOfDropping(t *testing.T) {
 	}{
 		{
 			name:  "ToolCallUpdateDone",
-			event: ToolCallUpdateEvent{ID: "tool-1", Name: "Shell", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true},
+			event: ToolCallUpdateEvent{ID: "tool-1", Name: "shell", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true},
 			check: func(t *testing.T, evt AgentEvent) {
 				t.Helper()
 				got, ok := evt.(ToolCallUpdateEvent)
@@ -256,7 +256,7 @@ func TestEmitToTUIToolCallUpdateStillDropsWhileStreamingWhenChannelFull(t *testi
 		a.outputCh <- StreamTextEvent{Text: "busy"}
 	}
 
-	a.emitToTUI(ToolCallUpdateEvent{ID: "tool-1", Name: "Shell", ArgsJSON: `{"command":"pw"}`})
+	a.emitToTUI(ToolCallUpdateEvent{ID: "tool-1", Name: "shell", ArgsJSON: `{"command":"pw"}`})
 
 	for i := 0; i < cap(a.outputCh); i++ {
 		evt := <-a.outputCh

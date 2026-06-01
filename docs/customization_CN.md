@@ -24,9 +24,9 @@ Chord 默认从以下目录发现 Skills：
 - `~/.config/chord/skills/`
 - `skills.paths` 中配置的额外目录
 
-运行时不会把所有 skill 正文预先注入 system prompt；任务明显匹配时，模型才会调用 `Skill` 工具按需加载。
+运行时不会把所有 skill 正文预先注入 system prompt；任务明显匹配时，模型才会调用 `skill` 工具按需加载。
 
-TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`Skill` 工具成功加载某个 skill 后，该 skill 以绿色显示为已调用；加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
+TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` 工具成功加载某个 skill 后，该 skill 以绿色显示为已调用；加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
 
 最小结构示例：
 

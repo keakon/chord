@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/toolname"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -318,24 +320,24 @@ func BuiltinAgentConfigs() map[string]*AgentConfig {
 
 // DefaultPlannerAgent returns the built-in planner agent configuration.
 // The planner agent is specialised for codebase exploration and plan generation.
-// It is read-heavy by default: Read/Grep/Glob/Shell are allowed, plan-file writes/patches are allowed,
+// It is read-heavy by default: read/grep/glob/shell are allowed, plan-file writes/patches are allowed,
 // and it can use Handoff to signal plan completion.
 func DefaultPlannerAgent() *AgentConfig {
 	// Build permission node: read-heavy, free exploration, plan-file changes only.
-	permYAML := `
+	permYAML := fmt.Sprintf(`
 "*": deny
-Read: allow
-Grep: allow
-Glob: allow
-Shell: allow
-Write:
+%s: allow
+%s: allow
+%s: allow
+%s: allow
+%s:
   .chord/plans/*: allow
-Edit:
+%s:
   .chord/plans/*: allow
-Handoff: allow
-Skill: allow
-Question: allow
-`
+%s: allow
+%s: allow
+%s: allow
+`, toolname.Read, toolname.Grep, toolname.Glob, toolname.Shell, toolname.Write, toolname.Edit, toolname.Handoff, toolname.Skill, toolname.Question)
 	var permNode yaml.Node
 	_ = yaml.Unmarshal([]byte(permYAML), &permNode)
 
@@ -356,20 +358,20 @@ Question: allow
 // DefaultBuilderAgent returns the built-in builder agent configuration.
 // The builder agent is the MainAgent's default role — the main agent the user
 // interacts with for coding tasks. Its permissions are from the MainAgent's
-// perspective (Delegate, TodoWrite) not SubAgent's (Complete, Escalate, Notify).
+// perspective (delegate, todo_write) not SubAgent's (complete, escalate, notify).
 // It defaults to an allow-all baseline, with Handoff and Delegate denied and Delete
 // requiring confirmation.
 //
 // When this config is used to create SubAgents via the Delegate tool, the system
 // automatically adapts: MainAgent-only tools are removed and SubAgent-specific
-// tools (Complete, Escalate, Notify) are added.
+// tools (complete, escalate, notify) are added.
 func DefaultBuilderAgent() *AgentConfig {
-	permYAML := `
+	permYAML := fmt.Sprintf(`
 "*": allow
-Handoff: deny
-Delegate: deny
-Delete: ask
-`
+%s: deny
+%s: deny
+%s: ask
+`, toolname.Handoff, toolname.Delegate, toolname.Delete)
 	var permNode yaml.Node
 	_ = yaml.Unmarshal([]byte(permYAML), &permNode)
 

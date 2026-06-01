@@ -176,10 +176,10 @@ func newHTTPClientWithProxy(proxyURL string, timeout time.Duration) (*http.Clien
 	return &http.Client{Timeout: timeout, Transport: transport}, nil
 }
 
-func (WebFetchTool) Name() string { return "WebFetch" }
+func (WebFetchTool) Name() string { return NameWebFetch }
 
 func (WebFetchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy("WebFetch", urlToolConcurrencyPolicy(args))
+	return normalizeConcurrencyPolicy(NameWebFetch, urlToolConcurrencyPolicy(args))
 }
 
 func (WebFetchTool) Description() string {

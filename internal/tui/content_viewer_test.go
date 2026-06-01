@@ -210,7 +210,7 @@ func TestContentViewerTripleClickSelectsLine(t *testing.T) {
 func TestContentViewerEscRestoresPreviousMode(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 20)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", DoneReport: "report"}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", DoneReport: "report"}
 	m.openContentViewer("Done report", "report")
 
 	cmd := m.handleContentViewerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))

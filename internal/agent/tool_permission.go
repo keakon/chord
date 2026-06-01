@@ -31,6 +31,7 @@ func normalizeToolPermissionAction(toolName string, action permission.Action) pe
 }
 
 func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
+	toolName = tools.NormalizeName(toolName)
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	if strings.TrimSpace(toolName) == "" {
 		return decision

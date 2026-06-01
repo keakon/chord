@@ -16,7 +16,7 @@ func TestBuildToolExecContextInjectsProgressReporter(t *testing.T) {
 	var emitted []AgentEvent
 	ctx := buildToolExecContext(
 		context.Background(),
-		message.ToolCall{ID: "call-1", Name: "Delete"},
+		message.ToolCall{ID: "call-1", Name: "delete"},
 		"agent-1",
 		"adhoc-1",
 		"/tmp/session",
@@ -37,7 +37,7 @@ func TestBuildToolExecContextInjectsProgressReporter(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want ToolProgressEvent", emitted[0])
 	}
-	if progress.CallID != "call-1" || progress.Name != "Delete" || progress.AgentID != "agent-1" {
+	if progress.CallID != "call-1" || progress.Name != "delete" || progress.AgentID != "agent-1" {
 		t.Fatalf("unexpected progress identity: %+v", progress)
 	}
 	if got := tools.TaskIDFromContext(ctx); got != "adhoc-1" {

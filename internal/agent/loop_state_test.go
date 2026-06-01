@@ -32,8 +32,8 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if assessment.Message != "Loop continuing: end this round with a `Done` tool call to request loop exit." {
-		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
+	if assessment.Message != "Loop continuing: end this round with a `done` tool call to request loop exit." {
+		t.Fatalf("assessment.Message = %q, want missing-done guidance", assessment.Message)
 	}
 	if a.loopState.State != LoopStateAssessing {
 		t.Fatalf("loopState.State = %q, want %q", a.loopState.State, LoopStateAssessing)
@@ -52,7 +52,7 @@ func TestNextLoopAssessmentFromAssistantRequiresDoneToolWhenEnabled(t *testing.T
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -68,8 +68,8 @@ Done: allow
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "Done") {
-		t.Fatalf("assessment.Message = %q, want Done guard", assessment.Message)
+	if !strings.Contains(assessment.Message, "done") {
+		t.Fatalf("assessment.Message = %q, want done guard", assessment.Message)
 	}
 	found := slices.Contains(assessment.Reasons, "missing_done_tool")
 	if !found {
@@ -86,7 +86,7 @@ func TestNextLoopAssessmentFromAssistantAcceptsDoneToolWhenEnabled(t *testing.T)
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -102,8 +102,8 @@ Done: allow
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "Done") {
-		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
+	if !strings.Contains(assessment.Message, "done") {
+		t.Fatalf("assessment.Message = %q, want missing-done guidance", assessment.Message)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestHandleToolResult_DoneInLoopRequestsConfirmationAndDisablesLoopOnApprova
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -218,7 +218,7 @@ func TestRepeatedToolCallInLoopAutoRejectsOnThirdAndFourthAttempt(t *testing.T) 
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
+read: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -243,7 +243,7 @@ Read: allow
 	if !strings.Contains(result3.Result, "Tool call rejected automatically") {
 		t.Fatalf("third attempt result = %q, want automatic rejection", result3.Result)
 	}
-	if !strings.Contains(result3.Result, "detected 3 consecutive identical `Read` tool calls") {
+	if !strings.Contains(result3.Result, "detected 3 consecutive identical `read` tool calls") {
 		t.Fatalf("third attempt result = %q, want repeated-call explanation", result3.Result)
 	}
 	if a.loopState.Iteration != 1 {
@@ -422,7 +422,7 @@ func TestHandleToolResult_DoneOutsideLoopEntersIdle(t *testing.T) {
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: ask
+done: ask
 `),
 	}
 	a.rebuildRuleset()
@@ -492,7 +492,7 @@ func TestHandleToolResult_DoneOutsideLoopDenyContinuesWork(t *testing.T) {
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -562,7 +562,7 @@ func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenExitConditionsFail(
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -648,7 +648,7 @@ func TestAwaitLoopExitConfirmationEscapesReasonJSON(t *testing.T) {
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: ask
+done: ask
 `),
 	}
 	a.rebuildRuleset()
@@ -706,7 +706,7 @@ func TestHandleToolResult_DoneInLoopUserDenialDoesNotEmitLoopContinue(t *testing
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: ask
+done: ask
 `),
 	}
 	a.rebuildRuleset()
@@ -799,7 +799,7 @@ func TestHandleToolResult_DoneInLoopUserDenialPreservesLongReason(t *testing.T) 
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: ask
+done: ask
 `),
 	}
 	a.rebuildRuleset()
@@ -887,8 +887,8 @@ func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if assessment.Message != "Loop continuing: end this round with a `Done` tool call to request loop exit." {
-		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
+	if assessment.Message != "Loop continuing: end this round with a `done` tool call to request loop exit." {
+		t.Fatalf("assessment.Message = %q, want missing-done guidance", assessment.Message)
 	}
 }
 
@@ -946,8 +946,8 @@ func TestNextLoopAssessmentFromAssistantRejectsDoneMixedWithOtherToolCalls(t *te
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
-Read: allow
+done: allow
+read: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -967,8 +967,8 @@ Read: allow
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "Done") || !strings.Contains(assessment.Message, "only tool call") {
-		t.Fatalf("assessment.Message = %q, want Done mixed-batch guidance", assessment.Message)
+	if !strings.Contains(assessment.Message, "done") || !strings.Contains(assessment.Message, "only tool call") {
+		t.Fatalf("assessment.Message = %q, want done mixed-batch guidance", assessment.Message)
 	}
 	found := slices.Contains(assessment.Reasons, "done_mixed_with_other_tools")
 	if !found {
@@ -1197,7 +1197,7 @@ func TestNextLoopAssessmentFromAssistantRequiresDoneToolBeforeCompleted(t *testi
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1213,8 +1213,8 @@ Done: allow
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "Done") {
-		t.Fatalf("assessment.Message = %q, want missing-Done guidance", assessment.Message)
+	if !strings.Contains(assessment.Message, "done") {
+		t.Fatalf("assessment.Message = %q, want missing-done guidance", assessment.Message)
 	}
 }
 
@@ -1240,14 +1240,14 @@ func TestNextLoopAssessmentFromAssistantReturnsBlockedForBlockedTag(t *testing.T
 }
 
 func TestIsVerificationLikeToolResultDetectsShellValidationOutput(t *testing.T) {
-	payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"go test ./..."}`}
+	payload := &ToolResultPayload{Name: "shell", ArgsJSON: `{"command":"go test ./..."}`}
 	if !isVerificationLikeToolResult(payload, "go test ./...\nok") {
 		t.Fatal("expected go test output to be treated as verification-like progress")
 	}
 }
 
 func TestIsVerificationLikeToolResultRejectsNonValidationShellOutput(t *testing.T) {
-	payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"echo hello"}`}
+	payload := &ToolResultPayload{Name: "shell", ArgsJSON: `{"command":"echo hello"}`}
 	if isVerificationLikeToolResult(payload, "hello") {
 		t.Fatal("unexpected verification classification for non-validation shell output")
 	}
@@ -1263,7 +1263,7 @@ func TestIsVerificationLikeToolResultDetectsVerificationFromShellCommand(t *test
 		{name: "npm test command", command: "npm test -- --runInBand", result: "PASS src/app.test.ts"},
 		{name: "cargo test command", command: "cargo test", result: "Finished test profile"},
 	} {
-		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
+		payload := &ToolResultPayload{Name: "shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
 		if !isVerificationLikeToolResult(payload, tc.result) {
 			t.Fatalf("%s should be treated as verification-like progress", tc.name)
 		}
@@ -1282,7 +1282,7 @@ func TestIsVerificationLikeToolResultDoesNotMisclassifyShortPatternSubstrings(t 
 		{name: "ava substring in command token", command: "java -version", result: "ok"},
 	}
 	for _, tc := range cases {
-		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
+		payload := &ToolResultPayload{Name: "shell", ArgsJSON: `{"command":"` + tc.command + `"}`}
 		if isVerificationLikeToolResult(payload, tc.result) {
 			t.Fatalf("%s should not be treated as verification-like progress", tc.name)
 		}
@@ -1291,7 +1291,7 @@ func TestIsVerificationLikeToolResultDoesNotMisclassifyShortPatternSubstrings(t 
 
 func TestIsVerificationLikeToolResultMatchesShortVerificationCommandsWithWordBoundaries(t *testing.T) {
 	for _, command := range []string{"tox -q", "nox -s tests", "npx ava"} {
-		payload := &ToolResultPayload{Name: "Shell", ArgsJSON: `{"command":"` + command + `"}`}
+		payload := &ToolResultPayload{Name: "shell", ArgsJSON: `{"command":"` + command + `"}`}
 		if !isVerificationLikeToolResult(payload, "ok") {
 			t.Fatalf("command %q should be treated as verification-like progress", command)
 		}
@@ -1304,7 +1304,7 @@ func TestHandleToolResult_DoneInLoopAllowsExitAfterPytestVerification(t *testing
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1315,7 +1315,7 @@ Done: allow
 	verifyCallID := "verify-pytest-1"
 	a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
 		CallID:   verifyCallID,
-		Name:     "Shell",
+		Name:     "shell",
 		ArgsJSON: `{"command":"pytest -q"}`,
 		Result:   "2 passed in 0.10s",
 		TurnID:   turn.ID,
@@ -1375,7 +1375,7 @@ Done: allow
 
 func TestChangedFileSummaryMarksObservableProgressSignal(t *testing.T) {
 	payload := &ToolResultPayload{
-		Name:     "Write",
+		Name:     "write",
 		ArgsJSON: `{"path":"internal/agent/example.go","content":"package example"}`,
 		Diff:     "@@ -0,0 +1 @@\n+package example",
 	}
@@ -1435,7 +1435,7 @@ func TestHandleUserMessageBusyLoopOnDefersContinuationPromptInjection(t *testing
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1504,7 +1504,7 @@ func TestHandleUserMessageRejectsLoopOnWithoutDoneTool(t *testing.T) {
 	a.tools.Register(tools.ReadTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
+read: allow
 `)}
 	a.rebuildRuleset()
 
@@ -1524,7 +1524,7 @@ func TestHandleUserMessageLoopOnAllowedWhenYoloEnabled(t *testing.T) {
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1644,7 +1644,7 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
-	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:") {
+	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:") {
 		t.Fatalf("loop notice content = %q, want Done report-argument requirement", found.Content)
 	}
 	if !strings.Contains(found.Content, "**Completion status**:") {
@@ -1751,7 +1751,7 @@ func TestHandleToolResult_DoneInLoopUserDenialDoesNotIncrementIteration(t *testi
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: ask
+done: ask
 `),
 	}
 	a.rebuildRuleset()
@@ -1816,7 +1816,7 @@ func TestHandleToolResult_DoneInLoopAutoRejectionStopsAtMaxIterations(t *testing
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1872,7 +1872,7 @@ func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) 
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `)}
 	a.rebuildRuleset()
 	a.newTurn()

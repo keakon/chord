@@ -221,13 +221,14 @@ func bashCollapsedCommandHiddenLines(command string, contentWidth int) int {
 }
 
 func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
+	b.ToolName = tools.NormalizeName(b.ToolName)
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	if b.ToolName == "TodoWrite" {
+	if b.ToolName == tools.NameTodoWrite {
 		return b.renderTodoCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameWrite {
@@ -642,9 +643,9 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 				}
 			}
 			if strings.TrimSpace(b.ResultContent) != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
-				if !expanded && b.ToolName == "Skill" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+				if !expanded && tools.NormalizeName(b.ToolName) == tools.NameSkill && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 					// collapsed Skill cards intentionally show only header summary
-				} else if !expanded && b.ToolName == "Complete" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+				} else if !expanded && tools.NormalizeName(b.ToolName) == tools.NameComplete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 					appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-10, ToolResultStyle)
 					if hidden := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; hidden > 0 {
 						result = append(result, renderToolExpandHint(toolHintIndent, hidden))

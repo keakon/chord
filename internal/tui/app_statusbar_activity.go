@@ -188,7 +188,7 @@ func (m Model) renderStatusBarLocalShell(maxWidth int) string {
 	if !startedAt.IsZero() {
 		elapsed = formatStatusBarElapsed(time.Since(startedAt))
 	}
-	text := "Shell" + elapsed
+	text := "Terminal" + elapsed
 	started := ""
 	if !startedAt.IsZero() {
 		started = DimStyle.Render(" · " + formatStatusBarStartedAt(startedAt))
@@ -197,7 +197,7 @@ func (m Model) renderStatusBarLocalShell(maxWidth int) string {
 	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.StatusFg))
 	out := iconStyle.Render("!") + " " + textStyle.Render(text) + started
 	if maxWidth > 0 && lipgloss.Width(out) > maxWidth {
-		short := iconStyle.Render("!") + " " + textStyle.Render("Shell"+elapsed)
+		short := iconStyle.Render("!") + " " + textStyle.Render("Terminal"+elapsed)
 		if lipgloss.Width(short) <= maxWidth {
 			out = short
 		} else {

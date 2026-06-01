@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/toolname"
 )
 
 func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
@@ -15,21 +16,21 @@ func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
 		pattern string
 		want    permission.Action
 	}{
-		{perm: "Shell", pattern: "go test ./...", want: permission.ActionAllow},
-		{perm: "Read", pattern: "internal/agent/main.go", want: permission.ActionAllow},
+		{perm: toolname.Shell, pattern: "go test ./...", want: permission.ActionAllow},
+		{perm: toolname.Read, pattern: "internal/agent/main.go", want: permission.ActionAllow},
 		{
-			perm:    "Write",
+			perm:    toolname.Write,
 			pattern: ".chord/plans/plan-001.md",
 			want:    permission.ActionAllow,
 		},
-		{perm: "Write", pattern: "docs/plan.md", want: permission.ActionDeny},
+		{perm: toolname.Write, pattern: "docs/plan.md", want: permission.ActionDeny},
 		{
-			perm:    "Edit",
+			perm:    toolname.Edit,
 			pattern: ".chord/plans/plan-001.md",
 			want:    permission.ActionAllow,
 		},
-		{perm: "Edit", pattern: "docs/plan.md", want: permission.ActionDeny},
-		{perm: "Handoff", pattern: "*", want: permission.ActionAllow},
+		{perm: toolname.Edit, pattern: "docs/plan.md", want: permission.ActionDeny},
+		{perm: toolname.Handoff, pattern: "*", want: permission.ActionAllow},
 	}
 	for _, tt := range checks {
 		if got := ruleset.Evaluate(tt.perm, tt.pattern); got != tt.want {
@@ -55,13 +56,13 @@ func TestDefaultBuilderAgentUsesAllowAllBaselineWithOverrides(t *testing.T) {
 		pattern string
 		want    permission.Action
 	}{
-		{perm: "Read", pattern: "internal/agent/main.go", want: permission.ActionAllow},
-		{perm: "Write", pattern: "docs/notes.md", want: permission.ActionAllow},
-		{perm: "Edit", pattern: "docs/notes.md", want: permission.ActionAllow},
-		{perm: "Shell", pattern: "go test ./...", want: permission.ActionAllow},
-		{perm: "Delete", pattern: "tmp/build.out", want: permission.ActionAsk},
-		{perm: "Delegate", pattern: "*", want: permission.ActionDeny},
-		{perm: "Handoff", pattern: "*", want: permission.ActionDeny},
+		{perm: toolname.Read, pattern: "internal/agent/main.go", want: permission.ActionAllow},
+		{perm: toolname.Write, pattern: "docs/notes.md", want: permission.ActionAllow},
+		{perm: toolname.Edit, pattern: "docs/notes.md", want: permission.ActionAllow},
+		{perm: toolname.Shell, pattern: "go test ./...", want: permission.ActionAllow},
+		{perm: toolname.Delete, pattern: "tmp/build.out", want: permission.ActionAsk},
+		{perm: toolname.Delegate, pattern: "*", want: permission.ActionDeny},
+		{perm: toolname.Handoff, pattern: "*", want: permission.ActionDeny},
 	}
 	for _, tt := range checks {
 		if got := ruleset.Evaluate(tt.perm, tt.pattern); got != tt.want {

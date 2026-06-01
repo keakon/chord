@@ -63,7 +63,7 @@ func TestShellRuntimeFailureDiagnosticPreservesOutputAndExitCode(t *testing.T) {
 	if !strings.Contains(out, "terminal prompts disabled") {
 		t.Fatalf("output = %q, want original stderr", out)
 	}
-	for _, want := range []string{"exit code 128", "non-interactive Shell failure", "provide input through files/arguments/pipes"} {
+	for _, want := range []string{"exit code 128", "non-interactive shell failure", "provide input through files/arguments/pipes"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
 		}

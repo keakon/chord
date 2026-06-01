@@ -88,7 +88,7 @@ A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) wi
 
 ## Skill
 
-A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `Skill` tool when relevant — Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization — Skills](./customization.md#skills).
+A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `skill` tool when relevant — Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization — Skills](./customization.md#skills).
 
 ## Hook
 

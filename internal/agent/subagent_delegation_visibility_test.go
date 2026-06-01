@@ -35,12 +35,12 @@ func TestSubAgentHidesDelegationControlToolsFromBaseRegistry(t *testing.T) {
 		ModelName:    "test-model",
 	})
 
-	for _, name := range []string{"Delegate", "Cancel"} {
+	for _, name := range []string{"delegate", "cancel"} {
 		if _, ok := sub.tools.Get(name); ok {
 			t.Fatalf("sub.tools unexpectedly exposes %q while nested delegation is hard-disabled", name)
 		}
 	}
-	tool, ok := sub.tools.Get("Notify")
+	tool, ok := sub.tools.Get("notify")
 	if !ok {
 		t.Fatal("sub.tools should still expose owner-only Notify when delegate family is hidden")
 	}
@@ -48,7 +48,7 @@ func TestSubAgentHidesDelegationControlToolsFromBaseRegistry(t *testing.T) {
 	if !ok || !notify.VisibleWithRuleset(nil) {
 		t.Fatalf("sub.tools should still expose owner-only Notify when delegate family is hidden, got %T", tool)
 	}
-	if _, ok := sub.tools.Get("Read"); !ok {
+	if _, ok := sub.tools.Get("read"); !ok {
 		t.Fatal("sub.tools should still expose normal non-delegation tools")
 	}
 }
@@ -78,7 +78,7 @@ func TestSubAgentShowsDelegationControlToolsWhenDepthAllows(t *testing.T) {
 		ModelName:    "test-model",
 	})
 
-	for _, name := range []string{"Delegate", "Notify", "Cancel"} {
+	for _, name := range []string{"delegate", "notify", "cancel"} {
 		if _, ok := sub.tools.Get(name); !ok {
 			t.Fatalf("sub.tools missing %q when depth allows nested delegation", name)
 		}
@@ -116,13 +116,13 @@ func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T)
 		ModelName:  "test-model",
 	})
 
-	if _, ok := sub.tools.Get("Complete"); !ok {
+	if _, ok := sub.tools.Get("complete"); !ok {
 		t.Fatal("sub.tools should retain Complete even when disable=*")
 	}
 	visible := visibleLLMTools(sub.tools, sub.ruleset, isSubAgentInternalTool)
 	foundComplete := false
 	for _, tool := range visible {
-		if tool.Name() == "Complete" {
+		if tools.NormalizeName(tool.Name()) == tools.NameComplete {
 			foundComplete = true
 			break
 		}
@@ -130,7 +130,7 @@ func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T)
 	if !foundComplete {
 		t.Fatal("visibleLLMTools should retain Complete even when disable=*")
 	}
-	for _, name := range []string{"Delegate", "Notify", "Escalate", "Cancel", "Read"} {
+	for _, name := range []string{"delegate", "notify", "escalate", "cancel", "read"} {
 		if _, ok := sub.tools.Get(name); ok {
 			t.Fatalf("sub.tools unexpectedly exposes %q when disable=*", name)
 		}
@@ -157,8 +157,8 @@ func TestSubAgentNotifyTargetingDependsOnDelegatePermission(t *testing.T) {
 		BaseTools:    reg,
 		Ruleset: permission.Ruleset{
 			{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
-			{Permission: "Delegate", Pattern: "*", Action: permission.ActionDeny},
-			{Permission: "Notify", Pattern: "*", Action: permission.ActionAllow},
+			{Permission: "delegate", Pattern: "*", Action: permission.ActionDeny},
+			{Permission: "notify", Pattern: "*", Action: permission.ActionAllow},
 		},
 		Depth:      1,
 		Delegation: config.DelegationConfig{MaxDepth: 2},
@@ -167,10 +167,10 @@ func TestSubAgentNotifyTargetingDependsOnDelegatePermission(t *testing.T) {
 		ModelName:  "test-model",
 	})
 
-	if _, ok := sub.tools.Get("Cancel"); ok {
+	if _, ok := sub.tools.Get("cancel"); ok {
 		t.Fatal("sub.tools should hide Cancel when Delegate is denied")
 	}
-	tool, ok := sub.tools.Get("Notify")
+	tool, ok := sub.tools.Get("notify")
 	if !ok {
 		t.Fatal("sub.tools should retain owner-only Notify when Delegate is denied")
 	}

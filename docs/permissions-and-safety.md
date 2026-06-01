@@ -24,13 +24,13 @@ Permissions can be defined in Agent config. Start with this recommended personal
 ```yaml
 permission:
   "*": allow
-  Handoff: deny
-  Delegate: deny
-  Delete: ask
-  WebFetch:
+  handoff: deny
+  delegate: deny
+  delete: ask
+  web_fetch:
     "http://localhost:8000/*": ask
     "http://169.254.169.254/*": deny
-  Shell:
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -45,36 +45,36 @@ permission:
     "git tag *": ask
 ```
 
-This means: allow most tools by default; disable `Handoff` and `Delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `WebFetch` and `Shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
+This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
 
 ### Special permission semantics
 
 Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orchestration tools intentionally have extra coupling so permission settings match the workflow Chord can safely run:
 
-- `Handoff` and `Done` are treated as control gates. Setting either one to `deny` hides or disables that workflow. Setting it to `allow` or `ask` makes the workflow available; Chord may still show local confirmation at the actual handoff/finish point (for example the loop `Done` confirmation). This means `ask` is not a second, stronger workflow mode for these tools: it mainly keeps the tool visible/available while preserving Chord's built-in confirmation gate. The trade-off avoids confusing the model with an available control tool that is later impossible to complete, while still preventing silent role switches or premature loop exits.
-- `Delegate` controls the delegation workflow as a group. If `Delegate` is `deny`, Chord also disables SubAgent cancellation via `Cancel`, hides nested `Delegate`/`Cancel` from SubAgents, and limits SubAgent `Notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while denying `Delegate` would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
-- `Cancel` therefore depends on `Delegate`: even if `Cancel: allow` is configured, `Cancel` is denied when `Delegate` is disabled. To allow a role to cancel delegated work, enable both `Delegate` and `Cancel`.
-- `Question: ask` is normalized to `allow`. The `Question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.
-- YOLO does not override `Handoff`, `Delegate`, `Cancel`, or `Done`; those control-tool permissions remain enforced even when ordinary file/shell/web permissions are bypassed. Under YOLO, a broad `"*": allow` rule does not grant these protected tools by itself; configure each protected tool directly when the role should use it.
+- `handoff` and `done` are treated as control gates. Setting either one to `deny` hides or disables that workflow. Setting it to `allow` or `ask` makes the workflow available; Chord may still show local confirmation at the actual handoff/finish point (for example the loop `done` confirmation). This means `ask` is not a second, stronger workflow mode for these tools: it mainly keeps the tool visible/available while preserving Chord's built-in confirmation gate. The trade-off avoids confusing the model with an available control tool that is later impossible to complete, while still preventing silent role switches or premature loop exits.
+- `delegate` controls the delegation workflow as a group. If `delegate` is `deny`, Chord also disables SubAgent cancellation via `cancel`, hides nested `delegate`/`cancel` from SubAgents, and limits SubAgent `notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while denying `delegate` would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
+- `cancel` therefore depends on `delegate`: even if `cancel: allow` is configured, `cancel` is denied when `delegate` is disabled. To allow a role to cancel delegated work, enable both `delegate` and `cancel`.
+- `question: ask` is normalized to `allow`. The `question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.
+- YOLO does not override `handoff`, `delegate`, `cancel`, or `done`; those control-tool permissions remain enforced even when ordinary file/shell/web permissions are bypassed. Under YOLO, a broad `"*": allow` rule does not grant these protected tools by itself; configure each protected tool directly when the role should use it.
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
-For `Shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow compound commands containing unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines). Those calls fall through to the next matching rule, typically `ask` or `deny`. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `Shell: allow` or `Shell: { "*": allow }` for only fully trusted roles.
+For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow compound commands containing unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines). Those calls fall through to the next matching rule, typically `ask` or `deny`. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
 
 ## Shell / shell risk
 
-`Shell` can execute system commands and should be treated carefully. `Shell` and `Spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+`shell` can execute system commands and should be treated carefully. `shell` and `spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
 
-Platform notes for `Shell` / `Spawn`:
+Platform notes for `shell` / `spawn`:
 
 - On Unix, Chord starts child processes in a new session and cleans up by process group on timeout/cancellation.
-- On Windows, Chord still keeps `Shell` / `Spawn` non-interactive, but there is no Unix-equivalent `setsid`/process-group control path here; timeout/cancellation cleanup falls back to direct process termination and may be less complete for descendant processes.
+- On Windows, Chord still keeps `shell` / `spawn` non-interactive, but there is no Unix-equivalent `setsid`/process-group control path here; timeout/cancellation cleanup falls back to direct process termination and may be less complete for descendant processes.
 
 Common rewrites:
 
 - Use `git commit -m "message"` or `git commit -F file` instead of editor-driven `git commit`
 - For amend flows that should preserve the existing message, use explicit non-editor forms such as `git commit --amend --no-edit` or `git commit --amend -C HEAD`
-- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `Shell` / `Spawn`; stage explicit pathspecs or run them manually
+- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `shell` / `spawn`; stage explicit pathspecs or run them manually
 - Remove TTY allocation flags from container commands (`docker exec -it`, `docker run -t`, `podman run -t`, `kubectl exec -it`) unless you are running them manually in a real terminal
 - Use `npm init -y` / `--yes` or provide all required options explicitly
 - Use `sudo -n` when you want sudo to fail non-interactively instead of prompting
@@ -83,7 +83,7 @@ Common rewrites:
 Recommendations:
 
 - Keep file deletion, bulk rewrites, network downloads, and database operations as `ask` or `deny` by default
-- Use `WebFetch` URL patterns when you want to gate local/private services or sensitive endpoints, for example `WebFetch: { "http://localhost:8000/*": ask }`
+- Use `web_fetch` URL patterns when you want to gate local/private services or sensitive endpoints, for example `web_fetch: { "http://localhost:8000/*": ask }`
 - Set `allow` only for a small set of predictable development commands
 - Do not treat permission matching as a security sandbox
 
@@ -91,9 +91,9 @@ Recommendations:
 
 ## File modification risk
 
-`Edit`, `Write`, and `Delete` directly modify workspace files. `Edit` is for local changes to one existing file, `Write` creates or intentionally replaces a whole file, and `Delete` removes whole files. `Read` and `Grep` are read-only, but they still operate on local filesystem paths and intentionally reject blocked device-style paths such as standard-stream device files (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and similar) instead of treating them as normal files.
+`edit`, `write`, and `delete` directly modify workspace files. `edit` is for local changes to one existing file, `write` creates or intentionally replaces a whole file, and `delete` removes whole files. `read` and `grep` are read-only, but they still operate on local filesystem paths and intentionally reject blocked device-style paths such as standard-stream device files (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and similar) instead of treating them as normal files.
 
-Before `Edit`, the target file must have been observed by the system through `Read`, a successful prior `Write`/`Edit`, or a system-resolved `@file` mention. If a file has changed since it was observed, Chord warns instead of rejecting when the tool can still validate the current contents. Risky non-empty pre-write contents are backed up under the active session directory and the tool result includes the backup path. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Session deletion/cleanup removes these backups with the session directory.
+Before `edit`, the target file must have been observed by the system through `read`, a successful prior `write`/`edit`, or a system-resolved `@file` mention. If a file has changed since it was observed, Chord warns instead of rejecting when the tool can still validate the current contents. Risky non-empty pre-write contents are backed up under the active session directory and the tool result includes the backup path. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Session deletion/cleanup removes these backups with the session directory.
 
 Recommendations:
 

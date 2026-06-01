@@ -46,18 +46,18 @@ func TestParsePermission_Scalar(t *testing.T) {
 func TestParsePermission_SimpleMapping(t *testing.T) {
 	input := `
 "*": deny
-Read: allow
-Grep: allow
-Shell: ask
+read: allow
+grep: allow
+shell: ask
 `
 	node := mustParseYAML(t, input)
 	rs := ParsePermission(node)
 
 	expected := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},
-		{Permission: "Read", Pattern: "*", Action: ActionAllow},
-		{Permission: "Grep", Pattern: "*", Action: ActionAllow},
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "read", Pattern: "*", Action: ActionAllow},
+		{Permission: "grep", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
 	}
 	if len(rs) != len(expected) {
 		t.Fatalf("expected %d rules, got %d: %+v", len(expected), len(rs), rs)
@@ -72,12 +72,12 @@ Shell: ask
 func TestParsePermission_NestedMapping(t *testing.T) {
 	input := `
 "*": deny
-Read: allow
-Shell:
+read: allow
+shell:
   "*": ask
   "rm *": deny
   "git *": ask
-Skill:
+skill:
   "go-expert": allow
   "code-review": deny
 `
@@ -86,12 +86,12 @@ Skill:
 
 	expected := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},
-		{Permission: "Read", Pattern: "*", Action: ActionAllow},
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
-		{Permission: "Shell", Pattern: "rm *", Action: ActionDeny},
-		{Permission: "Shell", Pattern: "git *", Action: ActionAsk},
-		{Permission: "Skill", Pattern: "go-expert", Action: ActionAllow},
-		{Permission: "Skill", Pattern: "code-review", Action: ActionDeny},
+		{Permission: "read", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "shell", Pattern: "rm *", Action: ActionDeny},
+		{Permission: "shell", Pattern: "git *", Action: ActionAsk},
+		{Permission: "skill", Pattern: "go-expert", Action: ActionAllow},
+		{Permission: "skill", Pattern: "code-review", Action: ActionDeny},
 	}
 	if len(rs) != len(expected) {
 		t.Fatalf("expected %d rules, got %d: %+v", len(expected), len(rs), rs)
@@ -116,7 +116,7 @@ func TestParsePermission_UnsupportedKind(t *testing.T) {
 
 func TestEvaluate_DefaultDeny(t *testing.T) {
 	rs := Ruleset{}
-	if action := rs.Evaluate("Shell", "ls"); action != ActionDeny {
+	if action := rs.Evaluate("shell", "ls"); action != ActionDeny {
 		t.Fatalf("expected deny for empty ruleset, got %s", action)
 	}
 }
@@ -124,18 +124,18 @@ func TestEvaluate_DefaultDeny(t *testing.T) {
 func TestEvaluate_LastMatchWins(t *testing.T) {
 	rs := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
-		{Permission: "Shell", Pattern: "git *", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "shell", Pattern: "git *", Action: ActionAllow},
 	}
 
 	tests := []struct {
 		perm, pattern string
 		want          Action
 	}{
-		{"Shell", "git push", ActionAllow},   // matches "git *" rule
-		{"Shell", "ls -la", ActionAsk},       // matches "Shell *" rule
-		{"Read", "somefile.txt", ActionDeny}, // matches "*" wildcard deny
-		{"Shell", "git", ActionAllow},        // "git *" pattern matches "git" (trailing " *" is optional)
+		{"shell", "git push", ActionAllow},   // matches "git *" rule
+		{"shell", "ls -la", ActionAsk},       // matches "shell *" rule
+		{"read", "somefile.txt", ActionDeny}, // matches "*" wildcard deny
+		{"shell", "git", ActionAllow},        // "git *" pattern matches "git" (trailing " *" is optional)
 	}
 	for _, tt := range tests {
 		got := rs.Evaluate(tt.perm, tt.pattern)
@@ -147,8 +147,8 @@ func TestEvaluate_LastMatchWins(t *testing.T) {
 
 func TestEvaluate_ShellAllowRuleDoesNotAutoAllowCompoundCommands(t *testing.T) {
 	rs := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
-		{Permission: "Shell", Pattern: "git *", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "shell", Pattern: "git *", Action: ActionAllow},
 	}
 
 	tests := []string{
@@ -160,11 +160,11 @@ func TestEvaluate_ShellAllowRuleDoesNotAutoAllowCompoundCommands(t *testing.T) {
 		"git status\nrm -rf ~",
 	}
 	for _, command := range tests {
-		if got := rs.Evaluate("Shell", command); got != ActionAsk {
-			t.Fatalf("Evaluate(Shell, %q) = %s, want ask", command, got)
+		if got := rs.Evaluate("shell", command); got != ActionAsk {
+			t.Fatalf("Evaluate(shell, %q) = %s, want ask", command, got)
 		}
 	}
-	if got := rs.Evaluate("Shell", "git status 'a;b'"); got != ActionAllow {
+	if got := rs.Evaluate("shell", "git status 'a;b'"); got != ActionAllow {
 		t.Fatalf("quoted separator command = %s, want allow", got)
 	}
 }
@@ -172,10 +172,10 @@ func TestEvaluate_ShellAllowRuleDoesNotAutoAllowCompoundCommands(t *testing.T) {
 func TestEvaluate_OverridePrecedence(t *testing.T) {
 	// A later "allow" overrides an earlier "deny" for the same pattern.
 	rs := Ruleset{
-		{Permission: "Shell", Pattern: "rm *", Action: ActionDeny},
-		{Permission: "Shell", Pattern: "rm *", Action: ActionAllow},
+		{Permission: "shell", Pattern: "rm *", Action: ActionDeny},
+		{Permission: "shell", Pattern: "rm *", Action: ActionAllow},
 	}
-	if got := rs.Evaluate("Shell", "rm -rf /"); got != ActionAllow {
+	if got := rs.Evaluate("shell", "rm -rf /"); got != ActionAllow {
 		t.Errorf("expected allow (last match wins), got %s", got)
 	}
 }
@@ -183,15 +183,15 @@ func TestEvaluate_OverridePrecedence(t *testing.T) {
 func TestEvaluate_FullConfigScenario(t *testing.T) {
 	input := `
 "*": deny
-Read: allow
-Grep: allow
-Glob: allow
-Shell:
+read: allow
+grep: allow
+glob: allow
+shell:
   "*": ask
   "rm *": deny
   "curl *": deny
   "git *": ask
-Task: allow
+task: allow
 `
 	node := mustParseYAML(t, input)
 	rs := ParsePermission(node)
@@ -200,16 +200,16 @@ Task: allow
 		perm, pattern string
 		want          Action
 	}{
-		{"Read", "anyfile", ActionAllow},
-		{"Grep", "pattern", ActionAllow},
-		{"Glob", "**/*.go", ActionAllow},
-		{"Shell", "echo hello", ActionAsk},
-		{"Shell", "rm -rf /tmp/test", ActionDeny},
-		{"Shell", "curl https://example.com", ActionDeny},
-		{"Shell", "git commit -m fix", ActionAsk},
-		{"Task", "do something", ActionAllow},
-		{"Write", "something", ActionDeny},  // not explicitly allowed
-		{"Unknown", "anything", ActionDeny}, // default deny
+		{"read", "anyfile", ActionAllow},
+		{"grep", "pattern", ActionAllow},
+		{"glob", "**/*.go", ActionAllow},
+		{"shell", "echo hello", ActionAsk},
+		{"shell", "rm -rf /tmp/test", ActionDeny},
+		{"shell", "curl https://example.com", ActionDeny},
+		{"shell", "git commit -m fix", ActionAsk},
+		{"task", "do something", ActionAllow},
+		{"write", "something", ActionDeny},  // not explicitly allowed
+		{"unknown", "anything", ActionDeny}, // default deny
 	}
 	for _, tt := range tests {
 		got := rs.Evaluate(tt.perm, tt.pattern)
@@ -224,19 +224,19 @@ Task: allow
 func TestIsDisabled(t *testing.T) {
 	rs := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},
-		{Permission: "Read", Pattern: "*", Action: ActionAllow},
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
-		{Permission: "Shell", Pattern: "rm *", Action: ActionDeny},
+		{Permission: "read", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "shell", Pattern: "rm *", Action: ActionDeny},
 	}
 
 	tests := []struct {
 		tool string
 		want bool
 	}{
-		{"Read", false},   // allowed
-		{"Shell", false},  // ask (not fully denied)
-		{"Write", true},   // matches "*" deny (no specific rule)
-		{"Unknown", true}, // matches "*" deny
+		{"read", false},   // allowed
+		{"shell", false},  // ask (not fully denied)
+		{"write", true},   // matches "*" deny (no specific rule)
+		{"unknown", true}, // matches "*" deny
 	}
 	for _, tt := range tests {
 		got := rs.IsDisabled(tt.tool)
@@ -249,14 +249,14 @@ func TestIsDisabled(t *testing.T) {
 func TestIsDisabled_SubPatternDeny(t *testing.T) {
 	// If the last matching rule has a specific pattern (not "*"), tool is not disabled.
 	rs := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionAllow},
-		{Permission: "Shell", Pattern: "rm *", Action: ActionDeny},
+		{Permission: "shell", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "rm *", Action: ActionDeny},
 	}
-	// Last rule matching "Shell" by permission is "rm *" deny, but pattern != "*",
+	// Last rule matching "shell" by permission is "rm *" deny, but pattern != "*",
 	// so IsDisabled scans further back and finds the "*" allow rule.
 	// Actually, IsDisabled finds the LAST rule matching the tool name,
 	// which is "rm *" deny. Since pattern is "rm *" (not "*"), it returns false.
-	if rs.IsDisabled("Shell") {
+	if rs.IsDisabled("shell") {
 		t.Error("Shell should not be disabled; only 'rm *' sub-pattern is denied")
 	}
 }
@@ -281,10 +281,10 @@ func TestMerge_Empty(t *testing.T) {
 func TestMerge_Concatenation(t *testing.T) {
 	base := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},
-		{Permission: "Read", Pattern: "*", Action: ActionAllow},
+		{Permission: "read", Pattern: "*", Action: ActionAllow},
 	}
 	override := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAllow},
 	}
 
 	merged := Merge(base, override)
@@ -293,33 +293,33 @@ func TestMerge_Concatenation(t *testing.T) {
 	}
 
 	// Later ruleset rules come last and thus take precedence in Evaluate.
-	if got := merged.Evaluate("Shell", "anything"); got != ActionAllow {
-		t.Errorf("merged.Evaluate(Shell, anything) = %s; want allow (override)", got)
+	if got := merged.Evaluate("shell", "anything"); got != ActionAllow {
+		t.Errorf("merged.Evaluate(shell, anything) = %s; want allow (override)", got)
 	}
 	// Base rules still work for non-overridden tools.
-	if got := merged.Evaluate("Read", "file.txt"); got != ActionAllow {
-		t.Errorf("merged.Evaluate(Read, file.txt) = %s; want allow (base)", got)
+	if got := merged.Evaluate("read", "file.txt"); got != ActionAllow {
+		t.Errorf("merged.Evaluate(read, file.txt) = %s; want allow (base)", got)
 	}
 	// Default deny from base still applies to unknown tools.
-	if got := merged.Evaluate("Write", "file.txt"); got != ActionDeny {
-		t.Errorf("merged.Evaluate(Write, file.txt) = %s; want deny (base default)", got)
+	if got := merged.Evaluate("write", "file.txt"); got != ActionDeny {
+		t.Errorf("merged.Evaluate(write, file.txt) = %s; want deny (base default)", got)
 	}
 }
 
 func TestMerge_OverridePrecedence(t *testing.T) {
 	base := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionDeny},
+		{Permission: "shell", Pattern: "*", Action: ActionDeny},
 	}
 	project := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
+		{Permission: "shell", Pattern: "*", Action: ActionAsk},
 	}
 	session := Ruleset{
-		{Permission: "Shell", Pattern: "*", Action: ActionAllow},
+		{Permission: "shell", Pattern: "*", Action: ActionAllow},
 	}
 
 	merged := Merge(base, project, session)
 	// Session (last) overrides project and base.
-	if got := merged.Evaluate("Shell", "ls"); got != ActionAllow {
+	if got := merged.Evaluate("shell", "ls"); got != ActionAllow {
 		t.Errorf("expected allow from session override, got %s", got)
 	}
 }
@@ -419,11 +419,11 @@ func TestGlobMatch_ComplexPatterns(t *testing.T) {
 		{"rmdir foo", "rm *", false}, // "rm *" should NOT match "rmdir foo"
 		{"curl https://example.com", "curl *", true},
 		{"curl", "curl *", true},
-		{"Shell", "Shell", true},
-		{"Shell", "S?ell", true},
-		{"Shell", "S??ll", true},
-		{"Shell", "S???l", true},
-		{"Shell", "S?????", false},
+		{"shell", "shell", true},
+		{"shell", "s?ell", true},
+		{"shell", "s??ll", true},
+		{"shell", "s???l", true},
+		{"shell", "s?????", false},
 	}
 	for _, tt := range tests {
 		got := globMatch(tt.str, tt.pattern)
@@ -450,18 +450,18 @@ func TestGlobMatch_EmptyStrings(t *testing.T) {
 func TestIntegration_ParseAndEvaluate(t *testing.T) {
 	input := `
 "*": deny
-Read: allow
-Grep: allow
-Glob: allow
-Question: allow
-Skill: allow
-Shell:
+read: allow
+grep: allow
+glob: allow
+question: allow
+skill: allow
+shell:
   "*": ask
   "rm *": deny
   "curl *": deny
   "git *": ask
-Task: allow
-TodoWrite: allow
+task: allow
+todo_write: allow
 `
 	node := mustParseYAML(t, input)
 	rs := ParsePermission(node)
@@ -472,20 +472,20 @@ TodoWrite: allow
 		pattern string
 		want    Action
 	}{
-		{"Read", "/etc/hosts", ActionAllow},
-		{"Grep", "TODO", ActionAllow},
-		{"Glob", "**/*.go", ActionAllow},
-		{"Question", "how are you?", ActionAllow},
-		{"Skill", "go-expert", ActionAllow},
-		{"Shell", "go test ./...", ActionAsk},
-		{"Shell", "rm -rf /tmp", ActionDeny},
-		{"Shell", "curl http://evil.com", ActionDeny},
-		{"Shell", "git push", ActionAsk},
-		{"Shell", "git", ActionAsk},
-		{"Task", "refactor code", ActionAllow},
-		{"TodoWrite", "add item", ActionAllow},
-		{"Write", "file.go", ActionDeny}, // not in allowed list
-		{"Edit", "file.go", ActionDeny},  // not in allowed list
+		{"read", "/etc/hosts", ActionAllow},
+		{"grep", "TODO", ActionAllow},
+		{"glob", "**/*.go", ActionAllow},
+		{"question", "how are you?", ActionAllow},
+		{"skill", "go-expert", ActionAllow},
+		{"shell", "go test ./...", ActionAsk},
+		{"shell", "rm -rf /tmp", ActionDeny},
+		{"shell", "curl http://evil.com", ActionDeny},
+		{"shell", "git push", ActionAsk},
+		{"shell", "git", ActionAsk},
+		{"task", "refactor code", ActionAllow},
+		{"todo_write", "add item", ActionAllow},
+		{"write", "file.go", ActionDeny}, // not in allowed list
+		{"edit", "file.go", ActionDeny},  // not in allowed list
 	}
 
 	for _, tt := range tests {
@@ -511,14 +511,14 @@ func BenchmarkGlobMatch(b *testing.B) {
 func BenchmarkEvaluate(b *testing.B) {
 	input := strings.NewReader(`
 "*": deny
-Read: allow
-Grep: allow
-Glob: allow
-Shell:
+read: allow
+grep: allow
+glob: allow
+shell:
   "*": ask
   "rm *": deny
   "git *": ask
-Task: allow
+task: allow
 `)
 	var doc yaml.Node
 	if err := yaml.NewDecoder(input).Decode(&doc); err != nil {
@@ -528,6 +528,6 @@ Task: allow
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rs.Evaluate("Shell", "git push --force")
+		rs.Evaluate("shell", "git push --force")
 	}
 }

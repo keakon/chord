@@ -49,7 +49,7 @@ func (DeleteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t DeleteTool) Description() string {
-	return "Delete one or more explicit files or symlinks. Use this to remove files instead of writing empty content with Write. Requires paths and a short reason. Does not delete directories or wildcard patterns."
+	return "Delete one or more explicit files or symlinks. Use this to remove files instead of writing empty content with write. Requires paths and a short reason. Does not delete directories or wildcard patterns."
 }
 
 func (t DeleteTool) Parameters() map[string]any {

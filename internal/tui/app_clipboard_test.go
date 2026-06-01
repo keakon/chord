@@ -274,7 +274,7 @@ func TestConfirmCmdVPastesTextEvenWhenClipboardHasImage(t *testing.T) {
 
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo old"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo old"}`}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 	m.confirm.editInput.SetValue("")

@@ -116,16 +116,16 @@ func TestSidebarUpdatePreservesEditedFiles(t *testing.T) {
 
 func TestShouldTrackSidebarFileEdit(t *testing.T) {
 	if !shouldTrackSidebarFileEdit(tools.NameWrite) {
-		t.Fatal("Write should be tracked as a sidebar file edit")
+		t.Fatal("write should be tracked as a sidebar file edit")
 	}
 	if !shouldTrackSidebarFileEdit(tools.NameEdit) {
-		t.Fatal("Edit should be tracked as a sidebar file edit")
+		t.Fatal("edit should be tracked as a sidebar file edit")
 	}
 	if !shouldTrackSidebarFileEdit(tools.NameDelete) {
-		t.Fatal("Delete should be tracked as a sidebar file edit")
+		t.Fatal("delete should be tracked as a sidebar file edit")
 	}
 	if shouldTrackSidebarFileEdit(tools.NameRead) {
-		t.Fatal("Read should not be tracked as a sidebar file edit")
+		t.Fatal("read should not be tracked as a sidebar file edit")
 	}
 }
 

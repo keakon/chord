@@ -65,7 +65,7 @@ func localShellContextMessage(userLine, cmd, output string, err error) message.M
 
 func userLocalShellCopyBody(b *Block) string {
 	if b.UserLocalShellPending {
-		return b.Content + "\n\n(local shell running…)"
+		return b.Content + "\n\n(terminal running…)"
 	}
 	return convformat.UserShellReadableBody(b.Content, b.UserLocalShellCmd, b.UserLocalShellResult, b.UserLocalShellFailed)
 }

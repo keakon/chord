@@ -111,10 +111,10 @@ model_pools:
   - thinking
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Shell:
+  read: allow
+  grep: allow
+  glob: allow
+  shell:
     "*": allow
     "rm *": deny
     "mv *": deny

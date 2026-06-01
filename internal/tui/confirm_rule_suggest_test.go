@@ -7,7 +7,7 @@ import (
 )
 
 func TestSuggestRulePatterns_BashSimple(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"git log --oneline"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("shell", `{"command":"git log --oneline"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for simple shell command")
 	}
@@ -31,7 +31,7 @@ func TestSuggestRulePatterns_BashSimple(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"git log --oneline && git status"}`, []string{"git status"}, "/home/user/project")
+	candidates := suggestRulePatterns("shell", `{"command":"git log --oneline && git status"}`, []string{"git status"}, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
@@ -42,7 +42,7 @@ func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"rm -rf /tmp/foo"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("shell", `{"command":"rm -rf /tmp/foo"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for high-risk command")
 	}
@@ -59,7 +59,7 @@ func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplex(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"git log | grep foo"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("shell", `{"command":"git log | grep foo"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for complex command")
 	}
@@ -73,7 +73,7 @@ func TestSuggestRulePatterns_BashComplex(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteFile(t *testing.T) {
-	candidates := suggestRulePatterns("Write", `{"path":"internal/tui/app.go","content":"..."}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("write", `{"path":"internal/tui/app.go","content":"..."}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for Write tool")
 	}
@@ -116,7 +116,7 @@ func TestSuggestRulePatterns_EditFile(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WebFetch(t *testing.T) {
-	candidates := suggestRulePatterns("WebFetch", `{"url":"https://example.com/api/v1/data"}`, nil, "")
+	candidates := suggestRulePatterns("web_fetch", `{"url":"https://example.com/api/v1/data"}`, nil, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for WebFetch")
 	}
@@ -146,7 +146,7 @@ func TestSuggestRulePatterns_WebFetch(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
-	candidates := suggestRulePatterns("WebFetch", `{"url":"https://example.com:8443/api/v1/data?q=ok"}`, nil, "")
+	candidates := suggestRulePatterns("web_fetch", `{"url":"https://example.com:8443/api/v1/data?q=ok"}`, nil, "")
 	foundPath := false
 	foundHost := false
 	for _, c := range candidates {
@@ -163,7 +163,7 @@ func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_Delete(t *testing.T) {
-	candidates := suggestRulePatterns("Delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, "")
+	candidates := suggestRulePatterns("delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected conservative candidates for Delete tool")
 	}
@@ -172,13 +172,13 @@ func TestSuggestRulePatterns_Delete(t *testing.T) {
 	}
 	for _, c := range candidates {
 		if c.Pattern == "*" {
-			t.Fatalf("Delete candidates should not include global wildcard: %+v", candidates)
+			t.Fatalf("delete candidates should not include global wildcard: %+v", candidates)
 		}
 	}
 }
 
 func TestSuggestRulePatterns_Read(t *testing.T) {
-	candidates := suggestRulePatterns("Read", `{"path":"foo.go"}`, nil, "")
+	candidates := suggestRulePatterns("read", `{"path":"foo.go"}`, nil, "")
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate for Read, got %d", len(candidates))
 	}
@@ -188,7 +188,7 @@ func TestSuggestRulePatterns_Read(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_Grep(t *testing.T) {
-	candidates := suggestRulePatterns("Grep", `{"pattern":"TODO"}`, nil, "")
+	candidates := suggestRulePatterns("grep", `{"pattern":"TODO"}`, nil, "")
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate for Grep, got %d", len(candidates))
 	}
@@ -198,7 +198,7 @@ func TestSuggestRulePatterns_Grep(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSudo(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"sudo apt install foo"}`, nil, "")
+	candidates := suggestRulePatterns("shell", `{"command":"sudo apt install foo"}`, nil, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for sudo command")
 	}
@@ -208,7 +208,7 @@ func TestSuggestRulePatterns_BashSudo(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, "")
+	candidates := suggestRulePatterns("shell", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, "")
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for heredoc command")
 	}
@@ -221,7 +221,7 @@ func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) 
 }
 
 func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"echo one\necho two"}`, nil, "")
+	candidates := suggestRulePatterns("shell", `{"command":"echo one\necho two"}`, nil, "")
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for multiline command")
 	}
@@ -234,7 +234,7 @@ func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
-	candidates := suggestRulePatterns("Shell", `{"command":"ls"}`, nil, "")
+	candidates := suggestRulePatterns("shell", `{"command":"ls"}`, nil, "")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for single-word command")
 	}
@@ -255,7 +255,7 @@ func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteRelativePathDefaultsToDirScope(t *testing.T) {
-	candidates := suggestRulePatterns("Write", `{"path":"docs/guide.md","content":"..."}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("write", `{"path":"docs/guide.md","content":"..."}`, nil, "/home/user/project")
 	foundDefaultDir := false
 	for _, c := range candidates {
 		if c.Pattern == "docs/*" && c.Default {
@@ -269,7 +269,7 @@ func TestSuggestRulePatterns_WriteRelativePathDefaultsToDirScope(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteParentPathDoesNotDefaultToDirScope(t *testing.T) {
-	candidates := suggestRulePatterns("Write", `{"path":"../secret/plan.md","content":"..."}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("write", `{"path":"../secret/plan.md","content":"..."}`, nil, "/home/user/project")
 	for _, c := range candidates {
 		if c.Pattern == "../secret/*" && c.Default {
 			t.Fatalf("unexpected default dir candidate for parent path: %+v", c)

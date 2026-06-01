@@ -32,6 +32,7 @@ func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permis
 }
 
 func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage, priorCalls []PendingToolCall) speculativeExecutionDecision {
+	toolName = tools.NormalizeName(toolName)
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
 		return rejectSpeculativeExecution("missing_tool_name")
@@ -76,7 +77,7 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 
 func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permission.Ruleset, priorCalls []PendingToolCall) (string, bool) {
 	for _, call := range priorCalls {
-		name := strings.TrimSpace(call.Name)
+		name := tools.NormalizeName(call.Name)
 		if name == "" {
 			continue
 		}

@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/keakon/chord/internal/tools"
+
 // ScrollDown moves the viewport down by n lines.
 func (v *Viewport) ScrollDown(n int) {
 	prevOffset := v.offset
@@ -183,9 +185,10 @@ func (v *Viewport) FindBlockByToolID(toolID string) (*Block, bool) {
 }
 
 func (v *Viewport) FindLastPendingToolBlockByName(toolName string) (*Block, bool) {
+	toolName = tools.NormalizeName(toolName)
 	for i := len(v.blocks) - 1; i >= 0; i-- {
 		b := v.blocks[i]
-		if b.Type == BlockToolCall && b.ToolName == toolName && !b.ResultDone {
+		if b.Type == BlockToolCall && tools.NormalizeName(b.ToolName) == toolName && !b.ResultDone {
 			return v.materialize(b), true
 		}
 	}

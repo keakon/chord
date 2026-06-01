@@ -114,7 +114,7 @@ func TestClassifyToolArgsAbnormality(t *testing.T) {
 func TestApplyConfirmedArgsEditsRejectsInvalidJSON(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(agentValidationTool{
-		name: "Shell",
+		name: "shell",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"command"},
@@ -124,7 +124,7 @@ func TestApplyConfirmedArgsEditsRejectsInvalidJSON(t *testing.T) {
 		},
 	})
 
-	_, err := applyConfirmedArgsEdits(registry, permission.Ruleset{{Permission: "Shell", Pattern: "*", Action: permission.ActionAsk}}, "Shell", json.RawMessage(`{"command":"pwd"}`), `{"command":`)
+	_, err := applyConfirmedArgsEdits(registry, permission.Ruleset{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}, "shell", json.RawMessage(`{"command":"pwd"}`), `{"command":`)
 	if err == nil || !strings.Contains(err.Error(), "valid JSON") {
 		t.Fatalf("err = %v, want invalid JSON error", err)
 	}
@@ -134,7 +134,7 @@ func TestExecuteToolCallAskRequiresConfirmFunc(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(agentValidationTool{
-		name: "Shell",
+		name: "shell",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"command"},
@@ -143,11 +143,11 @@ func TestExecuteToolCallAskRequiresConfirmFunc(t *testing.T) {
 			},
 		},
 	})
-	a.ruleset = permission.Ruleset{{Permission: "Shell", Pattern: "*", Action: permission.ActionAsk}}
+	a.ruleset = permission.Ruleset{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}
 
 	_, err := a.executeToolCall(context.Background(), message.ToolCall{
 		ID:   "call-1",
-		Name: "Shell",
+		Name: "shell",
 		Args: json.RawMessage(`{"command":"pwd"}`),
 	})
 	if err == nil || !strings.Contains(err.Error(), "requires confirmation") {
@@ -158,7 +158,7 @@ func TestExecuteToolCallAskRequiresConfirmFunc(t *testing.T) {
 func TestApplyConfirmedArgsEditsRejectsDeniedPermissionAfterEdit(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(agentValidationTool{
-		name: "Read",
+		name: "read",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"path"},
@@ -169,11 +169,11 @@ func TestApplyConfirmedArgsEditsRejectsDeniedPermissionAfterEdit(t *testing.T) {
 	})
 
 	ruleset := permission.Ruleset{
-		{Permission: "Read", Pattern: "*", Action: permission.ActionAsk},
-		{Permission: "Read", Pattern: "secret/*", Action: permission.ActionDeny},
+		{Permission: "read", Pattern: "*", Action: permission.ActionAsk},
+		{Permission: "read", Pattern: "secret/*", Action: permission.ActionDeny},
 	}
 
-	_, err := applyConfirmedArgsEdits(registry, ruleset, "Read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"secret/plan.txt"}`)
+	_, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"secret/plan.txt"}`)
 	if err == nil || !errors.Is(err, errEditedArgsPermissionDeny) {
 		t.Fatalf("err = %v, want permission deny error", err)
 	}
@@ -182,7 +182,7 @@ func TestApplyConfirmedArgsEditsRejectsDeniedPermissionAfterEdit(t *testing.T) {
 func TestApplyConfirmedArgsEditsBashDeniedBySubcommandPermission(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(agentValidationTool{
-		name: "Shell",
+		name: "shell",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"command"},
@@ -194,14 +194,14 @@ func TestApplyConfirmedArgsEditsBashDeniedBySubcommandPermission(t *testing.T) {
 
 	ruleset := permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
-		{Permission: "Shell", Pattern: "*", Action: permission.ActionAsk},
-		{Permission: "Shell", Pattern: "rm *", Action: permission.ActionDeny},
+		{Permission: "shell", Pattern: "*", Action: permission.ActionAsk},
+		{Permission: "shell", Pattern: "rm *", Action: permission.ActionDeny},
 	}
 
 	_, err := applyConfirmedArgsEdits(
 		registry,
 		ruleset,
-		"Shell",
+		"shell",
 		json.RawMessage(`{"command":"pwd"}`),
 		`{"command":"cd build && rm out.txt"}`,
 	)
@@ -213,7 +213,7 @@ func TestApplyConfirmedArgsEditsBashDeniedBySubcommandPermission(t *testing.T) {
 func TestValidateToolArgsAgainstSchemaRejectsWrongType(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(agentValidationTool{
-		name: "Shell",
+		name: "shell",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"timeout"},
@@ -223,7 +223,7 @@ func TestValidateToolArgsAgainstSchemaRejectsWrongType(t *testing.T) {
 		},
 	})
 
-	err := validateToolArgsAgainstSchema(registry, "Shell", json.RawMessage(`{"timeout":"fast"}`))
+	err := validateToolArgsAgainstSchema(registry, "shell", json.RawMessage(`{"timeout":"fast"}`))
 	if err == nil || !strings.Contains(err.Error(), "args.timeout must be an integer") {
 		t.Fatalf("err = %v, want schema type error", err)
 	}

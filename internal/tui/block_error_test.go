@@ -15,7 +15,7 @@ func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
 		{ID: 0, Type: BlockUser, Content: "hello"},
 		{ID: 1, Type: BlockAssistant, Content: "hi"},
 		{ID: 2, Type: BlockThinking, Content: "reasoning"},
-		{ID: 3, Type: BlockToolCall, ToolName: "Shell", Content: `{"command":"echo hi"}`},
+		{ID: 3, Type: BlockToolCall, ToolName: "shell", Content: `{"command":"echo hi"}`},
 		{ID: 4, Type: BlockToolResult, Content: "ok"},
 		{ID: 5, Type: BlockError, Content: "boom"},
 		{ID: 6, Type: BlockStatus, StatusTitle: "STATUS", Content: "body"},

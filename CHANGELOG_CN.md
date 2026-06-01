@@ -4,17 +4,19 @@
 
 ## 0.6.2-dev - 未发布
 
-- **Breaking / Tools：** 原生局部文件编辑工具已从 `ApplyPatch` 重命名为 `Edit`，包括模型可见工具名、权限/配置示例、TUI 渲染、hooks、恢复后的工具卡片以及内部实现命名。旧的 Chord 原生 `ApplyPatch` 工具名不会作为兼容别名保留。外部会话导入仍会识别 Codex `apply_patch` 等来源工具名，并映射为当前的 `Edit` 工具卡。
+- **Breaking / Tools：** 旧的原生局部文件编辑工具名 `ApplyPatch` 已替换为当前的 snake_case `edit` 名称，并且所有内置的模型可见工具名都已规范化为 snake_case（例如 `WebFetch` → `web_fetch`、`TodoWrite` → `todo_write`）。这会影响工具 schema、权限/配置示例、TUI 渲染、hooks、恢复/导入后的工具卡片以及内部实现命名。Chord 不再为旧内置工具名保留兼容别名；已有的旧 PascalCase 权限规则及通配符 pattern 必须更新为 snake_case。外部会话导入仍会识别 Codex `apply_patch` 等来源工具名，并映射为当前的 `edit` 工具卡。
+- Runtime / 上下文剪裁：新增 cache-aware warmup 保护和稳定剪裁面复用，避免在低压力 prompt 前缀上反复裁剪同一批内容。`context.reduction` 现在接受 `true` 或 `{}` 作为默认调优的简写，并新增 `cache_aware_min_usage`、`warmup_message_limit`、`min_incremental_saved_tokens`、`high_pressure_usage`、`force_prune_usage` 供高级调优。`context.reduction: false` 现在会报错，而不是静默当作默认配置处理。
+- Tools / edit：改进 hunk 应用失败诊断，会针对常见补丁问题给出更具体提示，例如复制了行号 gutter、缩进漂移、文件内容已过期，以及 function/class anchor 不匹配。
 - Runtime / 上下文剪裁：请求级剪裁现在会把 `*_age_turns` 视为等效年龄阈值，而不是只统计后续用户消息。很长的单轮工具调用链会随着后续 assistant/tool 消息累积，继续裁剪更早的陈旧 Shell、read-like 和其它工具大输出；同时复用现有 `context.reduction` 配置并保留最近工具输出。配置文档和术语表已同步说明等效年龄语义。
 
 ## 0.6.1 - 2026-06-01
 
 - TUI / 文件引用：`@` 文件补全现在会在非空根目录前缀查询（如 `@A`）时，回退到直接检查工作区根目录，因此像 `AGENTS.md` 这类即使被 `.gitignore` 或本地 excludes 排除出缓存的 Git 索引，也仍可补全。像 `@docs/`、`@.config/` 这样的显式路径型查询则继续直接读取对应目录的文件系统补全，而不是停留在缓存索引上。
-- Tools / ApplyPatch：原生 `ApplyPatch` 调用现在会容忍 Codex 风格的 `apply_patch` envelope 标记。Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch`，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行；但仍会拒绝新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记。
-- Tools / ApplyPatch：当前局部文件编辑工具面已切换为原生单文件 `ApplyPatch`，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`Write` 继续负责完整写入，`Delete` 继续负责整文件删除。ApplyPatch 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection，并按当前搜索位置之后的第一个 hunk 匹配应用补丁；如果某个 hunk 匹配到多个位置，会在成功输出中附带候选行提示，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
-- Tools / 文件编辑：`ApplyPatch` 现在接受通过 `Read`、之前成功的 `Write` / `ApplyPatch`，或系统解析的 `@file` mention 观察过的文件。如果文件在观察后发生变化，只要工具仍能基于当前内容验证操作，文件编辑工具会警告而不是直接拒绝；有风险的非空写前内容会备份到会话目录，并在工具结果中提示备份路径。空文件和无风险的连续 agent-owned 编辑不会创建备份。备份上限为每 path 10 个、每 session 200 个、单文件 10 MiB、每 session 总计 50 MiB；备份失败会在工具结果中说明但不阻塞编辑，备份会随会话目录删除而清理。
+- Tools / edit：原生 `edit` 调用现在会容忍 Codex 风格的 `apply_patch` envelope 标记。Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch`，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行；但仍会拒绝新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记。
+- Tools / edit：局部文件编辑工具面已切换为原生单文件 patch hunk，用于修改已有文件的局部内容，以减少旧 `Edit` 工作流中 exact-string 替换不匹配导致的编辑失败；`write` 继续负责完整写入，`delete` 继续负责整文件删除。`edit` 现在会在 pre-diff planning 读取目标文件前先执行 read-before-patch / stale protection，并按当前搜索位置之后的第一个 hunk 匹配应用补丁；如果某个 hunk 匹配到多个位置，会在成功输出中附带候选行提示，prompt 也会要求在重复块中加入唯一上下文。相关 prompt 与权限提示也已从旧 `Edit` 语义迁移。
+- Tools / 文件编辑：`edit` 现在接受通过 `read`、之前成功的 `write` / `edit`，或系统解析的 `@file` mention 观察过的文件。如果文件在观察后发生变化，只要工具仍能基于当前内容验证操作，文件编辑工具会警告而不是直接拒绝；有风险的非空写前内容会备份到会话目录，并在工具结果中提示备份路径。空文件和无风险的连续 agent-owned 编辑不会创建备份。备份上限为每 path 10 个、每 session 200 个、单文件 10 MiB、每 session 总计 50 MiB；备份失败会在工具结果中说明但不阻塞编辑，备份会随会话目录删除而清理。
 - Tools / Grep & Glob：降低搜索/路径列表输出的默认结果上限并新增字节上限（`Grep` 现在最多返回 120 条匹配 / 约 12 KiB，`Glob` 最多返回 250 个路径 / 约 16 KiB），避免过宽的搜索结果挤占更相关的上下文。
-- Session import：Codex、Claude Code 与 OpenCode 导入现在会尽量把可识别的外部工具转换成最接近的当前 Chord 工具卡（`Read`、`Shell`、`Grep`、`Glob`、`ApplyPatch`、`Write`、`Delete`）；参数不足或无法识别的工具仍保留为 unsupported tool card。导入 provenance 仍会在内部保留，因此外部文件修改不会恢复 Chord FileTracker 的 read/write 状态；导入后继续编辑前仍应重新 Read 相关文件。
+- Session import：Codex、Claude Code 与 OpenCode 导入现在会尽量把可识别的外部工具转换成最接近的当前 Chord 工具卡（`read`、`shell`、`grep`、`glob`、`edit`、`write`、`delete`）；参数不足或无法识别的工具仍保留为 unsupported tool card。导入 provenance 仍会在内部保留，因此外部文件修改不会恢复 Chord FileTracker 的 read/write 状态；导入后继续编辑前仍应重新 `read` 相关文件。
 - LLM / Codex：Codex OAuth access token 现在必须包含可解析的 account ID；缺失 account ID 的 token 会被拒绝，不再当作可用凭据。尚不知道账号的 refresh-only Codex OAuth 凭据仍可先参与选择；如果 refresh 在账号未知前发生不可恢复失败，Chord 会在 `auth.state.yaml` 中写入 `refresh_sha256` 状态，之后由用户执行 `chord auth state clean` 清理不可用凭据，而不是在请求处理中直接删除 `auth.yaml`。`token_invalidated`、revoked、无法解析认证 token，以及 refresh token 返回 401 等情况现在会被归类为不可恢复的 OAuth 失败，并避免无意义的重复 refresh。
 - LLM / Codex：Codex `key_order: smart` 现在把缓存的额度快照仅作为调度提示：只有报告为 `100%` 的窗口会被放到最后尝试，`99%` 仍视为有可用额度，并且 primary / secondary 窗口会分开比较，让短窗口额度能在过期前优先使用，而不会和周额度混为一个分数。
 - LLM / Codex：Codex WebSocket 返回 400 且错误信息表明服务端增量会话状态与本地 input 不一致（例如 `No tool call found for function call output with call_id …`，或消息中包含 `previous_response_id`）时，Chord 现在会清空 WebSocket 链状态并立即在同一 WS 上以**全量、不带 `previous_response_id`**的方式重发一次；只有原始 400 属于链状态不一致才会触发该重试，重试仍失败时直接返回错误、不再回退 HTTP，因为 HTTP 会发送相同的 input、注定同样失败。

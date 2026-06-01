@@ -251,7 +251,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if m.input.BangMode() {
 			if len(m.attachments) > 0 {
-				return m.enqueueToast("Remove images before running !shell", "warn")
+				return m.enqueueToast("Remove images before running terminal commands", "warn")
 			}
 			display := m.input.DisplayValue()
 			contentParts := m.input.ContentParts()

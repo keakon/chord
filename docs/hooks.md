@@ -64,7 +64,7 @@ Every hook receives this JSON document on stdin:
   "selected_model": "anthropic/claude-opus-4.7",
   "running_model": "anthropic/claude-opus-4.7",
   "data": {
-    "tool_name": "Shell",
+    "tool_name": "shell",
     "args": { "command": "git status" }
   }
 }
@@ -136,7 +136,7 @@ hooks:
     - name: audit-shell
       command: ["./scripts/audit-shell.sh"]   # or: shell: "./scripts/audit-shell.sh"
       timeout: 10                             # seconds; default 30
-      tools: ["Shell"]                         # glob match on tool name
+      tools: ["shell"]                         # glob match on tool name
       paths: ["src/**/*.go"]                  # glob match on relevant paths
       agents: ["main", "reviewer"]            # glob match on agent name
       agent_kinds: ["main", "subagent"]       # exact match
@@ -180,7 +180,7 @@ The hook ignores stdout; the side effect is the notification.
 hooks:
   on_tool_call:
     - name: deny-rm-rf
-      tools: ["Shell"]
+      tools: ["shell"]
       shell: |
         # Read envelope, check the command, optionally block
         jq -e '.data.args.command | test("^rm -rf|^sudo")' \
@@ -196,7 +196,7 @@ hooks:
 hooks:
   on_tool_batch_complete:
     - name: golangci-lint
-      tools: ["Edit", "Write", "Delete"]
+      tools: ["edit", "write", "delete"]
       paths: ["**/*.go"]
       min_changed_files: 1
       shell: |
@@ -223,7 +223,7 @@ When the lint fails, the truncated tail is appended to the next LLM context so t
 hooks:
   on_before_tool_result_append:
     - name: redact-keys
-      tools: ["Shell", "WebFetch", "Read"]
+      tools: ["shell", "web_fetch", "read"]
       shell: |
         envelope=$(cat)
         redacted=$(jq '.data.output |= (gsub("sk-[A-Za-z0-9_-]{20,}"; "sk-REDACTED"))' <<<"$envelope")

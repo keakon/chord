@@ -18,7 +18,7 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
 		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
-			mustJSONToolCall(t, "call-1", "Complete", map[string]any{
+			mustJSONToolCall(t, "call-1", "complete", map[string]any{
 				"summary":               "done",
 				"files_changed":         []string{"internal/a.go"},
 				"verification_run":      []string{"go test ./internal/a"},

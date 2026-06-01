@@ -281,7 +281,7 @@ func TestRenderTodoCallCancelledItemDoesNotStrikeThroughPadding(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "TodoWrite",
+		ToolName: "todo_write",
 		Content: `{"todos":[` +
 			`{"id":"1","content":"first item","status":"completed"},` +
 			`{"id":"2","content":"second item","status":"cancelled"}` +

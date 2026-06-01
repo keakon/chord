@@ -31,8 +31,8 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 
 	rendered := strings.Join(block.Render(100, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "Edit") || !strings.Contains(plain, "src/demo.go") {
-		t.Fatalf("expected Edit header to show path, got:\n%s", plain)
+	if !strings.Contains(plain, "edit") || !strings.Contains(plain, "src/demo.go") {
+		t.Fatalf("expected edit header to show path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected diff lines to render, got:\n%s", plain)
@@ -80,7 +80,7 @@ func TestEditLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
 		Content:  displayArgs,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if strings.Contains(plain, "Edit .") {
+	if strings.Contains(plain, "edit .") {
 		t.Fatalf("expected incomplete Edit args not to render dot path, got:\n%s", plain)
 	}
 }
@@ -385,8 +385,8 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "example.go")
-	if !strings.Contains(joined, "Edit") || !strings.Contains(joined, want) {
-		t.Fatalf("expected Edit header to show relative path; got:\n%s", joined)
+	if !strings.Contains(joined, "edit") || !strings.Contains(joined, want) {
+		t.Fatalf("expected edit header to show relative path; got:\n%s", joined)
 	}
 	_ = abs
 }

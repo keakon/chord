@@ -70,7 +70,7 @@ Chord uses Go's standard proxy resolution (`http.ProxyFromEnvironment`) for outb
 | `NO_PROXY`         | Comma-separated host patterns that bypass the proxy                                                                |
 | `http_proxy` / `https_proxy` / `no_proxy` | Lowercase variants are also recognized                                                                  |
 
-For per-tool proxy override (e.g. routing only `WebFetch` through a SOCKS5), see [Configuration & Auth — WebFetch](./configuration.md#webfetch).
+For per-tool proxy override (e.g. routing only `web_fetch` through a SOCKS5), see [Configuration & Auth — WebFetch](./configuration.md#webfetch).
 
 ## Terminal detection (read-only)
 

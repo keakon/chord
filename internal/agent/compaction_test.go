@@ -177,17 +177,17 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Read", Args: json.RawMessage(`{"path":"a.go"}`)},
+			{ID: "tc1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: "very old read output"},
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc2", Name: "Read", Args: json.RawMessage(`{"path":"a.go"}`)},
+			{ID: "tc2", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc2", Content: "new read output"},
 		{Role: "user", Content: "u3"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc3", Name: "Shell", Args: json.RawMessage(`{"cmd":"bad"}`)},
+			{ID: "tc3", Name: "shell", Args: json.RawMessage(`{"cmd":"bad"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc3", Content: "Error: command failed"},
 		{Role: "user", Content: "u4"},
@@ -211,7 +211,7 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Read", Args: json.RawMessage(`{"path":"a.go"}`)},
+			{ID: "tc1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 400)},
 		{Role: "user", Content: "u2"},
@@ -224,6 +224,28 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 	if !strings.Contains(prepared[2].Content, "large read output") {
 		t.Fatalf("expected old read output to keep a small excerpt, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_PrunesOldWebFetchOutput(t *testing.T) {
+	a := &MainAgent{}
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "web_fetch", Args: json.RawMessage(`{"url":"https://example.com"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large web output ", 400)},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated to save context") ||
+		!strings.Contains(prepared[2].Content, `url="https://example.com"`) {
+		t.Fatalf("expected web_fetch output compaction, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "large web output") {
+		t.Fatalf("expected compacted web_fetch output to keep a small excerpt, got %q", prepared[2].Content)
 	}
 }
 
@@ -329,7 +351,7 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("test output line\n", 500)},
 		{Role: "user", Content: "u2"},
@@ -354,7 +376,7 @@ func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -377,7 +399,7 @@ func TestPrepareMessagesForLLM_UsesReductionThresholdConfig(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -396,7 +418,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -450,7 +472,7 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningWhenCodexQuotaLow(t *testin
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -478,7 +500,7 @@ func TestPrepareMessagesForLLM_LoopGateIgnoresFocusedSubAgentProvider(t *testing
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -573,7 +595,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -596,7 +618,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 
 	loopMsgs := append(append([]message.Message(nil), msgs...),
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc2", Name: "Shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
+			{ID: "tc2", Name: "shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
 		}},
 		message.Message{Role: "tool", ToolCallID: "tc2", Content: newLargeOutput},
 		message.Message{Role: "user", Content: "u5"},
@@ -638,7 +660,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -658,7 +680,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	continuationMsgs := append(append([]message.Message(nil), msgs...),
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc2", Name: "Shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
+			{ID: "tc2", Name: "shell", Args: json.RawMessage(`{"command":"go test ./..."}`)},
 		}},
 		message.Message{Role: "tool", ToolCallID: "tc2", Content: newLargeOutput},
 		message.Message{Role: "user", Content: "u5"},
@@ -691,7 +713,7 @@ func TestPrepareMessagesForLLM_UserBoundaryRefreshesLowQuotaCodexReduction(t *te
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
-			{ID: "tc1", Name: "Shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 		{Role: "user", Content: "u2"},
@@ -2062,10 +2084,10 @@ func TestUsageDrivenCompactionSkipsAfterPreRequestShrink(t *testing.T) {
 	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: ""})
 	snapshot := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "Read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("very old read output ", 800)},
 		{Role: "user", Content: "u2"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: "Read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc2", Content: "new read output"},
 		{Role: "user", Content: "u3"},
 		{Role: "user", Content: "u4"},

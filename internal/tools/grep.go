@@ -31,10 +31,10 @@ const (
 
 var errMaxGrepMatchesReached = errors.New("max grep matches reached")
 
-func (GrepTool) Name() string { return "Grep" }
+func (GrepTool) Name() string { return NameGrep }
 
 func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy("Grep", pathToolConcurrencyPolicy(args, "path"))
+	return normalizeConcurrencyPolicy(NameGrep, pathToolConcurrencyPolicy(args, "path"))
 }
 
 func (GrepTool) Description() string {
@@ -42,7 +42,7 @@ func (GrepTool) Description() string {
 		" Use glob only to filter filenames by basename." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
-		" For semantic navigation at a known position (definition, references, implementations), prefer the Lsp tool when the file type has LSP coverage."
+		" For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool when the file type has LSP coverage."
 }
 
 func (GrepTool) Parameters() map[string]any {
@@ -59,7 +59,7 @@ func (GrepTool) Parameters() map[string]any {
 			},
 			"glob": map[string]any{
 				"type":        "string",
-				"description": "Glob pattern to filter filenames only, matched against each file's basename (e.g. \"*.go\", \"*.{ts,tsx}\"). Not a recursive path glob; use Glob for **/ path matching.",
+				"description": "Glob pattern to filter filenames only, matched against each file's basename (e.g. \"*.go\", \"*.{ts,tsx}\"). Not a recursive path glob; use glob for **/ path matching.",
 			},
 		},
 		"required":             []string{"pattern"},

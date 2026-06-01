@@ -44,7 +44,7 @@ type todoWriteArgs struct {
 	Todos []TodoItem `json:"todos"`
 }
 
-func (TodoWriteTool) Name() string { return "TodoWrite" }
+func (TodoWriteTool) Name() string { return NameTodoWrite }
 
 func (TodoWriteTool) Description() string {
 	return `Update the todo list by providing the complete list of items. This replaces the entire existing list.

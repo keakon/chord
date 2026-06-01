@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -52,17 +51,18 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 	if delta.ToolCall == nil || r.emit == nil {
 		return
 	}
+	name := tools.NormalizeName(delta.ToolCall.Name)
 	if r.turn != nil {
 		r.turn.recordStreamingToolCall(PendingToolCall{
 			CallID:   delta.ToolCall.ID,
-			Name:     delta.ToolCall.Name,
+			Name:     name,
 			ArgsJSON: delta.ToolCall.Input,
 			AgentID:  r.agentID,
 		})
 	}
 	r.emit(ToolCallStartEvent{
 		ID:       delta.ToolCall.ID,
-		Name:     delta.ToolCall.Name,
+		Name:     name,
 		ArgsJSON: delta.ToolCall.Input,
 		AgentID:  r.agentID,
 	})
@@ -75,13 +75,14 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 	if r.promoteStreamingActivity != nil {
 		r.promoteStreamingActivity("tool_use_delta")
 	}
-	accumulated := r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, delta.ToolCall.Name, delta.ToolCall.Input, r.agentID)
+	name := tools.NormalizeName(delta.ToolCall.Name)
+	accumulated := r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, delta.ToolCall.Input, r.agentID)
 	if accumulated == "" || r.emit == nil {
 		return
 	}
 	r.emit(ToolCallUpdateEvent{
 		ID:       delta.ToolCall.ID,
-		Name:     delta.ToolCall.Name,
+		Name:     name,
 		ArgsJSON: accumulated,
 		AgentID:  r.agentID,
 	})
@@ -92,11 +93,11 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 		return
 	}
 	callID := delta.ToolCall.ID
-	callName := strings.TrimSpace(delta.ToolCall.Name)
+	callName := tools.NormalizeName(delta.ToolCall.Name)
 	argsJSON := ""
 	if call, ok := r.turn.getStreamingToolCall(callID); ok {
 		if callName == "" {
-			callName = call.Name
+			callName = tools.NormalizeName(call.Name)
 		}
 		argsJSON = call.ArgsJSON
 	}

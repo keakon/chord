@@ -68,7 +68,7 @@ func buildSkillDisplayArgsJSON(name, result string) string {
 }
 
 func eventToolDisplayArgs(toolName, argsJSON, result string) string {
-	if toolName != "Skill" {
+	if tools.NormalizeName(toolName) != tools.NameSkill {
 		return argsJSON
 	}
 	parts := skillToolDisplayPartsFromArgsAndResult(argsJSON, result)

@@ -38,7 +38,7 @@ func TestCapturePreWriteState(t *testing.T) {
 		t.Fatalf("CapturePreWriteState read = (%q, %q, %v)", gotPath, content, existed)
 	}
 
-	gotPath, content, existed = CapturePreWriteState(message.ToolCall{Name: "Write", Args: json.RawMessage(`{`)})
+	gotPath, content, existed = CapturePreWriteState(message.ToolCall{Name: "write", Args: json.RawMessage(`{`)})
 	if gotPath != "" || content != "" || existed {
 		t.Fatalf("CapturePreWriteState write = (%q, %q, %v)", gotPath, content, existed)
 	}

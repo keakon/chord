@@ -142,7 +142,7 @@ func TestBlockPlainContentIncludesImagePlaceholderLabels(t *testing.T) {
 func TestBlockPlainContentSkillToolIncludesNamePathAndBody(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
-		ToolName:      "Skill",
+		ToolName:      "skill",
 		Content:       `{"name":"skill-creator","result":"<path>/tmp/skills/skill-creator/SKILL.md</path>"}`,
 		ResultContent: "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n\n# Skill Creator\n\n- Step one\n</skill>",
 	}

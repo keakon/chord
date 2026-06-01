@@ -39,7 +39,7 @@ func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
 func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout":30}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout":30}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Command:") {
@@ -56,10 +56,10 @@ func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t
 func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout":45}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout":45}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "Tool: Shell") {
+	if !strings.Contains(plain, "Tool: shell") {
 		t.Fatalf("expected tool line in confirm dialog, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "Action: Execute shell command") {
@@ -68,7 +68,7 @@ func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	if !strings.Contains(plain, "Command:") || !strings.Contains(plain, "rm internal/tui/example_obsolete.go") {
 		t.Fatalf("expected command to be visible in summary view, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "Tool: Shell({") {
+	if strings.Contains(plain, "Tool: shell({") {
 		t.Fatalf("summary view should not fall back to truncated JSON, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "Workdir: /tmp/project") {
@@ -88,7 +88,7 @@ func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"sleep 1","timeout":2400}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"sleep 1","timeout":2400}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Timeout: 600s") {
@@ -102,18 +102,18 @@ func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testin
 func TestRenderConfirmSummaryDoesNotTreatShellAsBackground(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"npm run dev","description":"Frontend dev server","timeout":45}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","description":"Frontend dev server","timeout":45}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if strings.Contains(plain, "Background:") || strings.Contains(plain, "Max runtime:") || strings.Contains(plain, "Mode:") {
-		t.Fatalf("Shell confirm summary should not include background fields, got:\n%s", plain)
+		t.Fatalf("shell confirm summary should not include background fields, got:\n%s", plain)
 	}
 }
 
 func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Write", ArgsJSON: `{"path":"internal/tui/confirm_render.go","content":"line 1\nline 2\nline 3\nline 4"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "write", ArgsJSON: `{"path":"internal/tui/confirm_render.go","content":"line 1\nline 2\nline 3\nline 4"}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "File: internal/tui/confirm_render.go") {
@@ -131,19 +131,19 @@ func TestBuildConfirmSummaryShowsStructuredEditFields(t *testing.T) {
 	summary := buildConfirmSummary(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
 
 	if summary.Action != "Replace text in file" {
-		t.Fatalf("Edit action = %q, want structured Edit action", summary.Action)
+		t.Fatalf("edit action = %q, want structured Edit action", summary.Action)
 	}
 	if summary.Risk != confirmRiskMedium {
-		t.Fatalf("Edit risk = %v, want %v", summary.Risk, confirmRiskMedium)
+		t.Fatalf("edit risk = %v, want %v", summary.Risk, confirmRiskMedium)
 	}
 	if !slices.Contains(summary.Warnings, "Patches existing file content") {
-		t.Fatalf("Edit warnings = %v, want patch warning", summary.Warnings)
+		t.Fatalf("edit warnings = %v, want patch warning", summary.Warnings)
 	}
 	if !confirmSummaryHasField(summary, "File") {
-		t.Fatalf("Edit summary fields = %+v, want File field", summary.Fields)
+		t.Fatalf("edit summary fields = %+v, want File field", summary.Fields)
 	}
 	if !confirmSummaryHasField(summary, "Patch preview") {
-		t.Fatalf("Edit summary fields = %+v, want Patch preview field", summary.Fields)
+		t.Fatalf("edit summary fields = %+v, want Patch preview field", summary.Fields)
 	}
 }
 
@@ -159,7 +159,7 @@ func confirmSummaryHasField(summary confirmSummary, label string) bool {
 func TestRenderConfirmSummaryShowsDeleteFilePathAndReason(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Action: Delete file") {
@@ -176,7 +176,7 @@ func TestRenderConfirmSummaryShowsDeleteFilePathAndReason(t *testing.T) {
 func TestRenderConfirmSummaryFallsBackToRawPayloadOnMalformedArgs(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm"`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm"`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Unable to parse arguments") {
@@ -193,7 +193,7 @@ func TestRenderConfirmSummaryFallsBackToRawPayloadOnMalformedArgs(t *testing.T) 
 func TestRenderDoneConfirmDialogShowsOnlyReportBody(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{
-		ToolName:   "Done",
+		ToolName:   "done",
 		ArgsJSON:   `{"report":"## Completion status\nAll requested work is finished\n\n**Verification**: passed"}`,
 		DoneReport: "## Completion status\nAll requested work is finished\n\n**Verification**: passed",
 	}
@@ -218,7 +218,7 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	}
 	report := strings.Join(reportLines, "\n")
 	m.confirm.request = &ConfirmRequest{
-		ToolName:   "Done",
+		ToolName:   "done",
 		ArgsJSON:   fmt.Sprintf(`{"report":%q}`, report),
 		DoneReport: report,
 	}
@@ -238,7 +238,7 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 
 func TestRenderConfirmDialogEditModeShowsMultilineTextareaAndHint(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: "{\n  \"a\": 1,\n  \"b\": 2\n}"}
+	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: "{\n  \"a\": 1,\n  \"b\": 2\n}"}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 
@@ -253,7 +253,7 @@ func TestRenderConfirmDialogEditModeShowsMultilineTextareaAndHint(t *testing.T) 
 
 func TestHandleConfirmEditKeyUpMovesWithinTextarea(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: "{\n  \"a\": 1,\n  \"b\": 2\n}"}
+	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: "{\n  \"a\": 1,\n  \"b\": 2\n}"}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 	if got := m.confirm.editInput.Line(); got != 3 {
@@ -269,7 +269,7 @@ func TestHandleConfirmEditKeyUpMovesWithinTextarea(t *testing.T) {
 
 func TestHandleConfirmEditKeyRejectsInvalidJSONAndStaysEditing(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: `{"paths":["a"],"reason":"cleanup"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"paths":["a"],"reason":"cleanup"}`}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, `{"paths":[}`)
 
@@ -291,9 +291,9 @@ func TestHandleConfirmEditKeyRejectsInvalidJSONAndStaysEditing(t *testing.T) {
 }
 
 func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
-	m := NewModelWithSize(nil, 100, 18)
+	m := NewModelWithSize(nil, 100, 12)
 	m.confirm.request = &ConfirmRequest{
-		ToolName:      "Delete",
+		ToolName:      "delete",
 		ArgsJSON:      `{"paths":["a","b","c","d","e","f","g","h","i","j","k","l"],"reason":"cleanup temporary review files"}`,
 		NeedsApproval: []string{"/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e", "/tmp/f", "/tmp/g", "/tmp/h", "/tmp/i"},
 	}
@@ -315,7 +315,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[R] Deny+Reason") {
@@ -325,7 +325,7 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 
 func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Delete", ArgsJSON: `{"path":"old.txt"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"path":"old.txt"}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[M] Add rule…") {
@@ -353,7 +353,7 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	}
 
 	picker := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(picker, "⚠ Add rule — Edit") {
+	if !strings.Contains(picker, "⚠ Add rule — edit") {
 		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
 	}
 	if !strings.Contains(picker, "Pattern:") {
@@ -367,7 +367,7 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 func TestConfirmEditAcceptsClipboardTextMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo old"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo old"}`}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 	m.confirm.editInput.SetValue("")
@@ -386,7 +386,7 @@ func TestConfirmEditAcceptsClipboardTextMsg(t *testing.T) {
 func TestConfirmEditAcceptsPasteMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo old"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo old"}`}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 	m.confirm.editInput.SetValue("")
@@ -402,7 +402,7 @@ func TestConfirmEditAcceptsPasteMsg(t *testing.T) {
 func TestConfirmDenyReasonAcceptsClipboardTextMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("")
@@ -421,7 +421,7 @@ func TestConfirmDenyReasonAcceptsClipboardTextMsg(t *testing.T) {
 func TestConfirmDenyReasonAcceptsPasteMsg(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"rm"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("")
@@ -437,7 +437,7 @@ func TestConfirmDenyReasonAcceptsPasteMsg(t *testing.T) {
 func TestConfirmCmdVPastesWhenEditing(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 40)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo old"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo old"}`}
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 
@@ -449,7 +449,7 @@ func TestConfirmCmdVPastesWhenEditing(t *testing.T) {
 
 func TestHandleConfirmKeyREntersDenyReasonMode(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 
 	_ = m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 	if !m.confirm.denyingWithReason {
@@ -459,7 +459,7 @@ func TestHandleConfirmKeyREntersDenyReasonMode(t *testing.T) {
 
 func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 
@@ -477,7 +477,7 @@ func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 
 func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("first line\nsecond line")
@@ -505,7 +505,7 @@ func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 
 func TestRenderConfirmDenyReasonInputAfterResizeUsesDialogContentWidth(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("Please wait until the deployment notes mention the rollback plan and the dashboard checks that should be reviewed after release.")
@@ -520,7 +520,7 @@ func TestRenderConfirmDenyReasonInputAfterResizeUsesDialogContentWidth(t *testin
 
 func TestNewConfirmTextareaUsesDialogContentWidth(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("The summary is missing the migration risk and the follow-up owner, so this should be revised before it is sent.")
@@ -535,7 +535,7 @@ func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.confirmCh = nil
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	longTail := strings.Repeat("long", 250) + " tail"
@@ -564,7 +564,7 @@ func TestHandleConfirmDenyReasonKeyEnterSubmitsReason(t *testing.T) {
 func TestHandleConfirmDenyReasonKeyEscGoesBack(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmCh = nil
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("some reason")
@@ -580,7 +580,7 @@ func TestHandleConfirmDenyReasonKeyEscGoesBack(t *testing.T) {
 
 func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
@@ -593,7 +593,7 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 
 func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, ForceDenyReason: true}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[Esc/R] Deny+Reason required") {
@@ -608,7 +608,7 @@ func TestHandleConfirmDImmediatelyDeniesGenericConfirm(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Shell", ArgsJSON: `{"command":"echo hi"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
 	if cmd == nil {
@@ -631,7 +631,7 @@ func TestHandleConfirmDoneIgnoresDenyShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
 	if cmd != nil {
@@ -651,7 +651,7 @@ func TestHandleConfirmDoneForceDenyIgnoresDenyShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, ForceDenyReason: true}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "d", Code: 'd'}))
 	if cmd != nil {
@@ -666,7 +666,7 @@ func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`, ForceDenyReason: true}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, ForceDenyReason: true}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
 	if cmd != nil {
@@ -694,7 +694,7 @@ func TestHandleConfirmDoneViewCopiesReportParsedFromArgs(t *testing.T) {
 	report := "# Finished\n\nAll done.\n\n- verified"
 	m := NewModelWithSize(nil, 100, 30)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"# Finished\n\nAll done.\n\n- verified"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{"report":"# Finished\n\nAll done.\n\n- verified"}`}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'}))
 	if cmd != nil {
@@ -729,7 +729,7 @@ func TestHandleConfirmDoneViewCopiesReportParsedFromArgs(t *testing.T) {
 func TestHandleConfirmDoneViewOpensContentViewer(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", DoneReport: "# Finished\n\nAll done."}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", DoneReport: "# Finished\n\nAll done."}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'}))
 	if cmd != nil {
@@ -749,7 +749,7 @@ func TestHandleConfirmDoneViewOpensContentViewer(t *testing.T) {
 func TestHandleConfirmDoneIgnoresEditShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{"report":"ok"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{"report":"ok"}`}
 
 	cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "e", Code: 'e'}))
 	if cmd != nil {
@@ -763,7 +763,7 @@ func TestHandleConfirmDoneIgnoresEditShortcut(t *testing.T) {
 func TestHandleConfirmDoneDenyRequiresReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 
@@ -813,7 +813,7 @@ func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	}
 	m := NewModelWithSize(backend, 100, 30)
 	m.confirm.request = &ConfirmRequest{
-		ToolName:  "Shell",
+		ToolName:  "shell",
 		ArgsJSON:  `{"command":"git status"}`,
 		RequestID: "req-1",
 	}

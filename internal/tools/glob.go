@@ -24,16 +24,16 @@ const (
 	maxGlobOutputBytes = 16 * 1024
 )
 
-func (GlobTool) Name() string { return "Glob" }
+func (GlobTool) Name() string { return NameGlob }
 
 func (GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy("Glob", pathToolConcurrencyPolicy(args, "path"))
+	return normalizeConcurrencyPolicy(NameGlob, pathToolConcurrencyPolicy(args, "path"))
 }
 
 func (GlobTool) Description() string {
 	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
 		" pattern is a path glob, not a regular expression and not a file-contents search." +
-		" Best for discovering candidate files by path or extension before using Read, Grep, or Lsp."
+		" Best for discovering candidate files by path or extension before using read, grep, or lsp."
 }
 
 func (GlobTool) Parameters() map[string]any {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type LoopState string
@@ -181,9 +182,9 @@ func isVerificationLikeToolResult(payload *ToolResultPayload, result string) boo
 	if payload == nil {
 		return false
 	}
-	name := strings.ToLower(strings.TrimSpace(payload.Name))
+	name := tools.NormalizeName(payload.Name)
 	result = strings.ToLower(strings.TrimSpace(result))
-	if name != "shell" {
+	if name != tools.NameShell {
 		return false
 	}
 

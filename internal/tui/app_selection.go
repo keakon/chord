@@ -537,7 +537,7 @@ func blockPlainContent(b *Block) string {
 		if b.Type == BlockUser && b.UserLocalShellCmd != "" {
 			return userLocalShellCopyBody(b)
 		}
-		if b.Type == BlockToolCall && b.ToolName == "Skill" {
+		if b.Type == BlockToolCall && tools.NormalizeName(b.ToolName) == tools.NameSkill {
 			return skillToolCopyContent(b.Content, b.ResultContent)
 		}
 		content := strings.TrimSpace(b.Content)

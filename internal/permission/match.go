@@ -1,6 +1,10 @@
 package permission
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/chord/internal/toolname"
+)
 
 // MatchResult describes the last matching rule for a permission lookup.
 type MatchResult struct {
@@ -10,9 +14,10 @@ type MatchResult struct {
 
 // LastMatch returns the last rule whose permission and pattern both match.
 func (rs Ruleset) LastMatch(permission, pattern string) MatchResult {
+	permission = toolname.Normalize(permission)
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
-		if globMatch(permission, r.Permission) && globMatch(pattern, r.Pattern) {
+		if globMatch(permission, toolname.Normalize(r.Permission)) && globMatch(pattern, r.Pattern) {
 			return MatchResult{Rule: r, Found: true}
 		}
 	}
@@ -22,12 +27,13 @@ func (rs Ruleset) LastMatch(permission, pattern string) MatchResult {
 // LastExactPatternMatch returns the last rule whose permission matches and whose
 // pattern is an exact literal equal to the provided pattern.
 func (rs Ruleset) LastExactPatternMatch(permission, pattern string) MatchResult {
+	permission = toolname.Normalize(permission)
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
 		if rulePatternHasWildcards(r.Pattern) {
 			continue
 		}
-		if globMatch(permission, r.Permission) && r.Pattern == pattern {
+		if globMatch(permission, toolname.Normalize(r.Permission)) && r.Pattern == pattern {
 			return MatchResult{Rule: r, Found: true}
 		}
 	}

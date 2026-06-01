@@ -35,7 +35,7 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 			resp: &message.Response{
 				ToolCalls: []message.ToolCall{{
 					ID:   "call-1",
-					Name: "Read",
+					Name: "read",
 					Args: []byte(`{"path":"README.md"}`),
 				}},
 				StopReason: "tool_use",
@@ -277,7 +277,7 @@ func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenan
 		ReasoningContent: "I need to inspect the repo before reading files.",
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Read",
+			Name: "read",
 			Args: []byte(`{"path":"README.md"}`),
 		}},
 		StopReason: "tool_calls",
@@ -318,13 +318,13 @@ func TestCallLLMOnlyEmitsOneStreamingActivityWhenStatusAlsoArrives(t *testing.T)
 		calls: []scriptedStreamCall{{
 			streams: []message.StreamDelta{
 				{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}},
-				{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "Read", Input: `{"path":"README.md"}`}},
+				{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: "read", Input: `{"path":"README.md"}`}},
 				{Type: "status", Status: &message.StatusDelta{Type: "streaming"}},
 			},
 			resp: &message.Response{
 				ToolCalls: []message.ToolCall{{
 					ID:   "call-1",
-					Name: "Read",
+					Name: "read",
 					Args: []byte(`{"path":"README.md"}`),
 				}},
 				StopReason: "tool_use",

@@ -32,7 +32,7 @@ func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, and do not copy the gutter into Edit hunks. Before Edit, the file must have been observed via Read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For Edit, include a few unchanged source lines around the intended change. Read output normalizes line endings to LF; Edit preserves the file's existing line-ending style when writing. When using Lsp line/character positions, count from the raw source line only."
+	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, and do not copy the gutter into edit hunks. Before edit, the file must have been observed via read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For edit, include a few unchanged source lines around the intended change. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing. When using lsp line/character positions, count from the raw source line only."
 }
 
 func (ReadTool) Parameters() map[string]any {
@@ -127,7 +127,7 @@ func readRangeFooter(startLine, endLine, totalLines int) string {
 
 func readBudgetTruncationFooter(startLine, endLine, totalLines int) string {
 	return fmt.Sprintf(
-		"(showing lines %d-%d of %d total; content truncated to fit the approximate %d-token read budget; use offset/limit or Grep to inspect more)",
+		"(showing lines %d-%d of %d total; content truncated to fit the approximate %d-token read budget; use offset/limit or grep to inspect more)",
 		startLine,
 		endLine,
 		totalLines,
@@ -163,7 +163,7 @@ func truncateReadContentToBudget(prefixLines, numberedLines []string, startLine,
 		prefixLines,
 		nil,
 		fmt.Sprintf(
-			"(content truncated to fit the approximate %d-token read budget; use offset/limit or Grep to inspect more)",
+			"(content truncated to fit the approximate %d-token read budget; use offset/limit or grep to inspect more)",
 			MaxReadOutputTokens,
 		),
 	)
@@ -189,7 +189,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	if info.Size() > MaxReadFileBytes {
-		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or Grep to search", info.Size(), MaxReadFileBytes)
+		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or grep to search", info.Size(), MaxReadFileBytes)
 	}
 
 	decoded, err := ReadDecodedTextFile(resolvedPath)

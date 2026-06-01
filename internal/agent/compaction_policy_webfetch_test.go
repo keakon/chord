@@ -3,7 +3,19 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tools"
 )
+
+func TestCompactGlobOutputSummaryUsesCanonicalToolName(t *testing.T) {
+	summary := compactGlobOutputSummary(`{"pattern":"**/*.go","path":"internal"}`, "internal/agent/compaction_policy.go")
+	if !strings.Contains(summary, "Re-run "+tools.NameGlob+"(") {
+		t.Fatalf("summary = %q, want canonical glob re-run hint", summary)
+	}
+	if strings.Contains(summary, "Re-run Glob(") {
+		t.Fatalf("summary should not use legacy Glob tool name: %q", summary)
+	}
+}
 
 func TestCompactWebFetchOutputSummaryStripsResultHeadersFromSnippet(t *testing.T) {
 	content := strings.Join([]string{
@@ -27,5 +39,11 @@ func TestCompactWebFetchOutputSummaryStripsResultHeadersFromSnippet(t *testing.T
 	}
 	if strings.Contains(summary, "browser=") {
 		t.Fatalf("summary should not mention removed browser arg: %q", summary)
+	}
+	if !strings.Contains(summary, "Re-run "+tools.NameWebFetch+"(") {
+		t.Fatalf("summary = %q, want canonical web_fetch re-run hint", summary)
+	}
+	if strings.Contains(summary, "Re-run WebFetch(") {
+		t.Fatalf("summary should not use legacy WebFetch tool name: %q", summary)
 	}
 }

@@ -118,7 +118,7 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Read",
+		ToolName:          "read",
 		Content:           fmt.Sprintf(`{"path":%q,"limit":20,"offset":5}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
@@ -139,14 +139,14 @@ func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Write",
+		ToolName:          "write",
 		Content:           fmt.Sprintf(`{"path":%q,"content":"hello"}`, abs),
 		Collapsed:         true,
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Write demo.txt") {
+	if !strings.Contains(joined, "write demo.txt") {
 		t.Fatalf("expected Write header to show relative path; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
@@ -161,7 +161,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Write",
+		ToolName:   "write",
 		Content:    fmt.Sprintf(`{"path":%q,"content":"package demo\n"}`, abs),
 		Collapsed:  false,
 		ResultDone: true,
@@ -226,7 +226,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Write",
+		ToolName:      "write",
 		Content:       string(args),
 		Collapsed:     false,
 		ResultDone:    true,
@@ -234,7 +234,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"Write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
+	for _, want := range []string{"write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
 		}
@@ -270,7 +270,7 @@ func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Write",
+		ToolName:      "write",
 		Content:       string(args),
 		Collapsed:     false,
 		ResultDone:    true,
@@ -292,7 +292,7 @@ func TestReadHeaderKeepsAbsolutePathOutsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Read",
+		ToolName:          "read",
 		Content:           fmt.Sprintf(`{"path":%q}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
@@ -321,7 +321,7 @@ func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Skill",
+		ToolName:      "skill",
 		Content:       `{"name":"sample-food-skill","result":"<path>` + filepath.ToSlash(filepath.Join(wd, ".agents", "skills", "sample-food-skill", "SKILL.md")) + `</path>"}`,
 		ResultContent: filepath.ToSlash(filepath.Join(wd, ".agents", "skills", "sample-food-skill", "SKILL.md")),
 		ResultDone:    true,
@@ -329,7 +329,7 @@ func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.
 	}
 
 	joined := stripANSI(strings.Join(block.Render(140, ""), "\n"))
-	if !strings.Contains(joined, "Skill sample-food-skill (from .agents)") {
+	if !strings.Contains(joined, "skill sample-food-skill (from .agents)") {
 		t.Fatalf("expected skill header to show name with source metadata, got:\n%s", joined)
 	}
 	if strings.Contains(joined, "sample-food-…") {
@@ -344,7 +344,7 @@ func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) 
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```\n\n- item one\n- item two",
 		ResultDone:             true,
@@ -371,7 +371,7 @@ func TestExpandedSkillResultUsesPlainTextForMarkdownLookingContent(t *testing.T)
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Skill",
+		ToolName:               "skill",
 		Content:                `{"name":"skill-creator","result":"<path>/tmp/skills/skill-creator/SKILL.md</path>"}`,
 		ResultContent:          "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n\n# Skill Creator\n\n- Step one\n- Step two\n</skill>",
 		ResultDone:             true,
@@ -393,7 +393,7 @@ func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```",
 		ResultDone:             true,
@@ -414,7 +414,7 @@ func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"printf 'one\ntwo\nthree\n'","description":"show lines"}`,
 		ResultContent:          "one\ntwo\nthree",
 		ResultDone:             true,
@@ -437,7 +437,7 @@ func TestCollapsedBashDoesNotDuplicateDescriptionInSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"ls /tmp","description":"List temp files"}`,
 		ResultContent:          "file1\nfile2\nfile3",
 		ResultDone:             true,
@@ -468,7 +468,7 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"cat big.txt","description":"show file"}`,
 		ResultContent:          strings.Join(lines, "\n"),
 		ResultDone:             true,
@@ -488,7 +488,7 @@ func TestToolProgressRendersConsistentlyAcrossCollapsedAndExpandedStates(t *test
 	block := &Block{
 		ID:                 1,
 		Type:               BlockToolCall,
-		ToolName:           "Delete",
+		ToolName:           "delete",
 		Content:            `{"paths":["a-very-long-file-name.txt","b-very-long-file-name.txt","c-very-long-file-name.txt"],"reason":"cleanup stale generated benchmark artifacts"}`,
 		ToolExecutionState: agent.ToolCallExecutionStateRunning,
 		ToolProgress: &agent.ToolProgressSnapshot{
@@ -515,7 +515,7 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolResult,
-		ToolName:   "Shell",
+		ToolName:   "shell",
 		Content:    "Error: " + strings.Repeat("x", 220),
 		IsError:    true,
 		Collapsed:  false,
@@ -578,7 +578,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -592,7 +592,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 
-	if !strings.Contains(joined, "Shell echo first (timeout=120)") {
+	if !strings.Contains(joined, "shell echo first (timeout=120)") {
 		t.Fatalf("expected header to contain only first command line with timeout; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "echo second (timeout=120)") {
@@ -605,7 +605,7 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -613,7 +613,7 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Shell Search existing permission-related tests (timeout=120)") {
+	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=120)") {
 		t.Fatalf("expected collapsed multiline Shell header to use description; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") {
@@ -625,7 +625,7 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"sleep 1","timeout":2400}`,
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -633,7 +633,7 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Shell sleep 1 (timeout=2400→600)") {
+	if !strings.Contains(joined, "shell sleep 1 (timeout=2400→600)") {
 		t.Fatalf("expected collapsed Shell header to show requested and effective capped foreground timeout; got:\n%s", joined)
 	}
 }
@@ -643,7 +643,7 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":"   ","timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -651,7 +651,7 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Shell python3 - <<'PY' (timeout=120)") {
+	if !strings.Contains(joined, "shell python3 - <<'PY' (timeout=120)") {
 		t.Fatalf("expected collapsed multiline Shell header to fall back to command first line; got:\n%s", joined)
 	}
 }
@@ -661,7 +661,7 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -669,7 +669,7 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "Shell Search existing permission-related tests (timeout=120)") {
+	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=120)") {
 		t.Fatalf("expected expanded Shell header to use summary description; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") || !strings.Contains(joined, "from pathlib import Path") || !strings.Contains(joined, "print('ok')") {
@@ -685,7 +685,7 @@ func TestExpandedBashShowsIndentedContinuationLines(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -735,7 +735,7 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
@@ -772,7 +772,7 @@ func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *tes
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"description":"暂存滚轮修复相关改动","timeout":30}`, cmd),
 		ResultContent:          "(Shell completed with no output)",
 		ResultDone:             true,
@@ -802,7 +802,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
 		ResultContent:          "one\ntwo\nthree",
 		ResultDone:             true,
@@ -823,7 +823,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	}
 }
 
-func TestExpandedUserLocalShellMatchesBashContinuationFormatting(t *testing.T) {
+func TestExpandedUserTerminalMatchesBashContinuationFormatting(t *testing.T) {
 	cmd := "echo first\necho second\n  pwd"
 	block := &Block{
 		ID:                   1,
@@ -840,17 +840,17 @@ func TestExpandedUserLocalShellMatchesBashContinuationFormatting(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 
-	if !strings.Contains(joined, "Shell echo first") {
-		t.Fatalf("expected local shell header to show first command line only; got:\n%s", joined)
+	if !strings.Contains(joined, "shell echo first") {
+		t.Fatalf("expected terminal header to show first command line only; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") {
-		t.Fatalf("expected local shell to show command block label; got:\n%s", joined)
+		t.Fatalf("expected terminal to show command block label; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "      echo second") {
-		t.Fatalf("expected local shell continuation line to be indented; got:\n%s", joined)
+		t.Fatalf("expected terminal continuation line to be indented; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "        pwd") {
-		t.Fatalf("expected local shell nested continuation indentation to be preserved; got:\n%s", joined)
+		t.Fatalf("expected terminal nested continuation indentation to be preserved; got:\n%s", joined)
 	}
 }
 
@@ -858,7 +858,7 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Complete",
+		ToolName:               "complete",
 		Content:                `{"summary":"Status: success\nChanges: line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nline eleven\nline twelve"}`,
 		ResultContent:          "Status: success\nChanges: line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nline eleven\nline twelve",
 		ResultDone:             true,
@@ -896,7 +896,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
-		ToolName:                   "Shell",
+		ToolName:                   "shell",
 		Content:                    `{"command":"command -v benchstat || true"}`,
 		Collapsed:                  true,
 		ResultDone:                 false,
@@ -905,7 +905,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
-	if !strings.Contains(joined, "⏸ Shell command -v benchstat || true") {
+	if !strings.Contains(joined, "⏸ shell command -v benchstat || true") {
 		t.Fatalf("expected queued Shell header; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Queued") {
@@ -922,7 +922,7 @@ func TestGenericToolHeaderAndCollapsedResultEscapesANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Glob",
+		ToolName:      "glob",
 		Content:       `{"pattern":"\u001b[33m*.go\u001b[0m","path":"\u001b[35m/tmp/repo\u001b[0m"}`,
 		Collapsed:     true,
 		ResultContent: "\x1b[31minternal/tui/app.go\x1b[0m\ninternal/tui/block.go",
@@ -944,7 +944,7 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:        1,
 		Type:      BlockToolCall,
-		ToolName:  "Shell",
+		ToolName:  "shell",
 		Content:   `{"command":"printf '\u001b[32mok\u001b[0m'","description":"\u001b[36mdesc\u001b[0m"}`,
 		Collapsed: true,
 		ResultContent: strings.Join([]string{
@@ -960,11 +960,11 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected Shell card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected shell card to not contain raw ESC: %q", joined)
 	}
 	for _, want := range []string{`\x1b[36mdesc\x1b[0m`, `\x1b[31mline-1\x1b[0m`} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("expected Shell card to contain %q, got:\n%s", want, joined)
+			t.Fatalf("expected shell card to contain %q, got:\n%s", want, joined)
 		}
 	}
 }
@@ -977,7 +977,7 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Shell",
+		ToolName:      "shell",
 		Content:       `{"command":"cat huge.log","description":"show huge log"}`,
 		Collapsed:     true,
 		ResultContent: strings.Join(lines, "\n"),
@@ -1000,7 +1000,7 @@ func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
 		ResultContent: `[{"header":"\u001b[31mHDR\u001b[0m","selected":["\u001b[34mA\u001b[0m","\u001b[33mcustom\u001b[0m"]}]`,
 		ResultDone:    true,
@@ -1008,11 +1008,11 @@ func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected Question card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected question card to not contain raw ESC: %q", joined)
 	}
 	for _, want := range []string{`\x1b[31mHDR\x1b[0m`, `\x1b[32mone\x1b[0m`, `\x1b[34mA\x1b[0m`, `\x1b[35mdesc\x1b[0m`, `\x1b[33mcustom\x1b[0m`} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("expected Question card to contain %q, got:\n%s", want, joined)
+			t.Fatalf("expected question card to contain %q, got:\n%s", want, joined)
 		}
 	}
 	if !strings.Contains(joined, `✓ 1. \x1b[34mA\x1b[0m`) {
@@ -1031,7 +1031,7 @@ func TestDelegateAndControlCardsEscapeStructuredFields(t *testing.T) {
 			block: &Block{
 				ID:            1,
 				Type:          BlockToolCall,
-				ToolName:      "Delegate",
+				ToolName:      "delegate",
 				Collapsed:     false,
 				Content:       `{"description":"run \u001b[32mworker\u001b[0m","agent_type":"\u001b[36mreviewer\u001b[0m"}`,
 				ResultContent: `{"status":"started","task_id":"adhoc-1","agent_id":"\u001b[31mreviewer-1\u001b[0m","message":"\u001b[33mrunning\u001b[0m"}`,
@@ -1044,7 +1044,7 @@ func TestDelegateAndControlCardsEscapeStructuredFields(t *testing.T) {
 			block: &Block{
 				ID:            2,
 				Type:          BlockToolCall,
-				ToolName:      "Cancel",
+				ToolName:      "cancel",
 				Collapsed:     false,
 				Content:       `{"target_task_id":"adhoc-7","reason":"\u001b[35mstop now\u001b[0m"}`,
 				ResultContent: `{"status":"stopped","task_id":"adhoc-7","agent_id":"\u001b[31mreviewer-2\u001b[0m","message":"\u001b[33mstopped\u001b[0m"}`,
@@ -1057,7 +1057,7 @@ func TestDelegateAndControlCardsEscapeStructuredFields(t *testing.T) {
 			block: &Block{
 				ID:            3,
 				Type:          BlockToolCall,
-				ToolName:      "Notify",
+				ToolName:      "notify",
 				Collapsed:     false,
 				Content:       `{"target_task_id":"adhoc-5","message":"\u001b[36mplease continue\u001b[0m","kind":"\u001b[34mreply\u001b[0m"}`,
 				ResultContent: `{"status":"delivered","task_id":"adhoc-5","agent_id":"\u001b[31mreviewer-3\u001b[0m","message":"\u001b[33mdelivered\u001b[0m"}`,
@@ -1086,7 +1086,7 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 	block := &Block{
 		ID:                 1,
 		Type:               BlockToolCall,
-		ToolName:           "Shell",
+		ToolName:           "shell",
 		Content:            `{"command":"echo hi"}`,
 		Collapsed:          true,
 		ResultDone:         false,
@@ -1097,7 +1097,7 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 	if strings.Contains(joined, "calling") {
 		t.Fatalf("active tool header should not render calling text; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Shell echo hi") {
+	if !strings.Contains(joined, "shell echo hi") {
 		t.Fatalf("expected active tool header to keep stable tool name and summary; got:\n%s", joined)
 	}
 }
@@ -1136,7 +1136,7 @@ func TestActiveToolHeaderUsesProvidedSpinnerFrame(t *testing.T) {
 	block := &Block{
 		ID:                 1,
 		Type:               BlockToolCall,
-		ToolName:           "Write",
+		ToolName:           "write",
 		Content:            `{"path":"demo.txt","content":"hello"}`,
 		Collapsed:          true,
 		ResultDone:         false,
@@ -1173,7 +1173,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 			name: "success",
 			block: Block{
 				Type:                   BlockToolCall,
-				ToolName:               "Read",
+				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "ok",
 				ResultStatus:           agent.ToolResultStatusSuccess,
@@ -1187,7 +1187,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 			name: "error",
 			block: Block{
 				Type:                   BlockToolCall,
-				ToolName:               "Read",
+				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "Error: denied",
 				ResultStatus:           agent.ToolResultStatusError,
@@ -1201,7 +1201,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 			name: "cancelled",
 			block: Block{
 				Type:                   BlockToolCall,
-				ToolName:               "Read",
+				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "Cancelled",
 				ResultStatus:           agent.ToolResultStatusCancelled,
@@ -1230,7 +1230,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"false"}`,
 		ResultContent:          "stdout\n\nError: exit code 1",
 		ResultStatus:           agent.ToolResultStatusError,
@@ -1242,7 +1242,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	joinedANSI := strings.Join(lines, "\n")
 	joinedPlain := stripANSI(joinedANSI)
 
-	if !strings.Contains(joinedPlain, "✗ Shell false") {
+	if !strings.Contains(joinedPlain, "✗ shell false") {
 		t.Fatalf("expected collapsed Shell error prefix; got:\n%s", joinedPlain)
 	}
 	if !strings.Contains(joinedPlain, "stdout") {
@@ -1257,7 +1257,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"cd /home/user/projects/sample-repo && git ls-files -s | grep '\\u0000' || true","description":"No-op check for nulls in git index","timeout":60,"workdir":""}`,
 		ResultContent:          "exit code 1 after output:\nstarting command: fork/exec /bin/bash: invalid argument",
 		ResultDone:             true,
@@ -1314,14 +1314,14 @@ func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Delete",
+		ToolName:          "delete",
 		Content:           fmt.Sprintf(`{"paths":[%q],"reason":"remove obsolete file"}`, abs),
-		ResultContent:     "Delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
+		ResultContent:     "delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Delete internal/tui/obsolete.go") {
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go") {
 		t.Fatalf("expected delete header to show relative path; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
@@ -1333,15 +1333,15 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delete",
+		ToolName:               "delete",
 		Content:                `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`,
-		ResultContent:          "Delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
+		ResultContent:          "delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Delete internal/tui/obsolete.go") {
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go") {
 		t.Fatalf("expected delete header to show file path; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
@@ -1360,26 +1360,26 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 	}{
 		{
 			name:        "delete",
-			toolName:    "Delete",
+			toolName:    "delete",
 			content:     `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
-			result:      "Delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
-			wantPrefix:  "✓ Delete",
+			result:      "delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
+			wantPrefix:  "✓ delete",
 			wantVisible: "- examples/compression-config.yaml",
 		},
 		{
 			name:        "grep",
-			toolName:    "Grep",
+			toolName:    "grep",
 			content:     `{"pattern":"TODO"}`,
 			result:      strings.Join([]string{"a.go:1:TODO", "b.go:2:TODO", "c.go:3:TODO", "d.go:4:TODO", "e.go:5:TODO", "f.go:6:TODO", "g.go:7:TODO", "h.go:8:TODO", "i.go:9:TODO", "j.go:10:TODO", "k.go:11:TODO"}, "\n"),
-			wantPrefix:  "✓ Grep",
+			wantPrefix:  "✓ grep",
 			wantVisible: "k.go:11:TODO",
 		},
 		{
 			name:        "glob",
-			toolName:    "Glob",
+			toolName:    "glob",
 			content:     `{"pattern":"**/*.go"}`,
 			result:      strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
-			wantPrefix:  "✓ Glob",
+			wantPrefix:  "✓ glob",
 			wantVisible: "k.go",
 		},
 	}
@@ -1414,7 +1414,7 @@ func TestWebFetchHeaderShowsURLAndTimeout(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://iterm2.com/documentation-images.html","timeout":40}`,
 		ResultContent:          "URL: https://iterm2.com/documentation-images.html\nContent-Type: text/html",
 		ResultDone:             true,
@@ -1422,8 +1422,8 @@ func TestWebFetchHeaderShowsURLAndTimeout(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "WebFetch https://iterm2.com/documentation-images.html (timeout=40)") {
-		t.Fatalf("expected WebFetch header to include URL and timeout; got:\n%s", joined)
+	if !strings.Contains(joined, "web_fetch https://iterm2.com/documentation-images.html (timeout=40)") {
+		t.Fatalf("expected web_fetch header to include URL and timeout; got:\n%s", joined)
 	}
 }
 
@@ -1431,7 +1431,7 @@ func TestCollapsedTaskShowsSpawnedSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delegate",
+		ToolName:               "delegate",
 		Collapsed:              true,
 		Content:                `{"description":"review tests","agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2","message":"running in background"}`,
@@ -1443,7 +1443,7 @@ func TestCollapsedTaskShowsSpawnedSummary(t *testing.T) {
 	if strings.Contains(joined, "description:") {
 		t.Fatalf("expected Delegate view to avoid raw description label; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Delegate (reviewer)") {
+	if !strings.Contains(joined, "delegate (reviewer)") {
 		t.Fatalf("expected Delegate header to show tool name + agent type only; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "review tests") && !strings.Contains(joined, "(reviewer)") {
@@ -1461,7 +1461,7 @@ func TestCollapsedTaskShowsMultilineDescription(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delegate",
+		ToolName:               "delegate",
 		Collapsed:              true,
 		Content:                `{"description":"review tests\ncheck coverage\nupdate docs","agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
@@ -1515,7 +1515,7 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delegate",
+		ToolName:               "delegate",
 		Collapsed:              false,
 		Content:                `{"description":"review tests","agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
@@ -1544,7 +1544,7 @@ func TestExpandedTaskDescriptionUsesPlainTextForMarkdownLookingContent(t *testin
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delegate",
+		ToolName:               "delegate",
 		Content:                `{"description":` + strconv.Quote(desc) + `,"agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
 		ResultDone:             true,
@@ -1561,7 +1561,7 @@ func TestExpandedTaskDescriptionUsesPlainTextForMarkdownLookingContent(t *testin
 		}
 	}
 	if strings.Contains(joined, "• item one") {
-		t.Fatalf("Delegate description should not render markdown bullets; got:\n%s", joined)
+		t.Fatalf("delegate description should not render markdown bullets; got:\n%s", joined)
 	}
 }
 
@@ -1571,13 +1571,13 @@ func TestGrepHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Grep",
+		ToolName:          "grep",
 		Content:           fmt.Sprintf(`{"pattern":"TODO","path":%q,"glob":"*.go"}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Grep TODO (path=internal/tui, glob=*.go)") {
+	if !strings.Contains(joined, "grep TODO (path=internal/tui, glob=*.go)") {
 		t.Fatalf("expected grep header to show relative search path; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
@@ -1591,13 +1591,13 @@ func TestGlobHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                1,
 		Type:              BlockToolCall,
-		ToolName:          "Glob",
+		ToolName:          "glob",
 		Content:           fmt.Sprintf(`{"pattern":"**/*.go","path":%q}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Glob **/*.go (path=internal)") {
+	if !strings.Contains(joined, "glob **/*.go (path=internal)") {
 		t.Fatalf("expected glob header to show relative search path; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
@@ -1611,7 +1611,7 @@ func TestBashExpandedMetaShowsRelativeWorkdirInsideWorkingDir(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                fmt.Sprintf(`{"command":"pwd","workdir":%q}`, workdir),
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
@@ -1630,7 +1630,7 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"go test ./internal/tui/..."}`,
 		ResultContent:          "ok\nsecond line",
 		ResultDone:             true,
@@ -1639,7 +1639,7 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "ok") {
-		t.Fatalf("expected Shell collapsed summary to show success output summary; got:\n%s", joined)
+		t.Fatalf("expected shell collapsed summary to show success output summary; got:\n%s", joined)
 	}
 }
 
@@ -1647,7 +1647,7 @@ func TestCollapsedGrepShowsMatchCountSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Grep",
+		ToolName:               "grep",
 		Content:                `{"pattern":"TODO"}`,
 		ResultContent:          "a.go:1:TODO\nb.go:2:TODO",
 		ResultDone:             true,
@@ -1686,7 +1686,7 @@ func TestCollapsedGrepOmitsLowCountSummary(t *testing.T) {
 			block := &Block{
 				ID:                     1,
 				Type:                   BlockToolCall,
-				ToolName:               "Grep",
+				ToolName:               "grep",
 				Content:                `{"pattern":"TODO"}`,
 				ResultContent:          tt.resultContent,
 				ResultDone:             true,
@@ -1708,7 +1708,7 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Write",
+		ToolName:      "write",
 		Content:       `{"path":"foo.txt","content":""}`,
 		ResultContent: "Cancelled",
 		ResultStatus:  agent.ToolResultStatusCancelled,
@@ -1716,7 +1716,7 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Write foo.txt") {
+	if !strings.Contains(plain, "write foo.txt") {
 		t.Fatalf("expected Write header to include file path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
@@ -1774,8 +1774,8 @@ func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *test
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Edit") || !strings.Contains(plain, "foo.txt") {
-		t.Fatalf("expected Edit header to include file path, got:\n%s", plain)
+	if !strings.Contains(plain, "edit") || !strings.Contains(plain, "foo.txt") {
+		t.Fatalf("expected edit header to include file path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
@@ -1795,7 +1795,7 @@ func TestCancelledReadCallOmitsDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Read",
+		ToolName:      "read",
 		Content:       `{"path":"foo.txt","limit":10}`,
 		ResultContent: "Cancelled",
 		ResultStatus:  agent.ToolResultStatusCancelled,
@@ -1803,7 +1803,7 @@ func TestCancelledReadCallOmitsDuplicateCancelledText(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Read foo.txt") {
+	if !strings.Contains(plain, "read foo.txt") {
 		t.Fatalf("expected Read header to include file path, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
@@ -1821,7 +1821,7 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"echo hi"}`,
 		ResultContent:          "Cancelled",
 		ResultStatus:           agent.ToolResultStatusCancelled,
@@ -1830,8 +1830,8 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Shell") {
-		t.Fatalf("expected Shell header to remain visible, got:\n%s", plain)
+	if !strings.Contains(plain, "shell echo hi") {
+		t.Fatalf("expected shell header to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
@@ -1848,7 +1848,7 @@ func TestCancelledSpecialToolOmitsDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"log","question":"paste log"}]}`,
 		ResultContent: "Cancelled",
 		ResultStatus:  agent.ToolResultStatusCancelled,
@@ -1856,8 +1856,8 @@ func TestCancelledSpecialToolOmitsDuplicateCancelledText(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Question") {
-		t.Fatalf("expected Question header to remain visible, got:\n%s", plain)
+	if !strings.Contains(plain, "question") {
+		t.Fatalf("expected question header to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected cancelled summary line, got:\n%s", plain)
@@ -1874,7 +1874,7 @@ func TestCollapsedGlobShowsFileCountSummary(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Glob",
+		ToolName:               "glob",
 		Content:                `{"pattern":"**/*.go"}`,
 		ResultContent:          "a.go\nb.go\nc.go",
 		ResultDone:             true,
@@ -1913,7 +1913,7 @@ func TestCollapsedGlobOmitsLowCountSummary(t *testing.T) {
 			block := &Block{
 				ID:                     1,
 				Type:                   BlockToolCall,
-				ToolName:               "Glob",
+				ToolName:               "glob",
 				Content:                `{"pattern":"**/*.go"}`,
 				ResultContent:          tt.resultContent,
 				ResultDone:             true,
@@ -1938,7 +1938,7 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Question",
+		ToolName: "question",
 		Content: `{"questions":[{"header":"Messaging platform","question":"Which one should we use first?","options":[` +
 			`{"label":"Email","description":"One inbox per workspace"},` +
 			`{"label":"Chat App","description":"Single workspace with direct messages"}` +
@@ -1987,7 +1987,7 @@ func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
-		ToolName: "Question",
+		ToolName: "question",
 		Content: `{"questions":[{"header":"Project location","question":"Where should it go?","options":[` +
 			`{"label":"Sibling directory","description":"For example /home/user/projects/sample-gateway"},` +
 			`{"label":"Project subdirectory","description":"For example /home/user/projects/sample-app/gateway"}` +
@@ -2015,7 +2015,7 @@ func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) 
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top","custom":true}]}`,
 		ResultContent: answers,
 		ResultDone:    true,
@@ -2040,7 +2040,7 @@ func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top","custom":true}]}`,
 		ResultContent: answers,
 		ResultDone:    true,
@@ -2061,7 +2061,7 @@ func TestQuestionCallFallbackResultPreservesMultilineText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"log","question":"paste log"}]}`,
 		ResultContent: "first line\nsecond line\nthird line",
 		ResultDone:    true,
@@ -2084,14 +2084,14 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Done",
+		ToolName:      "done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusCancelled,
 		ResultContent: "Done rejected: require all checks to pass before exit and include verification results",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if !strings.Contains(plain, "✗ Done") {
+	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected rejected Done to use failure icon, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "rejected reason: require all checks to pass before exit and include") ||
@@ -2111,14 +2111,14 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Done",
+		ToolName:      "done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
 		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet (open_todos). Finish the remaining work before calling Done again.",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(plain, "✗ Done") {
+	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected auto-rejected Done to use failure icon, got:\n%s", plain)
 	}
 	for _, want := range []string{"rejected reason: loop exit conditions are not", "satisfied yet (open_todos). Finish the", "remaining work before calling Done again."} {
@@ -2139,7 +2139,7 @@ func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Done",
+		ToolName:      "done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
 		ResultContent: "Done rejected: coverage must be >= 70% before exiting",
@@ -2166,15 +2166,15 @@ func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Done",
+		ToolName:      "done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
-		ResultContent: "Done",
+		ResultContent: "done",
 		DoneReport:    "## Summary\n- shipped\n- verified",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	for _, want := range []string{"✓ Done", "Summary", "• shipped", "• verified"} {
+	for _, want := range []string{"✓ done", "Summary", "• shipped", "• verified"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected accepted Done render to contain %q, got:\n%s", want, plain)
 		}
@@ -2192,7 +2192,7 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 	block := &Block{
 		ID:           1,
 		Type:         BlockToolCall,
-		ToolName:     "Done",
+		ToolName:     "done",
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
 		DoneReport:   "## Summary\n- shipped\n- verified",
@@ -2210,7 +2210,7 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"internal/tui/input.go","limit":1,"offset":358}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2220,7 +2220,7 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 
 	lines := block.renderReadCall(80, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "Read internal/tui/input.go") {
+	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected Read header to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "359") {
@@ -2235,7 +2235,7 @@ func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"/tmp/chord-diag/tui-dump.txt","limit":120,"offset":1535}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2260,12 +2260,12 @@ func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
 
 	plain := stripANSI(strings.Join(block.renderReadCall(140, ""), "\n"))
 	for _, want := range []string{
-		`Read /tmp/chord-diag/tui-dump.txt`,
+		`read /tmp/chord-diag/tui-dump.txt`,
 		`\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m`,
 		`[screen_buffer]`,
 	} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("expected rendered Read card to contain %q, got:\n%s", want, plain)
+			t.Fatalf("expected rendered read card to contain %q, got:\n%s", want, plain)
 		}
 	}
 }
@@ -2274,7 +2274,7 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"sample.csv","limit":20}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2299,11 +2299,11 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 
 	plain := stripANSI(strings.Join(block.renderReadCall(80, ""), "\n"))
 	if containsRawCarriageReturnForTest(plain) {
-		t.Fatalf("rendered Read card should not contain raw carriage return: %q", plain)
+		t.Fatalf("rendered read card should not contain raw carriage return: %q", plain)
 	}
 	for _, want := range []string{"issue,label", "\"a\",\"b\"", "(showing lines 1-2 of 10)"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("expected rendered Read card to contain %q, got:\n%s", want, plain)
+			t.Fatalf("expected rendered read card to contain %q, got:\n%s", want, plain)
 		}
 	}
 }
@@ -2312,7 +2312,7 @@ func TestReadCallAlignsLineNumberGutterAcrossDigitWidths(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"sample.go","limit":3}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2343,7 +2343,7 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 	twoDigitBlock := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"sample.go","limit":2}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2354,7 +2354,7 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 	threeDigitBlock := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"sample.go","limit":2}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -2383,7 +2383,7 @@ func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
 	block := &Block{
 		ID:                  1,
 		Type:                BlockToolCall,
-		ToolName:            "Read",
+		ToolName:            "read",
 		Content:             `{"path":"sample.go"}`,
 		ResultDone:          true,
 		ReadContentExpanded: true,
@@ -2420,7 +2420,7 @@ func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Shell",
+		ToolName:               "shell",
 		Content:                `{"command":"printf test"}`,
 		ResultContent:          "\x1b[31mred\x1b[0m\nplain",
 		ResultDone:             true,
@@ -2432,10 +2432,10 @@ func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 		t.Fatalf("expected rendered Shell card to not contain raw ESC: %q", joined)
 	}
 	if !strings.Contains(joined, `\x1b[31mred\x1b[0m`) {
-		t.Fatalf("expected Shell output to show ANSI literally, got:\n%s", joined)
+		t.Fatalf("expected shell output to show ANSI literally, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "plain") {
-		t.Fatalf("expected Shell output to keep plain text, got:\n%s", joined)
+		t.Fatalf("expected shell output to keep plain text, got:\n%s", joined)
 	}
 }
 
@@ -2443,7 +2443,7 @@ func TestQuestionFallbackResultEscapesANSIRichOutput(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Question",
+		ToolName:      "question",
 		Content:       `{"questions":[{"header":"mode","question":"Pick one"}]}`,
 		ResultDone:    true,
 		ResultContent: "\x1b[35muser typed answer\x1b[0m",
@@ -2451,10 +2451,10 @@ func TestQuestionFallbackResultEscapesANSIRichOutput(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected Question card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected question card to not contain raw ESC: %q", joined)
 	}
 	if !strings.Contains(joined, `\x1b[35muser typed answer\x1b[0m`) {
-		t.Fatalf("expected Question fallback result to show ANSI literally, got:\n%s", joined)
+		t.Fatalf("expected question fallback result to show ANSI literally, got:\n%s", joined)
 	}
 }
 
@@ -2462,7 +2462,7 @@ func TestNotifyExpandedEscapesANSIRichMessageAndResult(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Notify",
+		ToolName:               "notify",
 		Collapsed:              false,
 		Content:                `{"target_task_id":"adhoc-5","message":"\u001b[36mreply now\u001b[0m","kind":"reply"}`,
 		ResultContent:          "\x1b[33mdelivered\x1b[0m",
@@ -2472,11 +2472,11 @@ func TestNotifyExpandedEscapesANSIRichMessageAndResult(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected Notify card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected notify card to not contain raw ESC: %q", joined)
 	}
 	for _, want := range []string{`\x1b[36mreply now\x1b[0m`, `\x1b[33mdelivered\x1b[0m`} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("expected Notify card to contain %q, got:\n%s", want, joined)
+			t.Fatalf("expected notify card to contain %q, got:\n%s", want, joined)
 		}
 	}
 }
@@ -2515,7 +2515,7 @@ func TestRenderConfirmFieldEscapesANSIRichLiteralValue(t *testing.T) {
 	}
 }
 
-func TestLocalShellResultEscapesANSIRichOutput(t *testing.T) {
+func TestTerminalResultEscapesANSIRichOutput(t *testing.T) {
 	block := &Block{
 		ID:                   1,
 		Type:                 BlockUser,
@@ -2525,10 +2525,10 @@ func TestLocalShellResultEscapesANSIRichOutput(t *testing.T) {
 	}
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected local shell card to not contain raw ESC: %q", joined)
+		t.Fatalf("expected terminal card to not contain raw ESC: %q", joined)
 	}
 	if !strings.Contains(joined, `\x1b[32mok\x1b[0m`) {
-		t.Fatalf("expected local shell result to show ANSI literally, got:\n%s", joined)
+		t.Fatalf("expected terminal result to show ANSI literally, got:\n%s", joined)
 	}
 }
 
@@ -2569,7 +2569,7 @@ func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Cancel",
+		ToolName:               "cancel",
 		Collapsed:              true,
 		Content:                `{"target_task_id":"adhoc-7","reason":"task superseded"}`,
 		ResultContent:          `{"status":"stopped","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
@@ -2579,19 +2579,19 @@ func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
-		t.Fatalf("expected Cancel collapsed view to not show raw JSON; got:\n%s", joined)
+		t.Fatalf("expected cancel collapsed view to not show raw JSON; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Cancel") {
-		t.Fatalf("expected Cancel header to show tool name; got:\n%s", joined)
+	if !strings.Contains(joined, "cancel") {
+		t.Fatalf("expected cancel header to show tool name; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "7") {
-		t.Fatalf("expected Cancel to show readable target (7 not adhoc-7); got:\n%s", joined)
+		t.Fatalf("expected cancel to show readable target (7 not adhoc-7); got:\n%s", joined)
 	}
 	if strings.Contains(joined, "adhoc-7") {
-		t.Fatalf("expected Cancel collapsed view to not expose adhoc- prefix; got:\n%s", joined)
+		t.Fatalf("expected cancel collapsed view to not expose adhoc- prefix; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Stopped") {
-		t.Fatalf("expected Cancel to show stopped semantic; got:\n%s", joined)
+		t.Fatalf("expected cancel to show stopped semantic; got:\n%s", joined)
 	}
 }
 
@@ -2600,7 +2600,7 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Cancel",
+		ToolName:               "cancel",
 		Collapsed:              false,
 		Content:                `{"target_task_id":"adhoc-7","reason":"task superseded"}`,
 		ResultContent:          `{"status":"stopped","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
@@ -2610,16 +2610,16 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
-		t.Fatalf("expected Cancel expanded view to not show raw JSON; got:\n%s", joined)
+		t.Fatalf("expected cancel expanded view to not show raw JSON; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Cancel") {
-		t.Fatalf("expected Cancel header to show tool name; got:\n%s", joined)
+	if !strings.Contains(joined, "cancel") {
+		t.Fatalf("expected cancel header to show tool name; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "reason:") || !strings.Contains(joined, "task superseded") {
-		t.Fatalf("expected Cancel expanded to show reason; got:\n%s", joined)
+		t.Fatalf("expected cancel expanded to show reason; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Stopped") {
-		t.Fatalf("expected Cancel to show stopped semantic; got:\n%s", joined)
+		t.Fatalf("expected cancel to show stopped semantic; got:\n%s", joined)
 	}
 }
 
@@ -2628,7 +2628,7 @@ func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Cancel",
+		ToolName:               "cancel",
 		Collapsed:              true,
 		Content:                `{"target_task_id":"adhoc-3","reason":"user requested"}`,
 		ResultContent:          `{"status":"cancelled","task_id":"adhoc-3","agent_id":"worker-1"}`,
@@ -2638,7 +2638,7 @@ func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Cancelled") {
-		t.Fatalf("expected Cancel to show cancelled semantic; got:\n%s", joined)
+		t.Fatalf("expected cancel to show cancelled semantic; got:\n%s", joined)
 	}
 }
 
@@ -2647,7 +2647,7 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Notify",
+		ToolName:               "notify",
 		Collapsed:              true,
 		Content:                `{"target_task_id":"adhoc-5","message":"continue with option B","kind":"reply"}`,
 		ResultContent:          `{"status":"delivered","task_id":"adhoc-5","agent_id":"reviewer-2"}`,
@@ -2657,22 +2657,22 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
-		t.Fatalf("expected Notify collapsed view to not show raw JSON; got:\n%s", joined)
+		t.Fatalf("expected notify collapsed view to not show raw JSON; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Notify") {
-		t.Fatalf("expected Notify header to show tool name; got:\n%s", joined)
+	if !strings.Contains(joined, "notify") {
+		t.Fatalf("expected notify header to show tool name; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "5") {
-		t.Fatalf("expected Notify to show readable target (5 not adhoc-5); got:\n%s", joined)
+		t.Fatalf("expected notify to show readable target (5 not adhoc-5); got:\n%s", joined)
 	}
 	if strings.Contains(joined, "adhoc-5") {
-		t.Fatalf("expected Notify collapsed view to not expose adhoc- prefix; got:\n%s", joined)
+		t.Fatalf("expected notify collapsed view to not expose adhoc- prefix; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Delivered") {
-		t.Fatalf("expected Notify to show delivered semantic; got:\n%s", joined)
+		t.Fatalf("expected notify to show delivered semantic; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "reply") {
-		t.Fatalf("expected Notify to show kind; got:\n%s", joined)
+		t.Fatalf("expected notify to show kind; got:\n%s", joined)
 	}
 }
 
@@ -2681,7 +2681,7 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Notify",
+		ToolName:               "notify",
 		Collapsed:              false,
 		Content:                `{"target_task_id":"adhoc-5","message":"continue with option B","kind":"reply"}`,
 		ResultContent:          `{"status":"delivered","task_id":"adhoc-5","agent_id":"reviewer-2"}`,
@@ -2691,16 +2691,16 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
-		t.Fatalf("expected Notify expanded view to not show raw JSON; got:\n%s", joined)
+		t.Fatalf("expected notify expanded view to not show raw JSON; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Notify") {
-		t.Fatalf("expected Notify header to show tool name; got:\n%s", joined)
+	if !strings.Contains(joined, "notify") {
+		t.Fatalf("expected notify header to show tool name; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "message:") || !strings.Contains(joined, "continue with option B") {
-		t.Fatalf("expected Notify expanded to show message; got:\n%s", joined)
+		t.Fatalf("expected notify expanded to show message; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Delivered") {
-		t.Fatalf("expected Notify to show delivered semantic; got:\n%s", joined)
+		t.Fatalf("expected notify to show delivered semantic; got:\n%s", joined)
 	}
 }
 
@@ -2709,7 +2709,7 @@ func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
-		ToolName:                   "Notify",
+		ToolName:                   "notify",
 		Collapsed:                  true,
 		Content:                    `{"target_task_id":"adhoc-slot","message":"continue","kind":"follow_up"}`,
 		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
@@ -2718,7 +2718,7 @@ func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
-		t.Fatalf("expected Notify queued header badge; got:\n%s", joined)
+		t.Fatalf("expected notify queued header badge; got:\n%s", joined)
 	}
 }
 
@@ -2727,7 +2727,7 @@ func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
-		ToolName:                   "Cancel",
+		ToolName:                   "cancel",
 		Collapsed:                  true,
 		Content:                    `{"target_task_id":"adhoc-7","reason":"stopped"}`,
 		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
@@ -2736,7 +2736,7 @@ func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
-		t.Fatalf("expected Cancel queued header badge; got:\n%s", joined)
+		t.Fatalf("expected cancel queued header badge; got:\n%s", joined)
 	}
 }
 
@@ -2745,7 +2745,7 @@ func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
-		ToolName:                   "Question",
+		ToolName:                   "question",
 		Collapsed:                  false,
 		Content:                    `{"questions":[{"header":"Confirm","question":"Continue?","multiple":false,"options":[{"label":"Continue","description":"Continue execution"}]}]}`,
 		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
@@ -2754,7 +2754,7 @@ func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
-		t.Fatalf("expected Question queued header badge; got:\n%s", joined)
+		t.Fatalf("expected question queued header badge; got:\n%s", joined)
 	}
 }
 
@@ -2767,14 +2767,14 @@ func TestControlToolsCollapsedDoNotExposeAdhocTaskID(t *testing.T) {
 		resultContent string
 	}{
 		{
-			name:          "Cancel",
-			toolName:      "Cancel",
+			name:          "cancel",
+			toolName:      "cancel",
 			content:       `{"target_task_id":"adhoc-7","reason":"stopped"}`,
 			resultContent: `{"status":"stopped","task_id":"adhoc-7"}`,
 		},
 		{
-			name:          "Notify",
-			toolName:      "Notify",
+			name:          "notify",
+			toolName:      "notify",
 			content:       `{"target_task_id":"adhoc-5","message":"continue","kind":"reply"}`,
 			resultContent: `{"status":"delivered","task_id":"adhoc-5"}`,
 		},
@@ -2806,7 +2806,7 @@ func TestRenderTodoCall_EmptyList(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "TodoWrite",
+		ToolName:   "todo_write",
 		Content:    `{"todos":[]}`,
 		ResultDone: true,
 		Collapsed:  false,
@@ -2823,7 +2823,7 @@ func TestRenderTodoCall_EmptyList(t *testing.T) {
 		t.Fatalf("empty TodoWrite should not show '(no items)': %q", joined)
 	}
 	// Should still show the tool header
-	if !strings.Contains(joined, "TodoWrite") {
+	if !strings.Contains(joined, "todo_write") {
 		t.Fatalf("missing tool header: %q", joined)
 	}
 }
@@ -2833,7 +2833,7 @@ func TestRenderTodoCall_EmptyListCollapsed(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "TodoWrite",
+		ToolName:   "todo_write",
 		Content:    `{"todos":[]}`,
 		ResultDone: true,
 		Collapsed:  true,
@@ -2855,7 +2855,7 @@ func TestRenderTodoCall_WithItems(t *testing.T) {
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "TodoWrite",
+		ToolName:   "todo_write",
 		Content:    `{"todos":[{"content":"Task 1","status":"completed"},{"content":"Task 2","status":"pending"}]}`,
 		ResultDone: true,
 		Collapsed:  false,
@@ -2880,7 +2880,7 @@ func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
 		ResultStatus:           agent.ToolResultStatusSuccess,
@@ -2902,7 +2902,7 @@ func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
-		ToolName:               "Delegate",
+		ToolName:               "delegate",
 		Content:                `{"description":"Investigate task-complete rendering","agent_type":"reviewer"}`,
 		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2","message":"running in background"}`,
 		ResultDone:             true,

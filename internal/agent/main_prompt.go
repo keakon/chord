@@ -130,11 +130,12 @@ func (a *MainAgent) doneToolAvailable() bool {
 
 func (a *MainAgent) userConfirmationPromptBlock() string {
 	if a.questionToolAvailable() {
+		question := toolPromptName(tools.NameQuestion)
 		return `## Structured User Confirmation
-- Default to making ordinary implementation decisions yourself; use ` + "`Question`" + ` only when user input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
+	- Default to making ordinary implementation decisions yourself; use ` + question + ` only when user input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
 - Use plain assistant text only for lightweight clarifications that do not materially change the execution path
 - When asking the user to decide, keep the same high information standard as ordinary clarifications: include enough context for a non-implementer to answer, summarize the current situation, why a decision is needed, the main options, their tradeoffs/risks, and your recommended default when appropriate
-- When a confirmation would change scope, permissions, risk, or implementation choice, prefer ` + "`Question`" + ` so the user gets a structured decision UI instead of an unstructured text question`
+	- When a confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question`
 	}
 	return `## Plain-Text User Confirmation
 - Default to making ordinary implementation decisions yourself; ask the user only when input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
@@ -148,7 +149,7 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 		return ""
 	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
-- When LSP diagnostics are available after your ` + "`Edit`" + ` or ` + "`Write`" + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+	- When LSP diagnostics are available after your ` + toolPromptName(tools.NameEdit) + ` or ` + toolPromptName(tools.NameWrite) + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
 - If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
 }
 
@@ -189,23 +190,24 @@ func hasEnabledLSPServers(globalCfg, projectCfg *config.Config) bool {
 }
 
 func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
-	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic Done interception budget is low."
+	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic " + tools.NameDone + " interception budget is low."
 }
 
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
-	return "- Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
-		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling `Done`\n" +
-		"- Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:\n" +
+	done := toolPromptName(tools.NameDone)
+	return "- Do not call the " + done + " tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
+		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling " + done + "\n" +
+		"- Pass the complete final Markdown completion report in the " + done + " tool's required `report` argument. The report must include this structure:\n" +
 		"  - **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
 		"  - **What changed**: files modified, created, deleted or key actions taken\n" +
 		"  - **Verification**: tests run and their results\n" +
 		"  - **Remaining issues**: any limitations, unverified areas, or known issues\n" +
-		"- If you are unsure whether the task is truly complete, do not call `Done`; keep working"
+		"- If you are unsure whether the task is truly complete, do not call " + done + "; keep working"
 }
 
 func (a *MainAgent) plannerPermissionAdjustmentInstruction() string {
 	if a.questionToolAvailable() {
-		return "use `Question` to ask the user to adjust permissions, scope, or approach"
+		return "use " + toolPromptName(tools.NameQuestion) + " to ask the user to adjust permissions, scope, or approach"
 	}
 	return "ask the user in plain assistant text to adjust permissions, scope, or approach"
 }
@@ -403,7 +405,7 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 
 	const maxTotal = tools.SkillListingMaxTotal
 	const maxEntries = tools.SkillListingMaxEntries
-	intro := "## Available Skills\nThe `Skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `Skill` before proceeding.\n\n"
+	intro := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
 	budget := max(maxTotal-len(intro), 0)
 	shown := 0
 	var sb strings.Builder

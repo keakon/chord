@@ -90,7 +90,7 @@ func TestTodoWorkflowPromptBlock_HiddenWhenTodoWriteDisabled(t *testing.T) {
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-TodoWrite: deny
+todo_write: deny
 `)}
 	a.rebuildRuleset()
 
@@ -104,7 +104,7 @@ func TestTodoWorkflowPromptBlock_ShownWhenTodoWriteAvailable(t *testing.T) {
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-TodoWrite: allow
+todo_write: allow
 `)}
 	a.rebuildRuleset()
 
@@ -309,7 +309,7 @@ func TestUserConfirmationPromptBlock_UsesQuestionAvailabilitySpecificBranch(t *t
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Question: deny
+question: deny
 `)}
 	a.rebuildRuleset()
 	if got := a.userConfirmationPromptBlock(); !strings.Contains(got, "## Plain-Text User Confirmation") {
@@ -318,7 +318,7 @@ Question: deny
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: ask
+question: ask
 `)}
 	a.rebuildRuleset()
 	got := a.userConfirmationPromptBlock()
@@ -328,7 +328,7 @@ Question: ask
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: allow
+question: allow
 `)}
 	a.rebuildRuleset()
 	got = a.userConfirmationPromptBlock()
@@ -366,7 +366,7 @@ func TestBuildSystemPrompt_IncludesPermissionSpecificUserConfirmationGuidance(t 
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Question: deny
+question: deny
 `)}
 	a.rebuildRuleset()
 	got = a.buildSystemPrompt()
@@ -382,7 +382,7 @@ Question: deny
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: ask
+question: ask
 `)}
 	a.rebuildRuleset()
 	got = a.buildSystemPrompt()
@@ -392,7 +392,7 @@ Question: ask
 
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: allow
+question: allow
 `)}
 	a.rebuildRuleset()
 	got = a.buildSystemPrompt()
@@ -410,19 +410,19 @@ func TestLoopCompletionRequirementLines_KeepDoneToolContractEvenWhenQuestionAvai
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:",
+		"Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:",
 		"**Completion status**: one line summary",
 		"**What changed**: files modified, created, deleted or key actions taken",
 		"**Verification**: tests run and their results",
 		"**Remaining issues**: any limitations, unverified areas, or known issues",
-		"Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains",
-		"continue working instead of calling `Done`",
+		"Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains",
+		"continue working instead of calling `done`",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
@@ -436,13 +436,13 @@ func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneToolInLoop(t *testing
 	a.activeConfig = &config.AgentConfig{
 		Permission: parsePermissionNode(t, `
 "*": deny
-Done: allow
+done: allow
 `),
 	}
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
 	for _, want := range []string{
-		"Call the `Done` tool to request loop exit once those conditions are satisfied",
+		"Call the `done` tool to request loop exit once those conditions are satisfied",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop final completion response requirements should include %q, got %q", want, joined)
@@ -542,7 +542,7 @@ func TestUserConfirmationPromptBlock_RequiresContextTradeoffsAndRecommendation(t
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: allow
+question: allow
 `)}
 	a.rebuildRuleset()
 	got := a.userConfirmationPromptBlock()
@@ -626,9 +626,9 @@ func TestPlannerModePromptBlock_UsesPermissionSpecificInstructions(t *testing.T)
 	a.tools.Register(tools.HandoffTool{})
 	a.activeConfig = &config.AgentConfig{Name: "planner", Permission: parsePermissionNode(t, `
 "*": deny
-Write: allow
-Question: allow
-Handoff: allow
+write: allow
+question: allow
+handoff: allow
 `)}
 	a.rebuildRuleset()
 	got = a.mainAgentRolePromptBlock()
@@ -692,7 +692,7 @@ func TestPrimaryAgentCoordinationPromptBlock_ShowsTaskWorkflowWhenTaskVisible(t 
 	}
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Delegate: allow
+delegate: allow
 `)}
 	a.rebuildRuleset()
 	a.rebuildCachedSubAgents()
@@ -721,8 +721,8 @@ func TestPrimaryAgentCoordinationPromptBlock_HidesSubAgentWorkflowWhenTaskDisabl
 	}
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Delegate: deny
-TodoWrite: allow
+delegate: deny
+todo_write: allow
 `)}
 	a.rebuildRuleset()
 	a.rebuildCachedSubAgents()
@@ -746,8 +746,8 @@ func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("mainLLMToolDefinitions() count = %d, want 1", len(defs))
 	}
-	if defs[0].Name != "Skill" {
-		t.Fatalf("tool name = %q, want Skill", defs[0].Name)
+	if defs[0].Name != "skill" {
+		t.Fatalf("tool name = %q, want skill", defs[0].Name)
 	}
 	for _, want := range []string{"Load a skill's full instructions on demand", "## Available Skills", "go-expert", "Go language development expert"} {
 		if !strings.Contains(defs[0].Description, want) {
@@ -764,7 +764,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("mainLLMToolDefinitions() count = %d, want 1", len(defs))
 	}
-	for _, want := range []string{"Use Shell mainly for tests, builds, git, and other system commands.", "Prefer the smallest safe number of tool calls.", "Shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
+	for _, want := range []string{"Use shell mainly for tests, builds, git, and other system commands.", "Prefer the smallest safe number of tool calls.", "shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
 		if !strings.Contains(defs[0].Description, want) {
 			t.Fatalf("missing %q in Shell description %q", want, defs[0].Description)
 		}
@@ -780,7 +780,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	defs = a.mainLLMToolDefinitions()
 	bashDesc := ""
 	for _, def := range defs {
-		if def.Name == "Shell" {
+		if def.Name == "shell" {
 			bashDesc = def.Description
 			break
 		}
@@ -788,7 +788,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, Shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, Shell is not a substitute for them.", "For explicit file deletions, prefer `Delete`", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
+	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, shell is not a substitute for them.", "For explicit file deletions, prefer `delete`", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
@@ -801,8 +801,8 @@ func TestMainLLMToolDefinitionsExcludeSubAgentOnlyCompleteTool(t *testing.T) {
 	a.tools.Register(tools.CompleteTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Complete: allow
-Read: allow
+complete: allow
+read: allow
 `)}
 	a.rebuildRuleset()
 
@@ -810,8 +810,8 @@ Read: allow
 	if len(defs) != 1 {
 		t.Fatalf("mainLLMToolDefinitions() count = %d, want 1", len(defs))
 	}
-	if defs[0].Name != "Read" {
-		t.Fatalf("visible tool = %q, want Read", defs[0].Name)
+	if defs[0].Name != "read" {
+		t.Fatalf("visible tool = %q, want read", defs[0].Name)
 	}
 }
 
@@ -826,10 +826,10 @@ func TestMainAgentCapabilityPromptBlock_UsesVisibleToolsOnly(t *testing.T) {
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
-Grep: allow
-Glob: allow
-Shell: allow
+read: allow
+grep: allow
+glob: allow
+shell: allow
 `)}
 	a.rebuildRuleset()
 
@@ -837,15 +837,15 @@ Shell: allow
 	for _, want := range []string{
 		"## Tool Selection",
 		"Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.",
-		"Use `Read` for file contents.",
-		"Use `Glob` / `Grep` for discovery and navigation.",
-		"Use `Shell` mainly for tests, builds, git, and system commands.",
+		"Use `read` for file contents.",
+		"Use `glob` / `grep` for discovery and navigation.",
+		"Use `shell` mainly for tests, builds, git, and system commands.",
 		"## File Inspection Constraints",
 		"File inspection and code-navigation capabilities may be limited in this role.",
-		"Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+		"Do not use `shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 		"## File Modification Constraints",
 		"This role is currently read-only for files",
-		"Do not use `Shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
+		"Do not use `shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
 		"## Risk & Reporting",
 		"ask the user for clarification when they need to choose between materially different options.",
 	} {
@@ -853,7 +853,7 @@ Shell: allow
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use `Edit`", "Use `Write`"} {
+	for _, unwanted := range []string{"Use `edit`", "Use `write`"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
 		}
@@ -866,15 +866,15 @@ func TestMainAgentCapabilityPromptBlock_ShowsDeleteVsWriteFinalStateGuidance(t *
 	a.tools.Register(tools.DeleteTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Write: allow
-Delete: allow
+write: allow
+delete: allow
 `)}
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
 	for _, want := range []string{
-		"Choose file tools by final state: use `Write` directly when a path should still exist afterward with new full contents, and use `Delete` only when the path should no longer exist.",
-		"Do not `Delete` a path just to recreate it with `Write`; that adds unnecessary risk and tool churn.",
+		"Choose file tools by final state: use `write` directly when a path should still exist afterward with new full contents, and use `delete` only when the path should no longer exist.",
+		"Do not `delete` a path just to recreate it with `write`; that adds unnecessary risk and tool churn.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -891,7 +891,7 @@ func TestMainAgentCapabilityPromptBlock_ShowsInspectionConstraintsWhenInspection
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Shell: allow
+shell: allow
 `)}
 	a.rebuildRuleset()
 
@@ -899,7 +899,7 @@ Shell: allow
 	for _, want := range []string{
 		"## File Inspection Constraints",
 		"This role has no direct file inspection or code-navigation tools available in the prompt.",
-		"Do not use `Shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
+		"Do not use `shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -913,14 +913,14 @@ func TestMainAgentCapabilityPromptBlock_UsesQuestionWhenVisible(t *testing.T) {
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Question: allow
+read: allow
+shell: allow
+question: allow
 `)}
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
-	if !strings.Contains(got, "see Structured User Confirmation for when to use `Question` versus plain assistant text.") {
+	if !strings.Contains(got, "see Structured User Confirmation for when to use `question` versus plain assistant text.") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() should reference Structured User Confirmation when Question is visible, got %q", got)
 	}
 }
@@ -932,14 +932,14 @@ func TestMainAgentCapabilityPromptBlock_OmitsQuestionWhenHidden(t *testing.T) {
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Question: deny
+read: allow
+shell: allow
+question: deny
 `)}
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
-	if strings.Contains(got, "`Question`") {
+	if strings.Contains(got, "`question`") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() should not mention hidden Question tool, got %q", got)
 	}
 	if !strings.Contains(got, "ask the user for clarification when they need to choose between materially different options.") {
@@ -956,15 +956,15 @@ func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Edit:
+read: allow
+shell: allow
+edit:
   "*": deny
   "internal/tui/*": allow
-Write:
+write:
   "*": deny
   "internal/tui/*": allow
-Delete: deny
+delete: deny
 `)}
 	a.rebuildRuleset()
 
@@ -989,14 +989,14 @@ func TestMainAgentCapabilityPromptBlock_OnlyTightenedPathsDoesNotImplyScopedWrit
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
-Shell: allow
+shell: allow
 Edit:
   "*": allow
   "internal/tui/*": ask
 Write:
   "*": allow
   "internal/tui/*": ask
-Delete: allow
+delete: allow
 `)}
 	a.rebuildRuleset()
 
@@ -1014,8 +1014,8 @@ func TestBuildSystemPrompt_AppendsDynamicCapabilitiesAfterCustomPrompt(t *testin
 		SystemPrompt: "## Custom Role\n- Follow the custom workflow",
 		Permission: parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
+read: allow
+shell: allow
 `),
 	}
 	a.rebuildRuleset()
@@ -1062,7 +1062,7 @@ Shell: allow
 	if customRoleIdx > toolSelectionIdx {
 		t.Fatalf("buildSystemPrompt() should append dynamic capabilities after custom role body, got %q", got)
 	}
-	if !strings.Contains(got, "Use `Read` for file contents.") || !strings.Contains(got, "Use `Shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
+	if !strings.Contains(got, "Use `read` for file contents.") || !strings.Contains(got, "Use `shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
 		t.Fatalf("buildSystemPrompt() missing visible-tool guidance: %q", got)
 	}
 }
@@ -1073,8 +1073,8 @@ func TestSubAgentBuildSystemPrompt_AppendsDynamicCapabilitiesAfterCustomPrompt(t
 	reg.Register(tools.NewShellTool("bash"))
 	permNode := parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
+read: allow
+shell: allow
 `)
 	ruleset := permission.ParsePermission(&permNode)
 	s := &SubAgent{
@@ -1086,15 +1086,15 @@ Shell: allow
 	}
 
 	got := s.buildSystemPrompt()
-	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `Read` for file contents.", "## Your Task"} {
+	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents.", "## Your Task"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing %q in %q", want, got)
 		}
 	}
 	for _, want := range []string{
-		"`Notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`Escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
-		"Call `Complete` when the task is done",
+		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
+		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
+		"Call `complete` when the task is done",
 		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
@@ -1127,15 +1127,15 @@ func TestSubAgentBuildSystemPrompt_AdaptsControlGuidanceToVisibleTools(t *testin
 	reg.Register(tools.CompleteTool{})
 	permNode := parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
+read: allow
+shell: allow
 `)
 	ruleset := permission.ParsePermission(&permNode)
 	s := &SubAgent{tools: reg, ruleset: ruleset, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
-		"`Notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`Escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
+		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
+		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
 		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 	} {
 		if !strings.Contains(got, want) {
@@ -1147,18 +1147,18 @@ Shell: allow
 	reg.Register(tools.NewNotifyTool(nil, nil, true, false))
 	permNode = parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Escalate: allow
-Notify: allow
+read: allow
+shell: allow
+escalate: allow
+notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)
 	s = &SubAgent{tools: reg, ruleset: ruleset, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
 	got = s.buildSystemPrompt()
 	for _, want := range []string{
-		"Use `Notify` to surface progress, clarifications, or intermediate results",
-		"Call `Escalate` when owner-agent intervention, a cross-task dependency, or a decision is required",
-		"Call `Escalate` if you are blocked.",
+		"Use `notify` to surface progress, clarifications, or intermediate results",
+		"Call `escalate` when owner-agent intervention, a cross-task dependency, or a decision is required",
+		"Call `escalate` if you are blocked.",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
 	} {
 		if !strings.Contains(got, want) {
@@ -1175,10 +1175,10 @@ func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testin
 	reg.Register(tools.NewQuestionTool(nil))
 	permNode := parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Question: allow
-Edit:
+read: allow
+shell: allow
+question: allow
+edit:
   "*": deny
   "internal/tui/*": allow
 `)
@@ -1193,27 +1193,27 @@ Edit:
 	if !strings.Contains(mainBlock, "ask to adjust permissions, scope, or approach") {
 		t.Fatalf("main capability block missing user-facing escalation wording: %q", mainBlock)
 	}
-	if !strings.Contains(mainBlock, "see Structured User Confirmation for when to use `Question` versus plain assistant text") {
+	if !strings.Contains(mainBlock, "see Structured User Confirmation for when to use `question` versus plain assistant text") {
 		t.Fatalf("main capability block missing Structured User Confirmation reference: %q", mainBlock)
 	}
-	if !strings.Contains(subBlock, "Question` when the user must choose between materially different options") && !strings.Contains(subBlock, "Use `Question` when the user must choose between materially different options") {
+	if !strings.Contains(subBlock, "question` when the user must choose between materially different options") && !strings.Contains(subBlock, "Use `question` when the user must choose between materially different options") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
 	}
-	if !strings.Contains(subBlock, "explain the limitation clearly in assistant text because `Escalate` and `Notify` are unavailable in this role") {
+	if !strings.Contains(subBlock, "explain the limitation clearly in assistant text because `escalate` and `notify` are unavailable in this role") {
 		t.Fatalf("sub capability block should acknowledge missing control tools, got %q", subBlock)
 	}
 
 	reg.Register(tools.NewNotifyTool(nil, nil, true, false))
 	permNode = parsePermissionNode(t, `
 "*": deny
-Read: allow
-Shell: allow
-Notify: allow
+read: allow
+shell: allow
+notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)
 	s = &SubAgent{tools: reg, ruleset: ruleset}
 	subBlock = s.capabilityPromptBlock()
-	if !strings.Contains(subBlock, "use `Notify` to surface materially different decisions or owner-agent intervention because `Escalate` is unavailable") {
+	if !strings.Contains(subBlock, "use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
 		t.Fatalf("sub capability block should fall back to Notify when Escalate is unavailable, got %q", subBlock)
 	}
 }
@@ -1227,7 +1227,7 @@ func TestExecutionStartInstructionStaysGenericAcrossRoleCapabilities(t *testing.
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-TodoWrite: allow
+todo_write: allow
 `)}
 	a.rebuildRuleset()
 	if got := a.executionStartInstruction(); !strings.Contains(got, "TodoWrite") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
@@ -1242,8 +1242,8 @@ TodoWrite: allow
 	a.rebuildCachedSubAgents()
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-TodoWrite: allow
-Delegate: allow
+todo_write: allow
+delegate: allow
 `)}
 	a.rebuildRuleset()
 	if got := a.executionStartInstruction(); !strings.Contains(got, "TodoWrite") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
@@ -1265,7 +1265,7 @@ func TestExecutionPacingInstructionStaysGenericAcrossDelegateAccess(t *testing.T
 	a.rebuildCachedSubAgents()
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Delegate: allow
+delegate: allow
 `)}
 	a.rebuildRuleset()
 	if got := a.executionPacingInstruction(); strings.Contains(got, "dispatch") || strings.Contains(got, "Delegate") {
@@ -1277,7 +1277,7 @@ func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	// Check for the new structured format in the final report instruction
-	if !strings.Contains(joined, "Pass the complete final Markdown completion report in the `Done` tool's required `report` argument. The report must include this structure:") {
+	if !strings.Contains(joined, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:") {
 		t.Fatalf("loop completion requirements should mention final report structure, got %q", joined)
 	}
 	if !strings.Contains(joined, "**Completion status**:") {
@@ -1293,7 +1293,7 @@ func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 		t.Fatalf("loop completion requirements should mention remaining issues field, got %q", joined)
 	}
 	finalJoined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
-	if !strings.Contains(finalJoined, "Call the `Done` tool to request loop exit once those conditions are satisfied") {
+	if !strings.Contains(finalJoined, "Call the `done` tool to request loop exit once those conditions are satisfied") {
 		t.Fatalf("loop final completion requirements should mention Done exit contract, got %q", finalJoined)
 	}
 }
@@ -1306,30 +1306,30 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 	a := newTestMainAgent(t, t.TempDir())
 	lines := a.loopCompletionRequirementLines()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
+	if !strings.Contains(joined, "Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
 		t.Fatalf("loop completion requirements should describe stricter Done usage, got %q", joined)
 	}
 	if strings.Contains(joined, "Question tool") {
 		t.Fatalf("loop completion requirements without Question should not require Question tool, got %q", joined)
 	}
-	if strings.Contains(joined, "completion follow-up `Question` call") {
+	if strings.Contains(joined, "completion follow-up `question` call") {
 		t.Fatalf("loop completion requirements without Question should not mention completion follow-up Question, got %q", joined)
 	}
 
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
-Question: allow
+question: allow
 `)}
 	a.rebuildRuleset()
 	joined = strings.Join(a.loopCompletionRequirementLines(), "\n")
-	if strings.Contains(joined, "call the `Question` tool") {
+	if strings.Contains(joined, "call the `question` tool") {
 		t.Fatalf("loop completion requirements should not generally require Question during loop completion, got %q", joined)
 	}
-	if !strings.Contains(joined, "Do not call the `Done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
+	if !strings.Contains(joined, "Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
 		t.Fatalf("loop completion requirements should preserve Done gating, got %q", joined)
 	}
-	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `Question` call") {
+	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `question` call") {
 		t.Fatalf("loop completion requirements should not mention completion follow-up exception, got %q", joined)
 	}
 }

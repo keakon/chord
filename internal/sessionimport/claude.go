@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type claudeTranscriptEnvelope struct {
@@ -738,25 +739,25 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 	name := strings.TrimSpace(block.Name)
 	args := append(json.RawMessage(nil), block.Input...)
 	switch name {
-	case "Bash", "Shell":
+	case "Bash", "Shell", tools.NameShell:
 		if norm := normalizeClaudeBashArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "Shell", Args: norm}, false
+			return message.ToolCall{ID: block.ID, Name: tools.NameShell, Args: norm}, false
 		}
-	case "Read":
+	case "Read", tools.NameRead:
 		if norm := normalizeClaudeReadArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "Read", Args: norm}, false
+			return message.ToolCall{ID: block.ID, Name: tools.NameRead, Args: norm}, false
 		}
-	case "Write":
+	case "Write", tools.NameWrite:
 		if norm := normalizeClaudeWriteArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "Write", Args: norm}, false
+			return message.ToolCall{ID: block.ID, Name: tools.NameWrite, Args: norm}, false
 		}
-	case "Delete", "Remove":
+	case "Delete", "Remove", tools.NameDelete:
 		if norm := normalizeClaudeDeleteArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "Delete", Args: norm}, false
+			return message.ToolCall{ID: block.ID, Name: tools.NameDelete, Args: norm}, false
 		}
-	case "Edit", "MultiEdit", "Update":
+	case "Edit", "MultiEdit", "Update", tools.NameEdit:
 		if norm := normalizeClaudeEditArgs(name, block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: "Edit", Args: norm}, false
+			return message.ToolCall{ID: block.ID, Name: tools.NameEdit, Args: norm}, false
 		}
 	}
 	if name == "" {

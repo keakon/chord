@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	mainToolOutputGuidance = "Process it with Read(path, limit, offset) or Grep(path=...) in chunks. Use the Delegate tool only when you need a separate agent for substantial multi-step work on this content."
-	subToolOutputGuidance  = "Use Grep to search the full content or Read with offset/limit to view specific sections."
+	mainToolOutputGuidance = "Process it with " + tools.NameRead + "(path, limit, offset) or " + tools.NameGrep + "(path=...) in chunks. Use the " + tools.NameDelegate + " tool only when you need a separate agent for substantial multi-step work on this content."
+	subToolOutputGuidance  = "Use " + tools.NameGrep + " to search the full content or " + tools.NameRead + " with offset/limit to view specific sections."
 )
 
 type toolExecutionPipeline struct {
@@ -48,6 +48,7 @@ type toolExecutionPipeline struct {
 }
 
 func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
+	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if p.reservedToolError != nil {
 		if err := p.reservedToolError(tc.Name); err != nil {
@@ -120,6 +121,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 }
 
 func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err

@@ -114,7 +114,7 @@ func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
 		t.Fatalf("msgs len=%d, want 1", len(msgs))
 	}
 	content := msgs[0].Content
-	for _, want := range []string{"[Imported tool: Read]", `"tool": "Read"`, `"path": "README.md"`, "[Imported tool: Edit]", `"tool": "Edit"`, "[Imported unsupported tool: unknown-tool]"} {
+	for _, want := range []string{"[Imported tool: read]", `"tool": "read"`, `"path": "README.md"`, "[Imported tool: edit]", `"tool": "edit"`, "[Imported unsupported tool: unknown-tool]"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content missing %q:\n%s", want, content)
 		}

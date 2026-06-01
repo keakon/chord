@@ -134,7 +134,7 @@ func TestToolResultMarkdownRepairsUnterminatedFence(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
 		ResultStatus:           agent.ToolResultStatusSuccess,
@@ -155,7 +155,7 @@ func TestToolResultMarkdownRepairsUnterminatedTildeFence(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		Type:                   BlockToolCall,
-		ToolName:               "WebFetch",
+		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
 		ResultStatus:           agent.ToolResultStatusSuccess,

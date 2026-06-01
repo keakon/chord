@@ -25,7 +25,7 @@ type spawnArgs struct {
 	Workdir     string `json:"workdir,omitempty"`
 }
 
-func (SpawnTool) Name() string { return "Spawn" }
+func (SpawnTool) Name() string { return NameSpawn }
 
 func (SpawnTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
 	return ConcurrencyPolicy{
@@ -44,12 +44,12 @@ func (SpawnTool) DescriptionForTools(visible map[string]struct{}) string {
 
 func spawnToolDescription(_ map[string]struct{}) string {
 	return "Start a background process that runs independently of the current turn.\n" +
-		"Only use Spawn for processes with real background lifecycle needs — not as a way to parallelize ordinary commands.\n" +
+		"Only use spawn for processes with real background lifecycle needs — not as a way to parallelize ordinary commands.\n" +
 		"Appropriate: dev servers, file watchers, long-running benchmarks, batch pipelines the user explicitly wants in background.\n" +
-		"It uses the same detected shell environment as the foreground Shell tool.\n" +
+		"It uses the same detected shell environment as the foreground shell tool.\n" +
 		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
-		"Use foreground Shell for commands whose stdout/stderr you need in this turn.\n" +
-		"You will NOT receive live stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits and may include a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground Shell when needed.\n" +
+		"Use foreground shell for commands whose stdout/stderr you need in this turn.\n" +
+		"You will NOT receive live stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits and may include a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground shell when needed.\n" +
 		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
 }
 
@@ -163,10 +163,10 @@ type spawnStatusArgs struct {
 	ID string `json:"id"`
 }
 
-func (SpawnStatusTool) Name() string { return "SpawnStatus" }
+func (SpawnStatusTool) Name() string { return NameSpawnStatus }
 
 func (SpawnStatusTool) Description() string {
-	return "Inspect lightweight lifecycle state for a background process started by Spawn. Use this for status only; completion results are delivered automatically when background jobs exit."
+	return "Inspect lightweight lifecycle state for a background process started by spawn. Use this for status only; completion results are delivered automatically when background jobs exit."
 }
 
 func (SpawnStatusTool) Parameters() map[string]any {
@@ -175,7 +175,7 @@ func (SpawnStatusTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"id": map[string]any{
 				"type":        "string",
-				"description": "The process ID returned by Spawn.",
+				"description": "The process ID returned by spawn.",
 			},
 		},
 		"required":             []string{"id"},
@@ -222,10 +222,10 @@ type spawnStopArgs struct {
 	ID string `json:"id"`
 }
 
-func (SpawnStopTool) Name() string { return "SpawnStop" }
+func (SpawnStopTool) Name() string { return NameSpawnStop }
 
 func (SpawnStopTool) Description() string {
-	return "Stop a background process started by Spawn. Sends SIGTERM with a grace period, then SIGKILL if needed."
+	return "Stop a background process started by spawn. Sends SIGTERM with a grace period, then SIGKILL if needed."
 }
 
 func (SpawnStopTool) Parameters() map[string]any {
@@ -234,7 +234,7 @@ func (SpawnStopTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"id": map[string]any{
 				"type":        "string",
-				"description": "The process ID returned by Spawn.",
+				"description": "The process ID returned by spawn.",
 			},
 		},
 		"required":             []string{"id"},

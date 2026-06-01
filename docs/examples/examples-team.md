@@ -56,13 +56,13 @@ context:
 hooks:
   on_tool_call:
     - name: audit-shell
-      tools: ["Shell"]
+      tools: ["shell"]
       command: ["./scripts/chord-hooks/audit-shell.sh"]
       timeout: 5
 
   on_tool_batch_complete:
     - name: golangci-lint
-      tools: ["Edit", "Write", "Delete"]
+      tools: ["edit", "write", "delete"]
       paths: ["**/*.go"]
       min_changed_files: 1
       command: ["./scripts/chord-hooks/run-golangci-lint.sh"]
@@ -73,7 +73,7 @@ hooks:
 
   on_before_tool_result_append:
     - name: redact-keys
-      tools: ["Shell", "WebFetch", "Read"]
+      tools: ["shell", "web_fetch", "read"]
       command: ["./scripts/chord-hooks/redact-keys.sh"]
       timeout: 3
 
@@ -102,9 +102,9 @@ model_pools:
   - thinking
 permission:
   "*": allow
-  Handoff: deny
-  Delete: ask
-  Shell:
+  handoff: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -159,7 +159,7 @@ chord --version
 ## Common failures
 
 - Hook command not found: the project copied hook entries but did not create `./scripts/chord-hooks/*`.
-- Permission prompts are too broad for the team: start by changing risky `Shell` rules from `ask` to `deny`, then relax only the commands your workflow needs.
+- Permission prompts are too broad for the team: start by changing risky `shell` rules from `ask` to `deny`, then relax only the commands your workflow needs.
 - Agents do not appear: ensure files are under `<repo>/.chord/agents/` or the global agents directory and include valid front matter.
 
 ```md
@@ -171,10 +171,10 @@ model_pools:
   - fast
 permission:
   "*": allow
-  TodoWrite: deny
-  Delegate: deny
-  Delete: ask
-  Shell:
+  todo_write: deny
+  delegate: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask
@@ -206,10 +206,10 @@ model_pools:
   - thinking
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Shell:
+  read: allow
+  grep: allow
+  glob: allow
+  shell:
     "*": allow
     "rm *": deny
     "mv *": deny
@@ -237,10 +237,10 @@ model_pools:
   - fast
 permission:
   "*": deny
-  Read: allow
-  Grep: allow
-  Glob: allow
-  Shell:
+  read: allow
+  grep: allow
+  glob: allow
+  shell:
     "*": allow
     "rm *": deny
     "mv *": deny
@@ -268,10 +268,10 @@ model_pools:
   - thinking
 permission:
   "*": allow
-  TodoWrite: deny
-  Delegate: deny
-  Delete: ask
-  Shell:
+  todo_write: deny
+  delegate: deny
+  delete: ask
+  shell:
     "sudo *": ask
     "rm *": ask
     "rmdir *": ask

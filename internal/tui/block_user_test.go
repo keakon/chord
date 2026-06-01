@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestRenderUserLocalShellUsesLocalShellBadge(t *testing.T) {
+func TestRenderUserTerminalUsesTerminalBadge(t *testing.T) {
 	block := &Block{
 		ID:                   1,
 		Type:                 BlockUser,
@@ -25,15 +25,15 @@ func TestRenderUserLocalShellUsesLocalShellBadge(t *testing.T) {
 		plain = append(plain, stripANSI(line))
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "LOCAL SHELL") {
-		t.Fatalf("expected LOCAL SHELL badge, got %q", joined)
+	if !strings.Contains(joined, "TERMINAL") {
+		t.Fatalf("expected TERMINAL badge, got %q", joined)
 	}
-	if strings.Contains(joined, "LOCAL SHELL · LOOP") {
-		t.Fatalf("unexpected loop suffix in local shell badge, got %q", joined)
+	if strings.Contains(joined, "TERMINAL · LOOP") {
+		t.Fatalf("unexpected loop suffix in terminal badge, got %q", joined)
 	}
 }
 
-func TestRenderUserLocalShellShowsExpandHintForCollapsedOutput(t *testing.T) {
+func TestRenderUserTerminalShowsExpandHintForCollapsedOutput(t *testing.T) {
 	block := &Block{
 		ID:                   1,
 		Type:                 BlockUser,
@@ -44,13 +44,13 @@ func TestRenderUserLocalShellShowsExpandHintForCollapsedOutput(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(joined, "LOCAL SHELL") {
-		t.Fatalf("expected LOCAL SHELL badge, got:\n%s", joined)
+	if !strings.Contains(joined, "TERMINAL") {
+		t.Fatalf("expected TERMINAL badge, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "[space] toggle expand/collapse") {
-		t.Fatalf("expected collapsed local shell output to show expand hint, got:\n%s", joined)
+		t.Fatalf("expected collapsed terminal output to show expand hint, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "2 more lines") {
-		t.Fatalf("expected collapsed local shell output to report hidden lines, got:\n%s", joined)
+		t.Fatalf("expected collapsed terminal output to report hidden lines, got:\n%s", joined)
 	}
 }

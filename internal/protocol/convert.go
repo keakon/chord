@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // FromAgentEvent converts an internal [agent.AgentEvent] into a protocol
@@ -90,7 +91,7 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		return nil, ErrTUIOnlyEvent
 
 	case agent.ToolResultEvent:
-		if e.Name != "Done" || strings.TrimSpace(e.DoneReport) == "" {
+		if tools.NormalizeName(e.Name) != tools.NameDone || strings.TrimSpace(e.DoneReport) == "" {
 			return nil, ErrTUIOnlyEvent
 		}
 		reason, report := ParseDoneArgs(e.ArgsJSON)
@@ -355,7 +356,7 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 		if err != nil {
 			return nil, err
 		}
-		return agent.ToolResultEvent{CallID: p.CallID, Name: "Done", Result: p.Report, DoneReport: p.Report, Status: parseProtocolToolResultStatus(p.Status), AgentID: p.AgentID}, nil
+		return agent.ToolResultEvent{CallID: p.CallID, Name: tools.NameDone, Result: p.Report, DoneReport: p.Report, Status: parseProtocolToolResultStatus(p.Status), AgentID: p.AgentID}, nil
 	case TypeError:
 		p, err := ParsePayload[ErrorPayload](env)
 		if err != nil {

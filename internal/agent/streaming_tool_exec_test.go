@@ -18,7 +18,7 @@ func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
 		calls.Add(1)
 		return ToolExecutionResult{EffectiveArgsJSON: `{"path":"README.md"}`, Result: "ok"}, nil
 	})
-	call := message.ToolCall{ID: "call-1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}
+	call := message.ToolCall{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
@@ -42,10 +42,10 @@ func TestStreamingToolExecutorArgsDriftInvalidates(t *testing.T) {
 	exec := NewStreamingToolExecutor(7, ctx, nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
 		return ToolExecutionResult{EffectiveArgsJSON: `{"path":"a"}`, Result: "a"}, nil
 	})
-	if !exec.Start(message.ToolCall{ID: "call-1", Name: "Read", Args: json.RawMessage(`{"path":"a"}`)}) {
+	if !exec.Start(message.ToolCall{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"a"}`)}) {
 		t.Fatal("Start returned false")
 	}
-	payload, ok, drift := exec.Promote(message.ToolCall{ID: "call-1", Name: "Read", Args: json.RawMessage(`{"path":"b"}`)})
+	payload, ok, drift := exec.Promote(message.ToolCall{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"b"}`)})
 	if !drift {
 		t.Fatal("Promote did not report drift")
 	}
@@ -120,7 +120,7 @@ func TestStreamingToolExecutorDiscardSuppressesVisibleResult(t *testing.T) {
 		<-release
 		return ToolExecutionResult{EffectiveArgsJSON: `{"path":"README.md"}`, Result: "ok"}, nil
 	})
-	call := message.ToolCall{ID: "call-1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}
+	call := message.ToolCall{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}

@@ -79,7 +79,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-1",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://missing.example","timeout":40}`),
 		}},
 	}
@@ -87,7 +87,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 	a.persistAsync("main", assistant)
 	a.flushPersist()
 	a.turn.PendingToolCalls.Store(1)
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "WebFetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`})
 
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true")
@@ -98,7 +98,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 		TurnID: turnID,
 		Payload: &TurnCancelledPayload{
 			TurnID: turnID,
-			Calls:  []PendingToolCall{{CallID: "tool-1", Name: "WebFetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`}},
+			Calls:  []PendingToolCall{{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`}},
 		},
 	})
 	a.flushPersist()
@@ -137,7 +137,7 @@ func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(
 	turnID := a.turn.ID
 	a.turn.recordStreamingToolCall(PendingToolCall{
 		CallID:   "stream-write-1",
-		Name:     "Write",
+		Name:     "write",
 		ArgsJSON: `{"path":".chord/plans/plan-002.md","content":"partial"}`,
 	})
 
@@ -152,7 +152,7 @@ func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(
 			TurnID: turnID,
 			Calls: []PendingToolCall{{
 				CallID:   "stream-write-1",
-				Name:     "Write",
+				Name:     "write",
 				ArgsJSON: `{"path":".chord/plans/plan-002.md","content":"partial"}`,
 			}},
 		},
@@ -193,7 +193,7 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	call := message.ToolCall{
 		ID:   "spec-read-1",
-		Name: "Read",
+		Name: "read",
 		Args: []byte(`{"path":"README.md"}`),
 	}
 	a.ctxMgr.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{call}})

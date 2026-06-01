@@ -65,6 +65,7 @@ func extractToolArgument(toolName string, args []byte) string {
 }
 
 func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) string {
+	toolName = tools.NormalizeName(toolName)
 	switch toolName {
 	case tools.NameShell:
 		var parsed struct {
@@ -145,7 +146,14 @@ func normalizeAgentFilePath(raw string) string {
 	return path
 }
 
-func isInternalControlTool(_ string) bool { return false }
+func isInternalControlTool(toolName string) bool {
+	switch tools.NormalizeName(toolName) {
+	case tools.NameComplete:
+		return true
+	default:
+		return false
+	}
+}
 
 func emitToolExecutionState(emit func(AgentEvent), calls []PendingToolCall, state ToolCallExecutionState) {
 	for _, call := range calls {

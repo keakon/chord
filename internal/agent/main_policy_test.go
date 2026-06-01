@@ -271,7 +271,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 			Name:        "builder",
 			Mode:        config.AgentModeMain,
 			Description: "Builder role",
-			Permission:  parsePermissionNode(t, "\"*\": deny\nTodoWrite: allow\n"),
+			Permission:  parsePermissionNode(t, "\"*\": deny\ntodo_write: allow\n"),
 		},
 		"coder": {Name: "coder", Mode: "subagent", Description: "Coder role"},
 	})
@@ -1315,7 +1315,7 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithoutTodoWrite(t *t
 			Name:        "builder",
 			Mode:        config.AgentModeMain,
 			Description: "Builder role",
-			Permission:  parsePermissionNode(t, "\"*\": deny\nDelegate: allow\n"),
+			Permission:  parsePermissionNode(t, "\"*\": deny\ndelegate: allow\n"),
 		},
 		"coder": {Name: "coder", Mode: "subagent", Description: "Coder role"},
 	})
@@ -1440,8 +1440,8 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	if assessment.Action != LoopAssessmentActionContinue {
 		t.Fatalf("assessment.Action = %q, want %q after worker completion", assessment.Action, LoopAssessmentActionContinue)
 	}
-	if !strings.Contains(assessment.Message, "Done") {
-		t.Fatalf("assessment.Message = %q, want missing-Done guidance after worker completion", assessment.Message)
+	if !strings.Contains(assessment.Message, "done") {
+		t.Fatalf("assessment.Message = %q, want missing-done guidance after worker completion", assessment.Message)
 	}
 }
 

@@ -49,8 +49,8 @@ func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 			currentRole: "builder",
 		},
 		added: []permission.AddedRule{
-			{Role: "builder", Rule: permission.Rule{Permission: "Shell", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
-			{Role: "builder", Rule: permission.Rule{Permission: "Write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/agents/builder.yaml"},
+			{Role: "builder", Rule: permission.Rule{Permission: "shell", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
+			{Role: "builder", Rule: permission.Rule{Permission: "write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/agents/builder.yaml"},
 		},
 	}
 	m := NewModel(ag)
@@ -108,7 +108,7 @@ func TestRulesAddManualRuleUsesAgentBackend(t *testing.T) {
 	m := NewModel(ag)
 	_ = m.openRules()
 	_ = m.startAddRule()
-	m.rules.addToolInput.SetValue("Delete")
+	m.rules.addToolInput.SetValue("delete")
 	m.rules.addPatInput.SetValue("tmp/*")
 	m.rules.addScopeIdx = 1  // project
 	m.rules.addActionIdx = 2 // deny
@@ -121,7 +121,7 @@ func TestRulesAddManualRuleUsesAgentBackend(t *testing.T) {
 		t.Fatalf("agent rules = %d, want 1", got)
 	}
 	added := ag.added[0]
-	if added.Rule.Permission != "Delete" || added.Rule.Pattern != "tmp/*" || added.Rule.Action != permission.ActionDeny || added.Scope != permission.ScopeProject {
+	if added.Rule.Permission != "delete" || added.Rule.Pattern != "tmp/*" || added.Rule.Action != permission.ActionDeny || added.Scope != permission.ScopeProject {
 		t.Fatalf("added rule = %+v", added)
 	}
 }
@@ -137,8 +137,8 @@ func TestAddSessionRuleBuildsPersistentPaths(t *testing.T) {
 	m := NewModel(ag)
 
 	m.workingDir = "/home/user/project-root/subdir"
-	m.addSessionRule("Write", "docs/*", permission.ScopeProject)
-	m.addSessionRule("Write", "*.md", permission.ScopeUserGlobal)
+	m.addSessionRule("write", "docs/*", permission.ScopeProject)
+	m.addSessionRule("write", "*.md", permission.ScopeUserGlobal)
 
 	if got := len(m.rules.rules); got != 2 {
 		t.Fatalf("rules count = %d, want 2", got)
@@ -166,7 +166,7 @@ func TestResolveRuleScopePathUsesProjectRootInsteadOfWorkingDir(t *testing.T) {
 	m.mode = ModeConfirm
 	m.workingDir = "/repo/root/subdir/deep"
 	m.confirm.request = &ConfirmRequest{
-		ToolName:  "Write",
+		ToolName:  "write",
 		ArgsJSON:  `{"path":"docs/guide.md","content":"..."}`,
 		RequestID: "",
 	}

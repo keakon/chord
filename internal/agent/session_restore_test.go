@@ -993,7 +993,7 @@ func persistInterruptedMainSession(t *testing.T, sessionDir string) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-main-1",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://slow.example","timeout":40}`),
 		}},
 	}
@@ -1039,7 +1039,7 @@ func persistInterruptedSubAgentSession(t *testing.T, sessionDir string) {
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-sub-1",
-			Name: "WebFetch",
+			Name: "web_fetch",
 			Args: []byte(`{"url":"https://missing.example"}`),
 		}},
 	}

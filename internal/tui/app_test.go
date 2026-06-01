@@ -839,7 +839,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 		t.Fatalf("first assistant card progress = %q, want delta from card baseline", plain1)
 	}
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{ID: "tool-1", Name: "Shell", AgentID: "main", State: agent.ToolCallExecutionStateRunning}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{ID: "tool-1", Name: "shell", AgentID: "main", State: agent.ToolCallExecutionStateRunning}})
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
@@ -2039,7 +2039,7 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
@@ -2070,7 +2070,7 @@ func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
 func TestConfirmDialogArrowKeysScrollViewport(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "Done", ArgsJSON: `{}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 	for i := range 6 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
 	}
@@ -2095,13 +2095,13 @@ func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-q1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"command -v benchstat || true"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-q1",
-		Name:     "Shell",
+		Name:     "shell",
 		ArgsJSON: `{"command":"command -v benchstat || true"}`,
 		State:    agent.ToolCallExecutionStateQueued,
 		AgentID:  "",
@@ -2135,13 +2135,13 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-todo-queued-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: args,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-todo-queued-1",
-		Name:              "TodoWrite",
+		Name:              "todo_write",
 		AgentID:           "",
 		ArgsJSON:          args,
 		ArgsStreamingDone: true,
@@ -2158,7 +2158,7 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 		t.Fatalf("expected speculative queued state (not execution queued)")
 	}
 	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	if !strings.Contains(joined, "▖ TodoWrite") {
+	if !strings.Contains(joined, "▖ todo_write") {
 		t.Fatalf("expected speculative queued TodoWrite to keep spinner indicator; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "Queued") {
@@ -2175,13 +2175,13 @@ func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 	args := `{"todos":[{"id":"1","content":"a","status":"pending"}]}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-todo-static-queued-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: args,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-todo-static-queued-1",
-		Name:              "TodoWrite",
+		Name:              "todo_write",
 		AgentID:           "",
 		ArgsJSON:          args,
 		ArgsStreamingDone: true,
@@ -2211,13 +2211,13 @@ func TestTodoWriteCompletedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 	args := `{"todos":[{"id":"1","content":"a","status":"completed"}]}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-todo-static-done-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: args,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-todo-static-done-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		ArgsJSON: args,
 		Result:   "- [x] 1. a\n",
 		Status:   agent.ToolResultStatusSuccess,
@@ -2245,13 +2245,13 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-read-done-late-update-1",
-		Name:     "Read",
+		Name:     "read",
 		AgentID:  "",
 		ArgsJSON: args,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-read-done-late-update-1",
-		Name:     "Read",
+		Name:     "read",
 		AgentID:  "",
 		ArgsJSON: args,
 		Result:   "ok",
@@ -2260,7 +2260,7 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-read-done-late-update-1",
-		Name:              "Read",
+		Name:              "read",
 		AgentID:           "",
 		ArgsJSON:          args,
 		ArgsStreamingDone: true,
@@ -2290,7 +2290,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-elapsed-running",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"sleep 10"}`,
 	}})
@@ -2304,7 +2304,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-elapsed-running",
-		Name:     "Shell",
+		Name:     "shell",
 		ArgsJSON: `{"command":"sleep 10"}`,
 		State:    agent.ToolCallExecutionStateRunning,
 		AgentID:  "",
@@ -2328,7 +2328,7 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 	block.StartedAt = time.Now().Add(-7 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-elapsed-running",
-		Name:     "Shell",
+		Name:     "shell",
 		ArgsJSON: `{"command":"sleep 10"}`,
 		Result:   "done",
 		Status:   agent.ToolResultStatusSuccess,
@@ -2348,7 +2348,7 @@ func TestToolCallUpdateEventCreatesMissingToolBlock(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-missing-update-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: `{"command":"echo hello"}`,
 	}})
@@ -2371,7 +2371,7 @@ func TestToolCallUpdateEventArgsStreamingDoneCreatesQueuedNonAnimatingToolBlock(
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-missing-update-done-1",
-		Name:              "TodoWrite",
+		Name:              "todo_write",
 		AgentID:           "",
 		ArgsJSON:          args,
 		ArgsStreamingDone: true,
@@ -2402,7 +2402,7 @@ func TestToolCallExecutionEventCreatesMissingToolBlock(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-missing-exec-1",
-		Name:     "Read",
+		Name:     "read",
 		AgentID:  "",
 		ArgsJSON: `{"path":"go.mod"}`,
 		State:    agent.ToolCallExecutionStateQueued,
@@ -2425,13 +2425,13 @@ func TestToolProgressEventUpdatesRunningToolCard(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-progress-1",
-		Name:     "Delete",
+		Name:     "delete",
 		AgentID:  "",
 		ArgsJSON: `{"paths":["a.txt","b.txt","c.txt"],"reason":"cleanup"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolProgressEvent{
 		CallID:  "call-progress-1",
-		Name:    "Delete",
+		Name:    "delete",
 		AgentID: "",
 		Progress: agent.ToolProgressSnapshot{
 			Label:   "paths",
@@ -2476,7 +2476,7 @@ func TestAnyToolShowsReceivedCharCountFromStreamingArgs(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-shell-progress-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: startArgs,
 	}})
@@ -2486,7 +2486,7 @@ func TestAnyToolShowsReceivedCharCountFromStreamingArgs(t *testing.T) {
 	}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-shell-progress-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: updateArgs,
 	}})
@@ -2509,7 +2509,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-todo-throttle-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: startArgs,
 	}})
@@ -2526,7 +2526,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-todo-throttle-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: updateArgs,
 	}})
@@ -2544,7 +2544,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 	}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-todo-throttle-1",
-		Name:     "TodoWrite",
+		Name:     "todo_write",
 		AgentID:  "",
 		ArgsJSON: updateArgs,
 	}})
@@ -2559,7 +2559,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 
 func TestToolCharCountProgressUsesExactDigits(t *testing.T) {
 	largeJSON := `{"command":"` + strings.Repeat("x", 2190) + `"}`
-	progress := inferToolArgProgress("Shell", largeJSON)
+	progress := inferToolArgProgress("shell", largeJSON)
 	if progress == nil {
 		t.Fatal("expected inferred arg progress")
 	}
@@ -2574,7 +2574,7 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-shell-progress-done-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: argsJSON,
 	}})
@@ -2589,7 +2589,7 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-shell-progress-done-1",
-		Name:              "Shell",
+		Name:              "shell",
 		AgentID:           "",
 		ArgsJSON:          argsJSON,
 		ArgsStreamingDone: true,
@@ -2610,7 +2610,7 @@ func TestDoneToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-done-progress-done-1",
-		Name:     "Done",
+		Name:     "done",
 		AgentID:  "",
 		ArgsJSON: argsJSON,
 	}})
@@ -2625,7 +2625,7 @@ func TestDoneToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:                "call-done-progress-done-1",
-		Name:              "Done",
+		Name:              "done",
 		AgentID:           "",
 		ArgsJSON:          argsJSON,
 		ArgsStreamingDone: true,
@@ -2645,7 +2645,7 @@ func TestToolDoesNotShowCharCountWhenNoArgsReceived(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-zero-progress-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: ``,
 	}})
@@ -2665,13 +2665,13 @@ func TestWriteToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-write-progress-hide-1",
-		Name:     "Write",
+		Name:     "write",
 		AgentID:  "",
 		ArgsJSON: `{"path":"demo.txt","content":"hello world"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-write-progress-hide-1",
-		Name:     "Write",
+		Name:     "write",
 		AgentID:  "",
 		ArgsJSON: `{"path":"demo.txt","content":"hello world"}`,
 		State:    agent.ToolCallExecutionStateRunning,
@@ -2697,20 +2697,20 @@ func TestToolUpdateAfterExecutionStartsDoesNotRestoreReceivedCharCount(t *testin
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-shell-progress-after-running-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: initialArgs,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-shell-progress-after-running-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: initialArgs,
 		State:    agent.ToolCallExecutionStateRunning,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID:       "call-shell-progress-after-running-1",
-		Name:     "Shell",
+		Name:     "shell",
 		AgentID:  "",
 		ArgsJSON: finalArgs,
 	}})
@@ -2828,13 +2828,13 @@ func TestToolProgressEventPreservesProgressInNarrowWidthByTruncatingHeader(t *te
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-progress-tight-1",
-		Name:     "Delete",
+		Name:     "delete",
 		AgentID:  "",
 		ArgsJSON: `{"paths":["a-very-long-file-name.txt","b-very-long-file-name.txt","c-very-long-file-name.txt","d-very-long-file-name.txt"],"reason":"cleanup stale generated artifacts from previous long-running benchmark pass"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolProgressEvent{
 		CallID:  "call-progress-tight-1",
-		Name:    "Delete",
+		Name:    "delete",
 		AgentID: "",
 		Progress: agent.ToolProgressSnapshot{
 			Label:   "paths",
@@ -2858,20 +2858,20 @@ func TestToolProgressEventDoesNotUpdateQueuedToolCard(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-progress-q1",
-		Name:     "Delete",
+		Name:     "delete",
 		AgentID:  "",
 		ArgsJSON: `{"paths":["a.txt","b.txt"],"reason":"cleanup"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-progress-q1",
-		Name:     "Delete",
+		Name:     "delete",
 		ArgsJSON: `{"paths":["a.txt","b.txt"],"reason":"cleanup"}`,
 		State:    agent.ToolCallExecutionStateQueued,
 		AgentID:  "",
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolProgressEvent{
 		CallID:  "call-progress-q1",
-		Name:    "Delete",
+		Name:    "delete",
 		AgentID: "",
 		Progress: agent.ToolProgressSnapshot{
 			Label:   "paths",
@@ -2898,13 +2898,13 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-progress-clear-1",
-		Name:     "Delete",
+		Name:     "delete",
 		AgentID:  "",
 		ArgsJSON: `{"paths":["a.txt","b.txt","c.txt"],"reason":"cleanup"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolProgressEvent{
 		CallID:  "call-progress-clear-1",
-		Name:    "Delete",
+		Name:    "delete",
 		AgentID: "",
 		Progress: agent.ToolProgressSnapshot{
 			Label:   "paths",
@@ -2914,7 +2914,7 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-progress-clear-1",
-		Name:     "Delete",
+		Name:     "delete",
 		ArgsJSON: `{"paths":["a.txt","b.txt","c.txt"],"reason":"cleanup"}`,
 		Result:   "Deleted (3):\n- a.txt\n- b.txt\n- c.txt",
 		Status:   agent.ToolResultStatusSuccess,
@@ -2940,7 +2940,7 @@ func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 	questionArgs := `{"questions":[{"header":"Provider compatibility","question":"continue?","options":[{"label":"yes"}]}]}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-question-stream-1",
-		Name:     "Question",
+		Name:     "question",
 		AgentID:  "",
 		ArgsJSON: questionArgs,
 	}})
@@ -2955,7 +2955,7 @@ func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-question-final-1",
-		Name:     "Question",
+		Name:     "question",
 		AgentID:  "",
 		ArgsJSON: questionArgs,
 		Result:   `[{"header":"Provider compatibility","selected":["yes"]}]`,
@@ -2965,7 +2965,7 @@ func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 	blocks := m.viewport.visibleBlocks()
 	questionBlocks := 0
 	for _, b := range blocks {
-		if b != nil && b.Type == BlockToolCall && b.ToolName == "Question" {
+		if b != nil && b.Type == BlockToolCall && b.ToolName == "question" {
 			questionBlocks++
 			block = b
 		}
@@ -2989,13 +2989,13 @@ func TestDuplicateToolResultEventIsIgnoredAfterCompletion(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-read-dedupe-1",
-		Name:     "Read",
+		Name:     "read",
 		AgentID:  "",
 		ArgsJSON: `{"path":"internal/tui/app_agent_events.go","limit":1}`,
 	}})
 	resultEvt := agent.ToolResultEvent{
 		CallID:   "call-read-dedupe-1",
-		Name:     "Read",
+		Name:     "read",
 		AgentID:  "",
 		ArgsJSON: `{"path":"internal/tui/app_agent_events.go","limit":1}`,
 		Result:   "ok",
@@ -3032,19 +3032,19 @@ func TestSingleHiddenLineCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.
 	}{
 		{
 			name:     "delete",
-			toolName: "Delete",
+			toolName: "delete",
 			content:  `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
-			result:   "Delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
+			result:   "delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
 		},
 		{
 			name:     "grep",
-			toolName: "Grep",
+			toolName: "grep",
 			content:  `{"pattern":"TODO"}`,
 			result:   strings.Join([]string{"a.go:1:TODO", "b.go:2:TODO", "c.go:3:TODO", "d.go:4:TODO", "e.go:5:TODO", "f.go:6:TODO", "g.go:7:TODO", "h.go:8:TODO", "i.go:9:TODO", "j.go:10:TODO", "k.go:11:TODO"}, "\n"),
 		},
 		{
 			name:     "glob",
-			toolName: "Glob",
+			toolName: "glob",
 			content:  `{"pattern":"**/*.go"}`,
 			result:   strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
 		},
@@ -3197,14 +3197,14 @@ func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-delete-file-1",
-		Name:     "Delete",
+		Name:     "delete",
 		ArgsJSON: `{"paths":["obsolete.go"],"reason":"cleanup"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-delete-file-1",
-		Name:     "Delete",
+		Name:     "delete",
 		ArgsJSON: `{"paths":["obsolete.go"],"reason":"cleanup"}`,
-		Result:   "Delete completed.\n\nDeleted (1):\n- obsolete.go",
+		Result:   "delete completed.\n\nDeleted (1):\n- obsolete.go",
 		Status:   agent.ToolResultStatusSuccess,
 	}})
 
@@ -3265,12 +3265,12 @@ func TestToolResultForcesPriorityBoundaryFlush(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:   "call-boundary-1",
-		Name: "Read",
+		Name: "read",
 	}})
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: "call-boundary-1",
-		Name:   "Read",
+		Name:   "read",
 		Status: agent.ToolResultStatusSuccess,
 		Result: "done",
 	}})
@@ -3291,13 +3291,13 @@ func TestToolResultEventShowsEditedBeforeApprovalSummary(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-edited-1",
-		Name:     "Delete",
+		Name:     "delete",
 		AgentID:  "",
 		ArgsJSON: `{"paths":["a.txt"],"reason":"cleanup"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-edited-1",
-		Name:     "Delete",
+		Name:     "delete",
 		ArgsJSON: `{"paths":["a.txt"],"reason":"cleanup"}`,
 		Result:   "Deleted (1):\n- a.txt",
 		Status:   agent.ToolResultStatusSuccess,
@@ -3327,7 +3327,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeToolCard(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:      "call-1",
-		Name:    "Read",
+		Name:    "read",
 		AgentID: "",
 	}})
 	if _, ok := m.viewport.FindBlockByToolID("call-1"); !ok {
@@ -3339,7 +3339,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeToolCard(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-1",
-		Name:     "Read",
+		Name:     "read",
 		Status:   agent.ToolResultStatusCancelled,
 		Result:   "Cancelled",
 		AgentID:  "",
@@ -3367,7 +3367,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "write-call-1",
-		Name:     "Write",
+		Name:     "write",
 		AgentID:  "",
 		ArgsJSON: `{"path":".chord/plans/plan-002.md","content":"partial"}`,
 	}})
@@ -3381,7 +3381,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "write-call-1",
-		Name:     "Write",
+		Name:     "write",
 		Status:   agent.ToolResultStatusCancelled,
 		Result:   "Cancelled",
 		AgentID:  "",
@@ -3415,7 +3415,7 @@ func TestTaskToolResultErrorClearsPendingPlaceholder(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:      "task-call-1",
-		Name:    "Delegate",
+		Name:    "delegate",
 		AgentID: "",
 	}})
 	if got := m.sidebar.PendingTasks(); got != 1 {
@@ -3424,7 +3424,7 @@ func TestTaskToolResultErrorClearsPendingPlaceholder(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "task-call-1",
-		Name:     "Delegate",
+		Name:     "delegate",
 		Status:   agent.ToolResultStatusError,
 		Result:   "max concurrent agents reached",
 		AgentID:  "",
@@ -3440,7 +3440,7 @@ func TestTaskToolResultWithoutAgentIDClearsPendingPlaceholder(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:      "task-call-2",
-		Name:    "Delegate",
+		Name:    "delegate",
 		AgentID: "",
 	}})
 	if got := m.sidebar.PendingTasks(); got != 1 {
@@ -3449,7 +3449,7 @@ func TestTaskToolResultWithoutAgentIDClearsPendingPlaceholder(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "task-call-2",
-		Name:     "Delegate",
+		Name:     "delegate",
 		Status:   agent.ToolResultStatusSuccess,
 		Result:   `{"status":"child_limit_reached","message":"direct active child limit reached (max_children=10)"}`,
 		AgentID:  "",
@@ -4433,7 +4433,7 @@ func TestViewReadCardWithCRLFResultDoesNotLeakCarriageReturnIntoCanvas(t *testin
 	m.viewport.AppendBlock(&Block{
 		ID:         1,
 		Type:       BlockToolCall,
-		ToolName:   "Read",
+		ToolName:   "read",
 		Content:    `{"path":"sample.csv","limit":20}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
@@ -4462,7 +4462,7 @@ func TestMessagesToBlocksSkillToolRestoresDisplaySummary(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{{
 				ID:   "skill-1",
-				Name: "Skill",
+				Name: "skill",
 				Args: json.RawMessage(`{"name":"skill-creator"}`),
 			}},
 		},
@@ -4479,7 +4479,7 @@ func TestMessagesToBlocksSkillToolRestoresDisplaySummary(t *testing.T) {
 		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 	}
 	block := blocks[0]
-	if block.ToolName != "Skill" {
+	if block.ToolName != "skill" {
 		t.Fatalf("ToolName = %q, want Skill", block.ToolName)
 	}
 	if got, want := block.Content, `{"name":"skill-creator","result":"\u003cpath\u003e/tmp/skills/skill-creator/SKILL.md\u003c/path\u003e"}`; got != want {
@@ -4495,12 +4495,12 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "skill-1",
-		Name:     "Skill",
+		Name:     "skill",
 		ArgsJSON: `{"name":"skill-creator","args":"Create 4 new skills"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "skill-1",
-		Name:     "Skill",
+		Name:     "skill",
 		ArgsJSON: `{"name":"skill-creator","args":"Create 4 new skills"}`,
 		Status:   agent.ToolResultStatusSuccess,
 		Result:   "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n<notes>ignored</notes>\n\n# Skill Creator\n\n- Step one\n- Step two\n</skill>",
@@ -4517,7 +4517,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 		t.Fatalf("ResultContent should preserve full skill body, got %q", block.ResultContent)
 	}
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "Skill skill-creator") {
+	if !strings.Contains(collapsed, "skill skill-creator") {
 		t.Fatalf("expected collapsed skill card summary to keep full skill name, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "name:") {
@@ -4529,7 +4529,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 
 	block.Toggle()
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"Skill skill-creator", "Skill Creator", "Step one", "Step two"} {
+	for _, want := range []string{"skill skill-creator", "Skill Creator", "Step one", "Step two"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded skill card missing %q; got:\n%s", want, expanded)
 		}
@@ -4545,7 +4545,7 @@ func TestMessagesToBlocksDoneToolRestoresMarkdownReport(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{{
 				ID:   "done-1",
-				Name: "Done",
+				Name: "done",
 				Args: json.RawMessage(`{"report":"## Completion status\nAll requested work is finished\n\n- shipped\n- verified"}`),
 			}},
 		},
@@ -4562,8 +4562,8 @@ func TestMessagesToBlocksDoneToolRestoresMarkdownReport(t *testing.T) {
 		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 	}
 	block := blocks[0]
-	if block.ToolName != "Done" {
-		t.Fatalf("ToolName = %q, want Done", block.ToolName)
+	if block.ToolName != "done" {
+		t.Fatalf("ToolName = %q, want done", block.ToolName)
 	}
 	wantReport := "## Completion status\nAll requested work is finished\n\n- shipped\n- verified"
 	if got := block.DoneReport; got != wantReport {
@@ -4588,7 +4588,7 @@ func TestMessagesToBlocksDelegateToolRestoresLinkedAgentMetadata(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{{
 				ID:   "delegate-1",
-				Name: "Delegate",
+				Name: "delegate",
 				Args: json.RawMessage(`{"description":"review tests","agent_type":"reviewer"}`),
 			}},
 		},
@@ -4605,7 +4605,7 @@ func TestMessagesToBlocksDelegateToolRestoresLinkedAgentMetadata(t *testing.T) {
 		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 	}
 	block := blocks[0]
-	if block.ToolName != "Delegate" {
+	if block.ToolName != "delegate" {
 		t.Fatalf("ToolName = %q, want Delegate", block.ToolName)
 	}
 	if got := block.LinkedAgentID; got != "reviewer-2" {
@@ -4776,7 +4776,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
 			status:   agent.ToolResultStatusSuccess,
-			want:     []string{"Delete /tmp/obsolete.go", "remove obsolete file", "Deleted (1):"},
+			want:     []string{"delete /tmp/obsolete.go", "remove obsolete file", "Deleted (1):"},
 		},
 	}
 
@@ -4825,7 +4825,7 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 		t.Fatal("expected restored Delete tool block")
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Delete /tmp/obsolete.go") {
+	if !strings.Contains(joined, "delete /tmp/obsolete.go") {
 		t.Fatalf("expected restored Delete header to show path; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
@@ -4920,7 +4920,7 @@ func TestHandleNormalKeySpaceTogglesLinkedTaskCardWithoutSwitchingFocus(t *testi
 	task := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Delegate",
+		ToolName:      "delegate",
 		Collapsed:     true,
 		LinkedAgentID: "agent-1",
 		Content:       `{"description":"review tests\ncheck coverage\nupdate docs","agent_type":"reviewer"}`,
@@ -4958,7 +4958,7 @@ func TestHandleNormalKeyEnterOnLinkedTaskSwitchesToWorkerView(t *testing.T) {
 	task := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      "Delegate",
+		ToolName:      "delegate",
 		Collapsed:     true,
 		LinkedAgentID: "agent-1",
 		Content:       `{"description":"review tests","agent_type":"reviewer"}`,
@@ -5640,7 +5640,7 @@ func TestRenderStatusBarUsesCompactIdleLabelInNarrowLayout(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarShowsLocalShellWhenPending(t *testing.T) {
+func TestRenderStatusBarShowsTerminalWhenPending(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.workingDir = "/tmp"
 	m.updateRightPanelVisible()
@@ -5649,10 +5649,10 @@ func TestRenderStatusBarShowsLocalShellWhenPending(t *testing.T) {
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "Shell") {
+	if !strings.Contains(plain, "Terminal") {
 		t.Fatalf("status bar should show shell activity; got %q", plain)
 	}
-	if strings.Contains(plain, "Since") && !strings.Contains(plain, "Shell") {
+	if strings.Contains(plain, "Since") && !strings.Contains(plain, "Terminal") {
 		t.Fatalf("status bar should not show idle label while shell is pending; got %q", plain)
 	}
 }
@@ -5954,7 +5954,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	older := time.Now().Add(-3 * time.Minute)
 	newer := time.Now().Add(-90 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "done", SettledAt: older})
-	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "Shell", StartedAt: newer})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
 	if !strings.Contains(out, "⚙ 1m30s") {
@@ -5974,7 +5974,7 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	}
 }
 
-func TestStatusBarIgnoresMainLocalShellStartWhenFocusedOnSubAgentWithoutPendingShell(t *testing.T) {
+func TestStatusBarIgnoresMainTerminalStartWhenFocusedOnSubAgentWithoutPendingShell(t *testing.T) {
 	backend := &sessionControlAgent{
 		events: make(chan agent.AgentEvent, 1),
 		subAgents: []agent.SubAgentInfo{{
@@ -5989,49 +5989,49 @@ func TestStatusBarIgnoresMainLocalShellStartWhenFocusedOnSubAgentWithoutPendingS
 	m.setFocusedAgent("agent-1")
 
 	if m.viewport.HasUserLocalShellPending() {
-		t.Fatal("sub-agent viewport should not report pending local shell from main view")
+		t.Fatal("sub-agent viewport should not report pending terminal from main view")
 	}
 	if _, ok := m.latestStatusStartWall("agent-1"); ok {
-		t.Fatal("latestStatusStartWall should ignore main-view local shell when focused on sub-agent without pending shell")
+		t.Fatal("latestStatusStartWall should ignore main-view terminal when focused on sub-agent without pending shell")
 	}
 
 	plain := stripANSI(m.renderStatusBar())
 	if strings.Contains(plain, statusBarStartedLabel()) {
-		t.Fatalf("status bar should not inherit main-view local shell start time after focus switch, got %q", plain)
+		t.Fatalf("status bar should not inherit main-view terminal start time after focus switch, got %q", plain)
 	}
 }
 
-func TestRenderStatusBarLocalShellDropsStartedWhenWidthIsTight(t *testing.T) {
+func TestRenderStatusBarTerminalDropsStartedWhenWidthIsTight(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	startedAt := time.Now().Add(-5 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	wide := stripANSI(m.renderStatusBarLocalShell(200))
 	if !strings.Contains(wide, statusBarStartedLabel()) {
-		t.Fatalf("wide local shell render should include %q; got %q", statusBarStartedLabel(), wide)
+		t.Fatalf("wide terminal render should include %q; got %q", statusBarStartedLabel(), wide)
 	}
 
 	narrow := stripANSI(m.renderStatusBarLocalShell(22))
 	if strings.Contains(narrow, statusBarStartedLabel()) {
-		t.Fatalf("narrow local shell render should drop started labels; got %q", narrow)
+		t.Fatalf("narrow terminal render should drop started labels; got %q", narrow)
 	}
-	if !strings.Contains(narrow, "Shell") {
+	if !strings.Contains(narrow, "Terminal") {
 		t.Fatalf("narrow shell render should keep core text; got %q", narrow)
 	}
 }
 
-func TestRenderStatusBarLocalShellUsesCompactStartedLabelInCompactLayout(t *testing.T) {
+func TestRenderStatusBarTerminalUsesCompactStartedLabelInCompactLayout(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	startedAt := time.Now().Add(-5 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
 	compact := stripANSI(m.renderStatusBarLocalShell(36))
 	if !strings.Contains(compact, statusBarStartedLabel()) {
-		t.Fatalf("compact local shell render should use started label; got %q", compact)
+		t.Fatalf("compact terminal render should use started label; got %q", compact)
 	}
 }
 
-func TestStatusBarUsesVisiblePendingLocalShellStartByFocusedAgentView(t *testing.T) {
+func TestStatusBarUsesVisiblePendingTerminalStartByFocusedAgentView(t *testing.T) {
 	backend := &sessionControlAgent{
 		events: make(chan agent.AgentEvent, 1),
 		subAgents: []agent.SubAgentInfo{{
@@ -7123,7 +7123,7 @@ func TestNormalModeEscDisablesLoopBeforeCancellingBusyTurn(t *testing.T) {
 func TestToolCallCopyContentFormatsDoneAsMarkdown(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
-		ToolName:      "Done",
+		ToolName:      "done",
 		DoneReport:    "## Completion status\nDone\n\n- Verification passed",
 		ResultContent: "Done rejected: coverage is too low\nrequired minimum is 80%",
 	}
@@ -7146,14 +7146,14 @@ func TestToolCallCopyContentFormatsDoneAsMarkdown(t *testing.T) {
 func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
-		ToolName:      "Shell",
+		ToolName:      "shell",
 		Content:       `{"command":"echo hi"}`,
 		ResultContent: "hi",
 	}
 
 	got := blockCopyContent(block)
 	for _, want := range []string{
-		"# Tool call: Shell",
+		"# Tool call: shell",
 		"## Arguments\n\n```json\n{\"command\":\"echo hi\"}\n```",
 		"## Result\n\nhi",
 	} {
@@ -7795,7 +7795,7 @@ func TestAgentDoneEventRefreshesTaskBlockLastTime(t *testing.T) {
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
 	old := time.Date(2024, 6, 15, 15, 4, 0, 0, time.Local)
-	task := &Block{ID: 1, Type: BlockToolCall, ToolName: "Delegate", LinkedAgentID: "agent-1", StartedAt: old, SettledAt: old}
+	task := &Block{ID: 1, Type: BlockToolCall, ToolName: "delegate", LinkedAgentID: "agent-1", StartedAt: old, SettledAt: old}
 	m.viewport.AppendBlock(task)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", Summary: "done"}})
@@ -7851,7 +7851,7 @@ func TestThinkingDurationFrozenOnStreamThinkingEvent(t *testing.T) {
 	// not recompute the duration on the already-settled block.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:   "call-1",
-		Name: "Read",
+		Name: "read",
 	}})
 
 	thinkingBlock = findThinkingBlockInViewport(m.viewport)
@@ -7963,7 +7963,7 @@ func TestStreamingThinkingMsgIndexCatchesUpWhenMessagesAdvanceBeforeEvent(t *tes
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "", AgentID: ""}})
 
 	backend.messages = append(backend.messages,
-		message.Message{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Shell"}}},
+		message.Message{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "shell"}}},
 		message.Message{Role: "tool", Content: "result", ToolCallID: "call-1"},
 		message.Message{Role: "tool", Content: "result", ToolCallID: "call-2"},
 	)
@@ -8048,7 +8048,7 @@ func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
 	// Finalize without thinking_end (e.g. via ToolCallStartEvent or IdleEvent).
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:   "call-1",
-		Name: "Read",
+		Name: "read",
 	}})
 
 	// The thinking block should have a duration computed by finalizeAssistantBlock.
@@ -8209,7 +8209,7 @@ func TestTouchStreamDeltaFromToolCallStart(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:   "call-1",
-		Name: "Read",
+		Name: "read",
 	}})
 
 	if _, ok := m.streamLastDeltaAt["main"]; !ok {

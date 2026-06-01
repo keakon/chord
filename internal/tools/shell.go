@@ -189,20 +189,20 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	}
 	parts = append(parts,
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
-		"Use Shell mainly for tests, builds, git, and other system commands.",
+		"Use shell mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
-		"For native filesystem operations with no dedicated built-in tool, Shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		"If file-reading, search, or code-navigation tools are hidden or denied in this role, Shell is not a substitute for them.",
+		"For native filesystem operations with no dedicated built-in tool, shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
+		"If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.",
 		"Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
-		"If file-editing tools are hidden or denied in this role, Shell is not a substitute for them.",
-		"For explicit file deletions, prefer `Delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
+		"If file-editing tools are hidden or denied in this role, shell is not a substitute for them.",
+		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
-		"This tool is exclusively for foreground execution — all background process management uses the Spawn tool.",
+		"This tool is exclusively for foreground execution — all background process management uses the spawn tool.",
 		"If this turn needs the command's stdout/stderr, use this tool.",
 		"Only set timeout when you need a value other than the default 30s.",
 	)
-	if _, ok := visible["Spawn"]; ok {
-		parts = append(parts, "For processes that must run independently of the current turn, use Spawn instead.")
+	if _, ok := visible[NameSpawn]; ok {
+		parts = append(parts, "For processes that must run independently of the current turn, use spawn instead.")
 	}
 	return strings.Join(parts, " ")
 }

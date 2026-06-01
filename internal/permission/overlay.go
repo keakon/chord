@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/toolname"
 )
 
 // RuleScope represents where a permission rule is persisted.
@@ -150,12 +152,13 @@ func (o *Overlay) Evaluate(permission, pattern string) Action {
 
 // IsDisabled checks if a tool is completely unavailable.
 func (o *Overlay) IsDisabled(toolName string) bool {
+	toolName = toolname.Normalize(toolName)
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	for _, rs := range o.rulesetsHighToLowLocked() {
 		for i := len(rs) - 1; i >= 0; i-- {
 			r := rs[i]
-			if globMatch(toolName, r.Permission) {
+			if globMatch(toolName, toolname.Normalize(r.Permission)) {
 				return r.Pattern == "*" && r.Action == ActionDeny
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type overlayRulesSource interface {
@@ -117,7 +118,7 @@ func newRuleTextInput(prompt, placeholder, value string) textinput.Model {
 func (m *Model) startAddRule() tea.Cmd {
 	m.rules.adding = true
 	m.rules.addField = rulesAddFieldTool
-	m.rules.addToolInput = newRuleTextInput("Tool: ", "Shell", "Shell")
+	m.rules.addToolInput = newRuleTextInput("Tool: ", tools.NameShell, tools.NameShell)
 	m.rules.addPatInput = newRuleTextInput("Pattern: ", "git *", "")
 	m.rules.addPatInput.Blur()
 	m.rules.addScopeIdx = 0
@@ -170,7 +171,7 @@ func (m *Model) handleRulesAddKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) submitAddRule() tea.Cmd {
-	toolName := strings.TrimSpace(m.rules.addToolInput.Value())
+	toolName := tools.NormalizeName(m.rules.addToolInput.Value())
 	pattern := strings.TrimSpace(m.rules.addPatInput.Value())
 	if toolName == "" {
 		m.rules.addError = "Tool is required."

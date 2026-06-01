@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/keakon/chord/internal/tools"
+
 func (m *Model) startupDeferredTranscriptAtTail() bool {
 	state := m.startupDeferredTranscript
 	if state == nil || len(state.allBlocks) == 0 || m.viewport == nil {
@@ -64,6 +66,7 @@ func (m *Model) findToolBlockByToolID(toolID string) (*Block, bool) {
 }
 
 func (m *Model) findLastPendingToolBlockByName(toolName string) (*Block, bool) {
+	toolName = tools.NormalizeName(toolName)
 	if m != nil && m.viewport != nil && toolName != "" {
 		if block, ok := m.viewport.FindLastPendingToolBlockByName(toolName); ok {
 			return block, true
@@ -75,7 +78,7 @@ func (m *Model) findLastPendingToolBlockByName(toolName string) (*Block, bool) {
 	}
 	for i := len(state.allBlocks) - 1; i >= 0; i-- {
 		block := state.allBlocks[i]
-		if block != nil && block.Type == BlockToolCall && block.ToolName == toolName && !block.ResultDone {
+		if block != nil && block.Type == BlockToolCall && tools.NormalizeName(block.ToolName) == toolName && !block.ResultDone {
 			return block, true
 		}
 	}

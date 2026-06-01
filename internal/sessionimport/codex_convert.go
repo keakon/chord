@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -982,21 +983,21 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 // Only tools with high-confidence argument mapping are included.
 // Tools not in this map will be downgraded to text fallback.
 var codexToolMapping = map[string]string{
-	"exec_command": "Shell",
-	"shell":        "Shell",
-	"apply_patch":  "Edit",
-	"read_file":    "Read",
-	"file_read":    "Read",
-	"write_file":   "Write",
-	"file_write":   "Write",
-	"edit_file":    "Edit",
-	"delete_file":  "Delete",
-	"file_delete":  "Delete",
-	"remove_file":  "Delete",
-	"grep":         "Grep",
-	"search":       "Grep",
-	"glob":         "Glob",
-	"list_files":   "Glob",
+	"exec_command": tools.NameShell,
+	"shell":        tools.NameShell,
+	"apply_patch":  tools.NameEdit,
+	"read_file":    tools.NameRead,
+	"file_read":    tools.NameRead,
+	"write_file":   tools.NameWrite,
+	"file_write":   tools.NameWrite,
+	"edit_file":    tools.NameEdit,
+	"delete_file":  tools.NameDelete,
+	"file_delete":  tools.NameDelete,
+	"remove_file":  tools.NameDelete,
+	"grep":         tools.NameGrep,
+	"search":       tools.NameGrep,
+	"glob":         tools.NameGlob,
+	"list_files":   tools.NameGlob,
 }
 
 // codexNormalizeToolArgs converts Codex tool arguments into the shape
@@ -1021,22 +1022,22 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 
 	switch chordName {
-	case "Edit":
+	case tools.NameEdit:
 		if strings.EqualFold(codexName, "edit_file") {
 			return codexNormalizeEditFileArgs(args)
 		}
 		return codexNormalizeEditArgs(args)
-	case "Shell":
+	case tools.NameShell:
 		return codexNormalizeShellArgs(args)
-	case "Read":
+	case tools.NameRead:
 		return codexNormalizeReadArgs(args)
-	case "Write":
+	case tools.NameWrite:
 		return codexNormalizeWriteArgs(args)
-	case "Delete":
+	case tools.NameDelete:
 		return codexNormalizeDeleteArgs(args)
-	case "Grep":
+	case tools.NameGrep:
 		return codexNormalizeGrepArgs(args)
-	case "Glob":
+	case tools.NameGlob:
 		return codexNormalizeGlobArgs(args)
 	default:
 		return nil

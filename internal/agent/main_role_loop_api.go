@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // SwitchRole switches the MainAgent to the named role and emits RoleChangedEvent.
@@ -231,7 +232,7 @@ func (a *MainAgent) loopFinalCompletionResponseLines() []string {
 		"- Summarize the completed work",
 		"- Report verification status explicitly",
 		"- If verification was not run, state why",
-		"- Call the `Done` tool to request loop exit once those conditions are satisfied",
+		"- Call the " + toolPromptName(tools.NameDone) + " tool to request loop exit once those conditions are satisfied",
 		"- List any remaining limitations or unverified areas",
 	}
 }

@@ -430,6 +430,7 @@ func formatToolResultSummaryLine(b *Block) string {
 	if b == nil {
 		return ""
 	}
+	b.ToolName = tools.NormalizeName(b.ToolName)
 	if b.toolResultIsCancelled() {
 		return "Cancelled"
 	}

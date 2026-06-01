@@ -850,7 +850,7 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "Skill" || strings.TrimSpace(tc.ID) == "" {
+			if tools.NormalizeName(tc.Name) != tools.NameSkill || strings.TrimSpace(tc.ID) == "" {
 				continue
 			}
 			name := strings.TrimSpace(extractToolArgument(tc.Name, tc.Args))
@@ -913,7 +913,7 @@ func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, to
 
 func messageHasTodoWrite(msg message.Message) bool {
 	for _, tc := range msg.ToolCalls {
-		if tc.Name == tools.NameTodoWrite {
+		if tools.NormalizeName(tc.Name) == tools.NameTodoWrite {
 			return true
 		}
 	}
@@ -950,7 +950,7 @@ func compactionSummarySection(summary, startMarker, endMarker string) string {
 func rebuildTodosFromMessages(msgs []message.Message) []tools.TodoItem {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		for _, tc := range msgs[i].ToolCalls {
-			if tc.Name != tools.NameTodoWrite {
+			if tools.NormalizeName(tc.Name) != tools.NameTodoWrite {
 				continue
 			}
 			var args struct {

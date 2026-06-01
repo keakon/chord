@@ -199,13 +199,13 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 	// assistant prefix ("Okay"/"Sure"/"Let") should be treated as an orphan.
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: `{"file_path":"a.go"}`,
 	}})
 	applyTestCmd(t, &m, cmd)
 	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: `{"file_path":"a.go"}`,
 		Result:   "ok",
 		Status:   agent.ToolResultStatusSuccess,
@@ -219,7 +219,7 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 	applyTestCmd(t, &m, cmd)
 	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-2",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: `{"file_path":"b.go"}`,
 	}})
 	applyTestCmd(t, &m, cmd)
@@ -382,7 +382,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-read-root-1",
-			Name: "Read",
+			Name: "read",
 			Args: []byte(`{"path":"/repo-b/internal/tui/app.go","limit":20,"offset":0}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-read-root-1", Content: "1\tneedle line\n2\tomega line"},
@@ -415,7 +415,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 		t.Fatal("expected focused Read block after search reveal")
 	}
 	plain := stripANSI(strings.Join(block.Render(m.viewport.width, ""), "\n"))
-	if !strings.Contains(plain, "Read internal/tui/app.go") {
+	if !strings.Contains(plain, "read internal/tui/app.go") {
 		t.Fatalf("expected deferred restored Read header relative to updated project root, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "/repo-b/internal/tui/app.go") {
@@ -431,7 +431,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-1",
-			Name: "Read",
+			Name: "read",
 			Args: []byte(`{"path":"internal/tui/app.go","limit":20,"offset":0}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-1", Content: "1\talpha line\n2\tbeta line\n3\tgamma line\n4\tdelta line\n5\tepsilon line\n6\tzeta line\n7\teta line\n8\ttheta line\n9\tiota line\n10\tkappa line\n11\tneedle line\n12\tomega line"},
@@ -464,8 +464,8 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	if toolBlock == nil {
 		t.Fatal("matched tool block should exist in visible window")
 	}
-	if toolBlock.ToolName != "Read" {
-		t.Fatalf("matched tool = %q, want Read", toolBlock.ToolName)
+	if toolBlock.ToolName != "read" {
+		t.Fatalf("matched tool = %q, want read", toolBlock.ToolName)
 	}
 	if toolBlock.Collapsed {
 		t.Fatal("search should reveal collapsed Read tool content")
@@ -491,7 +491,7 @@ func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterial
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-shell-window-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: []byte(`{"command":"go test ./internal/tui -count=1","timeout":120}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-shell-window-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
@@ -654,7 +654,7 @@ func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWhee
 	argsJSON := `{"path":"internal/tui/app_agent_events.go","limit":1}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "live-read-hidden-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: argsJSON,
 	}})
 	if block, ok := m.viewport.FindBlockByToolID("live-read-hidden-1"); !ok || block == nil {
@@ -692,7 +692,7 @@ func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWhee
 
 	_ = model.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "live-read-hidden-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: argsJSON,
 		Result:   "ok",
 		Status:   agent.ToolResultStatusSuccess,
@@ -732,7 +732,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-shell-cold-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: []byte(`{"command":"go test ./internal/tui -count=1","timeout":120}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-shell-cold-1", Content: "ok chord/internal/tui 0.711s\nneedle output\nPASS"},
@@ -834,13 +834,13 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-dump-artifact-read-1",
-			Name: "Read",
+			Name: "read",
 			Args: []byte(`{"path":"~/.local/state/chord/logs/tui-dumps/tui-dump-20260403.log","limit":160,"offset":0}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-dump-artifact-read-1", Content: "1\tfind artifact line\n2\tdebug dump line"},
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-real-search-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: []byte(`{"command":"echo real find result","description":"search real transcript","timeout":30}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-real-search-1", Content: "real find result"},
@@ -887,7 +887,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	messages = append(messages,
 		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{
 			ID:   "call-shell-1",
-			Name: "Shell",
+			Name: "shell",
 			Args: []byte(`{"command":"python3 - <<'PY'\nprint('alpha')\nPY","description":"Run scripted search","timeout":120}`),
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-shell-1", Content: "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\nneedle output\nomega"},
@@ -924,8 +924,8 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	if toolBlock == nil {
 		t.Fatal("matched compact tool block should exist in visible window")
 	}
-	if toolBlock.ToolName != "Shell" {
-		t.Fatalf("matched tool = %q, want Shell", toolBlock.ToolName)
+	if toolBlock.ToolName != "shell" {
+		t.Fatalf("matched tool = %q, want shell", toolBlock.ToolName)
 	}
 	if !toolBlock.ToolCallDetailExpanded {
 		t.Fatal("search should expand compact tool detail")
@@ -1437,7 +1437,7 @@ func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
 				Role: "assistant",
 				ToolCalls: []message.ToolCall{{
 					ID:   "done-1",
-					Name: "Done",
+					Name: "done",
 					Args: json.RawMessage(`{"report":"## Summary\n- shipped\n- verified"}`),
 				}},
 			},
@@ -1446,7 +1446,7 @@ func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
 				Role: "assistant",
 				ToolCalls: []message.ToolCall{{
 					ID:   "delegate-1",
-					Name: "Delegate",
+					Name: "delegate",
 					Args: json.RawMessage(`{"description":"review tests","agent_type":"reviewer"}`),
 				}},
 			},
@@ -1466,9 +1466,9 @@ func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
 	var doneBlock, delegateBlock *Block
 	for _, block := range blocks {
 		switch block.ToolName {
-		case "Done":
+		case "done":
 			doneBlock = block
-		case "Delegate":
+		case "delegate":
 			delegateBlock = block
 		}
 	}
@@ -1485,10 +1485,10 @@ func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
 		}
 	}
 	if got := delegateBlock.LinkedAgentID; got != "reviewer-2" {
-		t.Fatalf("Delegate LinkedAgentID = %q, want reviewer-2", got)
+		t.Fatalf("delegate LinkedAgentID = %q, want reviewer-2", got)
 	}
 	if got := delegateBlock.LinkedTaskID; got != "adhoc-7" {
-		t.Fatalf("Delegate LinkedTaskID = %q, want adhoc-7", got)
+		t.Fatalf("delegate LinkedTaskID = %q, want adhoc-7", got)
 	}
 }
 
@@ -2226,12 +2226,12 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) 
 	argsJSON := `{"path":"internal/tui/app.go","limit":4,"offset":0}`
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "live-read-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: argsJSON,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "live-read-1",
-		Name:     "Read",
+		Name:     "read",
 		ArgsJSON: argsJSON,
 		Result:   "1\talpha line\n2\tbeta line\n3\tgamma line\n4\tomega line",
 		Status:   agent.ToolResultStatusSuccess,
@@ -3449,7 +3449,7 @@ func TestRebuildViewportFromMessagesRestoresReadBlankLineResult(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "tool-read", Name: "Read", Args: []byte(`{"path":"internal/tui/input.go","limit":1,"offset":358}`)},
+				{ID: "tool-read", Name: "read", Args: []byte(`{"path":"internal/tui/input.go","limit":1,"offset":358}`)},
 			},
 		},
 		{Role: "tool", ToolCallID: "tool-read", Content: "   359\t\n"},
@@ -3463,14 +3463,14 @@ func TestRebuildViewportFromMessagesRestoresReadBlankLineResult(t *testing.T) {
 		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
 	}
 	block := blocks[0]
-	if block.ToolName != "Read" || !block.ResultDone {
+	if block.ToolName != "read" || !block.ResultDone {
 		t.Fatalf("restored block = %#v, want completed Read block", block)
 	}
 	if !block.SettledAt.IsZero() {
 		t.Fatalf("restored block SettledAt = %v, want zero", block.SettledAt)
 	}
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "Read internal/tui/input.go") {
+	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "359") {
@@ -3484,7 +3484,7 @@ func TestSessionRestoredEventUpdatesWorkingDirAndShowsRelativeToolPath(t *testin
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{{
 				ID:   "tool-read",
-				Name: "Read",
+				Name: "read",
 				Args: []byte(`{"path":"/repo-b/internal/tui/input.go","limit":1,"offset":358}`),
 			}},
 		}, {Role: "tool", ToolCallID: "tool-read", Content: "   359\t\n"}},
@@ -3506,7 +3506,7 @@ func TestSessionRestoredEventUpdatesWorkingDirAndShowsRelativeToolPath(t *testin
 		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
 	}
 	plain := stripANSI(strings.Join(blocks[0].Render(100, ""), "\n"))
-	if !strings.Contains(plain, "Read internal/tui/input.go") {
+	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header relative to new project root, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "/repo-b/internal/tui/input.go") {
@@ -3670,7 +3670,7 @@ func TestRebuildViewportFromMessagesRestoresRejectedDoneIntoSingleToolCard(t *te
 		t.Fatalf("ResultContent = %q, want rejected Done content", block.ResultContent)
 	}
 	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if !strings.Contains(plain, "✗ Done") {
+	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("rendered Done card = %q, want rejected Done failure header", plain)
 	}
 	if !strings.Contains(plain, "update docs as needed") {
@@ -3683,9 +3683,9 @@ func TestRebuildViewportFromMessagesMarksRestoredToolErrorsAndCancellationsDone(
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "tool-error", Name: "WebFetch", Args: []byte(`{"url":"https://missing.example","timeout":40}`)},
-				{ID: "tool-cancel", Name: "WebFetch", Args: []byte(`{"url":"https://slow.example"}`)},
-				{ID: "tool-pending", Name: "WebFetch", Args: []byte(`{"timeout":40}`)},
+				{ID: "tool-error", Name: "web_fetch", Args: []byte(`{"url":"https://missing.example","timeout":40}`)},
+				{ID: "tool-cancel", Name: "web_fetch", Args: []byte(`{"url":"https://slow.example"}`)},
+				{ID: "tool-pending", Name: "web_fetch", Args: []byte(`{"timeout":40}`)},
 			},
 		},
 		{Role: "tool", ToolCallID: "tool-error", Content: "Model stopped before completing this tool call: context canceled"},
@@ -3735,8 +3735,8 @@ func TestRebuildBlocksFromFocusedSubAgentMessagesMarksRestoredToolStates(t *test
 				{
 					Role: "assistant",
 					ToolCalls: []message.ToolCall{
-						{ID: "sub-error", Name: "WebFetch", Args: []byte(`{"url":"https://missing.example"}`)},
-						{ID: "sub-cancel", Name: "WebFetch", Args: []byte(`{"url":"https://slow.example"}`)},
+						{ID: "sub-error", Name: "web_fetch", Args: []byte(`{"url":"https://missing.example"}`)},
+						{ID: "sub-cancel", Name: "web_fetch", Args: []byte(`{"url":"https://slow.example"}`)},
 					},
 				},
 				{Role: "tool", ToolCallID: "sub-error", Content: "Model stopped before completing this tool call: context deadline exceeded"},

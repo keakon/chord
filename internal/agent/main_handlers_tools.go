@@ -249,7 +249,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if isVerificationLikeToolResult(payload, rawToolResultForVerification(payload)) {
 			a.loopState.markProgress()
 		}
-		if payload.Name == "Skill" {
+		if tools.NormalizeName(payload.Name) == tools.NameSkill {
 			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {
 				a.MarkSkillInvokedByName(skillName)
 			}

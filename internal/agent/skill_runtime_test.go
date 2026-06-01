@@ -10,11 +10,11 @@ import (
 
 func TestRebuildInvokedSkillsFromMessagesRestoresOnlySuccessfulSkills(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-1", Name: "Skill", Args: mustToolArgs(t, map[string]any{"name": "go-expert"})}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-1", Name: "skill", Args: mustToolArgs(t, map[string]any{"name": "go-expert"})}}},
 		{Role: "tool", ToolCallID: "skill-1", Content: "<skill>...</skill>"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-2", Name: "Skill", Args: mustToolArgs(t, map[string]any{"name": "legacy-skill"})}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-2", Name: "skill", Args: mustToolArgs(t, map[string]any{"name": "legacy-skill"})}}},
 		{Role: "tool", ToolCallID: "skill-2", Content: "Error: skill \"legacy-skill\" not found"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-3", Name: "Skill", Args: mustToolArgs(t, map[string]any{"name": "later-discovered"})}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-3", Name: "skill", Args: mustToolArgs(t, map[string]any{"name": "later-discovered"})}}},
 		{Role: "tool", ToolCallID: "skill-3", Content: "<skill>...</skill>"},
 	}
 	visible := []*skill.Meta{
@@ -49,7 +49,7 @@ func TestSetSkillsHydratesRestoredInvokedSkillMetadata(t *testing.T) {
 func TestMainAgentListSkillsFiltersDeniedSkills(t *testing.T) {
 	a := &MainAgent{}
 	a.loadedSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert"}, {Name: "secret-skill", Description: "Hidden"}}
-	a.ruleset = permission.Ruleset{{Permission: "Skill", Pattern: "*", Action: permission.ActionAllow}, {Permission: "Skill", Pattern: "secret-*", Action: permission.ActionDeny}}
+	a.ruleset = permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}, {Permission: "skill", Pattern: "secret-*", Action: permission.ActionDeny}}
 
 	got := a.ListSkills()
 	if len(got) != 1 {

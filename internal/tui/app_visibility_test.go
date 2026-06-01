@@ -74,7 +74,7 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenBusy(t *testing.T) {
 func TestCurrentCadenceReturnsBackgroundActiveWhenPendingToolWork(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockToolCall, ToolName: "Read", ResultDone: false})
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockToolCall, ToolName: "read", ResultDone: false})
 
 	c := m.currentCadence()
 	if c != backgroundActiveCadence {
@@ -82,7 +82,7 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenPendingToolWork(t *testing.T) 
 	}
 }
 
-func TestCurrentCadenceReturnsBackgroundActiveWhenPendingLocalShell(t *testing.T) {
+func TestCurrentCadenceReturnsBackgroundActiveWhenPendingTerminal(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true})
