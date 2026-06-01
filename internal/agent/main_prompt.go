@@ -393,7 +393,7 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 		if s == nil {
 			continue
 		}
-		if len(ruleset) > 0 && ruleset.Evaluate("Skill", s.Name) == permission.ActionDeny {
+		if len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, s.Name) == permission.ActionDeny {
 			log.Debugf("skill denied by permission, skipping from visible list skill=%v", s.Name)
 			continue
 		}

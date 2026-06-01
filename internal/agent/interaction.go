@@ -126,7 +126,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 		}
 
 		a.fireHookBackground(ctx, hook.OnWaitQuestion, a.currentTurnID(), map[string]any{
-			"tool_name":      "Question",
+			"tool_name":      tools.NameQuestion,
 			"header":         q.Header,
 			"question":       q.Question,
 			"options":        append([]string(nil), options...),
@@ -136,7 +136,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 		})
 
 		if err := a.emitInteractiveToTUI(ctx, QuestionRequestEvent{
-			ToolName:      "Question",
+			ToolName:      tools.NameQuestion,
 			Header:        q.Header,
 			Question:      q.Question,
 			Options:       options,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) SetSkills(skills []*skill.Meta) {
@@ -57,7 +58,7 @@ func (a *MainAgent) visibleSkillsSnapshot() []*skill.Meta {
 		}
 		copyMeta := *meta
 		copyMeta.Discovered = true
-		if len(ruleset) > 0 && ruleset.Evaluate("Skill", meta.Name) == permission.ActionDeny {
+		if len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, meta.Name) == permission.ActionDeny {
 			copyMeta.Discovered = false
 		}
 		if copyMeta.Discovered {

@@ -138,6 +138,50 @@ Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`
 
 For `type: responses`, Chord follows the Responses request shape used by Codex: the stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. This keeps compatible gateways from receiving a system-role message in `input`.
 
+### Request-level context reduction
+
+Chord enables deterministic request-level context reduction by default. It only changes the current request sent to the model; it does not delete durable session history. Decisions use only local signals (message count, local token estimates, model input budget, and tool-output age/bytes), not provider-reported prompt-cache tokens. Provider usage is only used for offline analysis.
+
+Usually you do not need per-field tuning. Either form uses the built-in defaults:
+
+```yaml
+context:
+  reduction: true
+```
+
+```yaml
+context:
+  reduction: {}
+```
+
+Current defaults:
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 8000
+    read_like_age_turns: 1
+    read_like_output_bytes: 4000
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+    cache_aware_min_usage: 0.75
+    warmup_message_limit: 32
+    min_incremental_saved_tokens: 4096
+    high_pressure_usage: 0.80
+    force_prune_usage: 0.90
+```
+
+Default behavior:
+
+- Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
+- Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
+- High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
+- Large old `read` / `grep` / successful `shell` outputs remain age/byte-pruned; older errors, diagnostics, and confirmations are reduced to smaller hints or summaries.
+
 ### OpenAI Codex preset
 
 ```yaml

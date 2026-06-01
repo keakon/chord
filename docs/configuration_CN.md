@@ -107,6 +107,50 @@ providers:
 
 对 `type: responses`，Chord 使用与 Codex 一致的 Responses 请求形态：稳定 system prompt 会放在顶层 `instructions` 字段；对话消息仍保留为 typed `input` item，例如 `{"type":"message","role":"user",...}`。这样兼容网关不会在 `input` 里收到 system-role message。
 
+### 请求级上下文剪裁
+
+Chord 默认启用确定性的 request-level context reduction：它只影响发送给模型的当前请求，不会删除持久会话历史。剪裁决策只使用本地可确定信号（消息数、本地 token 估算、模型输入预算、工具输出 age/bytes），不会依赖 provider 是否返回 prompt cache 命中 token；provider usage 只用于离线分析。
+
+通常无需逐项配置，只写以下任一形式即可使用默认最佳参数：
+
+```yaml
+context:
+  reduction: true
+```
+
+```yaml
+context:
+  reduction: {}
+```
+
+当前默认值：
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    shell_success_age_turns: 2
+    shell_success_bytes: 8000
+    read_like_age_turns: 1
+    read_like_output_bytes: 4000
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    min_tool_results_prune: 8
+    cache_aware_min_usage: 0.75
+    warmup_message_limit: 32
+    min_incremental_saved_tokens: 4096
+    high_pressure_usage: 0.80
+    force_prune_usage: 0.90
+```
+
+这些参数的默认策略：
+
+- 短会话且上下文压力低时不急着剪裁：当消息数不超过 `warmup_message_limit`，且估算输入低于可用输入预算 `cache_aware_min_usage` 时，保护 prompt cache 热身和近期证据。
+- 较老消息冻结复用：同一 turn 内形成稳定剪裁 surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。
+- 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
+- 大块旧 `read` / `grep` / 成功 `shell` 输出会继续按 age/bytes 规则剪裁；旧错误、diagnostics 和确认类输出会保留更小的提示或摘要。
+
 ### OpenAI Codex preset
 
 ```yaml

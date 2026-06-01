@@ -221,7 +221,7 @@ func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) 
 				continue
 			}
 			for _, tc := range msg.ToolCalls {
-				if tc.ID == callID && strings.EqualFold(tc.Name, "Skill") {
+				if tc.ID == callID && tools.NormalizeName(tc.Name) == tools.NameSkill {
 					if name := parse(tc.Args); name != "" {
 						return name
 					}

@@ -9,12 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
-)
-
-const (
-	reviewToolWrite  = "Write"
-	reviewToolEdit   = "Edit"
-	reviewToolDelete = "Delete"
+	"github.com/keakon/chord/internal/toolname"
 )
 
 type ReviewedFileSnapshot struct {
@@ -340,11 +335,12 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != reviewToolWrite && tc.Name != reviewToolEdit && tc.Name != reviewToolDelete {
+			toolName := toolname.Normalize(tc.Name)
+			if toolName != toolname.Write && toolName != toolname.Edit && toolName != toolname.Delete {
 				continue
 			}
 			paths := extractReviewFilePaths(tc.Args)
-			info := callInfo{name: tc.Name}
+			info := callInfo{name: toolName}
 			if len(paths) > 0 {
 				info.path = paths[0]
 			}
@@ -364,7 +360,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			continue
 		}
 		switch info.name {
-		case reviewToolDelete:
+		case toolname.Delete:
 			groups := parseDeleteReviewResult(msg.Content)
 			for _, path := range groups.Deleted {
 				for key, snap := range byKey {
@@ -373,7 +369,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 					}
 				}
 			}
-		case reviewToolWrite, reviewToolEdit:
+		case toolname.Write, toolname.Edit:
 			if strings.TrimSpace(info.path) == "" {
 				continue
 			}

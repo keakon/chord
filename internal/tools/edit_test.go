@@ -176,6 +176,55 @@ func TestEditAmbiguousWeakContextAppliesFirstMatchWithHint(t *testing.T) {
 	}
 }
 
+func TestEditToolDiagnosesMissingHunkLineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n 1\talpha\n-2\tbeta\n+gamma\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "line numbers or the tab separator") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEditToolDiagnosesMissingHunkWhitespace(t *testing.T) {
+	got := diagnoseMissingHunk([]string{"\treturn nil"}, []string{"return nil"}, 0)
+	if !strings.Contains(got, "exact indentation") {
+		t.Fatalf("diagnosis = %q", got)
+	}
+}
+
+func TestEditToolDiagnosesMissingHunkStaleText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n-gamma\n+delta\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "not found in the current file") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEditToolDiagnosesMissingHunkHeaderAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo_test.go")
+	if err := os.WriteFile(path, []byte("package demo\n\nfunc TestActual(t *testing.T) {\n}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@ func TestImagined(t *testing.T) {\n }\n+// added\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo_test.go", "patch": patch})
+	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "@@ header anchor \"TestImagined\"") || !strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestEditToolWhitespaceAndUnicodeTolerance(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()

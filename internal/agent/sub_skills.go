@@ -20,7 +20,7 @@ func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
 		}
 		copyMeta := *meta
 		copyMeta.Discovered = true
-		if len(s.ruleset) > 0 && s.ruleset.Evaluate("Skill", copyMeta.Name) == permission.ActionDeny {
+		if len(s.ruleset) > 0 && s.ruleset.Evaluate(tools.NameSkill, copyMeta.Name) == permission.ActionDeny {
 			copyMeta.Discovered = false
 		}
 		if copyMeta.Discovered {

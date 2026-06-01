@@ -29,6 +29,11 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		ReadLikeOutputBytes:  4000,
 		StaleOutputBytes:     1500,
 		MinToolResultsPrune:  8,
+		CacheAwareMinUsage:   0.75,
+		WarmupMessageLimit:   32,
+		MinIncrementalTokens: 4096,
+		HighPressureUsage:    0.80,
+		ForcePruneUsage:      0.90,
 	}
 	if got != want {
 		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)
@@ -64,6 +69,42 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	}
 	if cfg.Context.Compaction.Threshold != 0.75 {
 		t.Fatalf("compaction.threshold = %v, want 0.75", cfg.Context.Compaction.Threshold)
+	}
+}
+
+func TestLoadConfigFromPathContextReductionKeepsDefaultTuning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  reduction: {}\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	defaults := DefaultConfig().Context.Reduction
+	if cfg.Context.Reduction != defaults {
+		t.Fatalf("context.reduction = %+v, want defaults %+v", cfg.Context.Reduction, defaults)
+	}
+}
+
+func TestLoadConfigFromPathContextReductionTrueUsesDefaultTuning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  reduction: true\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	defaults := DefaultConfig().Context.Reduction
+	if cfg.Context.Reduction != defaults {
+		t.Fatalf("context.reduction = %+v, want defaults %+v", cfg.Context.Reduction, defaults)
 	}
 }
 

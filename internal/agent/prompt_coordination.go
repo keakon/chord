@@ -72,14 +72,14 @@ func (a *MainAgent) hasTodoWriteAccess() bool {
 	if a.tools == nil {
 		return false
 	}
-	if _, ok := a.tools.Get("TodoWrite"); !ok {
+	if _, ok := a.tools.Get(tools.NameTodoWrite); !ok {
 		return false
 	}
 	ruleset := a.effectiveRuleset()
 	if len(ruleset) == 0 {
 		return true
 	}
-	return !ruleset.IsDisabled("TodoWrite")
+	return !ruleset.IsDisabled(tools.NameTodoWrite)
 }
 
 func (a *MainAgent) hasDelegateAccess() bool {

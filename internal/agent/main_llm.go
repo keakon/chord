@@ -515,7 +515,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.llmMu.RLock()
 		installedPrompt := a.installedSysPrompt
 		a.llmMu.RUnlock()
-		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, labels)
+		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v reduction_tokens_before=%v reduction_tokens_after=%v reduction_tokens_saved=%v reduction_protected=%v reduction_reused_stable=%v reduction_by_tool_rule=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, stats.TokensBefore, stats.TokensAfter, stats.TokensSaved, stats.Protected, stats.ReusedStable, stats.ByToolAndRule, labels)
 	}
 
 	// Hook: on_before_llm_call (before LLM call).

@@ -56,21 +56,56 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 
 	prepared := make([]message.Message, len(messages))
 	copy(prepared, messages)
+	policy := a.contextReductionPolicy()
+	inputBudget := 0
+	if a != nil {
+		inputBudget = a.contextReductionInputBudget()
+		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
+		if policy.shouldProtectCachedContext(len(prepared), estimatedTokens, inputBudget) {
+			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
+			a.setContextReductionStats(stats)
+			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+			return prepared
+		}
+	}
 	if a != nil {
 		loopEnabled, frozenPrefix, frozenStats := a.contextSurfaceReductionSnapshot()
 		if loopEnabled {
 			return a.applyLoopFrozenReductionPrefix(prepared, frozenPrefix, frozenStats)
 		}
 	}
-	policy := a.contextReductionPolicy()
-	stats := ContextReductionStats{}
-	noteReduction := func(original, reduced string) {
+	if a != nil {
+		if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
+			a.setContextReductionStats(stats)
+			a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
+			return reused
+		}
+	}
+	stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(prepared)}
+	noteReduction := func(toolName, rule, original, reduced string) {
 		saved := len(original) - len(reduced)
 		if saved <= 0 {
 			return
 		}
 		stats.Messages++
 		stats.Bytes += saved
+		beforeTokens := ctxmgr.EstimateMessageTokens(message.Message{Content: original})
+		afterTokens := ctxmgr.EstimateMessageTokens(message.Message{Content: reduced})
+		tokensSaved := beforeTokens - afterTokens
+		if tokensSaved > 0 {
+			stats.TokensSaved += tokensSaved
+		}
+		if stats.ByToolAndRule == nil {
+			stats.ByToolAndRule = make(map[string]ContextReductionBucket)
+		}
+		key := toolNameOrUnknown(toolName) + "/" + rule
+		bucket := stats.ByToolAndRule[key]
+		bucket.Messages++
+		bucket.Bytes += saved
+		if tokensSaved > 0 {
+			bucket.TokensSaved += tokensSaved
+		}
+		stats.ByToolAndRule[key] = bucket
 	}
 
 	callMeta := buildToolCallMeta(prepared)
@@ -90,27 +125,26 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		if repeated[i] && age >= 1 {
 			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(toolName))
 			prepared[i].ToolDiff = ""
-			noteReduction(original, prepared[i].Content)
+			noteReduction(toolName, "repeated", original, prepared[i].Content)
 			continue
 		}
 		if age >= policy.ErrorAgeTurns && isToolErrorContent(prepared[i].Content) {
 			prepared[i].Content = "[Older tool error omitted]"
 			prepared[i].ToolDiff = ""
-			noteReduction(original, prepared[i].Content)
+			noteReduction(toolName, "error", original, prepared[i].Content)
 			continue
 		}
 		if age >= policy.ConfirmAgeTurns && isConfirmationOutput(prepared[i].Content) {
 			prepared[i].Content = "[Confirmed]"
 			prepared[i].ToolDiff = ""
-			noteReduction(original, prepared[i].Content)
+			noteReduction(toolName, "confirmation", original, prepared[i].Content)
 			continue
 		}
 		if age >= 1 {
-			name := toolName
-			if (name == tools.NameEdit || name == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
+			if (toolName == tools.NameEdit || toolName == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
 				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
 					prepared[i].Content = compacted
-					noteReduction(original, prepared[i].Content)
+					noteReduction(toolName, "diagnostics", original, prepared[i].Content)
 					continue
 				}
 			}
@@ -119,33 +153,62 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			if toolName == tools.NameShell {
 				prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell)
 				prepared[i].ToolDiff = ""
-				noteReduction(original, prepared[i].Content)
+				noteReduction(toolName, "shell_success", original, prepared[i].Content)
 				continue
 			}
 		}
 		if age >= policy.ReadLikeAgeTurns && len(prepared[i].Content) > policy.ReadLikeOutputBytes {
-			name := toolName
-			if contextReductionIsReadLike(name) {
-				prepared[i].Content = compactReadLikeOutputSummary(name, meta.Args, prepared[i].Content)
+			if contextReductionIsReadLike(toolName) {
+				prepared[i].Content = compactReadLikeOutputSummary(toolName, meta.Args, prepared[i].Content)
 				prepared[i].ToolDiff = ""
-				noteReduction(original, prepared[i].Content)
+				noteReduction(toolName, "read_like", original, prepared[i].Content)
 				continue
 			}
 		}
 		if toolResults >= policy.MinToolResultsPrune &&
 			age >= policy.StaleAgeTurns &&
 			len(prepared[i].Content) > policy.StaleOutputBytes {
-			meta := callMeta[prepared[i].ToolCallID]
 			prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(meta.Name))
 			prepared[i].ToolDiff = ""
-			noteReduction(original, prepared[i].Content)
+			noteReduction(toolName, "stale", original, prepared[i].Content)
 		}
 	}
 
 	if a != nil {
+		stats.TokensAfter = ctxmgr.EstimateMessagesTokens(prepared)
+		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
+			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
+		}
+		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, a.contextReductionInputBudget()) {
+			prepared = reuseStableReductionPrefix(previous.Messages, prepared)
+			stats = previous.Stats
+			stats.ReusedStable = true
+		}
 		a.setContextReductionStats(stats)
+		a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
 	}
 	return prepared
+}
+
+func (a *MainAgent) contextReductionInputBudget() int {
+	if a == nil || a.llmClient == nil {
+		return 0
+	}
+	a.llmMu.RLock()
+	ref := a.runningModelRef
+	if ref == "" {
+		ref = a.providerModelRef
+	}
+	a.llmMu.RUnlock()
+	if ref == "" {
+		return 0
+	}
+	limit := a.llmClient.ContextLimitForModelRef(ref)
+	if limit <= 0 {
+		return 0
+	}
+	reserved := min(compactReservedOutput, limit/8)
+	return limit - reserved
 }
 
 func compactDiagnosticsToolOutput(content string) (string, bool) {
@@ -216,6 +279,64 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message
 	a.lastPreparedLLMTurnID = turnID
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(messages)
 	a.lastPreparedReductionStats = a.contextReductionStats
+}
+
+type stableReductionSurface struct {
+	Messages []message.Message
+	Stats    ContextReductionStats
+}
+
+func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReductionSurface, bool) {
+	if a == nil || turnID == 0 {
+		return stableReductionSurface{}, false
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+		return stableReductionSurface{}, false
+	}
+	return stableReductionSurface{
+		Messages: cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix),
+		Stats:    a.lastPreparedReductionStats,
+	}, true
+}
+
+func reuseStableReductionPrefix(previous, current []message.Message) []message.Message {
+	if len(previous) == 0 {
+		return current
+	}
+	if len(current) < len(previous) {
+		return current
+	}
+	out := cloneMessageSliceForRequestShape(current)
+	for i := range previous {
+		out[i] = cloneMessageForRequestShape(previous[i])
+	}
+	return out
+}
+
+func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy contextReductionPolicy, inputBudget int) ([]message.Message, ContextReductionStats, bool) {
+	previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID())
+	if !ok || len(previous.Messages) == 0 || len(messages) < len(previous.Messages) {
+		return nil, ContextReductionStats{}, false
+	}
+	currentTokens := ctxmgr.EstimateMessagesTokens(messages)
+	usage := policy.contextUsage(currentTokens, inputBudget)
+	if policy.ForcePruneUsage > 0 && usage >= policy.ForcePruneUsage {
+		return nil, ContextReductionStats{}, false
+	}
+	if policy.HighPressureUsage > 0 && usage >= policy.HighPressureUsage {
+		return nil, ContextReductionStats{}, false
+	}
+	tailTokens := ctxmgr.EstimateMessagesTokens(messages[len(previous.Messages):])
+	if tailTokens >= policy.MinIncrementalTokens {
+		return nil, ContextReductionStats{}, false
+	}
+	stats := previous.Stats
+	stats.TokensBefore = currentTokens
+	stats.TokensAfter = previous.Stats.TokensAfter + tailTokens
+	stats.ReusedStable = true
+	return reuseStableReductionPrefix(previous.Messages, messages), stats, true
 }
 
 func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {

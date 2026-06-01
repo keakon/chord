@@ -98,6 +98,34 @@ func (p *countingCompactionProvider) InvalidateRouting(reason string) {
 	p.invalidations = append(p.invalidations, reason)
 }
 
+func isZeroContextReductionStats(stats ContextReductionStats) bool {
+	return stats.Messages == 0 &&
+		stats.Bytes == 0 &&
+		stats.TokensSaved == 0 &&
+		!stats.Protected &&
+		!stats.ReusedStable &&
+		len(stats.ByToolAndRule) == 0
+}
+
+func contextReductionStatsEqual(a, b ContextReductionStats) bool {
+	if a.Messages != b.Messages ||
+		a.Bytes != b.Bytes ||
+		a.TokensBefore != b.TokensBefore ||
+		a.TokensAfter != b.TokensAfter ||
+		a.TokensSaved != b.TokensSaved ||
+		a.Protected != b.Protected ||
+		a.ReusedStable != b.ReusedStable ||
+		len(a.ByToolAndRule) != len(b.ByToolAndRule) {
+		return false
+	}
+	for key, av := range a.ByToolAndRule {
+		if bv, ok := b.ByToolAndRule[key]; !ok || bv != av {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *countingSummaryOnlyProvider) CompleteStream(
 	_ context.Context,
 	_ string,
@@ -388,8 +416,69 @@ func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing
 		t.Fatalf("expected initial reduction stats, got %+v", stats)
 	}
 	_ = a.prepareMessagesForLLM([]message.Message{{Role: "user", Content: "short"}})
-	if stats := a.GetContextReductionStats(); stats != (ContextReductionStats{}) {
+	if stats := a.GetContextReductionStats(); !isZeroContextReductionStats(stats) {
 		t.Fatalf("expected stats reset when request has no reduction, got %+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIncrease(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context:   config.ContextConfig{Reduction: config.ContextReductionConfig{MinIncrementalTokens: 4096, HighPressureUsage: 0.80, ForcePruneUsage: 0.90}},
+		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
+	}
+	a.providerModelRef = "codex/gpt-5.5"
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 65536, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 4096, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.newTurn()
+
+	largeOutput := strings.Repeat("first output line\n", 900)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+	for i := 0; i < 14; i++ {
+		msgs = append(msgs,
+			message.Message{Role: "assistant", Content: fmt.Sprintf("ack %d", i)},
+			message.Message{Role: "user", Content: fmt.Sprintf("continue %d", i)},
+		)
+	}
+	a.prepareMessagesForLLM(msgs)
+	firstStats := a.GetContextReductionStats()
+	if firstStats.TokensSaved <= 0 {
+		t.Fatalf("expected first request to reduce, stats=%+v", firstStats)
+	}
+
+	second := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		message.Message{Role: "tool", ToolCallID: "tc2", Content: "Replaced 1 occurrence\n\nDiagnostics:\n" + strings.Repeat("[E] 1:1 small diagnostic\n", 40)},
+		message.Message{Role: "assistant", Content: "ack2"},
+		message.Message{Role: "user", Content: "u4"},
+	)
+	prepared := a.prepareMessagesForLLM(second)
+	stats := a.GetContextReductionStats()
+	if !stats.ReusedStable {
+		t.Fatalf("expected stable reduction surface reuse, stats=%+v", stats)
+	}
+	if stats.TokensSaved != firstStats.TokensSaved || stats.Messages != firstStats.Messages || stats.ByToolAndRule == nil {
+		t.Fatalf("stats = %+v, want first stats marked reused", stats)
+	}
+	if len(prepared) != len(second) {
+		t.Fatalf("prepared len = %d, want current request len %d", len(prepared), len(second))
+	}
+	if prepared[len(prepared)-1].Content != "u4" {
+		t.Fatalf("expected current tail to be preserved, got last message %+v", prepared[len(prepared)-1])
 	}
 }
 
@@ -632,7 +721,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if loopPrepared[7].Content != newLargeOutput {
 		t.Fatalf("loop should not prune messages added after frozen prefix, got %q", loopPrepared[7].Content)
 	}
-	if loopStats != firstStats {
+	if !contextReductionStatsEqual(loopStats, firstStats) {
 		t.Fatalf("loop reduction stats = %+v, want frozen %+v", loopStats, firstStats)
 	}
 
@@ -693,7 +782,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if prepared[7].Content != newLargeOutput {
 		t.Fatalf("low-quota continuation should not newly prune messages after frozen prefix, got %q", prepared[7].Content)
 	}
-	if stats := a.GetContextReductionStats(); stats != firstStats {
+	if stats := a.GetContextReductionStats(); !contextReductionStatsEqual(stats, firstStats) {
 		t.Fatalf("reduction stats = %+v, want frozen %+v", stats, firstStats)
 	}
 }
@@ -1099,7 +1188,7 @@ func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 
 	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: draft})
 
-	if got := a.GetContextReductionStats(); got != (ContextReductionStats{}) {
+	if got := a.GetContextReductionStats(); !isZeroContextReductionStats(got) {
 		t.Fatalf("context reduction stats after compaction = %+v, want zero", got)
 	}
 	a.loopReductionMu.Lock()
@@ -1107,10 +1196,10 @@ func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 	if len(a.loopState.FrozenReductionPrefix) != 0 {
 		t.Fatalf("FrozenReductionPrefix after compaction = %#v, want nil/empty", a.loopState.FrozenReductionPrefix)
 	}
-	if a.loopState.FrozenReductionStats != (ContextReductionStats{}) {
+	if !isZeroContextReductionStats(a.loopState.FrozenReductionStats) {
 		t.Fatalf("FrozenReductionStats after compaction = %+v, want zero", a.loopState.FrozenReductionStats)
 	}
-	if len(a.lastPreparedLLMRequestPrefix) != 0 || a.lastPreparedReductionStats != (ContextReductionStats{}) || a.lastPreparedLLMTurnID != 0 {
+	if len(a.lastPreparedLLMRequestPrefix) != 0 || !isZeroContextReductionStats(a.lastPreparedReductionStats) || a.lastPreparedLLMTurnID != 0 {
 		t.Fatalf("last prepared reduction snapshot not cleared: turn=%d prefix=%#v stats=%+v", a.lastPreparedLLMTurnID, a.lastPreparedLLMRequestPrefix, a.lastPreparedReductionStats)
 	}
 }

@@ -330,7 +330,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		continueCh:      make(chan continueMsg, 1),
 	}
 	s.runtimeState.set(SubAgentStateRunning, "")
-	if hasSkillTool && !cfg.Ruleset.IsDisabled("Skill") {
+	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
 

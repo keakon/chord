@@ -378,7 +378,7 @@ func applyParsedPatch(content string, patch parsedEdit) (string, []EditMatchSumm
 		if hunk.Header != "" {
 			headerMatch, headerResult, err := findFirstHunkMatch(fileLines, []string{hunk.Header}, searchStart)
 			if err != nil {
-				return "", nil, fmt.Errorf("failed to locate @@ header %q: %w", hunk.Header, err)
+				return "", nil, fmt.Errorf("failed to locate @@ header %q: %s No files were modified", hunk.Header, diagnoseMissingHunkHeader(fileLines, hunk.Header, searchStart))
 			}
 			summary.HeaderLine = headerMatch + 1
 			summary.HeaderCandidateLines = toPatchLineNumbers(headerResult.Candidates)
@@ -486,7 +486,120 @@ func findFirstHunkMatch(fileLines, oldSeq []string, start int) (int, hunkMatchRe
 		}
 		return idxs[0], hunkMatchResult{Layer: layer.name, Candidates: idxs}, nil
 	}
-	return 0, hunkMatchResult{}, fmt.Errorf("hunk not found. Re-read the target area and rebuild the hunk from the latest file contents; make sure context/removal lines omit Read's line-number gutter, match the current indentation and surrounding lines, and keep the hunk small. No files were modified")
+	return 0, hunkMatchResult{}, fmt.Errorf("hunk not found. %s No files were modified", diagnoseMissingHunk(fileLines, oldSeq, start))
+}
+
+func diagnoseMissingHunk(fileLines, oldSeq []string, start int) string {
+	if len(oldSeq) == 0 {
+		return "Add at least one unchanged or removed line to anchor the hunk."
+	}
+	if hunkLooksLikeReadOutput(oldSeq) {
+		return "The hunk appears to include Read output line numbers or the tab separator; remove the left line-number gutter and use only source text."
+	}
+	if start >= len(fileLines) {
+		return "The previous hunk matched near the end of the file, so this hunk starts searching past EOF; combine nearby edits or include context after the previous match."
+	}
+	if hasExactLineMatches(fileLines, oldSeq, start) {
+		return "Some hunk lines exist in the file, but not as one contiguous block; Re-read the target area and include the current surrounding lines."
+	}
+	if hasTrimmedLineMatches(fileLines, oldSeq, start) {
+		return "The expected text is present only after trimming whitespace; rebuild the hunk with the file's exact indentation and blank-line spacing."
+	}
+	return "The hunk text was not found in the current file; Re-read the target area and rebuild the hunk from the latest contents."
+}
+
+func diagnoseMissingHunkHeader(fileLines []string, header string, start int) string {
+	if start >= len(fileLines) {
+		return "The previous hunk matched near the end of the file, so this @@ header starts searching past EOF; combine nearby edits or include context after the previous match."
+	}
+	if identifier := hunkHeaderIdentifier(header); identifier != "" && !fileContainsSubstring(fileLines, identifier, start) {
+		return fmt.Sprintf("The @@ header anchor %q was not found in the current file; search/read the actual function, test, or symbol name before rebuilding the hunk.", identifier)
+	}
+	if hasTrimmedLineMatches(fileLines, []string{header}, start) {
+		return "The @@ header text is present only after trimming whitespace; copy the exact header line, including indentation and spacing."
+	}
+	return "The @@ header text was not found in the current file; Re-read or grep the target area and use an existing function, test, or symbol name as the anchor."
+}
+
+func hunkHeaderIdentifier(header string) string {
+	fields := strings.Fields(header)
+	for i, field := range fields {
+		if (field == "func" || field == "type" || field == "const" || field == "var") && i+1 < len(fields) {
+			return trimIdentifierSuffix(fields[i+1])
+		}
+	}
+	for _, field := range fields {
+		candidate := trimIdentifierSuffix(field)
+		if strings.HasPrefix(candidate, "Test") || strings.HasPrefix(candidate, "Benchmark") || strings.HasPrefix(candidate, "Example") {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func trimIdentifierSuffix(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for i, r := range s {
+		if !(r == '_' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return strings.Trim(s[:i], ".")
+		}
+	}
+	return strings.Trim(s, ".")
+}
+
+func fileContainsSubstring(fileLines []string, needle string, start int) bool {
+	if needle == "" {
+		return false
+	}
+	for i := start; i < len(fileLines); i++ {
+		if strings.Contains(fileLines[i], needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func hunkLooksLikeReadOutput(lines []string) bool {
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		digits := 0
+		for digits < len(trimmed) && trimmed[digits] >= '0' && trimmed[digits] <= '9' {
+			digits++
+		}
+		if digits > 0 && digits < len(trimmed) && trimmed[digits] == '\t' {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExactLineMatches(fileLines, oldSeq []string, start int) bool {
+	for _, want := range oldSeq {
+		for i := start; i < len(fileLines); i++ {
+			if fileLines[i] == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasTrimmedLineMatches(fileLines, oldSeq []string, start int) bool {
+	for _, want := range oldSeq {
+		trimmedWant := strings.TrimSpace(want)
+		if trimmedWant == "" {
+			continue
+		}
+		for i := start; i < len(fileLines); i++ {
+			if strings.TrimSpace(fileLines[i]) == trimmedWant {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func formatEditMatchSummary(matches []EditMatchSummary) string {
