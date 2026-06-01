@@ -7,12 +7,10 @@ import (
 	"github.com/keakon/chord/internal/buildinfo"
 )
 
-func TestDefaultMainVersionMatchesBuildinfoDefaultDevVersion(t *testing.T) {
-	if Version != buildinfo.DefaultDevVersion {
-		t.Fatalf("Version = %q, want %q", Version, buildinfo.DefaultDevVersion)
-	}
-	if buildinfo.Version != buildinfo.DefaultDevVersion {
-		t.Fatalf("buildinfo.Version = %q, want %q", buildinfo.Version, buildinfo.DefaultDevVersion)
+func TestDefaultMainVersionUsesResolvedBuildinfoVersion(t *testing.T) {
+	want := buildinfo.Current().Version
+	if Version != want {
+		t.Fatalf("Version = %q, want %q", Version, want)
 	}
 }
 

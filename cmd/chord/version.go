@@ -13,7 +13,7 @@ import (
 //
 // The CLI `--version` output is richer and is sourced from internal/buildinfo.
 // We keep Version bare so external integrations can rely on it.
-var Version = buildinfo.Version
+var Version = buildinfo.Current().Version
 
 func cliVersionTemplate() string {
 	return formatCLIVersionTemplate(buildinfo.Current())

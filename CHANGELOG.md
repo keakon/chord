@@ -2,7 +2,7 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.6.1 - 2026-06-01
 
 - TUI / File mentions: `@` file completion now falls back to direct root-directory prefix matching for non-empty queries like `@A`, so root files such as `AGENTS.md` can complete even when excluded from the cached Git-based index by `.gitignore` or local excludes. Explicit path-like queries such as `@docs/` or `@.config/` continue to use direct filesystem completion for the addressed directory instead of the cached index.
 - Tools / ApplyPatch: Codex-style `apply_patch` envelope markers are now tolerated in native `ApplyPatch` calls. Chord strips standalone `*** Begin Patch` / `*** End Patch` lines and a leading `*** Update File:` line when it matches the structured `path`, while still rejecting add/delete/move operations, multi-file patches, and mismatched update paths.

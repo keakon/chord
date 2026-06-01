@@ -10,6 +10,7 @@ package buildinfo
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -28,10 +29,10 @@ import (
 // build info when the build is performed inside a Git checkout with buildvcs
 // enabled, so Commit and Dirty remain populated even without ldflags.
 var (
-	// The default Version is the next development version after the latest release
-	// tag, so plain `go build ./cmd/chord` produces a useful local development
-	// identity without requiring ldflags. Bump it immediately after each release.
-	Version   = DefaultDevVersion
+	// Version may be set by release/CI builds via ldflags. When it is empty,
+	// Current falls back to the module version embedded by `go install @version`,
+	// then to DefaultDevVersion for local development builds.
+	Version   = ""
 	Commit    = ""
 	BuildTime = ""
 	Dirty     = ""
@@ -72,15 +73,20 @@ const (
 // at most once per process.
 var current = sync.OnceValue(computeCurrent)
 
+var (
+	semverTagPattern      = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
+	pseudoVersionSuffixRE = regexp.MustCompile(`(?:^|[.-])[0-9]{14}-[0-9a-fA-F]{12}$`)
+)
+
 // Current returns best-effort build metadata for the running binary. Explicit
 // ldflags values take precedence over Go VCS fallback fields. The result is
 // cached after the first call.
 func Current() Info { return current() }
 
 func computeCurrent() Info {
-	settings := readBuildSettings()
+	settings, moduleVersion := readBuildMetadata()
 	info := Info{
-		Version:   valueOrUnknown(Version),
+		Version:   resolvedVersion(Version, moduleVersion),
 		Commit:    strings.TrimSpace(Commit),
 		BuildTime: strings.TrimSpace(BuildTime),
 		VCSTime:   strings.TrimSpace(settings["vcs.time"]),
@@ -171,16 +177,31 @@ func (i Info) LogString() string {
 	return strings.Join(parts, " ")
 }
 
-func readBuildSettings() map[string]string {
+func readBuildMetadata() (map[string]string, string) {
 	settings := make(map[string]string)
 	bi, ok := debug.ReadBuildInfo()
 	if !ok || bi == nil {
-		return settings
+		return settings, ""
 	}
 	for _, setting := range bi.Settings {
 		settings[setting.Key] = setting.Value
 	}
-	return settings
+	return settings, bi.Main.Version
+}
+
+func resolvedVersion(explicitVersion, moduleVersion string) string {
+	if version := strings.TrimSpace(explicitVersion); version != "" {
+		return version
+	}
+	if version := strings.TrimSpace(moduleVersion); isReleaseModuleVersion(version) {
+		return version
+	}
+	return DefaultDevVersion
+}
+
+func isReleaseModuleVersion(version string) bool {
+	baseVersion, _, _ := strings.Cut(version, "+")
+	return semverTagPattern.MatchString(version) && !pseudoVersionSuffixRE.MatchString(baseVersion)
 }
 
 func executableMetadata() (string, string) {

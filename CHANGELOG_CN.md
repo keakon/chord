@@ -2,7 +2,7 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## 未发布
+## 0.6.1 - 2026-06-01
 
 - TUI / 文件引用：`@` 文件补全现在会在非空根目录前缀查询（如 `@A`）时，回退到直接检查工作区根目录，因此像 `AGENTS.md` 这类即使被 `.gitignore` 或本地 excludes 排除出缓存的 Git 索引，也仍可补全。像 `@docs/`、`@.config/` 这样的显式路径型查询则继续直接读取对应目录的文件系统补全，而不是停留在缓存索引上。
 - Tools / ApplyPatch：原生 `ApplyPatch` 调用现在会容忍 Codex 风格的 `apply_patch` envelope 标记。Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch`，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行；但仍会拒绝新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记。
