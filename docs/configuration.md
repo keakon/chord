@@ -61,10 +61,12 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 ### ApplyPatch arguments, matching, and display
 
 `ApplyPatch` receives the target file path as a structured `path` argument. Its
-`patch` argument contains hunk text only: `@@` hunk headers, leading-space
-context lines, `-` removed lines, and `+` added lines. Do not include Codex
-`apply_patch` envelope lines such as `*** Begin Patch`, `*** Update File`, or
-`*** End Patch`.
+`patch` argument normally contains hunk text: `@@` hunk headers, leading-space
+context lines, `-` removed lines, and `+` added lines. If a model accidentally
+includes Codex `apply_patch` envelope lines, Chord strips standalone
+`*** Begin Patch` / `*** End Patch` markers and a leading `*** Update File:`
+line when it matches the structured `path`. Add/delete/move operations,
+multi-file patches, and mismatched update paths are still rejected.
 
 `ApplyPatch` uses Codex-style ordered matching for the hunk body: each hunk, and
 any `@@` function/class/test header attached to that hunk, matches the first

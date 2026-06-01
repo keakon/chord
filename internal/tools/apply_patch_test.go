@@ -24,12 +24,49 @@ func TestApplyPatchParserRejectsUnsupportedOperations(t *testing.T) {
 		"*** Add File: a.txt\n+new\n",
 		"*** Delete File: a.txt\n",
 		"*** Move to: b.txt\n",
+		"*** Update File: b.txt\n@@\n-a\n+b\n",
 		"@@\n-a\n+b\n*** Update File: b.txt\n@@\n-c\n+d\n",
 	} {
 		_, err := ParseApplyPatch("a.txt", patch)
 		if err == nil || !strings.Contains(err.Error(), "No files were modified") {
 			t.Fatalf("ParseApplyPatch(%q) err = %v", patch, err)
 		}
+	}
+}
+
+func TestApplyPatchParserStripsEnvelopeMarkers(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch\n"
+	parsed, err := ParseApplyPatch("a.txt", patch)
+	if err != nil {
+		t.Fatalf("ParseApplyPatch: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 2 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestApplyPatchParserStripsTrailingEndPatch(t *testing.T) {
+	patch := "@@\n-old\n+new\n*** End Patch"
+	parsed, err := ParseApplyPatch("a.txt", patch)
+	if err != nil {
+		t.Fatalf("ParseApplyPatch: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Lines[1].Text != "new" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestApplyPatchParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
+	patch := "@@\n *** Begin Patch\n-old\n+new\n *** End Patch\n*** End Patch"
+	parsed, err := ParseApplyPatch("a.txt", patch)
+	if err != nil {
+		t.Fatalf("ParseApplyPatch: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 4 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if parsed.Hunks[0].Lines[0].Text != "*** Begin Patch" || parsed.Hunks[0].Lines[3].Text != "*** End Patch" {
+		t.Fatalf("parsed = %+v", parsed)
 	}
 }
 

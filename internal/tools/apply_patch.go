@@ -82,7 +82,7 @@ func (ApplyPatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy 
 }
 
 func (t ApplyPatchTool) Description() string {
-	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Do not include Codex apply_patch envelope lines such as *** Begin Patch, *** Update File, or *** End Patch. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
+	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
 }
 
 func (t ApplyPatchTool) Parameters() map[string]any {
@@ -95,7 +95,7 @@ func (t ApplyPatchTool) Parameters() map[string]any {
 			},
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Patch hunk text only. Do not include *** Begin Patch, *** Update File, or *** End Patch. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
+				"description": "Patch hunk text. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
 			},
 		},
 		"required":             []string{"path", "patch"},
@@ -216,6 +216,7 @@ func ParseApplyPatch(path, patchText string) (parsedApplyPatch, error) {
 	if err != nil {
 		return parsedApplyPatch{}, err
 	}
+	patchText = stripApplyPatchEnvelopeMarkers(cleanPath, patchText)
 	if strings.TrimSpace(patchText) == "" {
 		return parsedApplyPatch{}, fmt.Errorf("patch is required")
 	}
@@ -258,6 +259,35 @@ func ParseApplyPatch(path, patchText string) (parsedApplyPatch, error) {
 		}
 	}
 	return parsed, nil
+}
+
+func stripApplyPatchEnvelopeMarkers(path, patchText string) string {
+	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
+	cleaned := make([]string, 0, len(lines))
+	seenHunk := false
+	changed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case line == "*** Begin Patch" || line == "*** End Patch":
+			changed = true
+			continue
+		case !seenHunk && strings.HasPrefix(trimmed, "*** Update File:"):
+			updatePath := strings.TrimSpace(strings.TrimPrefix(trimmed, "*** Update File:"))
+			if cleanUpdatePath, err := validateApplyPatchPath(updatePath); err == nil && cleanUpdatePath == path {
+				changed = true
+				continue
+			}
+		}
+		if strings.HasPrefix(line, "@@") {
+			seenHunk = true
+		}
+		cleaned = append(cleaned, line)
+	}
+	if !changed {
+		return patchText
+	}
+	return strings.Join(cleaned, "\n")
 }
 
 func ExtractApplyPatchPathFromArgs(args json.RawMessage) string {

@@ -43,7 +43,7 @@ Chord 将行为配置与凭据配置分开管理。
 
 ### ApplyPatch 参数、匹配与展示
 
-`ApplyPatch` 通过结构化的 `path` 参数接收目标文件路径；`patch` 参数只包含 hunk 文本：`@@` hunk header、前导空格的上下文行、`-` 删除行和 `+` 新增行。不要包含 Codex `apply_patch` envelope 行，例如 `*** Begin Patch`、`*** Update File` 或 `*** End Patch`。
+`ApplyPatch` 通过结构化的 `path` 参数接收目标文件路径；`patch` 参数通常包含 hunk 文本：`@@` hunk header、前导空格的上下文行、`-` 删除行和 `+` 新增行。如果模型意外带上 Codex `apply_patch` envelope 行，Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch` 标记，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行。新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记仍会被拒绝。
 
 `ApplyPatch` 对 hunk body 采用 Codex 风格的顺序匹配：每个 hunk，以及附在该 hunk 上的 `@@` 函数 / 类 / 测试 header，都会从当前搜索位置之后选择第一处匹配。当某个 hunk 有多个候选位置时，Chord 会应用第一处匹配，并在工具结果中附带实际匹配行号和其他候选行号，方便模型按需重新 `Read` 验证。没有任何上下文/删除行的 hunk 会失败，因为工具无法确定插入位置。
 
