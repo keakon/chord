@@ -50,7 +50,7 @@ func (m *Model) refreshAtMentionList() {
 			} else {
 				matches = atMentionFuzzyMatches(m.atMentionFiles, m.atMentionQuery)
 			}
-			matches = mergeAtMentionOptions(matches, atMentionOptionsMissingFromIndex(rootMatches, m.atMentionFiles))
+			matches = mergeAtMentionOptions(matches, atMentionOptionsMissingFromIndex(rootMatches, m.atMentionFiles), m.atMentionQuery)
 		}
 	}
 

@@ -530,6 +530,65 @@ func TestRefreshAtMentionListKeepsIndexedOrderBeforeRootFallback(t *testing.T) {
 	}
 }
 
+func TestRefreshAtMentionListKeepsRootFallbackWhenIndexIsFull(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AtlasGuide.txt"), "atlas")
+	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "AtlasGuide.txt\n")
+
+	files := make([]string, 50)
+	for i := range files {
+		files[i] = fmt.Sprintf("amber-vault/a-%02d.txt", i)
+	}
+
+	m := NewModel(nil)
+	m.workingDir = wd
+	m.atMentionLoaded = true
+	m.atMentionFiles = files
+	m.atMentionOpen = true
+	m.atMentionQuery = "A"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want indexed and root fallback results")
+	}
+	if got := m.atMentionList.Len(); got != 50 {
+		t.Fatalf("atMentionList.Len() = %d, want capped result list", got)
+	}
+	first := m.atMentionList.items[0].Value.(atMentionOption)
+	if first.Path != "AtlasGuide.txt" || first.IsDir {
+		t.Fatalf("first merged result = %+v, want AtlasGuide.txt root fallback", first)
+	}
+}
+
+func TestRefreshAtMentionListPrefersCaseMatchingRootFallback(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AtlasGuide.txt"), "atlas")
+	mustWriteFile(t, filepath.Join(wd, "amber-map.json"), "{}")
+	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "AtlasGuide.txt\namber-map.json\n")
+
+	m := NewModel(nil)
+	m.workingDir = wd
+	m.atMentionLoaded = true
+	m.atMentionFiles = []string{"amber-vault/a-00.txt", "brook/amber-note.txt"}
+	m.atMentionOpen = true
+	m.atMentionQuery = "A"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want root fallback results")
+	}
+	item, ok := m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() ok = false, want true")
+	}
+	match := item.Value.(atMentionOption)
+	if match.Path != "AtlasGuide.txt" {
+		t.Fatalf("selected match = %+v, want uppercase prefix root fallback AtlasGuide.txt", match)
+	}
+}
+
 func TestAtMentionRootPrefixMatches(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
@@ -553,7 +612,7 @@ func TestAtMentionRootPrefixMatches(t *testing.T) {
 func TestMergeAtMentionOptions(t *testing.T) {
 	primary := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}}
 	secondary := []atMentionOption{{Path: "misc.md"}, {Path: "Makefile"}}
-	got := mergeAtMentionOptions(primary, secondary)
+	got := mergeAtMentionOptions(primary, secondary, "m")
 	want := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}, {Path: "Makefile"}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mergeAtMentionOptions() = %#v, want %#v", got, want)
@@ -564,12 +623,20 @@ func TestMergeAtMentionOptions(t *testing.T) {
 		primary = append(primary, atMentionOption{Path: fmt.Sprintf("p-%02d", i)})
 	}
 	secondary = []atMentionOption{{Path: "tail-0"}, {Path: "tail-1"}}
-	got = mergeAtMentionOptions(primary, secondary)
+	got = mergeAtMentionOptions(primary, secondary, "p")
 	if len(got) != 50 {
 		t.Fatalf("len(mergeAtMentionOptions()) = %d, want 50", len(got))
 	}
 	if got[49].Path != "tail-0" {
 		t.Fatalf("mergeAtMentionOptions()[49] = %q, want %q", got[49].Path, "tail-0")
+	}
+
+	primary = []atMentionOption{{Path: "amber-vault/a-00.txt"}, {Path: "brook/amber-note.txt"}}
+	secondary = []atMentionOption{{Path: "amber-map.json"}, {Path: "AtlasGuide.txt"}}
+	got = mergeAtMentionOptions(primary, secondary, "A")
+	want = []atMentionOption{{Path: "AtlasGuide.txt"}, {Path: "amber-vault/a-00.txt"}, {Path: "brook/amber-note.txt"}, {Path: "amber-map.json"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("case-sensitive mergeAtMentionOptions() = %#v, want %#v", got, want)
 	}
 }
 
@@ -608,6 +675,31 @@ func TestAtMentionFuzzyMatchesKeepsLowScoreMatches(t *testing.T) {
 	}
 	if got := matches[0].Path; got != "reports/stage1_stage2_design_doc.md" {
 		t.Fatalf("top fuzzy match = %q, want %q", got, "reports/stage1_stage2_design_doc.md")
+	}
+}
+
+func TestAtMentionFuzzyMatchesPreferShallowerPaths(t *testing.T) {
+	files := make([]string, 0, 62)
+	for i := 0; i < 60; i++ {
+		files = append(files, fmt.Sprintf("nebula/ring/%02d/AtlasGuide.txt", i))
+	}
+	files = append(files, "orbit/AtlasGuide.txt", "AtlasGuide.txt")
+
+	matches := atMentionFuzzyMatches(files, "A")
+
+	if len(matches) != 50 {
+		t.Fatalf("len(matches) = %d, want capped result list", len(matches))
+	}
+	if got := matches[0].Path; got != "AtlasGuide.txt" {
+		t.Fatalf("top fuzzy match = %q, want current-folder AtlasGuide.txt", got)
+	}
+	if got := matches[1].Path; got != "orbit/AtlasGuide.txt" {
+		t.Fatalf("second fuzzy match = %q, want one-level orbit/AtlasGuide.txt", got)
+	}
+	for _, match := range matches {
+		if match.Path == "nebula/ring/59/AtlasGuide.txt" {
+			t.Fatalf("deep unrelated path survived top-50 cap: %#v", match)
+		}
 	}
 }
 

@@ -551,15 +551,27 @@ func atMentionRootPrefixMatches(query, workingDir string) []atMentionOption {
 	return out
 }
 
-func mergeAtMentionOptions(primary, secondary []atMentionOption) []atMentionOption {
+func mergeAtMentionOptions(primary, secondary []atMentionOption, query string) []atMentionOption {
 	if len(primary) == 0 {
 		return secondary
 	}
 	if len(secondary) == 0 {
 		return primary
 	}
+	exactCaseSecondary, otherSecondary := splitAtMentionExactCasePrefixOptions(secondary, query)
+	if len(exactCaseSecondary) > 0 {
+		primary = append(exactCaseSecondary, primary...)
+		secondary = otherSecondary
+		if len(secondary) == 0 {
+			if len(primary) > 50 {
+				return primary[:50]
+			}
+			return primary
+		}
+	}
 	seen := make(map[string]bool, len(primary)+len(secondary))
 	out := make([]atMentionOption, 0, len(primary)+len(secondary))
+	const limit = 50
 	appendUnique := func(options []atMentionOption) {
 		for _, option := range options {
 			if seen[option.Path] {
@@ -567,16 +579,57 @@ func mergeAtMentionOptions(primary, secondary []atMentionOption) []atMentionOpti
 			}
 			seen[option.Path] = true
 			out = append(out, option)
-			if len(out) >= 50 {
+			if len(out) >= limit {
 				return
 			}
 		}
 	}
 	appendUnique(primary)
-	if len(out) < 50 {
-		appendUnique(secondary)
+	addedSecondary := false
+	for _, option := range secondary {
+		if seen[option.Path] {
+			continue
+		}
+		seen[option.Path] = true
+		if len(out) < limit {
+			out = append(out, option)
+			addedSecondary = true
+			continue
+		}
+		if addedSecondary {
+			break
+		}
+		out[len(out)-1] = option
+		break
 	}
 	return out
+}
+
+func splitAtMentionExactCasePrefixOptions(options []atMentionOption, query string) ([]atMentionOption, []atMentionOption) {
+	query = normalizeAtMentionQuery(query)
+	if query == "" || isPathLikeAtMentionQuery(query) || !atMentionQueryHasUpper(query) {
+		return nil, options
+	}
+	exact := make([]atMentionOption, 0, len(options))
+	other := make([]atMentionOption, 0, len(options))
+	for _, option := range options {
+		path := strings.TrimSuffix(unescapeAtMentionPath(option.Path), "/")
+		if strings.HasPrefix(path, query) {
+			exact = append(exact, option)
+		} else {
+			other = append(other, option)
+		}
+	}
+	return exact, other
+}
+
+func atMentionQueryHasUpper(query string) bool {
+	for _, r := range query {
+		if unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func atMentionOptionsMissingFromIndex(options []atMentionOption, files []string) []atMentionOption {
@@ -846,9 +899,6 @@ func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
 		}
 		if query == "" {
 			matched = append(matched, scored{path: file, score: 0, queryLower: query})
-			if len(matched) >= 50 {
-				break
-			}
 			continue
 		}
 		fileLower := strings.ToLower(file)
@@ -885,20 +935,33 @@ func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
 			matched = append(matched, scored{path: file, score: score, queryLower: query})
 		}
 	}
-	if query != "" {
-		slices.SortFunc(matched, func(a, b scored) int {
-			if a.score != b.score {
-				return a.score - b.score
+	slices.SortFunc(matched, func(a, b scored) int {
+		if !strings.Contains(query, "/") {
+			aDepth := atMentionPathDepth(a.path)
+			bDepth := atMentionPathDepth(b.path)
+			if aDepth != bDepth {
+				return aDepth - bDepth
 			}
-			return atMentionSortTieBreak(a.path, b.path, a.queryLower)
-		})
-		if len(matched) > 50 {
-			matched = matched[:50]
 		}
+		if a.score != b.score {
+			return a.score - b.score
+		}
+		return atMentionSortTieBreak(a.path, b.path, a.queryLower)
+	})
+	if len(matched) > 50 {
+		matched = matched[:50]
 	}
 	matches := make([]atMentionOption, len(matched))
 	for i, match := range matched {
 		matches[i] = atMentionOption{Path: escapeAtMentionPath(match.path)}
 	}
 	return matches
+}
+
+func atMentionPathDepth(path string) int {
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return 0
+	}
+	return strings.Count(path, "/")
 }
