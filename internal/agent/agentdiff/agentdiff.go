@@ -38,13 +38,14 @@ func CaptureApplyPatchPlan(tc message.ToolCall, baseDir string) (tools.ApplyPatc
 	switch tc.Name {
 	case tools.NameApplyPatch:
 		var args struct {
+			Path  string `json:"path"`
 			Patch string `json:"patch"`
 		}
 		rawArgs := llm.UnwrapToolArgs(tc.Args)
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
 			return tools.ApplyPatchPlan{}, err
 		}
-		plan, err := tools.BuildApplyPatchPlanInDir(args.Patch, baseDir)
+		plan, err := tools.BuildApplyPatchPlanInDir(args.Path, args.Patch, baseDir)
 		if err != nil {
 			return tools.ApplyPatchPlan{}, err
 		}

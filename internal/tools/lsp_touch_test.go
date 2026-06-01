@@ -39,7 +39,7 @@ func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 		t.Fatalf("seed WriteTool.Execute: %v", err)
 	}
 	mgr := lsp.NewManager(&config.Config{}, dir, nil)
-	args, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: patched.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	args, err := json.Marshal(map[string]any{"path": "patched.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}

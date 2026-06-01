@@ -133,7 +133,7 @@ func TestSpeculativeApplyPatchDiscardRestoresExistingFile(t *testing.T) {
 
 	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + filepath.Base(path) + `\n@@\n-before\n+after\n*** End Patch\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
@@ -175,7 +175,7 @@ func TestSpeculativeApplyPatchDiscardWhileExecutingRestoresExistingFile(t *testi
 		}
 		return result, err
 	})
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + filepath.Base(path) + `\n@@\n-before\n+after\n*** End Patch\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}

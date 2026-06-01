@@ -80,7 +80,7 @@ func TestSpeculativeExecutionPolicyRejectsMutationTools(t *testing.T) {
 		args string
 	}{
 		{tools.NameWrite, `{"path":"x.txt","content":"x"}`},
-		{tools.NameApplyPatch, `{"patch":"*** Begin Patch\n*** Update File: x.txt\n@@\n-old\n+new\n*** End Patch\n"}`},
+		{tools.NameApplyPatch, `{"path":"x.txt","patch":"@@\n-old\n+new\n"}`},
 		{tools.NameDelete, `{"paths":["x.txt"],"reason":"cleanup"}`},
 	}
 	for _, tc := range cases {

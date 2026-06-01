@@ -17,7 +17,7 @@ func toolCall(name string, args any) message.ToolCall {
 }
 
 func applyPatchArgs(path string) map[string]string {
-	return map[string]string{"patch": "*** Begin Patch\n*** Update File: " + filepath.ToSlash(path) + "\n@@\n before\n-after\n+AFTER\n*** End Patch\n"}
+	return map[string]string{"path": filepath.ToSlash(path), "patch": "@@\n before\n-after\n+AFTER\n"}
 }
 
 func TestCapturePreWriteState(t *testing.T) {

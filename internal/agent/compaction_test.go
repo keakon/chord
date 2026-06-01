@@ -251,7 +251,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n*** End Patch\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -271,7 +271,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLi
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nDiagnostics status: backend=LSP, new=1, resolved=0, current=1 errors, 0 warnings (best effort).\n[E] 10:1 [F821] Undefined name `x`"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n*** End Patch\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},

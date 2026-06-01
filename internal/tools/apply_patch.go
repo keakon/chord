@@ -23,6 +23,7 @@ type ApplyPatchTool struct {
 }
 
 type applyPatchArgs struct {
+	Path  string `json:"path"`
 	Patch string `json:"patch"`
 }
 
@@ -77,39 +78,27 @@ type applyPatchLine struct {
 func (t ApplyPatchTool) Name() string { return NameApplyPatch }
 
 func (ApplyPatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	path := applyPatchConcurrencyPath(args)
-	if path == "" {
-		return normalizeConcurrencyPolicy(NameApplyPatch, ConcurrencyPolicy{})
-	}
-	return filePathConcurrencyPolicy(path, false)
-}
-
-func applyPatchConcurrencyPath(args json.RawMessage) string {
-	var parsed applyPatchArgs
-	if json.Unmarshal(unwrapToolArgs(args), &parsed) != nil {
-		return ""
-	}
-	patch, err := ParseApplyPatch(parsed.Patch)
-	if err != nil {
-		return ""
-	}
-	return patch.Path
+	return normalizeConcurrencyPolicy(NameApplyPatch, fileToolConcurrencyPolicy(args, false))
 }
 
 func (t ApplyPatchTool) Description() string {
-	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"patch\":\"...\"} containing a single Codex-style patch with exactly one Update File section. The Update File path may be absolute or relative and supports ~ for the current user's home directory. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
+	return "Apply a patch to modify the contents of one existing file. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Do not include Codex apply_patch envelope lines such as *** Begin Patch, *** Update File, or *** End Patch. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...). Do not use a separate @@ hunk only as an anchor. Use Write to create a new file or intentionally replace an entire file, and Delete to remove whole files. Before ApplyPatch, make sure the file has been observed via Read or a system-resolved @file mention; if you need more surrounding context, Read the target area. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use Shell to run apply_patch."
 }
 
 func (t ApplyPatchTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Path to the existing file to update. May be absolute or relative and supports ~ for the current user's home directory.",
+			},
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Single-file patch text in Codex apply_patch format. Must contain exactly one *** Update File: <path> section between *** Begin Patch and *** End Patch. Paths may be absolute or relative and support ~ for the current user's home directory. Use context lines with a leading space, removed lines with -, and added lines with +. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
+				"description": "Patch hunk text only. Do not include *** Begin Patch, *** Update File, or *** End Patch. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk; do not use a separate earlier @@ hunk only as an anchor.",
 			},
 		},
-		"required":             []string{"patch"},
+		"required":             []string{"path", "patch"},
 		"additionalProperties": false,
 	}
 }
@@ -124,7 +113,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	plan, ok := applyPatchPlanFromContext(ctx)
 	if !ok {
 		var err error
-		plan, err = BuildApplyPatchPlanInDir(a.Patch, t.BaseDir)
+		plan, err = BuildApplyPatchPlanInDir(a.Path, a.Patch, t.BaseDir)
 		if err != nil {
 			return "", err
 		}
@@ -133,9 +122,6 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("patch makes no changes. No files were modified")
 	}
 	baseDir := t.BaseDir
-	if baseDir == "" {
-		baseDir = os.Getenv("CHORD_PROJECT_ROOT")
-	}
 	resolvedPath, err := resolveApplyPatchPathForBase(plan.Path, baseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w. No files were modified", err)
@@ -180,21 +166,18 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	return out, nil
 }
 
-func BuildApplyPatchPlanInDir(patchText, baseDir string) (ApplyPatchPlan, error) {
-	return buildApplyPatchPlan(patchText, baseDir)
+func BuildApplyPatchPlanInDir(path, patchText, baseDir string) (ApplyPatchPlan, error) {
+	return buildApplyPatchPlan(path, patchText, baseDir)
 }
 
-func BuildApplyPatchPlan(patchText string) (ApplyPatchPlan, error) {
-	return buildApplyPatchPlan(patchText, "")
+func BuildApplyPatchPlan(path, patchText string) (ApplyPatchPlan, error) {
+	return buildApplyPatchPlan(path, patchText, "")
 }
 
-func buildApplyPatchPlan(patchText, baseDir string) (ApplyPatchPlan, error) {
-	parsed, err := ParseApplyPatch(patchText)
+func buildApplyPatchPlan(path, patchText, baseDir string) (ApplyPatchPlan, error) {
+	parsed, err := ParseApplyPatch(path, patchText)
 	if err != nil {
 		return ApplyPatchPlan{}, err
-	}
-	if baseDir == "" {
-		baseDir = os.Getenv("CHORD_PROJECT_ROOT")
 	}
 	resolvedPath, err := resolveApplyPatchPathForBase(parsed.Path, baseDir)
 	if err != nil {
@@ -228,45 +211,29 @@ func buildApplyPatchPlan(patchText, baseDir string) (ApplyPatchPlan, error) {
 	return ApplyPatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, Matches: matches}, nil
 }
 
-func ParseApplyPatch(patchText string) (parsedApplyPatch, error) {
+func ParseApplyPatch(path, patchText string) (parsedApplyPatch, error) {
+	cleanPath, err := validateApplyPatchPath(path)
+	if err != nil {
+		return parsedApplyPatch{}, err
+	}
 	if strings.TrimSpace(patchText) == "" {
 		return parsedApplyPatch{}, fmt.Errorf("patch is required")
 	}
 	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
-	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "*** Begin Patch" || strings.TrimSpace(lines[len(lines)-1]) != "*** End Patch" {
-		return parsedApplyPatch{}, fmt.Errorf("invalid patch: expected *** Begin Patch and *** End Patch. No files were modified")
-	}
-	var parsed parsedApplyPatch
+	parsed := parsedApplyPatch{Path: cleanPath}
 	var current *applyPatchHunk
-	seenUpdate := false
-	for i := 1; i < len(lines)-1; i++ {
-		line := lines[i]
+	for _, line := range lines {
 		switch {
-		case strings.HasPrefix(line, "*** Update File:"):
-			if seenUpdate {
-				return parsedApplyPatch{}, fmt.Errorf("invalid patch: multiple Update File sections are not supported. No files were modified")
-			}
-			seenUpdate = true
-			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Update File:"))
-			clean, err := validateApplyPatchPath(path)
-			if err != nil {
-				return parsedApplyPatch{}, err
-			}
-			parsed.Path = clean
-			current = nil
-		case strings.HasPrefix(line, "*** Add File:") || strings.HasPrefix(line, "*** Delete File:") || strings.HasPrefix(line, "*** Move to:"):
+		case strings.HasPrefix(line, "*** Add File:") || strings.HasPrefix(line, "*** Delete File:") || strings.HasPrefix(line, "*** Move to:") || strings.HasPrefix(line, "*** Update File:"):
 			return parsedApplyPatch{}, fmt.Errorf("unsupported patch operation. %s No files were modified", applyPatchUnsupportedOperationHint)
 		case strings.HasPrefix(line, "***"):
 			return parsedApplyPatch{}, fmt.Errorf("unsupported patch operation %q. %s No files were modified", line, applyPatchUnsupportedOperationHint)
 		case strings.HasPrefix(line, "@@"):
-			if !seenUpdate {
-				return parsedApplyPatch{}, fmt.Errorf("invalid patch: hunk appears before Update File. No files were modified")
-			}
 			header := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
 			parsed.Hunks = append(parsed.Hunks, applyPatchHunk{Header: header})
 			current = &parsed.Hunks[len(parsed.Hunks)-1]
 		default:
-			if !seenUpdate || current == nil {
+			if current == nil {
 				if strings.TrimSpace(line) == "" {
 					continue
 				}
@@ -281,9 +248,6 @@ func ParseApplyPatch(patchText string) (parsedApplyPatch, error) {
 			}
 			current.Lines = append(current.Lines, applyPatchLine{Kind: kind, Text: line[1:]})
 		}
-	}
-	if !seenUpdate {
-		return parsedApplyPatch{}, fmt.Errorf("invalid patch: missing Update File section. %s No files were modified", applyPatchUnsupportedOperationHint)
 	}
 	if len(parsed.Hunks) == 0 {
 		return parsedApplyPatch{}, fmt.Errorf("invalid patch: missing hunk. No files were modified")
@@ -305,13 +269,17 @@ func ExtractApplyPatchPathFromArgsInDir(args json.RawMessage, baseDir string) st
 	if json.Unmarshal(unwrapToolArgs(args), &parsed) != nil {
 		return ""
 	}
-	patch, err := ParseApplyPatch(parsed.Patch)
+	path := parsed.Path
+	if path == "" {
+		path = extractLegacyApplyPatchEnvelopePath(parsed.Patch)
+	}
+	path, err := validateApplyPatchPath(path)
 	if err != nil {
 		return ""
 	}
-	resolved, err := resolveApplyPatchPathForBase(patch.Path, baseDir)
+	resolved, err := resolveApplyPatchPathForBase(path, baseDir)
 	if err != nil {
-		return patch.Path
+		return path
 	}
 	abs, err := filepath.Abs(resolved)
 	if err == nil {
@@ -323,27 +291,38 @@ func ExtractApplyPatchPathFromArgsInDir(args json.RawMessage, baseDir string) st
 	return filepath.Clean(resolved)
 }
 
+func extractLegacyApplyPatchEnvelopePath(patchText string) string {
+	lines := splitPatchLines(strings.ReplaceAll(patchText, "\r\n", "\n"))
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
+		return ""
+	}
+	for _, line := range lines[1:] {
+		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "*** Update File:"); ok {
+			return strings.TrimSpace(path)
+		}
+	}
+	return ""
+}
+
 func resolveApplyPatchPathForBase(path, baseDir string) (string, error) {
 	resolved, err := resolveToolPath(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve path: %w", err)
 	}
 	if strings.TrimSpace(baseDir) != "" && !filepath.IsAbs(resolved) {
 		resolved = filepath.Join(baseDir, resolved)
-	} else if !filepath.IsAbs(resolved) {
-		if root := strings.TrimSpace(os.Getenv("CHORD_PROJECT_ROOT")); root != "" {
-			resolved = filepath.Join(root, resolved)
-		}
 	}
 	return filepath.Clean(resolved), nil
 }
 
 func validateApplyPatchPath(path string) (string, error) {
-	path = strings.TrimSpace(path)
 	if path == "" {
-		return "", fmt.Errorf("invalid patch path: path is required. No files were modified")
+		return "", fmt.Errorf("path is required. No files were modified")
 	}
-	clean := filepath.Clean(path)
+	clean, err := resolveToolPath(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
 	if clean == "." || clean == "" {
 		return "", fmt.Errorf("invalid patch path %q: path is required. No files were modified", path)
 	}

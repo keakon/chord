@@ -1048,7 +1048,15 @@ func codexNormalizeApplyPatchArgs(args map[string]any) json.RawMessage {
 	if patch == "" {
 		return nil
 	}
-	result := map[string]any{"patch": patch}
+	path := codexPickString(args, "path", "file_path", "file")
+	if path == "" {
+		var ok bool
+		path, patch, ok = splitImportedApplyPatchEnvelope(patch)
+		if !ok {
+			return nil
+		}
+	}
+	result := map[string]any{"path": path, "patch": patch}
 	b, _ := json.Marshal(result)
 	return b
 }
@@ -1060,8 +1068,8 @@ func codexNormalizeEditFileArgs(args map[string]any) json.RawMessage {
 	if path == "" || oldText == "" {
 		return nil
 	}
-	patch := buildSingleUpdatePatch(path, oldText, newText)
-	result := map[string]any{"patch": patch}
+	patch := buildSingleUpdatePatch(oldText, newText)
+	result := map[string]any{"path": path, "patch": patch}
 	b, _ := json.Marshal(result)
 	return b
 }
@@ -1212,16 +1220,35 @@ func codexPickStringList(m map[string]any, keys ...string) []string {
 	return nil
 }
 
-func buildSingleUpdatePatch(path, oldText, newText string) string {
+func buildSingleUpdatePatch(oldText, newText string) string {
 	var b strings.Builder
-	b.WriteString("*** Begin Patch\n")
-	b.WriteString("*** Update File: ")
-	b.WriteString(path)
-	b.WriteString("\n@@\n")
+	b.WriteString("@@\n")
 	writePatchLines(&b, "-", oldText)
 	writePatchLines(&b, "+", newText)
-	b.WriteString("*** End Patch")
 	return b.String()
+}
+
+func splitImportedApplyPatchEnvelope(patch string) (string, string, bool) {
+	lines := strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n")
+	if len(lines) < 4 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
+		return "", "", false
+	}
+	path, ok := strings.CutPrefix(strings.TrimSpace(lines[1]), "*** Update File:")
+	if !ok || strings.TrimSpace(path) == "" {
+		return "", "", false
+	}
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	if end <= 2 || strings.TrimSpace(lines[end-1]) != "*** End Patch" {
+		return "", "", false
+	}
+	body := strings.Join(lines[2:end-1], "\n")
+	if body != "" {
+		body += "\n"
+	}
+	return strings.TrimSpace(path), body, true
 }
 
 func writePatchLines(b *strings.Builder, prefix, text string) {

@@ -29,7 +29,7 @@ func TestMainAgent_ApplyPatchRequiresPriorRead(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ApplyPatchTool{})
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestMainAgent_ApplyPatchReadPreconditionTreatsEquivalentRelativeAndAbsolute
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	patch1Obj := map[string]any{"patch": "*** Begin Patch\n*** Update File: " + filepath.Base(path) + "\n@@\n-before\n+after\n*** End Patch\n"}
+	patch1Obj := map[string]any{"path": filepath.Base(path), "patch": "@@\n-before\n+after\n"}
 	patch1Raw, err := json.Marshal(patch1Obj)
 	if err != nil {
 		t.Fatalf("Marshal patch1 args: %v", err)
@@ -117,7 +117,7 @@ func TestMainAgent_ConsecutiveApplyPatchesWithWrappedArgsDoNotTriggerStaleRead(t
 		t.Fatalf("ApplyPatch-1 failed: %v", err)
 	}
 
-	patch2Obj := map[string]any{"patch": "*** Begin Patch\n*** Update File: " + filepath.Base(path) + "\n@@\n-after\n+final\n*** End Patch\n"}
+	patch2Obj := map[string]any{"path": filepath.Base(path), "patch": "@@\n-after\n+final\n"}
 	patch2Raw, err := json.Marshal(patch2Obj)
 	if err != nil {
 		t.Fatalf("Marshal patch2 args: %v", err)
@@ -162,7 +162,7 @@ func TestMainAgent_ApplyPatchReportsDiskDriftWithRereadGuidance(t *testing.T) {
 		t.Fatalf("WriteFile external change: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}

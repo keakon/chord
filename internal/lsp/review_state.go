@@ -65,17 +65,13 @@ func extractReviewFilePaths(args json.RawMessage) []string {
 
 func extractReviewApplyPatchPath(args json.RawMessage) string {
 	var parsed struct {
+		Path  string `json:"path"`
 		Patch string `json:"patch"`
 	}
 	if err := json.Unmarshal(args, &parsed); err != nil {
 		return ""
 	}
-	for line := range strings.SplitSeq(strings.ReplaceAll(parsed.Patch, "\r\n", "\n"), "\n") {
-		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "*** Update File: "); ok {
-			return strings.TrimSpace(path)
-		}
-	}
-	return ""
+	return strings.TrimSpace(parsed.Path)
 }
 
 func parseDeleteReviewResult(text string) deleteResultGroups {

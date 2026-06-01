@@ -14,7 +14,7 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
 				{ID: "write-1", Name: "Write", Args: json.RawMessage(`{"path":"a.go","content":"package main"}`)},
-				{ID: "patch-1", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: b.go\n@@\n-old\n+new\n*** End Patch\n"}`)},
+				{ID: "patch-1", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"b.go","patch":"@@\n-old\n+new\n"}`)},
 				{ID: "delete-1", Name: "Delete", Args: json.RawMessage(`{"paths":["a.go"],"reason":"cleanup"}`)},
 			},
 		},
@@ -51,7 +51,7 @@ func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "patch-stale", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n@@\n-old\n+bad\n*** End Patch\n"}`)},
+				{ID: "patch-stale", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-old\n+bad\n"}`)},
 			},
 		},
 		{
@@ -63,7 +63,7 @@ func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "patch-clean", Name: "ApplyPatch", Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n@@\n-bad\n+good\n*** End Patch\n"}`)},
+				{ID: "patch-clean", Name: "ApplyPatch", Args: json.RawMessage(`{"path":"a.go","patch":"@@\n-bad\n+good\n"}`)},
 			},
 		},
 		{

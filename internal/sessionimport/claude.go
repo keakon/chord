@@ -936,7 +936,11 @@ func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMes
 	}
 	if strings.EqualFold(name, "Update") {
 		if patch := claudePickString(args, "patch", "input"); patch != "" {
-			b, _ := json.Marshal(map[string]any{"patch": patch})
+			path, body, ok := splitImportedApplyPatchEnvelope(patch)
+			if !ok {
+				return nil
+			}
+			b, _ := json.Marshal(map[string]any{"path": path, "patch": body})
 			return b
 		}
 	}
@@ -950,10 +954,6 @@ func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMes
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*** Begin Patch\n")
-		b.WriteString("*** Update File: ")
-		b.WriteString(path)
-		b.WriteString("\n")
 		for _, rawEdit := range edits {
 			edit, ok := rawEdit.(map[string]any)
 			if !ok {
@@ -968,8 +968,7 @@ func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMes
 			writePatchLines(&b, "-", oldText)
 			writePatchLines(&b, "+", newText)
 		}
-		b.WriteString("*** End Patch")
-		out, _ := json.Marshal(map[string]any{"patch": b.String()})
+		out, _ := json.Marshal(map[string]any{"path": path, "patch": b.String()})
 		return out
 	}
 	oldText := claudePickString(args, "old_string", "old", "old_text")
@@ -977,8 +976,8 @@ func normalizeClaudeApplyPatchArgs(name string, raw json.RawMessage) json.RawMes
 	if oldText == "" {
 		return nil
 	}
-	patch := buildSingleUpdatePatch(path, oldText, newText)
-	out, _ := json.Marshal(map[string]any{"patch": patch})
+	patch := buildSingleUpdatePatch(oldText, newText)
+	out, _ := json.Marshal(map[string]any{"path": path, "patch": patch})
 	return out
 }
 

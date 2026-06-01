@@ -513,7 +513,7 @@ func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
 		t.Fatalf("unmarshal args: %v", err)
 	}
 	patch, _ := args["patch"].(string)
-	if !strings.Contains(patch, "*** Update File: notes.txt") || !strings.Contains(patch, "-hello") || !strings.Contains(patch, "+hi") {
+	if args["path"] != "notes.txt" || !strings.Contains(patch, "-hello") || !strings.Contains(patch, "+hi") {
 		t.Fatalf("patch=%q", patch)
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_e" || !strings.Contains(msgs[2].Content, "ok") {
@@ -524,7 +524,7 @@ func TestConvertCodexRollout_EditToolConvertsToApplyPatch(t *testing.T) {
 func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToApplyPatch(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"patch it"}],"turn_id":"turn-1"}}
-{"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch","call_id":"call_patch","turn_id":"turn-1"}}
+{"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File:a.txt\n@@\n-old\n+new\n*** End Patch","call_id":"call_patch","turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"Success. Updated the following files:\nM a.txt","call_id":"call_patch","turn_id":"turn-1"}}
 `)
 
@@ -548,8 +548,11 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToApplyPatch(t *testing
 		t.Fatalf("unmarshal args: %v", err)
 	}
 	patch, _ := args["patch"].(string)
-	if !strings.Contains(patch, "*** Begin Patch") || !strings.Contains(patch, "*** Update File: a.txt") {
+	if args["path"] != "a.txt" || !strings.Contains(patch, "-old") || !strings.Contains(patch, "+new") {
 		t.Fatalf("patch not preserved: %#v", args)
+	}
+	if strings.Contains(patch, "*** Update File") || strings.Contains(patch, "*** Begin Patch") || strings.Contains(patch, "*** End Patch") {
+		t.Fatalf("patch should be converted to hunk-only format: %q", patch)
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_patch" || !strings.Contains(msgs[2].Content, "Success") {
 		t.Fatalf("tool result not linked: %+v", msgs[2])

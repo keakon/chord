@@ -7,8 +7,6 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
-
-	"github.com/keakon/chord/internal/tools"
 )
 
 // PatternCandidate represents a suggested rule pattern for a tool invocation.
@@ -383,9 +381,6 @@ func extractShellCommand(argsJSON string) string {
 
 // extractFilePath extracts the file path from ApplyPatch/Write tool args JSON.
 func extractFilePath(argsJSON string) string {
-	if path := tools.ExtractApplyPatchPathFromArgs([]byte(argsJSON)); path != "" {
-		return path
-	}
 	var parsed struct {
 		Path       string `json:"path"`
 		TargetFile string `json:"TargetFile"`

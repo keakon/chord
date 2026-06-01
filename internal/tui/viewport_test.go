@@ -627,7 +627,7 @@ func TestExtractSelectionTextApplyPatchDiffPreservesLineNumAndMarker(t *testing.
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: tools.NameApplyPatch,
-		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:  `{"path":"example.py","patch":"@@\n-old\n+new\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +

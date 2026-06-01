@@ -32,7 +32,7 @@ func TestMainAgent_ApplyPatchRequiresObservationFirst(t *testing.T) {
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.ApplyPatchTool{})
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestMainAgent_ApplyPatchAfterWriteUsesWriteAsObservation(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestMainAgent_ApplyPatchAfterFileMentionObservation(t *testing.T) {
 	a.tools.Register(tools.ApplyPatchTool{})
 	a.recordCommittedUserMessage(message.Message{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: `<file path="` + path + `">` + "\nbefore\n</file>"}}})
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestMainAgent_ApplyPatchStaleCreatesBackup(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-external\n+after\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestMainAgent_ApplyPatchBackupFailureDoesNotBlockEdit(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: large.txt\n@@\n-external\n+patched\n*** End Patch\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "large.txt", "patch": "@@\n-external\n+patched\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}

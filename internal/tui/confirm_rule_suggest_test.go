@@ -95,7 +95,7 @@ func TestSuggestRulePatterns_WriteFile(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_ApplyPatchFile(t *testing.T) {
-	candidates := suggestRulePatterns("ApplyPatch", `{"patch":"*** Begin Patch\n*** Update File: docs/README.md\n@@\n-old\n+new\n*** End Patch\n"}`, nil, "/home/user/project")
+	candidates := suggestRulePatterns("ApplyPatch", `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, "/home/user/project")
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for ApplyPatch tool")
 	}

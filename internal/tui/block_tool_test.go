@@ -1766,7 +1766,7 @@ func TestCancelledApplyPatchCallSuppressesDiffPreviewAndDuplicateCancelledText(t
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameApplyPatch,
-		Content:       `{"patch":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-a\n+b\n*** End Patch\n"}`,
+		Content:       `{"path":"foo.txt","patch":"@@\n-a\n+b\n"}`,
 		Diff:          "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		ResultContent: "Cancelled",
 		ResultStatus:  agent.ToolResultStatusCancelled,

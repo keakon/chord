@@ -71,7 +71,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 		}, nil
 	})
 	exec.SetTraceCallbacks(nil, func(_, _ string, _ time.Time) { close(completed) }, nil)
-	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch\n"}`)}) {
+	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+after\n"}`)}) {
 		t.Fatal("Start returned false")
 	}
 	select {
@@ -84,7 +84,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 	var payload *ToolResultPayload
 	var ok, drift bool
 	go func() {
-		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+final\n*** End Patch\n"}`)})
+		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+final\n"}`)})
 		close(promoteReturned)
 	}()
 

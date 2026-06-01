@@ -2738,13 +2738,13 @@ func TestApplyPatchToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 		ID:       "call-patch-progress-hide-1",
 		Name:     tools.NameApplyPatch,
 		AgentID:  "",
-		ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+abcdef\n*** End Patch\n"}`,
+		ArgsJSON: `{"path":"demo.txt","patch":"@@\n-old\n+abcdef\n"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
 		ID:       "call-patch-progress-hide-1",
 		Name:     tools.NameApplyPatch,
 		AgentID:  "",
-		ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+abcdef\n*** End Patch\n"}`,
+		ArgsJSON: `{"path":"demo.txt","patch":"@@\n-old\n+abcdef\n"}`,
 		State:    agent.ToolCallExecutionStateRunning,
 	}})
 
@@ -3223,8 +3223,8 @@ func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T
 func TestToolResultEventApplyPatchTracksEditedFile(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.sidebar.Update(nil, "main", "builder")
-	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch\n"
-	args, _ := json.Marshal(map[string]string{"patch": patch})
+	patch := "@@\n-old\n+new\n"
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": patch})
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-apply-patch-1",
@@ -4723,7 +4723,7 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 func TestMessagesToBlocksRestoredApplyPatchWithoutToolDiffShowsResult(t *testing.T) {
 	nextID := 1
 	msgs := []message.Message{
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameApplyPatch, Args: []byte(`{"patch":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-old\n+new\n*** End Patch\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameApplyPatch, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
 		{Role: "tool", ToolCallID: "patch-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(agent.ToolResultStatusSuccess)},
 	}
 
@@ -4765,7 +4765,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 		{
 			name:     "apply patch error",
 			toolName: tools.NameApplyPatch,
-			args:     json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-old\n+new\n*** End Patch\n"}`),
+			args:     json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
 			content:  "hunk not found; re-read the file before applying the patch",
 			status:   agent.ToolResultStatusError,
 			want:     []string{"↳ Error:", "hunk not found"},

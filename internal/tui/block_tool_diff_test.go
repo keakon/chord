@@ -16,8 +16,8 @@ import (
 )
 
 func TestApplyPatchToolCardRendersHighlightedDiffWithPath(t *testing.T) {
-	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch\n"
-	args, _ := json.Marshal(map[string]string{"patch": patch})
+	patch := "@@\n-old\n+new\n"
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": patch})
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -351,7 +351,7 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 		ID:                1,
 		Type:              BlockToolCall,
 		ToolName:          tools.NameApplyPatch,
-		Content:           fmt.Sprintf(`{"patch":"*** Begin Patch\n*** Update File: %s\n@@\n-old\n+new\n*** End Patch\n"}`, filepath.Join("internal", "tui", "example.go")),
+		Content:           fmt.Sprintf(`{"path":"%s","patch":"@@\n-old\n+new\n"}`, filepath.Join("internal", "tui", "example.go")),
 		Diff:              "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 		ResultDone:        true,
 		ResultStatus:      agent.ToolResultStatusSuccess,
@@ -370,7 +370,7 @@ func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: tools.NameApplyPatch,
-		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:  `{"path":"example.py","patch":"@@\n-old\n+new\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,4 +8,5 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +
@@ -393,7 +393,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: tools.NameApplyPatch,
-		Content:  `{"patch":"*** Begin Patch\n*** Update File: example.py\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:  `{"path":"example.py","patch":"@@\n-old\n+new\n"}`,
 		Diff: "--- a/example.py\n+++ b/example.py\n@@ -8,5 +8,4 @@\n" +
 			" def build_items():\n" +
 			"     items = [\n" +
@@ -422,7 +422,7 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 		ID:           1,
 		Type:         BlockToolCall,
 		ToolName:     tools.NameApplyPatch,
-		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         diff,
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -444,7 +444,7 @@ func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 		ID:           1,
 		Type:         BlockToolCall,
 		ToolName:     tools.NameApplyPatch,
-		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -466,7 +466,7 @@ func TestRenderFileDiffCallOverHardColumnLimitUsesTwoLines(t *testing.T) {
 		ID:           1,
 		Type:         BlockToolCall,
 		ToolName:     tools.NameApplyPatch,
-		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,
@@ -488,7 +488,7 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 		ID:           1,
 		Type:         BlockToolCall,
 		ToolName:     tools.NameApplyPatch,
-		Content:      `{"patch":"*** Begin Patch\n*** Update File: example.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
 		ResultStatus: agent.ToolResultStatusSuccess,

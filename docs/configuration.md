@@ -58,18 +58,24 @@ for the provider to fully finalize the response. This reduces the "finalize gap"
 - Speculative results may be shown early in the UI, but they are only appended to
   the conversation context after finalize validation.
 
-### ApplyPatch matching and display
+### ApplyPatch arguments, matching, and display
 
-`ApplyPatch` uses Codex-style ordered matching for single-file updates: each
-hunk, and any `@@` function/class/test header attached to that hunk, matches the
-first occurrence after the current search position. When a hunk has multiple
-candidate locations, Chord applies the first match and includes the matched line
-number plus any other candidate line numbers in the tool result so the model can
-read back the area if needed. Hunks with no context/removal lines fail because
-there is no insertion point to match.
+`ApplyPatch` receives the target file path as a structured `path` argument. Its
+`patch` argument contains hunk text only: `@@` hunk headers, leading-space
+context lines, `-` removed lines, and `+` added lines. Do not include Codex
+`apply_patch` envelope lines such as `*** Begin Patch`, `*** Update File`, or
+`*** End Patch`.
+
+`ApplyPatch` uses Codex-style ordered matching for the hunk body: each hunk, and
+any `@@` function/class/test header attached to that hunk, matches the first
+occurrence after the current search position. When a hunk has multiple candidate
+locations, Chord applies the first match and includes the matched line number
+plus any other candidate line numbers in the tool result so the model can read
+back the area if needed. Hunks with no context/removal lines fail because there
+is no insertion point to match.
 
 While arguments stream, an `ApplyPatch` tool card follows `Write`-style path
-display: no file path is shown until Chord can parse the real `Update File` path;
+display: no file path is shown until Chord can parse the structured `path`;
 once parsed, the path is shown in the card header.
 
 ## Minimal provider config
