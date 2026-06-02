@@ -434,7 +434,7 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	// Read current credential under authConfigMu.
 	r.authConfigMu.Lock()
 	creds := (*r.authConfig)[p.name]
-	if credIdx >= len(creds) || creds[credIdx].OAuth == nil {
+	if credIdx < 0 || credIdx >= len(creds) || creds[credIdx].OAuth == nil {
 		r.authConfigMu.Unlock()
 		return fmt.Errorf("invalid OAuth credential index %d for provider %q", credIdx, p.name)
 	}
