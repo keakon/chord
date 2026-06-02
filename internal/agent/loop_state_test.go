@@ -700,6 +700,77 @@ done: ask
 	}
 }
 
+func TestHandleToolResult_MultipleDoneCallsRejectEarlierOnesWithActionableReason(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{
+		Permission: parsePermissionNode(t, `
+"*": deny
+done: allow
+`),
+	}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.todoItems = []tools.TodoItem{{ID: "1", Content: "remaining work", Status: "in_progress"}}
+	a.newTurn()
+	turn := a.turn
+	firstCallID := "done-batch-1"
+	secondCallID := "done-batch-2"
+	a.ctxMgr.Append(message.Message{
+		Role:    "assistant",
+		Content: "completed and verified",
+		ToolCalls: []message.ToolCall{{
+			ID:   firstCallID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"report":"first"}`),
+		}, {
+			ID:   secondCallID,
+			Name: tools.NameDone,
+			Args: json.RawMessage(`{"report":"second"}`),
+		}},
+	})
+	turn.PendingToolCalls.Store(2)
+
+	a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+		CallID:   firstCallID,
+		Name:     tools.NameDone,
+		ArgsJSON: `{"report":"first"}`,
+		Result:   "first",
+		TurnID:   turn.ID,
+	}})
+	a.handleToolResult(Event{TurnID: turn.ID, Payload: &ToolResultPayload{
+		CallID:   secondCallID,
+		Name:     tools.NameDone,
+		ArgsJSON: `{"report":"second"}`,
+		Result:   "second",
+		TurnID:   turn.ID,
+	}})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			result, ok := evt.(ToolResultEvent)
+			if !ok || result.CallID != firstCallID || result.Name != tools.NameDone {
+				continue
+			}
+			want := "Done rejected: only one Done call can be handled in a batch; keep a single final Done call after the remaining tool work is complete."
+			if result.Result != want {
+				t.Fatalf("ToolResultEvent.Result = %q, want %q", result.Result, want)
+			}
+			msgs := a.ctxMgr.Snapshot()
+			for _, msg := range msgs {
+				if msg.Role == "tool" && msg.ToolCallID == firstCallID && msg.Content != want {
+					t.Fatalf("persisted earlier Done rejection = %#v, want exact actionable reason", msg)
+				}
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for earlier Done rejection in multi-Done batch")
+		}
+	}
+}
+
 func TestHandleToolResult_DoneInLoopUserDenialDoesNotEmitLoopContinue(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
@@ -2206,6 +2277,43 @@ func TestLoopContinuationGapLinesConcrete(t *testing.T) {
 	}
 	if !strings.Contains(note.Text, "active subagents are still running") {
 		t.Fatalf("LOOP CONTINUE gap lines should mention active subagents, got: %q", note.Text)
+	}
+}
+
+func TestLoopExitRejectionToolResultUsesHumanReadableReasons(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("fix the bug")
+	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "in_progress"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+		parentCtx:  ctx,
+		cancel:     cancel,
+		inputCh:    make(chan pendingUserMessage, 1),
+		recovery:   a.recovery,
+		ctxMgr:     ctxmgr.NewManager(100, 0),
+	}
+	a.mu.Lock()
+	a.subAgents["agent-1"] = sub
+	a.mu.Unlock()
+
+	got := a.loopExitRejectionToolResult()
+	for _, want := range []string{
+		"Done rejected automatically: loop exit conditions are not satisfied yet:",
+		"open TODO items remain",
+		"active subagents are still running",
+		"Finish the remaining work before calling Done again.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("loopExitRejectionToolResult() = %q, want substring %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"open_todos", "subagents_active", "Continue working toward the current loop target."} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("loopExitRejectionToolResult() = %q, should not contain %q", got, unwanted)
+		}
 	}
 }
 

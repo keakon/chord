@@ -2114,14 +2114,14 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		ToolName:      "done",
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
-		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet (open_todos). Finish the remaining work before calling Done again.",
+		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet: open TODO items remain. Finish the remaining work before calling Done again.",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected auto-rejected Done to use failure icon, got:\n%s", plain)
 	}
-	for _, want := range []string{"rejected reason: loop exit conditions are not", "satisfied yet (open_todos). Finish the", "remaining work before calling Done again."} {
+	for _, want := range []string{"rejected reason: loop exit conditions are not", "satisfied yet: open TODO items remain.", "Finish the remaining work before calling", "Done again."} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected auto-rejected Done render to contain %q, got:\n%s", want, plain)
 		}

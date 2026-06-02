@@ -132,12 +132,34 @@ func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
 	return true
 }
 
+func doneAutoRejectionReasonLine(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "open_todos":
+		return "open TODO items remain"
+	case "subagents_active":
+		return "active subagents are still running"
+	default:
+		return strings.TrimSpace(reason)
+	}
+}
+
 func (a *MainAgent) loopExitRejectionToolResult() string {
 	reasons := a.currentLoopContinuationReasons()
 	if len(reasons) == 0 {
-		return "Done rejected automatically: loop exit conditions are not satisfied yet. Continue working toward the current loop target."
+		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling Done again."
 	}
-	return "Done rejected automatically: loop exit conditions are not satisfied yet (" + strings.Join(reasons, ", ") + "). Continue working toward the current loop target."
+	lines := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		line := doneAutoRejectionReasonLine(reason)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling Done again."
+	}
+	return "Done rejected automatically: loop exit conditions are not satisfied yet: " + strings.Join(lines, "; ") + ". Finish the remaining work before calling Done again."
 }
 
 func (a *MainAgent) loopExitInterceptLimitResult() string {

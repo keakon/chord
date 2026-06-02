@@ -434,7 +434,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.pendingLoopExitResults = nil
 			if len(pendingResults) > 1 {
 				for _, skipped := range pendingResults[:len(pendingResults)-1] {
-					rejection := "Done rejected: multiple Done tool calls were emitted in the same batch; only the final Done request can be considered."
+					rejection := "Done rejected: only one Done call can be handled in a batch; keep a single final Done call after the remaining tool work is complete."
 					a.persistLoopDoneToolResult(skipped.CallID, rejection)
 					a.emitToTUI(ToolCallUpdateEvent{ID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 					a.emitToTUI(ToolResultEvent{CallID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
