@@ -2,7 +2,7 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## 0.6.2-dev - Unreleased
+## 0.6.2 - 2026-06-02
 
 - **Breaking / Tools:** replaced the old native localized file-editing tool name `ApplyPatch` with the current snake_case `edit` name, and normalized all built-in model-visible tool names to snake_case (for example `WebFetch` → `web_fetch` and `TodoWrite` → `todo_write`). This affects tool schemas, permission/config examples, TUI rendering, hooks, restored/imported tool cards, and internal implementation names. Chord does not retain compatibility aliases for old built-in tool names; existing permission rules that use legacy PascalCase names or wildcard patterns must be updated to snake_case. External session import still recognizes source tool names such as Codex `apply_patch` and maps them to current `edit` cards.
 - Runtime / Context reduction: added cache-aware warmup protection and stable reduction-surface reuse to avoid repeatedly trimming the same low-pressure prompt prefix. Sidebar reduction savings now reflect the current request's total saved messages/bytes/tokens and remain visible after the turn returns to idle. `context.reduction` now accepts `true` or `{}` as shorthand for the default tuning and exposes `cache_aware_min_usage`, `warmup_message_limit`, `min_incremental_saved_tokens`, `high_pressure_usage`, and `force_prune_usage` for advanced tuning. `context.reduction: false` is rejected instead of being silently treated as the default configuration.

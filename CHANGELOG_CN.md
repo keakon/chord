@@ -2,7 +2,7 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## 0.6.2-dev - 未发布
+## 0.6.2 - 2026-06-02
 
 - **Breaking / Tools：** 旧的原生局部文件编辑工具名 `ApplyPatch` 已替换为当前的 snake_case `edit` 名称，并且所有内置的模型可见工具名都已规范化为 snake_case（例如 `WebFetch` → `web_fetch`、`TodoWrite` → `todo_write`）。这会影响工具 schema、权限/配置示例、TUI 渲染、hooks、恢复/导入后的工具卡片以及内部实现命名。Chord 不再为旧内置工具名保留兼容别名；已有的旧 PascalCase 权限规则及通配符 pattern 必须更新为 snake_case。外部会话导入仍会识别 Codex `apply_patch` 等来源工具名，并映射为当前的 `edit` 工具卡。
 - Runtime / 上下文剪裁：新增 cache-aware warmup 保护和稳定剪裁面复用，避免在低压力 prompt 前缀上反复裁剪同一批内容。侧边栏中的 reduction 节省量现在反映当前请求实际省掉的 messages / bytes / tokens，并会在 turn 回到 idle 后继续显示。`context.reduction` 现在接受 `true` 或 `{}` 作为默认调优的简写，并新增 `cache_aware_min_usage`、`warmup_message_limit`、`min_incremental_saved_tokens`、`high_pressure_usage`、`force_prune_usage` 供高级调优。`context.reduction: false` 现在会报错，而不是静默当作默认配置处理。
