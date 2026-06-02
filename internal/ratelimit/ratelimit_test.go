@@ -188,14 +188,3 @@ func TestSnapshotBlocksKeyAt_doesNotBlockOnPercentHeaders(t *testing.T) {
 		t.Fatal("used-percent headers must not block key selection without a real API error")
 	}
 }
-
-func TestKeySnapshotRecoveryDuration_zeroWithoutSnapshotBlocking(t *testing.T) {
-	now := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
-	snap := &KeyRateLimitSnapshot{
-		Primary:   &RateLimitWindow{UsedPct: 100, ResetsAt: now.Add(2 * time.Minute)},
-		Secondary: &RateLimitWindow{UsedPct: 100, ResetsAt: now.Add(10 * time.Minute)},
-	}
-	if d := KeySnapshotRecoveryDuration(snap, now); d != 0 {
-		t.Fatalf("recovery = %v, want 0 when snapshot does not drive blocking", d)
-	}
-}

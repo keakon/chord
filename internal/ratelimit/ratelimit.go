@@ -254,15 +254,6 @@ func SnapshotBlocksKeyAt(snap *KeyRateLimitSnapshot, now time.Time) bool {
 	return false
 }
 
-// KeySnapshotRecoveryDuration returns how long until snapshot-based blocking
-// may clear. With SnapshotBlocksKeyAt always false, this is always zero; kept
-// for a stable API and for callers that pair with SnapshotBlocksKeyAt.
-func KeySnapshotRecoveryDuration(snap *KeyRateLimitSnapshot, now time.Time) time.Duration {
-	_ = snap
-	_ = now
-	return 0
-}
-
 // SnapshotExpiredAt reports whether this snapshot is known to have reached its reset time.
 // A snapshot is treated as expired when any non-zero window reset timestamp is <= now.
 // When all reset timestamps are unknown (zero), it returns false.
