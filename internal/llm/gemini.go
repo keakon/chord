@@ -188,7 +188,7 @@ func (g *GeminiProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	req.Header.Set("x-goog-api-key", apiKey)
 	setProviderLLMUserAgent(req.Header, g.provider)
 
@@ -200,7 +200,7 @@ func (g *GeminiProvider) CompleteStream(
 	if g.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "gemini", g.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := g.client.Do(req)
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
@@ -209,7 +209,7 @@ func (g *GeminiProvider) CompleteStream(
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.Header.Get("Content-Encoding") == "gzip" {
+	if httpResp.Header.Get(headerContentEncoding) == headerValueGzip {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("create gzip reader: %w", err)
@@ -217,10 +217,10 @@ func (g *GeminiProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		io.Copy(io.Discard, httpResp.Body)
 		apiErr := parseGeminiHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		if g.dumpWriter != nil {
@@ -412,7 +412,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		if inThinking {
 			inThinking = false
 			if cb != nil {
-				cb(message.StreamDelta{Type: "thinking_end"})
+				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 			}
 			if p, ok := reader.(chunkPhaser); ok {
 				p.SetChunkTimeout(DefaultChunkTimeout)
@@ -423,7 +423,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
 			gotData = true
 		}
 		if !bytes.HasPrefix(line, []byte("data:")) {
@@ -460,13 +460,13 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 							}
 						}
 						if cb != nil {
-							cb(message.StreamDelta{Type: "thinking", Text: part.Text})
+							cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: part.Text})
 						}
 					} else {
 						finishThinking()
 						content.WriteString(part.Text)
 						if cb != nil {
-							cb(message.StreamDelta{Type: "text", Text: part.Text})
+							cb(message.StreamDelta{Type: message.StreamDeltaText, Text: part.Text})
 						}
 					}
 				}
@@ -483,8 +483,8 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					acc.args.Write(args)
 					toolCalls[idx] = acc
 					if cb != nil {
-						cb(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name}})
-						cb(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name, Input: acc.args.String()}})
+						cb(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name}})
+						cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name, Input: acc.args.String()}})
 					}
 				}
 			}
@@ -551,7 +551,7 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 		}
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: acc.id, Name: acc.name, Args: args})
 		if cb != nil {
-			cb(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: string(args)}})
+			cb(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: string(args)}})
 		}
 		delete(toolCalls, idx)
 	}

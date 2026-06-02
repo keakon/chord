@@ -62,7 +62,7 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		})
 		if cb != nil {
 			cb(message.StreamDelta{
-				Type: "tool_use_start",
+				Type: message.StreamDeltaToolUseStart,
 				ToolCall: &message.ToolCallDelta{
 					ID:   callID,
 					Name: out.Name,
@@ -113,7 +113,7 @@ func finalizeOneResponsesToolCall(
 	})
 	if cb != nil {
 		cb(message.StreamDelta{
-			Type: "tool_use_end",
+			Type: message.StreamDeltaToolUseEnd,
 			ToolCall: &message.ToolCallDelta{
 				ID:   acc.id,
 				Name: acc.name,
@@ -177,7 +177,7 @@ func finalizeResponsesToolCalls(
 		})
 		if cb != nil {
 			cb(message.StreamDelta{
-				Type: "tool_use_end",
+				Type: message.StreamDeltaToolUseEnd,
 				ToolCall: &message.ToolCallDelta{
 					ID:   acc.id,
 					Name: acc.name,

@@ -20,9 +20,9 @@ func TestStreamContentReducerMainClosesThinkingBeforeTextAndIgnoresLateThinking(
 		thinkingFlushInterval:   time.Hour,
 	}
 
-	reducer.Handle(message.StreamDelta{Type: "thinking", Text: "plan"})
-	reducer.Handle(message.StreamDelta{Type: "text", Text: "answer"})
-	reducer.Handle(message.StreamDelta{Type: "thinking", Text: "late"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "plan"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "answer"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "late"})
 	reducer.Finish()
 
 	if len(events) != 4 {
@@ -53,9 +53,9 @@ func TestStreamContentReducerSubAgentKeepsImmediateThinkingDeltaAndFinalText(t *
 		thinkingFlushInterval: 0,
 	}
 
-	reducer.Handle(message.StreamDelta{Type: "thinking", Text: "sub plan"})
-	reducer.Handle(message.StreamDelta{Type: "thinking_end"})
-	reducer.Handle(message.StreamDelta{Type: "text", Text: "done"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "sub plan"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "done"})
 	reducer.Finish()
 
 	if len(events) != 3 {

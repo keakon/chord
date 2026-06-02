@@ -181,7 +181,10 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, a.contextReductionInputBudget()) {
 			prepared = reuseStableReductionPrefix(previous.Messages, prepared)
-			stats = previous.Stats
+			stats = highLevelContextReductionStats(messages, prepared)
+			if len(stats.ByToolAndRule) == 0 {
+				stats.ByToolAndRule = previous.Stats.ByToolAndRule
+			}
 			stats.ReusedStable = true
 		}
 		a.setContextReductionStats(stats)
@@ -332,11 +335,33 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if tailTokens >= policy.MinIncrementalTokens {
 		return nil, ContextReductionStats{}, false
 	}
-	stats := previous.Stats
-	stats.TokensBefore = currentTokens
-	stats.TokensAfter = previous.Stats.TokensAfter + tailTokens
+	reused := reuseStableReductionPrefix(previous.Messages, messages)
+	stats := highLevelContextReductionStats(messages, reused)
+	if len(stats.ByToolAndRule) == 0 {
+		stats.ByToolAndRule = previous.Stats.ByToolAndRule
+	}
 	stats.ReusedStable = true
-	return reuseStableReductionPrefix(previous.Messages, messages), stats, true
+	return reused, stats, true
+}
+
+func highLevelContextReductionStats(original, reduced []message.Message) ContextReductionStats {
+	stats := ContextReductionStats{
+		TokensBefore: ctxmgr.EstimateMessagesTokens(original),
+		TokensAfter:  ctxmgr.EstimateMessagesTokens(reduced),
+	}
+	if stats.TokensBefore > stats.TokensAfter {
+		stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
+	}
+	limit := min(len(original), len(reduced))
+	for i := range limit {
+		saved := contextContributorBytes(original[i]) - contextContributorBytes(reduced[i])
+		if saved <= 0 {
+			continue
+		}
+		stats.Messages++
+		stats.Bytes += saved
+	}
+	return stats
 }
 
 func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
@@ -414,6 +439,10 @@ func topContextContributors(messages []message.Message, limit int) []contextCont
 }
 
 func (a *MainAgent) clearLoopFrozenReductionPrefix() {
+	a.clearLoopReductionCache(true)
+}
+
+func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	if a == nil {
 		return
 	}
@@ -424,7 +453,9 @@ func (a *MainAgent) clearLoopFrozenReductionPrefix() {
 	a.lastPreparedLLMTurnID = 0
 	a.lastPreparedLLMRequestPrefix = nil
 	a.lastPreparedReductionStats = ContextReductionStats{}
-	a.contextReductionStats = ContextReductionStats{}
+	if clearVisibleStats {
+		a.contextReductionStats = ContextReductionStats{}
+	}
 }
 
 func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
@@ -434,9 +465,37 @@ func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return sub.GetContextReductionStats()
 	}
+	return a.currentMainContextReductionStats()
+}
+
+func (a *MainAgent) currentMainContextReductionStats() ContextReductionStats {
+	if a == nil {
+		return ContextReductionStats{}
+	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	return a.contextReductionStats
+}
+
+func isZeroContextReductionStats(stats ContextReductionStats) bool {
+	return stats.Messages == 0 &&
+		stats.Bytes == 0 &&
+		stats.TokensSaved == 0 &&
+		!stats.Protected &&
+		!stats.ReusedStable &&
+		len(stats.ByToolAndRule) == 0
+}
+
+func (a *MainAgent) preparedContextReductionStatsForTurn(turnID uint64) ContextReductionStats {
+	if a == nil || turnID == 0 {
+		return ContextReductionStats{}
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.lastPreparedLLMTurnID != turnID {
+		return ContextReductionStats{}
+	}
+	return a.lastPreparedReductionStats
 }
 
 func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
@@ -536,11 +595,18 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, p
 		a.setContextReductionStats(ContextReductionStats{})
 		return prepared
 	}
+	original := cloneMessageSliceForRequestShape(prepared)
 	limit := min(len(prefix), len(prepared))
 	for i := range limit {
 		prepared[i] = cloneMessageForRequestShape(prefix[i])
 	}
-	a.setContextReductionStats(stats)
+	updatedStats := highLevelContextReductionStats(original, prepared)
+	if len(updatedStats.ByToolAndRule) == 0 {
+		updatedStats.ByToolAndRule = stats.ByToolAndRule
+	}
+	updatedStats.Protected = stats.Protected
+	updatedStats.ReusedStable = true
+	a.setContextReductionStats(updatedStats)
 	return prepared
 }
 

@@ -218,7 +218,7 @@ func (a *AnthropicProvider) CompleteStream(
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
@@ -237,7 +237,7 @@ func (a *AnthropicProvider) CompleteStream(
 	if a.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "anthropic", a.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := a.client.Do(req)
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
@@ -247,7 +247,7 @@ func (a *AnthropicProvider) CompleteStream(
 	defer httpResp.Body.Close()
 
 	// Handle gzip response if server supports it
-	if httpResp.Header.Get("Content-Encoding") == "gzip" {
+	if httpResp.Header.Get(headerContentEncoding) == headerValueGzip {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("create gzip reader: %w", err)
@@ -255,11 +255,11 @@ func (a *AnthropicProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		io.Copy(io.Discard, httpResp.Body)
 		apiErr := parseHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		// Dump error response if enabled.

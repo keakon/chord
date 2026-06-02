@@ -41,13 +41,13 @@ func TestStreamToolDeltaReducerReconcilesToolUseAndStartsSpeculativeExecution(t 
 		},
 	}
 
-	if !reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameRead, Input: `{"path":`}}) {
+	if !reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameRead, Input: `{"path":`}}) {
 		t.Fatal("tool_use_start was not handled")
 	}
-	if !reducer.Handle(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-1", Input: `"README.md"}`}}) {
+	if !reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-1", Input: `"README.md"}`}}) {
 		t.Fatal("tool_use_delta was not handled")
 	}
-	if !reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}}) {
+	if !reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-1"}}) {
 		t.Fatal("tool_use_end was not handled")
 	}
 
@@ -101,8 +101,8 @@ func TestStreamToolDeltaReducerRejectsSpeculativeExecutionWhenPolicyBlocks(t *te
 		registry: registry,
 		emit:     func(evt AgentEvent) { events = append(events, evt) },
 	}
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameQuestion, Input: `{"questions":[]}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameQuestion, Input: `{"questions":[]}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-2"}})
 
 	if started {
 		t.Fatal("interactive tool was started speculatively")
@@ -127,8 +127,8 @@ func TestStreamToolDeltaReducerRejectsMutationToolSpeculativeExecution(t *testin
 	})
 	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
 
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-w", Name: tools.NameWrite, Input: `{"path":"README.md","content":"x"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-w"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-w", Name: tools.NameWrite, Input: `{"path":"README.md","content":"x"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-w"}})
 
 	select {
 	case got := <-started:
@@ -155,10 +155,10 @@ func TestStreamToolDeltaReducerReadOnlyShellWaitsForPriorMutatingShell(t *testin
 		},
 	}
 
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git commit -m fix"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git commit -m fix"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-1"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-2"}})
 
 	select {
 	case got := <-started:
@@ -178,10 +178,10 @@ func TestStreamToolDeltaReducerAllowsReadOnlyShellPrefix(t *testing.T) {
 	})
 	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
 
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-1"}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git diff HEAD"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-2"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameShell, Input: `{"command":"git status --short"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-1"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-2", Name: tools.NameShell, Input: `{"command":"git diff HEAD"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-2"}})
 
 	seen := map[string]bool{}
 	deadline := time.After(time.Second)
@@ -216,7 +216,7 @@ func TestStreamToolDeltaReducerRollbackDrainsPartialTextAndEmitsEvent(t *testing
 		},
 	}
 
-	if !reducer.Handle(message.StreamDelta{Type: "rollback", Rollback: &message.RollbackDelta{Reason: "provider_retry"}}) {
+	if !reducer.Handle(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Reason: "provider_retry"}}) {
 		t.Fatal("rollback was not handled")
 	}
 	if got := turn.drainPartialText(); got != "" {
@@ -236,7 +236,7 @@ func TestStreamToolDeltaReducerRollbackDrainsPartialTextAndEmitsEvent(t *testing
 
 func TestStreamToolDeltaReducerIgnoresNonToolDelta(t *testing.T) {
 	reducer := streamToolDeltaReducer{}
-	if reducer.Handle(message.StreamDelta{Type: "text", Text: "hi"}) {
+	if reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "hi"}) {
 		t.Fatal("text delta should not be handled by tool reducer")
 	}
 }
@@ -252,8 +252,8 @@ func TestStreamToolDeltaReducerDeltaCanCreateMissingStartMetadata(t *testing.T) 
 	})
 
 	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
-	reducer.Handle(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call-4", Name: tools.NameRead, Input: `{"path":"README.md"}`}})
-	reducer.Handle(message.StreamDelta{Type: "tool_use_end", ToolCall: &message.ToolCallDelta{ID: "call-4"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-4", Name: tools.NameRead, Input: `{"path":"README.md"}`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-4"}})
 
 	select {
 	case got := <-startedArgs:

@@ -31,13 +31,13 @@ func sanitizeUserAgentProductVersion(version string) string {
 }
 
 func setDefaultLLMUserAgent(headerSetter interface{ Set(string, string) }) {
-	headerSetter.Set("User-Agent", defaultLLMUserAgent())
+	headerSetter.Set(headerUserAgent, defaultLLMUserAgent())
 }
 
 func setProviderLLMUserAgent(headerSetter interface{ Set(string, string) }, provider *ProviderConfig) {
 	if provider != nil {
 		if userAgent := provider.UserAgent(); userAgent != "" {
-			headerSetter.Set("User-Agent", userAgent)
+			headerSetter.Set(headerUserAgent, userAgent)
 			return
 		}
 	}

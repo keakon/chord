@@ -412,7 +412,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.turn = nil
 	a.turnMu.Unlock()
 	a.allowContextSurfaceRefreshAtUserBoundary()
-	a.clearLoopFrozenReductionPrefix()
+	a.clearLoopReductionCache(false)
 	a.setBugTriagePromptActive(false)
 	pausePendingDrain := a.pausePendingUserDrainOnce
 	a.pausePendingUserDrainOnce = false

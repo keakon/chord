@@ -116,11 +116,11 @@ func TestParseGeminiSSEStream(t *testing.T) {
 	var sawThinkingEnd, sawText, sawToolEnd bool
 	for _, ev := range events {
 		switch ev.Type {
-		case "thinking_end":
+		case message.StreamDeltaThinkingEnd:
 			sawThinkingEnd = true
-		case "text":
+		case message.StreamDeltaText:
 			sawText = true
-		case "tool_use_end":
+		case message.StreamDeltaToolUseEnd:
 			sawToolEnd = true
 		}
 	}

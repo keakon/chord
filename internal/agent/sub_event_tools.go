@@ -312,14 +312,14 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}()
 
 	s.turn.CompletedToolCalls = append(s.turn.CompletedToolCalls, map[string]any{
-		"call_id":    result.CallID,
-		"tool_name":  result.Name,
-		"args":       json.RawMessage(result.ArgsJSON),
-		"args_audit": toolArgsAuditHookData(result.Audit),
-		"result":     contextResult,
-		"error":      errorText,
-		"diff":       result.Diff,
-		"path":       extractHookFilePath(json.RawMessage(result.ArgsJSON)),
+		hook.DataKeyCallID:   result.CallID,
+		hook.DataKeyToolName: result.Name,
+		"args":               json.RawMessage(result.ArgsJSON),
+		"args_audit":         toolArgsAuditHookData(result.Audit),
+		"result":             contextResult,
+		"error":              errorText,
+		"diff":               result.Diff,
+		"path":               extractHookFilePath(json.RawMessage(result.ArgsJSON)),
 	})
 	if changed := changedFileSummary(&ToolResultPayload{
 		CallID:      result.CallID,

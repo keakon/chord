@@ -46,10 +46,10 @@ func resolveOpenAIOAuthAPIURL(apiURL string) string {
 func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey string) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("OpenAI-Beta", openAICodexBetaHeader)
-	req.Header.Set("User-Agent", openAICodexUserAgent())
+	req.Header.Set(headerOpenAIBeta, openAICodexBetaHeader)
+	req.Header.Set(headerUserAgent, openAICodexUserAgent())
 	req.Header.Set("originator", openAICodexOriginator)
-	req.Header.Set("session_id", newOpenAIOAuthSessionID())
+	req.Header.Set(headerSessionID, newOpenAIOAuthSessionID())
 
 	if provider == nil {
 		return

@@ -24,16 +24,16 @@ type streamToolDeltaReducer struct {
 
 func (r streamToolDeltaReducer) Handle(delta message.StreamDelta) bool {
 	switch delta.Type {
-	case "tool_use_start":
+	case message.StreamDeltaToolUseStart:
 		r.handleToolUseStart(delta)
 		return true
-	case "tool_use_delta":
+	case message.StreamDeltaToolUseDelta:
 		r.handleToolUseDelta(delta)
 		return true
-	case "tool_use_end":
+	case message.StreamDeltaToolUseEnd:
 		r.handleToolUseEnd(delta)
 		return true
-	case "rollback":
+	case message.StreamDeltaRollback:
 		r.handleRollback(delta)
 		return true
 	default:

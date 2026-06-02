@@ -29,7 +29,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 		return
 	}
 	switch delta.Type {
-	case "text", "thinking", "tool_use_start", "tool_use_delta", "tool_use_end":
+	case message.StreamDeltaText, message.StreamDeltaThinking, message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
 		if !t.visible {
 			log.Debugf("LLM first visible stream delta delta_type=%v model=%v key_suffix=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keySuffix, t.keyAttempt, t.keyCount)
 			t.visible = true
@@ -37,7 +37,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 				t.onVisibleStart()
 			}
 		}
-	case "rollback":
+	case message.StreamDeltaRollback:
 		if t.visible {
 			reason := ""
 			if delta.Rollback != nil {
@@ -57,7 +57,7 @@ func (t *visibleStreamTracker) EmitRollback(reason string) {
 		return
 	}
 	t.inner(message.StreamDelta{
-		Type: "rollback",
+		Type: message.StreamDeltaRollback,
 		Rollback: &message.RollbackDelta{
 			Reason: reason,
 		},
@@ -249,7 +249,7 @@ func emitStreamStatusDelta(cb StreamCallback, status message.StatusDelta) {
 	if cb == nil {
 		return
 	}
-	cb(message.StreamDelta{Type: "status", Status: &status})
+	cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &status})
 }
 
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
@@ -392,7 +392,7 @@ func (c *Client) completeStreamTarget(
 		}
 		if keySwitched {
 			if cb != nil {
-				cb(message.StreamDelta{Type: "key_switched"})
+				cb(message.StreamDelta{Type: message.StreamDeltaKeySwitched})
 			}
 			t.provider.WakeCodexRateLimitPolling()
 		}
@@ -482,13 +482,13 @@ func (c *Client) completeStreamTarget(
 				return result, lastInputTokens, err
 			}
 			if (cooldownResult.expiredAccountID != "" || cooldownResult.expiredEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: "key_expired", AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
+				cb(message.StreamDelta{Type: message.StreamDeltaKeyExpired, AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
 			}
 			if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: "key_deactivated", AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
+				cb(message.StreamDelta{Type: message.StreamDeltaKeyDeactivated, AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
 			}
 			if (cooldownResult.invalidatedAccountID != "" || cooldownResult.invalidatedEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: "key_invalidated", AccountID: cooldownResult.invalidatedAccountID, Email: cooldownResult.invalidatedEmail})
+				cb(message.StreamDelta{Type: message.StreamDeltaKeyInvalidated, AccountID: cooldownResult.invalidatedAccountID, Email: cooldownResult.invalidatedEmail})
 			}
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
 				log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)

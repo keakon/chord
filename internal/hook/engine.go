@@ -37,6 +37,11 @@ const (
 )
 
 const (
+	DataKeyCallID   = "call_id"
+	DataKeyToolName = "tool_name"
+)
+
+const (
 	DefaultTimeout = 30
 
 	DefaultMaxResultLines = 50
@@ -577,7 +582,7 @@ func buildHookEnv(env Envelope, h HookDef) []string {
 	add("CHORD_HOOK_RUNNING_MODEL", env.RunningModel)
 
 	data, _ := env.Data.(map[string]any)
-	if toolName, _ := data["tool_name"].(string); toolName != "" {
+	if toolName, _ := data[DataKeyToolName].(string); toolName != "" {
 		add("CHORD_HOOK_TOOL_NAME", toolName)
 	}
 	if timeoutMS, ok := intValue(data["timeout_ms"]); ok {
@@ -621,7 +626,7 @@ func shouldRunHook(h HookDef, env Envelope) (bool, string) {
 
 func matchesToolFilter(filters []string, env Envelope) bool {
 	data, _ := env.Data.(map[string]any)
-	if toolName, _ := data["tool_name"].(string); toolName != "" {
+	if toolName, _ := data[DataKeyToolName].(string); toolName != "" {
 		return containsString(filters, toolName)
 	}
 
@@ -718,7 +723,7 @@ func toolCallsFromData(data map[string]any) []toolCallFilterItem {
 		if !ok {
 			continue
 		}
-		name, _ := m["tool_name"].(string)
+		name, _ := m[DataKeyToolName].(string)
 		errText, _ := m["error"].(string)
 		items = append(items, toolCallFilterItem{ToolName: name, Error: errText})
 	}

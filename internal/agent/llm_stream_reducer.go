@@ -55,13 +55,13 @@ func (r *streamContentReducer) Handle(delta message.StreamDelta) bool {
 		return false
 	}
 	switch delta.Type {
-	case "text":
+	case message.StreamDeltaText:
 		r.handleText(delta.Text)
 		return true
-	case "thinking":
+	case message.StreamDeltaThinking:
 		r.handleThinking(delta.Text)
 		return true
-	case "thinking_end":
+	case message.StreamDeltaThinkingEnd:
 		r.closeThinkingBlock()
 		return true
 	default:
@@ -232,7 +232,7 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 		return
 	}
 	switch delta.Type {
-	case "status":
+	case message.StreamDeltaStatus:
 		if delta.Status == nil {
 			return
 		}
@@ -248,31 +248,31 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 		if r.emitActivity != nil {
 			r.emitActivity(ActivityType(delta.Status.Type), delta.Status.Detail)
 		}
-	case "rate_limits":
+	case message.StreamDeltaRateLimits:
 		if r.onRateLimits != nil {
 			r.onRateLimits(delta)
 		}
-	case "key_switched":
+	case message.StreamDeltaKeySwitched:
 		if r.onKeySwitched != nil {
 			r.onKeySwitched()
 		}
-	case "key_deactivated":
+	case message.StreamDeltaKeyDeactivated:
 		if r.onKeyDeactivated != nil {
 			r.onKeyDeactivated(delta.Email, delta.AccountID)
 		}
-	case "key_invalidated":
+	case message.StreamDeltaKeyInvalidated:
 		if r.onKeyInvalidated != nil {
 			r.onKeyInvalidated(delta.Email, delta.AccountID)
 		}
-	case "key_expired":
+	case message.StreamDeltaKeyExpired:
 		if r.onKeyExpired != nil {
 			r.onKeyExpired(delta.Email, delta.AccountID)
 		}
-	case "key_confirmed":
+	case message.StreamDeltaKeyConfirmed:
 		if r.onKeyConfirmed != nil {
 			r.onKeyConfirmed(delta.Status)
 		}
-	case "error":
+	case message.StreamDeltaError:
 		if r.onError != nil {
 			r.onError(delta.Text)
 		}

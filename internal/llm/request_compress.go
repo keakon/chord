@@ -39,8 +39,8 @@ func compressRequestBody(req *http.Request, bodyBytes []byte, enabled bool) (*ht
 			newReq.Header.Add(k, v)
 		}
 	}
-	newReq.Header.Set("Accept-Encoding", "gzip")
-	newReq.Header.Set("Content-Encoding", "gzip")
+	newReq.Header.Set(headerAcceptEncoding, headerValueGzip)
+	newReq.Header.Set(headerContentEncoding, headerValueGzip)
 	return newReq, compressed
 }
 

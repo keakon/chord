@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,9 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
@@ -96,15 +101,6 @@ func (p *countingCompactionProvider) Compact(
 
 func (p *countingCompactionProvider) InvalidateRouting(reason string) {
 	p.invalidations = append(p.invalidations, reason)
-}
-
-func isZeroContextReductionStats(stats ContextReductionStats) bool {
-	return stats.Messages == 0 &&
-		stats.Bytes == 0 &&
-		stats.TokensSaved == 0 &&
-		!stats.Protected &&
-		!stats.ReusedStable &&
-		len(stats.ByToolAndRule) == 0
 }
 
 func contextReductionStatsEqual(a, b ContextReductionStats) bool {
@@ -435,6 +431,65 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 }
 
+func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+
+	a := newReadyTestMainAgent(t)
+	a.newTurn()
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessAgeTurns: 1,
+		ShellSuccessBytes:    10,
+		CacheAwareMinUsage:   0.75,
+		WarmupMessageLimit:   1,
+	}}}
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	provider := &captureMessagesProvider{}
+	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
+	a.providerModelRef = "test/model"
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model"
+	a.llmMu.Unlock()
+	focusTestSubAgent(t, a, "sub-1", "sub", "")
+
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	if _, err := a.callLLM(context.Background(), msgs); err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "LLM request context contributors") {
+		t.Fatalf("expected request context debug log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "reduction_messages=1") {
+		t.Fatalf("expected main prepared reduction stats in log, got %q", logOutput)
+	}
+	if strings.Contains(logOutput, "reduction_messages=0") {
+		t.Fatalf("expected focused subagent not to zero-out main request stats, got %q", logOutput)
+	}
+	if got := a.GetContextReductionStats(); !isZeroContextReductionStats(got) {
+		t.Fatalf("focused subagent stats = %+v, want zero-valued subagent stats to confirm log did not come from focus getter", got)
+	}
+	if len(provider.messages) == 0 {
+		t.Fatal("expected provider to receive prepared messages")
+	}
+}
+
 func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing.T) {
 	a := &MainAgent{}
 	largeOutput := strings.Repeat("test output line\n", 500)
@@ -758,8 +813,8 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if loopPrepared[7].Content != newLargeOutput {
 		t.Fatalf("loop should not prune messages added after frozen prefix, got %q", loopPrepared[7].Content)
 	}
-	if !contextReductionStatsEqual(loopStats, firstStats) {
-		t.Fatalf("loop reduction stats = %+v, want frozen %+v", loopStats, firstStats)
+	if loopStats.TokensSaved != loopStats.TokensBefore-loopStats.TokensAfter || !loopStats.ReusedStable {
+		t.Fatalf("loop reduction stats should reflect current request savings, got %+v first %+v", loopStats, firstStats)
 	}
 
 	a.DisableLoopMode()
@@ -819,8 +874,28 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if prepared[7].Content != newLargeOutput {
 		t.Fatalf("low-quota continuation should not newly prune messages after frozen prefix, got %q", prepared[7].Content)
 	}
-	if stats := a.GetContextReductionStats(); !contextReductionStatsEqual(stats, firstStats) {
-		t.Fatalf("reduction stats = %+v, want frozen %+v", stats, firstStats)
+	if stats := a.GetContextReductionStats(); stats.TokensSaved != stats.TokensBefore-stats.TokensAfter || !stats.ReusedStable {
+		t.Fatalf("reduction stats should reflect current request savings, got %+v first %+v", stats, firstStats)
+	}
+}
+
+func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	want := ContextReductionStats{Messages: 2, Bytes: 2048, TokensBefore: 1000, TokensAfter: 700, TokensSaved: 300}
+	a.setContextReductionStats(want)
+	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}})
+
+	a.setIdleAndDrainPending()
+
+	if got := a.GetContextReductionStats(); !contextReductionStatsEqual(got, want) {
+		t.Fatalf("visible reduction stats after idle = %+v, want %+v", got, want)
+	}
+	a.loopReductionMu.Lock()
+	cacheCleared := a.lastPreparedLLMTurnID == 0 && len(a.lastPreparedLLMRequestPrefix) == 0
+	a.loopReductionMu.Unlock()
+	if !cacheCleared {
+		t.Fatal("idle should clear reusable reduction cache")
 	}
 }
 

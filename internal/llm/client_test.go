@@ -248,7 +248,7 @@ func TestVisibleStreamTrackerMarksToolUseAsStreaming(t *testing.T) {
 				Type:   "status",
 				Status: &message.StatusDelta{Type: "streaming"},
 			})
-			got = append(got, message.StreamDelta{Type: "key_confirmed"})
+			got = append(got, message.StreamDelta{Type: message.StreamDeltaKeyConfirmed})
 		},
 	}
 
@@ -274,8 +274,8 @@ func TestVisibleStreamTrackerMarksToolUseAsStreaming(t *testing.T) {
 	if got[1].Type != "status" || got[1].Status == nil || got[1].Status.Type != "streaming" {
 		t.Fatalf("got[1] = %#v, want streaming status", got[1])
 	}
-	if got[2].Type != "key_confirmed" {
-		t.Fatalf("got[2].Type = %q, want key_confirmed", got[2].Type)
+	if got[2].Type != message.StreamDeltaKeyConfirmed {
+		t.Fatalf("got[2].Type = %q, want %q", got[2].Type, message.StreamDeltaKeyConfirmed)
 	}
 	if got[3].Type != "tool_use_start" || got[3].ToolCall == nil || got[3].ToolCall.ID != "call-1" {
 		t.Fatalf("got[3] = %#v, want tool_use_start for call-1", got[3])
@@ -293,7 +293,7 @@ func TestVisibleStreamTrackerRearmsAfterRollback(t *testing.T) {
 				Type:   "status",
 				Status: &message.StatusDelta{Type: "streaming"},
 			})
-			got = append(got, message.StreamDelta{Type: "key_confirmed"})
+			got = append(got, message.StreamDelta{Type: message.StreamDeltaKeyConfirmed})
 		},
 	}
 
@@ -320,8 +320,8 @@ func TestVisibleStreamTrackerRearmsAfterRollback(t *testing.T) {
 	if got[0].Type != "status" || got[0].Status == nil || got[0].Status.Type != "streaming" {
 		t.Fatalf("got[0] = %#v, want first streaming status", got[0])
 	}
-	if got[1].Type != "key_confirmed" {
-		t.Fatalf("got[1].Type = %q, want key_confirmed", got[1].Type)
+	if got[1].Type != message.StreamDeltaKeyConfirmed {
+		t.Fatalf("got[1].Type = %q, want %q", got[1].Type, message.StreamDeltaKeyConfirmed)
 	}
 	if got[2].Type != "tool_use_start" {
 		t.Fatalf("got[2].Type = %q, want tool_use_start", got[2].Type)
@@ -332,8 +332,8 @@ func TestVisibleStreamTrackerRearmsAfterRollback(t *testing.T) {
 	if got[4].Type != "status" || got[4].Status == nil || got[4].Status.Type != "streaming" {
 		t.Fatalf("got[4] = %#v, want second streaming status", got[4])
 	}
-	if got[5].Type != "key_confirmed" {
-		t.Fatalf("got[5].Type = %q, want second key_confirmed", got[5].Type)
+	if got[5].Type != message.StreamDeltaKeyConfirmed {
+		t.Fatalf("got[5].Type = %q, want second %q", got[5].Type, message.StreamDeltaKeyConfirmed)
 	}
 	if got[6].Type != "text" || got[6].Text != "retry succeeded" {
 		t.Fatalf("got[6] = %#v, want retry text", got[6])

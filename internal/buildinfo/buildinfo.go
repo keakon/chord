@@ -47,13 +47,15 @@ type Info struct {
 	Commit          string
 	BuildTime       string
 	VCSTime         string
-	Dirty           string // "true", "false", or "unknown"
+	Dirty           DirtyState // "true", "false", or "unknown"
 	GoVersion       string
 	GOOS            string
 	GOARCH          string
 	ExecutablePath  string
 	ExecutableMTime string
 }
+
+type DirtyState string
 
 // Field is a single key/value pair for diagnostics output. Field is a named
 // type (rather than an anonymous struct) so callers can declare variables and
@@ -64,8 +66,23 @@ type Field struct {
 }
 
 const (
+	fieldChordVersion    = "chord_version"
+	fieldChordCommit     = "chord_commit"
+	fieldChordBuildTime  = "chord_build_time"
+	fieldChordVCSTime    = "chord_vcs_time"
+	fieldChordDirty      = "chord_dirty"
+	fieldGoVersion       = "go_version"
+	fieldGOOS            = "goos"
+	fieldGOARCH          = "goarch"
+	fieldExecutablePath  = "executable_path"
+	fieldExecutableMTime = "executable_mtime"
+
 	unknown           = "unknown"
 	DefaultDevVersion = "v0.6.2-dev"
+
+	dirtyTrue    DirtyState = "true"
+	dirtyFalse   DirtyState = "false"
+	dirtyUnknown DirtyState = unknown
 )
 
 // current is the cached result of [computeCurrent]. The build identity does
@@ -90,7 +107,7 @@ func computeCurrent() Info {
 		Commit:    strings.TrimSpace(Commit),
 		BuildTime: strings.TrimSpace(BuildTime),
 		VCSTime:   strings.TrimSpace(settings["vcs.time"]),
-		Dirty:     strings.TrimSpace(Dirty),
+		Dirty:     DirtyState(strings.TrimSpace(Dirty)),
 		GoVersion: runtime.Version(),
 		GOOS:      runtime.GOOS,
 		GOARCH:    runtime.GOARCH,
@@ -108,10 +125,10 @@ func computeCurrent() Info {
 		info.VCSTime = unknown
 	}
 	if info.Dirty == "" {
-		info.Dirty = strings.TrimSpace(settings["vcs.modified"])
+		info.Dirty = DirtyState(strings.TrimSpace(settings["vcs.modified"]))
 	}
 	if info.Dirty == "" {
-		info.Dirty = unknown
+		info.Dirty = dirtyUnknown
 	}
 	info.ExecutablePath, info.ExecutableMTime = executableMetadata()
 	return info
@@ -124,7 +141,7 @@ func computeCurrent() Info {
 // omitted to keep the line concise.
 func (i Info) Short() string {
 	version := valueOrUnknown(i.Version)
-	if i.Dirty == "true" {
+	if i.Dirty == dirtyTrue {
 		version += "*"
 	}
 	parts := []string{version}
@@ -139,16 +156,16 @@ func (i Info) Short() string {
 // `key: value` shape and ordering across surfaces.
 func (i Info) Fields() []Field {
 	return []Field{
-		{"chord_version", valueOrUnknown(i.Version)},
-		{"chord_commit", valueOrUnknown(i.Commit)},
-		{"chord_build_time", valueOrUnknown(i.BuildTime)},
-		{"chord_vcs_time", valueOrUnknown(i.VCSTime)},
-		{"chord_dirty", valueOrUnknown(i.Dirty)},
-		{"go_version", valueOrUnknown(i.GoVersion)},
-		{"goos", valueOrUnknown(i.GOOS)},
-		{"goarch", valueOrUnknown(i.GOARCH)},
-		{"executable_path", valueOrUnknown(i.ExecutablePath)},
-		{"executable_mtime", valueOrUnknown(i.ExecutableMTime)},
+		{fieldChordVersion, valueOrUnknown(i.Version)},
+		{fieldChordCommit, valueOrUnknown(i.Commit)},
+		{fieldChordBuildTime, valueOrUnknown(i.BuildTime)},
+		{fieldChordVCSTime, valueOrUnknown(i.VCSTime)},
+		{fieldChordDirty, valueOrUnknown(string(i.Dirty))},
+		{fieldGoVersion, valueOrUnknown(i.GoVersion)},
+		{fieldGOOS, valueOrUnknown(i.GOOS)},
+		{fieldGOARCH, valueOrUnknown(i.GOARCH)},
+		{fieldExecutablePath, valueOrUnknown(i.ExecutablePath)},
+		{fieldExecutableMTime, valueOrUnknown(i.ExecutableMTime)},
 	}
 }
 
@@ -159,12 +176,12 @@ func (i Info) Fields() []Field {
 // startup line a manageable length.
 func (i Info) LogString() string {
 	startupKeys := map[string]struct{}{
-		"chord_version":    {},
-		"chord_commit":     {},
-		"chord_dirty":      {},
-		"chord_build_time": {},
-		"chord_vcs_time":   {},
-		"go_version":       {},
+		fieldChordVersion:   {},
+		fieldChordCommit:    {},
+		fieldChordDirty:     {},
+		fieldChordBuildTime: {},
+		fieldChordVCSTime:   {},
+		fieldGoVersion:      {},
 	}
 	fields := i.Fields()
 	parts := make([]string, 0, len(startupKeys))

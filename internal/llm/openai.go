@@ -284,7 +284,7 @@ func (o *OpenAIProvider) CompleteStream(
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	setProviderLLMUserAgent(req.Header, o.provider)
 	applySessionIDHeaders(req.Header, o.sessionID)
@@ -299,7 +299,7 @@ func (o *OpenAIProvider) CompleteStream(
 	if o.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "openai", o.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	httpResp, err := o.client.Do(req)
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
@@ -309,7 +309,7 @@ func (o *OpenAIProvider) CompleteStream(
 	defer httpResp.Body.Close()
 
 	// Handle gzip response if server supports it
-	if httpResp.Header.Get("Content-Encoding") == "gzip" {
+	if httpResp.Header.Get(headerContentEncoding) == headerValueGzip {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("create gzip reader: %w", err)
@@ -317,12 +317,12 @@ func (o *OpenAIProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	traceCB(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
 		// Read up to 4KB for error logging to avoid memory issues with large responses.
-		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		// Discard any remaining body content to ensure clean connection reuse.
 		io.Copy(io.Discard, httpResp.Body)
 		log.Debugf("openai error response status=%v body_len=%v", httpResp.StatusCode, len(errBody))
@@ -668,7 +668,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		line := scanner.Bytes()
 
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
 			gotData = true
 		}
 
@@ -692,7 +692,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		// [DONE] signals end of stream.
 		if bytes.Equal(data, []byte("[DONE]")) {
 			if inThinking && cb != nil {
-				cb(message.StreamDelta{Type: "thinking_end"})
+				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 				inThinking = false
 			}
 			// Finalize any remaining tool calls (defensive — normally
@@ -741,7 +741,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					}
 				}
 				if cb != nil {
-					cb(message.StreamDelta{Type: "thinking", Text: thinking})
+					cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: thinking})
 				}
 			}
 
@@ -756,7 +756,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				if inThinking && text != "" {
 					inThinking = false
 					if cb != nil {
-						cb(message.StreamDelta{Type: "thinking_end"})
+						cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 					}
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(DefaultChunkTimeout)
@@ -764,7 +764,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				}
 				if text != "" && cb != nil {
 					cb(message.StreamDelta{
-						Type: "text",
+						Type: message.StreamDeltaText,
 						Text: text,
 					})
 				}
@@ -784,7 +784,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				if inThinking && !exists {
 					inThinking = false
 					if cb != nil {
-						cb(message.StreamDelta{Type: "thinking_end"})
+						cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 					}
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(DefaultChunkTimeout)
@@ -799,7 +799,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					toolCalls[tc.Index] = acc
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "tool_use_start",
+							Type: message.StreamDeltaToolUseStart,
 							ToolCall: &message.ToolCallDelta{
 								ID:   tc.ID,
 								Name: tc.Function.Name,
@@ -825,7 +825,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					}
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "tool_use_delta",
+							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
 								ID:    acc.id,
 								Name:  acc.name,
@@ -886,7 +886,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 	// Stream ended without [DONE] — close any open thinking block.
 	if inThinking && cb != nil {
-		cb(message.StreamDelta{Type: "thinking_end"})
+		cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 	}
 
 	// Finalize any remaining tool calls if stream ended without [DONE].

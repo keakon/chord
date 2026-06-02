@@ -128,9 +128,9 @@ func benchmarkSSEParseWithCallbackMode(b *testing.B, incremental bool) {
 				lastByID := map[string]string{}
 				cb := func(delta message.StreamDelta) {
 					switch delta.Type {
-					case "text", "thinking":
+					case message.StreamDeltaText, message.StreamDeltaThinking:
 						sink += len(delta.Text)
-					case "tool_use_delta":
+					case message.StreamDeltaToolUseDelta:
 						if delta.ToolCall != nil {
 							input := delta.ToolCall.Input
 							if incremental {

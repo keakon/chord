@@ -513,7 +513,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 	dialDone := false
 
 	cb := func(delta message.StreamDelta) {
-		if delta.Type == "status" && delta.Status != nil {
+		if delta.Type == message.StreamDeltaStatus && delta.Status != nil {
 			statuses = append(statuses, delta.Status.Type)
 			if delta.Status.Type == "connecting" && !dialDone {
 				connectingBeforeDial = true
@@ -524,7 +524,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 	// Simulate the sequence completeStreamCodexWebSocket now performs:
 	//
 	// Step 1: Emit "connecting" BEFORE dial (the fix).
-	cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 
 	// Step 2: Dial (simulates DialContext in completeStreamCodexWebSocket).
 	conn1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)

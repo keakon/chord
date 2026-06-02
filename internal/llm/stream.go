@@ -122,7 +122,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		line := scanner.Text()
 
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
 			gotData = true
 		}
 
@@ -191,7 +191,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					block.toolName = ev.ContentBlock.Name
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "tool_use_start",
+							Type: message.StreamDeltaToolUseStart,
 							ToolCall: &message.ToolCallDelta{
 								ID:   ev.ContentBlock.ID,
 								Name: ev.ContentBlock.Name,
@@ -201,7 +201,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
-				case "thinking":
+				case message.StreamDeltaThinking:
 					// thinking block started; no delta emitted yet (content arrives via thinking_delta)
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
@@ -223,7 +223,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					block.text.WriteString(ev.Delta.Text)
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "text",
+							Type: message.StreamDeltaText,
 							Text: ev.Delta.Text,
 						})
 					}
@@ -231,7 +231,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					block.toolInput.WriteString(ev.Delta.PartialJSON)
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "tool_use_delta",
+							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
 								ID:    block.toolID,
 								Name:  block.toolName,
@@ -243,7 +243,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					block.thinking.WriteString(ev.Delta.Thinking)
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "thinking",
+							Type: message.StreamDeltaThinking,
 							Text: ev.Delta.Thinking,
 						})
 					}
@@ -265,7 +265,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					continue
 				}
 				switch block.blockType {
-				case "text":
+				case message.StreamDeltaText:
 					text := block.text.String()
 					if text != "" {
 						if resp.Content != "" {
@@ -293,20 +293,20 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					resp.ToolCalls = append(resp.ToolCalls, tc)
 					if cb != nil {
 						cb(message.StreamDelta{
-							Type: "tool_use_end",
+							Type: message.StreamDeltaToolUseEnd,
 							ToolCall: &message.ToolCallDelta{
 								ID:   block.toolID,
 								Name: block.toolName,
 							},
 						})
 					}
-				case "thinking":
+				case message.StreamDeltaThinking:
 					resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{
 						Thinking:  block.thinking.String(),
 						Signature: block.signature,
 					})
 					if cb != nil {
-						cb(message.StreamDelta{Type: "thinking_end"})
+						cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 					}
 				}
 				delete(blocks, ev.Index)
@@ -326,7 +326,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				// Stream complete. Return the assembled response.
 				return &resp, nil
 
-			case "error":
+			case message.StreamDeltaError:
 				var ev sseError
 				if err := json.Unmarshal([]byte(data), &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
@@ -364,7 +364,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	truncated := resp.StopReason == "max_tokens"
 	for idx, block := range blocks {
 		switch block.blockType {
-		case "text":
+		case message.StreamDeltaText:
 			text := block.text.String()
 			if text != "" {
 				if resp.Content != "" {
@@ -394,20 +394,20 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 			}
 			if cb != nil {
 				cb(message.StreamDelta{
-					Type: "tool_use_end",
+					Type: message.StreamDeltaToolUseEnd,
 					ToolCall: &message.ToolCallDelta{
 						ID:   block.toolID,
 						Name: block.toolName,
 					},
 				})
 			}
-		case "thinking":
+		case message.StreamDeltaThinking:
 			resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{
 				Thinking:  block.thinking.String(),
 				Signature: block.signature,
 			})
 			if cb != nil {
-				cb(message.StreamDelta{Type: "thinking_end"})
+				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 			}
 		}
 		delete(blocks, idx)

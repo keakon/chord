@@ -180,9 +180,9 @@ func ExportToMarkdown(session *ExportedSession) string {
 	if session.Stats != nil && session.Stats.EstimatedCost > 0 {
 		fmt.Fprintf(&sb, "Cost: $%.4f\n", session.Stats.EstimatedCost)
 	}
-	if id, ok := session.Metadata["session_id"]; ok && id != "" {
+	if id, ok := session.Metadata[MetadataKeySessionID]; ok && id != "" {
 		fmt.Fprintf(&sb, "Session ID: %s\n", id)
-	} else if id, ok := session.Metadata["instance_id"]; ok && id != "" {
+	} else if id, ok := session.Metadata[MetadataKeyInstanceID]; ok && id != "" {
 		fmt.Fprintf(&sb, "Session ID: %s\n", id)
 	}
 	sb.WriteString(convformat.BlockSep)

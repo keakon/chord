@@ -458,12 +458,12 @@ func (r *ResponsesProvider) sendAndParse(
 		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
 		applyOpenAIOAuthHeaders(req, r.provider, apiKey)
 	} else {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("OpenAI-Beta", "responses=v1")
+		req.Header.Set(headerOpenAIBeta, "responses=v1")
 		setProviderLLMUserAgent(req.Header, r.provider)
 	}
 	applySessionIDHeaders(req.Header, r.sessionID)
@@ -477,7 +477,7 @@ func (r *ResponsesProvider) sendAndParse(
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "responses", r.proxyScheme)
 	}
 	if cb != nil {
-		cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	}
 	httpResp, err := r.client.Do(req)
 	if err != nil {
@@ -486,7 +486,7 @@ func (r *ResponsesProvider) sendAndParse(
 	defer httpResp.Body.Close()
 
 	// Handle gzip response if server supports it
-	if httpResp.Header.Get("Content-Encoding") == "gzip" {
+	if httpResp.Header.Get(headerContentEncoding) == headerValueGzip {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
 			return nil, 0, fmt.Errorf("create gzip reader: %w", err)
@@ -495,13 +495,13 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 
 	if cb != nil {
-		cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 	}
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {
 		// Read up to 4KB for error logging to avoid memory issues with large responses.
-		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		// Discard any remaining body content to ensure clean connection reuse.
 		io.Copy(io.Discard, httpResp.Body) //nolint:errcheck
 		log.Debugf("responses error response status=%v body_len=%v", httpResp.StatusCode, len(errBody))
@@ -512,7 +512,7 @@ func (r *ResponsesProvider) sendAndParse(
 				snap.Provider = r.provider.Name()
 				r.provider.UpdateKeySnapshot(apiKey, snap)
 				if cb != nil {
-					cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+					cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 				}
 			}
 		}
@@ -555,7 +555,7 @@ func (r *ResponsesProvider) sendAndParse(
 			snap.Provider = r.provider.Name()
 			r.provider.UpdateKeySnapshot(apiKey, snap)
 			if cb != nil {
-				cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+				cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 			}
 		}
 	}

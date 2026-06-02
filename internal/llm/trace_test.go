@@ -15,12 +15,12 @@ func TestPersistLLMTraceWritesToolLifecycleSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), LLMTraceFileName())
 	writer := NewTraceWriter(path)
 	collector := newLLMTraceCollector("responses", "gpt-5.5", nil)
-	collector.Callback(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+	collector.Callback(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	collector.Callback(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 42, Events: 2}})
-	collector.Callback(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit"}})
-	collector.Callback(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit", Input: `{"path":"a`}})
-	collector.Callback(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit", Input: `{"path":"abc"}`}})
-	collector.Callback(message.StreamDelta{Type: "text", Text: "done"})
+	collector.Callback(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit"}})
+	collector.Callback(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit", Input: `{"path":"a`}})
+	collector.Callback(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call_1", Name: "Edit", Input: `{"path":"abc"}`}})
+	collector.Callback(message.StreamDelta{Type: message.StreamDeltaText, Text: "done"})
 	startedAt := time.Now().Add(-25 * time.Millisecond)
 	persistLLMTrace(writer, collector, 200, "http", startedAt, &message.Response{
 		Content:    "done",

@@ -136,6 +136,26 @@ type StreamDelta struct {
 	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
 }
 
+const (
+	StreamDeltaText        = "text"
+	StreamDeltaThinking    = "thinking"
+	StreamDeltaThinkingEnd = "thinking_end"
+	StreamDeltaError       = "error"
+	StreamDeltaStatus      = "status"
+	StreamDeltaRateLimits  = "rate_limits"
+	StreamDeltaRollback    = "rollback"
+
+	StreamDeltaToolUseStart = "tool_use_start"
+	StreamDeltaToolUseDelta = "tool_use_delta"
+	StreamDeltaToolUseEnd   = "tool_use_end"
+
+	StreamDeltaKeySwitched    = "key_switched"
+	StreamDeltaKeyConfirmed   = "key_confirmed"
+	StreamDeltaKeyDeactivated = "key_deactivated"
+	StreamDeltaKeyInvalidated = "key_invalidated"
+	StreamDeltaKeyExpired     = "key_expired"
+)
+
 // StatusDelta represents a technical state change during an LLM request.
 type StatusDelta struct {
 	Type     string // e.g. "connecting", "waiting_headers", etc.

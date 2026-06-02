@@ -24,10 +24,10 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	}
 	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
-		"model":        a.ModelName(),
-		"project_path": a.projectRoot,
-		"session_id":   a.exportPersistentSessionID(),
-		"instance_id":  a.instanceID,
+		session.MetadataKeyModel:       a.ModelName(),
+		session.MetadataKeyProjectPath: a.projectRoot,
+		session.MetadataKeySessionID:   a.exportPersistentSessionID(),
+		session.MetadataKeyInstanceID:  a.instanceID,
 	}
 	exported, err := session.Export(messages, nil, metadata)
 	if err != nil {

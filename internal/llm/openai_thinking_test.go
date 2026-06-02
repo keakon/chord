@@ -41,9 +41,9 @@ func TestParseOpenAISSEStream_ThinkingEndBeforeToolUse(t *testing.T) {
 	var toolUseStartIdx int = -1
 	for i, d := range deltas {
 		switch d.Type {
-		case "thinking_end":
+		case message.StreamDeltaThinkingEnd:
 			thinkingEndIdx = i
-		case "tool_use_start":
+		case message.StreamDeltaToolUseStart:
 			toolUseStartIdx = i
 		}
 	}

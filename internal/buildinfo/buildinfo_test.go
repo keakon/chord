@@ -47,7 +47,7 @@ func TestFieldsIncludeDiagnosticsKeys(t *testing.T) {
 		Commit:          "abcdef1234567890",
 		BuildTime:       "unknown",
 		VCSTime:         "2026-05-05T00:00:00Z",
-		Dirty:           "true",
+		Dirty:           dirtyTrue,
 		GoVersion:       "go-test",
 		GOOS:            "testos",
 		GOARCH:          "testarch",
@@ -60,16 +60,16 @@ func TestFieldsIncludeDiagnosticsKeys(t *testing.T) {
 		got[field.Key] = field.Value
 	}
 	for _, key := range []string{
-		"chord_version",
-		"chord_commit",
-		"chord_build_time",
-		"chord_vcs_time",
-		"chord_dirty",
-		"go_version",
-		"goos",
-		"goarch",
-		"executable_path",
-		"executable_mtime",
+		fieldChordVersion,
+		fieldChordCommit,
+		fieldChordBuildTime,
+		fieldChordVCSTime,
+		fieldChordDirty,
+		fieldGoVersion,
+		fieldGOOS,
+		fieldGOARCH,
+		fieldExecutablePath,
+		fieldExecutableMTime,
 	} {
 		if got[key] == "" {
 			t.Fatalf("missing diagnostics key %q in %#v", key, got)
@@ -181,27 +181,27 @@ func TestShortMarksDirtyVersionOnlyWhenTrue(t *testing.T) {
 	}{
 		{
 			name: "dirty true",
-			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: "true"},
+			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: dirtyTrue},
 			want: "dev* abcdef123456",
 		},
 		{
 			name: "dirty false omitted",
-			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: "false"},
+			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: dirtyFalse},
 			want: "dev abcdef123456",
 		},
 		{
 			name: "dirty unknown omitted",
-			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: "unknown"},
+			info: Info{Version: "dev", Commit: "abcdef1234567890", Dirty: dirtyUnknown},
 			want: "dev abcdef123456",
 		},
 		{
 			name: "no commit",
-			info: Info{Version: "v1.0.0", Commit: "unknown", Dirty: "false"},
+			info: Info{Version: "v1.0.0", Commit: "unknown", Dirty: dirtyFalse},
 			want: "v1.0.0",
 		},
 		{
 			name: "short commit not truncated",
-			info: Info{Version: "v1.0.0", Commit: "abc123", Dirty: "true"},
+			info: Info{Version: "v1.0.0", Commit: "abc123", Dirty: dirtyTrue},
 			want: "v1.0.0* abc123",
 		},
 		{
@@ -225,7 +225,7 @@ func TestLogStringIsCompact(t *testing.T) {
 		Commit:          "abc123",
 		BuildTime:       "2026-05-05T00:00:00Z",
 		VCSTime:         "2026-05-04T00:00:00Z",
-		Dirty:           "false",
+		Dirty:           dirtyFalse,
 		GoVersion:       "go-test",
 		GOOS:            "testos",
 		GOARCH:          "testarch",

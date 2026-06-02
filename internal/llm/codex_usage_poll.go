@@ -52,7 +52,7 @@ func FetchCodexUsageSnapshot(ctx context.Context, provider *ProviderConfig, key,
 		return nil, fmt.Errorf("build codex usage request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("User-Agent", openAICodexUserAgent())
+	req.Header.Set(headerUserAgent, openAICodexUserAgent())
 	if accountID != "" {
 		req.Header.Set("ChatGPT-Account-ID", accountID)
 	}

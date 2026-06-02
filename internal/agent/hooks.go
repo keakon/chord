@@ -74,8 +74,8 @@ func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
 
 func buildToolHookData(tc message.ToolCall, projectRoot string) map[string]any {
 	data := map[string]any{
-		"tool_name": tc.Name,
-		"args":      json.RawMessage(tc.Args),
+		hook.DataKeyToolName: tc.Name,
+		"args":               json.RawMessage(tc.Args),
 	}
 	if filePaths := extractHookFilePaths(tc.Args, projectRoot); len(filePaths) > 0 {
 		data["paths"] = append([]string(nil), filePaths...)
@@ -86,9 +86,9 @@ func buildToolHookData(tc message.ToolCall, projectRoot string) map[string]any {
 
 func buildToolResultHookData(tcName string, argsJSON string, result string, err error, diff string, audit *message.ToolArgsAudit) map[string]any {
 	data := map[string]any{
-		"tool_name": tcName,
-		"result":    result,
-		"diff":      diff,
+		hook.DataKeyToolName: tcName,
+		"result":             result,
+		"diff":               diff,
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
@@ -120,10 +120,10 @@ func toolArgsAuditHookData(audit *message.ToolArgsAudit) map[string]any {
 
 func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult string, displayResult string, contextResult string, err error, audit *message.ToolArgsAudit) map[string]any {
 	data := map[string]any{
-		"tool_name":      tcName,
-		"raw_result":     rawResult,
-		"display_result": displayResult,
-		"context_result": contextResult,
+		hook.DataKeyToolName: tcName,
+		"raw_result":         rawResult,
+		"display_result":     displayResult,
+		"context_result":     contextResult,
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
@@ -160,16 +160,16 @@ func applyBeforeToolResultAppendHook(currentDisplay string, currentContext strin
 
 func toolResultSummary(payload *ToolResultPayload, storedResult string, errText string) map[string]any {
 	summary := map[string]any{
-		"call_id":    payload.CallID,
-		"tool_name":  payload.Name,
-		"args":       json.RawMessage(payload.ArgsJSON),
-		"result":     storedResult,
-		"diff":       payload.Diff,
-		"error":      errText,
-		"path":       extractHookFilePath(json.RawMessage(payload.ArgsJSON)),
-		"paths":      extractHookFilePaths(json.RawMessage(payload.ArgsJSON), ""),
-		"is_changed": payload.Diff != "" || payload.Name == tools.NameDelete,
-		"is_deleted": payload.Name == tools.NameDelete,
+		hook.DataKeyCallID:   payload.CallID,
+		hook.DataKeyToolName: payload.Name,
+		"args":               json.RawMessage(payload.ArgsJSON),
+		"result":             storedResult,
+		"diff":               payload.Diff,
+		"error":              errText,
+		"path":               extractHookFilePath(json.RawMessage(payload.ArgsJSON)),
+		"paths":              extractHookFilePaths(json.RawMessage(payload.ArgsJSON), ""),
+		"is_changed":         payload.Diff != "" || payload.Name == tools.NameDelete,
+		"is_deleted":         payload.Name == tools.NameDelete,
 	}
 	if payload.Audit != nil {
 		summary["args_audit"] = toolArgsAuditHookData(payload.Audit)

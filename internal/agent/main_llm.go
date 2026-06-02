@@ -511,7 +511,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		for _, c := range contributors {
 			labels = append(labels, contextContributorLabel(c))
 		}
-		stats := a.GetContextReductionStats()
+		stats := a.preparedContextReductionStatsForTurn(turnID)
+		if turnID == 0 && isZeroContextReductionStats(stats) {
+			stats = a.currentMainContextReductionStats()
+		}
 		a.llmMu.RLock()
 		installedPrompt := a.installedSysPrompt
 		a.llmMu.RUnlock()

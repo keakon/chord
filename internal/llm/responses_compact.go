@@ -119,7 +119,7 @@ func (r *ResponsesProvider) Compact(
 	if err != nil {
 		return nil, fmt.Errorf("create compact request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	applyOpenAIOAuthHeaders(req, r.provider, apiKey)
 
 	// Apply request body compression if configured
@@ -133,7 +133,7 @@ func (r *ResponsesProvider) Compact(
 	defer httpResp.Body.Close()
 
 	// Handle gzip response if server supports it
-	if httpResp.Header.Get("Content-Encoding") == "gzip" {
+	if httpResp.Header.Get(headerContentEncoding) == headerValueGzip {
 		gr, err := gzip.NewReader(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("create gzip reader: %w", err)
@@ -142,7 +142,7 @@ func (r *ResponsesProvider) Compact(
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		io.Copy(io.Discard, httpResp.Body) //nolint:errcheck
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		if r.dumpWriter != nil {

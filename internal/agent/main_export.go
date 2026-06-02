@@ -69,10 +69,10 @@ func (a *MainAgent) handleExportCommand(content string, busy bool) {
 	}
 
 	metadata := map[string]string{
-		"model":        a.ModelName(),
-		"project_path": a.projectRoot,
-		"session_id":   persistID,
-		"instance_id":  a.instanceID,
+		session.MetadataKeyModel:       a.ModelName(),
+		session.MetadataKeyProjectPath: a.projectRoot,
+		session.MetadataKeySessionID:   persistID,
+		session.MetadataKeyInstanceID:  a.instanceID,
 	}
 
 	exported, err := session.Export(messages, stats, metadata)

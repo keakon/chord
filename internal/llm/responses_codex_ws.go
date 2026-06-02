@@ -172,10 +172,10 @@ func newResponsesWebsocketDialer(proxyURL string) (*websocket.Dialer, error) {
 
 func applyCodexWebSocketHeaders(h http.Header, provider *ProviderConfig, apiKey, sessionID string) {
 	h.Set("Authorization", "Bearer "+apiKey)
-	h.Set("OpenAI-Beta", codexResponsesWebsocketsBeta)
-	h.Set("User-Agent", openAICodexUserAgent())
+	h.Set(headerOpenAIBeta, codexResponsesWebsocketsBeta)
+	h.Set(headerUserAgent, openAICodexUserAgent())
 	h.Set("originator", openAICodexOriginator)
-	h.Set("session_id", sessionID)
+	h.Set(headerSessionID, sessionID)
 	h.Set("x-client-request-id", sessionID)
 	if provider != nil {
 		if info := provider.oauthInfoForKey(apiKey); info != nil && info.AccountID != "" {
@@ -350,7 +350,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	// before dial, so reusingConn should always be true for the real-request
 	// call to avoid a duplicate.
 	if cb != nil && !reusingConn {
-		cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	}
 
 	if err := r.codexWSConn.SetWriteDeadline(time.Now().Add(60 * time.Second)); err != nil {
@@ -365,7 +365,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	waitingHeaderBytes := responseHeaderBytes(&http.Response{Header: http.Header{"Upgrade": []string{"websocket"}}})
 	if cb != nil {
 		cb(message.StreamDelta{
-			Type:   "status",
+			Type:   message.StreamDeltaStatus,
 			Status: &message.StatusDelta{Type: "waiting_headers"},
 			Progress: &message.StreamProgressDelta{
 				Bytes: waitingHeaderBytes,
@@ -465,7 +465,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		}
 		if !gotData {
 			if cb != nil {
-				cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}})
+				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
 			}
 			gotData = true
 		}
@@ -484,7 +484,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 						r.provider.UpdateKeySnapshot(apiKey, snap)
 						lastUsageEventAt = now
 						if cb != nil {
-							cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+							cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 						}
 					}
 				}
@@ -527,7 +527,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			log.Debugf("responses codex ws: rate_limits event provider=%v key_suffix=%v limit_id=%v plan=%v primary={%s} secondary={%s} credits={%s}", providerName, keySuffix(apiKey), snap.LimitID, snap.PlanType, formatWindow(snap.Primary), formatWindow(snap.Secondary), credits)
 
 			if cb != nil {
-				cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+				cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 			}
 			continue
 		}
@@ -624,7 +624,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		// After this point the connection is considered established, so the
 		// real-request call below passes reusingConn=true to avoid a duplicate.
 		if cb != nil {
-			cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "connecting"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 		}
 		sess := r.sessionID
 		if sess == "" {
@@ -638,7 +638,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		}
 		if dialErr != nil {
 			if httpResp != nil && httpResp.StatusCode >= 400 {
-				errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+				errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 				return nil, false, &APIError{
 					StatusCode: httpResp.StatusCode,
 					Message:    strings.TrimSpace(string(errBody)),
@@ -651,7 +651,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 				snap.Provider = r.provider.Name()
 				r.provider.UpdateKeySnapshot(apiKey, snap)
 				if cb != nil {
-					cb(message.StreamDelta{Type: "rate_limits", RateLimit: snap})
+					cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 				}
 			}
 		}

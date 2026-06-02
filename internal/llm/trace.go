@@ -147,20 +147,20 @@ func (c *llmTraceCollector) Callback(delta message.StreamDelta) {
 		c.record.ProgressEvents = delta.Progress.Events
 	}
 	switch delta.Type {
-	case "text":
+	case message.StreamDeltaText:
 		c.record.TextChunks++
 		c.record.TextChars += len(delta.Text)
-	case "thinking":
+	case message.StreamDeltaThinking:
 		c.record.ThinkingChars += len(delta.Text)
-	case "tool_use_start":
+	case message.StreamDeltaToolUseStart:
 		state := c.toolState(delta.ToolCall)
 		state.trace.Started = true
-	case "tool_use_delta":
+	case message.StreamDeltaToolUseDelta:
 		state := c.toolState(delta.ToolCall)
 		state.trace.Started = true
 		state.trace.DeltaCount++
 		c.addToolInputBytes(state, delta.ToolCall)
-	case "tool_use_end":
+	case message.StreamDeltaToolUseEnd:
 		state := c.toolState(delta.ToolCall)
 		state.trace.Started = true
 		state.trace.Ended = true

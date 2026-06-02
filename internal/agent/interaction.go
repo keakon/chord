@@ -34,11 +34,11 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 	ch := make(chan ConfirmResponse, 1)
 
 	a.fireHookBackground(ctx, hook.OnWaitConfirm, a.currentTurnID(), map[string]any{
-		"tool_name":       toolName,
-		"args_json":       argsJSON,
-		"timeout_ms":      timeout.Milliseconds(),
-		"needs_approval":  append([]string(nil), needsApproval...),
-		"already_allowed": append([]string(nil), alreadyAllowed...),
+		hook.DataKeyToolName: toolName,
+		"args_json":          argsJSON,
+		"timeout_ms":         timeout.Milliseconds(),
+		"needs_approval":     append([]string(nil), needsApproval...),
+		"already_allowed":    append([]string(nil), alreadyAllowed...),
 	})
 
 	a.confirmMapMu.Lock()
@@ -126,13 +126,13 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 		}
 
 		a.fireHookBackground(ctx, hook.OnWaitQuestion, a.currentTurnID(), map[string]any{
-			"tool_name":      tools.NameQuestion,
-			"header":         q.Header,
-			"question":       q.Question,
-			"options":        append([]string(nil), options...),
-			"default_answer": defaultAnswer,
-			"multiple":       q.Multiple,
-			"timeout_ms":     timeout.Milliseconds(),
+			hook.DataKeyToolName: tools.NameQuestion,
+			"header":             q.Header,
+			"question":           q.Question,
+			"options":            append([]string(nil), options...),
+			"default_answer":     defaultAnswer,
+			"multiple":           q.Multiple,
+			"timeout_ms":         timeout.Milliseconds(),
 		})
 
 		if err := a.emitInteractiveToTUI(ctx, QuestionRequestEvent{

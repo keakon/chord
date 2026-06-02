@@ -238,7 +238,7 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 		line, readErr := readSSELine(br)
 		if readErr == nil || len(line) > 0 {
 			if !gotData && cb != nil {
-				cb(message.StreamDelta{Type: "status", Status: &message.StatusDelta{Type: "waiting_token"}})
+				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
 				gotData = true
 			}
 			switch {
@@ -339,7 +339,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			}
 			state.toolCalls[addedIdx] = &responsesToolAccumulator{id: toolCallID, name: added.Item.Name}
 			if state.cb != nil {
-				state.cb(message.StreamDelta{Type: "tool_use_start", ToolCall: &message.ToolCallDelta{ID: toolCallID, Name: added.Item.Name}})
+				state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: toolCallID, Name: added.Item.Name}})
 			}
 		case "reasoning":
 			if state.phaser != nil {
@@ -354,7 +354,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, fmt.Errorf("parse output_text.delta: %w", err)
 		}
 		if delta.Delta != "" && state.cb != nil {
-			state.cb(message.StreamDelta{Type: "text", Text: delta.Delta})
+			state.cb(message.StreamDelta{Type: message.StreamDeltaText, Text: delta.Delta})
 		}
 		state.content.WriteString(delta.Delta)
 		return nil, nil, false, nil
@@ -374,7 +374,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			if state.cb != nil && acc.args.Len() > 0 {
 				argsStr := acc.args.String()
 				if argsStr != "{}" {
-					state.cb(message.StreamDelta{Type: "tool_use_delta", ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: argsStr}})
+					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: argsStr}})
 				}
 			}
 		}
@@ -387,7 +387,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		if delta.Delta != "" && state.cb != nil {
-			state.cb(message.StreamDelta{Type: "thinking", Text: delta.Delta})
+			state.cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: delta.Delta})
 		}
 		return nil, nil, false, nil
 
@@ -398,7 +398,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		if state.cb != nil {
-			state.cb(message.StreamDelta{Type: "thinking_end"})
+			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 		}
 		if done.Text != "" {
 			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: done.Text})
