@@ -3,7 +3,6 @@ package agent
 import (
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -39,7 +38,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 	}
 	paths := make(map[string]struct{})
 	for _, msg := range msgs {
-		if msg.Role != "tool" || !restoredToolResultSucceeded(msg.Content) {
+		if msg.Role != "tool" || !message.ToolResultSucceeded(msg.Content) {
 			continue
 		}
 		info, ok := calls[msg.ToolCallID]
@@ -67,19 +66,4 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func restoredToolResultSucceeded(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return true
-	}
-	lower := strings.ToLower(trimmed)
-	if lower == "cancelled" || strings.HasPrefix(lower, "cancelled\n") {
-		return false
-	}
-	if strings.HasPrefix(trimmed, "Error: ") || strings.Contains(trimmed, "\n\nError: ") || strings.HasPrefix(trimmed, "Model stopped before completing this tool call") {
-		return false
-	}
-	return true
 }

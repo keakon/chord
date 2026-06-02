@@ -352,7 +352,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 	}
 	byKey := make(map[string]ReviewedFileSnapshot)
 	for _, msg := range msgs {
-		if msg.Role != "tool" || !restoredToolResultSucceeded(msg.Content) {
+		if msg.Role != "tool" || !message.ToolResultSucceeded(msg.Content) {
 			continue
 		}
 		info, ok := calls[msg.ToolCallID]
@@ -404,19 +404,4 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		return out[i].Path < out[j].Path
 	})
 	return out
-}
-
-func restoredToolResultSucceeded(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return true
-	}
-	lower := strings.ToLower(trimmed)
-	if lower == "cancelled" || strings.HasPrefix(lower, "cancelled\n") {
-		return false
-	}
-	if strings.HasPrefix(trimmed, "Error: ") || strings.Contains(trimmed, "\n\nError: ") || strings.HasPrefix(trimmed, "Model stopped before completing this tool call") {
-		return false
-	}
-	return true
 }
