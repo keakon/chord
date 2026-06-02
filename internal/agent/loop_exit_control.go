@@ -119,7 +119,7 @@ func (a *MainAgent) maybeInterceptRepeatedToolCall(ctx context.Context, tc messa
 	return &repeatedToolCallInterceptResult{toolResult: a.repeatedToolCallRejectResult(tc, streak)}, true
 }
 
-func (a *MainAgent) loopExitConditionsSatisfied(content string) bool {
+func (a *MainAgent) loopExitConditionsSatisfied() bool {
 	if !a.loopState.Enabled {
 		return false
 	}

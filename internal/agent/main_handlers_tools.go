@@ -442,7 +442,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			}
 			pending := pendingResults[len(pendingResults)-1]
 			if a.loopState.Enabled {
-				if a.loopExitConditionsSatisfied(pending.AssistantContent) {
+				if a.loopExitConditionsSatisfied() {
 					resp, err := a.awaitDoneConfirmation(a.turn.Ctx, pending.Reason, pending.ArgsJSON, pending.AssistantContent)
 					if err != nil {
 						log.Warnf("loop exit confirmation failed error=%v", err)
