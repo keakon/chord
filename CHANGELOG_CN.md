@@ -5,7 +5,7 @@
 ## 0.6.2-dev - 未发布
 
 - **Breaking / Tools：** 旧的原生局部文件编辑工具名 `ApplyPatch` 已替换为当前的 snake_case `edit` 名称，并且所有内置的模型可见工具名都已规范化为 snake_case（例如 `WebFetch` → `web_fetch`、`TodoWrite` → `todo_write`）。这会影响工具 schema、权限/配置示例、TUI 渲染、hooks、恢复/导入后的工具卡片以及内部实现命名。Chord 不再为旧内置工具名保留兼容别名；已有的旧 PascalCase 权限规则及通配符 pattern 必须更新为 snake_case。外部会话导入仍会识别 Codex `apply_patch` 等来源工具名，并映射为当前的 `edit` 工具卡。
-- Runtime / 上下文剪裁：新增 cache-aware warmup 保护和稳定剪裁面复用，避免在低压力 prompt 前缀上反复裁剪同一批内容。`context.reduction` 现在接受 `true` 或 `{}` 作为默认调优的简写，并新增 `cache_aware_min_usage`、`warmup_message_limit`、`min_incremental_saved_tokens`、`high_pressure_usage`、`force_prune_usage` 供高级调优。`context.reduction: false` 现在会报错，而不是静默当作默认配置处理。
+- Runtime / 上下文剪裁：新增 cache-aware warmup 保护和稳定剪裁面复用，避免在低压力 prompt 前缀上反复裁剪同一批内容。侧边栏中的 reduction 节省量现在反映当前请求实际省掉的 messages / bytes / tokens，并会在 turn 回到 idle 后继续显示。`context.reduction` 现在接受 `true` 或 `{}` 作为默认调优的简写，并新增 `cache_aware_min_usage`、`warmup_message_limit`、`min_incremental_saved_tokens`、`high_pressure_usage`、`force_prune_usage` 供高级调优。`context.reduction: false` 现在会报错，而不是静默当作默认配置处理。
 - Tools / edit：改进 hunk 应用失败诊断，会针对常见补丁问题给出更具体提示，例如复制了行号 gutter、缩进漂移、文件内容已过期，以及 function/class anchor 不匹配。
 - Runtime / 上下文剪裁：请求级剪裁现在会把 `*_age_turns` 视为等效年龄阈值，而不是只统计后续用户消息。很长的单轮工具调用链会随着后续 assistant/tool 消息累积，继续裁剪更早的陈旧 Shell、read-like 和其它工具大输出；同时复用现有 `context.reduction` 配置并保留最近工具输出。配置文档和术语表已同步说明等效年龄语义。
 
@@ -66,7 +66,7 @@
 - TUI / 导航：normal 模式下 `gg` / `G` 现在把焦点移动到第一个 / 最后一个可见卡片，而不再只是单纯滚动到底/顶，与 vim 风格的焦点导航一致。
 - TUI / 工具卡：header 截断时不会再丢掉运行中的进度后缀；已删除文件的 Delete 卡片在恢复会话后仍会显示拒绝 / 完成 reason；toast 边界变化会触发重绘，让边界标记保持同步。
 - TUI / 焦点恢复：延迟到达的 tail-window 焦点恢复事件会被重新应用，让聚焦的卡片在多次重绘后仍保持可见。
-- Runtime / 上下文 reduction 统计：info-panel 的 `Reduced` 行在 `/compact` 或自动压缩重写会话历史后会刷新，loop 模式下同样有效。
+- Runtime / 上下文 reduction 统计：info panel 的 `Bytes` / `Messages` 现在描述将发送给模型的会话上下文。请求级剪裁后，`Bytes` 显示 reduction 后实际请求字节数和 `↓` 百分比；请求尚未准备时，则回退显示当前持久上下文估算。`/compact`、自动压缩、工具输出增长以及系统提示词或工具定义变化会更新回退估算；新的请求准备会刷新实际发送请求大小，loop 模式下同样有效。
 - Runtime / 压缩摘要：持久化压缩摘要的小节标题从单一的 `## Goal` 拆为 `## Current User Request` / `## Active Objective` / `## Background Goals`。最新用户请求和最近一次 Done 拒绝原因现在被视为同等优先级的 latest-request anchor（按消息序号取最新），不会再被一条更早的约束反过来盖住新到的 Done 拒绝。`## Todo State` 显式使用 `Active/relevant to latest request` / `Completed/background` / `Stale/superseded` 三个子组，让压缩后的 agent 按最新请求重新评估旧 todo，而不是默认沿用。
 - Runtime / 上下文剪裁：剪裁现在会保留最近的未完成 tool-call 链在当前尾部，而不是直接归档，这样没有 result 的 tool call 会继续和 assistant 消息保持配对；当这类未完成 tool call 足够陈旧时，仍然可以被压缩掉。每次发送 LLM 请求前，凡是已经没有有效 assistant tool-call 锚点的孤儿 tool result 都会被丢弃，不会再发送给 provider。
 - Runtime / Plan 执行：开始执行 plan 时，prompt 现在通过 `@<plan-path>` file mention + 附带文件 part 的方式把 plan 内容传给 LLM，不再把 plan 文本直接内联进 system prompt；这样 plan 体积有界，引用方式与普通文件 mention 一致。

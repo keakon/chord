@@ -56,7 +56,15 @@ func (a *MainAgent) GetContextBytes() int {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return sub.GetContextBytes()
 	}
-	return a.ctxMgr.EstimateTotalBytes()
+	return a.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(a.mainLLMToolDefinitions())
+}
+
+func toolDefinitionBytes(defs []message.ToolDefinition) int {
+	total := 0
+	for _, def := range defs {
+		total += len(def.Name) + len(def.Description)
+	}
+	return total
 }
 
 // KeyStats returns (healthy, total) API keys for the focused agent's provider

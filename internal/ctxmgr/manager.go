@@ -16,7 +16,9 @@ import (
 type Manager struct {
 	mu                     sync.RWMutex
 	systemPrompt           message.Message
+	systemPromptBytes      int
 	messages               []message.Message
+	payloadBytes           int
 	lastInputTokens        int // prompt size only (for compaction thresholds and input-budget displays)
 	lastTotalContextTokens int // true input-side context burden (input + cache_write) for recovery/diagnostics
 	maxTokens              int
@@ -61,6 +63,7 @@ func (m *Manager) SetSystemPrompt(msg message.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.systemPrompt = msg
+	m.systemPromptBytes = MessagePayloadBytes([]message.Message{msg})
 }
 
 // SystemPrompt returns the current system prompt.
@@ -146,6 +149,7 @@ func (m *Manager) Append(msg message.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.messages = append(m.messages, msg)
+	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
 }
 
 // DropLastMessage removes the last message from the conversation history.
@@ -154,6 +158,7 @@ func (m *Manager) DropLastMessage() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if n := len(m.messages); n > 0 {
+		m.payloadBytes -= MessagePayloadBytes(m.messages[n-1:])
 		m.messages = m.messages[:n-1]
 	}
 }
@@ -172,6 +177,7 @@ func (m *Manager) DropLastMessages(n int) {
 	if len(m.messages) < n {
 		n = len(m.messages)
 	}
+	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
 	m.messages = m.messages[:len(m.messages)-n]
 }
 
@@ -203,6 +209,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	replaced := make([]message.Message, len(repaired))
 	copy(replaced, repaired)
 	m.messages = replaced
+	m.payloadBytes = MessagePayloadBytes(replaced)
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -219,6 +226,7 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 		return 0
 	}
 	m.messages = repaired
+	m.payloadBytes = MessagePayloadBytes(repaired)
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -337,23 +345,40 @@ func (m *Manager) EstimateTotalTokens() int {
 	return EstimateMessagesTokens(m.messages)
 }
 
-// EstimateTotalBytes returns a rough byte count for the current message list.
-func (m *Manager) EstimateTotalBytes() int {
+// PayloadBytes returns message content bytes for the current message list. It
+// intentionally excludes request-encoding overhead, assistant tool-call
+// arguments, thinking metadata, and other API parameters.
+func (m *Manager) PayloadBytes() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return EstimateMessagesBytes(m.messages)
+	return m.payloadBytes
 }
 
-// EstimateMessagesBytes returns approximate payload bytes for a slice of messages.
-func EstimateMessagesBytes(messages []message.Message) int {
+// ContextPayloadBytes returns the current prompt-side content bytes for the
+// installed system prompt plus conversation messages. It excludes tool
+// definitions and provider/JSON envelope overhead.
+func (m *Manager) ContextPayloadBytes() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.systemPromptBytes + m.payloadBytes
+}
+
+func (m *Manager) SystemPromptPayloadBytes() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.systemPromptBytes
+}
+
+// MessagePayloadBytes returns message content bytes for a slice of messages.
+func MessagePayloadBytes(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
-		total += len(msg.Content)
-		for _, tc := range msg.ToolCalls {
-			total += len(tc.Args)
-		}
-		for _, tb := range msg.ThinkingBlocks {
-			total += len(tb.Thinking)
+		if len(msg.Parts) > 0 {
+			for _, part := range msg.Parts {
+				total += len(part.Text) + len(part.Data)
+			}
+		} else {
+			total += len(msg.Content)
 		}
 	}
 	return total

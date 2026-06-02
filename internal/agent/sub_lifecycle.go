@@ -197,7 +197,7 @@ func (s *SubAgent) GetContextMessageCount() int {
 }
 
 func (s *SubAgent) GetContextBytes() int {
-	return s.ctxMgr.EstimateTotalBytes()
+	return s.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(s.frozenToolDefs)
 }
 
 func (s *SubAgent) GetContextReductionStats() ContextReductionStats {

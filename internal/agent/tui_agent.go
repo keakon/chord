@@ -160,7 +160,7 @@ type UsageReporter interface {
 	GetContextStats() (current, limit int)
 	// GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar). -1 if unknown.
 	GetContextMessageCount() int
-	// GetContextBytes returns approximate message payload bytes in the focused agent's context.
+	// GetContextBytes returns request payload bytes for the focused agent.
 	GetContextBytes() int
 	// GetContextReductionStats returns request-level prompt trimming effect for the focused agent.
 	GetContextReductionStats() ContextReductionStats

@@ -3,14 +3,16 @@ package agent
 import "github.com/keakon/chord/internal/config"
 
 type ContextReductionStats struct {
-	Messages      int
-	Bytes         int
-	TokensBefore  int
-	TokensAfter   int
-	TokensSaved   int
-	Protected     bool
-	ReusedStable  bool
-	ByToolAndRule map[string]ContextReductionBucket
+	Messages        int
+	Bytes           int
+	CurrentBytes    int
+	CurrentMessages int
+	TokensBefore    int
+	TokensAfter     int
+	TokensSaved     int
+	Protected       bool
+	ReusedStable    bool
+	ByToolAndRule   map[string]ContextReductionBucket
 }
 
 type ContextReductionBucket struct {

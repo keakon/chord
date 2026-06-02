@@ -146,21 +146,65 @@ func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
 	}
 }
 
+func TestInfoPanelCacheIncludesRequestReductionSurface(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 42_600
+	backend.contextBytes = 200_000
+	backend.contextLimit = 100_000
+	backend.contextMessageCount = 370
+	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500, CurrentBytes: 200_000, CurrentMessages: 130}
+	model := NewModel(backend)
+
+	first := model.renderInfoPanel(50, 24)
+	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500, CurrentBytes: 100_000, CurrentMessages: 80}
+
+	second := stripANSI(model.renderInfoPanel(50, 24))
+	if second == stripANSI(first) {
+		t.Fatalf("info panel reused stale cached output after request reduction surface changed")
+	}
+	if !strings.Contains(second, "Bytes: 97.7 KB (↓75%)") || !strings.Contains(second, "Messages: 80") {
+		t.Fatalf("info panel should refresh when request reduction surface changes, got:\n%s", second)
+	}
+}
+
 func TestInfoPanelShowsContextBytesAndReducedRatio(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 42_600
 	backend.contextBytes = 200_000
 	backend.contextLimit = 100_000
 	backend.contextMessageCount = 370
-	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500}
+	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500, CurrentBytes: 200_000, CurrentMessages: 130}
 	model := NewModel(backend)
 
 	plain := stripANSI(model.renderInfoPanel(50, 24))
-	if !strings.Contains(plain, "Context: 42.6k / 195.3 KB (43%)") {
-		t.Fatalf("info panel missing context bytes, got:\n%s", plain)
+	if !strings.Contains(plain, "Context: 42.6k (43%)") {
+		t.Fatalf("info panel missing context summary, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "Reduced: 130 msg (26%) / 293.5 KB") {
-		t.Fatalf("info panel missing reduced ratio/bytes, got:\n%s", plain)
+	if !strings.Contains(plain, "Bytes: 195.3 KB (↓60%)") {
+		t.Fatalf("info panel missing reduced bytes summary, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Messages: 130") || strings.Contains(plain, "Messages: 370") {
+		t.Fatalf("info panel should show actual request message count, got:\n%s", plain)
+	}
+}
+
+func TestInfoPanelUsesSameReductionFormatForSidebarWidths(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 39_700
+	backend.contextBytes = 674_400
+	backend.contextLimit = 248_000
+	backend.contextMessageCount = 122
+	backend.contextReduction = agent.ContextReductionStats{Messages: 49, Bytes: 551_300, CurrentBytes: 674_400, CurrentMessages: 49}
+	model := NewModel(backend)
+
+	for _, width := range []int{28, 40} {
+		plain := stripANSI(model.renderInfoPanel(width, 24))
+		if !strings.Contains(plain, "Bytes: 658.6 KB (↓45%)") {
+			t.Fatalf("info panel missing byte reduction at width %d, got:\n%s", width, plain)
+		}
+		if !strings.Contains(plain, "Messages: 49") || strings.Contains(plain, "Messages: 122") {
+			t.Fatalf("request message count should be shown at width %d, got:\n%s", width, plain)
+		}
 	}
 }
 
@@ -493,8 +537,9 @@ func TestRenderInfoPanelShowsUsageUsesInputBudgetRatherThanTotalContextWindow(t 
 func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 159_100
+	backend.contextBytes = 86_323
 	backend.contextMessageCount = 360
-	backend.contextReduction = agent.ContextReductionStats{Messages: 12, Bytes: 86_323}
+	backend.contextReduction = agent.ContextReductionStats{Messages: 12, Bytes: 86_323, CurrentBytes: 86_323, CurrentMessages: 12}
 	backend.usage = analytics.SessionStats{
 		InputTokens:     20_400_000,
 		OutputTokens:    112_400,
@@ -506,8 +551,8 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 	want := []string{
 		"Context: 159.1k (80%)",
 		"[■■■■■■■■■■■■■■■■■■■■□□□□□□]",
-		"Messages: 360",
-		"Reduced: 12 msg / 84.3 KB",
+		"Bytes: 84.3 KB (↓50%)",
+		"Messages: 12",
 		"",
 		"TOKENS",
 		"↑ 20.4M  ↓ 112.4k",
@@ -567,6 +612,54 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 		if !found {
 			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
 		}
+	}
+}
+
+func TestRenderInfoPanelUsageRefreshesSavedStatsWhenFingerprintChanges(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 39_700
+	backend.contextBytes = 674_400
+	backend.contextMessageCount = 122
+
+	m := NewModel(backend)
+	first := infoPanelPlainLines(m.renderInfoPanel(40, 24))
+	if slices.Contains(first, "Bytes: 658.6 KB (↓45%)") || slices.Contains(first, "Messages: 122 (") {
+		t.Fatalf("initial usage render should not show reduction, got:\n%s", first)
+	}
+
+	backend.contextReduction = agent.ContextReductionStats{Messages: 49, Bytes: 551_300, CurrentBytes: 674_400, CurrentMessages: 49, TokensSaved: 152_000, ReusedStable: true}
+	second := infoPanelPlainLines(m.renderInfoPanel(40, 24))
+	if !slices.Contains(second, "Bytes: 658.6 KB (↓45%)") {
+		t.Fatalf("saved bytes should render after reduction stats change, got:\n%s", second)
+	}
+	if !slices.Contains(second, "Messages: 49") || slices.Contains(second, "Messages: 122") {
+		t.Fatalf("messages should render request count when reduction stats are available, got:\n%s", second)
+	}
+}
+
+func TestRenderInfoPanelUsageShowsRequestSurfaceWhenAvailable(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 39_700
+	backend.contextLimit = 200_000
+	backend.contextBytes = 153_600
+	backend.contextMessageCount = 122
+	backend.contextReduction = agent.ContextReductionStats{
+		Bytes:           81_920,
+		Messages:        37,
+		CurrentBytes:    73_728,
+		CurrentMessages: 85,
+	}
+
+	m := NewModel(backend)
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(42, 24)), "USAGE")
+	if !slices.Contains(lines, "Bytes: 72.0 KB (↓53%)") {
+		t.Fatalf("bytes should show actual request surface and reduction percentage, got %#v", lines)
+	}
+	if !slices.Contains(lines, "Messages: 85") {
+		t.Fatalf("messages should show actual request message count, got %#v", lines)
+	}
+	if slices.Contains(lines, "Bytes: 150.0 KB") || slices.Contains(lines, "Messages: 122") || slices.Contains(lines, "Req:") {
+		t.Fatalf("raw context size and separate Req line should not render when request surface is available, got %#v", lines)
 	}
 }
 
@@ -1576,107 +1669,28 @@ func normalizeInfoPanelSectionTitle(line string) string {
 	}
 }
 
-func TestInfoPanelBreakpoint(t *testing.T) {
-	tests := []struct {
-		width    int
-		wantTier int
-	}{
-		{10, 0},
-		{20, 0},
-		{23, 0},
-		{24, 1},
-		{28, 1},
-		{31, 1},
-		{32, 2},
-		{36, 2},
-		{39, 2},
-		{40, 3},
-		{50, 3},
-		{80, 3},
+func TestInfoPanelUsesSingleUsageLayoutAcrossWidths(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 50_000
+	backend.contextBytes = 86_000
+	backend.contextLimit = 128_000
+	backend.contextMessageCount = 42
+	backend.usage = analytics.SessionStats{
+		InputTokens:     500_000,
+		OutputTokens:    10_000,
+		CacheReadTokens: 20_000,
 	}
-	for _, tc := range tests {
-		got := infoPanelBreakpoint(tc.width)
-		if got != tc.wantTier {
-			t.Errorf("infoPanelBreakpoint(%d) = %d, want %d", tc.width, got, tc.wantTier)
+
+	m := NewModel(backend)
+	for _, width := range []int{23, 30, 32} {
+		plain := stripANSI(m.renderInfoPanel(width, 20))
+		for _, want := range []string{"Context", "Bytes", "Messages", "TOKENS", "Cache R"} {
+			if !strings.Contains(plain, want) {
+				t.Fatalf("info panel width %d missing %q in single layout, got %q", width, want, plain)
+			}
 		}
-	}
-}
-
-// TestInfoPanelBreakpointTier0HidesContextDetails verifies that at width < 24
-// the USAGE section omits Context gauge, Messages, and cache details.
-func TestInfoPanelBreakpointTier0HidesContextDetails(t *testing.T) {
-	backend := newInfoPanelAgent()
-	backend.contextCurrent = 50_000
-	backend.contextLimit = 128_000
-	backend.usage = analytics.SessionStats{
-		InputTokens:     500_000,
-		OutputTokens:    10_000,
-		CacheReadTokens: 20_000,
-	}
-
-	m := NewModel(backend)
-	// width=23, which is tier 0.
-	plain := stripANSI(m.renderInfoPanel(23, 20))
-	if strings.Contains(plain, "Context") {
-		t.Fatalf("tier 0 should hide Context details, got %q", plain)
-	}
-	if strings.Contains(plain, "Messages") {
-		t.Fatalf("tier 0 should hide Messages line, got %q", plain)
-	}
-	if strings.Contains(plain, "Reduced") {
-		t.Fatalf("tier 0 should hide Reduced line, got %q", plain)
-	}
-	if strings.Contains(plain, "Cache") {
-		t.Fatalf("tier 0 should hide cache details, got %q", plain)
-	}
-	// Token summary should still be visible.
-	if !strings.Contains(plain, "TOKENS") {
-		t.Fatalf("tier 0 should still show TOKENS header, got %q", plain)
-	}
-}
-
-// TestInfoPanelBreakpointTier1ShowsContextHidesCache verifies that at width 24-31
-// the USAGE section shows Context + gauge but hides cache details.
-func TestInfoPanelBreakpointTier1ShowsContextHidesCache(t *testing.T) {
-	backend := newInfoPanelAgent()
-	backend.contextCurrent = 50_000
-	backend.contextLimit = 128_000
-	backend.usage = analytics.SessionStats{
-		InputTokens:     500_000,
-		OutputTokens:    10_000,
-		CacheReadTokens: 20_000,
-	}
-
-	m := NewModel(backend)
-	// width=30, which is tier 1.
-	plain := stripANSI(m.renderInfoPanel(30, 20))
-	if !strings.Contains(plain, "Context") {
-		t.Fatalf("tier 1 should show Context, got %q", plain)
-	}
-	if strings.Contains(plain, "Cache") {
-		t.Fatalf("tier 1 should hide cache details, got %q", plain)
-	}
-}
-
-// TestInfoPanelBreakpointTier2ShowsFullDetails verifies that at width 32+
-// the USAGE section shows everything including cache details.
-func TestInfoPanelBreakpointTier2ShowsFullDetails(t *testing.T) {
-	backend := newInfoPanelAgent()
-	backend.contextCurrent = 50_000
-	backend.contextLimit = 128_000
-	backend.usage = analytics.SessionStats{
-		InputTokens:     500_000,
-		OutputTokens:    10_000,
-		CacheReadTokens: 20_000,
-	}
-
-	m := NewModel(backend)
-	// width=32, which is tier 2.
-	plain := stripANSI(m.renderInfoPanel(32, 20))
-	if !strings.Contains(plain, "Context") {
-		t.Fatalf("tier 2+ should show Context, got %q", plain)
-	}
-	if !strings.Contains(plain, "Cache R") {
-		t.Fatalf("tier 2+ should show cache details, got %q", plain)
+		if strings.Contains(plain, "Reduced") {
+			t.Fatalf("info panel should not render legacy Reduced label at width %d, got %q", width, plain)
+		}
 	}
 }

@@ -563,6 +563,9 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 	if !stats.ReusedStable {
 		t.Fatalf("expected stable reduction surface reuse, stats=%+v", stats)
 	}
+	if stats.CurrentMessages != len(prepared) || stats.CurrentBytes == 0 {
+		t.Fatalf("reused stable stats current surface = (%d messages, %d bytes), want prepared surface (%d messages, >0 bytes)", stats.CurrentMessages, stats.CurrentBytes, len(prepared))
+	}
 	if stats.TokensSaved != firstStats.TokensSaved || stats.Messages != firstStats.Messages || stats.ByToolAndRule == nil {
 		t.Fatalf("stats = %+v, want first stats marked reused", stats)
 	}
@@ -816,6 +819,9 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if loopStats.TokensSaved != loopStats.TokensBefore-loopStats.TokensAfter || !loopStats.ReusedStable {
 		t.Fatalf("loop reduction stats should reflect current request savings, got %+v first %+v", loopStats, firstStats)
 	}
+	if loopStats.CurrentMessages != len(loopPrepared) || loopStats.CurrentBytes == 0 {
+		t.Fatalf("loop reduction stats current surface = (%d messages, %d bytes), want prepared surface (%d messages, >0 bytes)", loopStats.CurrentMessages, loopStats.CurrentBytes, len(loopPrepared))
+	}
 
 	a.DisableLoopMode()
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
@@ -874,8 +880,12 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if prepared[7].Content != newLargeOutput {
 		t.Fatalf("low-quota continuation should not newly prune messages after frozen prefix, got %q", prepared[7].Content)
 	}
-	if stats := a.GetContextReductionStats(); stats.TokensSaved != stats.TokensBefore-stats.TokensAfter || !stats.ReusedStable {
+	stats := a.GetContextReductionStats()
+	if stats.TokensSaved != stats.TokensBefore-stats.TokensAfter || !stats.ReusedStable {
 		t.Fatalf("reduction stats should reflect current request savings, got %+v first %+v", stats, firstStats)
+	}
+	if stats.CurrentMessages != len(prepared) || stats.CurrentBytes == 0 {
+		t.Fatalf("reduction stats current surface = (%d messages, %d bytes), want prepared surface (%d messages, >0 bytes)", stats.CurrentMessages, stats.CurrentBytes, len(prepared))
 	}
 }
 

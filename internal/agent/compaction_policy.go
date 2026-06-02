@@ -63,6 +63,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
 		if policy.shouldProtectCachedContext(len(prepared), estimatedTokens, inputBudget) {
 			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
+			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
 			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
 			return prepared
@@ -76,6 +77,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 	}
 	if a != nil {
 		if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
+			a.setCurrentRequestSurface(&stats, reused)
 			a.setContextReductionStats(stats)
 			a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
 			return reused
@@ -176,12 +178,14 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 
 	if a != nil {
 		stats.TokensAfter = ctxmgr.EstimateMessagesTokens(prepared)
+		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
 		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, a.contextReductionInputBudget()) {
 			prepared = reuseStableReductionPrefix(previous.Messages, prepared)
 			stats = highLevelContextReductionStats(messages, prepared)
+			a.setCurrentRequestSurface(&stats, prepared)
 			if len(stats.ByToolAndRule) == 0 {
 				stats.ByToolAndRule = previous.Stats.ByToolAndRule
 			}
@@ -337,6 +341,7 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	}
 	reused := reuseStableReductionPrefix(previous.Messages, messages)
 	stats := highLevelContextReductionStats(messages, reused)
+	a.setCurrentRequestSurface(&stats, reused)
 	if len(stats.ByToolAndRule) == 0 {
 		stats.ByToolAndRule = previous.Stats.ByToolAndRule
 	}
@@ -349,6 +354,7 @@ func highLevelContextReductionStats(original, reduced []message.Message) Context
 		TokensBefore: ctxmgr.EstimateMessagesTokens(original),
 		TokensAfter:  ctxmgr.EstimateMessagesTokens(reduced),
 	}
+	stats.setCurrentMessageSurface(reduced)
 	if stats.TokensBefore > stats.TokensAfter {
 		stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 	}
@@ -362,6 +368,21 @@ func highLevelContextReductionStats(original, reduced []message.Message) Context
 		stats.Bytes += saved
 	}
 	return stats
+}
+
+func (s *ContextReductionStats) setCurrentMessageSurface(messages []message.Message) {
+	s.CurrentBytes = ctxmgr.MessagePayloadBytes(messages)
+	s.CurrentMessages = len(messages)
+}
+
+func (a *MainAgent) setCurrentRequestSurface(stats *ContextReductionStats, messages []message.Message) {
+	stats.setCurrentMessageSurface(messages)
+	if a != nil && a.ctxMgr != nil {
+		stats.CurrentBytes += a.ctxMgr.SystemPromptPayloadBytes()
+	}
+	if a != nil {
+		stats.CurrentBytes += toolDefinitionBytes(a.mainLLMToolDefinitions())
+	}
 }
 
 func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
@@ -592,7 +613,9 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, p
 		return prepared
 	}
 	if len(prefix) == 0 {
-		a.setContextReductionStats(ContextReductionStats{})
+		stats := ContextReductionStats{}
+		a.setCurrentRequestSurface(&stats, prepared)
+		a.setContextReductionStats(stats)
 		return prepared
 	}
 	original := cloneMessageSliceForRequestShape(prepared)
@@ -606,6 +629,7 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, p
 	}
 	updatedStats.Protected = stats.Protected
 	updatedStats.ReusedStable = true
+	a.setCurrentRequestSurface(&updatedStats, prepared)
 	a.setContextReductionStats(updatedStats)
 	return prepared
 }

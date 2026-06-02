@@ -248,6 +248,78 @@ func TestEstimateMessagesTokensCountsToolCallsAndThinking(t *testing.T) {
 	}
 }
 
+func TestMessagePayloadBytesCountsOnlyContentAndImageData(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role:    "assistant",
+			Content: "abcd",
+			ToolCalls: []message.ToolCall{
+				{ID: "1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)},
+			},
+			ThinkingBlocks: []message.ThinkingBlock{
+				{Thinking: "reasoning"},
+			},
+		},
+		{
+			Role: "user",
+			Parts: []message.ContentPart{
+				{Type: "text", Text: "hi"},
+				{Type: "image", Data: []byte("raw-image")},
+			},
+			Content: "ignored when parts are present",
+		},
+	}
+
+	if got := MessagePayloadBytes(msgs); got != len("abcd")+len("hi")+len("raw-image") {
+		t.Fatalf("MessagePayloadBytes() = %d, want content plus image data only", got)
+	}
+	if got, want := MessagePayloadBytes([]message.Message{{Role: "user", Content: "中文"}}), len("中文"); got != want {
+		t.Fatalf("MessagePayloadBytes() for UTF-8 content = %d, want %d", got, want)
+	}
+}
+
+func TestManagerPayloadBytesTracksIncrementalMessageChanges(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.SetSystemPrompt(message.Message{Role: "system", Content: "sys"})
+	m.Append(message.Message{Role: "user", Content: "abcd"})
+	m.Append(message.Message{Role: "assistant", Parts: []message.ContentPart{{Type: "text", Text: "hi"}, {Type: "image", Data: []byte("raw")}}})
+
+	if got, want := m.PayloadBytes(), len("abcd")+len("hi")+len("raw"); got != want {
+		t.Fatalf("PayloadBytes() = %d, want %d", got, want)
+	}
+	if got, want := m.ContextPayloadBytes(), len("sys")+len("abcd")+len("hi")+len("raw"); got != want {
+		t.Fatalf("ContextPayloadBytes() = %d, want %d", got, want)
+	}
+
+	m.DropLastMessage()
+	if got, want := m.PayloadBytes(), len("abcd"); got != want {
+		t.Fatalf("PayloadBytes() after DropLastMessage = %d, want %d", got, want)
+	}
+
+	m.SetSystemPrompt(message.Message{Role: "system", Content: "longer system"})
+	if got, want := m.ContextPayloadBytes(), len("longer system")+len("abcd"); got != want {
+		t.Fatalf("ContextPayloadBytes() after SetSystemPrompt = %d, want %d", got, want)
+	}
+}
+
+func TestManagerPayloadBytesRecomputesAfterRestoreAndRepair(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.RestoreMessages([]message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "a", Name: "read", Args: json.RawMessage(`{}`)}}},
+		{Role: "tool", ToolCallID: "a", Content: "ok"},
+		{Role: "tool", ToolCallID: "ghost", Content: "orphan"},
+	})
+	if got, want := m.PayloadBytes(), len("ok"); got != want {
+		t.Fatalf("PayloadBytes() after RestoreMessages repair = %d, want %d", got, want)
+	}
+
+	m.Append(message.Message{Role: "user", Content: "tail"})
+	m.DropLastMessages(2)
+	if got, want := m.PayloadBytes(), 0; got != want {
+		t.Fatalf("PayloadBytes() after DropLastMessages = %d, want %d", got, want)
+	}
+}
+
 func TestRestoreMessagesDropsOrphanToolResults(t *testing.T) {
 	m := NewManager(1000, 0)
 	in := []message.Message{

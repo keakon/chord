@@ -42,24 +42,6 @@ func renderInfoPanelCollapsibleContentLine(lineW int, content string) string {
 	return renderInfoPanelIndentedLine(lineW, infoPanelCollapsibleContentInset, content)
 }
 
-// infoPanelBreakpoint returns the effective breakpoint tier for the given panel width.
-// Tier 0 (width < 24): Only show critical summary (MODEL, context percentage, core status).
-// Tier 1 (24 <= width < 32): Show Context + Token summary on single line.
-// Tier 2 (32 <= width < 40): Show Context, Token, Cost with compact cache details.
-// Tier 3 (width >= 40): Full compact layout including cache R/W and all details.
-func infoPanelBreakpoint(panelWidth int) int {
-	switch {
-	case panelWidth < 24:
-		return 0
-	case panelWidth < 32:
-		return 1
-	case panelWidth < 40:
-		return 2
-	default:
-		return 3
-	}
-}
-
 func renderInfoPanelIndentedLine(lineW, inset int, content string) string {
 	if inset < 0 {
 		inset = 0
@@ -143,43 +125,42 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	// current = last request input tokens; percent = current / usable input budget.
 	// Color by usage: green normal, orange >50%, red >80% (value and gauge match).
 	current, limit := m.agent.GetContextStats()
-	currentBytes := m.agent.GetContextBytes()
 	percent := 0.0
 	if limit > 0 {
 		percent = float64(current) / float64(limit)
 	}
+	reduction := m.agent.GetContextReductionStats()
+	currentBytes := m.agent.GetContextBytes()
+	if reduction.CurrentBytes > 0 {
+		currentBytes = reduction.CurrentBytes
+	}
+	msgCount := m.agent.GetContextMessageCount()
+	if reduction.CurrentMessages > 0 {
+		msgCount = reduction.CurrentMessages
+	}
 
-	bp := infoPanelBreakpoint(width)
 	stats := m.agent.GetSidebarUsageStats()
 	usageLines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("USAGE"))}
 	if current > 0 || limit > 0 {
-		// Tier 0: show only context percent in the header summary line.
-		// Tier >=1: show context value + gauge.
-		if bp >= 1 {
-			gauge := m.renderContextGauge(width-6, percent)
-			contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
-			if currentBytes > 0 {
-				contextValueStr = fmt.Sprintf("%s / %s (%s)", formatTokens(current), bytefmt.Short(int64(currentBytes)), formatPercent(percent))
-			}
-			usageLines = append(usageLines,
-				renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent).Render(contextValueStr)),
-				InfoPanelLineBg.Width(lineW).Render(gauge),
-			)
-			msgCount := m.agent.GetContextMessageCount()
-			if msgCount >= 0 {
-				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", InfoPanelValue.Render(formatTokens(msgCount))))
-			}
-			if reduction := m.agent.GetContextReductionStats(); reduction.Messages > 0 && reduction.Bytes > 0 {
-				reduced := fmt.Sprintf("%s msg", formatTokens(reduction.Messages))
-				if msgCount > 0 {
-					totalMessages := msgCount + reduction.Messages
-					if totalMessages > 0 {
-						reduced += fmt.Sprintf(" (%s)", formatPercent(float64(reduction.Messages)/float64(totalMessages)))
-					}
+		gauge := m.renderContextGauge(width-6, percent)
+		contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
+		usageLines = append(usageLines,
+			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent).Render(contextValueStr)),
+			InfoPanelLineBg.Width(lineW).Render(gauge),
+		)
+		if currentBytes > 0 {
+			bytesValue := bytefmt.Short(int64(currentBytes))
+			if reduction.Bytes > 0 && reduction.CurrentBytes > 0 {
+				requestBefore := reduction.CurrentBytes + reduction.Bytes
+				if requestBefore > 0 {
+					bytesValue = formatReductionPercentValue(bytesValue, formatPercent(float64(reduction.Bytes)/float64(requestBefore)))
 				}
-				reduced += " / " + bytefmt.Short(int64(reduction.Bytes))
-				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Reduced", InfoPanelValue.Render(reduced)))
 			}
+			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Bytes", InfoPanelValue.Render(bytesValue)))
+		}
+		if msgCount >= 0 {
+			messagesValue := formatTokens(msgCount)
+			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", InfoPanelValue.Render(messagesValue)))
 		}
 	}
 
@@ -192,11 +173,8 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		if reasoningLine := renderUsageReasoningLine(lineW, stats); reasoningLine != "" {
 			usageLines = append(usageLines, reasoningLine)
 		}
-		// Cache details only at tier 2+.
-		if bp >= 2 {
-			if cacheLine := renderUsageCacheLine(lineW, stats); cacheLine != "" {
-				usageLines = append(usageLines, cacheLine)
-			}
+		if cacheLine := renderUsageCacheLine(lineW, stats); cacheLine != "" {
+			usageLines = append(usageLines, cacheLine)
 		}
 		if costLine := renderUsageCostLine(lineW, stats); costLine != "" {
 			usageLines = append(usageLines, costLine)
@@ -608,6 +586,10 @@ func renderInfoPanelIndentedKVLine(lineW, inset int, key, value string) string {
 	prefix := InfoPanelDim.Render(key + ": ")
 	line := lipgloss.JoinHorizontal(lipgloss.Left, prefix, value)
 	return renderInfoPanelIndentedLine(lineW, inset, line)
+}
+
+func formatReductionPercentValue(current, percent string) string {
+	return fmt.Sprintf("%s (↓%s)", current, percent)
 }
 
 func renderInfoPanelKVLine(lineW int, key, value string) string {

@@ -170,7 +170,7 @@ Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前
 
 导出内容包括全部对话消息以及当前会话的用量统计。导出成功后 TUI 会显示保存路径。
 
-TUI 信息面板中的 `Reduced` 行表示单次请求级别的上下文剪裁，不是持久化压缩结果。执行 `/compact` 或自动压缩改写会话历史后，Chord 会刷新这个值；loop 模式运行中也会同步更新。
+TUI 信息面板 `USAGE` 区中的 `Context` 显示最近一次模型请求由 provider usage 返回的实际输入侧 token 负担。`Bytes` 和 `Messages` 描述将发送给模型的会话上下文：请求级 context reduction 运行后，`Bytes` 显示 reduction 后实际请求字节数，并用 `↓` 显示节省百分比；在请求尚未准备时，则回退显示当前持久上下文估算。`Bytes` 统计已安装的系统提示词、消息内容、图片负载，以及工具名/描述；不包含 JSON 转义开销、tool-call 参数 JSON、thinking 元数据，也不包含 stream 设置、思考预算等请求参数。这些剪裁不是持久化压缩：较旧的工具结果通常会在请求中替换成更短的占位摘要，而持久化会话历史保持不变。`/compact`、自动压缩、工具输出增长以及系统提示词或工具定义变化会更新回退用的持久估算；新的请求准备会刷新实际发送请求大小，loop 模式运行中也会同步更新。
 
 信息面板 `USAGE` 区中的 `Think` 行只在 provider 上报 reasoning/thinking tokens 时显示。这些 token 已包含在输出 token 计费中；该行只是可见性拆解，不是额外的 token 计费桶。
 

@@ -11,6 +11,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.IdleEvent:
+		effects.invalidateUsage = true
 		m.clearSessionSwitch()
 		m.finalizeTurn()
 		prevMain := m.activities["main"].Type
