@@ -70,6 +70,41 @@ func TestEditParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
 	}
 }
 
+func TestEditParserTreatsBlankLinesAsContext(t *testing.T) {
+	parsed, err := ParseEdit("a.txt", "@@\n a\n\n-b\n+B\n")
+	if err != nil {
+		t.Fatalf("ParseEdit: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 4 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if parsed.Hunks[0].Lines[1].Kind != ' ' || parsed.Hunks[0].Lines[1].Text != "" {
+		t.Fatalf("blank line not parsed as empty context line: %+v", parsed.Hunks[0].Lines)
+	}
+}
+
+func TestEditToolMatchesBlankContextLine(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	if err := os.WriteFile("blank.txt", []byte("a\n\nb\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// The blank line between "a" and "-b" is a bare empty context line.
+	patch := "@@\n a\n\n-b\n+B\n"
+	args, _ := json.Marshal(map[string]string{"path": "blank.txt", "patch": patch})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile("blank.txt")
+	if string(got) != "a\n\nB\n" {
+		t.Fatalf("file = %q", got)
+	}
+}
+
 func TestEditParserRejectsInvalidPaths(t *testing.T) {
 	for _, path := range []string{"", "."} {
 		if _, err := ParseEdit(path, "@@\n-a\n+b\n"); err == nil {

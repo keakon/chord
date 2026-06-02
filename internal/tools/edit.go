@@ -242,7 +242,11 @@ func ParseEdit(path, patchText string) (parsedEdit, error) {
 				return parsedEdit{}, fmt.Errorf("invalid patch: expected @@ hunk before patch lines. No files were modified")
 			}
 			if line == "" {
-				return parsedEdit{}, fmt.Errorf("invalid patch line: hunk lines must start with space, +, or -. No files were modified")
+				// A bare empty line inside a hunk is a common model formatting
+				// choice for a blank context line; treat it as an unchanged empty
+				// line instead of rejecting the whole patch.
+				current.Lines = append(current.Lines, editLine{Kind: ' ', Text: ""})
+				continue
 			}
 			kind := line[0]
 			if kind != ' ' && kind != '+' && kind != '-' {
