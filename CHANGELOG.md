@@ -4,226 +4,238 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## 0.6.2 - 2026-06-02
 
-- **Breaking / Tools:** replaced the old native localized file-editing tool name `ApplyPatch` with the current snake_case `edit` name, and normalized all built-in model-visible tool names to snake_case (for example `WebFetch` → `web_fetch` and `TodoWrite` → `todo_write`). This affects tool schemas, permission/config examples, TUI rendering, hooks, restored/imported tool cards, and internal implementation names. Chord does not retain compatibility aliases for old built-in tool names; existing permission rules that use legacy PascalCase names or wildcard patterns must be updated to snake_case. External session import still recognizes source tool names such as Codex `apply_patch` and maps them to current `edit` cards.
-- Runtime / Context reduction: added cache-aware warmup protection and stable reduction-surface reuse to avoid repeatedly trimming the same low-pressure prompt prefix. Sidebar reduction savings now reflect the current request's total saved messages/bytes/tokens and remain visible after the turn returns to idle. `context.reduction` now accepts `true` or `{}` as shorthand for the default tuning and exposes `cache_aware_min_usage`, `warmup_message_limit`, `min_incremental_saved_tokens`, `high_pressure_usage`, and `force_prune_usage` for advanced tuning. `context.reduction: false` is rejected instead of being silently treated as the default configuration.
-- Tools / edit: improved failed-hunk diagnostics with targeted hints for common patch issues such as copied line-number gutters, indentation drift, stale file content, and mismatched function/class anchors.
-- Runtime / Context reduction: request-level pruning now treats `*_age_turns` as effective age thresholds instead of only counting later user messages. Long single-turn tool chains can now trim earlier stale Shell/read-like/tool outputs as later assistant/tool messages accumulate, while reusing the existing `context.reduction` settings and preserving recent tool output. Configuration docs and the glossary now describe the effective-age semantics.
+### Highlights
+
+- Built-in tool names are now snake_case (`ApplyPatch` → `edit`, `WebFetch` → `web_fetch`, `TodoWrite` → `todo_write`, …) — update any permission rules that referenced the old names.
+- Smarter context reduction that trims stale output sooner on long tool chains while staying prompt-cache friendly.
+
+### Breaking Changes
+
+- All built-in model-visible tool names changed to snake_case (for example `ApplyPatch` → `edit`, `WebFetch` → `web_fetch`, `TodoWrite` → `todo_write`). There are no compatibility aliases — update permission rules, hook tool filters, skill `allowed_tools`, and any saved integrations that used the old PascalCase names. Imported sessions still recognize source names like Codex `apply_patch` and map them to `edit`.
+
+### Improvements & Fixes
+
+- Context reduction now trims stale tool output sooner on long single-turn tool chains (age is measured by overall progress, not just later user messages), while warmup protection avoids re-trimming low-pressure prompts so prompt caching stays effective. `context.reduction` accepts `true` or `{}` for the default tuning and exposes finer keys (`cache_aware_min_usage`, `warmup_message_limit`, `min_incremental_saved_tokens`, `high_pressure_usage`, `force_prune_usage`); `context.reduction: false` is now rejected instead of silently using defaults.
+- The sidebar's reduction savings now show the current request's total saved messages/bytes/tokens and stay visible after the turn goes idle.
+- `edit` gives clearer guidance when a patch fails to apply — pointing out copied line-number gutters, indentation drift, stale file content, or mismatched function/class anchors.
 
 ## 0.6.1 - 2026-06-01
 
-- TUI / File mentions: `@` file completion now falls back to direct root-directory prefix matching for non-empty queries like `@A`, so root files such as `AGENTS.md` can complete even when excluded from the cached Git-based index by `.gitignore` or local excludes. Explicit path-like queries such as `@docs/` or `@.config/` continue to use direct filesystem completion for the addressed directory instead of the cached index.
-- Tools / edit: Codex-style `apply_patch` envelope markers are now tolerated in native `edit` calls. Chord strips standalone `*** Begin Patch` / `*** End Patch` lines and a leading `*** Update File:` line when it matches the structured `path`, while still rejecting add/delete/move operations, multi-file patches, and mismatched update paths.
-- Tools / edit: replaced the local-editing tool surface with native single-file patch hunks for localized modifications to existing files, reducing exact-string replacement failures from the old `Edit` workflow while keeping `write` for full-file writes and `delete` for whole-file deletion. `edit` now enforces read-before-patch/stale protection before pre-diff planning reads the target file, applies the first hunk match after the current search position, reports candidate line hints in the success output when a hunk matched multiple locations, and prompts models to include unique context for repeated blocks. Prompts and permission guidance have been migrated away from the old `Edit` tool semantics.
-- Tools / file edits: `edit` now accepts files observed through either `read`, a prior successful `write`/`edit`, or a system-resolved `@file` mention. If a file changed since it was observed, file-edit tools warn instead of rejecting when the operation can still validate current contents; risky non-empty pre-write contents are backed up under the session directory and the backup path is included in the tool result. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; backup failures are reported in the tool result without blocking the edit, and backups are removed with the session directory.
-- Tools / Grep & Glob: reduced default result caps and added byte ceilings for search/path-listing output (`Grep` now returns at most 120 matches / about 12 KiB, and `Glob` at most 250 paths / about 16 KiB), keeping broad searches from crowding out more relevant context.
-- Session import: Codex, Claude Code, and OpenCode imports now convert recognizable external tools to the closest current Chord tool cards (`read`, `shell`, `grep`, `glob`, `edit`, `write`, and `delete`) whenever the required arguments can be normalized. Unknown or malformed tools remain visible as unsupported tool cards. Imported provenance is still preserved internally, so external file edits do not restore Chord FileTracker read/write state; re-read files before continuing edits after import.
-- LLM / Codex: Codex OAuth access tokens must now carry a parseable account ID; tokens without one are rejected instead of being treated as usable credentials. Refresh-only Codex OAuth credentials remain selectable before the account is known, and unrecoverable refresh failures are recorded in `auth.state.yaml` via a `refresh_sha256` entry so a later `chord auth state clean` can remove the unusable credential without deleting `auth.yaml` during request handling. Token-invalidated, revoked, malformed-auth-token, and refresh-token 401 responses are now classified as unrecoverable OAuth failures without redundant refresh attempts.
-- LLM / Codex: Codex `key_order: smart` now treats cached quota snapshots as scheduling hints: only windows reported at `100%` are tried last, `99%` still counts as usable quota, and primary/secondary windows are compared separately so short-window quota can be used before it expires without conflating it with weekly quota.
-- LLM / Codex: when the Codex WebSocket returns a 400 indicating server-side incremental state diverged from the input we sent (for example `No tool call found for function call output with call_id …`, or messages naming `previous_response_id`), Chord now resets the WebSocket chain state and immediately retries the same request as a full send without `previous_response_id`. The retry is followed only when the original 400 is a chain-state mismatch; if the retry still fails, the error is returned without an HTTP fallback because HTTP would re-send the identical input.
-- Agent / Session resume: restored transcripts now repair structurally broken turns before being sent to providers — trailing assistant messages with `stop_reason=interrupted` are dropped, and every assistant `tool_call` without a persisted tool result gets a synthetic `error` tool message with `ToolStatus=error`. The repair is structural only; tool result text and `ToolStatus` values are left untouched, so the pre-1.0 heuristic content scanning (checking for substrings like "denied" or "cancelled") is not reintroduced.
-- TUI / Message directory: the Ctrl+T message directory now renders inside the main viewport without hiding the right info panel, items are prefixed with their 1-based index, and `Ctrl+F` / `PgDown` / `Ctrl+B` / `PgUp` move the cursor a page at a time.
-- LLM / Key pool: duplicate credential slots that share the same access token now receive cooldown, recovering, quota-exhausted, and success state updates together, preventing an exhausted token from being selected again through another slot.
-- LLM / Codex: Codex WebSocket usage-limit and quota-exhausted errors now skip the HTTP fallback path and immediately drive key quota/cooldown handling, avoiding response-header timeouts before trying the next account or fallback model.
-- LLM / Compatible gateway: HTTP 400 responses from non-official compatible gateways that look transient (for example "Concurrency limit exceeded") now cool the current key, rotate to the next key, and continue retrying across full pool passes; official-API 400s and request/parameter/model-incompatible 400s (including `Store must be set to false` / `Stream must be set to true`) still stop immediately.
-- Runtime / Compaction: fallback compaction summaries now keep the latest `Done rejected:` reason as the current request anchor and move pre-existing TODOs to stale/superseded when model relevance filtering is unavailable. Loop continuation prompts also include the exact Done rejection reason, so a user denial that changes scope is not reduced to generic “continue current goal” guidance. Restored sessions drop stale pre-compaction TODOs when the latest compaction summary explicitly superseded them, while preserving any TodoWrite list created after compaction. Non-Done tool denial reasons that contain actionable user instructions are also preserved as latest-request evidence.
-- CLI / Cleanup: `chord cleanup sessions` now removes project session directories that are left with only `project.json` after their session directories have been deleted, so old session cleanup also prunes the empty per-project containers it creates. `--older-than` now uses the project session directory timestamp from before child deletions, keeping dry-run previews and `--yes` cleanup consistent when deleting old sessions empties the project container.
-- Tools / Shell: `git stash show -p`, `git stash list --patch`, and other non-interactive `git stash` subcommands are no longer blocked as interactive patch workflows; only `git stash push -p` and `git stash save --patch` remain blocked when there is no piped stdin.
-- TUI / Service tier: `/tier` slash completion now mirrors the `Ctrl+R` shortcut target — both predict the same next tier, and `/tier` is hidden from completions (and the shortcut is a no-op) when the only supported tier is the already-active `standard`.
-- TUI / Custom commands: slash completion now shows each custom command's scope inline, for example `/commit  [project] ...`, so project and global commands are easier to distinguish without adding extra menu rows.
-- TUI / YOLO: added `--yolo`, `/yolo on|off`, and `Ctrl+Y` for a temporary main-agent permission bypass that can be toggled while running. Handoff, Delegate, Cancel, and Done permissions remain enforced, and the status bar shows a YOLO pill when enabled.
-- TUI / Permissions: `/rules` now opens even when no remembered rules exist and supports manually adding session/project/global allow/ask/deny rules. Confirmation remembered-rule picker now allows editing the suggested pattern before saving, and Delete confirmations offer conservative path-specific rule candidates instead of disabling remembered rules entirely.
-- TUI / Mouse selection: text selection is now consistent across transcript cards, Done/Handoff Markdown viewers, and the composer input. Double-click selects the current word, triple-click selects the current visible line, and drag selection continues to work as before.
-- TUI / Shortcuts: overlays no longer expose hidden close/action keys. Stats overlay drops `q` and surfaces `esc/$ close` in its hint, Model Select drops `ctrl+d` (esc is the documented close), Handoff Select drops the undocumented `d/D` (only `r` opens the deny-reason flow), and the generic Confirm dialog now accepts `enter` as Allow and surfaces `[Enter/A] Allow` and `[Esc/D] Deny`. Help and Stats overlays also show `esc ⇢ close` in the status bar.
-- TUI / Tool cards: restored and resumed file-mutation cards now use the same expanded terminal state as live results. Edit cards without persisted diffs show their saved result text instead of rendering as header-only cards, restored Write/Edit errors and Delete completions remain visible without manual expansion, and the remembered-rule shortcut in confirmation dialogs is now `M` so `A` remains reserved for Allow.
-- Auth / OAuth: stopped treating local access-token `expires` metadata as proof that a credential is expired. OAuth slots are now marked `expired` only after provider or token-endpoint authentication failures confirm they are unusable.
-- Auth / Codex: Codex OAuth runtime state is now reloaded when `auth.state.yaml` changes, so quota snapshots, reset timers, refreshed account metadata, and invalidated/deactivated statuses written by another Chord process are picked up without restarting the current session.
-- **Breaking / Config:** moved the provider/model HTTP `User-Agent` override to provider-level `user_agent` on normal model requests. The old Anthropic transport compat `user_agent` field was removed; provider/model requests now default to `User-Agent: chord/<version>` unless overridden.
-- LSP / Diagnostics: post-Write/Edit diagnostics now wait for fresh publishDiagnostics snapshots and a short settle window before tool output is generated. Diagnostics with stale document versions are ignored when servers provide versions, and versionless diagnostics must arrive after the edit notification, reducing transient false positives from asynchronous servers such as gopls.
-- Headless / Local shell: added a `local_shell` stdin command and `local_shell_result` event so headless integrations can execute `!`-style local shell commands and receive combined stdout/stderr results with timeout and output limits.
-- Headless / Handoff: `Handoff` now emits a structured `handoff_request` event in headless mode with the full saved plan and available agent/model-pool choices, and accepts a `handoff` command to approve execution or deny and continue planning.
-- **Breaking / Config:** removed the unused `context.reduction.model_pool` setting and the unused `maintenance.size_check_interval_hours` setting. Context reduction remains deterministic and does not call an auxiliary model; use `context.compaction.model_pool` for LLM-backed durable compaction.
-- Runtime / Context reduction: tuned the default byte thresholds to be more prompt-cache friendly while still trimming large stale output. `shell_success_bytes` is now `8000` (was `4000`) and `read_like_output_bytes` is now `4000` (was `2500`); age gates and `min_tool_results_prune` are unchanged.
-- Runtime / Context reduction: request-surface freezing for low Codex quota now applies outside loop mode as well. When a Codex 5h or 7d quota window has less than 10% remaining, continuous automatic continuations keep the prepared message surface, system prompt, and tool definitions stable so `stop_reason=tool_call` chains can continue until `end_turn`; returning to idle or sending a real user message lifts the freeze for the next request.
-- Runtime / Loop: loop-mode `Done` exit requests no longer have a machine-enforced verification-status gate. Open TODOs, active subagents, blocked states, and malformed/mixed `Done` batches still prevent automatic completion; verification-like tool results continue to count as progress for stall detection.
-- TUI / Navigation: a no-op scroll-down at the bottom no longer re-enables sticky follow mode after the user manually disabled it, preserving manual scroll state.
-- TUI / Tool cards: card headers now show one-based block sequence ids (for example `TOOL CALL #12`) so rendered cards can be referenced unambiguously.
-- TUI / Git sidebar: the right info panel now shows a compact, collapsible Git summary when the current directory is inside a repository, including branch or detached commit, linked worktree name, changed-file, staged-file, and stash counts, and ahead/behind counts. Git state refreshes asynchronously on startup, after file-mutating tools or Shell git commands, and on a low-frequency timer without blocking rendering.
-- TUI / Handoff: after a planner Handoff, the selector now behaves like an approval decision: Enter/A approves and starts plan execution, R denies with a reason and continues the model turn, and Esc simply closes the selector while leaving the saved plan available for later input. Tool confirmation dialogs use A for Allow, D for Deny, R for Deny+Reason, and M for adding a remembered rule; Done confirmation dialogs intentionally omit Deny and accept only A/R/V/esc so denials always include a reason. The selector now also previews the saved plan contents, with mouse-wheel scrolling for longer plans and a View action for a full-screen Markdown-rendered plan view. The status bar now settles to idle while waiting for the user's decision.
-- LLM / Fallback: API 400 errors are now treated as candidate-model failures instead of immediate request failures, so the client can advance to another configured model that may accept the same conversation history. The client still avoids same-model key rotation for request-shape 400s and stops once the model pool is exhausted.
-- LSP / Python diagnostics: post-tool diagnostics for Python files now have a quick-fallback backend. The default config runs `pyright` LSP as the semantic backend and `ruff check ... --output-format json` as a quick backend; large files (configurable `diagnostics.python.large_file.line_threshold` / `byte_threshold`, default 5000 lines / 250000 bytes) automatically use the quick backend instead of blocking on full semantic analysis, and `run_semantic_when_quick_unavailable: true` keeps semantic diagnostics on large files when no quick backend is configured. New top-level `diagnostics.*` config exposes per-backend command/server selection plus `diagnostics.python.output.*` to bound diagnostics text appended to tool results. See `docs/configuration.md` for the full key reference.
-- LSP / Diagnostics output: appended LSP and Ruff diagnostics are now capped to concise priority-ordered blocks (errors and warnings first, then info and hints only when the limit still has room). Clean runs no longer add a redundant status line, and changed diagnostics add only a short `Diagnostics changed: N new, M resolved.` summary when there is an actual delta.
-- TUI / Copy: `yy` on a tool card now copies a structured Markdown block (`# Tool call` / `## Arguments` / `## Result` / `## Diff`), and Done rejection cards add a `## Rejection reason` section, so external paste targets keep the same shape Chord renders.
-- Runtime / Compaction: `/compact` now schedules in the same background worker as automatic compaction. It can be invoked while a turn is active, shows progress in the background compaction status slot, and applies at the next safe continuation/idle barrier instead of requiring an idle barrier up front.
-- Runtime / Loop / Compaction: automatic and manual context compaction now run even when loop mode is enabled, so long-running loop sessions can continue past the context budget. Request-level reduction for new messages now stays off only for `preset: codex` providers when a 5h or 7d quota window has less than 10% remaining; otherwise loop mode keeps normal context reduction enabled.
-- Runtime / Service tier: `/tier standard` / `/tier fast` / `/tier slow` and `Ctrl+R` now propagate service-tier state to SubAgents. Existing SubAgent LLM clients are updated immediately; newly created, restored, rehydrated, or model-switched SubAgent clients inherit the current service-tier state. Bare `/tier` is not a status command; the sidebar/status bar hide the tier indicator for `standard` and show `tier: fast` / `tier: slow` only when the current provider/model actually supports and applies that tier.
-- **Breaking / Config:** removed the legacy `supports_fast` model field. Migrate models that previously used `supports_fast: true` to `supported_service_tiers: [fast]`; omit `supported_service_tiers` to use preset/provider defaults, or set an explicit list such as `[fast, slow]` when the provider/model supports multiple non-standard tiers.
-- Runtime / Delegated todos: `TodoWrite` now allows multiple `in_progress` items when the active role exposes a `Delegate` workflow, but each in-progress item must use a distinct `active_form` so it clearly maps to one live workstream. Single-in-progress validation remains the rule for roles without `Delegate`.
-- TUI / Thinking translation: translations are now persisted to `<session_dir>/thinking_translations.json` keyed by `(message, block)` plus a content-hash check, and restored on the next session resume. Translations are not re-generated when `thinking_translation.target_language` changes — a given thinking block is translated at most once. Translations are still UI-only and not written back into model context.
-- TUI / Thinking translation: translation envelope markers accidentally echoed by the translation model, including an unmatched leading `<TRANSLATION>`, are stripped before persistence/restoration/rendering so they cannot be parsed as Markdown HTML blocks and suppress Markdown formatting in the translated card.
-- Runtime / Thinking translation: empty, severely truncated, or wrong-target-language responses from the translation model are now treated as a soft failure and trigger the next model in the configured pool instead of producing a clearly broken translation card.
-- Runtime / Deny reasons: `Question` / confirmation deny reasons now preserve the user's full text, including internal newlines, in both the tool result returned to the model and the TUI card.
-- TUI / Rate-limit sidebar: the codex rate-limit sidebar no longer reuses a provider-scoped inline snapshot across key switches. After a key change, the sidebar shows the new key's cached inline snapshot, that key/account's polled `/wham/usage` snapshot, or nothing until fresh data arrives.
-- TUI / Navigation: `gg` and `G` in normal mode now move focus to the first/last viewport card instead of plain scroll-to-edge, matching vim-style focus navigation.
-- TUI / Tool cards: header truncation no longer drops live progress suffixes, deleted-file Delete cards keep showing the rejection / completion reason in restored sessions, and toast boundary changes trigger a redraw so the boundary marker stays in sync.
-- TUI / Focus restore: late deferred tail-window focus restores are reapplied so the focused card stays in view across redraws.
-- Runtime / Context reduction stats: the info panel `Bytes` / `Messages` now describe the conversation context that will be sent to the model. After request-level pruning, `Bytes` shows the post-reduction request byte count plus `↓` percentage; before a request is prepared, it falls back to the current durable context estimate. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
-- Runtime / Compaction summary: the durable compaction summary section header set is now `## Current User Request` / `## Active Objective` / `## Background Goals` instead of a single `## Goal`. Latest user requests and the most recent Done rejection reason now rank as equal-priority anchors (latest wins by sequence) so a fresh Done rejection cannot be overridden by an older standing constraint. The `## Todo State` section uses explicit `Active/relevant to latest request` / `Completed/background` / `Stale/superseded` subgroups so the post-compaction agent re-evaluates pre-compaction todos against the latest request instead of treating them as authoritative.
-- Runtime / Context compaction: compaction now keeps recent incomplete tool-call chains in the live tail instead of archiving them, so a tool call without a result remains paired with its assistant message until it is no longer recent; stale incomplete tool calls can still be compacted once they are sufficiently old. Before each LLM request, orphan tool results that no longer have a valid assistant tool-call anchor are dropped so they are never sent to providers.
-- Runtime / Plan execution: plan execution now passes the plan to the LLM as an `@<plan-path>` file mention with the file content attached as a message part, rather than inlining the plan text into the system prompt, so plan size is bounded and the file mention stays consistent with normal references.
-- Runtime / SubAgent prompt: SubAgent system prompts now report the full platform string `<goos>/<goarch>` (matching MainAgent), instead of just `<goos>`.
-- CLI / Done automation: aligned automatic Done interception across startup, runtime, and TUI flows. Startup/TUI creation/shutdown paths are now easier to test, browser-launch auth planning is testable without executing the browser command, and loop-mode Done exit interception is documented consistently. When `CHORD_PPROF_PORT` is set but invalid, `--continue` / `--resume` / `--worktree` and the rest of startup now still take effect (pprof is silently disabled with a warning) instead of being dropped.
-- TUI / Done internals: centralized Done-related UI effect handling and stream-render invalidation, split focused regression tests, and kept rejected/auto-rejected Done completions rendering consistently.
-- Config / Auth persistence: unified auth persistence locking with the shared config-mutation lock, and added platform-specific regression coverage for write-lock behavior and named-pipe test portability.
-- **Breaking / Permissions:** remembered permission rules now write directly to agent config files instead of separate permissions overlays. Session rules remain in memory, project rules update `<project>/.chord/agents/<role>.yaml`, and global rules update `<config-home>/agents/<role>.yaml`; `/rules` removes persisted rules from the same agent file. The built-in planner now allows `Write` / `Edit` only under `.chord/plans/*` by default. Rules previously written to `<project>/.chord/permissions/<role>.yaml` or `~/.chord/permissions/<role>.yaml` are no longer loaded or warned about; move any rules you still need into the corresponding agent config file.
-- TUI / Performance: reduced CPU and rendering work for background tabs and long conversations, making scrolling and focus recovery smoother in large sessions. Permission evaluation and tool-definition construction hot paths were also reduced.
-- **Breaking / Compatibility:** removed remaining pre-1.0 compatibility paths. Codex import now accepts only the current `type` + `payload` rollout schema; `--config` is no longer an alias for `--config-home`; headless model switching accepts only `set_current_model_pool`; session recovery no longer restores the old pre-1.0 heuristic for dangling/duplicate tool-result repair; model-pool state and recovery snapshots no longer read `current_role` / `model_pool_current_role`; OAuth credential updates require account identity instead of access-token or index fallback. Anthropic usage parsing now prefers the nested `usage.cache_creation` TTL breakdown when present and falls back to the flat `cache_creation_input_tokens` counter for Anthropic-compatible gateways that only return the aggregate field.
-- TUI / Delete: Delete tool cards now show the required `reason` in both live and restored sessions, and restored tool cards now prefer persisted status/duration metadata so resumed history matches the completed live display.
-- Docs: clarified that agent permissions live in `agents/<role>.yaml` and that confirmation/headless remembered rules update the corresponding agent config file; added `diagnostics` to the top-level config keys table; documented the `thinking_translation.max_chars` preview boundary.
+### Highlights
+
+- New `edit` tool applies patch hunks to existing files, greatly reducing the exact-string match failures of the old `Edit`.
+- YOLO mode: temporarily bypass permission prompts with `--yolo`, `/yolo on|off`, or `Ctrl+Y`.
+- Git status sidebar showing branch, changed/staged/stash counts, and ahead/behind.
+- More resilient Codex auth and quota handling, plus automatic recovery from WebSocket state errors.
+
+### Breaking Changes
+
+- **Permissions:** remembered permission rules now save into agent config files — project rules in `<project>/.chord/agents/<role>.yaml`, global rules in `<config-home>/agents/<role>.yaml` — instead of a separate permissions overlay. Rules previously written to `.chord/permissions/<role>.yaml` are no longer loaded; move any you still need. The built-in planner now allows `write`/`edit` only under `.chord/plans/*` by default.
+- **Config:** the HTTP `User-Agent` override moved to a provider-level `user_agent`; the old Anthropic transport field was removed. Requests now default to `User-Agent: chord/<version>` unless overridden.
+- **Config:** removed the unused `context.reduction.model_pool` and `maintenance.size_check_interval_hours` settings. Context reduction stays deterministic and does not call a model; use `context.compaction.model_pool` for LLM-backed compaction.
+- **Config:** removed the `supports_fast` model field — migrate models to `supported_service_tiers: [fast]` (or omit it for preset/provider defaults).
+- **Compatibility:** removed remaining pre-1.0 fallbacks — Codex import accepts only the current rollout schema, `--config` is no longer an alias for `--config-home`, and headless model switching accepts only `set_current_model_pool`.
+
+### Features
+
+- `edit` replaces the old `Edit` tool with native single-file patch hunks for localized changes (`write` still does full-file writes, `delete` removes whole files). It enforces read-before-edit, tolerates Codex `apply_patch` envelope markers (`*** Begin Patch` / `*** Update File:` / `*** End Patch`), and reports candidate lines when a hunk matches multiple places. If a file changed since you last read it, edits validate against the current content and back up risky overwrites under the session directory (capped per file and per session).
+- YOLO mode (`--yolo`, `/yolo on|off`, `Ctrl+Y`) temporarily bypasses main-agent permission prompts; Handoff, Delegate, Cancel, and Done still require approval, and the status bar shows a YOLO pill while it's on.
+- `/rules` now opens even when no rules exist and can add session/project/global allow/ask/deny rules; the remembered-rule picker lets you edit the suggested pattern before saving.
+- Git status sidebar: a compact, collapsible Git summary (branch or detached commit, worktree name, changed/staged/stash counts, ahead/behind) that refreshes asynchronously without blocking rendering.
+- LSP: Python diagnostics gain a quick `ruff` backend; large files use it automatically instead of blocking on full analysis. New top-level `diagnostics.*` config controls per-backend commands and output limits.
+- Headless: a new `local_shell` command/event runs `!`-style local commands, and `Handoff` emits a structured `handoff_request` event with a `handoff` approve/deny command.
+- Service tier (`/tier`, `Ctrl+R`) now propagates to SubAgents.
+- Thinking translations persist per block to the session directory and restore on resume.
+- Consistent mouse text selection across cards, viewers, and the composer (double-click selects a word, triple-click a line); `yy` copies a tool card as structured Markdown.
+- Session import converts recognizable external tools (`read`, `shell`, `grep`, `glob`, `edit`, `write`, `delete`) to the closest Chord tool cards.
+
+### Improvements & Fixes
+
+- `@` file completion falls back to root-directory prefix matching, so files like `AGENTS.md` complete even when excluded from the Git index by `.gitignore`.
+- `Grep` and `Glob` have lower default result caps and byte ceilings so broad searches don't crowd out more relevant context.
+- Codex: access tokens must carry a parseable account ID, and token/refresh-token auth failures are classified as unrecoverable without redundant refresh attempts. `key_order: smart` treats only fully-used (100%) windows as exhausted — 99% still counts as usable — and compares short vs. weekly windows separately. WebSocket state-mismatch 400s now reset the chain and retry once as a full send; usage-limit errors skip the slow HTTP fallback and go straight to key/quota handling.
+- Duplicate credential slots that share one access token now update cooldown, recovering, quota-exhausted, and success state together, so an exhausted token can't be re-selected through another slot.
+- Compatible gateways: transient-looking 400s (e.g. "Concurrency limit exceeded") cool the key, rotate, and keep retrying; official-API request-shape 400s still stop immediately. API 400s are treated as model-level failures so the client can try another configured model.
+- Resumed sessions repair structurally broken turns before sending to the provider, and orphan tool results without a matching tool call are dropped.
+- OAuth slots are marked expired only after a real auth failure, not from local `expires` metadata; Codex runtime state reloads automatically when `auth.state.yaml` changes (so another Chord process's updates apply without a restart).
+- Loop mode: `Done` no longer has a verification-status gate (open TODOs and active subagents still block); automatic and manual compaction now run in loop mode so long sessions can continue past the context budget. `/compact` runs in the background and applies at the next safe point, even mid-turn.
+- The info panel's Bytes/Messages now reflect what will actually be sent to the model, with a post-reduction percentage.
+- LSP diagnostics wait for fresh results after edits (fewer false positives from servers like gopls) and are capped to concise, priority-ordered blocks.
+- Plan execution passes the plan as an `@<plan-path>` file mention instead of inlining it into the system prompt.
+- Confirmation and `Question` deny reasons preserve your full text, including line breaks.
+- TUI polish: `gg`/`G` move focus to the first/last card, restored tool cards keep their state and diffs, the `Ctrl+T` message directory renders inline with paging, completions show custom-command scope and `/tier` parity, overlays drop undocumented shortcut keys, and scrolling/focus recovery is smoother in large sessions.
+- `chord cleanup sessions` also removes empty per-project session directories.
+- `git stash show -p`, `git stash list --patch`, and other read-only stash subcommands are no longer blocked as interactive.
 
 ## 0.6.0 - 2026-05-20
 
-- Build / Dependencies: require Go 1.26.3+ for source builds and release artifacts, update direct runtime dependencies to their latest compatible versions, and refresh reachable build-graph indirect dependencies. CI and release workflows read the Go version from `go.mod`, so published binaries are built with the patched Go toolchain.
-- Runtime / Context: added deterministic request-time context reduction controls under `context.reduction`, including stale tool-result pruning thresholds and a dedicated reduction model-pool hook, while keeping loop mode unpruned.
-- Auth / Runtime: moved OAuth account status authority to `auth.state.yaml`, added the `invalidated` status and `key_invalidated` stream delta, and kept legacy `status` out of `auth.yaml`.
-- **Breaking / Config:** renamed `context.compact_threshold` to `context.compaction.threshold`; there is no compatibility alias for the old key.
-- **Breaking / Config:** removed `context.auto_compact`. Automatic context compaction is now enabled when `context.compaction.threshold > 0`; set `context.compaction.threshold: 0` to disable it.
-- **Breaking / Config:** removed `context.compact_model`. Context compaction now only accepts `context.compaction.model_pool` for a dedicated compaction pool; when unset, compaction clones the current agent model pool instead of falling back to a single selected model.
-- **Breaking / Headless:** removed the external `tool_result` event from the headless/protocol integration surface. Non-loop `Done` reports now use the dedicated `done_completion` event, while loop-mode `Done` exit requests continue to use `confirm_request` with explicit `done_report` / `done_reason` fields. Ordinary tool results remain internal to the agent/TUI lifecycle and are no longer forwarded to headless clients.
-- TUI / IME: automatic input-method switching now only runs when the current Chord tab/window is actually foreground-focused, preventing background tabs' chord/mode transitions from clobbering the active tab's IME. On `FocusMsg`/tab return, Chord now reapplies the configured English IME target when the current mode still requires it.
-- CLI / Setup: added a first-run setup wizard for the default `chord` command when global `config.yaml` is missing. The wizard runs on a controlling TTY, writes minimal `config.yaml` plus `auth.yaml` when needed, can complete Codex OAuth login during setup, reuses matching existing credentials when possible, and prints the exact paths it used.
-- Runtime / Loop / Done: the `Done` tool now requires a non-empty `report` argument containing the full final completion report. Loop mode uses `Done` as the only exit request path: premature `Done` requests are rejected and returned to the model as tool results, while valid exit requests open a local confirmation dialog showing the report.
-- TUI / Done: `Done rejected:` and `Done rejected automatically:` results now both render as rejected completions using the standard failure styling (`✗ Done`) plus a simplified rejected-reason line, so loop auto-rejections are visible in the same way as manual rejections.
-- TUI / Clipboard: image paste now de-duplicates same-action `Ctrl+V` / `Cmd+V` key events and terminal `PasteMsg` delivery, preventing occasional double image attachment insertion when terminals emit both paths for one paste.
-- Tools / Safety: hardened local file/path safety by centralizing path validation for file-reading/search tools. `Read` and `Grep` now share the same existing-path checks and explicitly reject blocked device-style paths such as standard-stream device files.
-- Config / Persistence: hardened config writes used by setup and auth persistence. Initial config creation now uses a config-scoped lock plus temp-file + atomic install flow, and auth/config save paths now share the same atomic-write primitives.
-- Worktree: `chord worktree finish` now first merges the target branch into the real worktree branch to surface conflicts there, then squashes the finished worktree state back onto the target branch as a single commit. `--check` now preflights that merge in a temporary worktree without mutating the real worktree or target branch, and `finish` now refuses to start when the real worktree already has an in-progress rebase or merge.
-- CLI / Import: added `chord import` support for importing external sessions from Claude Code (`claude`), Codex (`codex`), and OpenCode (`opencode`). Import writes a resumable Chord session plus `import-report.json`; Codex defaults to conservative `auto` tool import, OpenCode defaults to text-only tool import and now handles current `{info, parts}` exports with readable unsupported-tool fallbacks, and Claude defaults to `auto` structured-tool preservation only when compatible.
-- TUI / Title alert: when a confirmation or question request arrives while Chord is in the background, the terminal title alert still blinks for attention; after the user focuses the tab/window, the alert stays visible but stops blinking for that pending request.
-- TUI / Usage: usage/context updates now invalidate the info-panel render cache, fixing stale `TOKENS` values after context compaction or other usage refresh events.
-- Docs: clarified that `chord auth state clean` removes invalid runtime-state entries and matching expired/deactivated OAuth credentials, and updated README highlights to describe background compaction plus `/loop` for long-running tasks.
+### Highlights
+
+- Request-time context reduction (`context.reduction`) keeps long sessions lean before compaction is needed.
+- First-run setup wizard when `config.yaml` is missing.
+- Loop mode uses `Done` (with a required completion report) as its single exit path.
+- `chord import` brings in sessions from Claude Code, Codex, and OpenCode.
+- `chord worktree finish` reworked to merge-then-squash, with a non-mutating `--check` preflight.
+
+### Breaking Changes
+
+- **Config:** renamed `context.compact_threshold` to `context.compaction.threshold`; there is no compatibility alias.
+- **Config:** removed `context.auto_compact`. Automatic compaction is now enabled when `context.compaction.threshold > 0`; set it to `0` to disable.
+- **Config:** removed `context.compact_model`. Compaction now only accepts `context.compaction.model_pool`; when unset, it clones the current agent model pool instead of a single model.
+- **Headless:** removed the external `tool_result` event. Non-loop `Done` reports now use the dedicated `done_completion` event; loop-mode `Done` exit requests keep using `confirm_request` with explicit `done_report` / `done_reason` fields.
+
+### Features
+
+- Deterministic request-time context reduction under `context.reduction`, including stale tool-result pruning thresholds, kept off in loop mode.
+- First-run setup wizard for the default `chord` command: it writes a minimal `config.yaml` (plus `auth.yaml` when needed), can complete Codex OAuth login, reuses matching existing credentials, and prints the exact paths it used.
+- `Done` now requires a non-empty `report` with the full completion report. In loop mode it's the only exit path: premature calls are rejected back to the model, and valid exits open a confirmation dialog showing the report.
+- `chord import` for external sessions from Claude Code, Codex, and OpenCode, writing a resumable session plus `import-report.json`.
+
+### Improvements & Fixes
+
+- Source builds and release artifacts now require Go 1.26.3+ (a patched toolchain that closes reachable standard-library vulnerabilities).
+- OAuth account status now lives in `auth.state.yaml`, with a new `invalidated` status, and is kept out of `auth.yaml`.
+- `chord worktree finish` first merges the target branch into the worktree branch to surface conflicts there, then squashes the result back onto the target as a single commit. `--check` previews that merge without touching the real worktree or target branch, and `finish` refuses to start if a rebase or merge is already in progress.
+- Automatic input-method switching only runs for the foreground tab/window, so background tabs no longer clobber the active tab's IME.
+- Hardened local file/path safety (rejecting device-style paths) and made config/auth writes atomic.
+- Image paste de-duplicates key and terminal paste events so one paste no longer inserts two copies.
+- A background confirmation alert keeps blinking the terminal title until you focus the window; fixed stale `TOKENS` in the info panel after compaction.
 
 ## 0.5.3 - 2026-05-11
 
-- Runtime/File safety: restored or resumed sessions now rebuild durable `Read` file-state, so later `Edit`/`Write` calls keep the read-before-write safety check without falsely requiring every file to be re-read.
-- Runtime/Compaction: when `limit.input` is omitted, automatic compaction and model-pool fallback sizing now reserve the effective requested-output budget from `limit.context`, reducing oversized prompt retries and premature threshold calculations.
-- Config/Runtime: project `.chord/config.yaml` now merges through the same path for startup, auth login, and model diagnostics; malformed project config is reported instead of silently ignored, and `stream_retry_rounds` can bound public LLM retry rounds for automation.
-- TUI: fixed syntax highlighting for Markdown previews so EOF block markers (ordered lists, headings, and similar line-based syntax) keep the same colour as preceding lines in `Read`/`Write` tool cards and fenced code blocks.
-- CLI: replaced the deprecated `chord test-providers` entry point with `chord doctor models`, adding exact `provider/model[@variant]` checks, model-pool audits, all-model/all-pool modes, per-target timeout, single-attempt diagnostics by default with optional `--retry`, fail-fast, JSON output, and model/variant tuning coverage.
-- CLI/Doctor: `chord doctor models` now reuses refreshed OAuth credential status across multi-target runs, avoiding stale token reuse and misleading failures.
+### Features
+
+- Replaced `chord test-providers` with `chord doctor models`: exact `provider/model[@variant]` checks, model-pool audits, all-model/all-pool modes, per-target timeouts, JSON output, and optional `--retry`.
+- Project `.chord/config.yaml` now merges consistently across startup, auth login, and diagnostics; malformed project config is reported instead of silently ignored. New `stream_retry_rounds` can bound public LLM retry rounds for automation.
+
+### Improvements & Fixes
+
+- Resumed sessions rebuild durable `Read` file-state, so later `Edit`/`Write` keep the read-before-write safety check without falsely requiring every file to be re-read.
+- When `limit.input` is omitted, compaction and model-pool fallback sizing reserve the output budget from `limit.context`, reducing oversized-prompt retries.
+- `chord doctor models` reuses refreshed OAuth credential status across targets, avoiding stale-token false failures.
+- Fixed Markdown preview syntax highlighting so trailing list/heading lines keep their color in `Read`/`Write` cards and fenced code blocks.
 
 ## 0.5.2 - 2026-05-11
 
-- Worktree: `chord worktree finish` now supports `--check`, which runs a temporary isolated rebase preflight so you can see whether the worktree would finish cleanly without mutating the real worktree or leaving it mid-rebase on conflicts.
-- **Breaking:** renamed the model-visible command tool from `Bash` to `Shell`. There is no runtime alias or compatibility mapping: update permission rules (`permission.Shell`), hook tool filters, skills `allowed_tools`, imported/saved structured tool calls, headless/tool-event consumers, gateways, and any saved prompts or integrations that refer to the old `Bash` tool name before upgrading.
-- TUI: strengthened Ghostty/cmux post-focus recovery for tab/refocus artifacts. The late `post-focus-settle-fallback` pass now revalidates terminal size before replaying the frame, reducing cases where stale horizontal separator lines or other residual cells survive the first focus-restore redraw.
-- TUI: renamed the sidebar/info-panel file list from `EDITED FILES` to `CHANGED FILES`; files deleted by new `Delete` tool results now render with a strikethrough filename and no fake `-1` line-count stat.
-- TUI: `Write` tool cards now show the written file content as a numbered, syntax-highlighted preview, sharing the same first-10-lines default and space-to-expand behavior as `Read` cards.
-- TUI: aligned default shortcuts across modes: `Ctrl+P` is now reserved for the model selector (removed Insert-mode history binding); message directory/tree moved from `Ctrl+J` to `Ctrl+T`; and the default `Ctrl+F` “attach image path from input” binding is removed (configure `insert_attach_file` if you still want it).
-- Runtime/LLM retry: API `402` quota/payment exhaustion errors now behave like per-key rate limits: Chord cools down the exhausted key, tries other configured keys for the same model before fallback, and avoids repeatedly retrying the same depleted key.
-- Tools/Safety: refined non-interactive Shell/Spawn guardrails so plain stdin reads such as shell `read`/`select` observe EOF instead of being rejected before execution, while terminal/TTY-dependent commands remain blocked.
-- Runtime/Codex rate limits: provider usage polling now inherits the application context, so shutdown/cancel paths stop pending Codex usage refreshes instead of letting them wait on a detached background context.
-- Auth/Codex: browser and device-code login HTTP requests now inherit the CLI command context, so Ctrl+C or parent shutdown can cancel in-flight device-code and token-exchange requests promptly.
+### Breaking Changes
+
+- Renamed the model-visible command tool from `Bash` to `Shell` (no runtime alias). Update permission rules (`permission.Shell`), hook tool filters, skill `allowed_tools`, saved/imported tool calls, headless consumers, and any prompts referring to the old `Bash` name before upgrading.
+
+### Features
+
+- `chord worktree finish --check`: a temporary isolated rebase preflight that shows whether the worktree would finish cleanly, without mutating the real worktree or leaving it mid-rebase.
+- `Write` tool cards now show the written file as a numbered, syntax-highlighted preview, like `Read` cards.
+
+### Improvements & Fixes
+
+- Sidebar file list renamed `EDITED FILES` → `CHANGED FILES`; deleted files render struck-through with no fake `-1` line stat.
+- Default shortcuts realigned: `Ctrl+P` is the model selector, the message directory moved to `Ctrl+T`, and the default `Ctrl+F` image-attach binding was removed (set `insert_attach_file` to restore it).
+- API `402` quota/payment errors now behave like per-key rate limits — cool the exhausted key and try other keys before falling back.
+- Non-interactive Shell/Spawn guardrails let plain `read`/`select` stdin proceed while still blocking TTY-dependent commands.
+- Codex usage polling and OAuth browser/device-code logins cancel promptly on Ctrl+C or shutdown.
+- Reduced Ghostty/cmux stale-cell artifacts after tab focus or resize recovery.
 
 ## 0.5.1 - 2026-05-09
 
-- Runtime/TUI: added manual MCP server control for `manual: true` servers. Chord now exposes `/mcp` (`status`, `enable`, `disable`) plus an MCP selector in the TUI (`Ctrl+O`) so on-demand servers can be connected or disconnected at runtime. Auto-start servers remain read-only, and the selector stays open while MCP state updates stream in.
-- Runtime: fixed initial LLM client not being configured with the builder agent's model pool. Previously, when multiple models were configured, retries would only rotate through API keys on the first model without falling back to other models. The initial client now properly includes all models from the builder agent's pool, so failures correctly trigger model-level fallback.
-- TUI: fixed Ghostty/cmux stale-cell artifacts after focus/resize recovery. The focus-resize freeze path now serializes the drawn screen buffer as a full frame that preserves trailing spaces, instead of relying on string-level end-of-line clearing or post-render padding.
-- TUI: upgraded the Bubble Tea rendering stack to newer compatible releases (`bubbletea/v2` 2.0.6, `bubbles/v2` 2.1.0, `lipgloss/v2` 2.0.3, plus newer `ultraviolet` and `x/ansi`) to pick up renderer and terminal-behavior fixes.
-- TUI: Write tool card no longer shows a diff preview. The result now displays a clear line and byte count summary (`Successfully wrote N lines, N bytes`) instead of extracting added lines from a unified diff, eliminating the misleading "only a few lines shown" display for full-file writes.
-- TUI: removed the pre-read + diff generation pipeline from the Write tool. Write tool results no longer carry `Diff`, `DiffAdded`, or `DiffRemoved` metadata. Edit tool results continue to show diffs as before.
-- Write tool `Execute` now reports the line count in addition to byte count in its success message.
-- Runtime/Codex rate limits: when active Responses WS streams run without fresh `rate_limits` events, Chord now proactively wakes Codex polling so RATE LIMIT/usage panels stay current instead of showing stale windows.
-- Thinking translation: when a translation model returns a semantically empty result, Chord now keeps trying the next model in the configured model pool before giving up, instead of treating the empty translation as a hard failure on the first model.
-- Tools/Safety: Bash and Spawn now reject high-confidence interactive shell commands before execution and run with explicit non-interactive environment defaults (for example disabling git credential/editor prompts) to reduce hang risk.
-- Tools/Process lifecycle: timeout/cancel shutdown now escalates from graceful terminate to force-kill for process groups after a grace period, preventing stubborn child processes from leaving Bash/Spawn calls stuck.
+### Features
+
+- Manual MCP server control for `manual: true` servers: `/mcp` (`status`, `enable`, `disable`) and an MCP selector (`Ctrl+O`) to connect or disconnect on-demand servers at runtime. Auto-start servers stay read-only.
+
+### Improvements & Fixes
+
+- Fixed the initial LLM client not using the builder agent's full model pool, so first-request failures now correctly fall back across models, not just API keys.
+- `Write` cards show a clear line/byte summary instead of a misleading "only a few lines shown" diff for full-file writes.
+- Thinking translation tries the next model in the pool when one returns an empty result.
+- `Bash` and `Spawn` reject high-confidence interactive commands and run with non-interactive defaults; timeout/cancel now escalates to force-kill so stuck child processes don't hang calls.
+- Codex usage polling wakes proactively when WebSocket streams go quiet, keeping the RATE LIMIT panel current.
+- Upgraded the Bubble Tea rendering stack and fixed Ghostty/cmux stale-cell artifacts after focus/resize recovery.
 
 ## 0.5.0 - 2026-05-08
 
-- Config: agent configs now use `mode: main` for MainAgent roles and `mode: subagent` for SubAgents. `sub_agent` and `sub` are also accepted as SubAgent aliases; empty or other values behave as `main`. Hook `agent_kind` filters use `main`/`subagent`.
-- CLI: added `chord import` support for importing external sessions from Claude Code (`claude`), Codex (`codex`), and OpenCode (`opencode`). Import writes a resumable Chord session plus `import-report.json`; Codex defaults to conservative `auto` tool import, OpenCode defaults to text-only tool import, and Claude defaults to `auto`.
-- Runtime: added request-time model compatibility normalization to safely replay or downgrade provider-specific history payloads (Anthropic signed thinking and structured tools) when switching providers/models.
-- Runtime: fixed a potential hang when a tool batch/turn is cancelled while waiting for the shared streaming tool execution quota. Chord now emits a cancelled tool result so pending tool calls resolve and the UI cannot get stuck.
-- TUI: fixed running tool/Bash spinner animation to advance one frame per visual animation tick instead of sampling wall-clock time, eliminating deterministic skipped frames and uneven rotation; background-active sessions now keep the same visual spinner cadence as foreground sessions while retaining slower content flushes.
-- TUI: fixed `/models` pool switching while the agent is busy. Selecting a pool from the TUI selector now submits the switch immediately to the main event loop, so queued user messages pick up the new pool at the next actual request boundary instead of waiting for another draft send or full idle.
-- Worktree: improved `chord worktree finish` failure ergonomics. If the target worktree already has a rebase in progress, `finish` now exits early with an explicit recovery hint instead of attempting a nested rebase. When rebase conflicts occur, the error message now includes step-by-step recovery commands (`git status`, `git rebase --show-current-patch`, then `--skip` / `--continue` / `--abort`) plus a best-effort redundant-commit hint from `git cherry -v` to help identify likely skip-safe patches.
-- TUI: when Chord is running in the background, the terminal title now shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle; the marker is cleared on focus.
-- TUI: fixed THINKING card ordering when reasoning output is followed quickly by assistant text. Chord now closes and flushes pending thinking before emitting the first text chunk, and ignores late reasoning deltas after text has started so THINKING no longer appears below the answer body.
-- TUI: fixed an occasional duplicate horizontal rule above the input separator. When the viewport was pinned to the bottom and the last block was a card style with `MarginBottom(1)` (assistant / user / thinking / tool / compaction), the card's transparent marginBottom row formed a colour step against the dim card-bg padBottom row above it, which read as a second rule on top of the input separator. The vertical margin band now inherits the card bg across the padded width while horizontal margins stay transparent.
+### Features
+
+- `chord import` for external sessions from Claude Code, Codex, and OpenCode, writing a resumable session plus `import-report.json`.
+- Request-time model compatibility normalization safely replays or downgrades provider-specific history (Anthropic signed thinking, structured tools) when switching providers/models.
+
+### Improvements & Fixes
+
+- Agent configs use `mode: main` for MainAgent roles and `mode: subagent` for SubAgents (`sub_agent`/`sub` also accepted); hook `agent_kind` filters use `main`/`subagent`.
+- Fixed a potential hang when a tool batch/turn is cancelled while waiting for the shared execution quota — Chord now emits a cancelled tool result so the UI can't get stuck.
+- `chord worktree finish` gives step-by-step recovery commands on rebase conflicts and exits early if a rebase is already in progress.
+- Fixed `/models` pool switching while busy so queued messages pick up the new pool at the next request boundary.
+- Tool/Bash spinner animation advances one frame per tick (no skipped frames); background sessions keep the same cadence.
+- Fixed THINKING card ordering when reasoning is followed quickly by assistant text.
+- A background agent going busy → idle now shows a one-shot `✅` completion marker in the terminal title.
 
 ## 0.4.0 - 2026-05-07
 
-- Added `--worktree [name]` to both the default TUI command and `chord headless` for creating or entering a chord-managed git worktree at startup. Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` with branch `chord/<slug>` (or `<branch_prefix><slug>` when `worktree.branch_prefix` is configured); each worktree gets its own ProjectKey so sessions, runtime cache, and exports are isolated automatically. `--worktree` may be combined with `--continue` / `--resume` to act on the worktree's own session history. Auto-named when the value is empty (`task-YYYYMMDD-HHMMSS`); a branch already attached to a worktree is reused (fast resume). Headless `ready` event payload now carries `worktree: { name, branch, path, repo_root }` when launched with `--worktree`.
-- Added `chord worktree` command group: `list` (chord-managed worktrees of the current repo, sorted by recency) and `remove <name>` (deletes the worktree directory and the worktree's sessions/cache/exports while preserving the branch by default; use `--delete-branch` to delete only-if-merged or `--force` for unconditional removal of dirty trees and the branch). Creating/entering a worktree is a startup-level action and lives on the `chord --worktree` flag, not under `chord worktree`; for "enter and continue", use `chord --worktree <name> --continue`.
-- Added `chord resume <session-id>`: locates the chord-managed worktree (or main repo) the session belongs to, switches into it, and resumes — complements `chord -r <id>`, which only resumes within the current project.
-- Added `worktree.branch_prefix` to `config.yaml`: overrides the default `chord/` prefix used for branch names and `git worktree list --porcelain` filtering. Empty falls back to `chord/`; trailing `/` is appended automatically; values that would produce malformed git refs (leading `/` or `-`, `..`, `//`, whitespace, or non-`[a-zA-Z0-9._/-]` characters) are rejected at startup.
-- Extended per-session `session-meta.json` with `repo_id`, `repo_root`, `worktree_name`, `worktree_branch`, `worktree_path`, and `is_main_worktree`. Existing sessions remain compatible; metadata files containing only worktree fields are now correctly recognized.
-- Added Google Gemini as a first-class provider (`type: generate-content`, `api_url` ending in `/models`); supports streaming text/tool/thinking output, multimodal inline images, function-calling tools, and Gemini-shaped error responses with `Retry-After` handling.
-- Fixed local-only slash commands (`/export`, `/models`) so they always run on the main agent's event loop instead of from the TUI input goroutine. Previously, submitting one of these while an LLM call was retrying could clear the active turn mid-flight, leaving the UI stuck in a "busy" state with no way to cancel; the cancel-busy key path now also recovers gracefully when the agent reports no active turn.
-- Fixed slash completion dropdown so scrolling with arrow keys keeps the selected command visible when the list exceeds 8 entries.
-- Fixed `/new` so it clears the sidebar EDITED FILES section instead of preserving the previous session's file list.
+### Highlights
+
+- Git worktree support: `chord --worktree [name]` creates or enters an isolated worktree with its own sessions, cache, and exports.
+- Google Gemini as a first-class provider.
+
+### Features
+
+- `chord --worktree [name]` (on the default command and `chord headless`) creates or enters a chord-managed git worktree, isolating sessions/cache/exports per worktree; combine with `--continue`/`--resume`. Auto-named when empty, and an existing worktree branch is reused.
+- `chord worktree list` / `remove <name>` to manage worktrees, and `chord resume <session-id>` locates and resumes a session in whatever worktree it belongs to.
+- `worktree.branch_prefix` config overrides the default `chord/` branch prefix (malformed refs are rejected at startup).
+- Google Gemini as a first-class provider (`type: generate-content`): streaming text/tool/thinking output, inline images, function-calling tools, and `Retry-After` handling.
+
+### Improvements & Fixes
+
+- `session-meta.json` gains worktree fields; existing sessions stay compatible.
+- Local slash commands (`/export`, `/models`) always run on the main event loop, fixing a stuck "busy" state when submitted during an LLM retry.
+- Slash completion keeps the selected command visible when scrolling past 8 entries; `/new` clears the sidebar file list.
 
 ## 0.3.0 - 2026-05-07
 
-- Added runtime model pools:
-  - **Breaking:** agent model configuration must now reference one or more top-level `model_pools` from `config.yaml`; the previous flat per-agent `models` list is no longer accepted. Internally, `AgentConfig.Models` is now a `map[string][]string` (pool name → ordered model refs).
-  - Every agent must define at least one pool. Pool names are user-defined and not reserved (for example, `default`, `base`, `fast`, and `strong` are all valid). When no pool is explicitly selected, Chord falls back to the **first** pool in the agent's `model_pools: [...]` list.
-  - Agents can reuse globally-defined pools via `model_pools`; inline `models` and `model_pools` are mutually exclusive in agent config. Runtime pool policy now tracks the current model pool, per-agent overrides, and last-picked state with per-project persistence.
-  - The `/model` command is replaced by `/models` with `status`, `<pool>`, and `--agent <name> <pool>` subcommands. The TUI selector now chooses pools instead of individual models.
-  - Model pool selections made while the agent is busy are submitted to the main event loop immediately. The current in-flight request keeps its existing client snapshot, while queued user messages and other later request boundaries pick up the new pool without waiting for another draft send or full idle. Pending-switch failures now flow through the TUI update loop instead of mutating view state from a background goroutine.
-- Added build identity metadata to diagnostics and startup logs. `chord --version`, diagnostics bundles, and TUI dumps now include or expose build/VCS/runtime details such as commit, dirty state, build time when injected, VCS time, Go version, and executable mtime. MCP client info continues to use the bare application version string.
-- Fixed SKILLS sidebar state: failed `Skill` tool calls no longer appear as loaded/green, unknown skills are hidden until discovered, and the legacy "(loaded)" suffix is removed.
-- Fixed Codex RATE LIMIT panel behavior: reset countdowns no longer stick at "1s" after expiry; when a window reaches its reset timestamp the timer is hidden and Chord triggers a best-effort usage refresh so the next window appears promptly.
-- Fixed deferred TUI diagnostics/export status cards so cards queued during assistant streaming appear as soon as the current assistant block finishes instead of waiting until the agent becomes idle.
-- Fixed `Cmd+V` clipboard text paste in permission-confirmation edit and deny-reason inputs.
+### Highlights
+
+- Runtime model pools: group models into named pools and switch the active pool at runtime via `/models` or the TUI selector.
+
+### Breaking Changes
+
+- Agent model configuration must now reference one or more top-level `model_pools`; the flat per-agent `models` list is no longer accepted. Every agent needs at least one pool, and the first listed pool is the default.
+
+### Features
+
+- Model pools with `/models` (`status`, `<pool>`, `--agent <name> <pool>`); switching while busy applies at the next request boundary without waiting for full idle.
+- Build identity in diagnostics and `chord --version` (commit, dirty state, build/VCS time, Go version, executable mtime).
+
+### Improvements & Fixes
+
+- SKILLS sidebar no longer shows failed or unknown skills as loaded, and drops the legacy "(loaded)" suffix.
+- Codex RATE LIMIT panel no longer sticks at "1s" after a window resets; it hides the timer and refreshes usage promptly.
+- Deferred diagnostics/export status cards appear right after the current assistant block instead of waiting for idle.
+- Fixed `Cmd+V` paste in permission-confirmation edit and deny-reason inputs.
 
 ## 0.2.0 - 2026-05-05
 
-- Refactored the TUI render-cache layout so `viewCacheState` contains only draw-loop caches that are safe to bulk reset, while animation/ticker/local-shell/startup-transcript bookkeeping lives in a separate runtime state and survives `invalidateDrawCaches`. The cache invalidator remains a struct re-zero (preserving the `cachedMainSearchBlockIndex = -1` invariant) instead of an 80-line list of per-field assignments. Removed the unused `cachedDirKey`, `cachedHelpKey`, `cachedStatusActivitiesKey`, `cachedStatusChordDisplay`, and `cachedStatusSessionSwitchKey` fields, grouped the five `renderSlashCache*` fields into a `slashRenderCache` substruct (`m.slashCache`), and consolidated the duplicated `renderVersion / renderCacheWidth / renderCacheText / renderCacheValid` quartet on `OverlayList` and `OverlayTable` into a shared `widthKeyedRenderCache` embedded in both.
-- Refactored the `agent.AgentForTUI` interface into focused sub-interfaces (`MessageSender`, `PromptResolver`, `ModelSelector`, `SessionController`, `SubAgentInspector`, `LoopController`, `RoleController`, `UsageReporter`, `KeyHealthReporter`, `CompactionController`, `PlanExecutor`) and recomposed `AgentForTUI` from them. Existing implementations (`MainAgent`, headless adapters, in-tree TUI test stubs) and consumers continue to satisfy the composite without changes; new TUI consumers should target the smaller surface they actually need.
-- Refactored `MainAgent.Shutdown` from one ~170-line phase into discrete helpers — `cancelActiveWork`, `closeSubAgentMCPServers`, and `buildShutdownSnapshot` — leaving the top-level method at ~92 lines and making each phase independently auditable for ordering and budget handling.
-- Removed the unused `tools.TruncateOutput` dead-code wrapper; all internal callers already use `TruncateOutputWithOptions`. Out-of-tree callers must switch to `TruncateOutputWithOptions(output, sessionDir, tools.TruncateOptions{})` for the previous default behavior.
+### Breaking Changes
 
-- Improved Pyright LSP setup: Chord now automatically discovers project-local `.venv`, `venv`, and `env` interpreters using the current platform's virtualenv layout (Unix `bin/python`, including WSL; Windows `Scripts\python.exe`) when no Python interpreter is configured, normalizes relative `python.pythonPath`, `python.defaultInterpreterPath`, and `python.venvPath` against the LSP root, and returns section-specific workspace settings so pyright-langserver can read `python` configuration correctly. Breaking change: LSP `options` consumed through `workspace/configuration` must now be shaped by section for every LSP server, not just Pyright; for Pyright, use nested keys like `python` and `python.analysis` rather than legacy flat top-level keys.
-- Removed the deprecated headless `notification` envelope type: dropped `protocol.TypeNotification` and `protocol.NotificationPayload`, and removed `"notification"` from the headless subscription allowlist. No code path emitted this envelope anymore; gateways should render the user-visible ready/idle state from the `idle` envelope.
-- Replaced the previous `slog`-style logging adapter with direct `golog` usage across the runtime. Logs are now plain golog text output with direct caller attribution; the previous pseudo-structured `level=... msg=... key=value` formatting and default logger `With(...)` context fields are no longer emitted automatically.
-- Fixed `ee`/fork editing for image messages so images restored from session history by path are reloaded and included when the edited user message is sent again.
-- Fixed TUI tool-card rendering so tool arguments/results are shown as terminal-safe plain text: ANSI/control sequences are escaped, Markdown-looking generic tool output is no longer auto-rendered as Markdown, large collapsed Bash results avoid wrapping hidden tails, and collapsed hidden-line hints no longer double-count the first hidden line.
-- Removed obsolete pre-1.0 compatibility paths and dead code across compaction, LLM session handling, LSP test-only helpers, tools, and TUI internals. This cleanup deletes the unused `ResetResponsesSession` / legacy responses-session reset chain, removes the old synchronous compaction fallback path, moves test-only helpers into `_test.go`, deduplicates fallback-summary rendering, finishes centralizing tool-name handling on `tools.NameXxx` constants, and keeps plan-execution session switches aligned with the active provider/session identifier lifecycle.
-- Fixed long-session TUI transcript clipping where late updates to older background status cards could undercount transcript height after spill/hydrate recovery, making the bottom rows or even several final cards unreachable.
-- Removed the deprecated `blockers_remaining` field from the SubAgent `Complete` tool arguments and `CompletionEnvelope`; SubAgents must report non-blocking caveats via `remaining_limitations` and signal true blockers through the Escalate or `blocked` mailbox path instead of `Complete`.
-- Unified SubAgent artifact representation: mailbox messages, durable task records, per-instance meta files, and the in-memory runtime state now reference artifacts via a single `ArtifactRef` / `[]ArtifactRef` shape; removed the parallel `artifact_ids` / `artifact_rel_paths` / `artifact_type` fields and the related legacy adapter.
-- Replaced remaining hard-coded tool-name string literals (`Read` / `Write` / `Edit` / `Delete` / `Grep` / `Glob`) across TUI rendering, search, hooks, agent execution paths, and edit tracking with the centralized `tools.NameXxx` constants.
-- Removed the unused deprecated `skill.Loader.Scan()` helper; remaining callers already use `ScanMeta` plus on-demand `Load`.
-- Improved MCP initialize handshake metadata so runtime-managed MCP clients now send the build-time Chord version instead of a stale hardcoded version, while preserving the default `mcp.NewClient` / `NewPendingManager` / `NewManager` convenience APIs and adding explicit `WithClientInfo` variants for callers that need custom handshake identity.
-- Centralized local tool traits used by TUI expansion and compaction (`Read` / `Grep` / `Glob` / `WebFetch` vs file-mutating tools) into `internal/tools/tool_traits.go` to reduce scattered string-driven branching.
-- Removed the legacy `ProviderConfig.UpdatePolledRateLimitSnapshot` test-compat wrapper in favor of explicit credential-index updates via `UpdatePolledRateLimitSnapshotForCredentialIndex`.
-- Added structured SubAgent completion handoff with files changed, verification run, remaining limitations, risks, follow-up recommendations, and artifact references.
-- Fixed TUI tool cards so queued badges and wrapped content keep consistent right-side padding.
-- Added session-scoped `SaveArtifact` and `ReadArtifact` tools for SubAgent handoff artifacts, with persistence through mailbox, task registry, snapshots, and session restore.
-- Improved SubAgent coordination snapshots to surface recent completion metadata, artifact references, write scope, and suspected stalls.
-- Fixed TUI transcript viewport drift that could accumulate in long sessions, clipping the last card/padding and causing mouse selection to hit the wrong rows.
-- Fixed TUI transcript mouse selection copy so drag-selected text keeps the final character when copied with `Cmd+C`, and documented transcript copying behavior.
-- Improved loop verification continuations so `verify` assessments inject a dedicated `LOOP VERIFY` notice with explicit verification guidance, and documented `/loop on [target]`.
-- Fixed LSP sidebar diagnostics so clean post-edit self-reviews persist `0E/0W` snapshots and clear stale errors after syntax issues are resolved.
-- Fixed TUI card background artifacts around emoji, variation selectors, and ZWJ graphemes by aligning wrapping, padding, and truncation with the viewport grapheme-width calculation.
-- Improved TUI tool-call file path display so local-path tools such as `Read`, `Write`, `Edit`, `Delete`, `Grep`, and `Glob`, along with existing visible path-bearing Bash metadata, show paths relative to the active project root when possible, including after session resume/startup restore and spill/hydrate recovery, while keeping external paths absolute.
-- Improved AGENTS.md handling by adding stable system-prompt framing only when repository guidance exists, while keeping AGENTS.md contents in the session `<system-reminder>` context layer.
-- Fixed sticky fallback model variants so pinned fallback requests preserve their own `@variant` and do not leak the primary model variant into variantless fallback runs.
-- Fixed categorized loop blocked messages rendering as unnamed status cards.
-- Fixed Ghostty/tab focus-restore artifacts by tracking transcript/layout changes that occur while the terminal is backgrounded, forcing a host redraw after focus-settle when those background changes are observed, and recording background-dirty plus input-separator diagnostics to make any remaining stale-display cases easier to investigate.
-- Fixed Ghostty/cmux stale display where separator lines could appear duplicated after rapid scroll/resize/layout changes; Chord now clears to end-of-line per rendered row in those terminals to avoid leftover cells.
-- Improved queued tool call badges so they keep right-side padding and hide when the tool header is too narrow.
-- Improved TUI markdown rendering caches for assistant/thinking streams, compaction summaries, and status cards.
-- Fixed collapsed tool result hidden-line counts for markdown-like output.
-- Fixed headless idle events so Chord emits a single `idle` envelope instead of also sending a duplicate ready `notification` envelope; gateways should render the idle state themselves.
+- LSP `options` passed via `workspace/configuration` must now be shaped by section for every server (for Pyright, use nested `python` / `python.analysis` keys instead of flat top-level keys).
+- Headless: removed the `notification` envelope type — render the ready/idle state from the `idle` envelope instead.
+- SubAgent `Complete` dropped the `blockers_remaining` field; report non-blocking caveats via `remaining_limitations` and real blockers via Escalate or the `blocked` mailbox path.
 
-- Fixed compaction follow-up behavior in three related cases: preserved/restored terminal titles now ignore compaction-summary pollution more reliably across old and newly compacted sessions; auto-compaction continuation no longer emits duplicate idle transitions when a barrier apply fails; and active title animation now always re-synchronizes the terminal-title ticker before resuming spinner-driven activity.
-- Changed automatic (usage/threshold-driven) compaction continuation: after the durable summary is applied the agent now proactively spawns a fresh LLM turn on the compacted context so the work keeps progressing, instead of going idle until the user prompts again. Manual `/compact` continues to return to idle. Sessions running in loop mode advance the loop state when the auto-continue fires.
-- Improved session preview/title correctness after compaction by persisting explicit metadata in `usage-summary.json` and session summaries (`*_is_compaction_summary` flags) instead of inferring compaction from text content. Breaking change: sessions created/compacted by older versions may still show polluted titles/previews until they are compacted again with this version.
+### Features
+
+- Pyright LSP auto-discovers project-local `.venv`/`venv`/`env` interpreters (Unix/WSL and Windows layouts) and normalizes relative interpreter paths against the LSP root.
+- New session-scoped `SaveArtifact` / `ReadArtifact` tools and structured SubAgent completion handoff (files changed, verification run, remaining limitations, risks, follow-ups, artifact references).
+- Loop `verify` assessments inject a dedicated `LOOP VERIFY` notice with explicit verification guidance; documented `/loop on [target]`.
+
+### Improvements & Fixes
+
+- Automatic (threshold-driven) compaction now continues working on the compacted context instead of going idle; manual `/compact` still returns to idle.
+- More accurate session preview/title after compaction, using explicit metadata instead of inferring from text. (Sessions compacted by older versions may still show polluted titles until re-compacted.)
+- Tool cards render as terminal-safe plain text (escaped ANSI, no false Markdown rendering); fixed background artifacts around emoji/ZWJ graphemes and inconsistent padding.
+- Fixed `ee`/fork editing so images restored from session history are reloaded and re-sent; mouse drag-selection copy keeps the final character.
+- Fixed long-session transcript clipping/drift that could hide the last cards or misalign mouse selection.
+- Local-path tools (`Read`/`Write`/`Edit`/`Delete`/`Grep`/`Glob`) show project-relative paths when possible.
+- Logs switched to plain `golog` output; the previous pseudo-structured `level=... msg=... key=value` format is no longer emitted.
+- Additional Ghostty/cmux stale-display fixes after rapid scroll/resize/focus changes.
 
 ## 0.1.0 - 2026-04-29
 
 - Initial public release of Chord.
-- Added the terminal coding agent with local-first runtime, Vim-like navigation, session management, model/provider configuration, tool execution, LSP integration, image input, and headless control support.
-- Added cross-platform release builds for macOS, Linux, and Windows.
+- A terminal coding agent with a local-first runtime, Vim-like navigation, session management, model/provider configuration, tool execution, LSP integration, image input, and headless control support.
+- Cross-platform release builds for macOS, Linux, and Windows.
