@@ -182,7 +182,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
-		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, a.contextReductionInputBudget()) {
+		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, inputBudget) {
 			prepared = reuseStableReductionPrefix(previous.Messages, prepared)
 			stats = highLevelContextReductionStats(messages, prepared)
 			a.setCurrentRequestSurface(&stats, prepared)
