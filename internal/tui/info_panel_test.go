@@ -25,6 +25,7 @@ type infoPanelAgent struct {
 	usage               analytics.SessionStats
 	runningModelRef     string
 	contextCurrent      int
+	contextBytes        int
 	contextLimit        int
 	contextMessageCount int
 	contextReduction    agent.ContextReductionStats
@@ -67,6 +68,10 @@ func (a *infoPanelAgent) GetContextStats() (current, limit int) {
 
 func (a *infoPanelAgent) GetContextMessageCount() int {
 	return a.contextMessageCount
+}
+
+func (a *infoPanelAgent) GetContextBytes() int {
+	return a.contextBytes
 }
 
 func (a *infoPanelAgent) GetContextReductionStats() agent.ContextReductionStats {
@@ -138,6 +143,24 @@ func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
 	second := stripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(second, "2.0k") {
 		t.Fatalf("info panel should refresh after UsageUpdatedEvent, got %q", second)
+	}
+}
+
+func TestInfoPanelShowsContextBytesAndReducedRatio(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 42_600
+	backend.contextBytes = 200_000
+	backend.contextLimit = 100_000
+	backend.contextMessageCount = 370
+	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500}
+	model := NewModel(backend)
+
+	plain := stripANSI(model.renderInfoPanel(50, 24))
+	if !strings.Contains(plain, "Context: 42.6k / 195.3 KB (43%)") {
+		t.Fatalf("info panel missing context bytes, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Reduced: 130 msg (26%) / 293.5 KB") {
+		t.Fatalf("info panel missing reduced ratio/bytes, got:\n%s", plain)
 	}
 }
 

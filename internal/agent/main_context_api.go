@@ -52,6 +52,13 @@ func (a *MainAgent) GetContextMessageCount() int {
 	return a.ctxMgr.MessageCount()
 }
 
+func (a *MainAgent) GetContextBytes() int {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return sub.GetContextBytes()
+	}
+	return a.ctxMgr.EstimateTotalBytes()
+}
+
 // KeyStats returns (healthy, total) API keys for the focused agent's provider
 // (SubAgent when focused, else MainAgent), aligned with RunningModelRef.
 // healthy = selectable AND not recovering (re-proven healthy since last failure/reset).

@@ -4022,6 +4022,7 @@ func (s *sessionControlAgent) GetContextStats() (current, limit int) {
 	return s.contextCurrent, s.contextLimit
 }
 func (s *sessionControlAgent) GetContextMessageCount() int { return 0 }
+func (s *sessionControlAgent) GetContextBytes() int        { return 0 }
 func (s *sessionControlAgent) GetContextReductionStats() agent.ContextReductionStats {
 	return agent.ContextReductionStats{}
 }

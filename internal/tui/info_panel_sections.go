@@ -143,6 +143,7 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	// current = last request input tokens; percent = current / usable input budget.
 	// Color by usage: green normal, orange >50%, red >80% (value and gauge match).
 	current, limit := m.agent.GetContextStats()
+	currentBytes := m.agent.GetContextBytes()
 	percent := 0.0
 	if limit > 0 {
 		percent = float64(current) / float64(limit)
@@ -157,15 +158,26 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		if bp >= 1 {
 			gauge := m.renderContextGauge(width-6, percent)
 			contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
+			if currentBytes > 0 {
+				contextValueStr = fmt.Sprintf("%s / %s (%s)", formatTokens(current), bytefmt.Short(int64(currentBytes)), formatPercent(percent))
+			}
 			usageLines = append(usageLines,
 				renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent).Render(contextValueStr)),
 				InfoPanelLineBg.Width(lineW).Render(gauge),
 			)
-			if msgCount := m.agent.GetContextMessageCount(); msgCount >= 0 {
+			msgCount := m.agent.GetContextMessageCount()
+			if msgCount >= 0 {
 				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", InfoPanelValue.Render(formatTokens(msgCount))))
 			}
 			if reduction := m.agent.GetContextReductionStats(); reduction.Messages > 0 && reduction.Bytes > 0 {
-				reduced := fmt.Sprintf("%s msg / %s", formatTokens(reduction.Messages), bytefmt.Short(int64(reduction.Bytes)))
+				reduced := fmt.Sprintf("%s msg", formatTokens(reduction.Messages))
+				if msgCount > 0 {
+					totalMessages := msgCount + reduction.Messages
+					if totalMessages > 0 {
+						reduced += fmt.Sprintf(" (%s)", formatPercent(float64(reduction.Messages)/float64(totalMessages)))
+					}
+				}
+				reduced += " / " + bytefmt.Short(int64(reduction.Bytes))
 				usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Reduced", InfoPanelValue.Render(reduced)))
 			}
 		}

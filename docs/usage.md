@@ -170,7 +170,7 @@ Export the current session as Markdown (default) or JSON.
 
 The export includes every conversation message plus the current session usage statistics. On success, the TUI displays the saved path.
 
-The TUI info panel's `Reduced` line is request-level context reduction, not persistent compaction. After `/compact` or automatic compaction rewrites the session history, Chord refreshes that value, including while loop mode is active.
+In the TUI info panel's `USAGE` block, `Context` shows the current input-token estimate plus approximate message payload bytes. The `Reduced` line is request-level context reduction, not persistent compaction: it shows reduced message count, that count as a share of the pre-reduction message total, and reduced bytes. After `/compact` or automatic compaction rewrites the session history, Chord refreshes that value, including while loop mode is active.
 
 In the info panel's `USAGE` block, `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
 

@@ -337,6 +337,28 @@ func (m *Manager) EstimateTotalTokens() int {
 	return EstimateMessagesTokens(m.messages)
 }
 
+// EstimateTotalBytes returns a rough byte count for the current message list.
+func (m *Manager) EstimateTotalBytes() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return EstimateMessagesBytes(m.messages)
+}
+
+// EstimateMessagesBytes returns approximate payload bytes for a slice of messages.
+func EstimateMessagesBytes(messages []message.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += len(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			total += len(tc.Args)
+		}
+		for _, tb := range msg.ThinkingBlocks {
+			total += len(tb.Thinking)
+		}
+	}
+	return total
+}
+
 // EstimateMessagesTokens returns approximate token count for a slice of
 // messages (content/3 + tool/3 + thinking/3, min 1 per msg).
 func EstimateMessagesTokens(messages []message.Message) int {

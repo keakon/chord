@@ -53,6 +53,7 @@ func (loopBusyAgentStub) GetSidebarUsageStats() analytics.SessionStats {
 }
 func (loopBusyAgentStub) GetContextStats() (int, int) { return 0, 0 }
 func (loopBusyAgentStub) GetContextMessageCount() int { return 0 }
+func (loopBusyAgentStub) GetContextBytes() int        { return 0 }
 func (loopBusyAgentStub) GetContextReductionStats() agent.ContextReductionStats {
 	return agent.ContextReductionStats{}
 }
