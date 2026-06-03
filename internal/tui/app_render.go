@@ -474,7 +474,7 @@ func (m *Model) hostSafeFullFrameWidth() int {
 		return width
 	}
 	if m.useFocusResizeFreeze {
-		return width - 1
+		return max(1, width-2)
 	}
 	return width
 }

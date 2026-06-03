@@ -158,9 +158,17 @@ func TestModelViewUsesSafeRightGutterWhenFocusResizeFreezeEnabled(t *testing.T) 
 		t.Fatalf("got %d lines, want 4", len(lines))
 	}
 	for i, line := range lines {
-		if w := ansi.StringWidth(line); w != 9 {
-			t.Fatalf("line %d width = %d, want 9; raw=%q", i, w, line)
+		if w := ansi.StringWidth(line); w != 8 {
+			t.Fatalf("line %d width = %d, want 8; raw=%q", i, w, line)
 		}
+	}
+}
+
+func TestModelHostSafeFullFrameWidthKeepsTwoColumnWidthUsable(t *testing.T) {
+	m := NewModelWithSize(nil, 2, 4)
+	m.useFocusResizeFreeze = true
+	if got := m.hostSafeFullFrameWidth(); got != 1 {
+		t.Fatalf("hostSafeFullFrameWidth() = %d, want 1", got)
 	}
 }
 
