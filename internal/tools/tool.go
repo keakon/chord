@@ -72,7 +72,7 @@ func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawM
 
 func isReadOnlyConcurrencySafeTool(toolName string, args json.RawMessage) bool {
 	switch strings.TrimSpace(toolName) {
-	case NameRead, NameGrep, NameGlob, NameLsp, NameWebFetch, NameReadArtifact, NameSkill, NameSpawnStatus:
+	case NameRead, NameViewImage, NameGrep, NameGlob, NameLsp, NameWebFetch, NameReadArtifact, NameSkill, NameSpawnStatus:
 		return true
 	case NameShell:
 		return shellReadOnlyCommandAllowed(args)
@@ -183,6 +183,7 @@ const (
 	eventSenderKey
 	sessionDirKey
 	taskIDKey
+	imageSinkKey
 )
 
 // WithAgentID returns a new context that carries the given agent ID.

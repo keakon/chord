@@ -134,7 +134,7 @@ func (b *Block) renderUserPlain(width int) []string {
 	}
 	contentWidth := min(innerWidth-2, maxTextWidth)
 
-	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 {
+	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 && len(b.PDFNames) == 0 {
 		return nil
 	}
 
@@ -188,6 +188,14 @@ func (b *Block) renderUserPlain(width int) []string {
 			imageLabel = fmt.Sprintf("  📎 %d", b.ImageCount)
 		}
 		finalLines = append(finalLines, DimStyle.Render(imageLabel))
+	}
+	if len(b.PDFNames) > 0 {
+		if strings.TrimSpace(b.Content) != "" || b.ImageCount > 0 || imagesRendered {
+			finalLines = append(finalLines, "")
+		}
+		for _, name := range b.PDFNames {
+			finalLines = append(finalLines, DimStyle.Render("  📄 "+name))
+		}
 	}
 	if len(b.FileRefs) > 0 {
 		if strings.TrimSpace(b.Content) != "" || b.ImageCount > 0 || imagesRendered {

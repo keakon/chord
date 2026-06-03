@@ -166,15 +166,42 @@ func (m Model) renderQueuedDrafts(width, maxLines int) string {
 }
 
 func (m Model) renderAttachments() string {
-	if len(m.attachments) == 0 {
+	mentionAttachments := m.atMentionAttachmentPreviews()
+	if len(m.attachments) == 0 && len(mentionAttachments) == 0 {
 		return ""
 	}
 	var lines []string
 	for i, a := range m.attachments {
-		size := fmt.Sprintf("%.1f KB", float64(len(a.Data))/1024)
-		lines = append(lines, DimStyle.Render(fmt.Sprintf("  [%d] %s (%s)", i+1, a.FileName, size)))
+		lines = append(lines, renderAttachmentLine(i+1, a))
+	}
+	for i, a := range mentionAttachments {
+		lines = append(lines, renderAttachmentLine(len(m.attachments)+i+1, a))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderAttachmentLine(index int, a Attachment) string {
+	sizeBytes := a.SizeBytes
+	if sizeBytes == 0 {
+		sizeBytes = len(a.Data)
+	}
+	size := fmt.Sprintf("%.1f KB", float64(sizeBytes)/1024)
+	name := a.FileName
+	if a.MimeType == "application/pdf" {
+		name = "📄 " + name
+	}
+	var flags []string
+	if a.Unsupported {
+		flags = append(flags, "unsupported")
+	}
+	if a.Encrypted {
+		flags = append(flags, "encrypted")
+	}
+	suffix := ""
+	if len(flags) > 0 {
+		suffix = " ⚠ " + strings.Join(flags, ", ")
+	}
+	return DimStyle.Render(fmt.Sprintf("  [%d] %s (%s)%s", index, name, size, suffix))
 }
 
 func (m Model) renderToast() string {

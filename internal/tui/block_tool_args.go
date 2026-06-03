@@ -91,7 +91,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	if !b.toolHeaderCacheParamLinesOK {
 		paramVals := vals
 		switch b.ToolName {
-		case tools.NameRead, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
+		case tools.NameRead, tools.NameViewImage, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
 			paramVals = cloneToolValsWithDisplayDirs(b, vals)
 		}
 		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
@@ -223,7 +223,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 		switch b.ToolName {
 		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
 			cloned["path"] = b.displayToolDir(path)
-		case tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameDelete:
+		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NameDelete:
 			cloned["path"] = b.displayToolPath(path)
 		}
 	}
@@ -362,7 +362,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 		return ""
 	}
 	switch b.ToolName {
-	case tools.NameRead:
+	case tools.NameRead, tools.NameViewImage:
 		path := b.displayToolPath(vals["path"])
 		if path == "" {
 			return ""
@@ -443,7 +443,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 		return ""
 	}
 	switch toolName {
-	case tools.NameRead:
+	case tools.NameRead, tools.NameViewImage:
 		path := vals["path"]
 		if path == "" {
 			return ""

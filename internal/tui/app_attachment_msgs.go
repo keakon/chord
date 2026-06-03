@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -20,16 +21,36 @@ func (m *Model) handleAttachmentReadyMsg(msg attachmentReadyMsg) tea.Cmd {
 	if msg.err != nil {
 		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(msg.err.Error(), "error"))
 	}
-	const maxBytes = 5 * 1024 * 1024
 	if len(m.attachments) >= maxInlineImageAttachments {
-		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(fmt.Sprintf("max %d images supported", maxInlineImageAttachments), "warn"))
+		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(fmt.Sprintf("max %d attachments supported", maxInlineImageAttachments), "warn"))
+	}
+	isPDF := msg.attachment.MimeType == "application/pdf"
+	maxBytes := imageutil.MaxImageBytes
+	if isPDF {
+		maxBytes = imageutil.MaxPDFBytes
 	}
 	if len(msg.attachment.Data) > maxBytes {
-		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast("Image exceeds 5 MB limit", "warn"))
+		kind := "Image"
+		if isPDF {
+			kind = "PDF"
+		}
+		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(fmt.Sprintf("%s exceeds %d MB limit", kind, maxBytes/1024/1024), "warn"))
+	}
+	msg.attachment = m.markAttachmentSupport(msg.attachment)
+	if msg.attachment.SizeBytes == 0 {
+		msg.attachment.SizeBytes = len(msg.attachment.Data)
 	}
 	m.attachments = append(m.attachments, msg.attachment)
 	m.recalcViewportSize()
-	return m.enqueueToast(fmt.Sprintf("Image added: %s", msg.attachment.FileName), "info")
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.enqueueToast(fmt.Sprintf("Attachment added: %s", msg.attachment.FileName), "info"))
+	if warning := m.unsupportedAttachmentWarning(msg.attachment); warning != "" {
+		cmds = append(cmds, m.enqueueToast(warning, "warn"))
+	}
+	if msg.attachment.Encrypted {
+		cmds = append(cmds, m.enqueueToast("PDF appears to be encrypted and may not be readable by the model: "+msg.attachment.FileName, "warn"))
+	}
+	return tea.Batch(cmds...)
 }
 
 // shellBangResultMsg carries output from a local !command (TUI shell).

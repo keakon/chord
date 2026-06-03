@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -189,7 +191,7 @@ func TestClient_CallTool(t *testing.T) {
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
-	result, err := client.CallTool(ctx, "greet", json.RawMessage(`{"name":"user"}`))
+	result, _, err := client.CallTool(ctx, "greet", json.RawMessage(`{"name":"user"}`))
 	if err != nil {
 		t.Fatalf("CallTool failed: %v", err)
 	}
@@ -201,10 +203,11 @@ func TestClient_CallTool(t *testing.T) {
 func TestClient_CallTool_MultipleContent(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})
+	imgBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
 			{Type: "text", Text: "line1"},
-			{Type: "image", Text: "ignored"},
+			{Type: "image", Data: base64.StdEncoding.EncodeToString(imgBytes), MimeType: "image/png"},
 			{Type: "text", Text: "line2"},
 		},
 	})
@@ -213,12 +216,47 @@ func TestClient_CallTool_MultipleContent(t *testing.T) {
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
-	result, err := client.CallTool(ctx, "multi", json.RawMessage(`{}`))
+	result, images, err := client.CallTool(ctx, "multi", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("CallTool failed: %v", err)
 	}
 	if result != "line1\nline2" {
 		t.Errorf("CallTool result = %q, want %q", result, "line1\nline2")
+	}
+	if len(images) != 1 {
+		t.Fatalf("CallTool returned %d images, want 1", len(images))
+	}
+	if images[0].Type != "image" || images[0].MimeType != "image/png" {
+		t.Errorf("image part = %+v, want type=image mime=image/png", images[0])
+	}
+	if !bytes.Equal(images[0].Data, imgBytes) {
+		t.Errorf("image data = %v, want %v", images[0].Data, imgBytes)
+	}
+}
+
+func TestClient_CallTool_SkipsOversizedImage(t *testing.T) {
+	ft := newFakeTransport()
+	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("tools/call", toolCallResult{
+		Content: []toolCallContent{
+			{Type: "text", Text: "ok"},
+			{Type: "image", Data: base64.StdEncoding.EncodeToString(make([]byte, 5*1024*1024+1)), MimeType: "image/jpeg"},
+		},
+	})
+
+	client := NewClientWithInfo("test", ft, testClientInfo)
+	ctx := context.Background()
+	_ = client.Initialize(ctx)
+
+	result, images, err := client.CallTool(ctx, "large", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+	if result != "ok" {
+		t.Errorf("CallTool result = %q, want %q", result, "ok")
+	}
+	if len(images) != 0 {
+		t.Fatalf("CallTool returned %d images, want 0", len(images))
 	}
 }
 
@@ -236,7 +274,7 @@ func TestClient_CallTool_Error(t *testing.T) {
 	ctx := context.Background()
 	_ = client.Initialize(ctx)
 
-	_, err := client.CallTool(ctx, "bad", json.RawMessage(`{}`))
+	_, _, err := client.CallTool(ctx, "bad", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("CallTool should have returned an error")
 	}

@@ -39,6 +39,12 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 							ImageURL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(p.Data),
 							Detail:   "auto",
 						})
+					case "pdf":
+						content = append(content, responsesContentBlock{
+							Type:     "input_file",
+							Filename: defaultPDFFilename(p.FileName),
+							FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(p.Data),
+						})
 					default:
 						content = append(content, responsesContentBlock{Type: "input_text", Text: p.Text})
 					}

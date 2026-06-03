@@ -31,11 +31,20 @@ func (t *MCPTool) Parameters() map[string]any { return t.schema }
 // IsReadOnly returns false (conservative default for external MCP tools).
 func (t *MCPTool) IsReadOnly() bool { return false }
 
-// Execute calls the tool on the MCP server and returns the result.
+// Execute calls the tool on the MCP server and returns the textual result.
+// Any image content blocks returned by the server are pushed to the image sink
+// in the context (if present) so the runtime can attach them to model context.
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	result, err := t.client.CallTool(ctx, t.remoteName, args)
+	result, images, err := t.client.CallTool(ctx, t.remoteName, args)
 	if err != nil {
 		return "", fmt.Errorf("MCP tool %s/%s: %w", t.serverName, t.remoteName, err)
+	}
+	if len(images) > 0 {
+		if sink, ok := tools.ImageSinkFromContext(ctx); ok {
+			for _, img := range images {
+				sink.AddImage(img)
+			}
+		}
 	}
 	return result, nil
 }

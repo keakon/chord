@@ -349,6 +349,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	a.turn.CompletedToolCalls = append(a.turn.CompletedToolCalls, toolResultSummary(payload, contextResult, errorText))
+	if len(payload.Images) > 0 {
+		a.turn.batchImageParts = append(a.turn.batchImageParts, payload.Images...)
+	}
 	if changed := changedFileSummary(payload); changed != nil {
 		a.loopState.markProgress()
 		a.turn.ChangedFiles = append(a.turn.ChangedFiles, changed)
@@ -506,6 +509,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if a.turn == nil {
 			return
 		}
+
+		a.injectBatchToolImages()
 
 		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)
 		a.prepareSubAgentMailboxBatchForTurnContinuation()

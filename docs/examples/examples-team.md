@@ -207,6 +207,7 @@ model_pools:
 permission:
   "*": deny
   read: allow
+  view_image: allow
   grep: allow
   glob: allow
   shell:
@@ -238,6 +239,7 @@ model_pools:
 permission:
   "*": deny
   read: allow
+  view_image: allow
   grep: allow
   glob: allow
   shell:

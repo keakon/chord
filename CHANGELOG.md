@@ -2,6 +2,20 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Features
+
+- Added multimodal input support for PDFs across Gemini, Anthropic, OpenAI Responses, and OpenAI Chat providers, including TUI attachment chips and session recovery.
+- Added the built-in `view_image` tool so models with image-input support can load local PNG/JPEG files into context using the same local-path permission handling as `read`.
+
+### Improvements & Fixes
+
+- Improved `edit` patch tolerance for blank context lines inside hunks, reducing failed model-generated edits.
+- Fixed an OAuth credential refresh crash when the active auth state uses a negative credential-index sentinel.
+- `@` file completion now treats supported image/PDF files as attachments, hides unsupported media types for the current model, and marks unsupported or encrypted attachments in the composer/transcript.
+- Switching to a model without image/PDF input support now filters unsupported historical binary parts before provider requests while preserving historical tool-call structure.
+
 ## 0.6.2 - 2026-06-02
 
 ### Highlights

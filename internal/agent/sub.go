@@ -41,6 +41,7 @@ type toolResult struct {
 	ArgsJSON         string // original args JSON string for malformed detection
 	Audit            *message.ToolArgsAudit
 	Result           string
+	Images           []message.ContentPart // image parts to inject into model context after the batch completes
 	Error            error
 	TurnID           uint64
 	Duration         time.Duration
@@ -225,6 +226,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// MainAgent-only tools with SubAgent-specific ones.
 	subTools := tools.NewRegistry()
 	hasSkillTool := false
+	hasViewImageTool := false
 	delegationEnabled := cfg.Depth < cfg.Delegation.EffectiveMaxDepth()
 	delegateVisible := delegationEnabled && !cfg.Ruleset.IsDisabled(tools.NameDelegate)
 	notifyVisible := !cfg.Ruleset.IsDisabled(tools.NameNotify)
@@ -244,6 +246,11 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			// fully constructed, so listing/visibility aligns with this
 			// SubAgent's own ruleset.
 			hasSkillTool = true
+		case tools.NameViewImage:
+			// Re-register with this SubAgent as the capability provider after it
+			// is constructed, so ViewImage visibility tracks the SubAgent's own
+			// model rather than the MainAgent's.
+			hasViewImageTool = true
 		case tools.NameDelegate, tools.NameCancel:
 			if !delegateVisible {
 				continue
@@ -333,6 +340,9 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
+	if hasViewImageTool && !cfg.Ruleset.IsDisabled(tools.NameViewImage) {
+		s.tools.Register(tools.NewViewImageTool(s))
+	}
 
 	// Build and install the system prompt.
 	prompt := s.buildSystemPrompt()
@@ -363,6 +373,19 @@ func (s *SubAgent) setServiceTier(tier config.ServiceTier) {
 	if client != nil {
 		client.SetServiceTier(tier)
 	}
+}
+
+// SupportsInput reports whether this SubAgent's active model accepts the given
+// input modality (e.g. "image", "pdf"). It mirrors MainAgent.SupportsInput and
+// gates modality-dependent tool visibility such as the native ViewImage tool.
+func (s *SubAgent) SupportsInput(modality string) bool {
+	if s == nil {
+		return false
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	s.llmMu.RUnlock()
+	return client != nil && client.SupportsInput(modality)
 }
 
 func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimit int) {
@@ -437,6 +460,11 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 		case <-s.parentCtx.Done():
 		}
 		return
+	}
+	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
+		log.Warnf("SubAgent dropping unsupported binary parts before LLM request agent=%v kinds=%s", s.instanceID, dropped.summary())
+		s.parent.emitToTUI(ToastEvent{Level: "warn", Message: "Input dropped (unsupported): " + dropped.summary(), AgentID: s.instanceID})
+		messages = filtered
 	}
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()

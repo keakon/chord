@@ -31,6 +31,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	}
 	clone.FileRefs = append([]string(nil), src.FileRefs...)
 	clone.ImageParts = append([]BlockImagePart(nil), src.ImageParts...)
+	clone.PDFNames = append([]string(nil), src.PDFNames...)
 	clone.ThinkingParts = append([]string(nil), src.ThinkingParts...)
 	clone.mdCache = append([]string(nil), src.mdCache...)
 	clone.mdCacheContent = src.mdCacheContent

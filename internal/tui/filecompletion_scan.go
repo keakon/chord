@@ -109,7 +109,7 @@ func skipAtMentionIndexedPath(path string) bool {
 			return true
 		}
 	}
-	return tools.IsBinaryExtension(path)
+	return tools.IsBinaryExtension(path) && attachmentKindForPath(path) == ""
 }
 
 func loadAtMentionWalkFiles(limit int) []string {
@@ -144,10 +144,8 @@ func loadAtMentionWalkFiles(limit int) []string {
 			}
 			return nil
 		}
-		// Exclude binary files from @-mention suggestions. The list is
-		// extension-only (zero IO) and shared with Grep's binary fast-path
-		// so the two filters stay in sync.
-		if tools.IsBinaryExtension(d.Name()) {
+		// Exclude non-attachable binary files from @-mention suggestions.
+		if skipAtMentionIndexedPath(d.Name()) {
 			return nil
 		}
 		rel := filepath.ToSlash(strings.TrimPrefix(path, "./"))

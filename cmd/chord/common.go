@@ -653,6 +653,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// configs are loaded, only when subagent-mode agents are available.
 	ac.Registry.Register(tools.NewTodoWriteTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewSkillTool(ac.MainAgent))
+	ac.Registry.Register(tools.NewViewImageTool(ac.MainAgent))
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))

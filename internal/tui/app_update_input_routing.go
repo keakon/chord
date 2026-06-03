@@ -49,8 +49,15 @@ func isInlineImagePlaceholderPart(part message.ContentPart) bool {
 	return ok
 }
 
+func attachmentPartType(mimeType string) string {
+	if mimeType == "application/pdf" {
+		return "pdf"
+	}
+	return "image"
+}
+
 func attachmentContentPart(att Attachment) message.ContentPart {
-	return message.ContentPart{Type: "image", MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath, FileName: att.FileName}
+	return message.ContentPart{Type: attachmentPartType(att.MimeType), MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath, FileName: att.FileName}
 }
 
 func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {

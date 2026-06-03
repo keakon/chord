@@ -281,14 +281,15 @@ In a SubAgent view, you can inspect that agent's context and output. Finished Su
 When `todo_write` is enabled but no `delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
 When `delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
 
-## Images
+## Images and PDFs
 
 Currently supported:
 
 - Paste images from the clipboard
-- Attach image files to the currently focused agent's message
-- View images directly in supported terminals
-- Edit/fork historical user messages that contain images; path-restored images are reloaded when the edited message is sent again
+- Attach image and PDF files to the currently focused agent's message when the active model supports that input type
+- View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
+- Edit/fork historical user messages that contain images or PDFs; path-restored attachments are reloaded when the edited message is sent again
+- Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the active model supports image input. The tool uses the same local-path permission handling as `read`.
 
 Common actions:
 
@@ -296,7 +297,9 @@ Common actions:
 - `Ctrl+V` / `Cmd+V` in confirmation-dialog text fields: always paste text, never attach images
 - Inline image attachments are capped at 5 per composer message
 - Typing literal placeholder text such as `[image1]` does not attach an image by itself; only Chord-inserted inline image placeholders are attachment-backed
-- To attach an image by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
+- `@` file completion includes image/PDF files only when the current model supports that input type. Manually typed image/PDF `@` references are still accepted as attachments; unsupported attachments are ignored at send time with a warning.
+- To attach an image or PDF by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
+- PDFs that appear to be encrypted are marked with a warning; Chord still allows sending them because provider-side parsing is authoritative.
 - `Enter` / `o` / `Space`: open the image in the current message in Normal mode
 
 ## Copying text

@@ -129,10 +129,12 @@ type responsesInputItem struct {
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
-	Type     string `json:"type"` // "input_text", "output_text", "input_image"
+	Type     string `json:"type"` // "input_text", "output_text", "input_image", "input_file"
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	Detail   string `json:"detail,omitempty"`
+	Filename string `json:"filename,omitempty"`  // input_file: display filename
+	FileData string `json:"file_data,omitempty"` // input_file: data URL (data:application/pdf;base64,...)
 }
 
 // responsesTool is a tool definition for the Responses API.

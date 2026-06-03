@@ -133,12 +133,22 @@ type openAIContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
 	ImageURL  *openAIImageURL `json:"image_url,omitempty"`
+	File      *openAIFile     `json:"file,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 }
 
 // openAIImageURL holds the image URL for an image_url content block.
 type openAIImageURL struct {
 	URL string `json:"url"`
+}
+
+// openAIFile holds the payload for a "file" content block (e.g. PDF input).
+// Chat Completions PDF support is relatively recent; providers that do not
+// support it will reject the block, so it is only emitted for "pdf" parts when
+// the model declares pdf input support upstream.
+type openAIFile struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"` // data URL: data:application/pdf;base64,...
 }
 
 // openAIToolCall is a tool call in assistant message.
@@ -438,6 +448,14 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 							Type: "image_url",
 							ImageURL: &openAIImageURL{
 								URL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(p.Data),
+							},
+						})
+					case "pdf":
+						blocks = append(blocks, openAIContentBlock{
+							Type: "file",
+							File: &openAIFile{
+								Filename: defaultPDFFilename(p.FileName),
+								FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(p.Data),
 							},
 						})
 					default: // "text"

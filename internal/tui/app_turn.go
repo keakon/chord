@@ -119,6 +119,7 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 		LoopAnchor: draft.LoopAnchor,
 		ImageCount: imageCount,
 		ImageParts: imagePartsFromContentParts(draft.contentParts()),
+		PDFNames:   pdfNamesFromContentParts(draft.contentParts()),
 		FileRefs:   draft.FileRefs,
 		MsgIndex:   msgIndex,
 		StartedAt:  draft.QueuedAt,

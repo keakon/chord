@@ -458,6 +458,17 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		messages = repaired
 	}
 
+	// Snapshot llmClient and modelName under a brief read-lock so that a
+	// concurrent SwapLLMClient cannot produce an inconsistent pair (e.g.
+	// old client with new model name). All subsequent reads in this
+	// function use the snapshot variables.
+	llmClient, modelName, selectedRef, prevRunningRef := a.llmSnapshot()
+	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
+		log.Warnf("dropping unsupported binary parts before LLM request kinds=%s", dropped.summary())
+		a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored", AgentID: a.instanceID})
+		messages = filtered
+	}
+
 	// On the first LLM call, prepend git status to the first user message so
 	// the model has repository context without polluting the stable system prompt.
 	a.injectGitStatusIntoFirstUserMessage(messages)
@@ -478,11 +489,6 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// before the HTTP request starts.
 	a.emitActivity("main", ActivityConnecting, "")
 
-	// Snapshot llmClient and modelName under a brief read-lock so that a
-	// concurrent SwapLLMClient cannot produce an inconsistent pair (e.g.
-	// old client with new model name). All subsequent reads in this
-	// function use the snapshot variables.
-	llmClient, modelName, selectedRef, prevRunningRef := a.llmSnapshot()
 	compatCfg := llmClient.ThinkingToolcallCompat() // use snapshot for consistency with llmClient
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 

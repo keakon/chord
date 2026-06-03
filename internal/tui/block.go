@@ -169,6 +169,10 @@ type Block struct {
 	// ImageParts holds metadata for each image attachment when available.
 	ImageParts []BlockImagePart
 
+	// PDFNames holds the display filenames of PDF attachments in this user
+	// message. PDFs cannot be rendered inline, so they are shown as chips.
+	PDFNames []string
+
 	// UserLocalShell: merged USER + Shell-style !shell card (Type must be BlockUser).
 	UserLocalShellCmd     string
 	UserLocalShellPending bool

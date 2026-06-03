@@ -169,6 +169,8 @@ func confirmActionText(toolName string) string {
 		return "Fetch URL"
 	case tools.NameRead:
 		return "Read file"
+	case tools.NameViewImage:
+		return "View image file"
 	case tools.NameGrep:
 		return "Search file contents"
 	case tools.NameGlob:
@@ -189,7 +191,7 @@ func confirmRiskForTool(toolName string) confirmRiskLevel {
 		return confirmRiskHigh
 	case tools.NameEdit, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
-	case tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
+	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
 		return confirmRiskLow
 	default:
 		return confirmRiskMedium

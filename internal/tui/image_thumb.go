@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -51,6 +52,28 @@ func imagePartsFromContentParts(parts []message.ContentPart) []BlockImagePart {
 		return nil
 	}
 	return imageParts
+}
+
+// pdfNamesFromContentParts returns the display filenames of PDF parts, used to
+// render PDF attachment chips on a user block (PDFs cannot be shown inline).
+func pdfNamesFromContentParts(parts []message.ContentPart) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	var names []string
+	pdfIndex := 0
+	for _, part := range parts {
+		if part.Type != "pdf" {
+			continue
+		}
+		pdfIndex++
+		name := imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, pdfIndex)
+		if imageutil.PDFAppearsEncrypted(part.Data) {
+			name += " ⚠ encrypted"
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 func imagePartDisplayName(fileName, imagePath, mimeType string, imageIndex int) string {

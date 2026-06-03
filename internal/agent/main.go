@@ -92,6 +92,11 @@ type Turn struct {
 	nextToolBatch                      int
 	activeToolBatchCancel              context.CancelFunc
 	streamingToolExec                  *StreamingToolExecutor
+	// batchImageParts accumulates image/binary content parts returned by tools
+	// in the current tool-call batch (ViewImage, MCP image results). When the
+	// batch completes they are injected as a synthetic user message before the
+	// next LLM call. Accessed only from the event-loop goroutine.
+	batchImageParts []message.ContentPart
 }
 
 // PendingToolCall records the minimal metadata needed to close a pending tool
@@ -126,6 +131,7 @@ type toolCallStageTrace struct {
 
 type ToolExecutionResult struct {
 	Result            string
+	Images            []message.ContentPart // image/binary parts produced by the tool (ViewImage, MCP image results)
 	EffectiveArgsJSON string
 	Audit             *message.ToolArgsAudit
 	LSPReviews        []message.LSPReview
@@ -1200,6 +1206,19 @@ func (a *MainAgent) resetRuntimeEvidenceFromMessages(messages []message.Message)
 // ---------------------------------------------------------------------------
 // Slash input policy (what reaches the LLM as user content)
 // ---------------------------------------------------------------------------
+
+// SupportsInput reports whether the active main-agent model accepts the given
+// input modality (e.g. "image", "pdf"). It is used to gate modality-dependent
+// tool visibility such as the native ViewImage tool.
+func (a *MainAgent) SupportsInput(modality string) bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	return client != nil && client.SupportsInput(modality)
+}
 
 // filterUnsupportedParts removes image/pdf parts that the current model does
 // not support. When parts are removed, a toast is emitted to notify the user.

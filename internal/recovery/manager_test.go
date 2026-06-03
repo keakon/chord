@@ -231,6 +231,55 @@ func TestPersistAndLoad_ImagePartsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPersistAndLoad_PDFPartsRoundTrip(t *testing.T) {
+	rm, dir := newTestManager(t)
+	defer rm.Close()
+
+	original := []byte("%PDF-1.7\n%\xe2\xe3\xcf\xd3\nfake pdf")
+	msg := message.Message{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "read this"},
+			{Type: "pdf", MimeType: "application/pdf", Data: original, FileName: "report.pdf"},
+		},
+	}
+	if err := rm.PersistMessage("main", msg); err != nil {
+		t.Fatalf("PersistMessage: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "images"))
+	if err != nil {
+		t.Fatalf("ReadDir(images): %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 persisted attachment, got %d", len(entries))
+	}
+	if ext := filepath.Ext(entries[0].Name()); ext != ".pdf" {
+		t.Fatalf("persisted file ext = %q, want .pdf", ext)
+	}
+
+	loaded, err := rm.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(loaded) != 1 || len(loaded[0].Parts) != 2 {
+		t.Fatalf("unexpected loaded shape: %#v", loaded)
+	}
+	pdf := loaded[0].Parts[1]
+	if pdf.Type != "pdf" {
+		t.Fatalf("loaded pdf part type = %q, want pdf", pdf.Type)
+	}
+	if pdf.ImagePath == "" {
+		t.Fatal("expected ImagePath to be persisted for pdf")
+	}
+	if pdf.FileName != "report.pdf" {
+		t.Fatalf("FileName = %q, want report.pdf", pdf.FileName)
+	}
+	if string(pdf.Data) != string(original) {
+		t.Fatalf("pdf data mismatch: got %v want %v", pdf.Data, original)
+	}
+}
+
 func TestPersistAndLoad_SubAgent(t *testing.T) {
 	rm, dir := newTestManager(t)
 	defer rm.Close()

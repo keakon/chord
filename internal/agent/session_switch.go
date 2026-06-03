@@ -23,7 +23,7 @@ func cloneMessageForForkSeed(msg message.Message) message.Message {
 	parts := make([]message.ContentPart, len(msg.Parts))
 	copy(parts, msg.Parts)
 	for i := range parts {
-		if parts[i].Type != "image" {
+		if !parts[i].IsBinary() {
 			continue
 		}
 		if len(parts[i].Data) > 0 {

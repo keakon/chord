@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/filectx"
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -67,19 +68,50 @@ func (m *Model) buildFileRefParts(displayText string, composerParts []message.Co
 	if len(refs) == 0 {
 		return nil
 	}
-	fileParts := filectx.BuildFileParts(refs, m.resolveFileRefPath)
-	if len(fileParts) == 0 {
+	textRefs, attachmentParts := m.splitAtMentionRefs(refs)
+	fileParts := filectx.BuildFileParts(textRefs, m.resolveFileRefPath)
+	if len(fileParts) == 0 && len(attachmentParts) == 0 {
 		return nil
 	}
-	parts := make([]message.ContentPart, 0, len(composerParts)+len(fileParts))
+	parts := make([]message.ContentPart, 0, len(composerParts)+len(fileParts)+len(attachmentParts))
 	for _, p := range composerParts {
 		if p.Type != "text" || message.IsFileRefContent(p.Text) {
 			continue
 		}
 		parts = append(parts, p)
 	}
+	parts = append(parts, attachmentParts...)
 	parts = append(parts, fileParts...)
 	return parts
+}
+
+func (m *Model) splitAtMentionRefs(refs []string) ([]string, []message.ContentPart) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	textRefs := make([]string, 0, len(refs))
+	attachments := make([]message.ContentPart, 0, len(refs))
+	for _, ref := range refs {
+		resolved := m.resolveFileRefPath(ref)
+		kind := attachmentKindForPath(resolved)
+		if kind == "" {
+			textRefs = append(textRefs, ref)
+			continue
+		}
+		data, mimeType, err := imageutil.ReadAttachmentFile(resolved)
+		if err != nil {
+			textRefs = append(textRefs, ref)
+			continue
+		}
+		attachments = append(attachments, message.ContentPart{
+			Type:      kind,
+			MimeType:  mimeType,
+			Data:      data,
+			ImagePath: resolved,
+			FileName:  filepath.Base(resolved),
+		})
+	}
+	return textRefs, attachments
 }
 
 func (m *Model) resolveFileRefPath(path string) string {

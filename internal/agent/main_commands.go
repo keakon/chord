@@ -12,7 +12,7 @@ import (
 func (a *MainAgent) expandSlashCommandForModel(content string, parts []message.ContentPart) (string, []message.ContentPart) {
 	if len(parts) > 0 {
 		for _, part := range parts {
-			if part.Type == "image" {
+			if part.IsBinary() {
 				return content, parts
 			}
 		}

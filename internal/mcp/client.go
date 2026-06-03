@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/message"
 )
 
 // ---------------------------------------------------------------------------
@@ -39,8 +43,10 @@ type toolCallResult struct {
 
 // toolCallContent is one content block in a tools/call response.
 type toolCallContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`     // base64-encoded bytes for image/audio blocks
+	MimeType string `json:"mimeType,omitempty"` // e.g. "image/png" for image blocks
 }
 
 // initializeParams are sent in the initialize handshake.
@@ -185,13 +191,14 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 }
 
 // CallTool invokes a tool on the MCP server via tools/call.
-// It returns the concatenated text content from the response.
-func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, error) {
+// It returns the concatenated text content plus any image content blocks
+// (decoded from base64) so the runtime can re-inject images into model context.
+func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, []message.ContentPart, error) {
 	// Parse args into a map so the MCP server receives a proper object.
 	var argsMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argsMap); err != nil {
-			return "", fmt.Errorf("mcp tools/call: invalid args JSON: %w", err)
+			return "", nil, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err)
 		}
 	}
 
@@ -207,15 +214,15 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 
 	resp, err := c.transport.Send(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, err)
+		return "", nil, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, err)
 	}
 	if resp.Error != nil {
-		return "", fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, resp.Error)
+		return "", nil, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, resp.Error)
 	}
 
 	var result toolCallResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return "", fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
+		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
 	}
 
 	if result.IsError {
@@ -226,20 +233,42 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 				errText.WriteString(c.Text)
 			}
 		}
-		return "", fmt.Errorf("mcp tool error: %s", errText.String())
+		return "", nil, fmt.Errorf("mcp tool error: %s", errText.String())
 	}
 
-	// Concatenate all text content blocks.
+	// Concatenate text blocks; decode image blocks into content parts so the
+	// runtime can attach them to the model context after the tool batch.
 	var text string
-	for _, c := range result.Content {
-		if c.Type == "text" {
+	var images []message.ContentPart
+	for _, block := range result.Content {
+		switch block.Type {
+		case "text":
 			if text != "" {
 				text += "\n"
 			}
-			text += c.Text
+			text += block.Text
+		case "image":
+			if block.Data == "" {
+				continue
+			}
+			raw, decErr := base64.StdEncoding.DecodeString(block.Data)
+			if decErr != nil {
+				log.Warnf("mcp tools/call %s/%s: skipping image block with undecodable base64 error=%v", c.name, toolName, decErr)
+				continue
+			}
+			mime := block.MimeType
+			if mime == "" {
+				mime = "image/png"
+			}
+			raw, mime = imageutil.CompressIfPNG(raw, mime)
+			if err := imageutil.CheckImageSize(raw); err != nil {
+				log.Warnf("mcp tools/call %s/%s: skipping oversized image block error=%v", c.name, toolName, err)
+				continue
+			}
+			images = append(images, message.ContentPart{Type: "image", MimeType: mime, Data: raw})
 		}
 	}
-	return text, nil
+	return text, images, nil
 }
 
 // Close shuts down the transport (and the child process for stdio).

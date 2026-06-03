@@ -6,16 +6,24 @@ import (
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
-// ContentPart is one part of a multi-part user message (text or image).
+// ContentPart is one part of a multi-part user message (text, image, or pdf).
 type ContentPart struct {
-	Type        string `json:"type"`                   // "text" or "image"
+	Type        string `json:"type"`                   // "text", "image", or "pdf"
 	Text        string `json:"text,omitempty"`         // for type="text"
 	DisplayText string `json:"display_text,omitempty"` // optional TUI-only summary for large hidden text parts
 	InlineToken string `json:"inline_token,omitempty"` // optional TUI-only marker for atomic inline composer tokens
-	MimeType    string `json:"mime_type,omitempty"`    // for type="image", e.g. "image/png"
-	Data        []byte `json:"data,omitempty"`         // for type="image", raw bytes (not persisted; loaded from ImagePath)
-	ImagePath   string `json:"image_path,omitempty"`   // for type="image", path to persisted image file on disk
-	FileName    string `json:"file_name,omitempty"`    // optional display name for image attachments
+	MimeType    string `json:"mime_type,omitempty"`    // for type="image"/"pdf", e.g. "image/png" or "application/pdf"
+	Data        []byte `json:"data,omitempty"`         // for type="image"/"pdf", raw bytes (not persisted; loaded from ImagePath)
+	ImagePath   string `json:"image_path,omitempty"`   // for type="image"/"pdf", path to persisted file on disk
+	FileName    string `json:"file_name,omitempty"`    // optional display name for image/pdf attachments
+}
+
+// IsBinary reports whether the part carries out-of-band binary bytes (an image
+// or a PDF) rather than inline text. Binary parts have their Data persisted to
+// a session file and reloaded on restore, so persistence/restore/clone paths
+// treat image and pdf parts identically.
+func (p ContentPart) IsBinary() bool {
+	return p.Type == "image" || p.Type == "pdf"
 }
 
 // ToolArgsAudit records how a tool call's effective execution arguments differ

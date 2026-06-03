@@ -151,11 +151,12 @@ func TestLoadAtMentionFilesUsesGitTrackedAndUntracked(t *testing.T) {
 	}
 }
 
-func TestLoadAtMentionFilesExcludesBinaryAndGitignored(t *testing.T) {
+func TestLoadAtMentionFilesIncludesAttachableMediaAndExcludesOtherBinary(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "main.go"), "package main")
 	mustWriteFile(t, filepath.Join(wd, "notes.md"), "notes")
 	mustWriteFile(t, filepath.Join(wd, "image.png"), "\x89PNG")
+	mustWriteFile(t, filepath.Join(wd, "paper.pdf"), "%PDF-1.7\n")
 	mustWriteFile(t, filepath.Join(wd, "icon.svg"), "<svg/>")
 	mustWriteFile(t, filepath.Join(wd, "bundle.zip"), "PK")
 	mustWriteFile(t, filepath.Join(wd, "libfoo.so"), "\x7fELF")
@@ -180,14 +181,14 @@ func TestLoadAtMentionFilesExcludesBinaryAndGitignored(t *testing.T) {
 		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
 	}
 
-	wantIn := []string{"main.go", "notes.md", "icon.svg"}
+	wantIn := []string{"main.go", "notes.md", "image.png", "paper.pdf", "icon.svg"}
 	for _, p := range wantIn {
 		if !slices.Contains(loaded.files, p) {
 			t.Errorf("%q should be included; got %v", p, loaded.files)
 		}
 	}
 	wantOut := []string{
-		"image.png", "bundle.zip", "libfoo.so", "pkg/mod.pyc", // binary extensions
+		"bundle.zip", "libfoo.so", "pkg/mod.pyc", // non-attachable binary extensions
 		"dist/app.js",    // hard-coded skipped dir
 		"out/result.txt", // .gitignore dir
 		"keys.secret",    // .gitignore file pattern
@@ -603,9 +604,39 @@ func TestAtMentionRootPrefixMatches(t *testing.T) {
 	}
 
 	got := atMentionRootPrefixMatches("A", wd)
-	want := []atMentionOption{{Path: "Alpha/", IsDir: true}, {Path: "AGENTS.md", IsDir: false}}
+	want := []atMentionOption{{Path: "Alpha/", IsDir: true}, {Path: "AGENTS.md", IsDir: false}, {Path: "app.png", IsDir: false}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("atMentionRootPrefixMatches(%q) = %#v, want %#v", "A", got, want)
+	}
+}
+
+func TestFilterAtMentionOptionsByInputSupportHidesUnsupportedMedia(t *testing.T) {
+	m := &Model{}
+	options := []atMentionOption{
+		{Path: "docs/", IsDir: true},
+		{Path: "notes.md"},
+		{Path: "shot.png"},
+		{Path: "paper.pdf"},
+	}
+
+	got := m.filterAtMentionOptionsByInputSupport(options)
+	want := []atMentionOption{{Path: "docs/", IsDir: true}, {Path: "notes.md"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("filtered options = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildFileRefPartsTreatsPDFAtMentionAsAttachment(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "paper.pdf"), "%PDF-1.7\nbody")
+	m := &Model{workingDir: wd}
+
+	parts := m.buildFileRefParts("review @./paper.pdf", nil)
+	if len(parts) != 1 {
+		t.Fatalf("parts len = %d, want pdf", len(parts))
+	}
+	if parts[0].Type != "pdf" || parts[0].MimeType != "application/pdf" || parts[0].FileName != "paper.pdf" {
+		t.Fatalf("attachment part = %+v, want pdf attachment", parts[0])
 	}
 }
 

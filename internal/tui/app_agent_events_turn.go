@@ -71,7 +71,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				}
 			}
 		}
-		block := &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, LoopAnchor: draft.LoopAnchor, ImageCount: imageCount, ImageParts: imagePartsFromContentParts(draft.contentParts()), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
+		block := &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, LoopAnchor: draft.LoopAnchor, ImageCount: imageCount, ImageParts: imagePartsFromContentParts(draft.contentParts()), PDFNames: pdfNamesFromContentParts(draft.contentParts()), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

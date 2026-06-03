@@ -29,6 +29,7 @@ const (
 	NameComplete     = toolname.Complete
 	NameSaveArtifact = toolname.SaveArtifact
 	NameReadArtifact = toolname.ReadArtifact
+	NameViewImage    = toolname.ViewImage
 )
 
 var NormalizeName = toolname.Normalize

@@ -337,6 +337,8 @@ func geminiUserParts(msg message.Message) []geminiPart {
 		switch p.Type {
 		case "image":
 			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, Data: encodeBase64Cached(p.Data)}})
+		case "pdf":
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), Data: encodeBase64Cached(p.Data)}})
 		default:
 			parts = append(parts, geminiPart{Text: p.Text})
 		}

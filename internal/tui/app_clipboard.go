@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+
+	"github.com/keakon/chord/internal/imageutil"
 )
 
 type clipboardWriteResultMsg struct {
@@ -48,15 +50,15 @@ func pasteTextFromClipboard() tea.Cmd {
 func attachmentFromImagePath(path string, index int) (Attachment, error) {
 	cleanPath := strings.TrimSpace(path)
 	if cleanPath == "" {
-		return Attachment{}, fmt.Errorf("empty image path")
+		return Attachment{}, fmt.Errorf("empty attachment path")
 	}
-	data, mimeType, err := readImageFile(cleanPath)
+	data, mimeType, err := imageutil.ReadAttachmentFile(cleanPath)
 	if err != nil {
 		return Attachment{}, err
 	}
 	fileName := filepath.Base(cleanPath)
 	if fileName == "." || fileName == string(filepath.Separator) || strings.TrimSpace(fileName) == "" {
-		fileName = fmt.Sprintf("image%d%s", index, attachmentExtForMimeType(mimeType))
+		fileName = fmt.Sprintf("attachment%d%s", index, attachmentExtForMimeType(mimeType))
 	}
 	return Attachment{
 		FileName:  fileName,
@@ -69,7 +71,7 @@ func attachmentFromImagePath(path string, index int) (Attachment, error) {
 func pasteAttachmentFromPath(path string, index int) tea.Msg {
 	attachment, err := attachmentFromImagePath(path, index)
 	if err != nil {
-		return attachmentReadyMsg{err: fmt.Errorf("failed to read image: %w", err)}
+		return attachmentReadyMsg{err: fmt.Errorf("failed to read attachment: %w", err)}
 	}
 	return attachmentReadyMsg{attachment: attachment}
 }

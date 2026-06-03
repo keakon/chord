@@ -158,7 +158,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -222,7 +222,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -332,6 +332,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		DiffRemoved: result.DiffRemoved,
 	}); changed != nil {
 		s.turn.ChangedFiles = append(s.turn.ChangedFiles, changed)
+	}
+	if len(result.Images) > 0 {
+		s.turn.batchImageParts = append(s.turn.batchImageParts, result.Images...)
 	}
 
 	s.turn.PendingToolCalls.Add(-1)
@@ -452,6 +455,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 
 	// Normal: continue LLM conversation.
+	s.injectBatchToolImages()
 	messages := s.ctxMgr.Snapshot()
 	s.asyncCallLLM(s.turn, messages)
 }

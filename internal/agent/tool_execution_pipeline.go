@@ -69,6 +69,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	}
 
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	imageSink := &tools.ImageCollector{}
+	agentCtx = tools.WithImageSink(agentCtx, imageSink)
 	artifactKey := toolCallArtifactKey(tc)
 
 	trackedFilePath, deleteLocks, err := p.prepareTrackedToolFileAccess(tc)
@@ -104,6 +106,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
 
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	execResult.Images = imageSink.Drain()
 	if err != nil {
 		if result != "" {
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
@@ -140,6 +143,8 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult.speculativeHooks = hooks
 
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	imageSink := &tools.ImageCollector{}
+	agentCtx = tools.WithImageSink(agentCtx, imageSink)
 	if tc.Name == tools.NameEdit {
 		plan, err := agentdiff.CaptureEditPlan(tc, p.projectRoot)
 		if err != nil {
@@ -156,6 +161,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	trackedFilePath := speculativeTrackedFilePath(tc.Name, execResult.PreFilePath, hooks)
 	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, speculativeDeleteLocks(tc.Name, hooks))
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	execResult.Images = imageSink.Drain()
 	if err != nil {
 		rollbackSpeculativeToolHooks(execResult)
 		if result != "" {

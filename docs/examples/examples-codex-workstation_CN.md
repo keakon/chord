@@ -112,6 +112,7 @@ model_pools:
 permission:
   "*": deny
   read: allow
+  view_image: allow
   grep: allow
   glob: allow
   shell:

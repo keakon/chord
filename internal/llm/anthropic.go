@@ -113,11 +113,12 @@ type anthropicContent struct {
 	CacheControl *anthropicCacheCtrl   `json:"cache_control,omitempty"` // prompt caching marker
 }
 
-// anthropicImageSource is the source object for an image content block.
+// anthropicImageSource is the base64 source block shared by image blocks and
+// document (PDF) blocks; both use the same type/media_type/data shape.
 type anthropicImageSource struct {
 	Type      string `json:"type"`       // always "base64"
-	MediaType string `json:"media_type"` // e.g. "image/png"
-	Data      string `json:"data"`       // base64-encoded image bytes
+	MediaType string `json:"media_type"` // e.g. "image/png" or "application/pdf"
+	Data      string `json:"data"`       // base64-encoded bytes
 }
 
 // anthropicCacheCtrl is the cache_control block for prompt caching.
@@ -518,6 +519,15 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 							Source: &anthropicImageSource{
 								Type:      "base64",
 								MediaType: p.MimeType,
+								Data:      encodeBase64Cached(p.Data),
+							},
+						})
+					case "pdf":
+						blocks = append(blocks, anthropicContent{
+							Type: "document",
+							Source: &anthropicImageSource{
+								Type:      "base64",
+								MediaType: defaultPDFMediaType(p.MimeType),
 								Data:      encodeBase64Cached(p.Data),
 							},
 						})

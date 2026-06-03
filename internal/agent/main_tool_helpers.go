@@ -78,7 +78,7 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 		if path := tools.ExtractEditPathFromArgsInDir(args, projectRoot); path != "" {
 			return path
 		}
-	case tools.NameRead, tools.NameWrite:
+	case tools.NameRead, tools.NameWrite, tools.NameViewImage:
 		var parsed struct {
 			Path string `json:"path"`
 		}

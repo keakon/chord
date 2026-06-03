@@ -58,6 +58,11 @@ func (m *Model) refreshAtMentionList() {
 		m.atMentionList = nil
 		return
 	}
+	matches = m.filterAtMentionOptionsByInputSupport(matches)
+	if len(matches) == 0 {
+		m.atMentionList = nil
+		return
+	}
 	items := make([]OverlayListItem, len(matches))
 	for i, match := range matches {
 		items[i] = OverlayListItem{Label: match.Path, Value: match}

@@ -810,6 +810,7 @@ model_pools: [default]
 permission:
   "*": deny
   read: allow
+  view_image: allow
   grep: allow
   glob: allow
   web_fetch:

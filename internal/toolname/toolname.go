@@ -27,6 +27,7 @@ const (
 	Complete     = "complete"
 	SaveArtifact = "save_artifact"
 	ReadArtifact = "read_artifact"
+	ViewImage    = "view_image"
 )
 
 // Normalize trims user-provided tool names while preserving exact spelling.

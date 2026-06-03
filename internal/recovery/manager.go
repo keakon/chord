@@ -169,21 +169,21 @@ func (r *RecoveryManager) imagesDir() string {
 	return filepath.Join(r.sessionDir, "images")
 }
 
-// persistImageParts writes any image ContentParts with raw Data to disk,
+// persistBinaryParts writes any image/pdf ContentParts with raw Data to disk,
 // replacing Data with an empty slice and setting ImagePath. The returned
 // message is a shallow copy safe to marshal without the large byte slices.
-func (r *RecoveryManager) persistImageParts(msg message.Message) (message.Message, error) {
+func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Message, error) {
 	if len(msg.Parts) == 0 {
 		return msg, nil
 	}
-	hasImage := false
+	hasBinary := false
 	for _, p := range msg.Parts {
-		if p.Type == "image" && len(p.Data) > 0 && p.ImagePath == "" {
-			hasImage = true
+		if p.IsBinary() && len(p.Data) > 0 && p.ImagePath == "" {
+			hasBinary = true
 			break
 		}
 	}
-	if !hasImage {
+	if !hasBinary {
 		return msg, nil
 	}
 
@@ -194,7 +194,7 @@ func (r *RecoveryManager) persistImageParts(msg message.Message) (message.Messag
 	parts := make([]message.ContentPart, len(msg.Parts))
 	copy(parts, msg.Parts)
 	for i, p := range parts {
-		if p.Type != "image" || len(p.Data) == 0 || p.ImagePath != "" {
+		if !p.IsBinary() || len(p.Data) == 0 || p.ImagePath != "" {
 			continue
 		}
 		ext := ".bin"
@@ -207,11 +207,13 @@ func (r *RecoveryManager) persistImageParts(msg message.Message) (message.Messag
 			ext = ".gif"
 		case "image/webp":
 			ext = ".webp"
+		case "application/pdf":
+			ext = ".pdf"
 		}
 		fileName := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), i, ext)
 		filePath := filepath.Join(r.imagesDir(), fileName)
 		if err := os.WriteFile(filePath, p.Data, 0600); err != nil {
-			return msg, fmt.Errorf("write image file: %w", err)
+			return msg, fmt.Errorf("write attachment file: %w", err)
 		}
 		parts[i].Data = nil
 		parts[i].ImagePath = filePath
@@ -225,14 +227,14 @@ func (r *RecoveryManager) persistImageParts(msg message.Message) (message.Messag
 // call this concurrently (e.g. handleLLMResponse and handleToolResult).
 //
 // Each message is written as a single JSON line terminated by '\n'.
-// Image data in ContentParts is written to separate files under images/;
+// Image/PDF data in ContentParts is written to separate files under images/;
 // only the file path is stored in the JSONL record.
 // After Close is called, PersistMessage is a no-op and returns nil.
 func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) error {
 	var err error
-	msg, err = r.persistImageParts(msg)
+	msg, err = r.persistBinaryParts(msg)
 	if err != nil {
-		log.Warnf("failed to persist image parts, storing inline error=%v", err)
+		log.Warnf("failed to persist binary parts, storing inline error=%v", err)
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -290,12 +292,12 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 			}
 			break
 		}
-		// Restore image data from disk for any parts that have ImagePath set.
+		// Restore image/pdf data from disk for any parts that have ImagePath set.
 		for i, p := range msg.Parts {
-			if p.Type == "image" && p.ImagePath != "" && len(p.Data) == 0 {
+			if p.IsBinary() && p.ImagePath != "" && len(p.Data) == 0 {
 				data, err := os.ReadFile(p.ImagePath)
 				if err != nil {
-					log.Warnf("failed to load image from disk path=%v error=%v", p.ImagePath, err)
+					log.Warnf("failed to load attachment from disk path=%v error=%v", p.ImagePath, err)
 					continue
 				}
 				msg.Parts[i].Data = data
