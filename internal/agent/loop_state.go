@@ -56,14 +56,14 @@ type loopRuntimeState struct {
 	// injection is suppressed until a terminal assistant stop_reason=done is
 	// observed, or a Done tool exit attempt is rejected.
 	DeferContinuationPromptUntilDone bool
-	// FrozenReductionPrefix stores the already-sent request prefix when loop mode is
-	// enabled while a request is in flight. Loop requests reuse this prefix shape
-	// so old messages do not flip from pruned to unpruned, while later messages are
-	// left unpruned.
+	// FrozenReductionPrefix stores the already-sent request prefix while the Codex
+	// quota is low enough to freeze the LLM context surface. Low-quota requests
+	// reuse this prefix shape so old messages do not flip from pruned to unpruned,
+	// while later messages are left unpruned until the surface can refresh.
 	FrozenReductionPrefix []message.Message
 	// FrozenReductionStats is the request-level reduction effect of the frozen
-	// prefix. It remains stable while loop mode is enabled because later loop
-	// messages are appended unreduced.
+	// prefix. It remains stable while the low-quota surface freeze is active because
+	// later messages are appended unreduced.
 	FrozenReductionStats   ContextReductionStats
 	ConsecutiveNoProgress  int
 	LastProgressSignature  string

@@ -140,12 +140,18 @@ function escapeYaml(value) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function buildFrontmatter({ title, description }) {
+function buildFrontmatter({ title, description, editUrl }) {
   const lines = ['---'];
   if (title) lines.push(`title: "${escapeYaml(title)}"`);
   if (description) lines.push(`description: "${escapeYaml(description)}"`);
+  if (editUrl) lines.push(`editUrl: "${escapeYaml(editUrl)}"`);
   lines.push('---', '');
   return lines.join('\n');
+}
+
+function sourceEditUrl(srcPath) {
+  const sourceRelative = path.relative(repoRoot, srcPath).split(path.sep).join('/');
+  return `https://github.com/keakon/chord/edit/main/${sourceRelative}`;
 }
 
 async function syncOne(srcPath, lang, targetSlug) {
@@ -154,7 +160,7 @@ async function syncOne(srcPath, lang, targetSlug) {
   const description = deriveDescription(body);
   let processed = rewriteLinks(body, lang);
   processed = rewriteAdmonitions(processed);
-  const out = buildFrontmatter({ title, description }) + processed.trimStart() + '\n';
+  const out = buildFrontmatter({ title, description, editUrl: sourceEditUrl(srcPath) }) + processed.trimStart() + '\n';
   const targetDir = lang === 'zh' ? zhDir : enDir;
   const targetPath = path.join(targetDir, `${targetSlug}.md`);
   await mkdir(path.dirname(targetPath), { recursive: true });
