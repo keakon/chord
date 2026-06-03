@@ -169,25 +169,6 @@ func (a *MainAgent) loopExitInterceptLimitResult() string {
 	return "Done requires user decision: automatic Done interception is disabled. Approve exit or deny to continue."
 }
 
-func (a *MainAgent) awaitLoopExitConfirmation(ctx context.Context, pending *loopExitResult) (ConfirmResponse, error) {
-	if pending == nil {
-		return ConfirmResponse{Approved: false}, nil
-	}
-	report := strings.TrimSpace(pending.AssistantContent)
-	if parsed, err := tools.ParseDoneArgs(json.RawMessage(pending.ArgsJSON)); err == nil {
-		report = parsed.Report
-	}
-	payload := struct {
-		Reason string `json:"reason,omitempty"`
-		Report string `json:"report"`
-	}{Reason: strings.TrimSpace(pending.Reason), Report: report}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return ConfirmResponse{}, err
-	}
-	return a.AwaitConfirm(ctx, tools.NameDone, string(encoded), 0, nil, nil, report)
-}
-
 func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason, argsJSON, assistantContent string) (ConfirmResponse, error) {
 	report := strings.TrimSpace(assistantContent)
 	if parsed, err := tools.ParseDoneArgs(json.RawMessage(argsJSON)); err == nil {

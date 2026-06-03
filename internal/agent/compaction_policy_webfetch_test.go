@@ -8,8 +8,15 @@ import (
 )
 
 func TestCompactGlobOutputSummaryUsesCanonicalToolName(t *testing.T) {
-	summary := compactGlobOutputSummary(`{"pattern":"**/*.go","path":"internal"}`, "internal/agent/compaction_policy.go")
-	if !strings.Contains(summary, "Re-run "+tools.NameGlob+"(") {
+	summary := compactSearchLikeOutputSummary(requestReductionContext{
+		ToolName: tools.NameGlob,
+		Content:  "internal/agent/compaction_policy.go",
+		Meta: toolCallMeta{
+			Name: tools.NameGlob,
+			Args: `{"pattern":"**/*.go","path":"internal"}`,
+		},
+	})
+	if !strings.Contains(summary, "Re-run the same glob query if full results are needed.") {
 		t.Fatalf("summary = %q, want canonical glob re-run hint", summary)
 	}
 	if strings.Contains(summary, "Re-run Glob(") {

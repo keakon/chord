@@ -326,12 +326,13 @@ type MainAgent struct {
 	thinkingTranslateSeen        map[string]struct{}
 	thinkingTranslateTurnHandled map[uint64]struct{}
 
-	sessionDir       string
-	modelName        string
-	providerModelRef string // "provider/model" for unique identification
-	runningModelRef  string // actual model used in latest LLM call
-	instanceID       string
-	mcpClientInfo    mcp.ClientInfo
+	sessionDir          string
+	modelName           string
+	providerModelRef    string // "provider/model" for unique identification
+	runningModelRef     string // actual model used in latest LLM call
+	previousLLMModelRef string
+	instanceID          string
+	mcpClientInfo       mcp.ClientInfo
 
 	// turnMu protects the turn pointer for cross-goroutine access.
 	// The event-loop goroutine writes turn in newTurn(); external goroutines

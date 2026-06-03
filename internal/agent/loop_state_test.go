@@ -657,7 +657,7 @@ done: ask
 	respCh := make(chan ConfirmResponse, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		resp, err := a.awaitLoopExitConfirmation(ctx, &loopExitResult{Reason: reason})
+		resp, err := a.awaitDoneConfirmation(ctx, reason, "", "")
 		if err != nil {
 			errCh <- err
 			return
@@ -690,7 +690,7 @@ done: ask
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("awaitLoopExitConfirmation: %v", err)
+		t.Fatalf("awaitDoneConfirmation: %v", err)
 	case resp := <-respCh:
 		if resp.Approved {
 			t.Fatal("confirmation unexpectedly approved")

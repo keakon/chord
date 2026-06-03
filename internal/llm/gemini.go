@@ -346,6 +346,8 @@ func geminiUserParts(msg message.Message) []geminiPart {
 	return parts
 }
 
+// convertToolsToGemini converts tool definitions to Gemini format.
+// Tools are expected to be in a stable order from Registry.ListDefinitions().
 func convertToolsToGemini(tools []message.ToolDefinition) []geminiTool {
 	if len(tools) == 0 {
 		return nil

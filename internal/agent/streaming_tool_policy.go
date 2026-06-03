@@ -24,13 +24,6 @@ func rejectSpeculativeExecution(reason string) speculativeExecutionDecision {
 	return speculativeExecutionDecision{Allowed: false, Reason: reason}
 }
 
-// evaluateSpeculativeExecutionPolicy is the streaming-execution safety gate.
-// Side-effecting and interactive tools stay out of speculative execution
-// until each tool has an audited rollback / interrupt protocol.
-func evaluateSpeculativeExecutionPolicy(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage) speculativeExecutionDecision {
-	return evaluateSpeculativeExecutionPolicyWithPrefix(registry, ruleset, toolName, args, nil)
-}
-
 func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage, priorCalls []PendingToolCall) speculativeExecutionDecision {
 	toolName = tools.NormalizeName(toolName)
 	toolName = strings.TrimSpace(toolName)

@@ -12,8 +12,24 @@ type ContextReductionStats struct {
 	TokensSaved     int
 	Protected       bool
 	ReusedStable    bool
+	ProtectReason   string
+	ReuseReason     string
+	SavedDelta      int
+	PreviousModel   string
+	ModelChanged    bool
 	ByToolAndRule   map[string]ContextReductionBucket
 }
+
+const (
+	contextProtectReasonNone           = ""
+	contextProtectReasonWarmupLowUsage = "warmup_low_usage"
+
+	contextReuseReasonNone                = ""
+	contextReuseReasonBelowIncrementalMin = "below_incremental_min"
+	contextReuseReasonNoPreviousSavings   = "no_previous_savings"
+	contextReuseReasonHighPressure        = "high_pressure"
+	contextReuseReasonForcePrune          = "force_prune"
+)
 
 type ContextReductionBucket struct {
 	Messages    int
@@ -116,14 +132,21 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	}
 }
 
-func (p contextReductionPolicy) shouldProtectCachedContext(messageCount, estimatedTokens, inputBudget int) bool {
+func (p contextReductionPolicy) protectCachedContextReason(messageCount, estimatedTokens, inputBudget int) string {
 	if inputBudget <= 0 || p.CacheAwareMinUsage <= 0 || p.WarmupMessageLimit <= 0 {
-		return false
+		return contextProtectReasonNone
 	}
 	if messageCount > p.WarmupMessageLimit {
-		return false
+		return contextProtectReasonNone
 	}
-	return float64(estimatedTokens)/float64(inputBudget) < p.CacheAwareMinUsage
+	if float64(estimatedTokens)/float64(inputBudget) < p.CacheAwareMinUsage {
+		return contextProtectReasonWarmupLowUsage
+	}
+	return contextProtectReasonNone
+}
+
+func (p contextReductionPolicy) shouldProtectCachedContext(messageCount, estimatedTokens, inputBudget int) bool {
+	return p.protectCachedContextReason(messageCount, estimatedTokens, inputBudget) != contextProtectReasonNone
 }
 
 func (p contextReductionPolicy) contextUsage(estimatedTokens, inputBudget int) float64 {
@@ -133,16 +156,20 @@ func (p contextReductionPolicy) contextUsage(estimatedTokens, inputBudget int) f
 	return float64(estimatedTokens) / float64(inputBudget)
 }
 
-func (p contextReductionPolicy) shouldReuseStableReductionSurface(stats, previous ContextReductionStats, estimatedTokens, inputBudget int) bool {
+func (p contextReductionPolicy) reuseStableReductionSurfaceReason(stats, previous ContextReductionStats, estimatedTokens, inputBudget int) (string, int) {
 	if p.MinIncrementalTokens <= 0 || stats.TokensSaved <= 0 || previous.TokensSaved <= 0 {
-		return false
+		return contextReuseReasonNoPreviousSavings, 0
 	}
 	usage := p.contextUsage(estimatedTokens, inputBudget)
 	if p.ForcePruneUsage > 0 && usage >= p.ForcePruneUsage {
-		return false
+		return contextReuseReasonForcePrune, stats.TokensSaved - previous.TokensSaved
 	}
 	if p.HighPressureUsage > 0 && usage >= p.HighPressureUsage {
-		return false
+		return contextReuseReasonHighPressure, stats.TokensSaved - previous.TokensSaved
 	}
-	return stats.TokensSaved-previous.TokensSaved < p.MinIncrementalTokens
+	delta := stats.TokensSaved - previous.TokensSaved
+	if delta < p.MinIncrementalTokens {
+		return contextReuseReasonBelowIncrementalMin, delta
+	}
+	return contextReuseReasonNone, delta
 }

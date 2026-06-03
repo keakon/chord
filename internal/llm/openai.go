@@ -554,7 +554,8 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 	return result
 }
 
-// convertToolsToOpenAI converts internal tool definitions to OpenAI format.
+// convertToolsToOpenAI converts tool definitions to OpenAI format.
+// Tools are expected to be in a stable order from Registry.ListDefinitions().
 func convertToolsToOpenAI(tools []message.ToolDefinition) []openAITool {
 	if len(tools) == 0 {
 		return nil

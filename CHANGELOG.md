@@ -11,6 +11,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements & Fixes
 
+- Context reduction now uses typed summaries for older large tool results: search outputs keep query/count/sample hits, JSON blobs keep top-level shape/counts, build/test logs keep key failures, and read summaries include range metadata instead of falling straight back to generic omission.
+- LLM-facing tool definitions now use the registry's stable name-sorted order, reducing prompt-cache misses from semantically unchanged tool ordering drift while preserving existing OpenAI `prompt_cache_key` and Anthropic `cache_control` behavior.
 - Improved `edit` patch tolerance for blank context lines inside hunks, reducing failed model-generated edits.
 - Fixed an OAuth credential refresh crash when the active auth state uses a negative credential-index sentinel.
 - `@` file completion now treats supported image/PDF files as attachments, hides unsupported media types for the current model, and marks unsupported or encrypted attachments in the composer/transcript.

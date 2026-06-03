@@ -131,7 +131,7 @@ context:
 - 短会话且上下文压力低时不急着剪裁：当消息数不超过 `warmup_message_limit`，且估算输入低于可用输入预算 `cache_aware_min_usage` 时，保护 prompt cache 热身和近期证据。
 - 较老消息冻结复用：同一 turn 内形成稳定剪裁 surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。
 - 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
-- 大块旧 `read` / `grep` / 成功 `shell` 输出会继续按 age/bytes 规则剪裁；旧错误、diagnostics 和确认类输出会保留更小的提示或摘要。
+- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出和成功 shell 输出仍会被压成固定短 marker 或摘要。
 
 ### OpenAI Codex preset
 
@@ -909,14 +909,16 @@ context:
 
 当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，默认配置是推荐选择。如果主要问题是工具密集型会话很快顶到上下文上限，可以下调字节阈值，例如 `shell_success_bytes: 4000`、`read_like_output_bytes: 2500`。
 
-**剪裁规则**：按工具输出的类型和时效分五类处理，类别不同，裁剪激进程度也不同。
+**剪裁规则**：Chord 会按工具输出类型和时效分类处理。专门摘要会优先于通用旧结果省略，因此旧的大块输出可以保留高价值结构，同时不会改写持久会话历史。
 
 | 类别 | 典型场景 | 年龄阈值 | 大小阈值 | 设计意图 |
 |------|----------|----------|----------|----------|
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
-| Shell 成功 | `git`、`go test`、`npm run` 等命令输出 | `shell_success_age_turns`（默认 2 轮后） | `shell_success_bytes`（默认 8000 字节以上才剪） | 构建/测试输出有时是关键上下文，但通常可重新执行 |
-| 读取/搜索 | `read`、`grep`、`glob` 等工具输出 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 4000 字节以上才剪） | 文件内容可随时重新读取，裁剪最激进 |
+| Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 2 轮后） | `shell_success_bytes`（默认 8000 字节以上才剪） | 成功输出通常可重新执行；大日志摘要会保留关键失败 / 警告 |
+| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 4000 字节以上才剪） | 文件内容可随时重新读取；摘要保留路径和请求 / 实际显示范围 |
+| 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 4000 字节以上才剪） | 命中列表可重跑；摘要保留范围、数量和代表命中 |
+| JSON / 结构化输出 | `shell` 或结构化工具返回的 JSON | 先走类别 gate，再退回旧结果兜底 | 类别对应的大小 gate | 大型结构化内容在通用省略前保留顶层 object key 或 array 数量 |
 | 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 4 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
 
 年龄参数说明：

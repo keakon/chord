@@ -119,7 +119,8 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 	return result
 }
 
-// convertToolsToResponses converts internal tool definitions to Responses API format.
+// convertToolsToResponses converts tool definitions to Responses API format.
+// Tools are expected to be in a stable order from Registry.ListDefinitions().
 func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 	if len(tools) == 0 {
 		return nil

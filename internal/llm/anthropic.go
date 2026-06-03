@@ -699,6 +699,7 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 
 // convertToolsWithCache converts tool definitions; marks the last tool with a
 // cache_control breakpoint when CacheTools is enabled (explicit mode).
+// Tools are expected to be in a stable order from Registry.ListDefinitions().
 func convertToolsWithCache(tools []message.ToolDefinition, at AnthropicTuning) []anthropicTool {
 	if len(tools) == 0 {
 		return nil

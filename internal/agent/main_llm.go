@@ -524,7 +524,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.llmMu.RLock()
 		installedPrompt := a.installedSysPrompt
 		a.llmMu.RUnlock()
-		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v reduction_tokens_before=%v reduction_tokens_after=%v reduction_tokens_saved=%v reduction_protected=%v reduction_reused_stable=%v reduction_by_tool_rule=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, stats.TokensBefore, stats.TokensAfter, stats.TokensSaved, stats.Protected, stats.ReusedStable, stats.ByToolAndRule, labels)
+		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v reduction_tokens_before=%v reduction_tokens_after=%v reduction_tokens_saved=%v reduction_saved_delta=%v reduction_protected=%v reduction_protect_reason=%v reduction_reused_stable=%v reduction_reuse_reason=%v previous_model=%v model_changed=%v reduction_by_tool_rule=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, stats.TokensBefore, stats.TokensAfter, stats.TokensSaved, stats.SavedDelta, stats.Protected, stats.ProtectReason, stats.ReusedStable, stats.ReuseReason, stats.PreviousModel, stats.ModelChanged, stats.ByToolAndRule, labels)
 	}
 
 	// Hook: on_before_llm_call (before LLM call).
@@ -623,6 +623,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.ctxMgr.SetTokenBudgets(callStatus.RunningContextLimit, callStatus.RunningInputLimit, a.effectiveCompactionReservedInput())
 	}
 	a.llmMu.Lock()
+	a.previousLLMModelRef = prevRunningRef
 	a.runningModelRef = callStatus.RunningModelRef
 	a.llmMu.Unlock()
 

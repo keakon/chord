@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -243,11 +244,45 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated to save context; file=a.go") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated to save context; path=\"a.go\"") {
 		t.Fatalf("expected old read output to keep path hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, "large read output") {
 		t.Fatalf("expected old read output to keep a small excerpt, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_DoesNotMutateOriginalMessages(t *testing.T) {
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+	}}}}
+	original := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","offset":10,"limit":20}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("line\n", 500)},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+	beforeBytes, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal(before): %v", err)
+	}
+	prepared := a.prepareMessagesForLLM(original)
+	if reflect.DeepEqual(prepared, original) {
+		t.Fatal("expected prepared messages to differ after reduction")
+	}
+	afterBytes, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal(after): %v", err)
+	}
+	if !bytes.Equal(beforeBytes, afterBytes) {
+		t.Fatalf("prepareMessagesForLLM mutated original messages:\nbefore=%s\nafter=%s", beforeBytes, afterBytes)
 	}
 }
 
@@ -301,7 +336,7 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted to save context; re-run the command if needed.]" {
 		t.Fatalf("expected early shell output in same user turn to be pruned, got %q", prepared[2].Content)
 	}
-	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated to save context; file=a.go") {
+	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated to save context; path=\"a.go\"") {
 		t.Fatalf("expected early read output in same user turn to be pruned, got %q", prepared[4].Content)
 	}
 	lastIndex := len(prepared) - 1
@@ -434,6 +469,26 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForLLM_DiagnosticsCompactionPreservesToolDiff(t *testing.T) {
+	a := &MainAgent{}
+	content := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content, ToolDiff: "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Diagnostics summary:") {
+		t.Fatalf("expected diagnostics compaction, got %q", prepared[2].Content)
+	}
+	if prepared[2].ToolDiff == "" {
+		t.Fatal("diagnostics compaction should preserve ToolDiff")
+	}
+}
+
 func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLine(t *testing.T) {
 	a := &MainAgent{}
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nDiagnostics status: backend=LSP, new=1, resolved=0, current=1 errors, 0 warnings (best effort).\n[E] 10:1 [F821] Undefined name `x`"
@@ -527,6 +582,16 @@ func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T
 	if !strings.Contains(logOutput, "reduction_messages=1") {
 		t.Fatalf("expected main prepared reduction stats in log, got %q", logOutput)
 	}
+	if !strings.Contains(logOutput, "reduction_saved_delta=") ||
+		!strings.Contains(logOutput, "reduction_protect_reason=") ||
+		!strings.Contains(logOutput, "reduction_reuse_reason=") ||
+		!strings.Contains(logOutput, "previous_model=") ||
+		!strings.Contains(logOutput, "model_changed=") {
+		t.Fatalf("expected extended reduction debug fields in log, got %q", logOutput)
+	}
+	if strings.Contains(logOutput, "provider_key_index=") {
+		t.Fatalf("expected single-key provider not to emit provider_key_index, got %q", logOutput)
+	}
 	if strings.Contains(logOutput, "reduction_messages=0") {
 		t.Fatalf("expected focused subagent not to zero-out main request stats, got %q", logOutput)
 	}
@@ -611,6 +676,12 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 	if !stats.ReusedStable {
 		t.Fatalf("expected stable reduction surface reuse, stats=%+v", stats)
 	}
+	if stats.ReuseReason != contextReuseReasonBelowIncrementalMin {
+		t.Fatalf("expected reuse reason %q, got %+v", contextReuseReasonBelowIncrementalMin, stats)
+	}
+	if stats.SavedDelta <= 0 || stats.SavedDelta >= 4096 {
+		t.Fatalf("expected saved delta in reuse hysteresis range, got %+v", stats)
+	}
 	if stats.CurrentMessages != len(prepared) || stats.CurrentBytes == 0 {
 		t.Fatalf("reused stable stats current surface = (%d messages, %d bytes), want prepared surface (%d messages, >0 bytes)", stats.CurrentMessages, stats.CurrentBytes, len(prepared))
 	}
@@ -622,6 +693,266 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 	}
 	if prepared[len(prepared)-1].Content != "u4" {
 		t.Fatalf("expected current tail to be preserved, got last message %+v", prepared[len(prepared)-1])
+	}
+}
+
+func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"internal/agent/compaction_policy.go:12:func prepareMessagesForLLM(...)",
+		"internal/agent/compaction_policy.go:88:func prepareMessagesForLLMWithOptions(...)",
+		"internal/agent/compaction_policy.go:150:func compactReadLikeOutputSummary(...)",
+		"internal/agent/compaction_test.go:50:func TestPrepareMessagesForLLM(...)",
+		"internal/agent/main_llm.go:125:candidateTools := llmToolDefinitionsFromVisibleTools(...)",
+	}, "\n") + "\n" + strings.Repeat("internal/agent/compaction_policy.go:999:func extraMatch()\n", 40)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"path":"internal/agent","glob":"*.go","pattern":"prepareMessagesForLLM"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameGrep+" results summarized") {
+		t.Fatalf("expected search summary, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
+		t.Fatalf("expected specialized search summary instead of generic stale fallback, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, `pattern="prepareMessagesForLLM"`) {
+		t.Fatalf("expected grep pattern in summary, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("expected search summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_LSPReferencesSearchReducerParsesFormattedArgs(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"internal/agent/compaction_policy.go:12:func prepareMessagesForLLM(...)",
+		"internal/agent/compaction_test.go:50:func TestPrepareMessagesForLLM(...)",
+	}, "\n") + "\n" + strings.Repeat("internal/agent/compaction_policy.go:999:func extraMatch()\n", 40)
+	args := json.RawMessage(`{
+		"path": "internal/agent/compaction_policy.go",
+		"line": 12,
+		"operation"
+		:
+		"references"
+	}`)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameLsp, Args: args}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameLsp+" results summarized") {
+		t.Fatalf("expected LSP references search summary, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
+		t.Fatalf("expected specialized LSP search summary instead of generic stale fallback, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, `operation="references"`) {
+		t.Fatalf("expected LSP operation in summary, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  60,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    60,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := `[{"path":"a.go","line":10,"message":"bad"},{"path":"b.go","line":12,"message":"worse"},{"path":"c.go","line":99,"message":"ok"},` + strings.Repeat(`{"path":"dup.go","line":1,"message":"extra"},`, 30) + `{"path":"z.go","line":100,"message":"tail"}]`
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"python script.py --json"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "JSON array summarized") {
+		t.Fatalf("expected json summary, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
+		t.Fatalf("expected specialized json summary instead of generic stale fallback, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("expected json summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     9,
+			ReadLikeOutputBytes:  1 << 20,
+			StaleAgeTurns:        9,
+			StaleOutputBytes:     1 << 20,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    80,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"go test ./...",
+		"--- FAIL: TestSomething (0.00s)",
+		"main_test.go:12: expected 1, got 2",
+		"build failed",
+		"warning: using fallback config",
+		"FAIL\tgithub.com/keakon/chord/internal/agent\t0.123s",
+	}, "\n") + "\n" + strings.Repeat("warning: repeated failure detail\n", 60)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "log summarized to save context") {
+		t.Fatalf("expected long log summary, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "re-run the command if needed") && !strings.Contains(prepared[2].Content, "full log") {
+		t.Fatalf("expected specialized long-log summary instead of shell success marker, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("expected long-log summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			StaleAgeTurns:        9,
+			StaleOutputBytes:     1 << 20,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"  41\tfunc important() {",
+		"  42\t\treturn true",
+		"  43\t}",
+		"",
+		"(showing lines 41-43 of 200 total; content truncated...)",
+	}, "\n") + "\n" + strings.Repeat("  44\tpadding line to force reduction\n", 40)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":40,"limit":3}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, `path="internal/agent/compaction_policy.go"`) {
+		t.Fatalf("expected read summary path, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "requested range: offset=40 limit=3") {
+		t.Fatalf("expected requested range details, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "displayed range: lines 41-43 of 200 total") {
+		t.Fatalf("expected displayed range details, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("expected read summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  40,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    40,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"internal/agent/compaction_policy.go:12:func prepareMessagesForLLM(...)",
+		"internal/agent/compaction_policy.go:88:func prepareMessagesForLLMWithOptions(...)",
+		"internal/agent/compaction_test.go:50:func TestPrepareMessagesForLLM(...)",
+	}, "\n")
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"path":"internal/agent","glob":"*.go","pattern":"prepareMessagesForLLM"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != content {
+		t.Fatalf("fresh specialized output should remain unreduced, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Messages != 0 {
+		t.Fatalf("fresh specialized output should not count as reduced, stats=%+v", stats)
 	}
 }
 

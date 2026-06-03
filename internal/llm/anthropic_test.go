@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	toolpkg "github.com/keakon/chord/internal/tools"
 )
 
 func TestAnthropicBetaHeaderMergesCompatAndThinking(t *testing.T) {
@@ -103,6 +105,47 @@ func TestConvertToolsWithCacheMarksLastToolInExplicitMode(t *testing.T) {
 	}
 	if got[1].CacheControl == nil || got[1].CacheControl.Type != "ephemeral" || got[1].CacheControl.TTL != "1h" {
 		t.Fatalf("last tool cache_control = %#v, want ephemeral ttl=1h", got[1].CacheControl)
+	}
+}
+
+func TestConvertToolsWithCacheStableAcrossRegistryConstructionOrder(t *testing.T) {
+	regA := toolpkg.NewRegistry()
+	regA.Register(toolpkg.GlobTool{})
+	regA.Register(toolpkg.ReadTool{})
+
+	regB := toolpkg.NewRegistry()
+	regB.Register(toolpkg.ReadTool{})
+	regB.Register(toolpkg.GlobTool{})
+
+	defsA := regA.ListDefinitions()
+	defsB := regB.ListDefinitions()
+	// Registry.ListTools() sorts by name, so registration order doesn't affect output
+	if !reflect.DeepEqual(defsA, defsB) {
+		t.Fatalf("registry definitions should be stable across construction order:\nA=%#v\nB=%#v", defsA, defsB)
+	}
+
+	gotA := convertToolsWithCache(defsA, AnthropicTuning{PromptCacheMode: "explicit", CacheTools: true, PromptCacheTTL: "1h"})
+	gotB := convertToolsWithCache(defsB, AnthropicTuning{PromptCacheMode: "explicit", CacheTools: true, PromptCacheTTL: "1h"})
+	if !reflect.DeepEqual(gotA, gotB) {
+		t.Fatalf("convertToolsWithCache should be stable across registry construction order:\nA=%#v\nB=%#v", gotA, gotB)
+	}
+	if len(gotA) != len(defsA) || gotA[len(gotA)-1].CacheControl == nil {
+		t.Fatalf("expected last tool cache marker to be preserved, got %#v", gotA)
+	}
+}
+
+func TestConvertToolsWithCache_PreservesInputOrderAndCachesLast(t *testing.T) {
+	// convertToolsWithCache no longer sorts; it preserves input order from Registry
+	tools := []message.ToolDefinition{
+		{Name: "read", Description: "read files", InputSchema: map[string]any{"type": "object"}},
+		{Name: "write", Description: "write files", InputSchema: map[string]any{"type": "object"}},
+	}
+	got := convertToolsWithCache(tools, AnthropicTuning{PromptCacheMode: "explicit", CacheTools: true, PromptCacheTTL: "1h"})
+	if len(got) != 2 || got[0].Name != "read" || got[1].Name != "write" {
+		t.Fatalf("expected tools in input order: %#v", got)
+	}
+	if got[0].CacheControl != nil || got[1].CacheControl == nil {
+		t.Fatalf("cache_control should be on the last tool: %#v", got)
 	}
 }
 

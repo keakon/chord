@@ -136,7 +136,7 @@ Default behavior:
 - Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
 - Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
 - High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
-- Large old `read` / `grep` / successful `shell` outputs remain age/byte-pruned; older errors, diagnostics, and confirmations are reduced to smaller hints or summaries.
+- Large old tool results remain age/byte-pruned, but Chord now preserves more structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, and build/test logs keep key failure or warning lines. Older errors, diagnostics, confirmations, and successful shell output are still reduced to compact fixed markers or summaries.
 
 ### OpenAI Codex preset
 
@@ -1036,15 +1036,19 @@ hitting context limits quickly in tool-heavy sessions, you can lower the byte
 thresholds, for example `shell_success_bytes: 4000` and
 `read_like_output_bytes: 2500`.
 
-**Reduction categories**: Tool results are classified into five categories,
-each with its own age and size thresholds.
+**Reduction categories**: Tool results are classified by output type and age.
+Specialized summaries are tried before the generic stale-output fallback, so old
+large outputs can keep high-value structure without changing durable session
+history.
 
 | Category | Typical examples | Age threshold | Size threshold | Rationale |
 |----------|-----------------|---------------|----------------|-----------|
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
-| Shell success | `git`, `go test`, `npm run` output | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 8000) | Build/test output can be important context but is usually reproducible |
-| Read / search | `read`, `grep`, `glob` output | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; most aggressive trimming |
+| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 8000) | Successful output is usually reproducible; large logs keep key failures/warnings when summarized |
+| Read-like | `read`, file content previews | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
+| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
+| JSON / structured output | JSON from `shell` or structured tools | category-specific gate, then stale fallback | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
 How to read the age and size parameters:

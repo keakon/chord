@@ -589,14 +589,6 @@ func (a *MainAgent) configuredCompactionModelRefs() ([]string, bool, error) {
 	return nil, false, nil
 }
 
-func (a *MainAgent) compactionModelRefs() []string {
-	refs, _, err := a.configuredCompactionModelRefs()
-	if err != nil {
-		return nil
-	}
-	return refs
-}
-
 func (a *MainAgent) compactionModelRef() string {
 	if a == nil {
 		return ""

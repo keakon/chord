@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1209,6 +1210,32 @@ func TestResponsesProvider_SendsSystemPromptAsInstructions(t *testing.T) {
 	}
 	if got := item["role"]; got == "system" {
 		t.Fatalf("unexpected system message in input: %#v", item)
+	}
+}
+
+func TestConvertToolsToResponsesStableAcrossRegistryConstructionOrder(t *testing.T) {
+	regA := tools.NewRegistry()
+	regA.Register(tools.GlobTool{})
+	regA.Register(tools.ReadTool{})
+
+	regB := tools.NewRegistry()
+	regB.Register(tools.ReadTool{})
+	regB.Register(tools.GlobTool{})
+
+	defsA := regA.ListDefinitions()
+	defsB := regB.ListDefinitions()
+	// Registry.ListTools() sorts by name, so registration order doesn't affect output
+	if !reflect.DeepEqual(defsA, defsB) {
+		t.Fatalf("registry definitions should be stable across construction order:\nA=%#v\nB=%#v", defsA, defsB)
+	}
+
+	gotA := convertToolsToResponses(defsA)
+	gotB := convertToolsToResponses(defsB)
+	if !reflect.DeepEqual(gotA, gotB) {
+		t.Fatalf("convertToolsToResponses should be stable across registry construction order:\nA=%#v\nB=%#v", gotA, gotB)
+	}
+	if len(gotA) != len(defsA) || gotA[0].Name != defsA[0].Name || gotA[1].Name != defsA[1].Name {
+		t.Fatalf("unexpected tool order: defs=%#v tools=%#v", defsA, gotA)
 	}
 }
 

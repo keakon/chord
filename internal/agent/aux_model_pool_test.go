@@ -130,13 +130,6 @@ func TestCompactionModelRefUsesMainModelWhenPoolMissing(t *testing.T) {
 	}
 }
 
-func TestCompactionModelRefsFallsBackToMainModelWhenPoolMissing(t *testing.T) {
-	a := &MainAgent{}
-	if got := a.compactionModelRefs(); got != nil {
-		t.Fatalf("compactionModelRefs() = %#v, want nil", got)
-	}
-}
-
 func TestNewCompactionClientInheritsMainModelPoolWhenUnconfigured(t *testing.T) {
 	a := &MainAgent{}
 	first := newAuxModelPoolTestClient("first", "ref")

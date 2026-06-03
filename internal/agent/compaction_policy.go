@@ -75,6 +75,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
 		if policy.shouldProtectCachedContext(len(prepared), estimatedTokens, inputBudget) {
 			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
+			stats.ProtectReason = policy.protectCachedContextReason(len(prepared), estimatedTokens, inputBudget)
+			a.fillReductionModelContinuity(&stats)
 			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
 			if rememberPrepared {
@@ -92,6 +94,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	if a != nil {
 		if rememberPrepared {
 			if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
+				a.fillReductionModelContinuity(&stats)
 				a.setCurrentRequestSurface(&stats, reused)
 				a.setContextReductionStats(stats)
 				a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
@@ -140,56 +143,25 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		meta := callMeta[prepared[i].ToolCallID]
 		toolName := toolname.Normalize(meta.Name)
 		age := max(turnsAfter[i], messageAge[i])
-		if repeated[i] && age >= 1 {
-			prepared[i].Content = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(toolName))
-			prepared[i].ToolDiff = ""
-			noteReduction(toolName, "repeated", original, prepared[i].Content)
+		ctx := requestReductionContext{
+			ToolName:    toolName,
+			Meta:        meta,
+			Content:     prepared[i].Content,
+			Age:         age,
+			Policy:      policy,
+			Repeated:    repeated[i],
+			ToolResults: toolResults,
+		}
+		class := classifyRequestReductionToolOutput(ctx)
+		reduced, rule, ok := reduceRequestToolOutput(class, ctx)
+		if !ok {
 			continue
 		}
-		if age >= policy.ErrorAgeTurns && isToolErrorContent(prepared[i].Content) {
-			prepared[i].Content = "[Older tool error omitted]"
+		prepared[i].Content = reduced
+		if class != requestReductionDiagnostics {
 			prepared[i].ToolDiff = ""
-			noteReduction(toolName, "error", original, prepared[i].Content)
-			continue
 		}
-		if age >= policy.ConfirmAgeTurns && isConfirmationOutput(prepared[i].Content) {
-			prepared[i].Content = "[Confirmed]"
-			prepared[i].ToolDiff = ""
-			noteReduction(toolName, "confirmation", original, prepared[i].Content)
-			continue
-		}
-		if age >= 1 {
-			if (toolName == tools.NameEdit || toolName == tools.NameWrite) && strings.Contains(prepared[i].Content, "Diagnostics:") {
-				if compacted, ok := compactDiagnosticsToolOutput(prepared[i].Content); ok {
-					prepared[i].Content = compacted
-					noteReduction(toolName, "diagnostics", original, prepared[i].Content)
-					continue
-				}
-			}
-		}
-		if age >= policy.ShellSuccessAgeTurns && len(prepared[i].Content) > policy.ShellSuccessBytes {
-			if toolName == tools.NameShell {
-				prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell)
-				prepared[i].ToolDiff = ""
-				noteReduction(toolName, "shell_success", original, prepared[i].Content)
-				continue
-			}
-		}
-		if age >= policy.ReadLikeAgeTurns && len(prepared[i].Content) > policy.ReadLikeOutputBytes {
-			if contextReductionIsReadLike(toolName) {
-				prepared[i].Content = compactReadLikeOutputSummary(toolName, meta.Args, prepared[i].Content)
-				prepared[i].ToolDiff = ""
-				noteReduction(toolName, "read_like", original, prepared[i].Content)
-				continue
-			}
-		}
-		if toolResults >= policy.MinToolResultsPrune &&
-			age >= policy.StaleAgeTurns &&
-			len(prepared[i].Content) > policy.StaleOutputBytes {
-			prepared[i].Content = fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(meta.Name))
-			prepared[i].ToolDiff = ""
-			noteReduction(toolName, "stale", original, prepared[i].Content)
-		}
+		noteReduction(toolName, rule, original, prepared[i].Content)
 	}
 
 	if a != nil {
@@ -199,16 +171,28 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
 		if rememberPrepared {
-			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, inputBudget) {
-				prepared = reuseStableReductionPrefix(previous.Messages, prepared)
-				stats = highLevelContextReductionStats(messages, prepared)
-				a.setCurrentRequestSurface(&stats, prepared)
-				if len(stats.ByToolAndRule) == 0 {
-					stats.ByToolAndRule = previous.Stats.ByToolAndRule
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok {
+				reuseReason, savedDelta := policy.reuseStableReductionSurfaceReason(stats, previous.Stats, stats.TokensBefore, inputBudget)
+				stats.ReuseReason = reuseReason
+				stats.SavedDelta = savedDelta
+				if reuseReason == contextReuseReasonBelowIncrementalMin {
+					prepared = reuseStableReductionPrefix(previous.Messages, prepared)
+					reusedStats := highLevelContextReductionStats(messages, prepared)
+					stats.Messages = reusedStats.Messages
+					stats.Bytes = reusedStats.Bytes
+					stats.TokensBefore = reusedStats.TokensBefore
+					stats.TokensAfter = reusedStats.TokensAfter
+					stats.TokensSaved = reusedStats.TokensSaved
+					stats.ByToolAndRule = reusedStats.ByToolAndRule
+					stats.ReusedStable = true
+					a.setCurrentRequestSurface(&stats, prepared)
+					if len(stats.ByToolAndRule) == 0 {
+						stats.ByToolAndRule = previous.Stats.ByToolAndRule
+					}
 				}
-				stats.ReusedStable = true
 			}
 		}
+		a.fillReductionModelContinuity(&stats)
 		a.setContextReductionStats(stats)
 		if rememberPrepared {
 			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
@@ -290,6 +274,341 @@ func preferredDiagnosticsSummaryLine(lines []string) string {
 	return ""
 }
 
+type requestReductionClass string
+
+const (
+	requestReductionNone        requestReductionClass = ""
+	requestReductionRepeated    requestReductionClass = "repeated_output"
+	requestReductionToolError   requestReductionClass = "tool_error"
+	requestReductionConfirm     requestReductionClass = "confirmation"
+	requestReductionDiagnostics requestReductionClass = "diagnostics"
+	requestReductionReadLike    requestReductionClass = "read_like"
+	requestReductionSearch      requestReductionClass = "search_result"
+	requestReductionJSON        requestReductionClass = "json_blob"
+	requestReductionLongLog     requestReductionClass = "long_log"
+	requestReductionShellOK     requestReductionClass = "shell_success"
+	requestReductionGeneric     requestReductionClass = "generic_stale"
+)
+
+type requestReductionContext struct {
+	ToolName    string
+	Meta        toolCallMeta
+	Content     string
+	Age         int
+	Policy      contextReductionPolicy
+	Repeated    bool
+	ToolResults int
+}
+
+func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
+	if ctx.Repeated && ctx.Age >= 1 {
+		return requestReductionRepeated
+	}
+	if ctx.Age >= ctx.Policy.ErrorAgeTurns && isToolErrorContent(ctx.Content) {
+		return requestReductionToolError
+	}
+	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {
+		return requestReductionConfirm
+	}
+	if ctx.Age >= 1 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
+		return requestReductionDiagnostics
+	}
+	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
+		if looksLikeStructuredJSON(ctx.Content) {
+			return requestReductionJSON
+		}
+		if looksLikeBuildLikeLog(ctx) {
+			return requestReductionLongLog
+		}
+		return requestReductionShellOK
+	}
+	if ctx.Age >= ctx.Policy.ReadLikeAgeTurns && len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
+		switch {
+		case looksLikeSearchResult(ctx):
+			return requestReductionSearch
+		case looksLikeStructuredJSON(ctx.Content):
+			return requestReductionJSON
+		case contextReductionIsReadLike(ctx.ToolName):
+			return requestReductionReadLike
+		case looksLikeBuildLikeLog(ctx):
+			return requestReductionLongLog
+		}
+	}
+	if ctx.ToolResults >= ctx.Policy.MinToolResultsPrune && ctx.Age >= ctx.Policy.StaleAgeTurns && len(ctx.Content) > ctx.Policy.StaleOutputBytes {
+		if looksLikeSearchResult(ctx) {
+			return requestReductionSearch
+		}
+		if looksLikeStructuredJSON(ctx.Content) {
+			return requestReductionJSON
+		}
+		if looksLikeBuildLikeLog(ctx) {
+			return requestReductionLongLog
+		}
+		return requestReductionGeneric
+	}
+	return requestReductionNone
+}
+
+func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionContext) (string, string, bool) {
+	switch class {
+	case requestReductionRepeated:
+		return fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(ctx.ToolName)), "repeated", true
+	case requestReductionToolError:
+		return "[Older tool error omitted]", "error", true
+	case requestReductionConfirm:
+		return "[Confirmed]", "confirmation", true
+	case requestReductionDiagnostics:
+		if compacted, ok := compactDiagnosticsToolOutput(ctx.Content); ok {
+			return compacted, "diagnostics", true
+		}
+		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+	case requestReductionReadLike:
+		return compactReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
+	case requestReductionSearch:
+		return compactSearchLikeOutputSummary(ctx), "search_result", true
+	case requestReductionJSON:
+		if compacted, ok := compactJSONBlobSummary(ctx); ok {
+			return compacted, "json_blob", true
+		}
+		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+	case requestReductionLongLog:
+		return compactLongLogOutputSummary(ctx), "long_log", true
+	case requestReductionShellOK:
+		return fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell), "shell_success", true
+	case requestReductionGeneric:
+		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+	default:
+		return "", "", false
+	}
+}
+
+func looksLikeSearchResult(ctx requestReductionContext) bool {
+	switch ctx.ToolName {
+	case tools.NameGrep, tools.NameGlob:
+		return true
+	case tools.NameLsp:
+		var parsed struct {
+			Operation string `json:"operation"`
+		}
+		if err := json.Unmarshal([]byte(ctx.Meta.Args), &parsed); err != nil {
+			return false
+		}
+		return strings.TrimSpace(parsed.Operation) == "references"
+	default:
+		return false
+	}
+}
+
+func looksLikeStructuredJSON(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) < 2 {
+		return false
+	}
+	return (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) || (strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]"))
+}
+
+func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
+	if ctx.ToolName != tools.NameShell && ctx.ToolName != tools.NameEdit && ctx.ToolName != tools.NameWrite {
+		return false
+	}
+	content := strings.TrimSpace(ctx.Content)
+	if content == "" {
+		return false
+	}
+	for _, line := range strings.Split(content, "\n") {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" {
+			continue
+		}
+		if strings.Contains(lower, "error") ||
+			strings.Contains(lower, "warning") ||
+			strings.Contains(lower, "failed") ||
+			strings.Contains(lower, "failure") ||
+			strings.Contains(lower, "panic:") ||
+			strings.Contains(lower, "traceback") ||
+			strings.Contains(lower, "exception") ||
+			strings.Contains(lower, "diagnostics:") ||
+			strings.HasPrefix(lower, "fail ") ||
+			strings.HasPrefix(lower, "--- fail") ||
+			strings.HasPrefix(lower, "build failed") ||
+			strings.HasPrefix(lower, "lint failed") {
+			return true
+		}
+	}
+	return false
+}
+
+func compactSearchLikeOutputSummary(ctx requestReductionContext) string {
+	toolName := toolNameOrUnknown(ctx.ToolName)
+	snippetLines := summarizeRepresentativeLines(ctx.Content, 4)
+	if len(snippetLines) == 0 {
+		snippetLines = []string{"- (no preserved matches)"}
+	}
+	scope := compactSearchScope(ctx)
+	return fmt.Sprintf("[Older %s results summarized to save context; %s; matches=%d]\n%s\n\n[Re-run the same %s query if full results are needed.]", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"), toolName)
+}
+
+func compactSearchScope(ctx requestReductionContext) string {
+	switch ctx.ToolName {
+	case tools.NameGrep:
+		var parsed struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+			Glob    string `json:"glob"`
+		}
+		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
+		return fmt.Sprintf("pattern=%q path=%q glob=%q", strings.TrimSpace(parsed.Pattern), blankToDefault(strings.TrimSpace(parsed.Path), "."), strings.TrimSpace(parsed.Glob))
+	case tools.NameGlob:
+		var parsed struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+		}
+		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
+		return fmt.Sprintf("pattern=%q path=%q", strings.TrimSpace(parsed.Pattern), blankToDefault(strings.TrimSpace(parsed.Path), "."))
+	case tools.NameLsp:
+		var parsed struct {
+			Operation string `json:"operation"`
+			Path      string `json:"path"`
+			Line      int    `json:"line"`
+		}
+		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
+		return fmt.Sprintf("operation=%q path=%q line=%d", strings.TrimSpace(parsed.Operation), strings.TrimSpace(parsed.Path), parsed.Line)
+	default:
+		return "query preserved"
+	}
+}
+
+func compactJSONBlobSummary(ctx requestReductionContext) (string, bool) {
+	var decoded any
+	if err := json.Unmarshal([]byte(ctx.Content), &decoded); err != nil {
+		return "", false
+	}
+	switch v := decoded.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		if len(keys) > 8 {
+			keys = append(keys[:8], fmt.Sprintf("... (+%d more)", len(v)-8))
+		}
+		return fmt.Sprintf("[Older %s JSON object summarized to save context; keys=%d]\n- top-level keys: %s", toolNameOrUnknown(ctx.ToolName), len(v), strings.Join(keys, ", ")), true
+	case []any:
+		items := summarizeJSONArrayItems(v, 3)
+		if len(items) == 0 {
+			items = []string{"- (no preserved items)"}
+		}
+		return fmt.Sprintf("[Older %s JSON array summarized to save context; items=%d]\n%s", toolNameOrUnknown(ctx.ToolName), len(v), strings.Join(items, "\n")), true
+	default:
+		return "", false
+	}
+}
+
+func summarizeJSONArrayItems(items []any, limit int) []string {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	limit = min(limit, len(items))
+	out := make([]string, 0, limit)
+	for i := range limit {
+		rendered, _ := json.Marshal(items[i])
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(string(rendered), 180), "\n", " "))
+	}
+	return out
+}
+
+func compactLongLogOutputSummary(ctx requestReductionContext) string {
+	counts := summarizeLogSignalCounts(ctx.Content)
+	lines := summarizeRepresentativeLogLines(ctx.Content, 4)
+	if len(lines) == 0 {
+		lines = []string{"- (no preserved log lines)"}
+	}
+	return fmt.Sprintf("[Older %s log summarized to save context; errors=%d warnings=%d failed=%d]\n%s\n\n[Re-run the command if the full log is needed.]", toolNameOrUnknown(ctx.ToolName), counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
+}
+
+type logSignalCounts struct {
+	Errors   int
+	Warnings int
+	Failures int
+}
+
+func summarizeLogSignalCounts(content string) logSignalCounts {
+	var out logSignalCounts
+	for _, line := range strings.Split(content, "\n") {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" {
+			continue
+		}
+		if strings.Contains(lower, "error") || strings.Contains(lower, "panic:") || strings.Contains(lower, "exception") || strings.Contains(lower, "traceback") {
+			out.Errors++
+		}
+		if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") {
+			out.Warnings++
+		}
+		if strings.Contains(lower, "failed") || strings.Contains(lower, "failure") {
+			out.Failures++
+		}
+	}
+	return out
+}
+
+func summarizeRepresentativeLogLines(content string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	out := make([]string, 0, limit)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if !strings.Contains(lower, "error") && !strings.Contains(lower, "warning") && !strings.Contains(lower, "failed") && !strings.Contains(lower, "panic:") && !strings.Contains(lower, "traceback") && !strings.Contains(lower, "exception") {
+			continue
+		}
+		lineKey := compactTextSnippet(trimmed, 220)
+		if _, ok := seen[lineKey]; ok {
+			continue
+		}
+		seen[lineKey] = struct{}{}
+		out = append(out, "- "+strings.ReplaceAll(lineKey, "\n", " "))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func summarizeRepresentativeLines(content string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	out := make([]string, 0, limit)
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, 180), "\n", " "))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func countMeaningfulLines(content string) int {
+	count := 0
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func isNoisyDiagnosticsSummaryLine(line string) bool {
 	return strings.HasPrefix(line, "Diagnostics status:") ||
 		strings.HasPrefix(line, "Used LSP diagnostics") ||
@@ -366,6 +685,8 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 		stats.ByToolAndRule = previous.Stats.ByToolAndRule
 	}
 	stats.ReusedStable = true
+	stats.ReuseReason = contextReuseReasonBelowIncrementalMin
+	stats.SavedDelta = tailTokens
 	return reused, stats, true
 }
 
@@ -403,6 +724,21 @@ func (a *MainAgent) setCurrentRequestSurface(stats *ContextReductionStats, messa
 	if a != nil {
 		stats.CurrentBytes += toolDefinitionBytes(a.mainLLMToolDefinitions())
 	}
+}
+
+func (a *MainAgent) fillReductionModelContinuity(stats *ContextReductionStats) {
+	if a == nil || stats == nil {
+		return
+	}
+	a.llmMu.RLock()
+	previous := a.previousLLMModelRef
+	current := a.runningModelRef
+	if current == "" {
+		current = a.providerModelRef
+	}
+	a.llmMu.RUnlock()
+	stats.PreviousModel = previous
+	stats.ModelChanged = previous != "" && current != "" && previous != current
 }
 
 func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
@@ -715,93 +1051,78 @@ func contextReductionIsReadLike(name string) bool {
 	return tools.IsReadLike(name)
 }
 
-func extractReadToolPath(argsJSON string) string {
+type readRequestSummary struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+}
+
+func parseReadRequestSummary(argsJSON string) readRequestSummary {
 	if strings.TrimSpace(argsJSON) == "" {
-		return ""
+		return readRequestSummary{}
 	}
-	var parsed struct {
-		FilePath string `json:"path"`
-	}
+	var parsed readRequestSummary
 	if err := json.Unmarshal([]byte(argsJSON), &parsed); err != nil {
-		return ""
+		return readRequestSummary{}
 	}
-	return strings.TrimSpace(parsed.FilePath)
+	parsed.Path = strings.TrimSpace(parsed.Path)
+	return parsed
+}
+
+type displayedReadRange struct {
+	Start int
+	End   int
+	Total int
+	OK    bool
+}
+
+func parseDisplayedReadRange(content string) displayedReadRange {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		var out displayedReadRange
+		if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
+			out.OK = true
+			return out
+		}
+		if n, _ := fmt.Sscanf(line, "(showing line %d of %d total", &out.Start, &out.Total); n == 2 {
+			out.End = out.Start
+			out.OK = true
+			return out
+		}
+	}
+	return displayedReadRange{}
 }
 
 func compactReadOutputSummary(argsJSON, content string) string {
-	path := extractReadToolPath(argsJSON)
+	request := parseReadRequestSummary(argsJSON)
+	path := request.Path
 	snippet := strings.TrimSpace(compactTextSnippet(content, compactReadSnippetChars))
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
 	}
-	if path == "" {
-		return "[Older " + tools.NameRead + " output truncated to save context]\n" + snippet + "\n\n[Re-run " + tools.NameRead + " with offset/limit if needed.]"
+	requestedRange := ""
+	if request.Offset > 0 || request.Limit > 0 {
+		requestedRange = fmt.Sprintf("; requested range: offset=%d limit=%d", request.Offset, request.Limit)
 	}
-	return fmt.Sprintf("[Older %s output truncated to save context; file=%s]\n%s\n\n[Re-run %s(path=%q, offset, limit) if needed.]", tools.NameRead, path, snippet, tools.NameRead, path)
+	displayedRange := ""
+	if displayed := parseDisplayedReadRange(content); displayed.OK {
+		displayedRange = fmt.Sprintf("\n- displayed range: lines %d-%d of %d total", displayed.Start, displayed.End, displayed.Total)
+	}
+	if path == "" {
+		return "[Older " + tools.NameRead + " output truncated to save context" + requestedRange + "]\n" + snippet + displayedRange + "\n\n[Re-run " + tools.NameRead + " with offset/limit if needed.]"
+	}
+	return fmt.Sprintf("[Older %s output truncated to save context; path=%q%s]\n%s%s\n\n[Re-run %s(path=%q, offset, limit) if needed.]", tools.NameRead, path, requestedRange, snippet, displayedRange, tools.NameRead, path)
 }
 
 func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
 	switch strings.TrimSpace(toolName) {
 	case tools.NameRead:
 		return compactReadOutputSummary(argsJSON, content)
-	case tools.NameGrep:
-		return compactGrepOutputSummary(argsJSON, content)
-	case tools.NameGlob:
-		return compactGlobOutputSummary(argsJSON, content)
 	case tools.NameWebFetch:
 		return compactWebFetchOutputSummary(argsJSON, content)
 	default:
 		return fmt.Sprintf("[Older %s output omitted to save context; re-run the tool if needed.]", toolNameOrUnknown(toolName))
 	}
-}
-
-func compactGrepOutputSummary(argsJSON, content string) string {
-	var parsed struct {
-		Pattern  string `json:"pattern"`
-		FilePath string `json:"path"`
-		Glob     string `json:"glob"`
-	}
-	_ = json.Unmarshal([]byte(argsJSON), &parsed)
-	snippet := strings.TrimSpace(compactTextSnippet(content, compactReadSnippetChars))
-	if snippet == "" {
-		snippet = "(no preserved excerpt)"
-	}
-	filePath := strings.TrimSpace(parsed.FilePath)
-	return fmt.Sprintf(
-		"[Older %s output truncated to save context; pattern=%q path=%q glob=%q]\n%s\n\n[Re-run %s(pattern=%q, path=%q, glob=%q) if needed.]",
-		tools.NameGrep,
-		strings.TrimSpace(parsed.Pattern),
-		blankToDefault(filePath, "."),
-		strings.TrimSpace(parsed.Glob),
-		snippet,
-		tools.NameGrep,
-		strings.TrimSpace(parsed.Pattern),
-		blankToDefault(filePath, "."),
-		strings.TrimSpace(parsed.Glob),
-	)
-}
-
-func compactGlobOutputSummary(argsJSON, content string) string {
-	var parsed struct {
-		Pattern  string `json:"pattern"`
-		FilePath string `json:"path"`
-	}
-	_ = json.Unmarshal([]byte(argsJSON), &parsed)
-	snippet := strings.TrimSpace(compactTextSnippet(content, compactReadSnippetChars))
-	if snippet == "" {
-		snippet = "(no preserved excerpt)"
-	}
-	filePath := strings.TrimSpace(parsed.FilePath)
-	return fmt.Sprintf(
-		"[Older %s output truncated to save context; pattern=%q path=%q]\n%s\n\n[Re-run %s(pattern=%q, path=%q) if needed.]",
-		tools.NameGlob,
-		strings.TrimSpace(parsed.Pattern),
-		blankToDefault(filePath, "."),
-		snippet,
-		tools.NameGlob,
-		strings.TrimSpace(parsed.Pattern),
-		blankToDefault(filePath, "."),
-	)
 }
 
 func compactWebFetchOutputSummary(argsJSON, content string) string {
