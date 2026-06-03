@@ -137,7 +137,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.SetVersionTemplate(cliVersionTemplate())
 
 	rootCmd.PersistentFlags().StringVar(&flagAPIBase, "api-base", "",
-		"API base URL (overrides CHORD_API_BASE env var)")
+		"API base URL for providers without api_url")
 
 	// Storage path overrides (see docs/guides/session-storage.md).
 	rootCmd.PersistentFlags().StringVar(&flagConfigHome, "config-home", "",

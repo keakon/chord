@@ -97,6 +97,21 @@ for cn in docs/examples/*_CN.md; do
  [[ -f "$en" ]] || fail "missing English companion example for $cn: $en"
 done
 
+# Each docs/*.md <-> *_CN.md and docs/examples/*.md <-> *_CN.md pair must carry the
+# same number of "## " section headings. This tolerates paragraph compression and
+# example substitution but catches whole-section drift between the two languages.
+for en in docs/*.md docs/examples/*.md; do
+ base=$(basename "$en")
+ [[ "$base" == *_CN.md ]] && continue
+ cn="${en%.md}_CN.md"
+ [[ -f "$cn" ]] || continue
+ en_headings=$(grep -c '^## ' "$en" || true)
+ cn_headings=$(grep -c '^## ' "$cn" || true)
+ if [[ "$en_headings" != "$cn_headings" ]]; then
+  fail "section heading count mismatch: $en has $en_headings '## ' headings but $cn has $cn_headings"
+ fi
+done
+
 for page in docs/examples/examples-*.md; do
  [[ -f "$page" ]] || continue
  if [[ "$page" == *_CN.md ]]; then

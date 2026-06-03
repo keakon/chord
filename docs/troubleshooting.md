@@ -119,6 +119,32 @@ If you configured LSP but do not see diagnostics after writing files:
 - check whether the corresponding language server is installed locally
 - check whether the `lsp` config format is correct
 - confirm the target file type matches `file_types`
+- check whether `diagnostics.enabled: false` turned off post-tool diagnostics
+
+For Python specifically:
+
+- Small files use `diagnostics.python.semantic_backend` (usually `lsp.pyright`). Make sure `diagnostics.python.semantic_backend.server` matches the server key under `lsp`.
+- Large Python files use Ruff quick diagnostics when `ruff` is on `PATH`.
+- If a large Python file reports diagnostics skipped because Ruff is unavailable, install Ruff or set `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true` to force Pyright on large files too.
+- Ruff quick diagnostics do not update the LSP sidebar; they appear only in `edit` / `write` tool results and clearly note that full Python semantic diagnostics were skipped.
+
+Recommended Python skeleton:
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+
+diagnostics:
+  python:
+    quick_backend:
+      type: command
+      command: ruff
+```
+
+For the full recommended config, see [Configuration — Post-tool diagnostics](./configuration.md#post-tool-diagnostics).
 
 ## Session resume issues
 
@@ -162,11 +188,9 @@ If the TUI occasionally shows stale rows, horizontal line artifacts, or partiall
 - if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
 - if it still reproduces, capture a diagnostics bundle and a screenshot together
 
-Chord protects redraws for two focus-restore cases: updates that arrive immediately after focus returns, and transcript/layout changes that happened while the terminal was backgrounded. When background changes are detected, Chord waits for focus to settle and forces a host redraw with a fallback pass, so terminals like Ghostty, cmux, or iTerm2 get reliable recovery even when host surface invalidation outlasts the first redraw. Diagnostics bundles include background-dirty state so remaining cases can be compared against the final screen buffer.
+If you see corruption right after focus restore while the UI is streaming output, treat it as a host redraw/replay issue and capture a diagnostics bundle plus a screenshot.
 
-If you see corruption right after focus restore while the UI is streaming output, treat it as a host redraw/replay issue and capture the diagnostics bundle plus screenshot. Avoid working around it by changing component padding or ANSI handling.
-
-Note: if you see fragments like `;250m pyright` during a corruption episode, this is typically not LSP text but the tail of a truncated ANSI/OSC control sequence. Chord routes window-title updates through the framework's `WindowTitle` API instead of writing directly to stdout, avoiding interleaving with renderer output.
+Note: fragments like `;250m pyright` during a corruption episode are usually not LSP text but the tail of a truncated ANSI/OSC control sequence.
 
 ## Bottom transcript rows are unreachable in long sessions
 
@@ -174,11 +198,6 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 
 - pay special attention to whether the issue starts after long-running background jobs or durable status updates in a long session
 - if it still reproduces, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
-
-Chord handles two transcript-height accounting risks:
-
-- Late updates to older status cards could leave the viewport shorter than the real transcript.
-- Background cache dropping could miscompute line offsets, causing scroll drift that grew over time.
 
 ## Edit reports `file ... has not been observed in this conversation`
 

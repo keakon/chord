@@ -193,7 +193,7 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 			ProviderName: "anthropic",
 			ProviderType: "messages",
 			APIURL:       "https://api.anthropic.com/v1/messages",
-			ModelName:    "claude-opus-4.7",
+			ModelName:    "claude-opus-4.8",
 			ContextLimit: 1000000,
 			OutputLimit:  64000,
 		}
@@ -202,7 +202,7 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 			ProviderName: "gemini",
 			ProviderType: "generate-content",
 			APIURL:       "https://generativelanguage.googleapis.com/v1beta/models",
-			ModelName:    "gemini-3.1-pro-preview",
+			ModelName:    "gemini-3.5-flash",
 			ContextLimit: 1048576,
 			OutputLimit:  65536,
 		}

@@ -83,7 +83,7 @@ func TestBuildInitialSetupConfigYAML_Gemini(t *testing.T) {
 		ProviderName: "gemini",
 		ProviderType: "generate-content",
 		APIURL:       "https://generativelanguage.googleapis.com/v1beta/models",
-		ModelName:    "gemini-3.1-pro-preview",
+		ModelName:    "gemini-3.5-flash",
 		ContextLimit: 1048576,
 		OutputLimit:  65536,
 	})
@@ -101,8 +101,8 @@ func TestBuildInitialSetupConfigYAML_Gemini(t *testing.T) {
 	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" {
 		t.Fatalf("provider api_url = %q", prov.APIURL)
 	}
-	if prov.Models["gemini-3.1-pro-preview"].Limit.Context != 1048576 || prov.Models["gemini-3.1-pro-preview"].Limit.Output != 65536 {
-		t.Fatalf("model limits = %#v", prov.Models["gemini-3.1-pro-preview"].Limit)
+	if prov.Models["gemini-3.5-flash"].Limit.Context != 1048576 || prov.Models["gemini-3.5-flash"].Limit.Output != 65536 {
+		t.Fatalf("model limits = %#v", prov.Models["gemini-3.5-flash"].Limit)
 	}
 	if normalized, err := normalizeProviderConfig("gemini", prov, nil); err != nil {
 		t.Fatalf("normalizeProviderConfig: %v", err)
@@ -163,12 +163,12 @@ func TestInitialSetupDefaultsForProviderType(t *testing.T) {
 	}
 
 	defaults = initialSetupDefaultsForProviderType("messages")
-	if defaults.APIURL != "https://api.anthropic.com/v1/messages" || defaults.ProviderName != "anthropic" || defaults.ModelName != "claude-opus-4.7" {
+	if defaults.APIURL != "https://api.anthropic.com/v1/messages" || defaults.ProviderName != "anthropic" || defaults.ModelName != "claude-opus-4.8" {
 		t.Fatalf("messages defaults = %#v", defaults)
 	}
 
 	defaults = initialSetupDefaultsForProviderType("generate-content")
-	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.1-pro-preview" {
+	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.5-flash" {
 		t.Fatalf("generate-content defaults = %#v", defaults)
 	}
 }

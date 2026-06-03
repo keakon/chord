@@ -66,7 +66,7 @@ If you prefer to write YAML manually or need a different provider/model setup, s
 cd my-project && chord
 ```
 
-For manual provider/model setup and model-limit guidance, see [Quickstart](./docs/quickstart.md). Read model limits in this order: `limit.context` is the total window; for most models, input + requested output just needs to fit there. If a provider also lists a separate input cap (some GPT models do), add `limit.input`; otherwise Chord falls back to `limit.context`. `limit.output` is the model's own output capacity. Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`; the default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it. See [Glossary](./docs/glossary.md) for the related terms.
+For manual provider/model setup and model-limit guidance, see [Quickstart](./docs/quickstart.md). In short: `limit.context` is the total request window, `limit.output` is the model's output capacity, and `limit.input` is only needed when a provider publishes a separate input cap. See the [Glossary](./docs/glossary.md) for the exact rules and [example configs](./docs/examples/index.md) for ready-to-paste `config.yaml` files.
 
 ### Release download notes
 

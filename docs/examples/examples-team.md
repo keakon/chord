@@ -162,6 +162,8 @@ chord --version
 - Permission prompts are too broad for the team: start by changing risky `shell` rules from `ask` to `deny`, then relax only the commands your workflow needs.
 - Agents do not appear: ensure files are under `<repo>/.chord/agents/` or the global agents directory and include valid front matter.
 
+## `<repo>/.chord/agents/coder.md`
+
 ```md
 ---
 name: "coder"

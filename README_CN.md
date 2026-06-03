@@ -66,7 +66,7 @@ chord
 cd my-project && chord
 ```
 
-手动配置 provider / 模型以及理解模型限制，见[快速开始](./docs/quickstart_CN.md)。按这个顺序理解模型限制：`limit.context` 是总窗口；大多数模型只要“输入 + 请求输出”不超过这个窗口即可。如果 provider 还单独列出了输入上限（例如部分 GPT 模型），再额外写 `limit.input`；未配置时，Chord 会回退到 `limit.context`。`limit.output` 是模型的最大输出能力，Chord 默认 `max_output_tokens` 仍为 `32000`，实际会取更小的值。相关术语见 [术语表](./docs/glossary_CN.md)，可直接复制粘贴的完整 `config.yaml` 见 [示例配置库](./docs/examples/index_CN.md)。
+手动配置 provider / 模型以及理解模型限制，见[快速开始](./docs/quickstart_CN.md)。简而言之：`limit.context` 是总请求窗口，`limit.output` 是模型的最大输出能力，`limit.input` 只在 provider 单独公布输入上限时才需要配置。完整规则见[术语表](./docs/glossary_CN.md)，可直接复制粘贴的 `config.yaml` 见[示例配置库](./docs/examples/index_CN.md)。
 
 ### Release 下载说明
 

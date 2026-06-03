@@ -45,7 +45,7 @@ permission:
     "git tag *": ask
 ```
 
-这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。
+这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。本页以 `"*": allow` 作为可信工作区基线；若想改用最小授权基线，[配置 — Agent 配置](./configuration_CN.md#agent-配置)中的 `builder` agent 从 `"*": deny` 起步，只对角色确需的工具逐项放开。按你的信任模型选择基线即可。
 
 ### 特殊权限语义
 

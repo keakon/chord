@@ -31,7 +31,7 @@ This Code of Conduct applies within all community spaces and also applies when a
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by opening an issue on the [GitHub repository](https://github.com/keakon/chord/issues).
+Instances of abusive, harassing, or otherwise unacceptable behavior can be reported to the project maintainers. For sensitive reports, please use the maintainer contact methods listed on the maintainer profile page (<https://github.com/keakon>) rather than a public issue. For non-sensitive conduct matters, you may also open an issue on the [GitHub repository](https://github.com/keakon/chord/issues).
 
 If you are reporting a security issue, please open a [GitHub security advisory](https://github.com/keakon/chord/security/advisories/new) with reproduction steps and impact details.
 

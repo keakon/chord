@@ -130,7 +130,7 @@ permission:
 - Stay read-only; do not modify project files.
 ```
 
-这里最关键的是三点：
+这里有几点很关键：
 
 - 大多数模型只写 `limit.context` 就够了，也就是保证“输入 + 请求输出”不超过总窗口。
 - 某些 GPT 模型还额外有单独的输入上限。这时要配置 `limit.input`，让 Chord 知道何时在 prompt 过大前压缩；否则它会从 `limit.context` 中扣除有效请求输出后推导输入预算。

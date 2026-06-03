@@ -34,52 +34,6 @@ rather than by searching parent directories. That means:
 
 On the first run, if you launch `chord` in an interactive terminal and `config.yaml` is missing, Chord starts a one-time setup wizard. It writes a minimal `config.yaml` and, when needed, `auth.yaml`, reuses matching existing credentials from `auth.yaml` when possible, then prints the resolved file locations. Redirected stdin does not by itself make startup non-interactive; if Chord can still open the controlling TTY, the wizard uses that TTY. If no controlling TTY is available, it exits instead of waiting for input.
 
-## Streaming tool execution (early execution)
-
-Chord executes a small safe subset of tools *speculatively* while the model response
-is still streaming (as soon as tool arguments are complete), instead of waiting
-for the provider to fully finalize the response. This reduces the "finalize gap".
-
-- Always enabled; there is no `early_tool_execution` toggle.
-- Eligible tools: `read`, `grep`, `glob`, rollback-safe file mutation tools
-  (`write`, `edit`, `delete`), plus a conservative read-only subset of
-  `shell` (single command only; no pipes/redirects/`&&`/`;`):
-  - `pwd`, `ls`, `cat`, `which`
-  - `git status|log|diff|show|branch|rev-parse`
-- Not eligible: non-read-only `shell`, interactive/control tools, or any call that
-  requires permission action `ask`.
-- Speculative file mutations are real on-disk writes/deletes, but the runtime
-  captures pre-state first and rolls them back if finalize discards the call.
-  Within a turn, conflicting speculative file mutations for the same path are
-  skipped and left to the finalized execution path. Read-like speculative calls
-  are also skipped while *any* unpromoted speculative file mutation exists in
-  the same turn (regardless of path), so they never observe uncommitted file
-  state — at the cost of serializing read speculation behind in-flight writes.
-- Speculative results may be shown early in the UI, but they are only appended to
-  the conversation context after finalize validation.
-
-### Edit arguments, matching, and display
-
-`edit` receives the target file path as a structured `path` argument. Its
-`patch` argument normally contains hunk text: `@@` hunk headers, leading-space
-context lines, `-` removed lines, and `+` added lines. If a model accidentally
-includes Codex `apply_patch` envelope lines, Chord strips standalone
-`*** Begin Patch` / `*** End Patch` markers and a leading `*** Update File:`
-line when it matches the structured `path`. Add/delete/move operations,
-multi-file patches, and mismatched update paths are still rejected.
-
-`edit` uses Codex-style ordered matching for the hunk body: each hunk, and
-any `@@` function/class/test header attached to that hunk, matches the first
-occurrence after the current search position. When a hunk has multiple candidate
-locations, Chord applies the first match and includes the matched line number
-plus any other candidate line numbers in the tool result so the model can read
-back the area if needed. Hunks with no context/removal lines fail because there
-is no insertion point to match.
-
-While arguments stream, an `edit` tool card follows `write`-style path
-display: no file path is shown until Chord can parse the structured `path`;
-once parsed, the path is shown in the card header.
-
 ## Minimal provider config
 
 ### OpenRouter
@@ -1139,6 +1093,37 @@ context:
 
 Unset or non-positive threshold fields use the defaults above. Project-level
 `.chord/config.yaml` can override global config field by field.
+
+## Post-tool diagnostics
+
+After `edit` / `write` modifies a file, Chord can append language diagnostics to the tool result so the model sees compile or lint problems immediately. This is controlled by the `diagnostics` config and is enabled by default for Python (an LSP semantic backend with a Ruff quick fallback). Set `diagnostics.enabled: false` to skip the whole pipeline.
+
+For Python, two backends are used:
+
+- `diagnostics.python.semantic_backend` — the primary LSP server (default `pyright`). Its `server` field must match a server key under `lsp` so the language server is actually configured.
+- `diagnostics.python.quick_backend` — a one-shot fallback (default `ruff check`) used for large files, or when the semantic backend is unavailable.
+
+`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` decides when a file is large enough to use the quick backend instead of the semantic one; `run_semantic_when_quick_unavailable: true` forces the semantic backend even on large files when the quick backend is missing. Ruff quick diagnostics do not update the LSP sidebar — they appear only in `edit` / `write` results and note that full semantic diagnostics were skipped.
+
+Recommended Python skeleton:
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+
+diagnostics:
+  python:
+    semantic_backend:
+      server: pyright
+    quick_backend:
+      type: command
+      command: ruff
+```
+
+`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes how much appended diagnostics text is shown, prioritizing errors and warnings before info and hints. See the [Configuration cheatsheet](#configuration-cheatsheet) for the full field list.
 
 ## Provider/model diagnostics
 

@@ -29,26 +29,6 @@ Chord 将行为配置与凭据配置分开管理。
 
 首次在交互式终端里运行 `chord` 且 `config.yaml` 缺失时，Chord 会启动一次性的初始化向导。它会写入最小可用的 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示真实解析后的路径。stdin 被重定向本身不等于非交互；只要还能打开控制 TTY，向导仍会使用该 TTY。只有没有控制 TTY 时，它才会直接退出，不会等待输入。
 
-## 流式工具早执行
-
-模型仍在流式输出响应、工具参数刚完整时，Chord 会提前执行一小批安全的只读工具，而不必等服务商完成最终确认（`CompleteStream()` 返回）后才开始。这能显著缩短最终确认阶段的体感等待时间。
-
-- 始终启用，无 `early_tool_execution` 开关。
-- 允许早执行的工具：`read`、`grep`、`glob`，支持回滚的文件编辑工具（`write`、`edit`、`delete`），以及 `shell` 的保守只读子集（仅限单命令，不含管道/重定向/`&&`/`;` 等组合）：
-  - `pwd`、`ls`、`cat`、`which`
-  - `git status|log|diff|show|branch|rev-parse`
-- 不允许早执行：非只读 `shell`、交互/控制类工具，以及权限为 `ask` 的工具调用。
-- 提前执行的文件变更会真实落盘，但运行时会先捕获变更前状态；若最终确认阶段丢弃了该调用，则自动回滚。同一回合内若多个提前执行的文件变更命中同一路径，后续冲突调用会跳过，留给正式路径处理。同一回合内只要有任意尚未提交的提前执行文件变更（不限路径），后续的读类早执行都会跳过——这避免了读取未提交状态，代价是读早执行会被进行中的写早执行短暂阻塞。
-- 提前执行的结果可能提前显示在界面上，但只有在最终确认通过后才会追加进对话上下文；未通过的结果会被丢弃，界面显示为「推测执行，已丢弃（不属于上下文）」。
-
-### Edit 参数、匹配与展示
-
-`edit` 通过结构化的 `path` 参数接收目标文件路径；`patch` 参数通常包含 hunk 文本：`@@` hunk header、前导空格的上下文行、`-` 删除行和 `+` 新增行。如果模型意外带上 Codex `apply_patch` envelope 行，Chord 会移除独立成行的 `*** Begin Patch` / `*** End Patch` 标记，以及与结构化 `path` 匹配且位于开头的 `*** Update File:` 行。新增/删除/移动文件操作、多文件补丁和路径不匹配的 update 标记仍会被拒绝。
-
-`edit` 对 hunk body 采用 Codex 风格的顺序匹配：每个 hunk，以及附在该 hunk 上的 `@@` 函数 / 类 / 测试 header，都会从当前搜索位置之后选择第一处匹配。当某个 hunk 有多个候选位置时，Chord 会应用第一处匹配，并在工具结果中附带实际匹配行号和其他候选行号，方便模型按需重新 `read` 验证。没有任何上下文/删除行的 hunk 会失败，因为工具无法确定插入位置。
-
-参数流式输出期间，`edit` 工具卡采用与 `write` 类似的路径展示：在 Chord 能解析出结构化 `path` 前不显示文件路径；解析成功后再在工具卡标题中显示该路径。
-
 ## 最小 provider 配置
 
 ### ModelScope
@@ -973,6 +953,37 @@ context:
 ```
 
 未设置或非正数的字段使用默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
+
+## 工具后诊断
+
+`edit` / `write` 修改文件后，Chord 可以把语言诊断追加到工具结果里，让模型立刻看到编译或 lint 问题。这由 `diagnostics` 配置控制，默认对 Python 启用（LSP 语义后端 + Ruff quick 回退）。设 `diagnostics.enabled: false` 可整体关闭这条流水线。
+
+Python 使用两个后端：
+
+- `diagnostics.python.semantic_backend` —— 主 LSP 服务（默认 `pyright`）。其 `server` 字段必须与 `lsp` 下的某个 server key 一致，语言服务器才真正配置生效。
+- `diagnostics.python.quick_backend` —— 一次性回退命令（默认 `ruff check`），用于大文件，或语义后端不可用时。
+
+`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏——只出现在 `edit` / `write` 结果中，并提示完整语义诊断已跳过。
+
+推荐 Python 配置骨架：
+
+```yaml
+lsp:
+  pyright:
+    command: pyright-langserver
+    args: ["--stdio"]
+    file_types: [".py", ".pyi"]
+
+diagnostics:
+  python:
+    semantic_backend:
+      server: pyright
+    quick_backend:
+      type: command
+      command: ruff
+```
+
+`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加诊断文本的长度，并按错误/警告优先于 info/hint 的顺序展示。完整字段表见[配置字段速查表](#配置字段速查表)。
 
 ## Provider/model 诊断
 

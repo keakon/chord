@@ -289,3 +289,10 @@ send({"type": "send", "content": "Summarize the project structure."})
 - 完整权限沙箱
 
 更高层的部署方式，见 [chord-gateway](https://github.com/keakon/chord-gateway)。
+
+## 相关
+
+- [使用指南](./usage_CN.md)
+- [CLI — chord headless](./cli_CN.md#chord-headless)
+- [权限与安全](./permissions-and-safety_CN.md)
+- [常见问题排查](./troubleshooting_CN.md)

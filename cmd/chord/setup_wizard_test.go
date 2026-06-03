@@ -673,7 +673,7 @@ func TestRunInitialSetupWizardInfersGeminiDefaultsFromModelsEndpoint(t *testing.
 	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" {
 		t.Fatalf("provider api_url = %q", prov.APIURL)
 	}
-	if _, ok := prov.Models["gemini-3.1-pro-preview"]; !ok {
+	if _, ok := prov.Models["gemini-3.5-flash"]; !ok {
 		t.Fatalf("expected default gemini model, got %#v", prov.Models)
 	}
 }

@@ -130,7 +130,7 @@ permission:
 - Stay read-only; do not modify project files.
 ```
 
-Two practical points matter here:
+A few practical points matter here:
 
 - Most models only need `limit.context`: keep total input + output within that window.
 - Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it derives the input budget from `limit.context` minus effective requested output.
