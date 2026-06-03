@@ -15,6 +15,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed an OAuth credential refresh crash when the active auth state uses a negative credential-index sentinel.
 - `@` file completion now treats supported image/PDF files as attachments, hides unsupported media types for the current model, and marks unsupported or encrypted attachments in the composer/transcript.
 - Switching to a model without image/PDF input support now filters unsupported historical binary parts before provider requests while preserving historical tool-call structure.
+- Fixed the info panel's context `Bytes` display so fresh sessions start at zero user context and restored sessions immediately show the same post-reduction size and savings estimate used for the next request.
 
 ## 0.6.2 - 2026-06-02
 

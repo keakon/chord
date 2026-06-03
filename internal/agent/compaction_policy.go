@@ -47,6 +47,18 @@ func splitMessagesForCompactionWithSelections(messages []message.Message, recent
 }
 
 func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.Message {
+	return a.prepareMessagesForLLMWithOptions(messages, true)
+}
+
+func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Message) {
+	if a == nil {
+		return
+	}
+	a.clearLoopReductionCache(true)
+	_ = a.prepareMessagesForLLMWithOptions(messages, false)
+}
+
+func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) []message.Message {
 	if len(messages) == 0 {
 		if a != nil {
 			a.setContextReductionStats(ContextReductionStats{})
@@ -65,7 +77,9 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
 			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
-			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+			if rememberPrepared {
+				a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+			}
 			return prepared
 		}
 	}
@@ -76,11 +90,13 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		}
 	}
 	if a != nil {
-		if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
-			a.setCurrentRequestSurface(&stats, reused)
-			a.setContextReductionStats(stats)
-			a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
-			return reused
+		if rememberPrepared {
+			if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
+				a.setCurrentRequestSurface(&stats, reused)
+				a.setContextReductionStats(stats)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
+				return reused
+			}
 		}
 	}
 	stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(prepared)}
@@ -182,17 +198,21 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
-		if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, inputBudget) {
-			prepared = reuseStableReductionPrefix(previous.Messages, prepared)
-			stats = highLevelContextReductionStats(messages, prepared)
-			a.setCurrentRequestSurface(&stats, prepared)
-			if len(stats.ByToolAndRule) == 0 {
-				stats.ByToolAndRule = previous.Stats.ByToolAndRule
+		if rememberPrepared {
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && policy.shouldReuseStableReductionSurface(stats, previous.Stats, stats.TokensBefore, inputBudget) {
+				prepared = reuseStableReductionPrefix(previous.Messages, prepared)
+				stats = highLevelContextReductionStats(messages, prepared)
+				a.setCurrentRequestSurface(&stats, prepared)
+				if len(stats.ByToolAndRule) == 0 {
+					stats.ByToolAndRule = previous.Stats.ByToolAndRule
+				}
+				stats.ReusedStable = true
 			}
-			stats.ReusedStable = true
 		}
 		a.setContextReductionStats(stats)
-		a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+		if rememberPrepared {
+			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+		}
 	}
 	return prepared
 }

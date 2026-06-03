@@ -148,10 +148,10 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent).Render(contextValueStr)),
 			InfoPanelLineBg.Width(lineW).Render(gauge),
 		)
-		if currentBytes > 0 {
+		if currentBytes > 0 && msgCount > 0 {
 			bytesValue := bytefmt.Short(int64(currentBytes))
-			if reduction.Bytes > 0 && reduction.CurrentBytes > 0 {
-				requestBefore := reduction.CurrentBytes + reduction.Bytes
+			if reduction.Bytes > 0 {
+				requestBefore := currentBytes + reduction.Bytes
 				if requestBefore > 0 {
 					bytesValue = formatReductionPercentValue(bytesValue, formatPercent(float64(reduction.Bytes)/float64(requestBefore)))
 				}

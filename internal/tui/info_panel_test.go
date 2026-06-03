@@ -188,6 +188,40 @@ func TestInfoPanelShowsContextBytesAndReducedRatio(t *testing.T) {
 	}
 }
 
+func TestInfoPanelHidesContextBytesWhenNoMessages(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextBytes = 200_000
+	backend.contextLimit = 100_000
+	backend.contextMessageCount = 0
+	model := NewModel(backend)
+
+	plain := stripANSI(model.renderInfoPanel(50, 24))
+	if strings.Contains(plain, "Bytes:") {
+		t.Fatalf("info panel should not show context bytes before any messages, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Messages: 0") {
+		t.Fatalf("info panel should still show empty context message count, got:\n%s", plain)
+	}
+}
+
+func TestInfoPanelShowsReducedRatioWithoutCurrentReductionSurface(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 42_600
+	backend.contextBytes = 200_000
+	backend.contextLimit = 100_000
+	backend.contextMessageCount = 370
+	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500}
+	model := NewModel(backend)
+
+	plain := stripANSI(model.renderInfoPanel(50, 24))
+	if !strings.Contains(plain, "Bytes: 195.3 KB (↓60%)") {
+		t.Fatalf("info panel should show reduced byte ratio without request surface bytes, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Messages: 370") {
+		t.Fatalf("info panel should fall back to restored context message count, got:\n%s", plain)
+	}
+}
+
 func TestInfoPanelUsesSameReductionFormatForSidebarWidths(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 39_700

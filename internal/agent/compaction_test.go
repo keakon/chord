@@ -310,6 +310,54 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	}
 }
 
+func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *testing.T) {
+	a := &MainAgent{}
+	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
+		{Role: "user", Content: "u2"},
+	}
+
+	a.refreshVisibleContextReductionStats(msgs)
+	stats := a.currentMainContextReductionStats()
+	if stats.Bytes <= 0 || stats.CurrentBytes <= 0 {
+		t.Fatalf("visible reduction stats = %+v, want reduced bytes and current surface", stats)
+	}
+	a.loopReductionMu.Lock()
+	lastPreparedTurnID := a.lastPreparedLLMTurnID
+	lastPreparedPrefixLen := len(a.lastPreparedLLMRequestPrefix)
+	a.loopReductionMu.Unlock()
+	if lastPreparedTurnID != 0 || lastPreparedPrefixLen != 0 {
+		t.Fatalf("refresh should not remember a prepared request, turn=%d prefix_len=%d", lastPreparedTurnID, lastPreparedPrefixLen)
+	}
+}
+
+func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
+		{Role: "user", Content: "u2"},
+	}
+
+	result := a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir, Messages: msgs})
+	if result.MessageCount != len(msgs) {
+		t.Fatalf("MessageCount = %d, want %d", result.MessageCount, len(msgs))
+	}
+	stats := a.currentMainContextReductionStats()
+	if stats.Bytes <= 0 || stats.CurrentBytes <= 0 {
+		t.Fatalf("restored visible reduction stats = %+v, want reduced bytes and current surface", stats)
+	}
+	if gotRaw := a.GetContextBytes(); stats.CurrentBytes >= gotRaw {
+		t.Fatalf("CurrentBytes = %d, want less than raw restored bytes %d", stats.CurrentBytes, gotRaw)
+	}
+}
+
 func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
