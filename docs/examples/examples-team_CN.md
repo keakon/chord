@@ -15,7 +15,7 @@ providers:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.7:
+      claude-opus-4.8:
         limit:
           context: 1000000
           input: 1000000
@@ -27,9 +27,9 @@ providers:
 
 model_pools:
   thinking:
-    - anthropic/claude-opus-4.7
+    - anthropic/claude-opus-4.8
   fast:
-    - anthropic/claude-opus-4.7
+    - anthropic/claude-opus-4.8
 
 context:
   compaction:

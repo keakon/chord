@@ -47,7 +47,7 @@ For API-key setup, the wizard provides one API-key provider path. It asks for an
 - `/chat/completions` — OpenAI Chat Completions compatible gateways
 - `/models` — Gemini Generate Content base path
 
-Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-5.5`, `anthropic` / `claude-opus-4.7`, or `gemini` / `gemini-3.1-pro-preview`.
+Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-5.5`, `anthropic` / `claude-opus-4.8`, or `gemini` / `gemini-3.5-flash`.
 
 If your provider requires a proxy, the wizard can also write a proxy URL into `config.yaml`. It shows examples such as `http://127.0.0.1:1080` and `socks5://127.0.0.1:1080`.
 

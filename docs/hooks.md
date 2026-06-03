@@ -61,8 +61,8 @@ Every hook receives this JSON document on stdin:
   "agent_id": "main",
   "agent_kind": "main",
   "project_root": "/path/to/project",
-  "selected_model": "anthropic/claude-opus-4.7",
-  "running_model": "anthropic/claude-opus-4.7",
+  "selected_model": "anthropic/claude-opus-4.8",
+  "running_model": "anthropic/claude-opus-4.8",
   "data": {
     "tool_name": "shell",
     "args": { "command": "git status" }

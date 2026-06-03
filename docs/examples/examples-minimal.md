@@ -17,7 +17,7 @@ providers:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.7:
+      claude-opus-4.8:
         limit:
           context: 1000000
           input: 1000000
@@ -27,11 +27,11 @@ providers:
           effort: medium
           display: summarized
         modalities:
-          input: [text, image]
+          input: [text, image, pdf]
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.7
+    - anthropic/claude-opus-4.8
 
 context:
   compaction:
@@ -49,7 +49,7 @@ Set `ANTHROPIC_API_KEY` in your shell or replace the environment-variable refere
 ## Verify
 
 ```bash
-chord doctor models --model anthropic/claude-opus-4.7
+chord doctor models --model anthropic/claude-opus-4.8
 ```
 
 ## Common failures

@@ -16,7 +16,7 @@ A named, ordered list of `provider/model` (and `model@variant`) refs. Each agent
 
 ## Variant
 
-A named parameter preset for a single model — for example `claude-opus-4.7@high` selects a higher reasoning effort. Variants are defined under `models.<name>.variants` in `config.yaml` and referenced as `provider/model@variant` inside model pools.
+A named parameter preset for a single model — for example `claude-opus-4.8@high` selects a higher reasoning effort. Variants are defined under `models.<name>.variants` in `config.yaml` and referenced as `provider/model@variant` inside model pools.
 
 ## Compaction
 

@@ -47,7 +47,7 @@ codesign --force --sign - /path/to/chord
 - `/chat/completions` —— OpenAI Chat Completions 兼容网关
 - `/models` —— Gemini Generate Content 基础路径
 
-Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-5.5`、`anthropic` / `claude-opus-4.7`、`gemini` / `gemini-3.1-pro-preview`。
+Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-5.5`、`anthropic` / `claude-opus-4.8`、`gemini` / `gemini-3.5-flash`。
 
 如果 provider 需要代理，向导也可以把 proxy URL 写入 `config.yaml`，并给出 `http://127.0.0.1:1080`、`socks5://127.0.0.1:1080` 这类示例。
 

@@ -206,13 +206,15 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.1-pro-preview:
+      gemini-3.5-flash:
         limit:
           context: 1048576
           output: 65536
+        modalities:
+          input: [text, image, pdf]
 ```
 
-For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.1-pro-preview`, is the model ID sent to Gemini.
+For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.5-flash`, is the model ID sent to Gemini.
 
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
@@ -238,6 +240,8 @@ providers:
         limit:
           context: 1048576
           output: 65536
+        modalities:
+          input: [text, image, pdf]
         thinking:
           budget: -1
           include_thoughts: true
@@ -245,6 +249,8 @@ providers:
         limit:
           context: 1048576
           output: 65536
+        modalities:
+          input: [text, image, pdf]
         thinking:
           budget: -1
           level: high
@@ -429,7 +435,7 @@ may reference pool names to restrict access; they cannot define inline pools.
 # ~/.config/chord/config.yaml or .chord/config.yaml
 model_pools:
   thinking:
-    - anthropic/claude-opus-4.7
+    - anthropic/claude-opus-4.8
     - openai/gpt-5.5
   non-thinking:
     - anthropic/claude-sonnet-4
@@ -537,6 +543,8 @@ model_templates:
           input: 10
           output: 60
           cache_read: 1
+    modalities:
+      input: [text, image, pdf]
 
   gpt-1m: &gpt-1m
     limit:
@@ -577,6 +585,8 @@ model_templates:
           input: 5
           output: 30
           cache_read: 0.5
+    modalities:
+      input: [text, image, pdf]
 
   claude-1m: &claude-1m
     limit:
@@ -606,7 +616,7 @@ model_templates:
           effort: xhigh
           display: summarized
     modalities:
-      input: [text, image]
+      input: [text, image, pdf]
 
 providers:
   codex:
@@ -631,7 +641,7 @@ providers:
     api_url: https://api.anthropic.com/v1/messages
     supported_service_tiers: [fast]
     models:
-      claude-opus-4.7: *claude-1m
+      claude-opus-4.8: *claude-1m
 ```
 
 Model fields used in the example:
@@ -654,7 +664,7 @@ Model fields used in the example:
   valid for `type: enabled` or `adaptive`; rejected under `disabled`); variants
   can override `thinking.effort` and `thinking.display`.
 - `variants`: named model parameter presets. Use a model ref like
-  `openai/gpt-5.5@high` or `anthropic/claude-opus-4.7@xhigh` to select one.
+  `openai/gpt-5.5@high` or `anthropic/claude-opus-4.8@xhigh` to select one.
 - `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
   - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI priority (`fast`) or flex (`slow`).
   - `cost.input_tiers`: optional long-context pricing overrides. Each entry uses `above_input_tokens` as a strict threshold; when billable input is greater than that value, Chord uses the highest matching tier's `input`, `output`, `cache_read`, and optional `cache_write` prices before applying any service-tier multiplier.

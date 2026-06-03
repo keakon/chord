@@ -16,7 +16,7 @@
 
 ## Variant
 
-模型的命名参数预设——例如 `claude-opus-4.7@high` 选高 reasoning effort。Variant 在 `config.yaml` 的 `models.<name>.variants` 下定义，在模型池中以 `provider/model@variant` 形式引用。
+模型的命名参数预设——例如 `claude-opus-4.8@high` 选高 reasoning effort。Variant 在 `config.yaml` 的 `models.<name>.variants` 下定义，在模型池中以 `provider/model@variant` 形式引用。
 
 ## Compaction（上下文压缩）
 
