@@ -146,6 +146,23 @@ func TestEditToolReplacesInsertsAndDeletes(t *testing.T) {
 	}
 }
 
+func TestEditToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "one\nTWO\nthree\n" {
+		t.Fatalf("file = %q", got)
+	}
+}
+
 func TestEditToolSupportsParentDirectoryPath(t *testing.T) {
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "repo")
