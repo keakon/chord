@@ -126,6 +126,62 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 	}
 }
 
+func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+	turnID := a.turn.ID
+	for _, callID := range []string{"tool-done-1", "tool-running-2", "tool-done-3", "tool-queued-4"} {
+		a.turn.recordPendingToolCall(PendingToolCall{CallID: callID, Name: "read", ArgsJSON: `{"path":"README.md"}`})
+		a.turn.recordStreamingToolCall(PendingToolCall{CallID: callID, Name: "read", ArgsJSON: `{"path":"README.md"}`})
+	}
+	a.turn.markToolCallCompleted("tool-done-1")
+	a.turn.markToolCallCompleted("tool-done-3")
+
+	if cancelled := a.CancelCurrentTurn(); !cancelled {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+
+	a.handleTurnCancelled(Event{
+		Type:   EventTurnCancelled,
+		TurnID: turnID,
+		Payload: &TurnCancelledPayload{
+			TurnID:              turnID,
+			MarkToolCallsFailed: true,
+			Calls: []PendingToolCall{
+				{CallID: "tool-done-1", Name: "read", ArgsJSON: `{"path":"README.md"}`},
+				{CallID: "tool-running-2", Name: "read", ArgsJSON: `{"path":"README.md"}`},
+				{CallID: "tool-done-3", Name: "read", ArgsJSON: `{"path":"README.md"}`},
+				{CallID: "tool-queued-4", Name: "read", ArgsJSON: `{"path":"README.md"}`},
+			},
+		},
+	})
+
+	events := drainAgentEvents(a.Events())
+	failedByCallID := make(map[string]ToolResultStatus)
+	for _, evt := range events {
+		if res, ok := evt.(ToolResultEvent); ok {
+			failedByCallID[res.CallID] = res.Status
+		}
+	}
+	if _, ok := failedByCallID["tool-done-1"]; ok {
+		t.Fatal("completed tool-done-1 unexpectedly received terminal cancellation result")
+	}
+	if _, ok := failedByCallID["tool-done-3"]; ok {
+		t.Fatal("completed tool-done-3 unexpectedly received terminal cancellation result")
+	}
+	if got := failedByCallID["tool-running-2"]; got != ToolResultStatusError {
+		t.Fatalf("tool-running-2 status = %q, want %q", got, ToolResultStatusError)
+	}
+	if got := failedByCallID["tool-queued-4"]; got != ToolResultStatusError {
+		t.Fatalf("tool-queued-4 status = %q, want %q", got, ToolResultStatusError)
+	}
+}
+
 func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

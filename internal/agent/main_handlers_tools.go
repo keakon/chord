@@ -29,6 +29,7 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	streaming := turn.drainStreamingToolCalls()
 	failedExec := turn.cancelPendingToolCalls()
 	merged := mergePendingToolCalls(streaming, failedExec)
+	merged = turn.filterCompletedToolCalls(merged)
 	a.clearToolTraceForCalls(merged)
 	if len(merged) == 0 {
 		return
@@ -243,7 +244,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		log.Errorf("handleToolResult: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	a.turn.resolvePendingToolCall(payload.CallID)
+	a.turn.markToolCallCompleted(payload.CallID)
 	a.loopState.markProgress()
 	if payload.Error == nil {
 		if isVerificationLikeToolResult(payload, rawToolResultForVerification(payload)) {

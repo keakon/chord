@@ -2350,24 +2350,34 @@ func TestToolResultSuccessIsNotOverwrittenByLateCancellation(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-late-cancel",
 		Name:     "read",
+		AgentID:  "",
 		ArgsJSON: `{"path":"README.md"}`,
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-late-cancel",
 		Name:     "read",
+		AgentID:  "",
 		ArgsJSON: `{"path":"README.md"}`,
 		Result:   "success result",
 		Status:   agent.ToolResultStatusSuccess,
 	}})
+	block, ok := m.viewport.FindBlockByToolID("call-late-cancel")
+	if !ok {
+		t.Fatal("expected tool block after success")
+	}
+	if block.ResultStatus != agent.ToolResultStatusSuccess {
+		t.Fatalf("success ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusSuccess)
+	}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-late-cancel",
 		Name:     "read",
+		AgentID:  "",
 		ArgsJSON: `{"path":"README.md"}`,
 		Result:   "Error:\ncontext canceled",
 		Status:   agent.ToolResultStatusError,
 	}})
 
-	block, ok := m.viewport.FindBlockByToolID("call-late-cancel")
+	block, ok = m.viewport.FindBlockByToolID("call-late-cancel")
 	if !ok {
 		t.Fatal("expected tool block")
 	}

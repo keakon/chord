@@ -273,7 +273,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	))
 
 	// Emit tool result to TUI so the tool call block shows its result.
-	s.turn.resolvePendingToolCall(result.CallID)
+	s.turn.markToolCallCompleted(result.CallID)
 	s.parent.emitToTUI(ToolResultEvent{
 		CallID:      result.CallID,
 		Name:        result.Name,

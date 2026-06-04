@@ -61,8 +61,9 @@ type Turn struct {
 	// because external cancellation paths need to snapshot it safely.
 	// Only IDs from the finalized LLM response (handleLLMResponse) are stored here
 	// so persistence/cancel never sees stream-only call_ids.
-	pendingToolMu   sync.Mutex
-	PendingToolMeta map[string]PendingToolCall
+	pendingToolMu        sync.Mutex
+	PendingToolMeta      map[string]PendingToolCall
+	completedToolCallIDs map[string]struct{}
 	// streamingToolCalls holds speculative tool metadata from SSE tool_use_start
 	// before the response is finalized. Used only for TUI cancel/fail bookkeeping;
 	// it must never be persisted until merged into PendingToolMeta.
@@ -1580,7 +1581,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	// Separate tools into completed vs truly cancelled
 	var reallyCancelled []PendingToolCall
 	completedCount := 0
-	for _, call := range payload.Calls {
+	for _, call := range a.turn.filterCompletedToolCalls(payload.Calls) {
 		if result, ok := completedResults[call.CallID]; ok {
 			// Tool completed execution: persist and emit immediately so the
 			// result survives cancellation/restart and can be reused on resume.

@@ -638,6 +638,7 @@ func (s *SubAgent) newTurn() *Turn {
 		cancelledExec := s.turn.cancelPendingToolCalls()
 		cancelledStream := s.turn.drainStreamingToolCalls()
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
+		merged = s.turn.filterCompletedToolCalls(merged)
 		if len(merged) > 0 {
 			persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 			if persistedResults > 0 {

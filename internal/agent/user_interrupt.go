@@ -52,6 +52,7 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause
 	cancelledExec := s.turn.cancelPendingToolCalls()
 	cancelledStream := s.turn.drainStreamingToolCalls()
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
+	merged = s.turn.filterCompletedToolCalls(merged)
 
 	persistedResults := s.persistInterruptedToolResults(merged, status, cause)
 	if persistedResults > 0 {

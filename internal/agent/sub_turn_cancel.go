@@ -27,6 +27,7 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	turn.nextToolBatch = 0
 	turn.Cancel()
 	merged := turn.snapshotPendingToolCalls()
+	merged = turn.filterCompletedToolCalls(merged)
 	turn.PendingToolMeta = nil
 	persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
 	if persistedResults > 0 {

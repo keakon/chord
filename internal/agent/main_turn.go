@@ -39,6 +39,7 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 		cancelledExec := t.cancelPendingToolCalls()
 		cancelledStream := t.drainStreamingToolCalls()
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
+		merged = t.filterCompletedToolCalls(merged)
 		a.clearToolTraceForCalls(merged)
 		a.sendEvent(Event{
 			Type:   EventTurnCancelled,
@@ -314,6 +315,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	cancelledExec := turn.cancelPendingToolCalls()
 	cancelledStream := turn.drainStreamingToolCalls()
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
+	merged = turn.filterCompletedToolCalls(merged)
 
 	// Separate tools into completed vs truly interrupted
 	var reallyInterrupted []PendingToolCall

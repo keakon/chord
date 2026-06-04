@@ -19,13 +19,36 @@ func (t *Turn) recordPendingToolCall(call PendingToolCall) {
 	t.PendingToolMeta[call.CallID] = call
 }
 
-func (t *Turn) resolvePendingToolCall(callID string) {
+func (t *Turn) markToolCallCompleted(callID string) {
 	if t == nil || callID == "" {
 		return
 	}
 	t.pendingToolMu.Lock()
 	defer t.pendingToolMu.Unlock()
+	if t.completedToolCallIDs == nil {
+		t.completedToolCallIDs = make(map[string]struct{})
+	}
+	t.completedToolCallIDs[callID] = struct{}{}
 	delete(t.PendingToolMeta, callID)
+}
+
+func (t *Turn) filterCompletedToolCalls(calls []PendingToolCall) []PendingToolCall {
+	if t == nil || len(calls) == 0 {
+		return calls
+	}
+	t.pendingToolMu.Lock()
+	defer t.pendingToolMu.Unlock()
+	if len(t.completedToolCallIDs) == 0 {
+		return calls
+	}
+	out := make([]PendingToolCall, 0, len(calls))
+	for _, call := range calls {
+		if _, completed := t.completedToolCallIDs[call.CallID]; completed {
+			continue
+		}
+		out = append(out, call)
+	}
+	return out
 }
 
 func (t *Turn) updatePendingToolCall(call PendingToolCall) {

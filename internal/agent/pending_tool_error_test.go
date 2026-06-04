@@ -481,6 +481,31 @@ func TestSubAgentDrainPendingToolFailureSets(t *testing.T) {
 	}
 }
 
+func TestSubAgentCancelDoesNotEmitTerminalResultForCompletedToolCalls(t *testing.T) {
+	parent := newTestMainAgent(t, t.TempDir())
+	s := newPersistenceTestSubAgent(parent, "agent-1")
+	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-done", Name: "read", ArgsJSON: `{"path":"done"}`, AgentID: s.instanceID})
+	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-running", Name: "read", ArgsJSON: `{"path":"running"}`, AgentID: s.instanceID})
+	s.turn.PendingToolCalls.Store(2)
+	s.turn.markToolCallCompleted("tool-done")
+
+	s.cancelCurrentTurnFromLoop()
+
+	events := drainAgentEvents(parent.Events())
+	seen := make(map[string]ToolResultStatus)
+	for _, evt := range events {
+		if res, ok := evt.(ToolResultEvent); ok {
+			seen[res.CallID] = res.Status
+		}
+	}
+	if _, ok := seen["tool-done"]; ok {
+		t.Fatal("completed subagent tool unexpectedly received terminal cancellation result")
+	}
+	if got := seen["tool-running"]; got != ToolResultStatusCancelled {
+		t.Fatalf("tool-running status = %q, want %q", got, ToolResultStatusCancelled)
+	}
+}
+
 func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 	var events []AgentEvent
 	emitFailedToolResults(func(evt AgentEvent) {
