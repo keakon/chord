@@ -17,6 +17,22 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
+## 性能实测
+
+我们在一个[真实数据库系统任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)上对比了 Chord v0.6.3 和 Codex-CLI v0.136.0：为 Pebble 实现 durability wait API。该任务并非简单的增删改查——需要理解 commit/WAL sync 和并发语义，跨越写入路径、事件监听、DB 生命周期等多个子系统进行推理，最终生成 8 个文件、853 行代码的补丁。
+
+两者均使用 GPT-5.5（xhigh）：
+
+| 指标 | Chord v0.6.3 | Codex-CLI v0.136.0 | 改进 |
+|------|--------------|---------------------|------|
+| **时间** | 48 分钟 | 63 分钟 | **快 24%** |
+| **API 调用** | 93 次 | 118 次 | **少 21%** |
+| **输入 tokens** | 6.86M | 18.47M | **少 63%** |
+| **输出 tokens** | 25K | 74K | **少 66%** |
+| **缓存读取 tokens** | 6.55M | 17.64M | **少 63%** |
+| **成本** | **$5.58** | **$15.15** | **省 63%** |
+
+
 ## 为什么选 Chord
 
 <CardGrid>

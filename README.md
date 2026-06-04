@@ -8,11 +8,27 @@
 
 - Companion gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway) — drive Chord from WeChat, Feishu, and other chat surfaces
 
+## Performance
+
+We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems — producing a patch of 853 lines across 8 files.
+
+Both used GPT-5.5 (xhigh):
+
+| Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
+|--------|--------------|---------------------|-------------|
+| **Time** | 48 minutes | 63 minutes | **24% faster** |
+| **API calls** | 93 | 118 | **21% fewer** |
+| **Input tokens** | 6.86M | 18.47M | **63% fewer** |
+| **Output tokens** | 25K | 74K | **66% fewer** |
+| **Cache read tokens** | 6.55M | 17.64M | **63% fewer** |
+| **Cost** | **$5.58** | **$15.15** | **63% cheaper** |
+
 ## Why Chord
 
 Start with the core experience you notice immediately:
 
 - **Stable for the long haul.** Before a long conversation approaches the model's token limit, Chord can compact earlier turns in the background; once compaction finishes, it atomically replaces the old history and keeps running while preserving the context needed for follow-up work. Paired with `/loop`, complex tasks can run continuously for hours.
+
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
 - **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.

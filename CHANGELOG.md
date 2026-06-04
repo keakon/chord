@@ -2,7 +2,14 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.6.3 - 2026-06-05
+
+### Highlights
+
+- Multimodal: PDF input support across providers and built-in `view_image` tool for local images
+- Context reduction now uses typed summaries for large tool results, preserving key information
+- Unload idle LSP/MCP resources to reduce memory footprint
+- Improved `edit` patch tolerance and cleaner TUI tool result display
 
 ### Features
 
