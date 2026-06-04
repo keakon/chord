@@ -1096,6 +1096,47 @@ func TestRenderInfoPanelMarksUnsupportedFastServiceTier(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelShowsRunningModelWhileBusy(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.providerModelRef = "openai/gpt-5.5"
+	backend.runningModelRef = "openai/gpt-5.4"
+	backend.serviceTierEnabled = true
+	backend.serviceTier = config.ServiceTierFast
+	backend.effectiveServiceTier = config.ServiceTierStandard
+	m := NewModelWithSize(backend, 100, 24)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	out := m.renderInfoPanel(80, 20)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "openai/gpt-5.4") {
+		t.Fatalf("info panel = %q, want running model", plain)
+	}
+	if strings.Contains(plain, "openai/gpt-5.5") || strings.Contains(plain, "->") {
+		t.Fatalf("info panel = %q, should not show selected model transition while busy", plain)
+	}
+	if !strings.Contains(plain, "tier: fast") {
+		t.Fatalf("info panel = %q, want current fast tier shown", plain)
+	}
+	if !strings.Contains(out, ";9m") {
+		t.Fatalf("info panel = %q, unsupported fast tier value should remain struck through", out)
+	}
+}
+
+func TestRenderInfoPanelShowsSelectedModelWhileIdle(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.providerModelRef = "openai/gpt-5.5"
+	backend.runningModelRef = "openai/gpt-5.4"
+	m := NewModelWithSize(backend, 100, 24)
+
+	plain := stripANSI(m.renderInfoPanel(80, 20))
+	if !strings.Contains(plain, "openai/gpt-5.5") {
+		t.Fatalf("info panel = %q, want selected model", plain)
+	}
+	if strings.Contains(plain, "openai/gpt-5.4") || strings.Contains(plain, "->") {
+		t.Fatalf("info panel = %q, should not show running model transition while idle", plain)
+	}
+}
+
 func TestRenderInfoPanelMarksUnsupportedSlowServiceTier(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.serviceTier = config.ServiceTierSlow
@@ -5177,6 +5218,7 @@ func TestNarrowStatusBarShowsRunningModelRefVerbatim(t *testing.T) {
 	m := NewModelWithSize(a, 80, 24)
 	m.mode = ModeNormal
 	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	plain := stripANSI(m.renderStatusBar())
 	want := "sample/gpt-5.5@xhigh"
@@ -5196,6 +5238,7 @@ func TestNarrowStatusBarDoesNotLeakVariantToFallbackModel(t *testing.T) {
 	m := NewModelWithSize(a, 80, 24)
 	m.mode = ModeNormal
 	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	plain := stripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1") {
@@ -5216,6 +5259,7 @@ func TestNarrowStatusBarShowsFallbackModelWithoutVariantWhenPrimaryHasNoVariant(
 	m := NewModelWithSize(a, 80, 24)
 	m.mode = ModeNormal
 	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	plain := stripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1") {
@@ -5223,6 +5267,32 @@ func TestNarrowStatusBarShowsFallbackModelWithoutVariantWhenPrimaryHasNoVariant(
 	}
 	if strings.Contains(plain, "@") {
 		t.Fatalf("status bar should not show variant for fallback when primary has none; got %q", plain)
+	}
+}
+
+func TestStatusBarShowsRunningModelWhileBusy(t *testing.T) {
+	events := make(chan agent.AgentEvent, 1)
+	a := &sessionControlAgent{
+		events:               events,
+		providerModelRef:     "openai/gpt-5.5",
+		runningModelRef:      "openai/gpt-5.4",
+		serviceTier:          config.ServiceTierFast,
+		effectiveServiceTier: config.ServiceTierStandard,
+	}
+	m := NewModelWithSize(a, 220, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	plain := stripANSI(m.renderStatusBar())
+	if !strings.Contains(plain, "openai/gpt-5.4") {
+		t.Fatalf("status bar should show running model; got %q", plain)
+	}
+	if strings.Contains(plain, "openai/gpt-5.5") || strings.Contains(plain, "->") {
+		t.Fatalf("status bar should not show selected model transition while busy; got %q", plain)
+	}
+	if strings.Contains(plain, "TIER fast") {
+		t.Fatalf("status bar should show current effective tier while busy; got %q", plain)
 	}
 }
 
@@ -5237,6 +5307,7 @@ func TestNarrowStatusBarShowsFallbackVariantWhenRunningModelRefIncludesVariant(t
 	m := NewModelWithSize(a, 80, 24)
 	m.mode = ModeNormal
 	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	plain := stripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1@high") {
@@ -5371,8 +5442,11 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 		t.Fatalf("backend focused = %q, want agent-1", got)
 	}
 	after := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(after, "worker/review@high") {
-		t.Fatalf("info panel after agent switch = %q, want worker/review@high", after)
+	if !strings.Contains(after, "worker/review") {
+		t.Fatalf("info panel after agent switch = %q, want worker/review", after)
+	}
+	if strings.Contains(after, "worker/review@high") {
+		t.Fatalf("info panel after idle agent switch should show selected model without running variant: %q", after)
 	}
 	if strings.Contains(after, "main/huge") {
 		t.Fatalf("info panel after agent switch should not keep stale main model: %q", after)
@@ -6619,7 +6693,7 @@ func TestViewRefreshesStatusBarForTransientStateChanges(t *testing.T) {
 		{
 			name: "hidden model pill",
 			mutate: func(m *Model, backend *sessionControlAgent) {
-				backend.runningModelRef = "anthropic/claude-opus-4.6"
+				backend.providerModelRef = "anthropic/claude-opus-4.6"
 				m.invalidateStatusBarAgentSnapshot()
 			},
 			want: "claude-opus-4.6",

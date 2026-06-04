@@ -1583,6 +1583,7 @@ func TestRenderInfoPanelModelLineDoesNotLeakVariantToFallbackModel(t *testing.T)
 	backend.runningModelRef = "sample/glm-5.1"
 	backend.runningVariant = "xhigh"
 	m := NewModel(backend)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	modelLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "MODEL")
 	if len(modelLines) < 1 {
 		t.Fatalf("MODEL section missing lines: %#v", modelLines)
@@ -1598,6 +1599,7 @@ func TestRenderInfoPanelModelLineShowsFallbackVariantWhenRunningRefIncludesVaria
 	backend.runningModelRef = "sample/glm-5.1@high"
 	backend.runningVariant = "xhigh"
 	m := NewModel(backend)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	modelLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "MODEL")
 	if len(modelLines) < 1 {
 		t.Fatalf("MODEL section missing lines: %#v", modelLines)

@@ -12,7 +12,6 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/tui/modelref"
 )
 
 const (
@@ -66,8 +65,7 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 }
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
-	// RunningModelRef may temporarily omit provider or @variant; backfill from selected ref.
-	modelDisplay := modelref.FormatRunningModelRefForDisplay(m.agent.RunningModelRef(), m.agent.ProviderModelRef(), m.agent.RunningVariant(), lineW)
+	modelDisplay := formatModelRefForRequestState(m.agent.RunningModelRef(), m.agent.ProviderModelRef(), m.agent.RunningVariant(), lineW, m.isFocusedAgentBusy())
 	modelShown := modelDisplay
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),
@@ -85,6 +83,7 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	}
 	if poolNames := m.agent.PoolNames(); len(poolNames) > 1 {
 		if pool := strings.TrimSpace(m.agent.CurrentPoolName()); pool != "" {
+			pool = m.pendingPoolSwitch.display(pool, m.isFocusedAgentBusy())
 			modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Pool: "+pool)))
 		}
 	}

@@ -242,7 +242,8 @@ type Model struct {
 	search SearchModel
 
 	// Model selector state
-	modelSelect modelSelectState
+	modelSelect       modelSelectState
+	pendingPoolSwitch pendingPoolSwitchState
 
 	// MCP server selector state (/mcp)
 	mcpSelect mcpSelectState

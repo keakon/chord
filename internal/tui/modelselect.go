@@ -14,6 +14,21 @@ type modelSwitchResultMsg struct {
 	err error
 }
 
+type pendingPoolSwitchState struct {
+	from string
+	to   string
+}
+
+func (s pendingPoolSwitchState) display(currentPool string, busy bool) string {
+	if !busy || strings.TrimSpace(s.from) == "" || strings.TrimSpace(s.to) == "" {
+		return strings.TrimSpace(currentPool)
+	}
+	if strings.TrimSpace(currentPool) != strings.TrimSpace(s.to) {
+		return strings.TrimSpace(currentPool)
+	}
+	return strings.TrimSpace(s.from) + " -> " + strings.TrimSpace(s.to)
+}
+
 type modelSelectState struct {
 	target     agent.ModelPoolSelectorTarget
 	poolNames  []string
@@ -28,6 +43,13 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 		return nil
 	}
 	ag := m.agent
+	setPending := func(currentPool string) {
+		if m.isFocusedAgentBusy() {
+			m.pendingPoolSwitch = pendingPoolSwitchState{from: currentPool, to: pool}
+		} else {
+			m.pendingPoolSwitch = pendingPoolSwitchState{}
+		}
+	}
 	switch target.Kind {
 	case agent.ModelPoolSelectorTargetAgentOverride:
 		currentPool := ""
@@ -39,13 +61,16 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 		if pool == currentPool {
 			return nil
 		}
+		setPending(currentPool)
 		return func() tea.Msg {
 			return modelSwitchResultMsg{err: ag.SetAgentModelPool(target.AgentName, pool)}
 		}
 	default:
-		if pool == ag.MainModelPoolName() {
+		currentPool := ag.MainModelPoolName()
+		if pool == currentPool {
 			return nil
 		}
+		setPending(currentPool)
 		return func() tea.Msg {
 			return modelSwitchResultMsg{err: ag.SetCurrentModelPool(pool)}
 		}

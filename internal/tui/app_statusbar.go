@@ -81,18 +81,20 @@ func (m *Model) pendingQuitFingerprint(now time.Time) string {
 }
 
 type statusBarAgentSnapshot struct {
-	currentRole    string
-	viewingLabel   string
-	viewingColor   string
-	sessionID      string
-	modelRef       string
-	modelVariant   string
-	proxyInUse     bool
-	mcpPill        string
-	tokenUsage     message.TokenUsage
-	cost           float64
-	contextCurrent int
-	contextLimit   int
+	currentRole      string
+	viewingLabel     string
+	viewingColor     string
+	sessionID        string
+	modelRef         string
+	selectedModelRef string
+	modelVariant     string
+	busy             bool
+	proxyInUse       bool
+	mcpPill          string
+	tokenUsage       message.TokenUsage
+	cost             float64
+	contextCurrent   int
+	contextLimit     int
 }
 
 type statusBarInputs struct {
@@ -214,11 +216,13 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 			snap.sessionID = strings.TrimSpace(summary.ID)
 		}
 		snap.modelRef = strings.TrimSpace(m.agent.RunningModelRef())
-		snap.modelRef = modelref.EnsureRefShowsProvider(snap.modelRef, strings.TrimSpace(m.agent.ProviderModelRef()))
+		snap.selectedModelRef = strings.TrimSpace(m.agent.ProviderModelRef())
+		snap.busy = m.isFocusedAgentBusy()
+		snap.modelRef = modelref.EnsureRefShowsProvider(snap.modelRef, snap.selectedModelRef)
 		snap.modelVariant = m.agent.RunningVariant()
 		ref := snap.modelRef
 		if ref == "" {
-			ref = strings.TrimSpace(m.agent.ProviderModelRef())
+			ref = snap.selectedModelRef
 		}
 		snap.proxyInUse = m.agent.ProxyInUseForRef(ref)
 		// MCP pill intentionally omitted from the status bar: space is limited and MCP is not critical status info.
@@ -383,7 +387,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -417,7 +421,9 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		snap.contextLimit,
 		snap.proxyInUse,
 		len(snap.modelRef),
+		len(snap.selectedModelRef),
 		len(snap.modelVariant),
+		snap.busy,
 	)
 	b.WriteByte('|')
 	b.WriteString(string(statusActivity.Type))
@@ -425,6 +431,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteString(statusActivity.Detail)
 	b.WriteByte('|')
 	b.WriteString(snap.modelRef)
+	b.WriteByte('|')
+	b.WriteString(snap.selectedModelRef)
 	b.WriteByte('|')
 	b.WriteString(snap.modelVariant)
 	b.WriteByte('|')

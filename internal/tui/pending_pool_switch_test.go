@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,69 @@ func TestBusyPoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 	}
 	if len(backend.setCurrentModelPoolCalls) != 1 || backend.setCurrentModelPoolCalls[0] != "fast" {
 		t.Fatalf("SetCurrentModelPool calls = %v, want [fast]", backend.setCurrentModelPoolCalls)
+	}
+}
+
+func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
+	m, backend := newPoolSwitchModel()
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.mainModelPool = "slow"
+	backend.currentPoolByFocus = map[string]string{"": "slow"}
+	backend.providerModelRef = "fast-provider/gpt-5.5"
+	backend.runningModelRef = "slow-provider/gpt-5.4"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	m.modelSelect = modelSelectState{
+		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
+		poolNames:  []string{"slow", "fast"},
+		poolCursor: 1,
+		prevMode:   ModeNormal,
+	}
+	runCmdTree(m.selectPoolAtCursor())
+	backend.currentPoolByFocus[""] = "fast"
+	backend.mainModelPool = "fast"
+
+	plain := stripANSI(m.renderInfoPanel(100, 20))
+	if !strings.Contains(plain, "Pool: slow -> fast") {
+		t.Fatalf("info panel = %q, want pool transition", plain)
+	}
+	if !strings.Contains(plain, "slow-provider/gpt-5.4") {
+		t.Fatalf("info panel = %q, want running model while busy", plain)
+	}
+	if strings.Contains(plain, "fast-provider/gpt-5.5") || strings.Contains(plain, "slow-provider/gpt-5.4 ->") {
+		t.Fatalf("info panel = %q, should not show model transition", plain)
+	}
+}
+
+func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
+	m, backend := newPoolSwitchModel()
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.mainModelPool = "slow"
+	backend.currentPoolByFocus = map[string]string{"": "slow"}
+	backend.providerModelRef = "fast-provider/gpt-5.5"
+	backend.runningModelRef = "slow-provider/gpt-5.4"
+
+	m.modelSelect = modelSelectState{
+		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
+		poolNames:  []string{"slow", "fast"},
+		poolCursor: 1,
+		prevMode:   ModeNormal,
+	}
+	runCmdTree(m.selectPoolAtCursor())
+	backend.currentPoolByFocus[""] = "fast"
+	backend.mainModelPool = "fast"
+
+	plain := stripANSI(m.renderInfoPanel(100, 20))
+	if !strings.Contains(plain, "Pool: fast") {
+		t.Fatalf("info panel = %q, want selected pool", plain)
+	}
+	if strings.Contains(plain, "Pool: slow -> fast") || strings.Contains(plain, "->") {
+		t.Fatalf("info panel = %q, should not show transition while idle", plain)
+	}
+	if !strings.Contains(plain, "fast-provider/gpt-5.5") {
+		t.Fatalf("info panel = %q, want selected model while idle", plain)
 	}
 }
 

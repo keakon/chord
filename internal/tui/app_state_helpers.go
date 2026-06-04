@@ -207,7 +207,9 @@ type viewCacheState struct {
 	cachedStatusBarSessionValue        string
 	cachedStatusBarSessionShown        string
 	cachedModelPillRef                 string
+	cachedModelPillSelectedRef         string
 	cachedModelPillVariant             string
+	cachedModelPillBusy                bool
 	cachedModelPillEffW                int
 	cachedModelPillLeftW               int
 	cachedModelPill                    string

@@ -215,6 +215,7 @@ func (m *Model) handleProjectUsageLoaded(msg projectUsageLoadedMsg) tea.Cmd {
 
 func (m *Model) handleModelSwitchResult(msg modelSwitchResultMsg) tea.Cmd {
 	if msg.err != nil {
+		m.pendingPoolSwitch = pendingPoolSwitchState{}
 		block := &Block{
 			ID:      m.nextBlockID,
 			Type:    BlockError,
