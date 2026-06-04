@@ -366,6 +366,24 @@ func (m *Manager) SidebarEntries() []SidebarServerEntry {
 	return out
 }
 
+// LoadedServerNames returns the names of currently connected LSP servers.
+func (m *Manager) LoadedServerNames() []string {
+	if m == nil {
+		return nil
+	}
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	if len(m.clients) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(m.clients))
+	for name := range m.clients {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (m *Manager) notifySidebarChanged() {
 	if m == nil || m.broadcast == nil {
 		return

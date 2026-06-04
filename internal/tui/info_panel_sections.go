@@ -212,6 +212,9 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 		case row.OK:
 			dot = GaugeFull
 			labelStyle = InfoPanelDim
+		case row.Idle:
+			dot = pendingDotStyle
+			labelStyle = InfoPanelDim
 		case row.Pending:
 			dot = pendingDotStyle
 			labelStyle = InfoPanelDim
@@ -271,6 +274,10 @@ func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
 		switch {
 		case row.OK:
 			dot = GaugeFull
+			labelStyle = InfoPanelDim
+		case row.Idle:
+			// Auto-unloaded while idle: dim gray, not an error.
+			dot = pendingDotStyle
 			labelStyle = InfoPanelDim
 		case row.Disabled:
 			// Disabled/manual: dim gray.

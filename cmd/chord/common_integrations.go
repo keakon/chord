@@ -6,7 +6,7 @@ import (
 	"github.com/keakon/chord/internal/mcp"
 )
 
-func lspServerDisplayList(mgr *lsp.Manager) []agent.LSPServerDisplay {
+func lspServerDisplayList(mgr *lsp.Manager, runtimeCtrl *runtimeResourceController) []agent.LSPServerDisplay {
 	if mgr == nil {
 		return nil
 	}
@@ -14,12 +14,15 @@ func lspServerDisplayList(mgr *lsp.Manager) []agent.LSPServerDisplay {
 	if len(rows) == 0 {
 		return nil
 	}
+	lspIdle, _ := runtimeIdleStatus(runtimeCtrl)
 	out := make([]agent.LSPServerDisplay, len(rows))
 	for i, row := range rows {
+		idle := lspIdle && runtimeCtrl != nil && runtimeCtrl.WasLSPLoaded(row.Name) && !row.OK && row.Pending && row.Error == ""
 		out[i] = agent.LSPServerDisplay{
 			Name:     row.Name,
 			OK:       row.OK,
-			Pending:  row.Pending,
+			Pending:  row.Pending && !idle,
+			Idle:     idle,
 			Err:      row.Error,
 			Errors:   row.Errors,
 			Warnings: row.Warnings,
@@ -28,7 +31,7 @@ func lspServerDisplayList(mgr *lsp.Manager) []agent.LSPServerDisplay {
 	return out
 }
 
-func mcpServerDisplayList(mgr *mcp.Manager) []agent.MCPServerDisplay {
+func mcpServerDisplayList(mgr *mcp.Manager, runtimeCtrl *runtimeResourceController) []agent.MCPServerDisplay {
 	if mgr == nil {
 		return nil
 	}
@@ -36,12 +39,15 @@ func mcpServerDisplayList(mgr *mcp.Manager) []agent.MCPServerDisplay {
 	if len(status) == 0 {
 		return nil
 	}
+	_, mcpIdle := runtimeIdleStatus(runtimeCtrl)
 	out := make([]agent.MCPServerDisplay, len(status))
 	for i, st := range status {
+		idle := mcpIdle && !st.OK && !st.Disabled && !st.Retrying && st.Error == ""
 		out[i] = agent.MCPServerDisplay{
 			Name:        st.Name,
 			OK:          st.OK,
-			Pending:     st.Pending,
+			Pending:     st.Pending && !idle,
+			Idle:        idle,
 			Disabled:    st.Disabled,
 			Manual:      st.Manual,
 			Retrying:    st.Retrying,
@@ -51,4 +57,11 @@ func mcpServerDisplayList(mgr *mcp.Manager) []agent.MCPServerDisplay {
 		}
 	}
 	return out
+}
+
+func runtimeIdleStatus(runtimeCtrl *runtimeResourceController) (lspIdle, mcpIdle bool) {
+	if runtimeCtrl == nil {
+		return false, false
+	}
+	return runtimeCtrl.IdleStatus()
 }

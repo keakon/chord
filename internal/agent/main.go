@@ -572,8 +572,10 @@ type MainAgent struct {
 	rateLimitSnaps map[string]*ratelimit.KeyRateLimitSnapshot
 
 	// Activity observer for side-band runtime reactions (e.g. power management).
-	activityObserverMu sync.RWMutex
-	activityObserver   ActivityObserver
+	activityObserverMu  sync.RWMutex
+	activityObserver    ActivityObserver
+	busyPreparationMu   sync.RWMutex
+	busyPreparationHook func(context.Context) error
 }
 
 // persistEntry is a queued persistence request for ordered JSONL writes.
@@ -696,6 +698,15 @@ func (a *MainAgent) SetConfirmFunc(fn ConfirmFunc) {
 	a.confirmFn = fn
 }
 
+// SetBusyPreparationHook installs a callback that runs before the main request
+// surface is built for a new busy cycle. It is used by runtime resource
+// managers to restore idle-unloaded dependencies before the next request.
+func (a *MainAgent) SetBusyPreparationHook(fn func(context.Context) error) {
+	a.busyPreparationMu.Lock()
+	defer a.busyPreparationMu.Unlock()
+	a.busyPreparationHook = fn
+}
+
 // SetSessionLock installs the ownership lock handle for the currently active session.
 func (a *MainAgent) SetSessionLock(lock *recovery.SessionLock) {
 	a.sessionLock = lock
@@ -735,6 +746,22 @@ func (a *MainAgent) SetPendingMCPDiscovery(mcpTools []tools.Tool, block string) 
 		a.pendingMCPTools = append([]tools.Tool(nil), mcpTools...)
 	}
 	a.mcpServersPromptMu.Unlock()
+	a.markMCPReady()
+}
+
+// SetRuntimeMCPDiscovery stages a full runtime MCP surface replacement for the
+// next request and marks the frozen LLM-facing surface for re-evaluation.
+func (a *MainAgent) SetRuntimeMCPDiscovery(mcpTools []tools.Tool, block string) {
+	a.mcpServersPromptMu.Lock()
+	a.mcpServersPrompt = block
+	a.pendingMCPReplace = true
+	if len(mcpTools) == 0 {
+		a.pendingMCPTools = nil
+	} else {
+		a.pendingMCPTools = append([]tools.Tool(nil), mcpTools...)
+	}
+	a.mcpServersPromptMu.Unlock()
+	a.markRuntimeSurfaceDirty()
 	a.markMCPReady()
 }
 

@@ -66,6 +66,14 @@ func (a *MainAgent) waitGitStatus(ctx context.Context) {
 }
 
 func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
+	a.busyPreparationMu.RLock()
+	busyPreparationHook := a.busyPreparationHook
+	a.busyPreparationMu.RUnlock()
+	if busyPreparationHook != nil {
+		if err := busyPreparationHook(ctx); err != nil {
+			return err
+		}
+	}
 	if a.sessionBuilt.Load() {
 		return nil
 	}

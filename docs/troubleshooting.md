@@ -112,6 +112,18 @@ Check first:
 
 Note: a brief gray pending state right after startup does not necessarily indicate an error.
 
+## LSP / MCP rows turn gray after the session is idle
+
+If the right-side environment panel shows LSP or MCP rows in gray after the agent has been idle for a while, that does **not** necessarily mean the integration failed.
+
+Chord can unload idle LSP and MCP runtime resources to reduce background cost. In that state:
+
+- the row is shown in a dim gray idle state instead of an error color;
+- this means the resource was intentionally unloaded while the session was idle;
+- on the next real request / busy cycle, Chord restores the runtime dependency before rebuilding the request surface.
+
+Treat it as a problem only when the row stays red, keeps showing a real connection/configuration error, or the next request fails to restore it.
+
 ## No diagnostics after writing files
 
 If you configured LSP but do not see diagnostics after writing files:

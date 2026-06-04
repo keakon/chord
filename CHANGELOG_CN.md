@@ -14,6 +14,7 @@
 - 上下文剪裁现在会按类型摘要旧的大块工具输出：搜索结果保留查询 / 数量 / 代表命中，JSON 大块保留顶层结构和数量，构建 / 测试日志保留关键失败项，读取摘要包含行范围等元数据，而不是直接退化为通用省略。
 - 面向 LLM 的工具定义现在使用 registry 按名称排序的稳定顺序，减少语义未变但工具顺序漂移导致的 prompt cache miss，同时保留现有 OpenAI `prompt_cache_key` 与 Anthropic `cache_control` 语义。
 - 改进 `edit` patch 对 hunk 内空白 context 行的容忍度，减少模型生成补丁的应用失败。
+- Chord 现在会在空闲数分钟后卸载 LSP 与 MCP 资源，并在下一次请求时恢复 MCP server；空闲的 LSP/MCP 行会以灰色显示，而不是显示为失败。
 - 修复当前 auth 状态使用负数 credential-index 哨兵值时，OAuth credential 刷新可能崩溃的问题。
 - `@` 文件补全现在会把当前模型支持的图片 / PDF 文件作为附件处理，隐藏当前模型不支持的媒体类型，并在输入框 / 转录区标记不支持或已加密的附件。
 - 切换到不支持图片 / PDF 输入的模型时，会在 provider 请求前过滤历史中不支持的二进制 part，同时保留历史工具调用结构。

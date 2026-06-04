@@ -36,11 +36,20 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 
 	// Wire power manager if prevent_sleep is enabled.
 	var powerMgr *power.Manager
+	resourceCtrl := newRuntimeResourceController(ac.Ctx, ac.LSPManager, ac.MCPMgr, nil, ac.MainAgent.NotifyEnvStatusUpdated)
+	resourceCtrl.restoreMCP = restoreRuntimeMCP(ac, resourceCtrl)
+	ac.RuntimeResources = resourceCtrl
 	if ac.Cfg != nil && ac.Cfg.PreventSleep != nil && *ac.Cfg.PreventSleep {
 		powerMgr = power.NewManager(power.NewBackend())
-		ac.MainAgent.SetActivityObserver(&activityObserverAdapter{mgr: powerMgr})
+		ac.MainAgent.SetActivityObserver(combineActivityObservers(
+			&activityObserverAdapter{mgr: powerMgr},
+			resourceCtrl,
+		))
 		log.Debug("prevent_sleep enabled: activity-based sleep prevention active")
+	} else {
+		ac.MainAgent.SetActivityObserver(resourceCtrl)
 	}
+	ac.MainAgent.SetBusyPreparationHook(resourceCtrl.EnsureReady)
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
 	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout)
@@ -73,6 +82,9 @@ func (rt *Runtime) Close() {
 	}
 	if rt.powerMgr != nil {
 		rt.powerMgr.Close()
+	}
+	if rt.Agent != nil {
+		rt.Agent.SetBusyPreparationHook(nil)
 	}
 	if rt.Agent != nil {
 		rt.Agent.ClearPendingInteractions()
@@ -121,7 +133,7 @@ func configureRuntimeStateProviders(ac *AppContext) {
 	}
 
 	ac.MainAgent.SetLSPStatusFunc(
-		func() []agent.LSPServerDisplay { return lspServerDisplayList(ac.LSPManager) },
+		func() []agent.LSPServerDisplay { return lspServerDisplayList(ac.LSPManager, ac.RuntimeResources) },
 	)
 	ac.MainAgent.SetLSPSessionFuncs(
 		func() {
@@ -142,7 +154,7 @@ func configureRuntimeStateProviders(ac *AppContext) {
 		},
 	)
 	ac.MainAgent.SetMCPStatusFunc(func() []agent.MCPServerDisplay {
-		return mcpServerDisplayList(ac.MCPMgr)
+		return mcpServerDisplayList(ac.MCPMgr, ac.RuntimeResources)
 	})
 	ac.MainAgent.SetMCPControlFunc(func(ctx context.Context, req agent.MCPControlRequest) (agent.MCPControlResult, error) {
 		return controlRuntimeMCP(ctx, ac, req)

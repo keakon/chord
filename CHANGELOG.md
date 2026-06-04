@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Context reduction now uses typed summaries for older large tool results: search outputs keep query/count/sample hits, JSON blobs keep top-level shape/counts, build/test logs keep key failures, and read summaries include range metadata instead of falling straight back to generic omission.
 - LLM-facing tool definitions now use the registry's stable name-sorted order, reducing prompt-cache misses from semantically unchanged tool ordering drift while preserving existing OpenAI `prompt_cache_key` and Anthropic `cache_control` behavior.
 - Improved `edit` patch tolerance for blank context lines inside hunks, reducing failed model-generated edits.
+- Chord now unloads idle LSP and MCP resources after several minutes of inactivity and restores MCP servers on the next request; idle LSP/MCP rows are shown dimly instead of as failures.
 - Fixed an OAuth credential refresh crash when the active auth state uses a negative credential-index sentinel.
 - `@` file completion now treats supported image/PDF files as attachments, hides unsupported media types for the current model, and marks unsupported or encrypted attachments in the composer/transcript.
 - Switching to a model without image/PDF input support now filters unsupported historical binary parts before provider requests while preserving historical tool-call structure.

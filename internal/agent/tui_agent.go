@@ -232,6 +232,7 @@ type LSPServerDisplay struct {
 	Name     string
 	OK       bool
 	Pending  bool // not connected yet (lazy start)
+	Idle     bool // auto-unloaded while runtime is idle; will be restored on demand
 	Err      string
 	Errors   int
 	Warnings int
@@ -250,6 +251,7 @@ type MCPServerDisplay struct {
 	Name        string
 	OK          bool
 	Pending     bool // not connected yet (async startup)
+	Idle        bool // auto-unloaded while runtime is idle; will be restored on demand
 	Disabled    bool // explicitly disabled (manual /mcp disable)
 	Manual      bool // configured as manual/on-demand; only manual servers can be changed with /mcp
 	Retrying    bool // transient failure, retry still in progress

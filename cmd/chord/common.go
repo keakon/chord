@@ -42,42 +42,43 @@ const (
 // caller must call Close() to release resources (log file, MCP connections,
 // agent).
 type AppContext struct {
-	Ctx            context.Context
-	Cancel         context.CancelFunc
-	ProjectRoot    string
-	ChordDir       string
-	ConfigHome     string
-	PathLocator    *config.PathLocator
-	ProjectLocator *config.ProjectLocator
-	SessionDir     string
-	Cfg            *config.Config
-	GlobalCfg      *config.Config
-	ProjectCfg     *config.Config
-	Auth           config.AuthConfig
-	LLMClient      *llm.Client
-	ProviderName   string
-	ModelID        string
-	ProviderCfg    *llm.ProviderConfig // shared, safe for per-session reuse
-	LLMProvider    llm.Provider        // shared HTTP transport
-	ModelCfg       config.ModelConfig  // resolved model limits
-	ProviderCache  *providerCache      // per-provider config cache (key cooldown shared across sessions)
-	CtxMgr         *ctxmgr.Manager
-	Registry       *tools.Registry
-	HookEngine     hook.Manager
-	LSPManager     *lsp.Manager
-	MCPMgr         *mcp.Manager
-	MCPConfigs     []mcp.ServerConfig
-	MainAgent      *agent.MainAgent
-	LoadedSkills   []*skill.Meta
-	LoadedCommands []*command.Definition
-	LogWriter      *rotatingLogFile
-	StderrRedirect *stderrRedirect
-	logCtx         logContext
-	logLevel       golog.Level
-	mcpStartOnce   sync.Once
-	skillsLoadOnce sync.Once
-	SessionLock    *recovery.SessionLock
-	InstanceID     string
+	Ctx              context.Context
+	Cancel           context.CancelFunc
+	ProjectRoot      string
+	ChordDir         string
+	ConfigHome       string
+	PathLocator      *config.PathLocator
+	ProjectLocator   *config.ProjectLocator
+	SessionDir       string
+	Cfg              *config.Config
+	GlobalCfg        *config.Config
+	ProjectCfg       *config.Config
+	Auth             config.AuthConfig
+	LLMClient        *llm.Client
+	ProviderName     string
+	ModelID          string
+	ProviderCfg      *llm.ProviderConfig // shared, safe for per-session reuse
+	LLMProvider      llm.Provider        // shared HTTP transport
+	ModelCfg         config.ModelConfig  // resolved model limits
+	ProviderCache    *providerCache      // per-provider config cache (key cooldown shared across sessions)
+	CtxMgr           *ctxmgr.Manager
+	Registry         *tools.Registry
+	HookEngine       hook.Manager
+	LSPManager       *lsp.Manager
+	MCPMgr           *mcp.Manager
+	MCPConfigs       []mcp.ServerConfig
+	RuntimeResources *runtimeResourceController
+	MainAgent        *agent.MainAgent
+	LoadedSkills     []*skill.Meta
+	LoadedCommands   []*command.Definition
+	LogWriter        *rotatingLogFile
+	StderrRedirect   *stderrRedirect
+	logCtx           logContext
+	logLevel         golog.Level
+	mcpStartOnce     sync.Once
+	skillsLoadOnce   sync.Once
+	SessionLock      *recovery.SessionLock
+	InstanceID       string
 }
 
 // GetOrCreateProvider returns the cached ProviderConfig for provName, or creates
@@ -755,6 +756,9 @@ func (ac *AppContext) Close() {
 		stopCtx, cancel := newLSPShutdownContext()
 		ac.LSPManager.Stop(stopCtx)
 		cancel()
+	}
+	if ac.RuntimeResources != nil {
+		ac.RuntimeResources.Stop()
 	}
 	if ac.MCPMgr != nil {
 		ac.MCPMgr.Close()

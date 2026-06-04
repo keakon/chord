@@ -1270,6 +1270,25 @@ func TestRenderInfoPanelEnvironmentDotsUseThemeInfoPanelBackground(t *testing.T)
 	}
 }
 
+func TestRenderInfoPanelIdleEnvironmentRowsUseDimNotCriticalStyles(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Idle: true}}
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", Idle: true}}
+
+	m := NewModel(backend)
+	rendered := m.renderInfoPanel(40, 20)
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "gopls") || !strings.Contains(plain, "exa") {
+		t.Fatalf("idle environment rows missing from info panel, got %q", plain)
+	}
+	if strings.Contains(rendered, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg)).Render(" gopls")) {
+		t.Fatalf("idle LSP row should not use critical label style, got %q", rendered)
+	}
+	if strings.Contains(rendered, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg)).Render(" exa")) {
+		t.Fatalf("idle MCP row should not use critical label style, got %q", rendered)
+	}
+}
+
 func TestRenderInfoPanelLSPErrorHidesRawMessageAndRefreshesWhenStatusChanges(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Err: "dial tcp", OK: false}}
