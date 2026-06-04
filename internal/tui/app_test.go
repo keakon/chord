@@ -21,6 +21,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -2340,6 +2341,41 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "⏱ 7s") {
 		t.Fatalf("expected finished tool elapsed footer; got:\n%s", joined)
+	}
+}
+
+func TestToolResultSuccessIsNotOverwrittenByLateCancellation(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-late-cancel",
+		Name:     "read",
+		ArgsJSON: `{"path":"README.md"}`,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-late-cancel",
+		Name:     "read",
+		ArgsJSON: `{"path":"README.md"}`,
+		Result:   "success result",
+		Status:   agent.ToolResultStatusSuccess,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-late-cancel",
+		Name:     "read",
+		ArgsJSON: `{"path":"README.md"}`,
+		Result:   "Error:\ncontext canceled",
+		Status:   agent.ToolResultStatusError,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-late-cancel")
+	if !ok {
+		t.Fatal("expected tool block")
+	}
+	if block.ResultStatus != agent.ToolResultStatusSuccess {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusSuccess)
+	}
+	if block.ResultContent != "success result" {
+		t.Fatalf("ResultContent = %q, want original success result", block.ResultContent)
 	}
 }
 
@@ -4720,7 +4756,7 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	}
 }
 
-func TestMessagesToBlocksRestoredEditWithoutToolDiffShowsResult(t *testing.T) {
+func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testing.T) {
 	nextID := 1
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
@@ -4740,8 +4776,8 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffShowsResult(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(plain, "↳ Result:") || !strings.Contains(plain, "Applied patch") {
-		t.Fatalf("restored Edit without ToolDiff should show result content, got:\n%s", plain)
+	if strings.Contains(plain, "↳ Result:") || strings.Contains(plain, "Applied patch") {
+		t.Fatalf("restored Edit without ToolDiff should hide routine success result, got:\n%s", plain)
 	}
 }
 
@@ -4768,7 +4804,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
 			content:  "hunk not found; re-read the file before applying the patch",
 			status:   agent.ToolResultStatusError,
-			want:     []string{"↳ Error:", "hunk not found"},
+			want:     []string{"↳ Error:", "hunk not found", "↳ Patch:", "-old", "+new"},
 		},
 		{
 			name:     "delete success",
@@ -4776,7 +4812,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
 			status:   agent.ToolResultStatusSuccess,
-			want:     []string{"delete /tmp/obsolete.go", "remove obsolete file", "Deleted (1):"},
+			want:     []string{"delete /tmp/obsolete.go", "remove obsolete file", "Deleted /tmp/obsolete.go"},
 		},
 	}
 
@@ -4806,6 +4842,47 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 	}
 }
 
+func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	args := `{"path":"foo.txt","patch":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-old\n+new\n*** End Patch\n"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "patch-1",
+		Name:     tools.NameEdit,
+		ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "patch-1",
+		Name:     tools.NameEdit,
+		ArgsJSON: args,
+		Result:   "hunk not found; re-read the file before applying the patch",
+		Status:   agent.ToolResultStatusError,
+	}})
+
+	var block *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockToolCall && b.ToolID == "patch-1" {
+			block = b
+			break
+		}
+	}
+	if block == nil {
+		t.Fatal("expected live Edit tool block")
+	}
+	if block.Collapsed {
+		t.Fatal("failed live Edit should be expanded")
+	}
+	if strings.Contains(block.Content, "patch") {
+		t.Fatalf("display args should stay compact, got %s", block.Content)
+	}
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"edit foo.txt", "↳ Error:", "hunk not found", "↳ Patch:", "*** Begin Patch", "*** End Patch", "@@", "-old", "+new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("live Edit error render missing %q; got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "del-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`)}}},
@@ -4830,6 +4907,9 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
 		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "Deleted /tmp/obsolete.go") {
+		t.Fatalf("expected restored Delete block to show compact success summary; got:\n%s", joined)
 	}
 	if block.PersistedDuration != 1234*time.Millisecond {
 		t.Fatalf("PersistedDuration = %v, want 1234ms", block.PersistedDuration)
@@ -7163,6 +7243,81 @@ func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
 	}
 }
 
+func TestToolCardCopyContentIsSelfContainedMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "grep",
+		Content:       `{"pattern":"foo"}`,
+		ResultContent: "grep failed: exit status 2",
+	}
+
+	got := blockCopyContent(block)
+	if strings.Contains(got, "TOOL CALL (grep):") {
+		t.Fatalf("tool copy content should not add outer tool label, got %q", got)
+	}
+	for _, want := range []string{
+		"# Tool call: grep",
+		"## Arguments\n\n```json\n{\"pattern\":\"foo\"}\n```",
+		"## Result\n\ngrep failed: exit status 2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(tool) = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "web_fetch",
+		Content:       `{"raw":false,"timeout":60,"url":"https://raw.githubusercontent.com/datacurve-ai/pier/main/docs/agents.md"}`,
+		ResultContent: "Error: HTTP 404: 404 Not Found",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"✗ web_fetch", "Error:", "HTTP 404: 404 Not Found"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered error tool card missing %q; got:\n%s", want, plain)
+		}
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: web_fetch",
+		"## Arguments",
+		"## Result\n\nError: HTTP 404: 404 Not Found",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(error tool) = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestStandaloneToolResultCopyIncludesErrorContent(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolResult,
+		ToolName:      "web_fetch",
+		Content:       "Error: HTTP 404: 404 Not Found",
+		ResultContent: "Error: HTTP 404: 404 Not Found",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool result: web_fetch",
+		"## Result\n\nError: HTTP 404: 404 Not Found",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(standalone result) = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestCopyFocusedBlockHydratesSpilledContent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 6)
 	m.mode = ModeNormal
@@ -7226,6 +7381,139 @@ func TestCopyFocusedBlocksHydratesSpilledBlocks(t *testing.T) {
 		if block == nil || block.spillCold {
 			t.Fatalf("block %d after copy = %#v, want hydrated block", id, block)
 		}
+	}
+}
+
+func TestCopyFocusedBlocksToolCallMatchesSingleBlockFormat(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	tool := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "grep",
+		Content:       `{"pattern":"foo"}`,
+		ResultContent: "grep failed: exit status 2",
+	}
+	m.viewport.AppendBlock(tool)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(2)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+
+	want := blockCopyContent(tool)
+	if copied != want {
+		t.Fatalf("multi-card tool copy mismatch\n got: %q\nwant: %q", copied, want)
+	}
+	if strings.Contains(copied, "TOOL CALL (grep):") {
+		t.Fatalf("multi-card tool copy should not include duplicate outer label, got %q", copied)
+	}
+}
+
+func TestCopyFocusedBlocksMixedAssistantAndToolKeepsSingleToolHeading(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 10)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "Working on it"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "grep", Content: `{"pattern":"foo"}`, ResultContent: "grep failed: exit status 2"})
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(2)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "2 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "2 message cards copied to clipboard")
+	}
+
+	if !strings.Contains(copied, blockCopyContent(&Block{Type: BlockAssistant, Content: "Working on it"})) {
+		t.Fatalf("mixed copy missing assistant block, got %q", copied)
+	}
+	if !strings.Contains(copied, "# Tool call: grep") {
+		t.Fatalf("mixed copy missing tool markdown heading, got %q", copied)
+	}
+	if strings.Contains(copied, "TOOL CALL (grep):") {
+		t.Fatalf("mixed copy should not include duplicate outer tool label, got %q", copied)
+	}
+	if !strings.Contains(copied, convformat.BlockSep) {
+		t.Fatalf("mixed copy should include block separator, got %q", copied)
+	}
+}
+
+func TestCopyFocusedBlocksJoinsPerCardCopyRepresentations(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 10)
+	m.mode = ModeNormal
+	b1 := &Block{ID: 1, Type: BlockAssistant, Content: "Assistant reply"}
+	b2 := &Block{ID: 2, Type: BlockThinking, Content: "Reasoning details"}
+	b3 := &Block{ID: 3, Type: BlockToolCall, ToolName: "grep", Content: `{"pattern":"foo"}`, ResultContent: "grep failed: exit status 2"}
+	m.viewport.AppendBlock(b1)
+	m.viewport.AppendBlock(b2)
+	m.viewport.AppendBlock(b3)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(3)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "3 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "3 message cards copied to clipboard")
+	}
+
+	want := convformat.JoinBlocks([]string{
+		blockCopyContent(b1),
+		blockCopyContent(b2),
+		blockCopyContent(b3),
+	})
+	if copied != want {
+		t.Fatalf("multi-card copy should join per-card copy content\n got: %q\nwant: %q", copied, want)
 	}
 }
 

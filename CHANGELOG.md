@@ -15,6 +15,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - LLM-facing tool definitions now use the registry's stable name-sorted order, reducing prompt-cache misses from semantically unchanged tool ordering drift while preserving existing OpenAI `prompt_cache_key` and Anthropic `cache_control` behavior.
 - Improved `edit` patch tolerance for blank context lines inside hunks, reducing failed model-generated edits.
 - Chord now unloads idle LSP and MCP resources after several minutes of inactivity and restores MCP servers on the next request; idle LSP/MCP rows are shown dimly instead of as failures.
+- `edit` results are less noisy in the TUI: routine successful patch summaries are hidden from the expanded card while diagnostics still show, failed edits show the attempted patch preview, and copied tool cards keep the full result.
+- `edit` now reports successful patches with project-relative paths and concise added/removed counts, and failed patches include the attempted patch context for easier recovery.
+- File tool cards now use compact success summaries for routine edit/write/delete results, and tool error results can be displayed and copied instead of being dropped from the card.
 - Fixed an OAuth credential refresh crash when the active auth state uses a negative credential-index sentinel.
 - `@` file completion now treats supported image/PDF files as attachments, hides unsupported media types for the current model, and marks unsupported or encrypted attachments in the composer/transcript.
 - Switching to a model without image/PDF input support now filters unsupported historical binary parts before provider requests while preserving historical tool-call structure.

@@ -150,6 +150,7 @@ func mergeFocusedToolBlockRuntimeState(dst, src *Block) {
 		return
 	}
 	dst.Content = src.Content
+	dst.RawArgs = src.RawArgs
 	dst.Streaming = src.Streaming
 	dst.ToolExecutionState = src.ToolExecutionState
 	if src.ToolProgress != nil {

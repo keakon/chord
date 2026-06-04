@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,6 +163,94 @@ func toolExpandedResultContent(toolName, result string) string {
 	default:
 		return result
 	}
+}
+
+func toolDisplayResultContent(b *Block) string {
+	if b == nil {
+		return ""
+	}
+	result := toolExpandedResultContent(b.ToolName, b.ResultContent)
+	if b.toolResultIsError() || b.toolResultIsCancelled() {
+		return result
+	}
+	if toolShouldHideSuccessfulFileOpResult(b) {
+		return ""
+	}
+	return result
+}
+
+func toolShouldHideSuccessfulFileOpResult(b *Block) bool {
+	if b == nil || b.toolResultIsError() || b.toolResultIsCancelled() {
+		return false
+	}
+	switch tools.NormalizeName(b.ToolName) {
+	case tools.NameEdit:
+		return !strings.Contains(b.ResultContent, "Diagnostics summary:")
+	default:
+		return false
+	}
+}
+
+func toolSuccessfulFileOpSummary(b *Block) string {
+	if b == nil || strings.TrimSpace(b.ResultContent) == "" || b.toolResultIsError() || b.toolResultIsCancelled() {
+		return ""
+	}
+	switch tools.NormalizeName(b.ToolName) {
+	case tools.NameEdit:
+		path := b.displayToolPath(tools.ExtractEditPathFromArgs([]byte(b.Content)))
+		if path == "" {
+			path = b.displayToolPath(firstPathFromToolResult(b.ResultContent))
+		}
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("Applied patch to %s", path)
+	case tools.NameWrite:
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(b.Content), &args); err != nil || strings.TrimSpace(args.Path) == "" {
+			return ""
+		}
+		path := b.displayToolPath(args.Path)
+		first := firstDisplayLine(strings.TrimSpace(b.ResultContent))
+		if first == "" {
+			return ""
+		}
+		return fmt.Sprintf("Wrote %s — %s", path, first)
+	case tools.NameDelete:
+		groups := tools.ParseDeleteResult(b.ResultContent)
+		if len(groups.Deleted) == 1 && len(groups.AlreadyAbsent) == 0 && len(groups.Blocked) == 0 && len(groups.Failed) == 0 && len(groups.NotAttempted) == 0 {
+			return fmt.Sprintf("Deleted %s", b.displayToolPath(groups.Deleted[0]))
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+func firstPathFromToolResult(result string) string {
+	for _, prefix := range []string{"Applied patch to ", "Updated file ", "Wrote file ", "Deleted file "} {
+		idx := strings.Index(result, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(result[idx+len(prefix):])
+		if rest == "" {
+			continue
+		}
+		cut := len(rest)
+		for _, marker := range []string{" (", "\n"} {
+			if i := strings.Index(rest, marker); i >= 0 && i < cut {
+				cut = i
+			}
+		}
+		cand := strings.TrimSpace(rest[:cut])
+		if cand != "" {
+			return filepath.Clean(cand)
+		}
+	}
+	return ""
 }
 
 func skillToolBodyFromResult(result string) string {

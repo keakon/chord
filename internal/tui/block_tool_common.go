@@ -437,7 +437,6 @@ func formatToolResultSummaryLine(b *Block) string {
 	if !b.ResultDone {
 		return ""
 	}
-
 	trimmed := strings.TrimSpace(b.ResultContent)
 	switch b.ToolName {
 	case tools.NameShell:
@@ -551,6 +550,11 @@ func formatToolResultSummaryLine(b *Block) string {
 	default:
 		if b.Audit != nil && b.Audit.UserModified {
 			return "edited before approval"
+		}
+		if !b.toolResultIsError() {
+			if summary := toolSuccessfulFileOpSummary(b); summary != "" {
+				return summary
+			}
 		}
 		return ""
 	}

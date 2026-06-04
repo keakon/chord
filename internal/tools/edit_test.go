@@ -190,8 +190,8 @@ func TestEditToolUsesHunkHeaderAsAnchor(t *testing.T) {
 	}
 }
 
-func TestEditAmbiguousWeakContextAppliesFirstMatchWithHint(t *testing.T) {
-	got, matches, err := applyParsedPatch("func a() {\n}\n\nfunc b() {\n}\n", parsedEdit{
+func TestEditAmbiguousWeakContextAppliesFirstMatch(t *testing.T) {
+	got, err := applyParsedPatch("func a() {\n}\n\nfunc b() {\n}\n", parsedEdit{
 		Path: "demo.go",
 		Hunks: []editHunk{{Lines: []editLine{
 			{Kind: ' ', Text: "}"},
@@ -205,9 +205,6 @@ func TestEditAmbiguousWeakContextAppliesFirstMatchWithHint(t *testing.T) {
 	}
 	if got != "func a() {\n}\n\nfunc c() {\n}\n\nfunc b() {\n}\n" {
 		t.Fatalf("file = %q", got)
-	}
-	if len(matches) != 1 || matches[0].Line != 2 || !matches[0].WeakContext || len(matches[0].CandidateLines) != 2 {
-		t.Fatalf("matches = %+v", matches)
 	}
 }
 
@@ -322,8 +319,34 @@ func TestEditToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
 	if string(got) != "changed\nsame\n" {
 		t.Fatalf("file = %q", got)
 	}
-	if !strings.Contains(out, "Matched hunk near line(s): 1") || !strings.Contains(out, "matched multiple locations") || !strings.Contains(out, "Other candidate line(s): 2") {
+	if !strings.Contains(out, "Applied patch to demo.txt (+1 -1)") {
 		t.Fatalf("output = %q", out)
+	}
+	if strings.Contains(out, "Matched hunk near line(s):") || strings.Contains(out, "matched multiple locations") {
+		t.Fatalf("output should not include low-level match notes by default, got %q", out)
+	}
+}
+
+func TestEditToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	if err := os.WriteFile("demo.txt", []byte("one\ntwo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n-missing\n+new\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	out, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, want := range []string{"hunk not found", "Patch excerpt:", "```diff", "-missing", "+new"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output = %q, want substring %q", out, want)
+		}
 	}
 }
 

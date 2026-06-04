@@ -35,6 +35,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
 		Content:            liveToolDisplayArgs(name, argsJSON, ""),
+		RawArgs:            argsJSON,
 		ToolName:           name,
 		ToolID:             id,
 		Collapsed:          true,
@@ -126,8 +127,12 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) {
 			return effects
 		}
+		if block.ResultDone && block.ResultStatus == agent.ToolResultStatusSuccess && evt.Status != agent.ToolResultStatusSuccess {
+			return effects
+		}
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		block.ResultContent = evt.Result
+		block.RawArgs = evt.ArgsJSON
 		block.Audit = evt.Audit.Clone()
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if strings.TrimSpace(evt.DoneReport) != "" {
@@ -196,7 +201,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.updateViewportBlock(block)
 		m.markBlockSettled(block)
 	} else {
-		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), ToolName: evt.Name, ToolID: evt.CallID, ResultStatus: evt.Status, Collapsed: true, AgentID: evt.AgentID}
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -272,6 +277,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		updated := false
 		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
 		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
+			block.RawArgs = evt.ArgsJSON
+			updated = true
+		}
 		if displayArgs != "" && displayArgs != block.Content {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
 			block.Content = displayArgs
@@ -332,6 +341,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		updated := false
 		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
+			block.RawArgs = evt.ArgsJSON
+			updated = true
+		}
 		if displayArgs != "" && displayArgs != block.Content {
 			block.Content = displayArgs
 			updated = true

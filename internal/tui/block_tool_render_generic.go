@@ -290,11 +290,11 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), width-30)
 			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ ✓ %s", summary)))
 		} else if b.ResultContent != "" {
-			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, b.ResultContent))
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, width-30)
 			if b.toolResultIsError() {
-				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
+				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ Error: %s (%d lines)", summary, lineCount)))
 			} else if b.toolResultIsCancelled() {
 				result = append(result, DimStyle.Render(fmt.Sprintf("  ▸ ↳ cancelled (%d lines)", lineCount)))
 			} else {
@@ -342,7 +342,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			if b.ToolName == tools.NameDelete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				lineStyle = ToolResultExpandedStyle
 			}
-			displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
+			displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
 			for _, line := range wrapText(displayResult, contentWidth) {
 				result = append(result, lineStyle.Render("    "+line))
 			}
@@ -519,7 +519,7 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 			}
 		case tools.NameSkill:
 			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-				displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
+				displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
 				hidden += toolCollapsedVisibleLineCount(displayResult, contentWidth)
 			} else {
 				hidden += compactToolHiddenResultLines(b, contentWidth)
@@ -652,7 +652,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 						expandHintAdded = true
 					}
 				} else {
-					displayResult := sanitizeToolDisplayText(toolExpandedResultContent(b.ToolName, b.ResultContent))
+					displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
 					lines, hidden := toolExpandedResultLines(displayResult, contentWidth, expanded)
 					if !expanded && collapsedPreviewLine != "" && compactToolPreviewDuplicatesResult(collapsedPreviewLine, lines) {
 						lines = nil

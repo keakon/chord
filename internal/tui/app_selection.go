@@ -459,7 +459,6 @@ func (m *Model) copyFocusedBlocks(count int) tea.Cmd {
 	}
 	endIdx := min(startIdx+count, len(blocks))
 	var parts []string
-	multiBlock := countCopyableFocusedBlocks(blocks, startIdx, endIdx) > 1
 	copied := 0
 	for i := startIdx; i < endIdx; i++ {
 		b := m.viewport.GetFocusedBlock(blocks[i].ID)
@@ -471,15 +470,7 @@ func (m *Model) copyFocusedBlocks(count int) tea.Cmd {
 			continue
 		}
 		copied++
-		if multiBlock {
-			label := blockCopyLabel(b)
-			if b.Type == BlockThinking && strings.HasPrefix(c, "▸ thinking\n\n") {
-				c = strings.TrimPrefix(c, "▸ thinking\n\n")
-			}
-			parts = append(parts, convformat.BlockString(label, c))
-		} else {
-			parts = append(parts, c)
-		}
+		parts = append(parts, c)
 	}
 	if len(parts) == 0 {
 		return m.enqueueToast("This card type cannot be copied", "info")
@@ -490,39 +481,6 @@ func (m *Model) copyFocusedBlocks(count int) tea.Cmd {
 	msg := fmt.Sprintf("%d message cards copied to clipboard", copied)
 	return writeClipboardCmd(convformat.JoinBlocks(parts), msg)
 }
-
-func countCopyableFocusedBlocks(blocks []*Block, startIdx, endIdx int) int {
-	count := 0
-	for i := startIdx; i < endIdx; i++ {
-		if i < 0 || i >= len(blocks) {
-			continue
-		}
-		b := blocks[i]
-		if b == nil || !isCopyableBlockType(b.Type) {
-			continue
-		}
-		count++
-	}
-	return count
-}
-
-func blockCopyLabel(b *Block) string {
-	switch b.Type {
-	case BlockUser:
-		return convformat.LabelUser
-	case BlockAssistant:
-		return convformat.LabelAssistant
-	case BlockThinking:
-		return convformat.LabelThinking
-	case BlockToolCall:
-		return convformat.ToolCallLabel(b.ToolName)
-	case BlockBoundaryMarker:
-		return convformat.LabelBlock
-	default:
-		return convformat.LabelBlock
-	}
-}
-
 func blockPlainContent(b *Block) string {
 	switch b.Type {
 	case BlockThinking:
@@ -577,7 +535,20 @@ func blockCopyContent(b *Block) string {
 	if b.Type == BlockToolCall {
 		return toolCallMarkdownContent(b)
 	}
+	if b.Type == BlockToolResult {
+		return convformat.ToolResultMarkdown(b.ToolName, toolExpandedResultContent(b.ToolName, b.toolResultContentForCopy()), b.Diff)
+	}
 	return blockPlainContent(b)
+}
+
+func (b *Block) toolResultContentForCopy() string {
+	if b == nil {
+		return ""
+	}
+	if strings.TrimSpace(b.ResultContent) != "" {
+		return b.ResultContent
+	}
+	return b.Content
 }
 
 func toolCallMarkdownContent(b *Block) string {

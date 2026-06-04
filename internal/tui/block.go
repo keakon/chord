@@ -52,6 +52,7 @@ type Block struct {
 	ID        int
 	Type      BlockType
 	Content   string // raw content (args JSON for tool calls, result text for tool results)
+	RawArgs   string // full args JSON for tool calls when Content is display-trimmed
 	Collapsed bool   // for tool blocks, default true
 	ToolName  string // for tool blocks
 	ToolID    string // tool call ID

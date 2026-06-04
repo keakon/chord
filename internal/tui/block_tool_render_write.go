@@ -39,7 +39,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	if !b.toolResultIsCancelled() && b.ResultContent != "" {
 		// Keep the compact header summary to a single line; detailed multi-line
 		// diagnostics are rendered below via renderLSPDiagnosticsLines.
-		summary := strings.TrimSpace(b.ResultContent)
+		summary := strings.TrimSpace(toolDisplayResultContent(b))
 		if i := strings.IndexByte(summary, '\n'); i >= 0 {
 			summary = strings.TrimSpace(summary[:i])
 		}

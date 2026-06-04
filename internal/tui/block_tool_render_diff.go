@@ -102,7 +102,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 	if b.Collapsed {
 		if strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" {
-			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, b.ResultContent))
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, width-30)
 			if b.toolResultIsError() {
@@ -246,13 +246,16 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if b.ToolName == tools.NameEdit && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+	if b.ToolName == tools.NameEdit && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
+		if b.ToolName == tools.NameEdit {
+			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
+		}
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = append(result, DimStyle.Render("  ↳ Cancelled"))
 		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
@@ -262,6 +265,63 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	result = appendToolElapsedFooter(result, b)
 
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+func appendEditPatchPreview(result []string, argsJSON string, width int) []string {
+	patch := editPatchFromArgs(argsJSON)
+	if patch == "" {
+		return result
+	}
+	result = append(result, ToolResultExpandedStyle.Render("  ↳ Patch:"))
+	for _, line := range editPatchPreviewLines(patch) {
+		for _, wrapped := range wrapIndentedText(line, width) {
+			result = append(result, renderEditPatchPreviewLine(wrapped))
+		}
+	}
+	return result
+}
+
+func (b *Block) editPatchArgsJSON() string {
+	if strings.TrimSpace(b.RawArgs) != "" {
+		return b.RawArgs
+	}
+	return b.Content
+}
+
+func renderEditPatchPreviewLine(line string) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	styled := DimStyle.Render(line)
+	switch {
+	case strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "+++"):
+		styled = DiffAddStyle.Render(line)
+	case strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "---"):
+		styled = DiffDelStyle.Render(line)
+	case strings.HasPrefix(trimmed, "@@"):
+		styled = ToolResultExpandedStyle.Render(line)
+	case strings.HasPrefix(trimmed, "***"):
+		styled = ToolResultStyle.Render(line)
+	case strings.HasPrefix(trimmed, "..."):
+		styled = DimStyle.Render(line)
+	}
+	return "    " + styled
+}
+
+func editPatchFromArgs(argsJSON string) string {
+	var parsed struct {
+		Patch string `json:"patch"`
+	}
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Patch)
+}
+
+func editPatchPreviewLines(patch string) []string {
+	lines := strings.Split(strings.TrimSpace(patch), "\n")
+	if len(lines) > 20 {
+		lines = append(lines[:20], "... (patch truncated)")
+	}
+	return lines
 }
 
 func (b *Block) diffToolFilePath() string {

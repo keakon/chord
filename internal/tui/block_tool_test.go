@@ -177,6 +177,9 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 
 	raw := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(raw)
+	if !strings.Contains(plain, "Successfully wrote 66 lines, 1976 bytes") {
+		t.Fatalf("expected compact write summary to render before diagnostics; got:\n%s", plain)
+	}
 	if !strings.Contains(plain, "Diagnostics:") {
 		t.Fatalf("expected diagnostics text to render; got:\n%s", plain)
 	}

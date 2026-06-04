@@ -35,19 +35,6 @@ type EditPlan struct {
 	Diff    string
 	Added   int
 	Removed int
-	Matches []EditMatchSummary
-}
-
-type EditMatchSummary struct {
-	HunkIndex            int
-	Line                 int
-	CandidateLines       []int
-	Layer                string
-	WeakContext          bool
-	Header               string
-	HeaderLine           int
-	HeaderCandidateLines []int
-	HeaderLayer          string
 }
 
 type editPlanContextKey struct{}
@@ -109,36 +96,43 @@ func (t EditTool) IsReadOnly() bool { return false }
 func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a editArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		err = fmt.Errorf("invalid arguments: %w", err)
+		return formatEditErrorResult(a.Patch, err), err
 	}
 	plan, ok := editPlanFromContext(ctx)
 	if !ok {
 		var err error
 		plan, err = BuildEditPlanInDir(a.Path, a.Patch, t.BaseDir)
 		if err != nil {
-			return "", err
+			return formatEditErrorResult(a.Patch, err), err
 		}
 	}
 	if plan.Before == plan.After {
-		return "", fmt.Errorf("patch makes no changes. No files were modified")
+		err := fmt.Errorf("patch makes no changes. No files were modified")
+		return formatEditErrorResult(a.Patch, err), err
 	}
 	baseDir := t.BaseDir
 	resolvedPath, err := resolveEditPathForBase(plan.Path, baseDir)
 	if err != nil {
-		return "", fmt.Errorf("resolve path: %w. No files were modified", err)
+		err = fmt.Errorf("resolve path: %w. No files were modified", err)
+		return formatEditErrorResult(a.Patch, err), err
 	}
 	decodedFile, err := ReadDecodedTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("file not found: %s. No files were modified", plan.Path)
+			err = fmt.Errorf("file not found: %s. No files were modified", plan.Path)
+			return formatEditErrorResult(a.Patch, err), err
 		}
 		if errors.Is(err, ErrBinaryFile) {
-			return "", fmt.Errorf("cannot patch binary file: %s. No files were modified", plan.Path)
+			err = fmt.Errorf("cannot patch binary file: %s. No files were modified", plan.Path)
+			return formatEditErrorResult(a.Patch, err), err
 		}
-		return "", fmt.Errorf("reading file: %w. No files were modified", err)
+		err = fmt.Errorf("reading file: %w. No files were modified", err)
+		return formatEditErrorResult(a.Patch, err), err
 	}
 	if decodedFile.Text != plan.Before {
-		return "", fmt.Errorf("file %s changed while planning patch; re-read it before applying the patch. No files were modified", plan.Path)
+		err := fmt.Errorf("file %s changed while planning patch; re-read it before applying the patch. No files were modified", plan.Path)
+		return formatEditErrorResult(a.Patch, err), err
 	}
 	encodedBytes, err := encodeString(plan.After, decodedFile.Encoding)
 	if err != nil {
@@ -150,13 +144,11 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 	warmDecodedFileCacheAsync(resolvedPath, encodedBytes, decodedText{Text: plan.After, Encoding: decodedFile.Encoding})
 
-	out := fmt.Sprintf("Applied patch to %s (+%d -%d)", plan.Path, plan.Added, plan.Removed)
-	if decodedFile.Encoding.Name != "utf-8" {
-		out += fmt.Sprintf(", encoding=%s", decodedFile.Encoding.Name)
+	displayPath := plan.Path
+	if rel, relErr := filepath.Rel(baseDirOrCwd(t.BaseDir), plan.Path); relErr == nil && rel != "" && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		displayPath = filepath.Clean(rel)
 	}
-	if summary := formatEditMatchSummary(plan.Matches); summary != "" {
-		out += "\n" + summary
-	}
+	out := formatEditSuccessResult(displayPath, plan.Added, plan.Removed, decodedFile.Encoding.Name)
 	if t.LSP != nil {
 		absPath, absErr := filepath.Abs(resolvedPath)
 		if absErr == nil {
@@ -173,6 +165,61 @@ func BuildEditPlanInDir(path, patchText, baseDir string) (EditPlan, error) {
 
 func BuildEditPlan(path, patchText string) (EditPlan, error) {
 	return buildEditPlan(path, patchText, "")
+}
+
+func baseDirOrCwd(baseDir string) string {
+	if strings.TrimSpace(baseDir) != "" {
+		return baseDir
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
+func formatEditSuccessResult(displayPath string, added, removed int, encoding string) string {
+	result := fmt.Sprintf("Applied patch to %s (+%d -%d)", displayPath, added, removed)
+	if encoding != "" && encoding != "utf-8" {
+		result += fmt.Sprintf(", encoding=%s", encoding)
+	}
+	return result
+}
+
+func formatEditErrorResult(patch string, err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	patch = strings.TrimSpace(patch)
+	if patch == "" || !shouldShowEditPatchExcerpt(msg) {
+		return msg
+	}
+	return msg + "\n\nPatch excerpt:\n" + fencedPatchExcerpt(patch)
+}
+
+func shouldShowEditPatchExcerpt(msg string) bool {
+	msg = strings.ToLower(strings.TrimSpace(msg))
+	for _, needle := range []string{
+		"hunk not found",
+		"failed to locate @@ header",
+		"invalid patch",
+		"patch is required",
+		"unsupported patch operation",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func fencedPatchExcerpt(patch string) string {
+	lines := strings.Split(strings.TrimSpace(patch), "\n")
+	if len(lines) > 20 {
+		lines = append(lines[:20], "... (patch truncated)")
+	}
+	return "```diff\n" + strings.Join(lines, "\n") + "\n```"
 }
 
 func buildEditPlan(path, patchText, baseDir string) (EditPlan, error) {
@@ -204,12 +251,12 @@ func buildEditPlan(path, patchText, baseDir string) (EditPlan, error) {
 		}
 		return EditPlan{}, fmt.Errorf("reading file: %w. No files were modified", err)
 	}
-	after, matches, err := applyParsedPatch(decodedFile.Text, parsed)
+	after, err := applyParsedPatch(decodedFile.Text, parsed)
 	if err != nil {
 		return EditPlan{}, err
 	}
 	diff := GenerateUnifiedDiffSummary(decodedFile.Text, after, parsed.Path)
-	return EditPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, Matches: matches}, nil
+	return EditPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed}, nil
 }
 
 func ParseEdit(path, patchText string) (parsedEdit, error) {
@@ -364,7 +411,7 @@ func validateEditPath(path string) (string, error) {
 	return clean, nil
 }
 
-func applyParsedPatch(content string, patch parsedEdit) (string, []EditMatchSummary, error) {
+func applyParsedPatch(content string, patch parsedEdit) (string, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -375,30 +422,20 @@ func applyParsedPatch(content string, patch parsedEdit) (string, []EditMatchSumm
 	if finalNewline {
 		fileLines = fileLines[:len(fileLines)-1]
 	}
-	matches := make([]EditMatchSummary, 0, len(patch.Hunks))
 	searchStart := 0
-	for i, hunk := range patch.Hunks {
-		summary := EditMatchSummary{HunkIndex: i + 1, Header: hunk.Header}
+	for _, hunk := range patch.Hunks {
 		if hunk.Header != "" {
-			headerMatch, headerResult, err := findFirstHunkMatch(fileLines, []string{hunk.Header}, searchStart)
+			headerMatch, _, err := findFirstHunkMatch(fileLines, []string{hunk.Header}, searchStart)
 			if err != nil {
-				return "", nil, fmt.Errorf("failed to locate @@ header %q: %s No files were modified", hunk.Header, diagnoseMissingHunkHeader(fileLines, hunk.Header, searchStart))
+				return "", fmt.Errorf("failed to locate @@ header %q: %s No files were modified", hunk.Header, diagnoseMissingHunkHeader(fileLines, hunk.Header, searchStart))
 			}
-			summary.HeaderLine = headerMatch + 1
-			summary.HeaderCandidateLines = toPatchLineNumbers(headerResult.Candidates)
-			summary.HeaderLayer = headerResult.Layer
 			searchStart = headerMatch + 1
 		}
 		oldSeq := hunkOldSequence(hunk)
-		match, result, err := findFirstHunkMatch(fileLines, oldSeq, searchStart)
+		match, _, err := findFirstHunkMatch(fileLines, oldSeq, searchStart)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
-		summary.Line = match + 1
-		summary.CandidateLines = toPatchLineNumbers(result.Candidates)
-		summary.Layer = result.Layer
-		summary.WeakContext = isWeakHunkContext(oldSeq)
-		matches = append(matches, summary)
 		newSeq := buildHunkReplacement(fileLines[match:match+len(oldSeq)], hunk)
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
 		replaced = append(replaced, fileLines[:match]...)
@@ -417,7 +454,7 @@ func applyParsedPatch(content string, patch parsedEdit) (string, []EditMatchSumm
 	if newline == "\r\n" {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	return out, matches, nil
+	return out, nil
 }
 
 func hunkOldSequence(h editHunk) []string {
@@ -604,98 +641,6 @@ func hasTrimmedLineMatches(fileLines, oldSeq []string, start int) bool {
 		}
 	}
 	return false
-}
-
-func formatEditMatchSummary(matches []EditMatchSummary) string {
-	if len(matches) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if match.Line <= 0 {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%d", match.Line))
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	out := "Matched hunk"
-	if len(lines) > 1 {
-		out += "s"
-	}
-	out += " near line(s): " + strings.Join(lines, ", ")
-	var notes []string
-	for _, match := range matches {
-		if len(match.CandidateLines) > 1 {
-			notes = append(notes, formatEditAmbiguousNote("hunk", match.HunkIndex, match.CandidateLines, match.WeakContext))
-		}
-		if len(match.HeaderCandidateLines) > 1 {
-			notes = append(notes, formatEditAmbiguousNote("@@ header", match.HunkIndex, match.HeaderCandidateLines, false))
-		}
-	}
-	if len(notes) > 0 {
-		out += "\n" + strings.Join(notes, "\n")
-	}
-	return out
-}
-
-func formatEditAmbiguousNote(kind string, hunkIndex int, candidates []int, weak bool) string {
-	if len(candidates) == 0 {
-		return ""
-	}
-	other := candidates[1:]
-	note := fmt.Sprintf("Note: %s %d matched multiple locations; applied the first match near line %d after the current search position", kind, hunkIndex, candidates[0])
-	if len(other) > 0 {
-		note += ". Other candidate line(s): " + formatIntList(other)
-	}
-	if weak {
-		note += ". The hunk used weak context such as a brace, parenthesis, bracket, or blank line; verify the matched location if needed"
-	}
-	return note + "."
-}
-
-func formatIntList(values []int) string {
-	parts := make([]string, 0, len(values))
-	for _, value := range values {
-		parts = append(parts, fmt.Sprintf("%d", value))
-	}
-	return strings.Join(parts, ", ")
-}
-
-func isWeakHunkContext(oldSeq []string) bool {
-	if len(oldSeq) > 2 {
-		return false
-	}
-	for _, line := range oldSeq {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		weak := true
-		for _, r := range trimmed {
-			switch r {
-			case '{', '}', '(', ')', '[', ']', ',', ';':
-			default:
-				weak = false
-			}
-		}
-		if !weak {
-			return false
-		}
-	}
-	return true
-}
-
-func toPatchLineNumbers(idxs []int) []int {
-	if len(idxs) == 0 {
-		return nil
-	}
-	out := make([]int, len(idxs))
-	for i, idx := range idxs {
-		out[i] = idx + 1
-	}
-	return out
 }
 
 func findMatchesWithNorm(fileLines, oldSeq []string, start int, norm func(string) string) []int {

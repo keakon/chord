@@ -520,6 +520,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					ID:        *nextID,
 					Type:      BlockToolCall,
 					Content:   eventToolDisplayArgs(toolName, argsStr, ""),
+					RawArgs:   argsStr,
 					ToolName:  toolName,
 					ToolID:    tc.ID,
 					Collapsed: true,
