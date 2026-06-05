@@ -272,6 +272,8 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		allowArgRenderUpdate := evt.ArgsStreamingDone || m.shouldRefreshToolArgRender(evt.ID, evt.ArgsJSON, now)
 		if !allowArgRenderUpdate {
+			m.markStreamRenderDirty()
+			effects.addFollowup(m.scheduleStreamFlush(0))
 			return true, effects
 		}
 		updated := false
