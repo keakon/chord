@@ -31,6 +31,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed the info panel's context `Bytes` display so fresh sessions start at zero user context and restored sessions immediately show the same post-reduction size and savings estimate used for the next request.
 - Cancelling a turn now preserves tool calls that already completed successfully, so pressing Esc on a slow later tool no longer rewrites earlier successful tool cards as `context canceled`.
 - Pending model or pool switches are now shown explicitly in the TUI while a turn is busy, so the status line and info panel distinguish the currently running model from the queued switch.
+- `edit` now gives models clearer patch-writing guidance and accepts more common patch context, reducing avoidable edit failures.
 
 ## 0.6.2 - 2026-06-02
 

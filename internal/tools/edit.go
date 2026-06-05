@@ -70,7 +70,7 @@ func (EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t EditTool) Description() string {
-	return "Edit one existing file with patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Patch contains hunk text only: use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Standard unified-diff line-range headers such as @@ -1,3 +1,3 @@ are accepted as plain hunk separators. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...), only after verifying that exact header exists in the current file. Do not guess or approximate anchors, and do not use a separate @@ hunk only as an anchor. Use " + toolname.Write + " to create a new file or intentionally replace an entire file, and " + toolname.Delete + " to remove whole files. Before " + toolname.Edit + ", make sure the file has been observed via " + toolname.Read + " or a system-resolved @file mention; if you need more surrounding context, " + toolname.Read + " the target area. If " + toolname.Edit + " fails, diagnose the reported cause first; re-read or grep stale text/anchors before retrying, and do not retry the same hunk unchanged. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use " + toolname.Shell + " to run apply_patch."
+	return "Edit one existing file with patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. The path may be absolute or relative and supports ~ for the current user's home directory. Use direct @@ patch hunks: @@ or @@ <verified header>, context lines with a leading space, removed lines with -, and added lines with +. Do not rely on unified diff line numbers or apply_patch wrappers; use verified headers and nearby context for positioning instead. Hunks are applied in order by matching the first occurrence after the current search position, so include enough nearby context for the intended location; for repeated blocks such as tests or fixtures, include the surrounding function, test, or case name in the same @@ hunk, for example @@ func name(...), only after verifying that exact header exists in the current file. Do not guess or approximate anchors, and do not use a separate @@ hunk only as an anchor. Use " + toolname.Write + " to create a new file or intentionally replace an entire file, and " + toolname.Delete + " to remove whole files. Before " + toolname.Edit + ", make sure the file has been observed via " + toolname.Read + " or a system-resolved @file mention; if you need more surrounding context, " + toolname.Read + " the target area. If " + toolname.Edit + " fails, diagnose the reported cause first; re-read or grep stale text/anchors before retrying, and do not retry the same hunk unchanged. If the file changed since it was observed, the tool validates hunks against current contents and may report a backup for risky writes. Do not use " + toolname.Shell + " to run apply_patch."
 }
 
 func (t EditTool) Parameters() map[string]any {
@@ -83,7 +83,7 @@ func (t EditTool) Parameters() map[string]any {
 			},
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Patch hunk text. Use @@ hunk headers, context lines with a leading space, removed lines with -, and added lines with +. Standard unified-diff line-range headers such as @@ -1,3 +1,3 @@ are accepted as plain hunk separators. Codex apply_patch envelope lines such as *** Begin Patch, a leading *** Update File matching path, and *** End Patch are ignored when present. Hunks are applied in order by matching the first occurrence after the current search position. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk, but only after verifying that exact header exists in the current file with read/grep; do not guess or approximate anchors, and do not use a separate earlier @@ hunk only as an anchor. If an edit fails, diagnose the error first, re-read/grep stale text or anchors, and do not retry the same hunk unchanged.",
+				"description": "Patch hunk text. Use direct @@ or @@ <verified header> hunk lines, context lines with a leading space, removed lines with -, and added lines with +. Do not rely on unified diff line numbers or apply_patch wrappers; use verified headers and nearby context for positioning instead. Keep hunks small and include enough nearby context for the intended location. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk, but only after verifying that exact header exists in the current file with read/grep; do not guess or approximate anchors, and do not use a separate earlier @@ hunk only as an anchor. If an edit fails, diagnose the error first, re-read/grep stale text or anchors before retrying, and do not retry the same hunk unchanged. Example:\n@@ func target() {\n old line\n-old value\n+new value\n }",
 			},
 		},
 		"required":             []string{"path", "patch"},
@@ -278,10 +278,7 @@ func ParseEdit(path, patchText string) (parsedEdit, error) {
 		case strings.HasPrefix(line, "***"):
 			return parsedEdit{}, fmt.Errorf("unsupported patch operation %q. %s No files were modified", line, editUnsupportedOperationHint)
 		case strings.HasPrefix(line, "@@"):
-			header := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
-			if isUnifiedDiffRangeHeader(header) {
-				header = ""
-			}
+			header := parseEditHunkHeader(line)
 			parsed.Hunks = append(parsed.Hunks, editHunk{Header: header})
 			current = &parsed.Hunks[len(parsed.Hunks)-1]
 		default:
@@ -316,12 +313,43 @@ func ParseEdit(path, patchText string) (parsedEdit, error) {
 	return parsed, nil
 }
 
-func isUnifiedDiffRangeHeader(header string) bool {
-	fields := strings.Fields(header)
-	if len(fields) < 3 || fields[2] != "@@" {
-		return false
+func parseEditHunkHeader(line string) string {
+	header := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
+	if section, ok := parseUnifiedDiffRangeHeader(header); ok {
+		return section
 	}
-	return isUnifiedDiffRange(fields[0], '-') && isUnifiedDiffRange(fields[1], '+')
+	return header
+}
+
+func parseUnifiedDiffRangeHeader(header string) (string, bool) {
+	firstRange, rest, ok := cutNextField(header)
+	if !ok || !isUnifiedDiffRange(firstRange, '-') {
+		return "", false
+	}
+	secondRange, rest, ok := cutNextField(rest)
+	if !ok || !isUnifiedDiffRange(secondRange, '+') {
+		return "", false
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	if !strings.HasPrefix(rest, "@@") {
+		return "", false
+	}
+	section := strings.TrimPrefix(rest, "@@")
+	section = strings.TrimPrefix(section, " ")
+	return section, true
+}
+
+func cutNextField(s string) (field, rest string, ok bool) {
+	s = strings.TrimLeft(s, " \t")
+	if s == "" {
+		return "", "", false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' {
+			return s[:i], s[i:], true
+		}
+	}
+	return s, "", true
 }
 
 func isUnifiedDiffRange(field string, prefix byte) bool {

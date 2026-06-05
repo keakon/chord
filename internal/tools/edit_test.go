@@ -163,6 +163,93 @@ func TestEditToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
 	}
 }
 
+func TestEditParserPreservesUnifiedDiffSectionHeader(t *testing.T) {
+	parsed, err := ParseEdit("demo.go", "@@ -3,3 +3,4 @@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
+	if err != nil {
+		t.Fatalf("ParseEdit: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Header != "func second() {" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestEditParserPreservesUnifiedDiffSectionWhitespace(t *testing.T) {
+	parsed, err := ParseEdit("demo.go", "@@ -3,3 +3,4 @@     func  second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
+	if err != nil {
+		t.Fatalf("ParseEdit: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Header != "    func  second() {" {
+		t.Fatalf("header = %q", parsed.Hunks[0].Header)
+	}
+}
+
+func TestEditToolUsesUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.go")
+	content := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n}\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@ -6,3 +6,4 @@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.go", "patch": patch})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	want := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n\tprintln(\"y\")\n}\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditToolUsesIndentedUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.py")
+	content := "def first():\n    value = 1\n\ndef second():\n    value = 1\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@ -3,2 +3,3 @@     def second():\n     value = 1\n+    value = 2\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.py", "patch": patch})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	want := "def first():\n    value = 1\n\ndef second():\n    value = 1\n    value = 2\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditToolSupportsMultipleUnifiedDiffRangeHeaders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n@@ -3,2 +3,3 @@\n three\n four\n+five\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "one\nTWO\nthree\nfour\nfive\n" {
+		t.Fatalf("file = %q", got)
+	}
+}
+
+func TestEditToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
+	params := (EditTool{}).Parameters()
+	props := params["properties"].(map[string]any)
+	patch := props["patch"].(map[string]any)
+	desc := patch["description"].(string)
+	for _, want := range []string{"Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Example:"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q: %q", want, desc)
+		}
+	}
+}
+
 func TestEditToolSupportsParentDirectoryPath(t *testing.T) {
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "repo")
