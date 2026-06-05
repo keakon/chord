@@ -17,6 +17,16 @@ if [[ -z "${files}" ]]; then
   exit 0
 fi
 
+while IFS= read -r f; do
+  [[ -z "${f}" ]] && continue
+  if ! git diff --quiet -- "${f}"; then
+    echo "pre-commit: ${f} has unstaged changes"
+    echo "pre-commit: refusing to format and re-stage partially staged Go files"
+    echo "pre-commit: stage the whole file, stash unstaged changes, or split the commit"
+    exit 1
+  fi
+done <<< "${files}"
+
 count=0
 while IFS= read -r f; do
   [[ -z "${f}" ]] && continue
