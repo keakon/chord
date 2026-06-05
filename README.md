@@ -24,6 +24,7 @@ We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database
 | **Cost** | **$5.58** | $15.15 | **63% cheaper** |
 
 Notes:
+
 - Both runs used GPT-5.5 (xhigh).
 - Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
 - The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
@@ -39,6 +40,7 @@ We also measured the interactive app shell: time from launch to accepting input,
 | Claude Code v2.1.163 | 32s | ~2s | 156.3MB | >300MB |
 
 Notes:
+
 - Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
 - Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
 - Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.

@@ -4,5 +4,22 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+has_doc_changes=0
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  case "$path" in
+    *.md|*.markdown|docs/*|website/*|.markdownlint-cli2.jsonc|.lycheeignore|.github/workflows/docs.yml|scripts/check_docs_consistency.sh)
+      has_doc_changes=1
+      break
+      ;;
+  esac
+done < <(git diff --name-only @{push}...HEAD 2>/dev/null || git diff --name-only HEAD~1...HEAD)
+
 echo "pre-push: running lightweight checks"
 make fmt-check vet staticcheck test
+
+if [[ "$has_doc_changes" -eq 1 ]]; then
+  echo "pre-push: running docs checks"
+  make docs-check
+  npx -y markdownlint-cli2
+fi

@@ -24,18 +24,14 @@
     // MD040 fenced code language, MD047 file end newline — all default-on.
   },
   "globs": [
-    "docs/**/*.md",
-    "README.md",
-    "README_CN.md",
-    "CONTRIBUTING.md",
-    "AGENTS.md",
-    "SECURITY.md",
-    "CODE_OF_CONDUCT.md"
+    "**/*.{md,markdown}"
   ],
   "ignores": [
+    ".chord/**",
     ".internal-docs/**",
     "website/**",
     "node_modules/**",
+    ".opencode/**",
     "CHANGELOG.md",
     "CHANGELOG_CN.md"
   ]
