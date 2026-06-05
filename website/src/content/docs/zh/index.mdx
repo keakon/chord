@@ -19,43 +19,69 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## 性能实测
 
-我们在一个[真实数据库系统任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)上对比了 Chord v0.6.3 和 Codex-CLI v0.136.0：为 Pebble 实现 durability wait API。该任务并非简单的增删改查——需要理解 commit/WAL sync 和并发语义，跨越写入路径、事件监听、DB 生命周期等多个子系统进行推理，最终生成 8 个文件、853 行代码的补丁。
+### 真实编码任务
 
-两者均使用 GPT-5.5（xhigh）：
+我们在一个[真实数据库系统任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)上对比了 Chord v0.6.3 和 Codex-CLI v0.136.0：为 Pebble 实现 durability wait API。该任务并非简单的增删改查——需要理解 commit/WAL sync 和并发语义，跨越写入路径、事件监听、DB 生命周期等多个子系统推理。
 
 | 指标 | Chord v0.6.3 | Codex-CLI v0.136.0 | 改进 |
 |------|--------------|---------------------|------|
-| **时间** | 48 分钟 | 63 分钟 | **快 24%** |
-| **API 调用** | 93 次 | 118 次 | **少 21%** |
-| **输入 tokens** | 6.86M | 18.47M | **少 63%** |
-| **输出 tokens** | 25K | 74K | **少 66%** |
-| **缓存读取 tokens** | 6.55M | 17.64M | **少 63%** |
-| **成本** | **$5.58** | **$15.15** | **省 63%** |
+| **耗时** | **46m21s** | 61m18s | **快 24%** |
+| **模型调用** | **93 次** | 118 次 | **少 21%** |
+| **输入 tokens** | **6.86M** | 18.47M | **少 63%** |
+| **输出 tokens** | **25K** | 74K | **少 66%** |
+| **缓存读取 tokens** | **6.55M** | 17.64M | **少 63%** |
+| **成本** | **$5.58** | $15.15 | **省 63%** |
 
+注：
+- 两次运行均使用 GPT-5.5（xhigh）。
+- 耗时排除环境准备和最终收尾时间，包含模型交互、代码修改和测试执行。
+- 该任务参考答案规模为 8 个文件、670 行变更；实际模型输出可能因单元测试、注释或实现路径不同而更大或更小。
+
+### 应用启动与内存
+
+我们还测了应用交互层：从启动到可以输入、正常退出耗时，以及空会话和加载 200 条消息后的内存。
+
+| 应用 | 启动到可输入 | 正常退出 | 空会话内存 | 200 消息内存 |
+|------|--------------|----------|------------|--------------|
+| Chord v0.6.3 | **&lt;1s** | **&lt;1s** | **31.6MB** | **~40MB** |
+| Codex-CLI v0.136.0 | **&lt;1s** | ~20s | 35.8MB | ~80MB |
+| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | &gt;300MB |
+
+注：
+- Codex-CLI 退出时会等待收尾，约 20 秒超时后退出。
+- Claude Code 启动时会等待，约 30 秒超时后才可以正常输入。
+- 不同会话和环境的内存占用会有差异，表中数据仅用于估算。
 
 ## 为什么选 Chord
 
 <CardGrid>
-  <Card title="稳定长期运行" icon="document">
-    Chord 会在长对话接近模型 token 上限前压缩早期内容，同时保留继续工作所需的信息。
+  <Card title="长会话更省上下文" icon="document">
+    请求时剪裁陈旧工具输出，并用类型化摘要保留大块结果的关键信息；接近上限前再压缩早期内容。
+  </Card>
+  <Card title="轻量常驻" icon="seti:powershell">
+    近乎瞬间加载上千条消息的历史会话，退出无需等待；内存占用低，空闲数分钟后卸载 LSP/MCP 资源。
   </Card>
   <Card title="网络状态全程可见" icon="rocket">
     模型调用过程中精确显示请求状态与已等待时间，再也不用猜「是不是卡住了」。
   </Card>
   <Card title="键盘优先、Vim 风格" icon="seti:vim">
-    Insert / Normal 模式、消息搜索、完整 Vim 风格导航、模式切换自动切输入法。退出需连按两次。
+    面向习惯全键盘操作的用户：Insert / Normal 模式、Vim 风格导航、消息搜索，模式切换时自动切输入法。
   </Card>
   <Card title="模型组合热切换" icon="random">
     将模型分到可复用的池（`fast`、`thinking`、`cheap`），运行时用 `/models` 或 `Ctrl+P` 切换。运行时按池内顺序自动 fallback。
   </Card>
-  <Card title="资源占用极低" icon="seti:powershell">
-    低内存、低 CPU。macOS 上电源感知：工作时阻止系统休眠，空闲后自动放行。
+  <Card title="项目上下文" icon="document">
+    LSP 诊断、definition/reference/implementation 查询、Git 状态，以及
+    `@` 文件补全。
   </Card>
-  <Card title="可远程操控" icon="external">
-    `chord headless` 提供 stdio JSON 控制面，配合 [chord-gateway](https://github.com/keakon/chord-gateway) 可从任意聊天平台操控，离开桌面也能在手机上用。
+  <Card title="图片和 PDF 输入" icon="seti:image">
+    粘贴图片，按模型能力附加图片或 PDF；支持的终端可预览图片，模型也可用 `view_image` 查看本地 PNG/JPEG。
   </Card>
-  <Card title="一键导入外部会话" icon="import">
-    一条命令即可从 Claude Code、Codex、OpenCode 迁移。对话记录和工具调用自动转换，无缝恢复原有上下文。
+  <Card title="远程控制" icon="external">
+    `chord headless` 可配合 chord-gateway 从聊天平台操控本机 Chord。
+  </Card>
+  <Card title="导入外部会话" icon="import">
+    可把 Claude Code、Codex、OpenCode 会话迁移成可恢复的 Chord 会话。
   </Card>
 </CardGrid>
 

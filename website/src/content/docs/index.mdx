@@ -19,53 +19,80 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## Performance
 
-We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems — producing a patch of 853 lines across 8 files.
+### Real-world coding task
 
-Both used GPT-5.5 (xhigh):
+We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
 
 | Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
 |--------|--------------|---------------------|-------------|
-| **Time** | 48 minutes | 63 minutes | **24% faster** |
-| **API calls** | 93 | 118 | **21% fewer** |
-| **Input tokens** | 6.86M | 18.47M | **63% fewer** |
-| **Output tokens** | 25K | 74K | **66% fewer** |
-| **Cache read tokens** | 6.55M | 17.64M | **63% fewer** |
-| **Cost** | **$5.58** | **$15.15** | **63% cheaper** |
+| **Time** | **46m21s** | 61m18s | **24% faster** |
+| **LLM calls** | **93** | 118 | **21% fewer** |
+| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
+| **Output tokens** | **25K** | 74K | **66% fewer** |
+| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
+| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
 
+Notes:
+- Both runs used GPT-5.5 (xhigh).
+- Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
+- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
+
+### App startup and memory
+
+We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
+
+| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
+|-----|------------------|-------------|----------------------|--------------------|
+| Chord v0.6.3 | **&lt;1s** | **&lt;1s** | **31.6MB** | **~40MB** |
+| Codex-CLI v0.136.0 | **&lt;1s** | ~20s | 35.8MB | ~80MB |
+| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | &gt;300MB |
+
+Notes:
+- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
+- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
+- Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
 
 ## Why Chord
 
 <CardGrid>
-  <Card title="Stable for the long haul" icon="document">
-    Chord can summarize earlier turns before a long conversation gets too large
-    for the model, while preserving the information needed to continue.
+  <Card title="Long sessions use less context" icon="document">
+    Chord trims stale tool output at request time, keeps typed summaries for
+    large results, and compacts earlier turns before context pressure breaks
+    the flow.
+  </Card>
+  <Card title="Stays out of the way" icon="seti:powershell">
+    Loads sessions with thousands of messages almost instantly, exits without
+    a shutdown wait, keeps memory low, and unloads idle LSP/MCP resources.
   </Card>
   <Card title="You see the network state" icon="rocket">
     Precise request status and elapsed wait time during model calls. Never
     wonder if it's stuck again.
   </Card>
   <Card title="Keyboard-first, Vim-style" icon="seti:vim">
-    Insert / Normal modes, message search, full Vim-flavoured navigation,
-    automatic input-method switching. Quitting takes two taps.
+    Built for keyboard-heavy workflows: Insert / Normal modes, Vim-flavoured
+    navigation, and message search.
   </Card>
   <Card title="Hot-swap model setups" icon="random">
     Group models into reusable pools (`fast`, `thinking`, `cheap`) and switch
     them at runtime via `/models` or `Ctrl+P`. The runtime falls back through
     the ordered list automatically.
   </Card>
-  <Card title="Extremely lightweight" icon="seti:powershell">
-    Low memory and CPU footprint. macOS power-aware: prevents idle sleep
-    while work is active, lets the system sleep again when idle.
+  <Card title="Project context" icon="document">
+    LSP diagnostics, definition/reference/implementation lookups, Git status,
+    and `@` file completion.
   </Card>
-  <Card title="Drive it remotely" icon="external">
+  <Card title="Images and PDFs" icon="seti:image">
+    Paste images, attach image/PDF files when supported, preview images in
+    supported terminals, and use `view_image` for local PNG/JPEG files.
+  </Card>
+  <Card title="Remote control" icon="external">
     `chord headless` exposes a stdio JSON control plane; pair with
     [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord
-    from any chat surface — even from your phone when you are away.
+    from chat surfaces.
   </Card>
   <Card title="Import existing sessions" icon="import">
-    Migrate from Claude Code, Codex, or OpenCode with a single command.
-    Import turns and tool history are converted automatically — resume
-    where you left off without losing context.
+    Migrate Claude Code, Codex, and OpenCode sessions into resumable Chord
+    sessions.
   </Card>
 </CardGrid>
 

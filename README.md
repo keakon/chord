@@ -10,35 +10,55 @@
 
 ## Performance
 
-We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems — producing a patch of 853 lines across 8 files.
+### Real-world coding task
 
-Both used GPT-5.5 (xhigh):
+We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
 
 | Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
 |--------|--------------|---------------------|-------------|
-| **Time** | 48 minutes | 63 minutes | **24% faster** |
-| **API calls** | 93 | 118 | **21% fewer** |
-| **Input tokens** | 6.86M | 18.47M | **63% fewer** |
-| **Output tokens** | 25K | 74K | **66% fewer** |
-| **Cache read tokens** | 6.55M | 17.64M | **63% fewer** |
-| **Cost** | **$5.58** | **$15.15** | **63% cheaper** |
+| **Time** | **46m21s** | 61m18s | **24% faster** |
+| **LLM calls** | **93** | 118 | **21% fewer** |
+| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
+| **Output tokens** | **25K** | 74K | **66% fewer** |
+| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
+| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
+
+Notes:
+- Both runs used GPT-5.5 (xhigh).
+- Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
+- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
+
+### App startup and memory
+
+We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
+
+| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
+|-----|------------------|-------------|----------------------|--------------------|
+| Chord v0.6.3 | **<1s** | **<1s** | **31.6MB** | **~40MB** |
+| Codex-CLI v0.136.0 | **<1s** | ~20s | 35.8MB | ~80MB |
+| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | >300MB |
+
+Notes:
+- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
+- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
+- Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
 
 ## Why Chord
 
 Start with the core experience you notice immediately:
 
-- **Stable for the long haul.** Before a long conversation approaches the model's token limit, Chord can compact earlier turns in the background; once compaction finishes, it atomically replaces the old history and keeps running while preserving the context needed for follow-up work. Paired with `/loop`, complex tasks can run continuously for hours.
-
+- **Long sessions use less context.** Chord trims stale tool output at request time and keeps typed summaries for large search results, JSON blobs, build/test logs, and file reads. Before a conversation approaches the model's token limit, it can compact earlier turns in the background. Paired with `/loop`, complex tasks can run continuously for hours while wasting fewer tokens.
+- **Stays out of the way.** Chord can load sessions with thousands of messages almost instantly, exits without a shutdown wait, keeps memory usage low, and unloads idle LSP/MCP resources until they are needed again.
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
-- **Keyboard-first, Vim-style.** Insert / Normal modes, message search, Vim-flavoured navigation, automatic input-method switching across modes. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
+- **Keyboard-first, Vim-style.** Built for keyboard-heavy workflows: Insert / Normal modes, Vim-flavoured navigation, and message search. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
-- **Extremely lightweight.** Low memory and CPU footprint. Power-aware on macOS: prevents idle sleep while work is active, lets the system sleep again when idle.
-- **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from any chat surface — even from your phone when you are away from the desk.
+- **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from chat surfaces.
+- **Bring old sessions in.** `chord import` migrates Claude Code, Codex, and OpenCode sessions into resumable Chord sessions.
 
 Out of the box, you also get these quality-of-life upgrades:
 
-- **LSP-backed code awareness** — live diagnostics and definition / references / implementation lookups via your local language servers.
-- **Multimodal input** — paste images from the clipboard, attach files, preview in supported terminals.
+- **Project context** — live LSP diagnostics, definition / reference / implementation lookups, Git status, and `@` file completion.
+- **Images and PDFs** — paste images, attach image/PDF files when the active model supports them, preview images in supported terminals, and let image-capable models inspect local PNG/JPEG files with `view_image`.
 - **Codex quota visibility** — real-time remaining-quota and reset-time display for OpenAI Codex subscriptions.
 
 Once you want to go further, Chord also supports these advanced workflows:
