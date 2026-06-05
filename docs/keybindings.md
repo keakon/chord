@@ -53,7 +53,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `j` / `}`                 | Move to the next message card                                                         |
 | `k` / `{`                 | Move to the previous message card                                                     |
 | `o` / `Enter` / `Space`   | Toggle collapse / expand on the current card; on an image card, open the image       |
-| `e`                       | Edit / fork the focused user message into a new turn                                  |
+| `e`                       | Edit the focused user message; forks only when that message is not the transcript tail |
 
 ### Normal mode — overlays
 

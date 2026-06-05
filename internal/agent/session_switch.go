@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/keakon/golog/log"
 
@@ -266,11 +267,69 @@ func (a *MainAgent) ForkSession(msgIndex int) {
 	})
 }
 
+func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg message.Message) error {
+	if a.recovery != nil {
+		if err := a.recovery.RewriteLog("main", prefix); err != nil {
+			return fmt.Errorf("rewrite current session log: %w", err)
+		}
+	}
+
+	a.ctxMgr.RestoreMessages(prefix)
+	a.fileTrack = filelock.NewFileTracker()
+	a.restoreMainTrackedFileState(prefix)
+	a.resetRuntimeEvidenceFromMessages(prefix)
+	if a.lspSessionLoadFn != nil {
+		a.lspSessionLoadFn(prefix)
+	}
+
+	firstUser := ""
+	for _, msg := range prefix {
+		if msg.Role != "user" {
+			continue
+		}
+		firstUser = message.UserPromptPlainText(msg)
+		if strings.TrimSpace(firstUser) != "" {
+			break
+		}
+	}
+	if a.usageLedger != nil {
+		if err := a.usageLedger.RewriteFirstUserMessage(firstUser); err != nil {
+			return fmt.Errorf("rewrite usage summary first user message: %w", err)
+		}
+	}
+	a.updateSessionSummary(func(summary *SessionSummary) {
+		if summary == nil {
+			return
+		}
+		summary.FirstUserMessage = strings.TrimSpace(firstUser)
+		summary.FirstUserMessageIsCompactionSummary = false
+		if strings.TrimSpace(firstUser) == "" {
+			summary.OriginalFirstUserMessage = ""
+			return
+		}
+		if summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessage == summary.FirstUserMessage {
+			summary.OriginalFirstUserMessage = strings.TrimSpace(firstUser)
+		}
+	})
+
+	todos := rebuildTodosFromMessages(prefix)
+	a.todoMu.Lock()
+	a.todoItems = append([]tools.TodoItem(nil), todos...)
+	a.todoMu.Unlock()
+
+	a.emitToTUI(SessionRestoredEvent{})
+	a.emitToTUI(ForkSessionEvent{Parts: forkMsgParts(forkMsg)})
+	a.emitToTUI(ToastEvent{
+		Message: "Removed the tail user message from the current session and loaded it into the composer",
+		Level:   "info",
+	})
+	return nil
+}
+
 // handleForkSessionCommand creates a new session seeded with messages before
 // msgIndex, emits SessionRestoredEvent + ForkSessionEvent so the TUI can
 // load the forked message into the composer.
 func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
-	a.emitToTUI(SessionSwitchStartedEvent{Kind: "fork"})
 	msgs := a.ctxMgr.Snapshot()
 	if msgIndex < 0 || msgIndex >= len(msgs) {
 		log.Warnf("handleForkSessionCommand: msgIndex out of range msgIndex=%v len=%v", msgIndex, len(msgs))
@@ -287,6 +346,16 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 		a.setIdleAndDrainPending()
 		return
 	}
+
+	if msgIndex == len(msgs)-1 {
+		if err := a.editTailUserMessageInPlace(prefix, forkMsg); err != nil {
+			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("edit tail user message: %w", err)})
+		}
+		a.setIdleAndDrainPending()
+		return
+	}
+
+	a.emitToTUI(SessionSwitchStartedEvent{Kind: "fork"})
 
 	newSessionDir, err := a.createRuntimeSessionDir()
 	if err != nil {

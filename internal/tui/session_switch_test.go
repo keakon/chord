@@ -1830,6 +1830,9 @@ func TestHandleNormalKeyForkRequiresDoubleE(t *testing.T) {
 	if got := backend.forkMsgIndices; len(got) != 1 || got[0] != 2 {
 		t.Fatalf("ForkSession() calls after ee = %+v, want [2]", got)
 	}
+	if m.sessionSwitch.active() {
+		t.Fatalf("sessionSwitch = %+v, want inactive until backend confirms actual session switch", m.sessionSwitch)
+	}
 }
 
 func TestHandleNormalKeyForkIgnoresNonForkableBlocks(t *testing.T) {

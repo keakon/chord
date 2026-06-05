@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -452,6 +453,7 @@ func TestHandleForkSessionCommandReleasesOldLockAfterSwitch(t *testing.T) {
 	a.ctxMgr.RestoreMessages([]message.Message{
 		{Role: "user", Content: "first"},
 		{Role: "user", Content: "fork me"},
+		{Role: "assistant", Content: "tail reply"},
 	})
 
 	a.handleForkSessionCommand(1)
@@ -480,6 +482,7 @@ func TestHandleForkSessionCommandKeepsCurrentSessionWhenCreateFails(t *testing.T
 		{Role: "user", Content: "task list"},
 		{Role: "assistant", Content: "mid"},
 		{Role: "user", Content: "fork me"},
+		{Role: "assistant", Content: "tail reply"},
 	})
 	before := a.GetMessages()
 
@@ -538,6 +541,7 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 		{Role: "user", Content: "task list"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "todo-call-1", Name: "todo_write", Args: todoArgs}}},
 		{Role: "user", Content: "edit me"},
+		{Role: "assistant", Content: "tail reply"},
 	}
 	a.ctxMgr.RestoreMessages(msgs)
 	a.todoMu.Lock()
@@ -701,6 +705,7 @@ func TestHandleForkSessionCommandRePersistsImageAssetsIntoNewSession(t *testing.
 	<-a.Events() // startup restore toast
 
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "edit me"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "tail reply"})
 	a.handleForkSessionCommand(1)
 
 	newRecovery := recovery.NewRecoveryManager(a.sessionDir)
@@ -901,5 +906,97 @@ func TestHandleForkSessionCommandFirstUserEmptyPrefix(t *testing.T) {
 	}
 	if len(persisted) != 0 {
 		t.Fatalf("persisted messages = %d, want 0 for empty prefix fork", len(persisted))
+	}
+}
+
+func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	alphaPath := filepath.Join(projectRoot, "alpha.txt")
+	writeTestFile(t, alphaPath, "alpha")
+
+	msgs := []message.Message{{Role: "user", Content: "read alpha"}}
+	msgs = append(msgs, restoreReadMessages(t, "read-alpha", alphaPath, computeFileHash(alphaPath), nil)...)
+	msgs = append(msgs, message.Message{Role: "user", Content: "edit me"})
+	a.ctxMgr.RestoreMessages(msgs)
+	a.fileTrack = filelock.NewFileTracker()
+	a.restoreMainTrackedFileState(msgs)
+	if err := a.recovery.RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	if err := a.usageLedger.SetFirstUserMessage("read alpha"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	a.refreshSessionSummary()
+	oldSessionDir := a.sessionDir
+
+	a.handleForkSessionCommand(3)
+
+	if a.sessionDir != oldSessionDir {
+		t.Fatalf("sessionDir = %q, want unchanged %q", a.sessionDir, oldSessionDir)
+	}
+	gotMsgs := a.GetMessages()
+	if len(gotMsgs) != 3 {
+		t.Fatalf("len(GetMessages()) = %d, want 3 after removing tail user message", len(gotMsgs))
+	}
+	if gotMsgs[2].Role != "tool" {
+		t.Fatalf("last remaining message = %+v, want tool result before removed tail user message", gotMsgs[2])
+	}
+	if !a.fileTrack.HasRead(alphaPath, a.instanceID) {
+		t.Fatal("tracked read for prefix message should be preserved after in-place tail edit")
+	}
+
+	persisted, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	if len(persisted) != 3 {
+		t.Fatalf("len(persisted) = %d, want 3 after dropping tail user message", len(persisted))
+	}
+	if persisted[2].Role != "tool" {
+		t.Fatalf("persisted tail = %+v, want tool result after dropping tail user message", persisted[2])
+	}
+
+	if summary := a.GetSessionSummary(); summary == nil {
+		t.Fatal("GetSessionSummary() = nil")
+	} else {
+		if summary.ForkedFrom != "" {
+			t.Fatalf("ForkedFrom = %q, want empty for in-place tail edit", summary.ForkedFrom)
+		}
+		if summary.FirstUserMessage != "read alpha" {
+			t.Fatalf("FirstUserMessage = %q, want read alpha", summary.FirstUserMessage)
+		}
+	}
+
+	evt := nextNonRequestCycleEvent(t, a.Events())
+	if _, ok := evt.(SessionRestoredEvent); !ok {
+		t.Fatalf("first event = %T, want SessionRestoredEvent", evt)
+	}
+	evt = <-a.Events()
+	forkEvt, ok := evt.(ForkSessionEvent)
+	if !ok {
+		t.Fatalf("second event = %T, want ForkSessionEvent", evt)
+	}
+	if len(forkEvt.Parts) != 1 || forkEvt.Parts[0].Text != "edit me" {
+		t.Fatalf("fork parts = %+v, want single text part 'edit me'", forkEvt.Parts)
+	}
+	evt = <-a.Events()
+	toast, ok := evt.(ToastEvent)
+	if !ok {
+		t.Fatalf("third event = %T, want ToastEvent", evt)
+	}
+	if toast.Level != "info" || !strings.Contains(toast.Message, "current session") {
+		t.Fatalf("unexpected toast: %+v", toast)
+	}
+	select {
+	case evt := <-a.Events():
+		if _, ok := evt.(SessionSwitchStartedEvent); ok {
+			t.Fatalf("unexpected SessionSwitchStartedEvent after in-place tail edit: %+v", evt)
+		}
+	default:
 	}
 }

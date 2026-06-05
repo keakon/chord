@@ -94,7 +94,6 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil &&
 					block.Type == BlockUser && !block.IsUserLocalShell() && block.MsgIndex >= 0 {
-					m.beginSessionSwitch("fork", "")
 					m.agent.ForkSession(block.MsgIndex)
 				}
 				return nil

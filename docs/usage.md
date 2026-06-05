@@ -307,7 +307,7 @@ Currently supported:
 - Paste images from the clipboard
 - Attach image and PDF files to the currently focused agent's message when the active model supports that input type
 - View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
-- Edit/fork historical user messages that contain images or PDFs; path-restored attachments are reloaded when the edited message is sent again
+- Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
 - Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the active model supports image input. The tool uses the same local-path permission handling as `read`.
 
 Common actions:
