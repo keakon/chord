@@ -161,7 +161,7 @@ func TestNormalizeMessagesForPoolTarget_ResponsesConversionReplaysReasoningForSt
 	if items[2].Type != "function_call" || items[2].CallID != "call_1" || items[2].Name != "Shell" || items[2].Arguments != `{"command":"pwd"}` {
 		t.Fatalf("items[2] = %#v, want structured function_call item", items[2])
 	}
-	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" || items[3].Output == nil || *items[3].Output != "/tmp/project\n" {
+	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" || items[3].Output != "/tmp/project\n" {
 		t.Fatalf("items[3] = %#v, want tool result output", items[3])
 	}
 }

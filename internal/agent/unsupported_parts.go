@@ -6,6 +6,10 @@ type inputCapability interface {
 	SupportsInput(modality string) bool
 }
 
+type toolResultCapability interface {
+	SupportsToolResultModalities(modalities []string) bool
+}
+
 type unsupportedPartCounts struct {
 	Images int
 	PDFs   int

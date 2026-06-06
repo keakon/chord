@@ -308,7 +308,9 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - 在当前模型支持对应输入类型时，把图片或 PDF 文件作为附件发送给当前聚焦的 Agent
 - 在支持的终端里直接查看图片；PDF 会发送给模型，并在转录区显示为文件 chip，但不会 inline 预览
 - 编辑含图片或 PDF 的历史用户消息；如果这条消息已经在转录尾部，就直接在当前会话里回填编辑，否则会 fork 新会话；按路径恢复的附件会在重新发送该消息时再次加载
-- 在当前模型支持图片输入时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG 载入上下文。该工具使用与 `read` 相同的本地路径权限处理。
+- 当工具被权限规则允许、有效 model pool 的第一个模型支持 image 输入且这个第一个模型不是 OpenAI Chat Completions API 时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG 载入上下文。该工具使用与 `read` 相同的本地路径权限处理。
+
+`view_image` 是否可用由有效 model pool 的第一个模型决定，因此 fallback 路由切换模型时工具列表仍保持稳定。使用 OpenAI 模型且工具需要返回图片或文件时，建议优先使用 Responses API：OpenAI Chat Completions 可以接收用户消息中的图片，但它的 `role: "tool"` 消息只能承载文本。一旦当前会话包含工具返回的图片/PDF，Chord 会跳过无法安全重放这类上下文的 fallback 候选，包括不支持 image 输入的模型和 OpenAI Chat Completions；未使用图片/PDF 工具结果的普通会话仍可正常 fallback 到 Chat Completions。工具返回的图片会作为缩略图显示在对应的工具结果卡片中，并可在 Normal 模式下像用户附件图片一样打开。
 
 常用操作：
 
@@ -319,7 +321,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - `@` 文件补全只会在当前模型支持对应输入类型时显示图片 / PDF 文件。手动完整输入的图片 / PDF `@` 引用仍会作为附件接受；若当前模型不支持，发送时会忽略并提示。
 - 若要按路径附加图片或 PDF：先在输入框中填入文件路径，再给 `insert_attach_file` 配一个自定义快捷键
 - 似乎已加密的 PDF 会显示警告；Chord 仍允许发送，因为最终是否可读取以 provider 解析结果为准。
-- `Enter` / `o` / `Space`：Normal 模式下打开当前消息中的图片
+- `Enter` / `o` / `Space`：Normal 模式下打开当前用户消息或工具结果中的图片
 
 ## 复制文本
 

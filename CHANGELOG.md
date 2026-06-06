@@ -12,10 +12,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Context reduction now waits until the third consecutive request on the same model before preserving the prompt-cache surface; switching models resets that model-run count, so the first two requests on a new model can still trim cached context under pressure.
 - Context reduction now gives the first main-model request after all TODOs are completed a one-request wrap-up grace window, avoiding cache-breaking last-minute pruning before final answers unless the model changed or the context is under high pressure. The grace is configurable with `context.reduction.wrap_up_grace_requests`.
 - Context reduction now keeps shorter successful shell-output excerpts by default, reducing low-signal terminal output retained under pressure.
+- Images returned by tools such as `view_image` now stay attached to the corresponding tool result, appear as openable TUI thumbnails on the tool result card, and are sent through provider-native multimodal tool/function result formats for APIs that support them. `view_image` is visible only when permitted and the effective model pool's first model supports image input without using OpenAI Chat Completions; after image/PDF tool results exist, Chord skips fallback candidates that lack the required image/PDF input support or use Chat Completions.
 
 ### Fixes
 
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
+- Resuming sessions after `view_image` no longer shows tool-returned images as user-authored messages.
 
 ## 0.6.3 - 2026-06-05
 

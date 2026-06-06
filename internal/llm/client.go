@@ -55,6 +55,7 @@ type Client struct {
 	lastInputTokens        int             // tracks last known input token count for context size checks
 	fallbackModels         []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
 	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
+	toolSurfacePrimary     FallbackModel   // first entry of the effective model pool; defines stable modality-dependent tool visibility
 	lastCallStatus         CallStatus
 	serviceTier            config.ServiceTier
 
@@ -104,6 +105,7 @@ func NewClient(
 			RunningModelRef:  providerModelRef(providerCfg, modelID),
 		},
 	}
+	c.toolSurfacePrimary = c.PrimaryModelEntry()
 	c.startCodexWarmup()
 	return c
 }
@@ -238,6 +240,7 @@ func (c *Client) SetFallbackModels(models []FallbackModel) {
 	defer c.mu.Unlock()
 	c.fallbackModels = append([]FallbackModel(nil), models...)
 	c.poolCursor = 0
+	c.toolSurfacePrimary = c.primaryModelEntryLocked()
 }
 
 // SetModelPool configures the client with an ordered model pool.
@@ -254,6 +257,7 @@ func (c *Client) SetModelPool(models []FallbackModel, selectedIdx int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	sel := models[selectedIdx]
+	c.toolSurfacePrimary = models[0]
 	c.provider = sel.ProviderConfig
 	c.providerImpl = sel.ProviderImpl
 	c.modelID = sel.ModelID
@@ -318,6 +322,10 @@ func (c *Client) Variant() string {
 func (c *Client) PrimaryModelEntry() FallbackModel {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.primaryModelEntryLocked()
+}
+
+func (c *Client) primaryModelEntryLocked() FallbackModel {
 	entry := FallbackModel{
 		ProviderConfig: c.provider,
 		ProviderImpl:   c.providerImpl,
@@ -707,6 +715,84 @@ func (c *Client) SupportsInput(modality string) bool {
 		return modality == "text" || modality == "image"
 	}
 	return m.SupportsInput(modality)
+}
+
+func (c *Client) SupportsToolResultModalities(modalities []string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return fallbackModelCanReplayToolResultModalities(FallbackModel{ProviderConfig: c.provider, ModelID: c.modelID}, modalities)
+}
+
+// PrimarySupportsViewImageTool reports whether the configured primary model can
+// expose view_image. The primary entry, not the sticky fallback cursor, defines
+// the stable tool surface for the session.
+func (c *Client) PrimarySupportsViewImageTool() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return fallbackModelCanReplayImageToolResults(c.toolSurfacePrimary)
+}
+
+func fallbackModelCanReplayImageToolResults(model FallbackModel) bool {
+	return fallbackModelCanReplayToolResultModalities(model, []string{"image"})
+}
+
+func fallbackModelCanReplayToolResultModalities(model FallbackModel, modalities []string) bool {
+	if model.ProviderConfig == nil {
+		return false
+	}
+	m, ok := model.ProviderConfig.GetModel(model.ModelID)
+	if !ok {
+		return false
+	}
+	for _, modality := range modalities {
+		if !m.SupportsInput(modality) {
+			return false
+		}
+	}
+	switch providerWireFamily(model.ProviderConfig) {
+	case modelcompat.WireFamilyOpenAIChat:
+		return false
+	default:
+		return true
+	}
+}
+
+func streamTargetCanReplayToolResultModalities(target streamRetryTarget, modalities []string) bool {
+	return fallbackModelCanReplayToolResultModalities(FallbackModel{
+		ProviderConfig: target.provider,
+		ModelID:        target.modelID,
+	}, modalities)
+}
+
+func requiredToolResultModalities(messages []message.Message) []string {
+	var needsImage, needsPDF bool
+	for _, msg := range messages {
+		if msg.Role != "tool" {
+			continue
+		}
+		for _, part := range msg.Parts {
+			switch part.Type {
+			case "image":
+				needsImage = true
+			case "pdf":
+				needsPDF = true
+			}
+		}
+	}
+	modalities := make([]string, 0, 2)
+	if needsImage {
+		modalities = append(modalities, "image")
+	}
+	if needsPDF {
+		modalities = append(modalities, "pdf")
+	}
+	return modalities
 }
 
 // CompleteStream sends a streaming completion request with automatic retries.

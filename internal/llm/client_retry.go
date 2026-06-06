@@ -709,11 +709,19 @@ func (c *Client) completeStreamWithRetry(
 			fallbackEnabled,
 			fallbackModels,
 		)
+		requiredModalities := requiredToolResultModalities(messages)
 		for ti := range targets {
 			if err := abortIfCancelled(); err != nil {
 				return nil, err
 			}
 			t := targets[ti]
+			if len(requiredModalities) > 0 && !streamTargetCanReplayToolResultModalities(t, requiredModalities) {
+				required := strings.Join(requiredModalities, "/")
+				log.Infof("skipping model: conversation contains %s tool results that target cannot replay provider=%v model=%v wire_family=%v", required, t.provider.Name(), t.modelID, providerWireFamily(t.provider))
+				lastErr = fmt.Errorf("conversation contains tool-returned %s data, but model %s cannot replay it because it lacks required input support or uses the Chat API", required, t.displayRef())
+				lastErrProvider = t.provider
+				continue
+			}
 			if skipReason, ok := skippedProviders[t.provider]; ok {
 				log.Infof("skipping model: provider skipped for current round provider=%v model=%v reason=%v", t.provider.Name(), t.modelID, skipReason)
 				continue

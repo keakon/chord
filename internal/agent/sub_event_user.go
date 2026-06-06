@@ -117,3 +117,16 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 	}
 	return content, filtered
 }
+
+func (s *SubAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
+	llmClient, _ := s.llmSnapshot()
+	parts, dropped := toolResultPartsForCapability(text, images, llmClient)
+	if dropped.any() {
+		s.parent.emitToTUI(ToastEvent{
+			Level:   "warn",
+			Message: "Tool-result attachments dropped (unsupported): " + dropped.summary(),
+			AgentID: s.instanceID,
+		})
+	}
+	return parts
+}

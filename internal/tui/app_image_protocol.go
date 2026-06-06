@@ -110,7 +110,7 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 		windowEnd := m.viewport.offset + m.viewport.height
 		var seq strings.Builder
 		for i, block := range blocks {
-			if block == nil || block.Type != BlockUser || len(block.ImageParts) == 0 {
+			if !blockSupportsImagePreview(block) {
 				continue
 			}
 			block = m.viewport.materialize(block)
@@ -224,7 +224,7 @@ func (m *Model) iterm2InlineProtocolCmd() tea.Cmd {
 	mainTop := layout.main.Min.Y
 	var seq strings.Builder
 	for i, block := range blocks {
-		if block == nil || block.Type != BlockUser || len(block.ImageParts) == 0 {
+		if !blockSupportsImagePreview(block) {
 			continue
 		}
 		block = m.viewport.materialize(block)

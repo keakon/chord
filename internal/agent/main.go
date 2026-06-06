@@ -93,11 +93,6 @@ type Turn struct {
 	nextToolBatch                      int
 	activeToolBatchCancel              context.CancelFunc
 	streamingToolExec                  *StreamingToolExecutor
-	// batchImageParts accumulates image/binary content parts returned by tools
-	// in the current tool-call batch (ViewImage, MCP image results). When the
-	// batch completes they are injected as a synthetic user message before the
-	// next LLM call. Accessed only from the event-loop goroutine.
-	batchImageParts []message.ContentPart
 }
 
 // PendingToolCall records the minimal metadata needed to close a pending tool
@@ -1250,8 +1245,7 @@ func (a *MainAgent) resetRuntimeEvidenceFromMessages(messages []message.Message)
 // ---------------------------------------------------------------------------
 
 // SupportsInput reports whether the active main-agent model accepts the given
-// input modality (e.g. "image", "pdf"). It is used to gate modality-dependent
-// tool visibility such as the native ViewImage tool.
+// input modality (e.g. "image", "pdf").
 func (a *MainAgent) SupportsInput(modality string) bool {
 	if a == nil {
 		return false
@@ -1260,6 +1254,20 @@ func (a *MainAgent) SupportsInput(modality string) bool {
 	client := a.llmClient
 	a.llmMu.RUnlock()
 	return client != nil && client.SupportsInput(modality)
+}
+
+// SupportsViewImageTool reports whether the stable primary model for this agent
+// can expose view_image. It intentionally follows the model-pool primary rather
+// than the current fallback cursor so the tool surface does not change as
+// fallback routing moves between candidates.
+func (a *MainAgent) SupportsViewImageTool() bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	return client != nil && client.PrimarySupportsViewImageTool()
 }
 
 // filterUnsupportedParts removes image/pdf parts that the current model does

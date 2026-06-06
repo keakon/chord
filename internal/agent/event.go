@@ -324,6 +324,7 @@ type ToolResultEvent struct {
 	DoneReport  string
 	Status      ToolResultStatus
 	AgentID     string // originating agent ("" = main agent)
+	Parts       []message.ContentPart
 	Diff        string // unified diff for Write/Edit tools (not sent to LLM)
 	DiffAdded   int    // full added-line count before any diff truncation
 	DiffRemoved int    // full removed-line count before any diff truncation

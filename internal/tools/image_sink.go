@@ -9,8 +9,7 @@ import (
 
 // ImageSink receives image (and other binary, e.g. PDF) content parts produced
 // by a tool during its execution. The runtime injects a fresh sink per tool
-// call via context; after the tool-call batch completes it re-injects the
-// collected parts into model context as a synthetic user message.
+// call via context, then attaches collected parts to that tool's result message.
 //
 // This is the shared output channel for both the native ViewImage tool and MCP
 // tools that return non-text content, avoiding any change to the Tool.Execute

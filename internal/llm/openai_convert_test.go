@@ -97,3 +97,23 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningWithoutProvenance(t *test
 		}
 	}
 }
+
+func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
+	msgs := []message.Message{{
+		Role:       "tool",
+		ToolCallID: "c1",
+		Content:    "Loaded image",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Loaded image"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}}
+
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, msgs)
+	if len(out) != 1 || out[0].Role != "tool" || out[0].ToolCallID != "c1" {
+		t.Fatalf("tool message = %#v", out)
+	}
+	if out[0].Content != "Loaded image" {
+		t.Fatalf("content = %#v, want text-only tool result", out[0].Content)
+	}
+}

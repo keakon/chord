@@ -11,25 +11,20 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-// ImageInputCapability reports whether the active model accepts image input.
-// ViewImage uses it to hide itself from models that cannot consume images, so
-// the model is never offered a tool whose output it could not use.
-type ImageInputCapability interface {
-	SupportsInput(modality string) bool
+// ViewImageCapability reports whether the session can expose the view_image tool.
+type ViewImageCapability interface {
+	SupportsViewImageTool() bool
 }
 
 // ViewImageTool loads a local PNG/JPEG file into the conversation as an image
-// part. The decoded bytes are pushed to the per-call ImageSink (see
-// image_sink.go); the agent runtime re-injects the collected parts as a
-// synthetic user message after the surrounding tool-call batch completes. The
-// tool itself returns only a short textual confirmation.
+// part attached to the surrounding tool result.
 type ViewImageTool struct {
-	capability ImageInputCapability
+	capability ViewImageCapability
 }
 
-// NewViewImageTool builds a ViewImageTool. capability gates visibility on the
-// active model's image-input support; a nil capability keeps the tool hidden.
-func NewViewImageTool(capability ImageInputCapability) *ViewImageTool {
+// NewViewImageTool builds a ViewImageTool. capability gates visibility; a nil
+// capability keeps the tool hidden.
+func NewViewImageTool(capability ViewImageCapability) *ViewImageTool {
 	return &ViewImageTool{capability: capability}
 }
 
@@ -67,9 +62,9 @@ func (*ViewImageTool) Parameters() map[string]any {
 
 func (*ViewImageTool) IsReadOnly() bool { return true }
 
-// IsAvailable hides ViewImage unless the active model accepts image input.
+// IsAvailable hides ViewImage unless the owning agent can safely expose it.
 func (t *ViewImageTool) IsAvailable() bool {
-	return t.capability != nil && t.capability.SupportsInput("image")
+	return t.capability != nil && t.capability.SupportsViewImageTool()
 }
 
 func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

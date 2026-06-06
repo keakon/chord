@@ -115,7 +115,7 @@ func (v *Viewport) HasVisibleInlineImage() bool {
 	windowStart := v.offset
 	windowEnd := v.offset + v.height
 	for i, block := range blocks {
-		if block == nil || block.Type != BlockUser || len(block.ImageParts) == 0 {
+		if !blockSupportsImagePreview(block) {
 			continue
 		}
 		if i >= len(starts) {

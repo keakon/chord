@@ -43,7 +43,7 @@ func (m *Model) imageViewerParts(blockID int) ([]BlockImagePart, int, bool) {
 				continue
 			}
 			block = m.viewport.materialize(block)
-			if block.Type != BlockUser || len(block.ImageParts) == 0 {
+			if !blockSupportsImagePreview(block) {
 				return nil, -1, false
 			}
 			_ = block.Render(m.viewport.width, "")
@@ -61,7 +61,7 @@ func (m *Model) imageViewerParts(blockID int) ([]BlockImagePart, int, bool) {
 				continue
 			}
 			block = m.viewport.materialize(block)
-			if block.Type != BlockUser || len(block.ImageParts) == 0 {
+			if !blockSupportsImagePreview(block) {
 				return nil, -1, false
 			}
 			_ = block.Render(m.viewport.width, "")

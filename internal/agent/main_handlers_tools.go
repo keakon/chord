@@ -154,6 +154,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	rawResult := payload.Result
 	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+	parts := a.toolResultParts(contextResult, payload.Images)
 
 	a.emitToTUI(ToolResultEvent{
 		CallID:      payload.CallID,
@@ -162,6 +163,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		Audit:       payload.Audit.Clone(),
 		Result:      displayResult,
 		Status:      toolResultStatusFromError(isError),
+		Parts:       parts,
 		Diff:        payload.Diff,
 		DiffAdded:   payload.DiffAdded,
 		DiffRemoved: payload.DiffRemoved,
@@ -173,6 +175,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	toolMsg := message.Message{
 		Role:            "tool",
 		Content:         contextResult,
+		Parts:           parts,
 		ToolCallID:      payload.CallID,
 		ToolDiff:        payload.Diff,
 		ToolDiffAdded:   payload.DiffAdded,
@@ -218,6 +221,17 @@ func rawToolResultForVerification(payload *ToolResultPayload) string {
 		return ""
 	}
 	return payload.Result
+}
+
+func (a *MainAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	parts, dropped := toolResultPartsForCapability(text, images, client)
+	if dropped.any() {
+		a.emitToTUI(ToastEvent{Message: "The current model does not support " + dropped.summary() + " tool-result attachments; attachments were ignored", Level: "warn"})
+	}
+	return parts
 }
 
 func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) string {
@@ -333,6 +347,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil
+	parts := a.toolResultParts(contextResult, payload.Images)
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
 			CallID:      payload.CallID,
@@ -341,6 +356,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			Audit:       payload.Audit.Clone(),
 			Result:      displayResult,
 			Status:      toolResultStatusFromError(isError),
+			Parts:       parts,
 			Diff:        payload.Diff,
 			DiffAdded:   payload.DiffAdded,
 			DiffRemoved: payload.DiffRemoved,
@@ -353,6 +369,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		toolMsg := message.Message{
 			Role:            "tool",
 			Content:         contextResult,
+			Parts:           parts,
 			ToolCallID:      payload.CallID,
 			ToolDiff:        payload.Diff,
 			ToolDiffAdded:   payload.DiffAdded,
@@ -372,9 +389,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	a.turn.CompletedToolCalls = append(a.turn.CompletedToolCalls, toolResultSummary(payload, contextResult, errorText))
-	if len(payload.Images) > 0 {
-		a.turn.batchImageParts = append(a.turn.batchImageParts, payload.Images...)
-	}
 	if changed := changedFileSummary(payload); changed != nil {
 		a.loopState.markProgress()
 		a.turn.ChangedFiles = append(a.turn.ChangedFiles, changed)
@@ -532,8 +546,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if a.turn == nil {
 			return
 		}
-
-		a.injectBatchToolImages()
 
 		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)
 		a.prepareSubAgentMailboxBatchForTurnContinuation()

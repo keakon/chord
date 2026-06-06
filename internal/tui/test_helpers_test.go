@@ -57,7 +57,7 @@ func (e *imageRuntimeCacheEntry) transportPNG(part BlockImagePart) ([]byte, int,
 // imagePartAtLine maps a block-relative line index to the inline image part
 // occupying that line; thumb hit tests use it without a column coordinate.
 func (b *Block) imagePartAtLine(lineInBlock, width int) (BlockImagePart, bool) {
-	if b == nil || b.Type != BlockUser || len(b.ImageParts) == 0 {
+	if !blockSupportsImagePreview(b) {
 		return BlockImagePart{}, false
 	}
 	_ = b.Render(width, "")

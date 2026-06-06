@@ -14,16 +14,13 @@ import (
 	"testing"
 )
 
-// stubImageCapability is a test double for ImageInputCapability.
+// stubImageCapability is a test double for ViewImageCapability.
 type stubImageCapability struct {
 	image bool
 }
 
-func (s stubImageCapability) SupportsInput(modality string) bool {
-	if modality == "image" {
-		return s.image
-	}
-	return false
+func (s stubImageCapability) SupportsViewImageTool() bool {
+	return s.image
 }
 
 func writeTestPNG(t *testing.T, dir, name string) string {
@@ -83,8 +80,8 @@ func TestViewImageToolIsAvailable(t *testing.T) {
 		want bool
 	}{
 		{name: "nil capability", tool: NewViewImageTool(nil), want: false},
-		{name: "image unsupported", tool: NewViewImageTool(stubImageCapability{image: false}), want: false},
-		{name: "image supported", tool: NewViewImageTool(stubImageCapability{image: true}), want: true},
+		{name: "view image unsupported", tool: NewViewImageTool(stubImageCapability{image: false}), want: false},
+		{name: "view image supported", tool: NewViewImageTool(stubImageCapability{image: true}), want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

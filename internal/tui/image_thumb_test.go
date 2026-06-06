@@ -7,6 +7,8 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func makeTestPNG(t *testing.T) []byte {
@@ -136,6 +138,43 @@ func TestBlockPlainContentIncludesImagePlaceholderLabels(t *testing.T) {
 	}
 	if !strings.Contains(got, "[image: sample.png]") {
 		t.Fatalf("blockPlainContent = %q, want image placeholder label", got)
+	}
+}
+
+func TestToolResultImagePreviewRendersAndCopiesPlaceholder(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	setCurrentTerminalImageCapabilities(TerminalImageCapabilities{Backend: ImageBackendNone})
+	pngData := makeTestPNG(t)
+	block := &Block{
+		ID:            2,
+		Type:          BlockToolResult,
+		ToolName:      "view_image",
+		Content:       "Loaded image",
+		ResultContent: "Loaded image",
+		ImageParts: imagePartsFromContentParts([]message.ContentPart{{
+			Type:     "image",
+			FileName: "sample.png",
+			MimeType: "image/png",
+			Data:     pngData,
+		}}),
+	}
+
+	const renderWidth = 80
+	lines := block.Render(renderWidth, "")
+	if len(lines) == 0 {
+		t.Fatal("expected rendered tool result lines")
+	}
+	if !blockSupportsImagePreview(block) {
+		t.Fatal("expected tool result block to support image preview")
+	}
+	if block.ImageParts[0].RenderStartLine < 0 || block.ImageParts[0].RenderRows <= 0 {
+		t.Fatalf("image render metadata not populated: %#v", block.ImageParts[0])
+	}
+	if _, ok := block.imagePartAtLine(block.ImageParts[0].RenderStartLine, renderWidth); !ok {
+		t.Fatal("expected image hit on rendered tool result image line")
+	}
+	if got := blockPlainContent(block); !strings.Contains(got, "[image: sample.png]") {
+		t.Fatalf("blockPlainContent = %q, want image placeholder", got)
 	}
 }
 

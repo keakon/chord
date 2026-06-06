@@ -134,6 +134,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		block.ResultContent = evt.Result
 		block.RawArgs = evt.ArgsJSON
 		block.Audit = evt.Audit.Clone()
+		block.ImageParts = imagePartsFromContentParts(evt.Parts)
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if strings.TrimSpace(evt.DoneReport) != "" {
 				block.DoneReport = evt.DoneReport
@@ -201,7 +202,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.updateViewportBlock(block)
 		m.markBlockSettled(block)
 	} else {
-		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID}
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID, ImageParts: imagePartsFromContentParts(evt.Parts)}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

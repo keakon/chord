@@ -104,19 +104,50 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 				log.Warn("skipping function_call_output with empty call_id in history")
 				continue
 			}
-			// Tool results become function_call_output items.
-			// Use pointer so omitempty keeps the field (even when "") for this type,
-			// while omitting it for message/function_call items (where Output is nil).
-			output := msg.Content
+			// Tool results become function_call_output items. When the tool result
+			// carries image/file parts, Responses accepts output content blocks.
+			output := responsesToolOutput(msg)
 			result = append(result, responsesInputItem{
 				Type:   "function_call_output",
 				CallID: msg.ToolCallID,
-				Output: &output,
+				Output: output,
 			})
 		}
 	}
 
 	return result
+}
+
+func responsesToolOutput(msg message.Message) any {
+	if len(msg.Parts) == 0 {
+		return msg.Content
+	}
+	content := make([]responsesContentBlock, 0, len(msg.Parts))
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case "image":
+			content = append(content, responsesContentBlock{
+				Type:     "input_image",
+				ImageURL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(p.Data),
+				Detail:   "auto",
+			})
+		case "pdf":
+			content = append(content, responsesContentBlock{
+				Type:     "input_file",
+				Filename: defaultPDFFilename(p.FileName),
+				FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(p.Data),
+			})
+		default:
+			if p.Text == "" {
+				continue
+			}
+			content = append(content, responsesContentBlock{Type: "input_text", Text: p.Text})
+		}
+	}
+	if len(content) == 0 {
+		return msg.Content
+	}
+	return content
 }
 
 // convertToolsToResponses converts tool definitions to Responses API format.

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -71,6 +72,86 @@ func TestConvertMessagesToAnthropic_WithPDFPart(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
+	got := convertMessages([]message.Message{{
+		Role:       "tool",
+		ToolCallID: "toolu_1",
+		Content:    "Loaded image",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Loaded image"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}})
+
+	if len(got) != 1 || got[0].Role != "user" {
+		t.Fatalf("convertMessages() = %#v, want one user tool_result message", got)
+	}
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 1 || blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "toolu_1" {
+		t.Fatalf("tool_result block = %#v", got[0].Content)
+	}
+	content, ok := blocks[0].Content.([]anthropicContent)
+	if !ok {
+		t.Fatalf("tool_result content type = %T, want []anthropicContent", blocks[0].Content)
+	}
+	if len(content) != 2 || content[0].Type != "text" || content[0].Text != "Loaded image" {
+		t.Fatalf("text content = %#v", content)
+	}
+	if content[1].Type != "image" || content[1].Source == nil || content[1].Source.MediaType != "image/png" || content[1].Source.Data != "cG5n" {
+		t.Fatalf("image content = %#v", content[1])
+	}
+}
+
+func TestConvertMessagesToAnthropic_ToolOutputWithOnlyImageSkipsEmptyTextPart(t *testing.T) {
+	got := convertMessages([]message.Message{{
+		Role:       "tool",
+		ToolCallID: "toolu_1",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: ""},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}})
+
+	blocks := got[0].Content.([]anthropicContent)
+	content := blocks[0].Content.([]anthropicContent)
+	if len(content) != 1 || content[0].Type != "image" {
+		t.Fatalf("tool_result content = %#v, want only image block", content)
+	}
+}
+
+func TestConvertMessagesToAnthropic_EmptyToolOutputPreserved(t *testing.T) {
+	// A successful tool with empty output must still serialize a "content" field
+	// rather than omitting it; this mirrors the Responses empty-output guard and
+	// locks the string->any switch so empty content is not dropped by omitempty.
+	got := convertMessages([]message.Message{{
+		Role:       "tool",
+		ToolCallID: "toolu_1",
+		Content:    "",
+	}})
+
+	if len(got) != 1 || got[0].Role != "user" {
+		t.Fatalf("convertMessages() = %#v, want one user tool_result message", got)
+	}
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 1 || blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "toolu_1" {
+		t.Fatalf("tool_result block = %#v", got[0].Content)
+	}
+	if blocks[0].Content != "" {
+		t.Fatalf("tool_result content = %#v, want empty string preserved", blocks[0].Content)
+	}
+	data, err := json.Marshal(blocks[0])
+	if err != nil {
+		t.Fatalf("marshal tool_result: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal tool_result: %v", err)
+	}
+	if _, ok := raw["content"]; !ok {
+		t.Fatalf("tool_result JSON missing 'content' field: %s", data)
+	}
+}
+
 func TestConvertMessagesToOpenAI_WithPDFPart(t *testing.T) {
 	msgs, wantB64 := pdfTestParts()
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, msgs)
@@ -133,6 +214,22 @@ func TestConvertMessagesToResponses_WithPDFPart(t *testing.T) {
 	}
 	if !strings.HasSuffix(fileBlock.FileData, wantB64) {
 		t.Fatalf("pdf file_data = %q, want suffix %q", fileBlock.FileData, wantB64)
+	}
+}
+
+func TestConvertMessagesToResponses_ToolOutputWithOnlyImageSkipsEmptyTextPart(t *testing.T) {
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{
+		Role:       "tool",
+		ToolCallID: "call_1",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: ""},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}})
+
+	content := items[0].Output.([]responsesContentBlock)
+	if len(content) != 1 || content[0].Type != "input_image" {
+		t.Fatalf("tool output = %#v, want only image block", content)
 	}
 }
 

@@ -108,7 +108,7 @@ type anthropicContent struct {
 	Name         string                `json:"name,omitempty"`          // tool_use: tool name
 	Input        json.RawMessage       `json:"input,omitempty"`         // tool_use: tool arguments
 	ToolUseID    string                `json:"tool_use_id,omitempty"`   // tool_result: corresponding tool call ID
-	Content      string                `json:"content,omitempty"`       // tool_result: the result text
+	Content      any                   `json:"content,omitempty"`       // tool_result: string or []anthropicContent
 	Source       *anthropicImageSource `json:"source,omitempty"`        // image block
 	CacheControl *anthropicCacheCtrl   `json:"cache_control,omitempty"` // prompt caching marker
 }
@@ -559,7 +559,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				toolResults = append(toolResults, anthropicContent{
 					Type:      "tool_result",
 					ToolUseID: msgs[i].ToolCallID,
-					Content:   msgs[i].Content,
+					Content:   anthropicToolResultContent(msgs[i]),
 				})
 				i++
 			}
@@ -639,6 +639,44 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 	}
 
 	return result
+}
+
+func anthropicToolResultContent(msg message.Message) any {
+	if len(msg.Parts) == 0 {
+		return msg.Content
+	}
+	blocks := make([]anthropicContent, 0, len(msg.Parts))
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case "image":
+			blocks = append(blocks, anthropicContent{
+				Type: "image",
+				Source: &anthropicImageSource{
+					Type:      "base64",
+					MediaType: p.MimeType,
+					Data:      encodeBase64Cached(p.Data),
+				},
+			})
+		case "pdf":
+			blocks = append(blocks, anthropicContent{
+				Type: "document",
+				Source: &anthropicImageSource{
+					Type:      "base64",
+					MediaType: defaultPDFMediaType(p.MimeType),
+					Data:      encodeBase64Cached(p.Data),
+				},
+			})
+		default:
+			if p.Text == "" {
+				continue
+			}
+			blocks = append(blocks, anthropicContent{Type: "text", Text: p.Text})
+		}
+	}
+	if len(blocks) == 0 {
+		return msg.Content
+	}
+	return blocks
 }
 
 // applyCacheBreakpoints applies the 4-breakpoint cache_control strategy:

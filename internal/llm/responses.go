@@ -118,13 +118,13 @@ type responsesRequest struct {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string  `json:"type"` // "message", "function_call", "function_call_output"
-	Role      string  `json:"role,omitempty"`
-	Content   any     `json:"content,omitempty"`
-	Name      string  `json:"name,omitempty"`
-	CallID    string  `json:"call_id,omitempty"`
-	Output    *string `json:"output,omitempty"`    // pointer: nil→omitted for message/function_call; non-nil (even "")→included for function_call_output
-	Arguments string  `json:"arguments,omitempty"` // JSON object as string per API spec
+	Type      string `json:"type"` // "message", "function_call", "function_call_output"
+	Role      string `json:"role,omitempty"`
+	Content   any    `json:"content,omitempty"`
+	Name      string `json:"name,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Output    any    `json:"output,omitempty"`    // string or []responsesContentBlock for function_call_output
+	Arguments string `json:"arguments,omitempty"` // JSON object as string per API spec
 }
 
 // responsesContentBlock is a content block within a message item.

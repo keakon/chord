@@ -16,7 +16,7 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: "hello"}, {Type: "image", MimeType: "image/png", Data: []byte("png")}}},
 		{Role: "assistant", Content: "hi", ToolCalls: []message.ToolCall{{ID: "call_1", Name: "get_weather", Args: json.RawMessage(`{"city":"BJ"}`)}}},
-		{Role: "tool", ToolCallID: "call_1", Content: "sunny"},
+		{Role: "tool", ToolCallID: "call_1", Content: "sunny", Parts: []message.ContentPart{{Type: "text", Text: "sunny"}, {Type: "image", MimeType: "image/png", Data: []byte("png"), FileName: "weather.png"}}},
 		{Role: "tool", ToolCallID: "call_2", Content: "fallback name"},
 	}
 
@@ -40,8 +40,10 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	if got[2].Role != "user" || len(got[2].Parts) != 2 {
 		t.Fatalf("tool result message = %#v", got[2])
 	}
-	if fr := got[2].Parts[0].FunctionResponse; fr == nil || fr.Name != "get_weather" || fr.Response["result"] != "sunny" {
+	if fr := got[2].Parts[0].FunctionResponse; fr == nil || fr.Name != "get_weather" || fr.Response["result"] != "sunny" || len(fr.Parts) != 1 {
 		t.Fatalf("first functionResponse = %#v", fr)
+	} else if fr.Parts[0].InlineData == nil || fr.Parts[0].InlineData.MimeType != "image/png" || fr.Parts[0].InlineData.Data != "cG5n" || fr.Parts[0].InlineData.DisplayName != "weather.png" {
+		t.Fatalf("first functionResponse parts = %#v", fr.Parts)
 	}
 	if fr := got[2].Parts[1].FunctionResponse; fr == nil || fr.Name != "call_2" || fr.Response["result"] != "fallback name" {
 		t.Fatalf("second functionResponse = %#v", fr)

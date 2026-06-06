@@ -499,7 +499,7 @@ func blockPlainContent(b *Block) string {
 			return skillToolCopyContent(b.Content, b.ResultContent)
 		}
 		content := strings.TrimSpace(b.Content)
-		if b.Type == BlockUser && len(b.ImageParts) > 0 {
+		if blockSupportsImagePreview(b) {
 			var imageLabels []string
 			for _, part := range b.ImageParts {
 				name := strings.TrimSpace(part.FileName)

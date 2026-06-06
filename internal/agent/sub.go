@@ -379,8 +379,7 @@ func (s *SubAgent) setServiceTier(tier config.ServiceTier) {
 }
 
 // SupportsInput reports whether this SubAgent's active model accepts the given
-// input modality (e.g. "image", "pdf"). It mirrors MainAgent.SupportsInput and
-// gates modality-dependent tool visibility such as the native ViewImage tool.
+// input modality (e.g. "image", "pdf"). It mirrors MainAgent.SupportsInput.
 func (s *SubAgent) SupportsInput(modality string) bool {
 	if s == nil {
 		return false
@@ -389,6 +388,16 @@ func (s *SubAgent) SupportsInput(modality string) bool {
 	client := s.llmClient
 	s.llmMu.RUnlock()
 	return client != nil && client.SupportsInput(modality)
+}
+
+func (s *SubAgent) SupportsViewImageTool() bool {
+	if s == nil {
+		return false
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	s.llmMu.RUnlock()
+	return client != nil && client.PrimarySupportsViewImageTool()
 }
 
 func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimit int) {

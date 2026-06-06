@@ -386,15 +386,38 @@ func TestConvertMessagesToResponses_WhitespaceOnlyToolOutputPreserved(t *testing
 		if item.Type != "function_call_output" {
 			continue
 		}
-		if item.Output == nil {
-			t.Fatal("function_call_output missing output pointer")
-		}
-		if *item.Output != "   359\t\n" {
-			t.Fatalf("output = %q, want exact whitespace-only payload preserved", *item.Output)
+		if item.Output != "   359\t\n" {
+			t.Fatalf("output = %q, want exact whitespace-only payload preserved", item.Output)
 		}
 		return
 	}
 	t.Fatal("no function_call_output item found")
+}
+
+func TestConvertMessagesToResponses_ToolOutputWithImageParts(t *testing.T) {
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{
+		Role:       "tool",
+		ToolCallID: "c1",
+		Content:    "Loaded image",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Loaded image"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}})
+
+	if len(items) != 1 || items[0].Type != "function_call_output" {
+		t.Fatalf("items = %#v, want function_call_output", items)
+	}
+	blocks, ok := items[0].Output.([]responsesContentBlock)
+	if !ok {
+		t.Fatalf("output type = %T, want []responsesContentBlock", items[0].Output)
+	}
+	if len(blocks) != 2 || blocks[0].Type != "input_text" || blocks[0].Text != "Loaded image" {
+		t.Fatalf("text output block = %#v", blocks)
+	}
+	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,cG5n" || blocks[1].Detail != "auto" {
+		t.Fatalf("image output block = %#v", blocks[1])
+	}
 }
 
 // TestConvertMessagesToResponses_EmptyToolOutput ensures that function_call_output items

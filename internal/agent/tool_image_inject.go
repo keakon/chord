@@ -1,79 +1,44 @@
 package agent
 
-import (
-	"fmt"
+import "github.com/keakon/chord/internal/message"
 
-	"github.com/keakon/chord/internal/message"
-)
-
-// buildToolImageMessage builds a synthetic user message that carries image
-// content parts produced by tools during a tool-call batch. The leading text
-// part keeps the message human-readable in history and gives the model a cue
-// that the images originate from tool output.
-func buildToolImageMessage(parts []message.ContentPart) message.Message {
-	text := fmt.Sprintf("Loaded %d image(s) returned by tool calls.", len(parts))
-	full := make([]message.ContentPart, 0, len(parts)+1)
-	full = append(full, message.ContentPart{Type: "text", Text: text})
-	full = append(full, parts...)
-	return message.Message{Role: "user", Content: text, Parts: full}
+func toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
+	if len(images) == 0 {
+		return nil
+	}
+	parts := make([]message.ContentPart, 0, len(images)+1)
+	parts = append(parts, message.ContentPart{Type: "text", Text: text})
+	parts = append(parts, images...)
+	return parts
 }
 
-// injectBatchToolImages appends the accumulated tool image parts as a synthetic
-// user message before the next LLM call. Images are dropped (with a warning
-// toast) when the active model does not accept image input, so the provider
-// never receives an unsupported payload.
-func (a *MainAgent) injectBatchToolImages() {
-	if a.turn == nil || len(a.turn.batchImageParts) == 0 {
-		return
+func toolResultPartsForCapability(text string, images []message.ContentPart, capability inputCapability) ([]message.ContentPart, unsupportedPartCounts) {
+	if len(images) == 0 || capability == nil {
+		return toolResultParts(text, images), unsupportedPartCounts{}
 	}
-	parts := a.turn.batchImageParts
-	a.turn.batchImageParts = nil
-
-	a.llmMu.RLock()
-	client := a.llmClient
-	a.llmMu.RUnlock()
-	if client == nil || !client.SupportsInput("image") {
-		a.emitToTUI(ToastEvent{
-			Message: "The current model does not support image input; tool images were dropped",
-			Level:   "warn",
-		})
-		return
-	}
-
-	msg := buildToolImageMessage(parts)
-	a.ctxMgr.Append(msg)
-	if a.recovery != nil {
-		a.persistAsync("main", msg)
-	}
-	a.emitToTUI(ToastEvent{
-		Message: fmt.Sprintf("Loaded %d tool image(s) into context", len(parts)),
-		Level:   "info",
-	})
-}
-
-// injectBatchToolImages is the SubAgent counterpart of the main-agent method.
-func (s *SubAgent) injectBatchToolImages() {
-	if s.turn == nil || len(s.turn.batchImageParts) == 0 {
-		return
-	}
-	parts := s.turn.batchImageParts
-	s.turn.batchImageParts = nil
-
-	llmClient, _ := s.llmSnapshot()
-	if llmClient == nil || !llmClient.SupportsInput("image") {
-		s.parent.emitToTUI(ToastEvent{
-			Message: "The current model does not support image input; tool images were dropped",
-			Level:   "warn",
-			AgentID: s.instanceID,
-		})
-		return
-	}
-
-	msg := buildToolImageMessage(parts)
-	s.ctxMgr.Append(msg)
-	go func() {
-		if s.recovery != nil {
-			_ = s.recovery.PersistMessage(s.instanceID, msg)
+	filtered := make([]message.ContentPart, 0, len(images))
+	var dropped unsupportedPartCounts
+	for _, part := range images {
+		switch part.Type {
+		case "image":
+			if !canReplayToolResultModality(capability, "image") {
+				dropped.Images++
+				continue
+			}
+		case "pdf":
+			if !canReplayToolResultModality(capability, "pdf") {
+				dropped.PDFs++
+				continue
+			}
 		}
-	}()
+		filtered = append(filtered, part)
+	}
+	return toolResultParts(text, filtered), dropped
+}
+
+func canReplayToolResultModality(capability inputCapability, modality string) bool {
+	if toolResultCap, ok := capability.(toolResultCapability); ok {
+		return toolResultCap.SupportsToolResultModalities([]string{modality})
+	}
+	return capability.SupportsInput(modality)
 }

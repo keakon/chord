@@ -679,6 +679,17 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 	}
 
+	if len(b.ImageParts) > 0 {
+		imagesRendered := b.appendImagePreviewLines(&result, contentWidth, toolCardBg, blockStyle.GetPaddingTop(), len(result) > 0)
+		if !imagesRendered {
+			label := "  📎"
+			if len(b.ImageParts) > 1 {
+				label = fmt.Sprintf("  📎 %d", len(b.ImageParts))
+			}
+			result = append(result, DimStyle.Render(label))
+		}
+	}
+
 	// If the expanded view would reveal additional lines (params or result),
 	// show a hint even when the collapsed rendering path hid all such content.
 	if !expanded && !expandHintAdded && hiddenDetail > 0 {
@@ -820,6 +831,7 @@ func (b *Block) renderToolResult(width int) []string {
 			more := lineCount - maxToolCallCompactResultLines
 			body = append(body, renderToolExpandHint(toolHintIndent, more))
 		}
+		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
 		return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.ID), body, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	renderHeader := func(s string) string { return ToolResultExpandedStyle.Render(s) }
@@ -837,5 +849,6 @@ func (b *Block) renderToolResult(width int) []string {
 	for _, line := range wrapText(sanitizeToolDisplayText(b.Content), contentWidth) {
 		result = append(result, "    "+renderBody(line))
 	}
+	b.appendImagePreviewLines(&result, contentWidth, toolCardBg, style.GetPaddingTop(), len(result) > 0)
 	return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

@@ -12,10 +12,12 @@
 - 上下文剪裁现在会等到同一模型连续第 3 次请求时才保护 prompt cache surface；切换模型会重置这个连续计数，因此新模型的前两次请求在压力下仍可剪裁已缓存上下文。
 - 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口，避免最终回复前临时剪裁打破已有 prompt cache；模型切换或高压上下文会跳过该宽限。可通过 `context.reduction.wrap_up_grace_requests` 配置。
 - 上下文剪裁现在默认只保留更短的成功 shell 输出片段，减少上下文压力下保留的低信号终端输出。
+- `view_image` 等工具返回的图片现在会保留在对应的工具结果上，在 TUI 的工具结果卡片中显示为可打开的缩略图，并会对支持该能力的 API 通过 provider 原生的多模态 tool/function result 格式发送。`view_image` 只会在权限允许、有效 model pool 的第一个模型支持 image 输入且该模型不是 OpenAI Chat Completions 时可见；会话已包含图片/PDF 工具结果后，Chord 会跳过不支持所需 image/PDF 输入或使用 Chat Completions 的 fallback 候选。
 
 ### 修复
 
 - 请求进行中切换 model pool 现在会在下一次请求边界生效，不再打断正在进行的请求；状态栏与信息面板会显示下一次请求将使用的模型。
+- `view_image` 后恢复会话时，工具返回的图片不再显示成用户手动发送的消息。
 
 ## 0.6.3 - 2026-06-05
 

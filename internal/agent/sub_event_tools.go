@@ -272,6 +272,8 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		result.Audit,
 	))
 
+	parts := s.toolResultParts(contextResult, result.Images)
+
 	// Emit tool result to TUI so the tool call block shows its result.
 	s.turn.markToolCallCompleted(result.CallID)
 	s.parent.emitToTUI(ToolResultEvent{
@@ -282,6 +284,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Result:      displayResult,
 		Status:      toolResultStatusFromError(isError),
 		AgentID:     s.instanceID,
+		Parts:       parts,
 		Diff:        result.Diff,
 		DiffAdded:   result.DiffAdded,
 		DiffRemoved: result.DiffRemoved,
@@ -292,6 +295,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Role:            "tool",
 		ToolCallID:      result.CallID,
 		Content:         contextResult,
+		Parts:           parts,
 		ToolDiff:        result.Diff,
 		ToolDiffAdded:   result.DiffAdded,
 		ToolDiffRemoved: result.DiffRemoved,
@@ -332,9 +336,6 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		DiffRemoved: result.DiffRemoved,
 	}); changed != nil {
 		s.turn.ChangedFiles = append(s.turn.ChangedFiles, changed)
-	}
-	if len(result.Images) > 0 {
-		s.turn.batchImageParts = append(s.turn.batchImageParts, result.Images...)
 	}
 
 	s.turn.PendingToolCalls.Add(-1)
@@ -455,7 +456,6 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 
 	// Normal: continue LLM conversation.
-	s.injectBatchToolImages()
 	messages := s.ctxMgr.Snapshot()
 	s.asyncCallLLM(s.turn, messages)
 }

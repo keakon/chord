@@ -121,7 +121,7 @@ func imagePartBodyLeftColumn() int {
 }
 
 func (b *Block) imagePartAtPoint(lineInBlock, viewportCol, width int) (BlockImagePart, bool) {
-	if b == nil || b.Type != BlockUser || len(b.ImageParts) == 0 {
+	if !blockSupportsImagePreview(b) {
 		return BlockImagePart{}, false
 	}
 	_ = b.Render(width, "")
@@ -140,7 +140,7 @@ func (b *Block) imagePartAtPoint(lineInBlock, viewportCol, width int) (BlockImag
 }
 
 func (b *Block) firstImagePart(width int) (BlockImagePart, bool) {
-	if b == nil || b.Type != BlockUser || len(b.ImageParts) == 0 {
+	if !blockSupportsImagePreview(b) {
 		return BlockImagePart{}, false
 	}
 	_ = b.Render(width, "")

@@ -261,7 +261,7 @@ func (v *Viewport) selectionBlocksInOrder(startBlockID, endBlockID int) ([]*Bloc
 }
 
 func selectionImagePlaceholder(block *Block, lineInBlock int) string {
-	if block == nil || block.Type != BlockUser || len(block.ImageParts) == 0 {
+	if !blockSupportsImagePreview(block) {
 		return ""
 	}
 	for _, part := range block.ImageParts {

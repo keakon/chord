@@ -237,6 +237,171 @@ func callCompleteStreamWithRetryForTest(
 	)
 }
 
+func TestPrimarySupportsViewImageToolUsesFirstPoolModel(t *testing.T) {
+	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+	chatCfg := NewProviderConfig("chat", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+
+	client := NewClient(chatCfg, &scriptedProvider{}, "vision", 1024, "")
+	client.SetModelPool([]FallbackModel{
+		{ProviderConfig: responsesCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
+		{ProviderConfig: chatCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
+	}, 1)
+	if !client.PrimarySupportsViewImageTool() {
+		t.Fatal("PrimarySupportsViewImageTool() = false, want true from first model-pool entry")
+	}
+
+	client.SetModelPool([]FallbackModel{
+		{ProviderConfig: chatCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
+		{ProviderConfig: responsesCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
+	}, 1)
+	if client.PrimarySupportsViewImageTool() {
+		t.Fatal("PrimarySupportsViewImageTool() = true, want false when first model-pool entry is OpenAI Chat")
+	}
+}
+
+func TestCompleteStreamSkipsChatFallbackForImageToolResultHistory(t *testing.T) {
+	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+	chatCfg := NewProviderConfig("chat", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
+	chatProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
+	client := NewClient(responsesCfg, startProvider, "vision", 1024, "")
+	messages := []message.Message{{
+		Role:       "tool",
+		ToolCallID: "call_1",
+		Content:    "Loaded image",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Loaded image"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}}
+
+	_, err := callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		responsesCfg,
+		startProvider,
+		"vision",
+		1024,
+		RequestTuning{},
+		"",
+		messages,
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{ProviderConfig: chatCfg, ProviderImpl: chatProvider, ModelID: "vision", MaxTokens: 1024}},
+		1,
+		&CallStatus{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
+		t.Fatalf("CompleteStream error = %v, want image tool-result replay error", err)
+	}
+	if got := chatProvider.CallCount(); got != 0 {
+		t.Fatalf("chat fallback calls = %d, want 0", got)
+	}
+
+	textCfg := NewProviderConfig("text", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"text": {Modalities: &config.ModelModalities{Input: []string{"text"}}},
+		},
+	}, []string{"key"})
+	textProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
+	_, err = callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		responsesCfg,
+		startProvider,
+		"vision",
+		1024,
+		RequestTuning{},
+		"",
+		messages,
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{ProviderConfig: textCfg, ProviderImpl: textProvider, ModelID: "text", MaxTokens: 1024}},
+		1,
+		&CallStatus{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
+		t.Fatalf("CompleteStream text fallback error = %v, want image input replay error", err)
+	}
+	if got := textProvider.CallCount(); got != 0 {
+		t.Fatalf("text fallback calls = %d, want 0", got)
+	}
+}
+
+func TestCompleteStreamSkipsImageOnlyFallbackForPDFToolResultHistory(t *testing.T) {
+	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"document": {Modalities: &config.ModelModalities{Input: []string{"text", "pdf"}}},
+		},
+	}, []string{"key"})
+	imageOnlyCfg := NewProviderConfig("image-only", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
+	imageOnlyProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
+	client := NewClient(responsesCfg, startProvider, "document", 1024, "")
+	messages := []message.Message{{
+		Role:       "tool",
+		ToolCallID: "call_1",
+		Content:    "Loaded PDF",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Loaded PDF"},
+			{Type: "pdf", MimeType: "application/pdf", Data: []byte("%PDF-1.7")},
+		},
+	}}
+
+	_, err := callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		responsesCfg,
+		startProvider,
+		"document",
+		1024,
+		RequestTuning{},
+		"",
+		messages,
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{ProviderConfig: imageOnlyCfg, ProviderImpl: imageOnlyProvider, ModelID: "vision", MaxTokens: 1024}},
+		1,
+		&CallStatus{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "tool-returned pdf data") || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
+		t.Fatalf("CompleteStream error = %v, want pdf replay capability error", err)
+	}
+	if got := imageOnlyProvider.CallCount(); got != 0 {
+		t.Fatalf("image-only fallback calls = %d, want 0", got)
+	}
+}
+
 func TestVisibleStreamTrackerMarksToolUseAsStreaming(t *testing.T) {
 	var got []message.StreamDelta
 	tracker := &visibleStreamTracker{

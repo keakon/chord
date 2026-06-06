@@ -308,7 +308,9 @@ Currently supported:
 - Attach image and PDF files to the currently focused agent's message when the active model supports that input type
 - View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
 - Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
-- Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the active model supports image input. The tool uses the same local-path permission handling as `read`.
+- Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the tool is permitted, the first model in the effective model pool supports image input, and that first model does not use the OpenAI Chat Completions API. The tool uses the same local-path permission handling as `read`.
+
+`view_image` availability is decided from the first model in the effective model pool so the tool surface stays stable when fallback routing changes models. For OpenAI models, prefer the Responses API when tools need to return images or files: OpenAI Chat Completions can accept images in user messages, but its `role: "tool"` messages are text-only. Once a conversation contains image/PDF tool results, Chord skips fallback candidates that cannot safely replay them, including models without image input support and OpenAI Chat Completions. Conversations that have not used image/PDF tool results can still fall back to Chat Completions normally. Tool-returned images appear in the TUI as thumbnails on the corresponding tool result card and can be opened from Normal mode like user-attached images.
 
 Common actions:
 
@@ -319,7 +321,7 @@ Common actions:
 - `@` file completion includes image/PDF files only when the current model supports that input type. Manually typed image/PDF `@` references are still accepted as attachments; unsupported attachments are ignored at send time with a warning.
 - To attach an image or PDF by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
 - PDFs that appear to be encrypted are marked with a warning; Chord still allows sending them because provider-side parsing is authoritative.
-- `Enter` / `o` / `Space`: open the image in the current message in Normal mode
+- `Enter` / `o` / `Space`: open the image in the current user message or tool result in Normal mode
 
 ## Copying text
 

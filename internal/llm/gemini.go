@@ -95,8 +95,9 @@ type geminiPart struct {
 }
 
 type geminiInlineData struct {
-	MimeType string `json:"mimeType"`
-	Data     string `json:"data"`
+	MimeType    string `json:"mimeType"`
+	DisplayName string `json:"displayName,omitempty"`
+	Data        string `json:"data"`
 }
 
 type geminiFunctionCall struct {
@@ -107,6 +108,7 @@ type geminiFunctionCall struct {
 type geminiFunctionResponse struct {
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
+	Parts    []geminiPart   `json:"parts,omitempty"`
 }
 
 type geminiTool struct {
@@ -314,7 +316,7 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 					i++
 					continue
 				}
-				parts = append(parts, geminiPart{FunctionResponse: &geminiFunctionResponse{Name: name, Response: map[string]any{"result": toolMsg.Content}}})
+				parts = append(parts, geminiPart{FunctionResponse: geminiToolFunctionResponse(name, toolMsg)})
 				i++
 			}
 			if len(parts) > 0 {
@@ -326,6 +328,25 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 		}
 	}
 	return result
+}
+
+func geminiToolFunctionResponse(name string, msg message.Message) *geminiFunctionResponse {
+	resp := &geminiFunctionResponse{Name: name, Response: map[string]any{"result": msg.Content}}
+	if len(msg.Parts) == 0 {
+		return resp
+	}
+	// The textual result already rides in Response["result"]; parts only needs to
+	// carry the binary media (image/PDF) that the response object cannot express.
+	resp.Parts = make([]geminiPart, 0, len(msg.Parts))
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case "image":
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, DisplayName: p.FileName, Data: encodeBase64Cached(p.Data)}})
+		case "pdf":
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), DisplayName: p.FileName, Data: encodeBase64Cached(p.Data)}})
+		}
+	}
+	return resp
 }
 
 func geminiUserParts(msg message.Message) []geminiPart {

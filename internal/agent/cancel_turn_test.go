@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -247,6 +249,16 @@ func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(
 func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"test-model": {
+				Limit:      config.ModelLimit{Context: 8192, Output: 1024},
+				Modalities: &config.ModelModalities{Input: []string{"text", "image", "pdf"}},
+			},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "test-model", 1024, "")
 	call := message.ToolCall{
 		ID:   "spec-read-1",
 		Name: "read",
@@ -260,7 +272,11 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 		Name:     call.Name,
 		ArgsJSON: string(call.Args),
 		Result:   "     1\thello",
-		TurnID:   1,
+		Images: []message.ContentPart{
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "pdf", MimeType: "application/pdf", Data: []byte("%PDF-1.7"), FileName: "report.pdf"},
+		},
+		TurnID: 1,
 	})
 	a.flushPersist()
 
@@ -274,6 +290,18 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 			}
 			if !strings.Contains(msg.Content, "hello") {
 				t.Fatalf("tool content=%q, want completed read result payload", msg.Content)
+			}
+			if len(msg.Parts) != 3 {
+				t.Fatalf("len(tool parts) = %d, want text + image + pdf", len(msg.Parts))
+			}
+			if msg.Parts[0].Type != "text" || !strings.Contains(msg.Parts[0].Text, "hello") {
+				t.Fatalf("tool text part = %#v, want completed read result payload", msg.Parts[0])
+			}
+			if msg.Parts[1].Type != "image" || msg.Parts[1].MimeType != "image/png" {
+				t.Fatalf("tool image part = %#v, want png image", msg.Parts[1])
+			}
+			if msg.Parts[2].Type != "pdf" || msg.Parts[2].MimeType != "application/pdf" || msg.Parts[2].FileName != "report.pdf" {
+				t.Fatalf("tool pdf part = %#v, want report.pdf", msg.Parts[2])
 			}
 		}
 	}
@@ -292,10 +320,28 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 			if msg.ToolStatus != string(ToolResultStatusSuccess) {
 				t.Fatalf("restored tool status=%q, want success", msg.ToolStatus)
 			}
+			if len(msg.Parts) != 3 || msg.Parts[1].Type != "image" || msg.Parts[2].Type != "pdf" {
+				t.Fatalf("restored tool parts = %#v, want text + image + pdf", msg.Parts)
+			}
 		}
 	}
 	if !restoredTool {
 		t.Fatal("expected completed speculative tool result in persisted recovery log")
+	}
+
+	foundEvent := false
+	for _, evt := range drainAgentEvents(a.Events()) {
+		toolEvt, ok := evt.(ToolResultEvent)
+		if !ok || toolEvt.CallID != call.ID {
+			continue
+		}
+		foundEvent = true
+		if len(toolEvt.Parts) != 3 || toolEvt.Parts[1].Type != "image" || toolEvt.Parts[2].Type != "pdf" {
+			t.Fatalf("tool event parts = %#v, want text + image + pdf", toolEvt.Parts)
+		}
+	}
+	if !foundEvent {
+		t.Fatal("expected completed speculative tool result event")
 	}
 }
 
