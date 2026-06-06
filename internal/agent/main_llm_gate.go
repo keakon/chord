@@ -92,6 +92,19 @@ func (a *MainAgent) resetCompactionState() {
 	a.compactionState = compactionState{}
 }
 
+func (a *MainAgent) beginCompactionState(planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, headSplit int, cancel context.CancelFunc) {
+	a.compactionState = compactionState{
+		running:      true,
+		planID:       planID,
+		target:       target,
+		trigger:      trigger,
+		discard:      false,
+		continuation: continuation,
+		headSplit:    headSplit,
+		cancel:       cancel,
+	}
+}
+
 func (a *MainAgent) finishCompactionState() (pending *pendingMainLLMCall, discard bool) {
 	pending = a.currentCompactionPendingCall()
 	discard = a.compactionState.discard

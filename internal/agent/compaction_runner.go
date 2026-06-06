@@ -62,16 +62,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	}
 
 	ctx, cancel := context.WithCancel(a.parentCtx)
-	a.compactionState = compactionState{
-		running:      true,
-		planID:       planID,
-		target:       target,
-		trigger:      trigger,
-		discard:      false,
-		continuation: continuation,
-		headSplit:    headSplit,
-		cancel:       cancel,
-	}
+	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
 
 	a.emitActivity("main", ActivityCompacting, "context")
 	a.emitToTUI(CompactionStatusEvent{Status: "started"})

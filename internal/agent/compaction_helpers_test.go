@@ -6,16 +6,7 @@ import "fmt"
 // without running the full async compaction goroutine. Production schedules
 // compaction through scheduleCompactionAsync, which sets these fields itself.
 func (a *MainAgent) startCompactionState(planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan) {
-	a.compactionState = compactionState{
-		running:      true,
-		planID:       planID,
-		target:       target,
-		trigger:      trigger,
-		discard:      false,
-		continuation: continuation,
-		headSplit:    0,
-		cancel:       nil,
-	}
+	a.beginCompactionState(planID, target, trigger, continuation, 0, nil)
 }
 
 // historyMutationAllowed reports whether a mutation of an existing persisted
