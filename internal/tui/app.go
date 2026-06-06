@@ -327,6 +327,14 @@ type Model struct {
 
 	// Layered drawing layout.
 	layout tuiLayout
+	// renderFrameGeneration increments for every drawFrame call. Diagnostics use
+	// it to correlate captured buffers with host redraw/replay events.
+	renderFrameGeneration uint64
+	// renderFrameDiag caches the last recorded render-frame diagnostic signature
+	// so drawFrame records a new diagnostic only when a separator-relevant input
+	// changes, keeping the steady-state render path free of diagnostic formatting.
+	renderFrameDiag         renderFrameDiagSignature
+	renderFrameDiagRecorded bool
 
 	// rightPanelVisible tracks whether the right panel (info + agents) is shown.
 	// Hysteresis: enabled at >=120 cols, disabled only when width drops below 116,

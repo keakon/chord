@@ -22,10 +22,48 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 	return m.drawFrame(scr, area)
 }
 
+// renderFrameDiagSignature captures the separator-relevant inputs of a rendered
+// frame. drawFrame records a render-frame diagnostic only when this signature
+// changes, so identical consecutive frames cost no diagnostic formatting on the
+// per-frame render path.
+type renderFrameDiagSignature struct {
+	w, h          int
+	safeWidth     int
+	hostRedrawGen uint64
+	fullFrame     bool
+	layout        tuiLayout
+}
+
 func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
+	m.renderFrameGeneration++
 	w, h := area.Dx(), area.Dy()
 	layout := m.generateLayout(w, h)
 	m.layout = layout
+	if sig := (renderFrameDiagSignature{
+		w:             w,
+		h:             h,
+		safeWidth:     m.hostSafeFullFrameWidth(),
+		hostRedrawGen: m.hostRedrawGeneration,
+		fullFrame:     m.useFocusResizeFreeze,
+		layout:        layout,
+	}); !m.renderFrameDiagRecorded || sig != m.renderFrameDiag {
+		m.renderFrameDiag = sig
+		m.renderFrameDiagRecorded = true
+		m.recordTUIDiagnostic(
+			"render-frame",
+			"size=%dx%d safe_width=%d host_redraw_generation=%d full_frame=%t layout_main=%s layout_input=%s layout_status=%s separators=%s frame=%d",
+			w,
+			h,
+			sig.safeWidth,
+			m.hostRedrawGeneration,
+			m.useFocusResizeFreeze,
+			debugRectString(layout.main),
+			debugRectString(layout.input),
+			debugRectString(layout.status),
+			debugSeparatorRows(layout),
+			m.renderFrameGeneration,
+		)
+	}
 
 	m.clearScreenBuffer(scr)
 

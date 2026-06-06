@@ -63,6 +63,11 @@ func (m *Model) recordTUIDiagnostic(kind, format string, args ...any) {
 }
 
 func tuiDiagnosticCoalesceKey(kind, detail string) string {
+	if kind == "render-frame" {
+		if before, _, ok := strings.Cut(detail, " frame="); ok {
+			return before
+		}
+	}
 	if kind != "tool-call-update" {
 		return detail
 	}
@@ -152,6 +157,39 @@ func writeDiagnosticScreenBufferBottom(sb *strings.Builder, scr uv.ScreenBuffer,
 	}
 }
 
+func writeDiagnosticHorizontalLineRows(sb *strings.Builder, scr uv.ScreenBuffer, height int) {
+	if scr.RenderBuffer == nil || height <= 0 {
+		fmt.Fprintf(sb, "(empty)\n")
+		return
+	}
+	found := false
+	for y := 0; y < height; y++ {
+		line := scr.Line(y)
+		plain, occupied, cells := debugScreenBufferLineSummary(line)
+		plainWidth := ansi.StringWidth(plain)
+		horizontal := debugHorizontalLineRuneCount(plain)
+		if horizontal < 8 || horizontal*2 < max(1, plainWidth) {
+			continue
+		}
+		found = true
+		fmt.Fprintf(sb, "y=%d plain_width=%d horizontal=%d occupied=%d cells=%d plain=%q\n", y, plainWidth, horizontal, occupied, cells, plain)
+	}
+	if !found {
+		fmt.Fprintf(sb, "(none)\n")
+	}
+}
+
+func debugHorizontalLineRuneCount(s string) int {
+	count := 0
+	for _, r := range s {
+		switch r {
+		case '─', '━', '═', '╌', '╍', '┄', '┅', '┈', '┉', '╴', '╶', '╾', '╼':
+			count++
+		}
+	}
+	return count
+}
+
 func debugScreenBufferLineSummary(line uv.Line) (plain string, occupied, cells int) {
 	cells = len(line)
 	var b strings.Builder
@@ -168,6 +206,30 @@ func debugScreenBufferLineSummary(line uv.Line) (plain string, occupied, cells i
 		b.WriteString(content)
 	}
 	return strings.TrimRight(b.String(), " "), occupied, cells
+}
+
+func debugOptionalRow(rect image.Rectangle, delta int) string {
+	if rect.Empty() {
+		return "none"
+	}
+	return fmt.Sprintf("%d", rect.Min.Y+delta)
+}
+
+func debugSeparatorRows(layout tuiLayout) string {
+	parts := []string{
+		fmt.Sprintf("input=%s", debugOptionalRow(layout.input, 0)),
+		fmt.Sprintf("status=%s", debugOptionalRow(layout.status, 0)),
+		fmt.Sprintf("attachments=%s", debugOptionalRow(layout.attachments, 0)),
+		fmt.Sprintf("queue=%s", debugOptionalRow(layout.queue, 0)),
+		fmt.Sprintf("toast=%s", debugOptionalRow(layout.toast, 0)),
+	}
+	if !layout.main.Empty() {
+		parts = append(parts, fmt.Sprintf("main_last=%d", layout.main.Max.Y-1))
+	}
+	if !layout.infoPanel.Empty() {
+		parts = append(parts, fmt.Sprintf("info_panel_last=%d", layout.infoPanel.Max.Y-1))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath string, sanitize bool) (string, error) {
@@ -258,6 +320,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "display_state: %s\n", debugDisplayState(m.displayState))
 	fmt.Fprintf(&sb, "right_panel_visible: %t\n", m.rightPanelVisible)
 	fmt.Fprintf(&sb, "terminal_focused: %t\n", m.terminalAppFocused)
+	fmt.Fprintf(&sb, "render_frame_generation: %d\n", m.renderFrameGeneration)
 	fmt.Fprintf(&sb, "focus_resize_frozen: %t\n", m.focusResizeFrozen)
 	fmt.Fprintf(&sb, "last_foreground_at: %s\n", debugTimeString(m.lastForegroundAt))
 	fmt.Fprintf(&sb, "last_background_at: %s\n", debugTimeString(m.lastBackgroundAt))
@@ -300,6 +363,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "queue: %s\n", debugRectString(layout.queue))
 	fmt.Fprintf(&sb, "input: %s\n", debugRectString(layout.input))
 	fmt.Fprintf(&sb, "input_separator_row: %d input_height=%d input_area_height=%d\n", layout.input.Min.Y, layout.input.Dy(), m.inputAreaHeight())
+	fmt.Fprintf(&sb, "expected_separator_rows: %s\n", debugSeparatorRows(layout))
 	fmt.Fprintf(&sb, "toast: %s\n", debugRectString(layout.toast))
 	fmt.Fprintf(&sb, "status: %s\n", debugRectString(layout.status))
 
@@ -409,6 +473,9 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 
 	fmt.Fprintf(&sb, "\n[screen_buffer_bottom]\n")
 	writeDiagnosticScreenBufferBottom(&sb, scratch, max(0, height-8), height)
+
+	fmt.Fprintf(&sb, "\n[screen_buffer_horizontal_lines]\n")
+	writeDiagnosticHorizontalLineRows(&sb, scratch, height)
 
 	fmt.Fprintf(&sb, "\n[screen_buffer]\n")
 	writeDiagnosticDumpSection(&sb, safe(screenRender))

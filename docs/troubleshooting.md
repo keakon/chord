@@ -204,6 +204,31 @@ If you see corruption right after focus restore while the UI is streaming output
 
 Note: fragments like `;250m pyright` during a corruption episode are usually not LSP text but the tail of a truncated ANSI/OSC control sequence.
 
+### Repeated separator lines / stale border artifacts
+
+If the main symptom is repeated horizontal lines, duplicated input/status separators, stale card borders, or old sidebar borders, the most useful question is whether the extra line exists in Chord's current frame or is a stale terminal artifact from an older frame.
+
+Capture evidence in this order:
+
+1. Take a screenshot before forcing a redraw. Include the full terminal window, especially the input area, status bar, and right sidebar.
+2. Export a diagnostics bundle immediately, before resizing the terminal. Use the diagnostics shortcut if available; the bundle contains `metadata.txt`, `tui-dump.txt`, and `chord.log`.
+3. In `tui-dump.txt`, compare the screenshot against:
+   - `[layout]` and `expected_separator_rows`: `main`, `info_panel`, `input`, `status`, `input_separator_row`, plus the aggregated `expected_separator_rows` line show every row where Chord expected a separator.
+   - `[frame_bottom]` and `[screen_buffer_bottom]`: show the bottom rows of the frame Chord most recently rendered.
+   - `[screen_buffer]`: shows Chord's full current screen buffer.
+   - `[screen_buffer_horizontal_lines]`: lists every screen-buffer row that contains a horizontal box-drawing run, so you can match the screenshot's extra line to a specific row and tell Chord-drawn separators from stale artifacts.
+   - `last_host_redraw`, `host_redraw_generation`, `host_full_frame`, and `render_frame_generation`: show whether a host redraw, fallback replay, or Ghostty-safe full-frame path was involved, and which render frame produced the captured buffer.
+   - `recent_events`: look for `render-frame`, `host-redraw`, `host-redraw-skip`, `post-host-redraw-fallback-arm`, `image-protocol`, `focus`, `resize`, `scroll-flush`, or `content-boundary` events near the capture time. A `render-frame` entry is recorded whenever the layout or separator rows change, so its `separators` and `frame` fields show the most recent separator geometry.
+
+Interpretation:
+
+- If the extra line appears in `[screen_buffer]` at the same row as the screenshot, Chord likely generated the duplicate separator in the current frame. Keep the bundle and note the matching row.
+- If the extra line appears in the screenshot but not in `[screen_buffer]`, it is probably a stale terminal/renderer artifact from a previous frame. This is most commonly associated with host redraw, focus restore, right-edge wrapping, or clear/repaint timing.
+- If the line appears only near the far right edge or disappears when the terminal is made one or two columns narrower, suspect right-edge wrap behavior. Record `size` and `host_full_frame safe_width/raw_width`.
+- If the artifact appears immediately after image preview, paste image, or diagnostics export, also inspect `last_image_protocol_reason` and `last_image_protocol_summary`.
+
+For maintainer-level isolation, replaying the final ANSI output in multiple terminals is useful: if the same captured output only shows stale lines in Ghostty/libghostty but not in Terminal.app, iTerm2, or WezTerm, keep both the replay file and the Ghostty screenshot. If multiple terminals show the same duplicate line, prefer investigating Chord or the Bubble Tea/Ultraviolet renderer output.
+
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
