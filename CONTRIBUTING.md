@@ -49,12 +49,14 @@ The Makefile targets mirror CI and should be preferred over copying individual c
 
 ```bash
 make fmt-check
+make deps-check
 make test-cover    # CI requires total coverage >= 70.0%.
 make race
 make vet
 make staticcheck
 make gopls-check
 make docs-check
+make docs-examples-check
 ```
 
 If your changes touch TUI performance-critical paths, also run:

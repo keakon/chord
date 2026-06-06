@@ -8,16 +8,28 @@ on:
       - "docs/**"
       - "website/**"
       - "scripts/sync-docs.mjs"
+      - "scripts/check_docs_consistency.sh"
+      - "scripts/check_docs_examples.sh"
       - "README.md"
       - "README_CN.md"
+      - "CONTRIBUTING.md"
+      - ".github/pull_request_template.md"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "docs/**"
       - "website/**"
       - "scripts/sync-docs.mjs"
+      - "scripts/check_docs_consistency.sh"
+      - "scripts/check_docs_examples.sh"
       - "README.md"
       - "README_CN.md"
+      - "CONTRIBUTING.md"
+      - ".github/pull_request_template.md"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -32,6 +44,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  consistency:
+    name: Docs consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check docs consistency
+        run: ./scripts/check_docs_consistency.sh
+
+  examples:
+    name: Docs examples
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check docs examples
+        run: ./scripts/check_docs_examples.sh
+
   markdown-lint:
     name: Markdown lint
     runs-on: ubuntu-latest
@@ -109,7 +147,7 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [markdown-lint, link-check, build]
+    needs: [consistency, examples, markdown-lint, link-check, build]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

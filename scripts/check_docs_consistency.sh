@@ -61,9 +61,18 @@ fi
 
 ci_coverage=$(grep -E 'MIN_COVERAGE:' .github/workflows/ci.yml | head -n1 | sed -E 's/.*"([0-9.]+)".*/\1/')
 [[ -n "$ci_coverage" ]] || fail "could not read MIN_COVERAGE from .github/workflows/ci.yml"
-grep -n "${ci_coverage}%" CONTRIBUTING.md >/dev/null || fail "CONTRIBUTING.md coverage threshold must match CI MIN_COVERAGE (${ci_coverage}%)"
-if grep -nE '65\.0%' CONTRIBUTING.md >/dev/null; then
- fail "CONTRIBUTING.md contains stale coverage threshold 65.0%"
+coverage_docs=(CONTRIBUTING.md .github/pull_request_template.md)
+for doc in "${coverage_docs[@]}"; do
+ [[ -f "$doc" ]] || fail "missing coverage doc $doc"
+ grep -n "${ci_coverage}%" "$doc" >/dev/null || fail "$doc coverage threshold must match CI MIN_COVERAGE (${ci_coverage}%)"
+ if grep -nE '65\.0%' "$doc" >/dev/null; then
+  fail "$doc contains stale coverage threshold 65.0%"
+ fi
+done
+
+grep -n "staticcheck -checks 'all,-ST1000' ./..." .github/pull_request_template.md >/dev/null || fail ".github/pull_request_template.md staticcheck command must match CI"
+if grep -n "staticcheck -checks 'all,-ST\\*' ./..." .github/pull_request_template.md >/dev/null; then
+ fail ".github/pull_request_template.md contains stale staticcheck -ST* command"
 fi
 
 for path in "${public_docs[@]}"; do

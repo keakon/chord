@@ -13,9 +13,9 @@ GOIMPORTS ?= goimports
 STATICCHECK ?= staticcheck
 GOPLS ?= gopls
 
-.PHONY: ci fmt fmt-check test test-cover race vet staticcheck gopls-check docs-check bench-tui clean
+.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check docs-check docs-examples-check bench-tui clean
 
-ci: fmt-check test-cover race vet staticcheck gopls-check docs-check
+ci: fmt-check deps-check test-cover race vet staticcheck gopls-check docs-check docs-examples-check
 
 fmt:
 	$(GOIMPORTS) -w -local $(LOCAL) .
@@ -28,6 +28,9 @@ fmt-check:
 		echo "Run: make fmt"; \
 		exit 1; \
 	fi
+
+deps-check:
+	./scripts/check_deps.sh
 
 test:
 	$(GO) test -count=1 $(PKGS)
@@ -51,8 +54,11 @@ gopls-check:
 docs-check:
 	./scripts/check_docs_consistency.sh
 
+docs-examples-check:
+	./scripts/check_docs_examples.sh
+
 bench-tui:
 	./scripts/bench_tui_regression.sh
 
 clean:
-	rm -f coverage.out *.out *.test
+	rm -f chord chord.exe coverage.* *.out *.test

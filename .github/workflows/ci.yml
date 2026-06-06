@@ -53,6 +53,22 @@ jobs:
           CHORD_TEST_COUNT: "1"
         run: scripts/check_ci_local.sh
 
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Audit dependencies
+        run: scripts/check_deps.sh
+
   vet:
     name: Vet
     runs-on: ubuntu-latest
