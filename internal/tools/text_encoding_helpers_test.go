@@ -1,10 +1,11 @@
 package tools
 
-import "strings"
+import (
+	"strings"
+)
 
 // knownTextEncoding maps encoding names to textEncoding values for tests that
-// drive the encoding pipeline by name. Production code resolves encodings via
-// detectLegacyEncoding* / decodeText* paths that don't go through this map.
+// drive the local file encoding pipeline by name.
 var knownTextEncoding = map[string]textEncoding{
 	"utf-8":     utf8Encoding,
 	"utf-8-bom": utf8BOMEncoding,

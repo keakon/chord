@@ -2,6 +2,12 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Improvements
+
+- Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
+
 ## 0.6.3 - 2026-06-05
 
 ### Highlights

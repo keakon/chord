@@ -16,7 +16,6 @@ import (
 
 	ristretto "github.com/dgraph-io/ristretto/v2"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/wlynxg/chardet"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -30,7 +29,6 @@ var ErrBinaryFile = errors.New("binary file")
 
 const (
 	binarySampleBytes          = 4096
-	chardetSampleBytes         = 64 * 1024
 	pathCacheEntries           = 4096
 	pathCacheTTL               = 30 * time.Minute
 	decodedCacheTTL            = 15 * time.Minute
@@ -55,16 +53,16 @@ type textEncoding struct {
 }
 
 var (
-	utf8Encoding     = textEncoding{Name: "utf-8"}
-	utf8BOMEncoding  = textEncoding{Name: "utf-8", BOM: utf8BOM}
-	utf16LEEncoding  = textEncoding{Name: "utf-16le", Enc: textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM), BOM: utf16LEBOM}
-	utf16BEEncoding  = textEncoding{Name: "utf-16be", Enc: textunicode.UTF16(textunicode.BigEndian, textunicode.IgnoreBOM), BOM: utf16BEBOM}
-	utf32LEEncoding  = textEncoding{Name: "utf-32le", Enc: utf32.UTF32(utf32.LittleEndian, utf32.IgnoreBOM), BOM: utf32LEBOM}
-	utf32BEEncoding  = textEncoding{Name: "utf-32be", Enc: utf32.UTF32(utf32.BigEndian, utf32.IgnoreBOM), BOM: utf32BEBOM}
-	gb18030Encoding  = textEncoding{Name: "gb18030", Enc: simplifiedchinese.GB18030}
-	big5Encoding     = textEncoding{Name: "big5", Enc: traditionalchinese.Big5}
-	shiftJISEncoding = textEncoding{Name: "shift-jis", Enc: japanese.ShiftJIS}
-	legacyEncodings  = []textEncoding{gb18030Encoding, big5Encoding, shiftJISEncoding}
+	utf8Encoding      = textEncoding{Name: "utf-8"}
+	utf8BOMEncoding   = textEncoding{Name: "utf-8", BOM: utf8BOM}
+	utf16LEEncoding   = textEncoding{Name: "utf-16le", Enc: textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM), BOM: utf16LEBOM}
+	utf16BEEncoding   = textEncoding{Name: "utf-16be", Enc: textunicode.UTF16(textunicode.BigEndian, textunicode.IgnoreBOM), BOM: utf16BEBOM}
+	utf32LEEncoding   = textEncoding{Name: "utf-32le", Enc: utf32.UTF32(utf32.LittleEndian, utf32.IgnoreBOM), BOM: utf32LEBOM}
+	utf32BEEncoding   = textEncoding{Name: "utf-32be", Enc: utf32.UTF32(utf32.BigEndian, utf32.IgnoreBOM), BOM: utf32BEBOM}
+	gb18030Encoding   = textEncoding{Name: "gb18030", Enc: simplifiedchinese.GB18030}
+	big5Encoding      = textEncoding{Name: "big5", Enc: traditionalchinese.Big5}
+	shiftJISEncoding  = textEncoding{Name: "shift-jis", Enc: japanese.ShiftJIS}
+	regionalEncodings = []textEncoding{gb18030Encoding, big5Encoding, shiftJISEncoding}
 )
 
 var (
@@ -199,8 +197,8 @@ func readDecodedTextFile(path string, returnRaw bool) (decodedText, []byte, erro
 	if entry, ok := getPathCache(path); ok {
 		if entry.Size == info.Size() && entry.ModTime == info.ModTime().UnixNano() {
 			if dec, ok := loadDecodedFromHash(entry.Hash); ok {
-				if goStrictUTF8Path(path) && isLegacyEncoding(dec.Encoding) {
-					// Miss: same bytes may have been cached via a non-strict read (legacy decode).
+				if goStrictUTF8Path(path) && isRegionalEncoding(dec.Encoding) {
+					// Miss: same bytes may have been cached through a regional fallback.
 				} else if !returnRaw {
 					return dec, nil, nil
 				} else {
@@ -245,8 +243,6 @@ func loadDecodedFromHash(hash [32]byte) (decodedText, bool) {
 	return entry.Decoded, true
 }
 
-// goStrictUTF8Path reports paths for which the Go toolchain expects UTF-8 text; we skip
-// legacy encoding probes so invalid UTF-8 fails fast instead of mis-decoding.
 func goStrictUTF8Path(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	switch base {
@@ -258,8 +254,7 @@ func goStrictUTF8Path(path string) bool {
 }
 
 // decodeTextBytes decodes file bytes to logical Unicode text. filePath should be the
-// on-disk path when decoding a named file (enables Go-source UTF-8 fast-fail); use ""
-// for raw bytes without path semantics (legacy probe allowed).
+// on-disk path when decoding a named file.
 func decodeTextBytes(data []byte, filePath string) (decodedText, error) {
 	if len(data) == 0 {
 		return decodedText{Encoding: utf8Encoding}, nil
@@ -274,8 +269,8 @@ func decodeTextBytes(data []byte, filePath string) (decodedText, error) {
 				return decodedText{}, fmt.Errorf("%w: content appears to be binary", ErrBinaryFile)
 			}
 			dec := cached.Entry.Decoded
-			if filePath != "" && goStrictUTF8Path(filePath) && isLegacyEncoding(dec.Encoding) {
-				// Do not reuse a legacy decode when reading Go module/source paths.
+			if filePath != "" && goStrictUTF8Path(filePath) && isRegionalEncoding(dec.Encoding) {
+				// Do not reuse a regional fallback when reading Go module/source paths.
 			} else {
 				return dec, nil
 			}
@@ -297,13 +292,16 @@ func decodeTextBytes(data []byte, filePath string) (decodedText, error) {
 		return decoded, nil
 	}
 	if filePath != "" && goStrictUTF8Path(filePath) {
-		return decodedText{}, fmt.Errorf("invalid UTF-8 in Go source file %q (Go requires UTF-8; skipped legacy encoding detection)", filepath.Clean(filePath))
+		return decodedText{}, fmt.Errorf("invalid UTF-8 in Go source file %q (Go requires UTF-8; skipped regional encoding detection)", filepath.Clean(filePath))
 	}
-	if decoded, ok := detectLegacyEncoding(data); ok {
+	if decoded, ok := detectRegionalEncoding(data); ok {
 		cacheSuccess(hash, decoded)
 		return decoded, nil
 	}
-	return decodedText{}, fmt.Errorf("file is not valid UTF-8/BOM Unicode and no supported legacy text encoding matched")
+	if filePath != "" {
+		return decodedText{}, fmt.Errorf("file %q is not valid UTF-8/BOM Unicode and no supported regional text encoding matched", filepath.Clean(filePath))
+	}
+	return decodedText{}, fmt.Errorf("content is not valid UTF-8/BOM Unicode and no supported regional text encoding matched")
 }
 
 func decodedEntryCost(entry encodingCacheEntry) int64 {
@@ -389,7 +387,7 @@ func decodeWithEncoding(data []byte, enc textEncoding) (decodedText, error) {
 		}
 		text = string(decoded)
 	}
-	if err := validateDecodedText(text, isLegacyEncoding(enc)); err != nil {
+	if err := validateDecodedText(text, isRegionalEncoding(enc)); err != nil {
 		return decodedText{}, err
 	}
 	if _, err := encodeString(text, enc); err != nil {
@@ -442,52 +440,15 @@ func encodeString(text string, enc textEncoding) ([]byte, error) {
 	return out, nil
 }
 
-func isLegacyEncoding(enc textEncoding) bool {
+func isRegionalEncoding(enc textEncoding) bool {
 	return enc.Name == gb18030Encoding.Name || enc.Name == big5Encoding.Name || enc.Name == shiftJISEncoding.Name
 }
 
-func detectLegacyEncoding(data []byte) (decodedText, bool) {
-	if enc, ok := detectLegacyEncodingByChardet(data); ok {
-		if decoded, err := decodeWithEncoding(data, enc); err == nil {
-			return decoded, true
-		}
-	}
-	enc, ok := detectLegacyEncodingByHeuristic(data)
-	if !ok {
-		return decodedText{}, false
-	}
-	decoded, err := decodeWithEncoding(data, enc)
-	if err != nil {
-		return decodedText{}, false
-	}
-	return decoded, true
-}
-
-func detectLegacyEncodingByChardet(data []byte) (textEncoding, bool) {
-	results := chardet.DetectAll(limitBytes(data, chardetSampleBytes))
-	bestConfidence := 0.0
-	var best textEncoding
-	for _, result := range results {
-		enc, ok := mapDetectedEncoding(result.Encoding)
-		if !ok {
-			continue
-		}
-		if result.Confidence > bestConfidence {
-			bestConfidence = result.Confidence
-			best = enc
-		}
-	}
-	if bestConfidence >= 0.85 {
-		return best, true
-	}
-	return textEncoding{}, false
-}
-
-func detectLegacyEncodingByHeuristic(data []byte) (textEncoding, bool) {
+func detectRegionalEncoding(data []byte) (decodedText, bool) {
 	bestScore := -1 << 30
 	secondBest := -1 << 30
-	var best textEncoding
-	for _, enc := range legacyEncodings {
+	var best decodedText
+	for _, enc := range regionalEncodings {
 		decoded, err := decodeWithEncoding(data, enc)
 		if err != nil {
 			continue
@@ -496,29 +457,31 @@ func detectLegacyEncodingByHeuristic(data []byte) (textEncoding, bool) {
 		if score > bestScore {
 			secondBest = bestScore
 			bestScore = score
-			best = enc
+			best = decoded
 		} else if score > secondBest {
 			secondBest = score
 		}
 	}
 	if bestScore <= 0 {
-		return textEncoding{}, false
+		return decodedText{}, false
 	}
 	if secondBest > bestScore-10 {
-		return textEncoding{}, false
+		return decodedText{}, false
 	}
 	return best, true
 }
 
 func scoreDecodedText(text string, enc textEncoding) int {
-	var kana, halfwidthKana, han int
+	var kana, halfwidthKana, halfwidthPunct, han int
 	var simplifiedHits, traditionalHits int
 	for _, r := range text {
 		switch {
-		case unicode.Is(unicode.Hiragana, r), unicode.Is(unicode.Katakana, r):
-			kana++
 		case r >= 0xFF66 && r <= 0xFF9F:
 			halfwidthKana++
+		case r >= 0xFF61 && r <= 0xFF65:
+			halfwidthPunct++
+		case unicode.Is(unicode.Hiragana, r), unicode.Is(unicode.Katakana, r):
+			kana++
 		case unicode.Is(unicode.Han, r):
 			han++
 		}
@@ -533,35 +496,32 @@ func scoreDecodedText(text string, enc textEncoding) int {
 	score += han / 4
 	switch enc.Name {
 	case shiftJISEncoding.Name:
-		score += kana*8 + halfwidthKana*6
-		if kana+halfwidthKana > 0 {
+		if kana == 0 && halfwidthKana+halfwidthPunct > 2 {
+			return -1 << 20
+		}
+		score += kana * 10
+		if kana > 0 {
 			score += 24
+		}
+		if kana == 0 && halfwidthKana > 0 {
+			score -= halfwidthKana * 16
+		} else {
+			score += halfwidthKana
 		}
 	case gb18030Encoding.Name:
 		score += simplifiedHits * 8
 		score -= traditionalHits * 2
 		score -= kana * 2
 		score -= halfwidthKana * 3
+		score -= halfwidthPunct * 2
 	case big5Encoding.Name:
 		score += traditionalHits * 8
 		score -= simplifiedHits * 2
 		score -= kana * 2
 		score -= halfwidthKana * 3
+		score -= halfwidthPunct * 2
 	}
 	return score
-}
-
-func mapDetectedEncoding(name string) (textEncoding, bool) {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "GB2312", "GBK", "GB18030":
-		return gb18030Encoding, true
-	case "BIG5":
-		return big5Encoding, true
-	case "SHIFT_JIS", "CP932":
-		return shiftJISEncoding, true
-	default:
-		return textEncoding{}, false
-	}
 }
 
 func looksBinary(data []byte) bool {

@@ -91,7 +91,7 @@ permission:
 
 ## 文件修改风险
 
-`edit`、`write`、`delete` 都会直接改动工作区文件。`edit` 用于修改一个已有文件的局部内容，`write` 用于创建文件或明确完整替换文件，`delete` 用于删除整个文件。`read`、`view_image` 和 `grep` 虽然是只读工具，但它们仍会访问本地文件系统路径，并可能把本地文件内容暴露到 transcript / 模型上下文中。按路径读取的工具会刻意拒绝标准流设备文件（如 `/dev/stdin`、`/dev/stdout`、`/dev/stderr` 等）这类受限 device-style 路径，而不会把它们当作普通文件处理。
+`edit`、`write`、`delete` 都会直接改动工作区文件。`edit` 用于修改一个已有文件的局部内容，`write` 用于创建文件或明确完整替换文件，`delete` 用于删除整个文件。`read`、`view_image` 和 `grep` 虽然是只读工具，但它们仍会访问本地文件系统路径，并可能把本地文件内容暴露到 transcript / 模型上下文中。按路径读取的工具会刻意拒绝标准流设备文件（如 `/dev/stdin`、`/dev/stdout`、`/dev/stderr` 等）这类受限 device-style 路径，而不会把它们当作普通文件处理。本地文本文件工具优先使用 UTF-8 或带 BOM 的 Unicode（UTF-8 / UTF-16 / UTF-32），并保留对 GB18030、Big5、Shift-JIS 等常见地区性编码的受限支持。无法明确识别或不受支持的编码会快速失败；`web_fetch` 仍会按 HTTP 响应声明的 charset 解码。
 
 执行 `edit` 前，目标文件必须已经被系统观察过：可以来自 `read`、之前成功的 `write` / `edit`，或系统解析的 `@file` mention。如果文件在观察后发生变化，只要工具仍能验证当前内容，Chord 会提示警告而不是直接拒绝。有风险的非空写前内容会备份到当前会话目录，工具结果会包含备份路径。空文件和无风险的连续 agent-owned 编辑不会创建备份。备份上限为每 path 10 个、每 session 200 个、单文件 10 MiB、每 session 总计 50 MiB；如果必须备份但超过这些上限或因其他原因失败，编辑仍可继续，但工具结果会说明未创建备份及原因。删除/清理会话时，这些备份会随会话目录一起删除。
 
