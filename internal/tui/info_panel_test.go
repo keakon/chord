@@ -24,6 +24,7 @@ type infoPanelAgent struct {
 	*sessionControlAgent
 	usage               analytics.SessionStats
 	runningModelRef     string
+	nextRequestModelRef string
 	contextCurrent      int
 	contextBytes        int
 	contextLimit        int
@@ -50,6 +51,10 @@ func newInfoPanelAgent() *infoPanelAgent {
 
 func (a *infoPanelAgent) RunningModelRef() string {
 	return a.runningModelRef
+}
+
+func (a *infoPanelAgent) NextRequestModelRef() string {
+	return a.nextRequestModelRef
 }
 
 func (a *infoPanelAgent) RunningVariant() string { return "" }
@@ -1606,6 +1611,44 @@ func TestRenderInfoPanelModelLineShowsFallbackVariantWhenRunningRefIncludesVaria
 	}
 	if got := modelLines[0]; got != "sample/glm-5.1@high" {
 		t.Fatalf("model line = %q, want sample/glm-5.1@high", got)
+	}
+}
+
+func TestRenderInfoPanelIdleModelLineUsesNextRequestModel(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.providerModelRef = "provider-a/model-a"
+	backend.runningModelRef = "provider-b/model-b"
+	backend.nextRequestModelRef = "provider-b/model-b"
+	backend.keysConfirmed = 5
+	backend.keysTotal = 5
+	m := NewModel(backend)
+
+	modelLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "MODEL")
+	if len(modelLines) < 2 {
+		t.Fatalf("MODEL section missing lines: %#v", modelLines)
+	}
+	if got := modelLines[0]; got != "provider-b/model-b" {
+		t.Fatalf("model line = %q, want provider-b/model-b", got)
+	}
+	if got := modelLines[1]; got != "Keys: 5/5" {
+		t.Fatalf("keys line = %q, want Keys: 5/5", got)
+	}
+}
+
+func TestRenderInfoPanelBusyModelLineIgnoresNextRequestModel(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.providerModelRef = "provider-a/model-a"
+	backend.runningModelRef = "provider-a/model-a"
+	backend.nextRequestModelRef = "provider-b/model-b"
+	m := NewModel(backend)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	modelLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "MODEL")
+	if len(modelLines) < 1 {
+		t.Fatalf("MODEL section missing lines: %#v", modelLines)
+	}
+	if got := modelLines[0]; got != "provider-a/model-a" {
+		t.Fatalf("model line = %q, want provider-a/model-a", got)
 	}
 }
 

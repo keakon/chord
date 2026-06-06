@@ -2741,6 +2741,9 @@ func TestModelPoolStickyCursorKeepsSuccessfulModel(t *testing.T) {
 	if st1.RunningModelRef != "prov/model1" {
 		t.Fatalf("first RunningModelRef = %q, want prov/model1", st1.RunningModelRef)
 	}
+	if next := c.NextRequestModelRef(); next != "prov/model1" {
+		t.Fatalf("NextRequestModelRef after fallback success = %q, want prov/model1", next)
+	}
 
 	resp2, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-2"}}, nil, nil)
 	if err != nil {

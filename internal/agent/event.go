@@ -41,6 +41,7 @@ const (
 	EventSubAgentStop            = "subagent_stop"
 	EventAgentLog                = "agent_log"                  // Informational log from SubAgent (e.g. buffer overflow warning)
 	EventResetNudge              = "reset_nudge"                // SubAgent activity detected; reset idle nudge counter
+	EventSubAgentRequestBoundary = "subagent_request_boundary"  // SubAgent LLM request finished; apply deferred routing changes
 	EventSpawnFinished           = "background_object_finished" // Spawned background process finished; runtime-only notification
 	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)
 	EventLoopAssessment          = "loop_assessment"            // internal loop-controller decision point after a completed assistant round

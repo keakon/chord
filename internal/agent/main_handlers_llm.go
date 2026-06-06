@@ -71,6 +71,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		log.Errorf("handleLLMResponse: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	a.mainLLMRequestInFlight.Store(false)
 	handledAt := time.Now()
 	a.recordToolTraceLLMResponseHandled(payload, handledAt)
 	// Finalized response received: snapshot any streamed partial text first for
@@ -127,6 +128,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				})
 				turnID := a.turn.ID
 				turnCtx := a.turn.Ctx
+				a.applyPendingModelPoolSwitchesAtRequestBoundary()
 				a.beginLengthRecoveryRetry(a.turn.LastTruncatedToolName, turnID, turnCtx)
 				return
 			}
@@ -142,6 +144,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			if a.turn.MalformedCount >= maxMalformedToolCalls {
 				if isTruncated && a.scheduleCompactionForLengthRecovery() {
 					a.emitToTUI(ToastEvent{Message: "Response still hit the output limit; compacting context before retry", Level: "warn"})
+					a.applyPendingModelPoolSwitchesAtRequestBoundary()
 					a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 					return
 				}
@@ -165,6 +168,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				})
 				a.emitToTUI(ToastEvent{Message: strings.TrimSpace(compactHint), Level: "warn"})
 				a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "args_invalid")
+				a.applyPendingModelPoolSwitchesAtRequestBoundary()
 				a.setIdleAndDrainPending()
 				return
 			}
@@ -175,6 +179,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		// Retry LLM call without storing the malformed response.
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx
+		a.applyPendingModelPoolSwitchesAtRequestBoundary()
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 		return
 	}
@@ -227,6 +232,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				Message: "Detected provider thinking pseudo tool-call templates but could not parse them. Please retry or switch model.",
 			})
 			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "provider_drift")
+			a.applyPendingModelPoolSwitchesAtRequestBoundary()
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -265,6 +271,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// TUI applies it only to settled thinking cards, so it must not affect the main
 	// response or streaming display.
 	a.maybeTranslateLatestThinkingAfterIdle(evt.TurnID)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 
 	// No valid tool calls → agent is idle, waiting for the next user message.
 	if len(validCalls) == 0 {

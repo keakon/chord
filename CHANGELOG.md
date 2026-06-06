@@ -8,6 +8,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
 
+### Fixes
+
+- Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
+
 ## 0.6.3 - 2026-06-05
 
 ### Highlights

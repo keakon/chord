@@ -36,6 +36,9 @@ func formatCost(cost float64) string {
 func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSnapshot, effectiveWidth, leftWidth int) []string {
 	modelRef := snap.modelRef
 	selectedRef := snap.selectedModelRef
+	if !snap.busy && snap.nextModelRef != "" {
+		selectedRef = snap.nextModelRef
+	}
 	modelVariant := snap.modelVariant
 
 	const modelPillPrefixRunes = 2

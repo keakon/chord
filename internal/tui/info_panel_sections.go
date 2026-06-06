@@ -65,7 +65,14 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 }
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
-	modelDisplay := formatModelRefForRequestState(m.agent.RunningModelRef(), m.agent.ProviderModelRef(), m.agent.RunningVariant(), lineW, m.isFocusedAgentBusy())
+	busy := m.isFocusedAgentBusy()
+	selectedRef := m.agent.ProviderModelRef()
+	if !busy {
+		if nextRef := nextRequestModelRefForAgent(m.agent); strings.TrimSpace(nextRef) != "" {
+			selectedRef = nextRef
+		}
+	}
+	modelDisplay := formatModelRefForRequestState(m.agent.RunningModelRef(), selectedRef, m.agent.RunningVariant(), lineW, busy)
 	modelShown := modelDisplay
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),

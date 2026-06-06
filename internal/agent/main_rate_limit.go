@@ -87,7 +87,12 @@ func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
 	}
 	a.llmMu.RLock()
 	client = a.llmClient
-	ref = strings.TrimSpace(a.runningModelRef)
+	if !a.mainLLMRequestInFlight.Load() && client != nil {
+		ref = strings.TrimSpace(client.NextRequestModelRef())
+	}
+	if ref == "" {
+		ref = strings.TrimSpace(a.runningModelRef)
+	}
 	if ref == "" {
 		ref = strings.TrimSpace(a.providerModelRef)
 	}

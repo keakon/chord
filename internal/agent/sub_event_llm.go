@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -20,6 +21,16 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 
 	if result.err != nil {
+		if llm.IsRoutingInvalidated(result.err) {
+			// Model routing changed mid-request (e.g. this sub-agent's model pool
+			// was switched while the request was in flight). Abandon the stale
+			// request and restart with the latest client instead of failing the
+			// turn. Mirrors MainAgent.handleAgentError's routing-invalidated path.
+			log.Infof("SubAgent routing invalidated during active turn; restarting request agent=%v turn_id=%v", s.instanceID, result.turnID)
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "routing_invalidated")
+			s.asyncCallLLM(s.turn, s.ctxMgr.Snapshot())
+			return
+		}
 		s.sendEvent(Event{
 			Type:    EventAgentError,
 			Payload: result.err,

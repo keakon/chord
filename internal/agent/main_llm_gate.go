@@ -251,6 +251,7 @@ func (a *MainAgent) applyMainLLMRequestTuningOverride(tuning llm.RequestTuning) 
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
 	// flow from here; otherwise this fresh pre-request path should continue on
@@ -324,6 +325,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
 	a.pendingLoopContinuation = nil
+	a.mainLLMRequestInFlight.Store(true)
 	a.outputWg.Go(func() {
 		resp, err := a.callLLM(turnCtx, messages)
 		if err != nil {

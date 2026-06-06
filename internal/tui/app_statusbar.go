@@ -87,6 +87,7 @@ type statusBarAgentSnapshot struct {
 	sessionID        string
 	modelRef         string
 	selectedModelRef string
+	nextModelRef     string
 	modelVariant     string
 	busy             bool
 	proxyInUse       bool
@@ -218,9 +219,16 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		snap.modelRef = strings.TrimSpace(m.agent.RunningModelRef())
 		snap.selectedModelRef = strings.TrimSpace(m.agent.ProviderModelRef())
 		snap.busy = m.isFocusedAgentBusy()
+		snap.nextModelRef = strings.TrimSpace(nextRequestModelRefForAgent(m.agent))
+		if snap.nextModelRef == "" {
+			snap.nextModelRef = snap.selectedModelRef
+		}
 		snap.modelRef = modelref.EnsureRefShowsProvider(snap.modelRef, snap.selectedModelRef)
 		snap.modelVariant = m.agent.RunningVariant()
 		ref := snap.modelRef
+		if !snap.busy {
+			ref = snap.nextModelRef
+		}
 		if ref == "" {
 			ref = snap.selectedModelRef
 		}
@@ -387,7 +395,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -422,6 +430,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		snap.proxyInUse,
 		len(snap.modelRef),
 		len(snap.selectedModelRef),
+		len(snap.nextModelRef),
 		len(snap.modelVariant),
 		snap.busy,
 	)
@@ -433,6 +442,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteString(snap.modelRef)
 	b.WriteByte('|')
 	b.WriteString(snap.selectedModelRef)
+	b.WriteByte('|')
+	b.WriteString(snap.nextModelRef)
 	b.WriteByte('|')
 	b.WriteString(snap.modelVariant)
 	b.WriteByte('|')

@@ -348,6 +348,14 @@ type MainAgent struct {
 	llmMu                sync.RWMutex
 	installedSysPrompt   string
 	systemPromptOverride string
+	// The event-loop goroutine owns the active request and pending model-pool
+	// switch state. Pool switches requested while a main LLM request is in flight
+	// are applied at the next request boundary, so they do not invalidate the
+	// request currently producing output.
+	mainLLMRequestInFlight      atomic.Bool
+	pendingMainModelPoolSwitch  bool
+	pendingAgentModelPoolSwitch map[string]struct{}
+	pendingModelPoolRollback    *modelPoolSelectionSnapshot
 
 	// done is closed when Run exits, allowing Shutdown to wait.
 	done chan struct{}
@@ -1567,6 +1575,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		return
 	}
 
+	a.mainLLMRequestInFlight.Store(false)
 	a.savePartialAssistantMsg()
 	if payload.KeepPendingUserMessagesQueued {
 		a.pausePendingUserDrainOnce = true
@@ -1615,6 +1624,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	if payload.CommitPendingUserMessagesWithoutTurn {
 		a.commitPendingUserMessagesWithoutTurn()
 	}
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 	a.emitActivity("main", ActivityIdle, "")
 	a.markActiveSubAgentMailboxAck(false)
 	a.setIdleAndDrainPending()
@@ -1653,9 +1663,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			log.Debugf("discarding stale error event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 			return
 		}
+		a.mainLLMRequestInFlight.Store(false)
 
 		if llm.IsRoutingInvalidated(err) {
 			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
+			a.applyPendingModelPoolSwitchesAtRequestBoundary()
 			if a.resumeTurnAfterRoutingInvalidation(evt.TurnID) {
 				return
 			}
@@ -1664,6 +1676,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		log.Errorf("agent error error=%v turn_id=%v instance=%v", err, evt.TurnID, a.instanceID)
 		a.savePartialAssistantMsg()
 		a.failPendingToolCalls(a.turn, err)
+		a.applyPendingModelPoolSwitchesAtRequestBoundary()
 		a.fireHookBackground(a.parentCtx, hook.OnAgentError, evt.TurnID, map[string]any{
 			"message":         err.Error(),
 			"error_kind":      classifyAgentError(err),

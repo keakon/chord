@@ -23,9 +23,6 @@ func (s pendingPoolSwitchState) display(currentPool string, busy bool) string {
 	if !busy || strings.TrimSpace(s.from) == "" || strings.TrimSpace(s.to) == "" {
 		return strings.TrimSpace(currentPool)
 	}
-	if strings.TrimSpace(currentPool) != strings.TrimSpace(s.to) {
-		return strings.TrimSpace(currentPool)
-	}
 	return strings.TrimSpace(s.from) + " -> " + strings.TrimSpace(s.to)
 }
 

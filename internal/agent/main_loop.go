@@ -119,6 +119,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleAgentLog(evt)
 	case EventResetNudge:
 		a.handleResetNudge(evt)
+	case EventSubAgentRequestBoundary:
+		a.handleSubAgentRequestBoundary(evt)
 	case EventSpawnFinished:
 		a.handleSpawnFinished(evt)
 	case EventContinue:

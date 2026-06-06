@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -19,6 +20,11 @@ type RuntimeModelPoolPolicy struct {
 	overrides        map[string]string
 
 	lastPicked map[string]map[string]string
+}
+
+type modelPoolSelectionSnapshot struct {
+	currentPool string
+	overrides   map[string]string
 }
 
 func NewRuntimeModelPoolPolicy() *RuntimeModelPoolPolicy {
@@ -297,6 +303,161 @@ func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
 	if err := a.setCurrentModelPool(req.Pool, true); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
+}
+
+func (a *MainAgent) markMainModelPoolSwitchPending() {
+	a.pendingMainModelPoolSwitch = true
+}
+
+func (a *MainAgent) markAgentModelPoolSwitchPending(agentName string) {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return
+	}
+	if a.pendingAgentModelPoolSwitch == nil {
+		a.pendingAgentModelPoolSwitch = make(map[string]struct{})
+	}
+	a.pendingAgentModelPoolSwitch[agentName] = struct{}{}
+}
+
+func (a *MainAgent) agentModelPoolSwitchInFlight(agentName string) bool {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, sub := range a.subAgents {
+		if sub == nil || sub.agentDefName != agentName {
+			continue
+		}
+		if sub.llmRequestInFlight.Load() {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) pendingAgentModelPoolSwitchInFlight(pendingAgents map[string]struct{}) bool {
+	for agentName := range pendingAgents {
+		if a.agentModelPoolSwitchInFlight(agentName) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) handleSubAgentRequestBoundary(_ Event) {
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+}
+
+func (a *MainAgent) capturePendingModelPoolRollback() {
+	if a == nil || a.modelPoolPolicy == nil || a.pendingModelPoolRollback != nil {
+		return
+	}
+	current, overrides := a.snapshotModelPoolState()
+	a.pendingModelPoolRollback = &modelPoolSelectionSnapshot{
+		currentPool: current,
+		overrides:   cloneStringMap(overrides),
+	}
+}
+
+func (a *MainAgent) restorePendingModelPoolRollback() {
+	if a == nil || a.modelPoolPolicy == nil || a.pendingModelPoolRollback == nil {
+		return
+	}
+	snap := a.pendingModelPoolRollback
+	a.modelPoolPolicy.ReplaceSelections(snap.currentPool, snap.overrides)
+	a.pendingModelPoolRollback = nil
+	a.saveModelPoolState()
+}
+
+func (a *MainAgent) restoreFailedModelPoolSelections(mainFailed bool, failedAgents []string) {
+	if a == nil || a.modelPoolPolicy == nil || a.pendingModelPoolRollback == nil {
+		return
+	}
+	snap := a.pendingModelPoolRollback
+	currentPool := a.modelPoolPolicy.CurrentModelPool()
+	if mainFailed {
+		currentPool = snap.currentPool
+	}
+	overrides := a.modelPoolPolicy.Overrides()
+	for _, agentName := range failedAgents {
+		agentName = strings.TrimSpace(agentName)
+		if agentName == "" {
+			continue
+		}
+		if pool, ok := snap.overrides[agentName]; ok {
+			overrides[agentName] = pool
+		} else {
+			delete(overrides, agentName)
+		}
+	}
+	a.modelPoolPolicy.ReplaceSelections(currentPool, overrides)
+	a.saveModelPoolState()
+}
+
+func (a *MainAgent) applyPendingModelPoolSwitchesAtRequestBoundary() {
+	if a == nil || a.modelPoolPolicy == nil || a.mainLLMRequestInFlight.Load() {
+		return
+	}
+	pendingMain := a.pendingMainModelPoolSwitch
+	pendingAgents := a.pendingAgentModelPoolSwitch
+	if !pendingMain && len(pendingAgents) == 0 {
+		return
+	}
+	if a.pendingAgentModelPoolSwitchInFlight(pendingAgents) {
+		return
+	}
+	a.pendingMainModelPoolSwitch = false
+	a.pendingAgentModelPoolSwitch = nil
+
+	var applyErr error
+	appliedAny := false
+	mainChanged := false
+	mainFailed := false
+	var failedAgents []string
+	if pendingMain {
+		cfg := a.currentActiveConfig()
+		if cfg != nil {
+			effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
+			if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, ""); err != nil {
+				mainFailed = true
+				applyErr = errors.Join(applyErr, err)
+			} else {
+				appliedAny = true
+				mainChanged = true
+			}
+		}
+	}
+	for agentName := range pendingAgents {
+		cfg, ok := a.agentConfigs[agentName]
+		if !ok {
+			continue
+		}
+		pool := a.modelPoolPolicy.EffectivePool(agentName, cfg)
+		if err := a.switchActiveSubAgentsForPoolIfNeeded(agentName, cfg, pool); err != nil {
+			failedAgents = append(failedAgents, agentName)
+			applyErr = errors.Join(applyErr, fmt.Errorf("agent %q: %w", agentName, err))
+			continue
+		}
+		appliedAny = true
+		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
+	}
+	if mainChanged {
+		a.notifyMainRoutingChanged("model_pool_changed")
+	}
+	if applyErr != nil {
+		if !appliedAny {
+			a.restorePendingModelPoolRollback()
+		} else {
+			a.restoreFailedModelPoolSelections(mainFailed, failedAgents)
+			a.pendingModelPoolRollback = nil
+		}
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/models: switch model: %w", applyErr)})
+		return
+	}
+	a.pendingModelPoolRollback = nil
 }
 
 func (a *MainAgent) AgentOverridePoolName(agentName string) (string, bool) {

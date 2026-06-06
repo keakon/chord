@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -76,30 +77,32 @@ const inputChanCap = 64
 // and tool registry, but shares the recovery manager and hook engine with
 // its parent MainAgent.
 //
-// All mutable state is confined to the runLoop goroutine (single-writer);
+// Most mutable state is confined to the runLoop goroutine (single-writer);
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
+// Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	instanceID      string // immutable, from NextInstanceID()
-	taskID          string // plan task ID or "adhoc-N"
-	agentDefName    string // agent definition name (e.g. "backend-coder")
-	taskDesc        string // task description (from Plan or ad-hoc)
-	planTaskRef     string
-	semanticTaskKey string
-	writeScope      tools.WriteScope
-	ownerAgentID    string
-	ownerTaskID     string
-	depth           int
-	joinToOwner     bool
-	delegation      config.DelegationConfig
-	color           string // optional ANSI color code from agent config for TUI display
-	llmMu           sync.RWMutex
-	llmClient       *llm.Client
-	ctxMgr          *ctxmgr.Manager // own context; automatic compaction disabled
-	tools           *tools.Registry // shared base + SubAgent-specific tools
-	parent          *MainAgent      // reference to parent for event forwarding
-	parentCtx       context.Context
-	cancel          context.CancelFunc
-	recovery        *recovery.RecoveryManager // shared with MainAgent, thread-safe
+	instanceID         string // immutable, from NextInstanceID()
+	taskID             string // plan task ID or "adhoc-N"
+	agentDefName       string // agent definition name (e.g. "backend-coder")
+	taskDesc           string // task description (from Plan or ad-hoc)
+	planTaskRef        string
+	semanticTaskKey    string
+	writeScope         tools.WriteScope
+	ownerAgentID       string
+	ownerTaskID        string
+	depth              int
+	joinToOwner        bool
+	delegation         config.DelegationConfig
+	color              string // optional ANSI color code from agent config for TUI display
+	llmMu              sync.RWMutex
+	llmClient          *llm.Client
+	llmRequestInFlight atomic.Bool
+	ctxMgr             *ctxmgr.Manager // own context; automatic compaction disabled
+	tools              *tools.Registry // shared base + SubAgent-specific tools
+	parent             *MainAgent      // reference to parent for event forwarding
+	parentCtx          context.Context
+	cancel             context.CancelFunc
+	recovery           *recovery.RecoveryManager // shared with MainAgent, thread-safe
 
 	// turnMu guards concurrent CancelSubAgent vs runLoop turn creation.
 	turnMu sync.Mutex
@@ -469,7 +472,13 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
+	s.llmRequestInFlight.Store(true)
 	go func() {
+		defer func() {
+			s.llmRequestInFlight.Store(false)
+			s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
+		}()
+
 		// Hook: on_before_llm_call (mirrors MainAgent.callLLM).
 		hookResult, hookErr := s.fireHook(turn.Ctx, hook.OnBeforeLLMCall, turn.ID, map[string]any{
 			"model":         modelName,

@@ -352,6 +352,25 @@ func (c *Client) ModelPoolSnapshot() ([]FallbackModel, int) {
 	return pool, cursor
 }
 
+// NextRequestModelRef returns the provider/model ref that the next request will
+// start from, including an inline variant suffix when the cursor entry has one.
+func (c *Client) NextRequestModelRef() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	pool := c.modelPoolLocked()
+	cursor := c.poolCursor
+	if cursor < 0 || cursor >= len(pool) {
+		cursor = 0
+	}
+	if len(pool) == 0 {
+		return ""
+	}
+	return modelRefWithVariant(pool[cursor])
+}
+
 // SetOutputTokenMax sets the global output token cap (Layer 1). If n is 0,
 // DefaultOutputTokenMax is used. This cap is applied before the dynamic
 // context-aware capping (Layer 2) in completeStreamWithRetry.

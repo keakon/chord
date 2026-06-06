@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,217 @@ func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *te
 	}
 }
 
+func TestInFlightModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	a.newTurn()
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after dispatch = %q, want fast", got)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef while request in flight = %q, want provider/model-a", got)
+	}
+	if !a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = false, want true")
+	}
+
+	a.mainLLMRequestInFlight.Store(false)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after request boundary = %q, want provider/model-b", got)
+	}
+	if a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = true after apply, want false")
+	}
+}
+
+func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	a.newTurn()
+	turnID := a.turn.ID
+	turnEpoch := a.turn.Epoch
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	a.handleCompactionOversizeSuspend(Event{Payload: &pendingMainLLMCall{
+		continuation:     compactionResumeMainLLM,
+		turnID:           turnID,
+		turnEpoch:        turnEpoch,
+		sessionEpoch:     a.sessionEpoch,
+		agentErrSourceID: "main",
+	}})
+
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef after oversize suspend = %q, want provider/model-a", got)
+	}
+	if !a.mainLLMRequestInFlight.Load() {
+		t.Fatal("mainLLMRequestInFlight = false after oversize suspend, want true")
+	}
+	if !a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = false after oversize suspend, want true")
+	}
+
+	a.mainLLMRequestInFlight.Store(false)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after real request boundary = %q, want provider/model-b", got)
+	}
+	if a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = true after real boundary, want false")
+	}
+}
+
+func TestInFlightModelPoolSwitchRollsBackWhenDeferredClientSwapFails(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		return nil, "", 0, errors.New("factory unavailable for " + providerModel)
+	})
+
+	a.newTurn()
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after pending switch = %q, want fast", got)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef while request in flight = %q, want provider/model-a", got)
+	}
+
+	a.mainLLMRequestInFlight.Store(false)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "base" {
+		t.Fatalf("CurrentModelPool after failed deferred apply = %q, want rollback to base", got)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef after failed deferred apply = %q, want provider/model-a", got)
+	}
+	if a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = true after failed apply, want false")
+	}
+	if a.pendingModelPoolRollback != nil {
+		t.Fatal("pendingModelPoolRollback not cleared after failed apply")
+	}
+	events := drainEventsByType(t, a.Events())
+	if events["ErrorEvent"] != 1 {
+		t.Fatalf("events = %#v, want one ErrorEvent", events)
+	}
+}
+
+func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	workerCfg := &config.AgentConfig{
+		Name: "worker",
+		Mode: config.AgentModeSubAgent,
+		Models: map[string][]string{
+			"base": {"provider/model-a"},
+			"fast": {"provider/model-c"},
+		},
+	}
+	a.agentConfigs["worker"] = workerCfg
+	workerProvider := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	subCtx, subCancel := context.WithCancel(context.Background())
+	t.Cleanup(subCancel)
+	sub := &SubAgent{
+		instanceID:   "worker-1",
+		agentDefName: "worker",
+		llmClient:    llm.NewClient(workerProvider, stubProvider{}, "model-a", 1024, ""),
+		parent:       a,
+		parentCtx:    subCtx,
+		cancel:       subCancel,
+	}
+	a.subAgents[sub.instanceID] = sub
+
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel == "provider/model-c" {
+			return nil, "", 0, errors.New("factory unavailable for " + providerModel)
+		}
+		providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+				"model-b": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+				"model-c": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"test-key"})
+		modelID := strings.TrimPrefix(providerModel, "provider/")
+		return llm.NewClient(providerCfg, stubProvider{}, modelID, 1024, ""), modelID, 8192, nil
+	})
+
+	a.newTurn()
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	a.SetAgentModelPool("worker", "fast")
+	dispatchPendingEvents(t, a)
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after pending switch = %q, want fast", got)
+	}
+	if got, ok := a.ModelPoolPolicy().AgentOverride("worker"); !ok || got != "fast" {
+		t.Fatalf("AgentOverride(worker) after pending switch = (%q, %v), want (fast, true)", got, ok)
+	}
+
+	a.mainLLMRequestInFlight.Store(false)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after partial apply = %q, want successful main switch kept", got)
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after partial apply = %q, want provider/model-b", got)
+	}
+	if got, ok := a.ModelPoolPolicy().AgentOverride("worker"); ok || got != "" {
+		t.Fatalf("AgentOverride(worker) after failed agent apply = (%q, %v), want cleared override", got, ok)
+	}
+	if got := sub.llmClient.PrimaryModelRef(); got != "provider/model-a" {
+		t.Fatalf("subagent model after failed agent apply = %q, want provider/model-a", got)
+	}
+	if a.pendingModelPoolRollback != nil {
+		t.Fatal("pendingModelPoolRollback not cleared after partial apply")
+	}
+	events := drainEventsByType(t, a.Events())
+	if events["ErrorEvent"] != 1 {
+		t.Fatalf("events = %#v, want one ErrorEvent", events)
+	}
+}
+
 func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
@@ -149,6 +361,107 @@ func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for old client retry plan to be invalidated")
+	}
+}
+
+func TestBusyCurrentModelPoolSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+
+	oldCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	oldProvider := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 500, Message: "old pool failed"}}}}
+	oldClient := llm.NewClient(oldCfg, oldProvider, "model-a", 1024, "")
+	a.swapLLMClientWithRef(oldClient, "model-a", 8192, "provider/model-a")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := oldClient.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+		errCh <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after busy switch = %q, want fast", got)
+	}
+	if !a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = false, want true")
+	}
+	if got := a.ProviderModelRef(); got != "provider/model-a" {
+		t.Fatalf("ProviderModelRef before request boundary = %q, want provider/model-a", got)
+	}
+
+	select {
+	case err := <-errCh:
+		if !llm.IsRoutingInvalidated(err) {
+			t.Fatalf("old CompleteStream err = %v, want routing invalidated", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy model pool switch to invalidate old retry plan")
+	}
+
+	a.mainLLMRequestInFlight.Store(false)
+	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after request boundary = %q, want provider/model-b", got)
+	}
+}
+
+func TestSubAgentModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	workerCfg := &config.AgentConfig{
+		Name: "worker",
+		Mode: config.AgentModeSubAgent,
+		Models: map[string][]string{
+			"base": {"provider/model-a"},
+			"fast": {"provider/model-b"},
+		},
+	}
+	a.agentConfigs["worker"] = workerCfg
+	sub := newControllableTestSubAgent(t, a, "task-1")
+	oldClient := sub.llmClient
+	oldRef := oldClient.PrimaryModelRef()
+	drainAgentEvents(a.Events())
+
+	sub.llmRequestInFlight.Store(true)
+	a.SetAgentModelPool("worker", "fast")
+	dispatchPendingEvents(t, a)
+
+	if got, ok := a.ModelPoolPolicy().AgentOverride("worker"); !ok || got != "fast" {
+		t.Fatalf("AgentOverride(worker) = (%q, %v), want (fast, true)", got, ok)
+	}
+	if sub.llmClient != oldClient {
+		t.Fatal("busy sub-agent client was swapped before request boundary")
+	}
+	if got := sub.llmClient.PrimaryModelRef(); got != oldRef {
+		t.Fatalf("busy sub-agent model ref = %q, want %q", got, oldRef)
+	}
+	if len(a.pendingAgentModelPoolSwitch) != 1 {
+		t.Fatalf("pendingAgentModelPoolSwitch = %#v, want worker pending", a.pendingAgentModelPoolSwitch)
+	}
+
+	sub.llmRequestInFlight.Store(false)
+	a.handleSubAgentRequestBoundary(Event{Type: EventSubAgentRequestBoundary, SourceID: sub.instanceID})
+
+	if sub.llmClient == oldClient {
+		t.Fatal("sub-agent client was not swapped at request boundary")
+	}
+	if got := sub.llmClient.PrimaryModelRef(); got != "provider/model-b" {
+		t.Fatalf("sub-agent model ref after boundary = %q, want provider/model-b", got)
+	}
+	if a.pendingAgentModelPoolSwitch != nil {
+		t.Fatalf("pendingAgentModelPoolSwitch after boundary = %#v, want nil", a.pendingAgentModelPoolSwitch)
 	}
 }
 

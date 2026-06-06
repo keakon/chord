@@ -48,6 +48,35 @@ func (a *MainAgent) RunningModelRef() string {
 	return a.runningModelRef
 }
 
+// NextRequestModelRef returns the provider/model ref the focused agent will use
+// to start its next LLM request.
+func (a *MainAgent) NextRequestModelRef() string {
+	if sub := a.validFocusedSubAgent(); sub != nil && sub.llmClient != nil {
+		ref := strings.TrimSpace(sub.llmClient.NextRequestModelRef())
+		if ref == "" {
+			ref = strings.TrimSpace(sub.llmClient.RunningModelRef())
+		}
+		if ref == "" {
+			ref = strings.TrimSpace(sub.llmClient.PrimaryModelRef())
+		}
+		return ref
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	providerRef := a.providerModelRef
+	runningRef := a.runningModelRef
+	a.llmMu.RUnlock()
+	if client != nil {
+		if ref := strings.TrimSpace(client.NextRequestModelRef()); ref != "" {
+			return ref
+		}
+	}
+	if strings.TrimSpace(providerRef) != "" {
+		return strings.TrimSpace(providerRef)
+	}
+	return strings.TrimSpace(runningRef)
+}
+
 // RunningVariant returns the active variant name for the running model
 // (focused SubAgent if any, else MainAgent), or empty string if none.
 func (a *MainAgent) RunningVariant() string {
@@ -442,17 +471,23 @@ func (a *MainAgent) setCurrentModelPool(pool string, emitToast bool) error {
 	}
 
 	oldPool := a.modelPoolPolicy.CurrentModelPool()
+	if a.mainLLMRequestInFlight.Load() {
+		a.capturePendingModelPoolRollback()
+	}
 	a.modelPoolPolicy.SetCurrentModelPool(pool)
 
 	cfg := a.currentActiveConfig()
-	if cfg != nil {
+	if cfg != nil && a.mainLLMRequestInFlight.Load() {
+		a.markMainModelPoolSwitchPending()
+		a.notifyMainRoutingChanged("model_pool_changed")
+	} else if cfg != nil {
 		effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 		if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, oldPool); err != nil {
 			a.modelPoolPolicy.SetCurrentModelPool(oldPool)
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
+		a.notifyMainRoutingChanged("model_pool_changed")
 	}
-	a.notifyMainRoutingChanged("model_pool_changed")
 	a.saveModelPoolState()
 
 	if emitToast {
@@ -521,9 +556,16 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 	}
 
 	prev, hadOverride := a.modelPoolPolicy.AgentOverride(agentName)
+	agentInFlight := a.agentModelPoolSwitchInFlight(agentName)
+	if a.mainLLMRequestInFlight.Load() || agentInFlight {
+		a.capturePendingModelPoolRollback()
+	}
 	a.modelPoolPolicy.SetAgentOverride(agentName, pool)
 
-	if cfg.Name == a.CurrentRole() {
+	if cfg.Name == a.CurrentRole() && a.mainLLMRequestInFlight.Load() {
+		a.markMainModelPoolSwitchPending()
+		a.notifyMainRoutingChanged("agent_model_pool_changed")
+	} else if cfg.Name == a.CurrentRole() {
 		effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 		if err := a.switchMainModelForPoolIfNeeded(cfg, effectivePool, prev); err != nil {
 			if hadOverride {
@@ -534,6 +576,9 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 		a.notifyMainRoutingChanged("agent_model_pool_changed")
+	} else if a.mainLLMRequestInFlight.Load() || agentInFlight {
+		a.markAgentModelPoolSwitchPending(agentName)
+		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
 	} else if err := a.switchActiveSubAgentsForPoolIfNeeded(agentName, cfg, pool); err != nil {
 		if hadOverride {
 			a.modelPoolPolicy.SetAgentOverride(agentName, prev)
