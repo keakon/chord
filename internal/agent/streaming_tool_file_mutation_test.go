@@ -108,6 +108,7 @@ func TestSpeculativeWriteDiscardRemovesNewFile(t *testing.T) {
 		t.Fatal("Start returned false")
 	}
 	waitForFileContent(t, path, "discarded")
+	waitForStreamingToolDone(t, exec, call.ID)
 	info, ok := exec.DiscardCall(call.ID, "filtered")
 	if !ok || !info.Started || !info.Completed {
 		t.Fatalf("discard info=%#v ok=%v", info, ok)
@@ -378,6 +379,32 @@ func waitForFileContent(t *testing.T, path, want string) {
 	}
 	if strings.TrimSpace(string(data)) != strings.TrimSpace(want) {
 		t.Fatalf("file content = %q, want %q", data, want)
+	}
+}
+
+func waitForStreamingToolDone(t *testing.T, exec *StreamingToolExecutor, callID string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		exec.mu.Lock()
+		entry := exec.entries[callID]
+		var done <-chan struct{}
+		if entry != nil {
+			done = entry.done
+		}
+		exec.mu.Unlock()
+		if done == nil {
+			t.Fatalf("streaming tool %s is not tracked", callID)
+		}
+		select {
+		case <-done:
+			return
+		case <-deadline:
+			t.Fatalf("streaming tool %s did not finish", callID)
+		case <-tick.C:
+		}
 	}
 }
 
