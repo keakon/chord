@@ -17,12 +17,20 @@ type ContextReductionStats struct {
 	SavedDelta      int
 	PreviousModel   string
 	ModelChanged    bool
+	ModelRunLength  int
 	ByToolAndRule   map[string]ContextReductionBucket
 }
 
 const (
+	// Cache protection starts on the projected third same-model request: the
+	// first two successful requests give provider prompt caches time to be
+	// written and become reliably hittable.
+	contextReductionCacheProtectMinModelRunLength = 3
+	contextReductionWrapUpGraceRequests           = 1
+
 	contextProtectReasonNone           = ""
 	contextProtectReasonWarmupLowUsage = "warmup_low_usage"
+	contextProtectReasonWrapUpGrace    = "wrap_up_grace"
 
 	contextReuseReasonNone                = ""
 	contextReuseReasonBelowIncrementalMin = "below_incremental_min"
@@ -38,38 +46,42 @@ type ContextReductionBucket struct {
 }
 
 type contextReductionPolicy struct {
-	ConfirmAgeTurns      int
-	ErrorAgeTurns        int
-	ShellSuccessAgeTurns int
-	ReadLikeAgeTurns     int
-	StaleAgeTurns        int
-	ShellSuccessBytes    int
-	ReadLikeOutputBytes  int
-	StaleOutputBytes     int
-	MinToolResultsPrune  int
-	CacheAwareMinUsage   float64
-	WarmupMessageLimit   int
-	MinIncrementalTokens int
-	HighPressureUsage    float64
-	ForcePruneUsage      float64
+	ConfirmAgeTurns         int
+	ErrorAgeTurns           int
+	HighRiskProtectAgeTurns int
+	ShellSuccessAgeTurns    int
+	ReadLikeAgeTurns        int
+	StaleAgeTurns           int
+	ShellSuccessBytes       int
+	ReadLikeOutputBytes     int
+	StaleOutputBytes        int
+	WrapUpGraceRequests     int
+	MinToolResultsPrune     int
+	CacheAwareMinUsage      float64
+	WarmupMessageLimit      int
+	MinIncrementalTokens    int
+	HighPressureUsage       float64
+	ForcePruneUsage         float64
 }
 
 func defaultContextReductionPolicy() contextReductionPolicy {
 	return contextReductionPolicy{
-		ConfirmAgeTurns:      compactConfirmAgeTurns,
-		ErrorAgeTurns:        compactErrorAgeTurns,
-		ShellSuccessAgeTurns: compactBashSuccessAgeTurns,
-		ReadLikeAgeTurns:     compactReadLikeAgeTurns,
-		StaleAgeTurns:        compactStaleAgeTurns,
-		ShellSuccessBytes:    compactBashSuccessBytes,
-		ReadLikeOutputBytes:  compactReadLikeOutputBytes,
-		StaleOutputBytes:     compactStaleOutputBytes,
-		MinToolResultsPrune:  compactMinToolResultsPrune,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   32,
-		MinIncrementalTokens: 4096,
-		HighPressureUsage:    0.80,
-		ForcePruneUsage:      0.90,
+		ConfirmAgeTurns:         compactConfirmAgeTurns,
+		ErrorAgeTurns:           compactErrorAgeTurns,
+		HighRiskProtectAgeTurns: compactHighRiskProtectAgeTurns,
+		ShellSuccessAgeTurns:    compactBashSuccessAgeTurns,
+		ReadLikeAgeTurns:        compactReadLikeAgeTurns,
+		StaleAgeTurns:           compactStaleAgeTurns,
+		ShellSuccessBytes:       compactBashSuccessBytes,
+		ReadLikeOutputBytes:     compactReadLikeOutputBytes,
+		StaleOutputBytes:        compactStaleOutputBytes,
+		WrapUpGraceRequests:     contextReductionWrapUpGraceRequests,
+		MinToolResultsPrune:     compactMinToolResultsPrune,
+		CacheAwareMinUsage:      0.75,
+		WarmupMessageLimit:      32,
+		MinIncrementalTokens:    4096,
+		HighPressureUsage:       0.80,
+		ForcePruneUsage:         0.90,
 	}
 }
 
@@ -94,6 +106,9 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	if cfg.ErrorAgeTurns > 0 {
 		p.ErrorAgeTurns = cfg.ErrorAgeTurns
 	}
+	if cfg.HighRiskProtectAgeTurns > 0 {
+		p.HighRiskProtectAgeTurns = cfg.HighRiskProtectAgeTurns
+	}
 	if cfg.ShellSuccessAgeTurns > 0 {
 		p.ShellSuccessAgeTurns = cfg.ShellSuccessAgeTurns
 	}
@@ -111,6 +126,9 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	}
 	if cfg.StaleOutputBytes > 0 {
 		p.StaleOutputBytes = cfg.StaleOutputBytes
+	}
+	if cfg.WrapUpGraceRequests > 0 {
+		p.WrapUpGraceRequests = cfg.WrapUpGraceRequests
 	}
 	if cfg.MinToolResultsPrune > 0 {
 		p.MinToolResultsPrune = cfg.MinToolResultsPrune
@@ -145,8 +163,15 @@ func (p contextReductionPolicy) protectCachedContextReason(messageCount, estimat
 	return contextProtectReasonNone
 }
 
-func (p contextReductionPolicy) shouldProtectCachedContext(messageCount, estimatedTokens, inputBudget int) bool {
-	return p.protectCachedContextReason(messageCount, estimatedTokens, inputBudget) != contextProtectReasonNone
+func (p contextReductionPolicy) shouldProtectCachedContextForModelRun(messageCount, estimatedTokens, inputBudget, modelRunLength int) (bool, string) {
+	reason := p.protectCachedContextReason(messageCount, estimatedTokens, inputBudget)
+	if reason == contextProtectReasonNone {
+		return false, reason
+	}
+	if modelRunLength < contextReductionCacheProtectMinModelRunLength {
+		return false, reason
+	}
+	return true, reason
 }
 
 func (p contextReductionPolicy) contextUsage(estimatedTokens, inputBudget int) float64 {

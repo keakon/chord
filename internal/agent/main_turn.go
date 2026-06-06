@@ -355,6 +355,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	a.clearContextReductionWrapUpGrace()
 	a.turnMu.Lock()
 	if a.turn != nil {
 		a.interruptCurrentTurnForReplacement()

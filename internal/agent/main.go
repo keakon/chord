@@ -314,8 +314,12 @@ type MainAgent struct {
 	lastPreparedLLMTurnID        uint64
 	lastPreparedLLMRequestPrefix []message.Message
 	lastPreparedReductionStats   ContextReductionStats
+	wrapUpGraceTurnID            uint64
+	wrapUpGraceRemaining         int
 	contextReductionStats        ContextReductionStats
 	contextSurfaceRefreshAllowed atomic.Bool
+	lastLLMRequestModelRef       string
+	llmModelRunLength            int
 
 	// Async durable compaction (pre-request gate): defer inbound events until commit.
 	compactionState      compactionState
@@ -340,7 +344,8 @@ type MainAgent struct {
 	// (TUI, shutdown) read it via CancelCurrentTurn() / Shutdown().
 	turnMu sync.Mutex
 
-	// llmMu protects llmClient, modelName, and providerModelRef for
+	// llmMu protects llmClient, modelName, providerModelRef, running-model
+	// continuity, and model-run cache-warmth state for
 	// cross-goroutine access. The TUI goroutine reads ModelName() and
 	// ProviderModelRef() from View(), while SwapLLMClient / SwitchModel
 	// write these fields. callLLM snapshots under RLock at the start

@@ -125,6 +125,25 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 	return persisted
 }
 
+func todoWriteArgsAllDone(argsJSON string) bool {
+	var payload struct {
+		Todos []struct {
+			Status string `json:"status"`
+		} `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &payload); err != nil || len(payload.Todos) == 0 {
+		return false
+	}
+	for _, todo := range payload.Todos {
+		switch strings.ToLower(strings.TrimSpace(todo.Status)) {
+		case "completed", "cancelled":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // appendCompletedInterruptedToolResult persists a fully completed tool result
 // during turn interruption paths (cancel/replace/terminal error), without
 // driving normal turn continuation.
@@ -249,6 +268,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	if payload.Error == nil {
 		if isVerificationLikeToolResult(payload, rawToolResultForVerification(payload)) {
 			a.loopState.markProgress()
+		}
+		if tools.NormalizeName(payload.Name) == tools.NameTodoWrite && todoWriteArgsAllDone(payload.ArgsJSON) {
+			a.beginContextReductionWrapUpGrace()
 		}
 		if tools.NormalizeName(payload.Name) == tools.NameSkill {
 			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {

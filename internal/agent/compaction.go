@@ -25,9 +25,10 @@ const (
 	compactConfirmAgeTurns          = 2
 	compactErrorAgeTurns            = 3
 	compactBashSuccessAgeTurns      = 2
-	compactReadLikeAgeTurns         = 1
+	compactReadLikeAgeTurns         = 2
 	compactStaleAgeTurns            = 4
-	compactBashSuccessBytes         = 8000
+	compactHighRiskProtectAgeTurns  = 4
+	compactBashSuccessBytes         = 4000
 	compactReadLikeOutputBytes      = 4000
 	compactReadSnippetChars         = 500
 	compactStaleOutputBytes         = 1500

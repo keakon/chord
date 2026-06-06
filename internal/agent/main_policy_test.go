@@ -600,6 +600,7 @@ func TestEnsureMainModelPolicyKeepsRateLimitSnapshotWithinSameProvider(t *testin
 
 func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 	t.Helper()
+	isolateChordTestPaths(t, projectRoot)
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatalf("mkdir session dir: %v", err)
@@ -632,6 +633,16 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		}
 	})
 	return a
+}
+
+func isolateChordTestPaths(t *testing.T, projectRoot string) {
+	t.Helper()
+	root := filepath.Join(projectRoot, ".test-chord")
+	t.Setenv("CHORD_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(root, "state"))
+	t.Setenv("CHORD_CACHE_DIR", filepath.Join(root, "cache"))
+	t.Setenv("CHORD_SESSIONS_DIR", filepath.Join(root, "sessions"))
+	t.Setenv("CHORD_LOGS_DIR", filepath.Join(root, "logs"))
 }
 
 func TestCallLLMDropsOrphanToolResultsBeforeRequest(t *testing.T) {

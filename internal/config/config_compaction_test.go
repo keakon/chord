@@ -21,20 +21,22 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 	cfg := DefaultConfig()
 	got := cfg.Context.Reduction
 	want := ContextReductionConfig{
-		ConfirmAgeTurns:      2,
-		ErrorAgeTurns:        3,
-		ShellSuccessAgeTurns: 2,
-		ReadLikeAgeTurns:     1,
-		StaleAgeTurns:        4,
-		ShellSuccessBytes:    8000,
-		ReadLikeOutputBytes:  4000,
-		StaleOutputBytes:     1500,
-		MinToolResultsPrune:  8,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   32,
-		MinIncrementalTokens: 4096,
-		HighPressureUsage:    0.80,
-		ForcePruneUsage:      0.90,
+		ConfirmAgeTurns:         2,
+		ErrorAgeTurns:           3,
+		HighRiskProtectAgeTurns: 4,
+		ShellSuccessAgeTurns:    2,
+		ReadLikeAgeTurns:        2,
+		StaleAgeTurns:           4,
+		ShellSuccessBytes:       4000,
+		ReadLikeOutputBytes:     4000,
+		StaleOutputBytes:        1500,
+		WrapUpGraceRequests:     1,
+		MinToolResultsPrune:     8,
+		CacheAwareMinUsage:      0.75,
+		WarmupMessageLimit:      32,
+		MinIncrementalTokens:    4096,
+		HighPressureUsage:       0.80,
+		ForcePruneUsage:         0.90,
 	}
 	if got != want {
 		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)

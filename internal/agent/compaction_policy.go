@@ -73,10 +73,24 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	if a != nil {
 		inputBudget = a.contextReductionInputBudget()
 		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
-		if policy.shouldProtectCachedContext(len(prepared), estimatedTokens, inputBudget) {
+		modelSnapshot := a.llmModelContinuitySnapshot()
+		usage := policy.contextUsage(estimatedTokens, inputBudget)
+		if modelSnapshot.ProjectedModelRunLength > 1 && (policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage) && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
 			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
-			stats.ProtectReason = policy.protectCachedContextReason(len(prepared), estimatedTokens, inputBudget)
-			a.fillReductionModelContinuity(&stats)
+			stats.ProtectReason = contextProtectReasonWrapUpGrace
+			stats.fillModelContinuity(modelSnapshot)
+			a.setCurrentRequestSurface(&stats, prepared)
+			a.setContextReductionStats(stats)
+			if rememberPrepared {
+				a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+			}
+			return prepared
+		}
+		protect, protectReason := policy.shouldProtectCachedContextForModelRun(len(prepared), estimatedTokens, inputBudget, modelSnapshot.ProjectedModelRunLength)
+		if protect {
+			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
+			stats.ProtectReason = protectReason
+			stats.fillModelContinuity(modelSnapshot)
 			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
 			if rememberPrepared {
@@ -148,6 +162,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			Meta:        meta,
 			Content:     prepared[i].Content,
 			Age:         age,
+			UserTurnAge: turnsAfter[i],
 			Policy:      policy,
 			Repeated:    repeated[i],
 			ToolResults: toolResults,
@@ -220,6 +235,69 @@ func (a *MainAgent) contextReductionInputBudget() int {
 	}
 	reserved := min(compactReservedOutput, limit/8)
 	return limit - reserved
+}
+
+type llmModelContinuitySnapshot struct {
+	PreviousModel           string
+	CurrentModel            string
+	ProjectedModelRunLength int
+}
+
+func (a *MainAgent) llmModelContinuitySnapshot() llmModelContinuitySnapshot {
+	if a == nil {
+		return llmModelContinuitySnapshot{}
+	}
+	a.llmMu.RLock()
+	defer a.llmMu.RUnlock()
+	current := a.runningModelRef
+	if current == "" {
+		current = a.providerModelRef
+	}
+	snapshot := llmModelContinuitySnapshot{
+		PreviousModel: a.previousLLMModelRef,
+		CurrentModel:  current,
+	}
+	if current == "" {
+		return snapshot
+	}
+	if a.lastLLMRequestModelRef != current {
+		snapshot.ProjectedModelRunLength = 1
+		return snapshot
+	}
+	if a.llmModelRunLength <= 0 {
+		snapshot.ProjectedModelRunLength = 1
+		return snapshot
+	}
+	snapshot.ProjectedModelRunLength = a.llmModelRunLength + 1
+	return snapshot
+}
+
+func (a *MainAgent) recordLLMModelRun(ref string) {
+	if a == nil {
+		return
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	a.llmMu.Lock()
+	defer a.llmMu.Unlock()
+	if a.lastLLMRequestModelRef == ref {
+		a.llmModelRunLength++
+	} else {
+		a.lastLLMRequestModelRef = ref
+		a.llmModelRunLength = 1
+	}
+}
+
+func (a *MainAgent) resetLLMModelRun() {
+	if a == nil {
+		return
+	}
+	a.llmMu.Lock()
+	defer a.llmMu.Unlock()
+	a.lastLLMRequestModelRef = ""
+	a.llmModelRunLength = 0
 }
 
 func compactDiagnosticsToolOutput(content string) (string, bool) {
@@ -295,6 +373,7 @@ type requestReductionContext struct {
 	Meta        toolCallMeta
 	Content     string
 	Age         int
+	UserTurnAge int
 	Policy      contextReductionPolicy
 	Repeated    bool
 	ToolResults int
@@ -303,6 +382,9 @@ type requestReductionContext struct {
 func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
 	if ctx.Repeated && ctx.Age >= 1 {
 		return requestReductionRepeated
+	}
+	if ctx.UserTurnAge < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
+		return requestReductionNone
 	}
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && isToolErrorContent(ctx.Content) {
 		return requestReductionToolError
@@ -347,6 +429,75 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		return requestReductionGeneric
 	}
 	return requestReductionNone
+}
+
+func isHighRiskToolOutput(ctx requestReductionContext) bool {
+	if strings.TrimSpace(ctx.Content) == "" {
+		return false
+	}
+	if looksLikeDiffOrPatch(ctx.Content) {
+		return true
+	}
+	content := strings.ToLower(highRiskScanPrefix(ctx.Content))
+	for _, marker := range []string{
+		"traceback",
+		"panic:",
+		"exception",
+		"segmentation fault",
+		"permission denied",
+		"access denied",
+		"unauthorized",
+		"forbidden",
+		"expected:",
+		"actual:",
+		"assertion failed",
+		"assert failed",
+		"npm err!",
+		"fatal:",
+	} {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	if ctx.ToolName == tools.NameShell && strings.Contains(content, "failed") {
+		return true
+	}
+	return false
+}
+
+func highRiskScanPrefix(content string) string {
+	const maxHighRiskScanBytes = 64 * 1024
+	if len(content) <= maxHighRiskScanBytes {
+		return content
+	}
+	return content[:maxHighRiskScanBytes]
+}
+
+func looksLikeDiffOrPatch(content string) bool {
+	seenHeader := false
+	start := 0
+	for range 80 {
+		if start > len(content) {
+			break
+		}
+		line := content[start:]
+		if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+			line = line[:newline]
+			start += newline + 1
+		} else {
+			start = len(content) + 1
+		}
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "diff --git "), strings.HasPrefix(trimmed, "--- "), strings.HasPrefix(trimmed, "+++ "):
+			seenHeader = true
+		case seenHeader && strings.HasPrefix(trimmed, "@@"):
+			return true
+		case strings.HasPrefix(trimmed, "*** Begin Patch"), strings.HasPrefix(trimmed, "*** Update File:"), strings.HasPrefix(trimmed, "*** Add File:"), strings.HasPrefix(trimmed, "*** Delete File:"):
+			return true
+		}
+	}
+	return false
 }
 
 func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionContext) (string, string, bool) {
@@ -730,15 +881,16 @@ func (a *MainAgent) fillReductionModelContinuity(stats *ContextReductionStats) {
 	if a == nil || stats == nil {
 		return
 	}
-	a.llmMu.RLock()
-	previous := a.previousLLMModelRef
-	current := a.runningModelRef
-	if current == "" {
-		current = a.providerModelRef
+	stats.fillModelContinuity(a.llmModelContinuitySnapshot())
+}
+
+func (s *ContextReductionStats) fillModelContinuity(snapshot llmModelContinuitySnapshot) {
+	if s == nil {
+		return
 	}
-	a.llmMu.RUnlock()
-	stats.PreviousModel = previous
-	stats.ModelChanged = previous != "" && current != "" && previous != current
+	s.PreviousModel = snapshot.PreviousModel
+	s.ModelChanged = snapshot.PreviousModel != "" && snapshot.CurrentModel != "" && snapshot.PreviousModel != snapshot.CurrentModel
+	s.ModelRunLength = snapshot.ProjectedModelRunLength
 }
 
 func (a *MainAgent) setContextReductionStats(stats ContextReductionStats) {
@@ -830,9 +982,55 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	a.lastPreparedLLMTurnID = 0
 	a.lastPreparedLLMRequestPrefix = nil
 	a.lastPreparedReductionStats = ContextReductionStats{}
+	a.wrapUpGraceTurnID = 0
+	a.wrapUpGraceRemaining = 0
 	if clearVisibleStats {
 		a.contextReductionStats = ContextReductionStats{}
 	}
+}
+
+func (a *MainAgent) beginContextReductionWrapUpGrace() {
+	if a == nil {
+		return
+	}
+	turnID := a.currentTurnID()
+	if turnID == 0 {
+		return
+	}
+	requests := a.contextReductionPolicy().WrapUpGraceRequests
+	if requests <= 0 {
+		return
+	}
+	a.loopReductionMu.Lock()
+	a.wrapUpGraceTurnID = turnID
+	a.wrapUpGraceRemaining = requests
+	a.loopReductionMu.Unlock()
+}
+
+func (a *MainAgent) clearContextReductionWrapUpGrace() {
+	if a == nil {
+		return
+	}
+	a.loopReductionMu.Lock()
+	a.wrapUpGraceTurnID = 0
+	a.wrapUpGraceRemaining = 0
+	a.loopReductionMu.Unlock()
+}
+
+func (a *MainAgent) consumeContextReductionWrapUpGrace(turnID uint64) bool {
+	if a == nil || turnID == 0 {
+		return false
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.wrapUpGraceTurnID != turnID || a.wrapUpGraceRemaining <= 0 {
+		return false
+	}
+	a.wrapUpGraceRemaining--
+	if a.wrapUpGraceRemaining == 0 {
+		a.wrapUpGraceTurnID = 0
+	}
+	return true
 }
 
 func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
@@ -924,6 +1122,7 @@ func (a *MainAgent) noteContextSurfaceIdentityChanged() {
 		return
 	}
 	a.clearLoopFrozenReductionPrefix()
+	a.resetLLMModelRun()
 	a.contextSurfaceRefreshAllowed.Store(true)
 }
 

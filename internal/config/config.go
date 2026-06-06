@@ -736,20 +736,22 @@ type ContextConfig struct {
 
 // ContextReductionConfig controls request-level context pruning.
 type ContextReductionConfig struct {
-	ConfirmAgeTurns      int     `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
-	ErrorAgeTurns        int     `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
-	ShellSuccessAgeTurns int     `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
-	ShellSuccessBytes    int     `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
-	ReadLikeAgeTurns     int     `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
-	ReadLikeOutputBytes  int     `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
-	StaleAgeTurns        int     `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
-	StaleOutputBytes     int     `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
-	MinToolResultsPrune  int     `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
-	CacheAwareMinUsage   float64 `json:"cache_aware_min_usage,omitempty" yaml:"cache_aware_min_usage,omitempty"`
-	WarmupMessageLimit   int     `json:"warmup_message_limit,omitempty" yaml:"warmup_message_limit,omitempty"`
-	MinIncrementalTokens int     `json:"min_incremental_saved_tokens,omitempty" yaml:"min_incremental_saved_tokens,omitempty"`
-	HighPressureUsage    float64 `json:"high_pressure_usage,omitempty" yaml:"high_pressure_usage,omitempty"`
-	ForcePruneUsage      float64 `json:"force_prune_usage,omitempty" yaml:"force_prune_usage,omitempty"`
+	ConfirmAgeTurns         int     `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
+	ErrorAgeTurns           int     `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
+	HighRiskProtectAgeTurns int     `json:"high_risk_protect_age_turns,omitempty" yaml:"high_risk_protect_age_turns,omitempty"`
+	ShellSuccessAgeTurns    int     `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
+	ShellSuccessBytes       int     `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
+	ReadLikeAgeTurns        int     `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
+	ReadLikeOutputBytes     int     `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
+	StaleAgeTurns           int     `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
+	StaleOutputBytes        int     `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
+	WrapUpGraceRequests     int     `json:"wrap_up_grace_requests,omitempty" yaml:"wrap_up_grace_requests,omitempty"`
+	MinToolResultsPrune     int     `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
+	CacheAwareMinUsage      float64 `json:"cache_aware_min_usage,omitempty" yaml:"cache_aware_min_usage,omitempty"`
+	WarmupMessageLimit      int     `json:"warmup_message_limit,omitempty" yaml:"warmup_message_limit,omitempty"`
+	MinIncrementalTokens    int     `json:"min_incremental_saved_tokens,omitempty" yaml:"min_incremental_saved_tokens,omitempty"`
+	HighPressureUsage       float64 `json:"high_pressure_usage,omitempty" yaml:"high_pressure_usage,omitempty"`
+	ForcePruneUsage         float64 `json:"force_prune_usage,omitempty" yaml:"force_prune_usage,omitempty"`
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
@@ -767,20 +769,22 @@ func DefaultConfig() *Config {
 	return &Config{
 		Context: ContextConfig{
 			Reduction: ContextReductionConfig{
-				ConfirmAgeTurns:      2,
-				ErrorAgeTurns:        3,
-				ShellSuccessAgeTurns: 2,
-				ShellSuccessBytes:    8000,
-				ReadLikeAgeTurns:     1,
-				ReadLikeOutputBytes:  4000,
-				StaleAgeTurns:        4,
-				StaleOutputBytes:     1500,
-				MinToolResultsPrune:  8,
-				CacheAwareMinUsage:   0.75,
-				WarmupMessageLimit:   32,
-				MinIncrementalTokens: 4096,
-				HighPressureUsage:    0.80,
-				ForcePruneUsage:      0.90,
+				ConfirmAgeTurns:         2,
+				ErrorAgeTurns:           3,
+				HighRiskProtectAgeTurns: 4,
+				ShellSuccessAgeTurns:    2,
+				ShellSuccessBytes:       4000,
+				ReadLikeAgeTurns:        2,
+				ReadLikeOutputBytes:     4000,
+				StaleAgeTurns:           4,
+				StaleOutputBytes:        1500,
+				WrapUpGraceRequests:     1,
+				MinToolResultsPrune:     8,
+				CacheAwareMinUsage:      0.75,
+				WarmupMessageLimit:      32,
+				MinIncrementalTokens:    4096,
+				HighPressureUsage:       0.80,
+				ForcePruneUsage:         0.90,
 			},
 			Compaction: CompactionConfig{
 				Threshold: 0.8,

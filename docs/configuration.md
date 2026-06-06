@@ -117,12 +117,14 @@ context:
   reduction:
     confirm_age_turns: 2
     error_age_turns: 3
+    high_risk_protect_age_turns: 4
     shell_success_age_turns: 2
-    shell_success_bytes: 8000
-    read_like_age_turns: 1
+    shell_success_bytes: 4000
+    read_like_age_turns: 2
     read_like_output_bytes: 4000
     stale_age_turns: 4
     stale_output_bytes: 1500
+    wrap_up_grace_requests: 1
     min_tool_results_prune: 8
     cache_aware_min_usage: 0.75
     warmup_message_limit: 32
@@ -134,9 +136,22 @@ context:
 Default behavior:
 
 - Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
+- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` skips destructive new reduction for that one request when the same model is still active and the context is not under high pressure, avoiding a last-minute prompt-cache break before the final answer. New user input, model changes, or high-pressure context sizing resume normal reduction.
 - Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
 - High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
+- Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. A cost-first setup can lower this to `1`; current-turn high-risk output still remains intact, while older high-risk output may be conservatively summarized. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, without deleting the tool result the model just received in the active user turn.
+- Successful shell output is treated as low risk once it is old enough. The default `shell_success_bytes: 4000` trims verbose success logs earlier than the previous 8 KiB threshold, while failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling instead of this success-output omission path.
 - Large old tool results remain age/byte-pruned, but Chord now preserves more structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, and build/test logs keep key failure or warning lines. Older errors, diagnostics, confirmations, and successful shell output are still reduced to compact fixed markers or summaries.
+
+Cost-first example:
+
+```yaml
+context:
+  reduction:
+    high_risk_protect_age_turns: 1
+    shell_success_bytes: 4000
+    wrap_up_grace_requests: 1
+```
 
 ### OpenAI Codex preset
 
@@ -1021,12 +1036,14 @@ context:
   reduction:
     confirm_age_turns: 2
     error_age_turns: 3
+    high_risk_protect_age_turns: 4
     shell_success_age_turns: 2
-    shell_success_bytes: 8000
-    read_like_age_turns: 1
+    shell_success_bytes: 4000
+    read_like_age_turns: 2
     read_like_output_bytes: 4000
     stale_age_turns: 4
     stale_output_bytes: 1500
+    wrap_up_grace_requests: 1
     min_tool_results_prune: 8
 ```
 
@@ -1045,9 +1062,9 @@ history.
 |----------|-----------------|---------------|----------------|-----------|
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
-| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 8000) | Successful output is usually reproducible; large logs keep key failures/warnings when summarized |
-| Read-like | `read`, file content previews | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
-| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 4000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
+| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 4000) | Successful output is usually reproducible; large logs keep key failures/warnings when summarized |
+| Read-like | `read`, file content previews | `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
+| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 4000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
 | JSON / structured output | JSON from `shell` or structured tools | category-specific gate, then stale fallback | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
@@ -1057,9 +1074,9 @@ How to read the age and size parameters:
   either when more user turns happen after it, or when a long single user turn
   keeps adding later assistant/tool messages. Internally, Chord uses the larger
   of "user turns after this result" and "later message progress converted to
-  effective turns". For example, `read_like_age_turns: 1` means a large read
-  result may be trimmed after your next message, and can also be trimmed within
-  the same user turn after enough later tool work has made it stale.
+  effective turns". For example, `read_like_age_turns: 2` means a large read
+  result is preserved one effective turn longer than `1`, and can still be
+  trimmed within the same user turn after enough later tool work has made it stale.
 - `*_bytes` is the **minimum output size in bytes** for that category to be
   eligible for trimming. Smaller outputs stay intact — short output doesn't
   need reduction.
@@ -1067,6 +1084,18 @@ How to read the age and size parameters:
   trimming until the conversation has at least this many tool-result messages,
   preventing small conversations from being touched prematurely. It does not
   control how message progress is converted into effective age.
+- `wrap_up_grace_requests` (default 1) protects the next main-model request
+  after `todo_write` reports all TODOs completed/cancelled. It is counted in
+  LLM requests, not user turns. The grace is skipped when the model changed or
+  the context is under high pressure, because old prompt-cache entries are then
+  unlikely to be useful or context-limit safety is more important.
+- Recent high-risk outputs are protected regardless of the thresholds above:
+  while fewer than `high_risk_protect_age_turns` real user turns have passed,
+  results that look like diffs,
+  failed assertions, stack traces, or permission/security errors are kept intact
+  even when later tool work in the same turn would otherwise make them eligible
+  for trimming. This protection counts real user turns only, not the
+  message-progress component of effective age.
 
 **Tuning guidance**:
 
@@ -1077,6 +1106,7 @@ How to read the age and size parameters:
 | Permission confirmations dominating the prompt | Lower `confirm_age_turns` (e.g. `1`) |
 | Build/test logs are important context to keep | Raise `shell_success_bytes` further (e.g. `16000`) |
 | File contents often need to be revisited | Raise `read_like_age_turns` (e.g. `3`) and `read_like_output_bytes` (e.g. `8000`) |
+| Final answers after TODO completion cost more because the prompt cache was disturbed | Keep `wrap_up_grace_requests: 1`; use `2` only if your workflow usually needs one extra verification request after TODO completion |
 | All tool output is important, nothing should be dropped | Raise all `*_age_turns` and `*_bytes` globally |
 
 Full configuration example (showing all defaults):
@@ -1086,12 +1116,14 @@ context:
   reduction:
     confirm_age_turns: 2
     error_age_turns: 3
+    high_risk_protect_age_turns: 4
     shell_success_age_turns: 2
-    shell_success_bytes: 8000
-    read_like_age_turns: 1
+    shell_success_bytes: 4000
+    read_like_age_turns: 2
     read_like_output_bytes: 4000
     stale_age_turns: 4
     stale_output_bytes: 1500
+    wrap_up_grace_requests: 1
     min_tool_results_prune: 8
 ```
 

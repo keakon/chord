@@ -252,6 +252,73 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForLLM_WrapUpGraceSkipsOneDestructiveReduction(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
+		{Role: "user", Content: "u2"},
+	}
+
+	a.beginContextReductionWrapUpGrace()
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != msgs[2].Content {
+		t.Fatalf("wrap-up grace should preserve read output for one request, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if !stats.Protected || stats.ProtectReason != contextProtectReasonWrapUpGrace {
+		t.Fatalf("stats protected/reason = %v/%q, want wrap-up grace", stats.Protected, stats.ProtectReason)
+	}
+
+	prepared = a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+		t.Fatalf("wrap-up grace should be consumed after one request, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model-b"
+	a.lastLLMRequestModelRef = "test/model-a"
+	a.llmModelRunLength = 3
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
+		{Role: "user", Content: "u2"},
+	}
+
+	a.beginContextReductionWrapUpGrace()
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+		t.Fatalf("model switch should bypass wrap-up grace, got %q", prepared[2].Content)
+	}
+}
+
 func TestPrepareMessagesForLLM_DoesNotMutateOriginalMessages(t *testing.T) {
 	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ReadLikeAgeTurns:     1,
@@ -345,6 +412,137 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	}
 }
 
+func TestPrepareMessagesForLLM_ProtectsRecentHighRiskOutputWithinSingleUserTurn(t *testing.T) {
+	a := &MainAgent{}
+	largeFailureOutput := "panic: boom\nTraceback (most recent call last):\n  File \"test.py\", line 12, in test_case\nexpected: 1\nactual: 2\n" + strings.Repeat("failure context line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pytest"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeFailureOutput},
+	}
+	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != largeFailureOutput {
+		t.Fatalf("recent high-risk output should remain intact, got %q", prepared[2].Content)
+	}
+	if stats := a.GetContextReductionStats(); stats.Messages != 0 || stats.Bytes != 0 {
+		t.Fatalf("expected no reduction for protected high-risk output, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_ConfiguresHighRiskProtectAgeTurns(t *testing.T) {
+	a := &MainAgent{globalConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{HighRiskProtectAgeTurns: 1}}}}
+	largeFailureOutput := "panic: boom\nTraceback (most recent call last):\n  File \"test.py\", line 12, in test_case\nexpected: 1\nactual: 2\n" + strings.Repeat("failure context line\n", 500)
+	currentFailureOutput := "panic: still active\nTraceback (most recent call last):\n" + strings.Repeat("current failure context line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pytest"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeFailureOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: currentFailureOutput},
+	}
+	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == largeFailureOutput {
+		t.Fatalf("previous-turn high-risk output should be reducible with high_risk_protect_age_turns=1")
+	}
+	if !strings.Contains(prepared[2].Content, "Older shell log summarized") {
+		t.Fatalf("previous-turn high-risk output should use conservative log summary, got %q", prepared[2].Content)
+	}
+	if prepared[5].Content != currentFailureOutput {
+		t.Fatalf("current-turn high-risk output should remain intact, got %q", prepared[5].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_PrunesRecentLowRiskOutputWithinSingleUserTurn(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat("install progress line\n", compactBashSuccessBytes)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm install"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+	}
+	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
+		t.Fatalf("expected recent low-risk shell output to use existing effective-age pruning, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_ProtectsRecentDiffOutputWithinSingleUserTurn(t *testing.T) {
+	a := &MainAgent{}
+	// A unified diff with no failure markers: protected only via diff detection.
+	diffOutput := "diff --git a/calc.go b/calc.go\n--- a/calc.go\n+++ b/calc.go\n@@ -1,4 +1,4 @@\n-func add(a, b int) int { return a - b }\n+func add(a, b int) int { return a + b }\n" + strings.Repeat(" // stable context line for the diff body\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git diff"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: diffOutput},
+	}
+	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != diffOutput {
+		t.Fatalf("recent diff output should remain intact, got %q", prepared[2].Content)
+	}
+	if stats := a.GetContextReductionStats(); stats.Messages != 0 || stats.Bytes != 0 {
+		t.Fatalf("expected no reduction for protected diff output, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserTurn(t *testing.T) {
+	a := &MainAgent{}
+	// High-risk only via the shell + "failed" heuristic: no diff, no marker words.
+	failureOutput := "running build pipeline\nstep 3 of 7 failed\n" + strings.Repeat("build log line without markers\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"make build"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: failureOutput},
+	}
+	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+		id := fmt.Sprintf("tc-filler-%d", i)
+		msgs = append(msgs,
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
+		)
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != failureOutput {
+		t.Fatalf("recent shell failure output should remain intact, got %q", prepared[2].Content)
+	}
+	if stats := a.GetContextReductionStats(); stats.Messages != 0 || stats.Bytes != 0 {
+		t.Fatalf("expected no reduction for protected shell failure output, stats=%+v", stats)
+	}
+}
+
 func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *testing.T) {
 	a := &MainAgent{}
 	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
@@ -353,6 +551,7 @@ func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *te
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
 		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
 	}
 
 	a.refreshVisibleContextReductionStats(msgs)
@@ -378,6 +577,7 @@ func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
 		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
 	}
 
 	result := a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir, Messages: msgs})
@@ -410,6 +610,8 @@ func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
 	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model", 1024, "")
 	a.llmMu.Lock()
 	a.runningModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 2
 	a.llmMu.Unlock()
 	largeOutput := strings.Repeat("test output line\n", 20)
 	msgs := []message.Message{
@@ -427,6 +629,95 @@ func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
 	stats := a.GetContextReductionStats()
 	if !stats.Protected || stats.Messages != 0 || stats.Bytes != 0 || stats.TokensBefore != stats.TokensAfter {
 		t.Fatalf("context reduction stats = %+v, want protected no-op stats", stats)
+	}
+	if stats.ModelRunLength != 3 {
+		t.Fatalf("model run length = %d, want 3", stats.ModelRunLength)
+	}
+}
+
+func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceBeforeThirdSameModelRun(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessAgeTurns: 1,
+		ShellSuccessBytes:    10,
+		CacheAwareMinUsage:   0.75,
+		WarmupMessageLimit:   32,
+	}}}
+	a.providerModelRef = "test/model"
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model", 1024, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	a.llmMu.Unlock()
+	largeOutput := strings.Repeat("test output line\n", 20)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == largeOutput {
+		t.Fatalf("expected second same-model request to reduce instead of protecting cache surface")
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Protected || stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("context reduction stats = %+v, want unprotected reduction", stats)
+	}
+	if stats.ModelRunLength != 2 {
+		t.Fatalf("model run length = %d, want 2", stats.ModelRunLength)
+	}
+}
+
+func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceAfterModelSwitch(t *testing.T) {
+	a := &MainAgent{}
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessAgeTurns: 1,
+		ShellSuccessBytes:    10,
+		CacheAwareMinUsage:   0.75,
+		WarmupMessageLimit:   32,
+	}}}
+	a.providerModelRef = "test/model-b"
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			"model-b": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model-b", 1024, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model-b"
+	a.lastLLMRequestModelRef = "test/model-a"
+	a.llmModelRunLength = 5
+	a.llmMu.Unlock()
+	largeOutput := strings.Repeat("test output line\n", 20)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == largeOutput {
+		t.Fatalf("expected model-switch request to reduce instead of protecting cache surface")
+	}
+	stats := a.GetContextReductionStats()
+	if stats.Protected || stats.Messages == 0 || stats.Bytes == 0 {
+		t.Fatalf("context reduction stats = %+v, want unprotected reduction", stats)
+	}
+	if stats.ModelRunLength != 1 {
+		t.Fatalf("model run length = %d, want 1", stats.ModelRunLength)
 	}
 }
 
@@ -858,6 +1149,8 @@ func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", Content: "ack"},
 		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+		{Role: "user", Content: "u5"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)

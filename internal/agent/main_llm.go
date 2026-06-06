@@ -532,7 +532,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		a.llmMu.RLock()
 		installedPrompt := a.installedSysPrompt
 		a.llmMu.RUnlock()
-		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v reduction_tokens_before=%v reduction_tokens_after=%v reduction_tokens_saved=%v reduction_saved_delta=%v reduction_protected=%v reduction_protect_reason=%v reduction_reused_stable=%v reduction_reuse_reason=%v previous_model=%v model_changed=%v reduction_by_tool_rule=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, stats.TokensBefore, stats.TokensAfter, stats.TokensSaved, stats.SavedDelta, stats.Protected, stats.ProtectReason, stats.ReusedStable, stats.ReuseReason, stats.PreviousModel, stats.ModelChanged, stats.ByToolAndRule, labels)
+		log.Debugf("LLM request context contributors messages=%v estimated_tokens=%v reduction_messages=%v reduction_bytes=%v reduction_tokens_before=%v reduction_tokens_after=%v reduction_tokens_saved=%v reduction_saved_delta=%v reduction_protected=%v reduction_protect_reason=%v reduction_reused_stable=%v reduction_reuse_reason=%v previous_model=%v model_changed=%v model_run_length=%v reduction_by_tool_rule=%v top=%v", len(messages), llm.EstimateRequestInputTokens(installedPrompt, messages, toolDefs), stats.Messages, stats.Bytes, stats.TokensBefore, stats.TokensAfter, stats.TokensSaved, stats.SavedDelta, stats.Protected, stats.ProtectReason, stats.ReusedStable, stats.ReuseReason, stats.PreviousModel, stats.ModelChanged, stats.ModelRunLength, stats.ByToolAndRule, labels)
 	}
 
 	// Hook: on_before_llm_call (before LLM call).
@@ -618,6 +618,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 
 	callStatus := llmClient.LastCallStatus()
+	callStatus.RunningModelRef = strings.TrimSpace(callStatus.RunningModelRef)
 	if callStatus.RunningModelRef == "" {
 		callStatus.RunningModelRef = selectedRef
 	}
@@ -634,6 +635,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.previousLLMModelRef = prevRunningRef
 	a.runningModelRef = callStatus.RunningModelRef
 	a.llmMu.Unlock()
+	a.recordLLMModelRun(callStatus.RunningModelRef)
 
 	if callStatus.RunningModelRef != prevRunningRef {
 		a.emitToTUI(RunningModelChangedEvent{
