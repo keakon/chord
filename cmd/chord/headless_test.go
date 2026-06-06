@@ -1637,6 +1637,89 @@ func TestStdoutWriterCloseRejectsEmitAfterClose(t *testing.T) {
 	}
 }
 
+func TestRuntimeHeadlessAdapterNilRuntimeIsSafe(t *testing.T) {
+	adapter := runtimeHeadlessAdapter{}
+	adapter.Close()
+	if backend := adapter.Backend(); backend != nil {
+		t.Fatalf("Backend() = %#v, want nil", backend)
+	}
+	events := adapter.Events()
+	if events == nil {
+		t.Fatal("Events() returned nil channel")
+	}
+	if _, ok := <-events; ok {
+		t.Fatal("nil runtime Events() channel should be closed")
+	}
+}
+
+func TestRuntimeHeadlessAdapterUsesRuntimeAgent(t *testing.T) {
+	ac := newTestAppContext(t)
+	rt := &Runtime{Agent: ac.MainAgent}
+	adapter := runtimeHeadlessAdapter{rt: rt}
+	if got := adapter.Backend(); got != ac.MainAgent {
+		t.Fatalf("Backend() = %#v, want main agent", got)
+	}
+	if got := adapter.Events(); got != ac.MainAgent.Events() {
+		t.Fatal("Events() did not return main agent event channel")
+	}
+	adapter.Close()
+}
+
+func TestDefaultHeadlessRunDeps(t *testing.T) {
+	deps := defaultHeadlessRunDeps()
+	if deps.initApp == nil {
+		t.Fatal("default initApp is nil")
+	}
+	if deps.createRuntime == nil {
+		t.Fatal("default createRuntime is nil")
+	}
+	if deps.stdin != os.Stdin {
+		t.Fatal("default stdin should be os.Stdin")
+	}
+	if deps.stdout != os.Stdout {
+		t.Fatal("default stdout should be os.Stdout")
+	}
+	if !deps.watchParent {
+		t.Fatal("default parent watcher should be enabled")
+	}
+	if deps.parentCheckInterval != time.Second {
+		t.Fatalf("parentCheckInterval = %v, want %v", deps.parentCheckInterval, time.Second)
+	}
+	if deps.getppid == nil || deps.getppid() <= 0 {
+		t.Fatal("default getppid should return a process id")
+	}
+}
+
+func TestDefaultHeadlessRunDepsCreateRuntimePropagatesRuntimeError(t *testing.T) {
+	deps := defaultHeadlessRunDeps()
+	rt, err := deps.createRuntime(&AppContext{})
+	if err == nil || rt != nil {
+		t.Fatalf("createRuntime empty app context = (%#v, %v), want nil runtime and error", rt, err)
+	}
+	if !strings.Contains(err.Error(), "runtime requires an initialized main agent") {
+		t.Fatalf("unexpected createRuntime error: %v", err)
+	}
+}
+
+func TestDefaultHandoffAgent(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []agent.HandoffAgentOption
+		want    string
+	}{
+		{name: "default named option", options: []agent.HandoffAgentOption{{Name: " planner "}, {Name: " builder ", Default: true}}, want: "builder"},
+		{name: "first named fallback", options: []agent.HandoffAgentOption{{Name: " "}, {Name: " planner "}, {Name: "builder"}}, want: "planner"},
+		{name: "empty fallback", options: []agent.HandoffAgentOption{{Name: " "}}, want: "builder"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := defaultHandoffAgent(tt.options); got != tt.want {
+				t.Fatalf("defaultHandoffAgent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunHeadlessWithDepsEmitsReadyAndExitsOnStdinClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

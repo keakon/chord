@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -62,5 +63,63 @@ func TestBuildToolExecutionBatchesSplitsDirectoryReadFromFileWrite(t *testing.T)
 	batches := buildToolExecutionBatches(registry, calls)
 	if len(batches) != 2 {
 		t.Fatalf("len(batches) = %d, want 2", len(batches))
+	}
+}
+
+func TestFinalizeStreamingToolCardsEmitsDiscardReasonForStartedSpeculativeCall(t *testing.T) {
+	turn := &Turn{}
+	turn.recordStreamingToolCall(PendingToolCall{
+		CallID:   "call-1",
+		Name:     tools.NameRead,
+		ArgsJSON: `{"path":"README.md"}`,
+		AgentID:  "agent-1",
+	})
+	var events []AgentEvent
+	finalizeStreamingToolCards(func(evt AgentEvent) { events = append(events, evt) }, nil, map[string]StreamingToolDiscardInfo{
+		"call-1": {Started: true, Reason: "filtered"},
+	}, turn)
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	ev, ok := events[0].(ToolResultEvent)
+	if !ok {
+		t.Fatalf("event = %#v, want ToolResultEvent", events[0])
+	}
+	if ev.Status != ToolResultStatusError || ev.AgentID != "agent-1" {
+		t.Fatalf("tool result event = %#v", ev)
+	}
+	if !strings.Contains(ev.Result, "Speculative tool execution was discarded") || !strings.Contains(ev.Result, "reason=filtered") {
+		t.Fatalf("discard result = %q", ev.Result)
+	}
+
+	events = nil
+	finalizeStreamingToolCards(func(evt AgentEvent) { events = append(events, evt) }, nil, nil, turn)
+	if len(events) != 0 {
+		t.Fatalf("second finalize emitted drained events: %#v", events)
+	}
+}
+
+func TestFinalizeStreamingToolCardsSkipsValidCallsAndMarksDeferredInvalid(t *testing.T) {
+	turn := &Turn{}
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "valid", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`})
+	turn.recordStreamingToolCall(PendingToolCall{CallID: "deferred", Name: tools.NameRead, ArgsJSON: `{"path":"docs"}`})
+	turn.recordStreamingToolCall(PendingToolCall{Name: tools.NameRead, ArgsJSON: `{}`})
+
+	var events []AgentEvent
+	finalizeStreamingToolCards(func(evt AgentEvent) { events = append(events, evt) }, map[string]struct{}{"valid": {}}, map[string]StreamingToolDiscardInfo{
+		"deferred": {Reason: "deferred"},
+	}, turn)
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want only deferred invalid event", len(events))
+	}
+	ev, ok := events[0].(ToolResultEvent)
+	if !ok {
+		t.Fatalf("event = %#v, want ToolResultEvent", events[0])
+	}
+	if ev.CallID != "deferred" || ev.Status != ToolResultStatusError {
+		t.Fatalf("tool result event = %#v", ev)
+	}
+	if !strings.Contains(ev.Result, "not executed") || !strings.Contains(ev.Result, "reason=deferred") {
+		t.Fatalf("deferred result = %q", ev.Result)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/worktree"
 )
 
@@ -22,6 +25,40 @@ type shutdownTrackingAgent struct {
 func (a *shutdownTrackingAgent) CancelCurrentTurn() bool {
 	a.cancelCalls++
 	return a.cancelResult
+}
+
+func TestCLIExitCodeAndPrintPolicy(t *testing.T) {
+	baseErr := errors.New("boom")
+	tests := []struct {
+		name      string
+		err       error
+		wantCode  int
+		wantPrint bool
+	}{
+		{name: "generic", err: baseErr, wantCode: 1, wantPrint: true},
+		{name: "context canceled", err: context.Canceled, wantCode: 130, wantPrint: false},
+		{name: "wrapped exit", err: cliExitError{code: 7, err: baseErr}, wantCode: 7, wantPrint: true},
+		{name: "interrupt exit", err: cliExitError{code: 130, err: baseErr}, wantCode: 130, wantPrint: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cliExitCode(tt.err); got != tt.wantCode {
+				t.Fatalf("cliExitCode() = %d, want %d", got, tt.wantCode)
+			}
+			if got := shouldPrintCLIError(tt.err); got != tt.wantPrint {
+				t.Fatalf("shouldPrintCLIError() = %v, want %v", got, tt.wantPrint)
+			}
+		})
+	}
+	if shouldPrintCLIError(nil) {
+		t.Fatal("nil error should not print")
+	}
+	if got := (cliExitError{code: 5}).Error(); got != "exit code 5" {
+		t.Fatalf("cliExitError nil wrapped error string = %q", got)
+	}
+	if !errors.Is(cliExitError{code: 9, err: baseErr}, baseErr) {
+		t.Fatal("cliExitError should unwrap the underlying error")
+	}
 }
 
 func TestShutdownLocalRuntimeWaitsForIdleOnlyWhenCancelSucceeds(t *testing.T) {
@@ -58,6 +95,59 @@ func TestShutdownLocalRuntimeWaitsForIdleOnlyWhenCancelSucceeds(t *testing.T) {
 	}
 	if !appCloseCalled {
 		t.Fatal("expected app close hook to be called")
+	}
+}
+
+func TestHookDefsFromConfigFlattensEntries(t *testing.T) {
+	hc := config.HookConfig{
+		OnToolCall: []config.HookEntry{
+			{
+				Command:         config.HookCommand{Shell: "echo tool"},
+				Timeout:         3,
+				Tools:           []string{"Read"},
+				Paths:           []string{"*.go"},
+				Agents:          []string{"planner"},
+				AgentKinds:      []string{"main"},
+				Models:          []string{"provider/model-1"},
+				MinChangedFiles: 1,
+				OnlyOnError:     true,
+				Join:            "all",
+				Result:          hook.ResultAlwaysAppend,
+				ResultFormat:    hook.ResultFormatTail,
+				MaxResultLines:  7,
+				MaxResultBytes:  1024,
+				DebounceMS:      50,
+				Concurrency:     "serial",
+				RetryOnFailure:  2,
+				RetryDelayMS:    100,
+				Environment:     map[string]string{"SAMPLE": "1"},
+			},
+		},
+		OnIdle: []config.HookEntry{
+			{},
+			{Name: "idle-hook", Command: config.HookCommand{Args: []string{"echo", "idle"}}},
+		},
+	}
+
+	defs := hookDefsFromConfig(hc)
+	if len(defs) != 2 {
+		t.Fatalf("len(hookDefsFromConfig) = %d, want 2", len(defs))
+	}
+	if defs[0].Name != hook.OnToolCall+"-0" || defs[0].Point != hook.OnToolCall {
+		t.Fatalf("first hook def = %#v", defs[0])
+	}
+	if defs[0].Command.Shell != "echo tool" || defs[0].Timeout != 3 || defs[0].Result != hook.ResultAlwaysAppend {
+		t.Fatalf("first hook def did not preserve scalar fields: %#v", defs[0])
+	}
+	if defs[0].Tools[0] != "Read" || defs[0].Paths[0] != "*.go" || defs[0].Environment["SAMPLE"] != "1" {
+		t.Fatalf("first hook def did not preserve filters/env: %#v", defs[0])
+	}
+	if defs[1].Name != "idle-hook" || defs[1].Point != hook.OnIdle || len(defs[1].Command.Args) != 2 {
+		t.Fatalf("second hook def = %#v", defs[1])
+	}
+	hc.OnIdle[1].Command.Args[0] = "changed"
+	if defs[1].Command.Args[0] != "echo" {
+		t.Fatal("hookDefsFromConfig should copy command args")
 	}
 }
 

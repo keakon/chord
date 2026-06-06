@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -72,6 +73,104 @@ func TestCreateRuntimeWiresConfirmAndQuestionTools(t *testing.T) {
 
 func TestRuntimeCloseIsNilSafe(t *testing.T) {
 	(&Runtime{}).Close()
+}
+
+func TestEnsureRuntimeLSPNoopsWithoutConfig(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{}
+	ensureRuntimeLSP(ac)
+	if ac.LSPManager != nil {
+		t.Fatal("LSP manager should stay nil without LSP config")
+	}
+	if _, ok := ac.Registry.Get(tools.NameLsp); ok {
+		t.Fatal("LSP tool should not be registered without LSP config")
+	}
+}
+
+func TestEnsureRuntimeLSPRegistersLSPAwareTools(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{
+		LSP: config.LSPConfig{
+			"sample-lsp": {
+				Command:   "sample-lsp",
+				FileTypes: []string{"go"},
+			},
+		},
+	}
+	ensureRuntimeLSP(ac)
+	if ac.LSPManager == nil {
+		t.Fatal("LSP manager was not initialized")
+	}
+	for _, name := range []string{tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameDelete, tools.NameLsp} {
+		if _, ok := ac.Registry.Get(name); !ok {
+			t.Fatalf("tool %s was not registered", name)
+		}
+	}
+}
+
+func TestEnsureRuntimeLSPKeepsExistingManager(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{
+		LSP: config.LSPConfig{
+			"sample-lsp": {Command: "sample-lsp"},
+		},
+	}
+	ensureRuntimeLSP(ac)
+	existing := ac.LSPManager
+	ensureRuntimeLSP(ac)
+	if ac.LSPManager != existing {
+		t.Fatal("ensureRuntimeLSP replaced an existing manager")
+	}
+}
+
+func TestStartRuntimeMCPNoopsWhenRuntimeIsIncomplete(t *testing.T) {
+	tests := []struct {
+		name string
+		ac   *AppContext
+	}{
+		{name: "nil app context"},
+		{name: "missing agent", ac: &AppContext{Registry: tools.NewRegistry()}},
+		{name: "missing registry", ac: &AppContext{MainAgent: newTestAppContext(t).MainAgent}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			startRuntimeMCP(tt.ac)
+		})
+	}
+}
+
+func TestStartRuntimeMCPManualServerMarksDiscoveryReady(t *testing.T) {
+	ac := newTestAppContext(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac.Ctx = ctx
+	ac.Cancel = cancel
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{}
+	mgr, err := mcp.NewManager(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	ac.MCPMgr = mgr
+	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual", Manual: true}}
+
+	startRuntimeMCP(ac)
+
+	deadline := time.After(2 * time.Second)
+	updates := 0
+	for updates < 2 {
+		select {
+		case evt := <-ac.MainAgent.Events():
+			if _, ok := evt.(agent.EnvStatusUpdateEvent); ok {
+				updates++
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for MCP env status updates, got %d", updates)
+		}
+	}
 }
 
 func waitForConfirmRequestEvent(t *testing.T, ch <-chan agent.AgentEvent) agent.ConfirmRequestEvent {

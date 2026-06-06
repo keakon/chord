@@ -179,6 +179,39 @@ func TestRuntimeMCPReconnectConfigsKeepsAutoAndLoadedManualServers(t *testing.T)
 	}
 }
 
+func TestLoadMCPStateNilManager(t *testing.T) {
+	result, err := loadMCPState(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("loadMCPState nil manager error = %v", err)
+	}
+	if len(result.Tools) != 0 || result.PromptBlock != "" {
+		t.Fatalf("loadMCPState nil manager = %#v, want empty result", result)
+	}
+}
+
+func TestRestoreRuntimeMCPRequiresCompleteRuntime(t *testing.T) {
+	mgr, err := mcp.NewManager(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	tests := []struct {
+		name string
+		ac   *AppContext
+	}{
+		{name: "nil app context"},
+		{name: "empty app context", ac: &AppContext{}},
+		{name: "missing configs", ac: &AppContext{MCPMgr: mgr}},
+		{name: "missing agent", ac: &AppContext{MCPMgr: mgr, MCPConfigs: []mcp.ServerConfig{{Name: "sample"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if restore := restoreRuntimeMCP(tt.ac, nil); restore != nil {
+				t.Fatal("restoreRuntimeMCP() returned a restore function, want nil")
+			}
+		})
+	}
+}
+
 func TestRuntimeResourceControllerNotifiesEnvOnUnloadAndReady(t *testing.T) {
 	var updates int32
 	ctrl := newRuntimeResourceController(context.Background(), nil, nil, nil, func() {

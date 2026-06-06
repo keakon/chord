@@ -61,6 +61,113 @@ func TestRotatingLogFileCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRotatingLogFileWriteAfterCloseReturnsErrClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chord.log")
+	w, err := newRotatingLogFileWithOptions(path, rotatingLogOptions{MaintenanceInterval: time.Hour})
+	if err != nil {
+		t.Fatalf("newRotatingLogFileWithOptions: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := w.Write([]byte("after close")); err != os.ErrClosed {
+		t.Fatalf("Write after Close err = %v, want %v", err, os.ErrClosed)
+	}
+}
+
+func TestRotatingLogFileKeepsOnlyConfiguredRotations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chord.log")
+	w, err := newRotatingLogFileWithOptions(path, rotatingLogOptions{
+		MaxSize:             32,
+		MaxFiles:            2,
+		CheckEveryBytes:     1,
+		MaintenanceInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("newRotatingLogFileWithOptions: %v", err)
+	}
+	defer w.Close()
+
+	payload := bytes.Repeat([]byte("x"), 40)
+	for i := 0; i < 4; i++ {
+		if _, err := w.Write(payload); err != nil {
+			t.Fatalf("Write %d: %v", i, err)
+		}
+		if err := w.maybeMaintain(); err != nil {
+			t.Fatalf("maybeMaintain %d: %v", i, err)
+		}
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active log missing: %v", err)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("latest rotated log missing: %v", err)
+	}
+	if _, err := os.Stat(path + ".2"); !os.IsNotExist(err) {
+		t.Fatalf("unexpected extra rotated log .2 err=%v", err)
+	}
+}
+
+func TestRotatingLogFileReopensWhenActivePathIsRemoved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chord.log")
+	w, err := newRotatingLogFileWithOptions(path, rotatingLogOptions{MaintenanceInterval: time.Hour})
+	if err != nil {
+		t.Fatalf("newRotatingLogFileWithOptions: %v", err)
+	}
+	defer w.Close()
+
+	if _, err := w.Write([]byte("before\n")); err != nil {
+		t.Fatalf("Write before remove: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove active log: %v", err)
+	}
+	if err := w.maybeMaintain(); err != nil {
+		t.Fatalf("maybeMaintain after remove: %v", err)
+	}
+	if _, err := w.Write([]byte("after\n")); err != nil {
+		t.Fatalf("Write after reopen: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile reopened log: %v", err)
+	}
+	if got := string(data); got != "after\n" {
+		t.Fatalf("reopened log content = %q, want only new content", got)
+	}
+}
+
+func TestRotatingLogFileRebindsStderrRedirectOnReopen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chord.log")
+	w, err := newRotatingLogFileWithOptions(path, rotatingLogOptions{MaintenanceInterval: time.Hour})
+	if err != nil {
+		t.Fatalf("newRotatingLogFileWithOptions: %v", err)
+	}
+	defer w.Close()
+
+	redirect := &stderrRedirect{active: true, writeFile: w.CurrentFile()}
+	w.SetStderrRedirect(redirect)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove active log: %v", err)
+	}
+	if err := w.maybeMaintain(); err != nil {
+		t.Fatalf("maybeMaintain after remove: %v", err)
+	}
+
+	redirect.mu.Lock()
+	got := redirect.writeFile
+	redirect.mu.Unlock()
+	if got == nil || got != w.CurrentFile() {
+		t.Fatalf("stderr redirect writeFile not rebound to current log")
+	}
+}
+
 func TestResolveLogLevelProjectOverridesGlobal(t *testing.T) {
 	global := &config.Config{LogLevel: "info"}
 	project := &config.Config{LogLevel: "debug"}
@@ -212,5 +319,37 @@ func TestRedirectProcessStderrUsesUpdatedLogger(t *testing.T) {
 	}
 	if !strings.Contains(text, "sid=20260502015258426] stderr stderr_text=after session") {
 		t.Fatalf("updated stderr logger did not include sid: %q", text)
+	}
+}
+
+func TestStderrRedirectRebindNoopsWhenInactive(t *testing.T) {
+	dir := t.TempDir()
+	oldFile, err := os.Create(filepath.Join(dir, "old.log"))
+	if err != nil {
+		t.Fatalf("Create old log: %v", err)
+	}
+	defer oldFile.Close()
+	newFile, err := os.Create(filepath.Join(dir, "new.log"))
+	if err != nil {
+		t.Fatalf("Create new log: %v", err)
+	}
+	defer newFile.Close()
+
+	r := &stderrRedirect{active: false, writeFile: oldFile}
+	if err := r.Rebind(newFile); err != nil {
+		t.Fatalf("Rebind inactive redirect: %v", err)
+	}
+	if r.writeFile != oldFile {
+		t.Fatal("inactive redirect should keep existing write file")
+	}
+}
+
+func TestStderrRedirectRestoreNilAndInactiveAreNoops(t *testing.T) {
+	var nilRedirect *stderrRedirect
+	if err := nilRedirect.Restore(); err != nil {
+		t.Fatalf("nil Restore: %v", err)
+	}
+	if err := (&stderrRedirect{}).Restore(); err != nil {
+		t.Fatalf("inactive Restore: %v", err)
 	}
 }
