@@ -55,7 +55,7 @@ func (GrepTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Directory or file path to search in. Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "File or directory to search in (one path). Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 			"glob": map[string]any{
 				"type":        "string",
@@ -90,7 +90,7 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 	resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
 	if err != nil {
-		return "", err
+		return "", grepPathErrorWithHint(searchPath, err)
 	}
 
 	var matches []string
@@ -219,6 +219,26 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 	logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
 	return result, nil
+}
+
+func grepPathErrorWithHint(path string, err error) error {
+	if err == nil || !strings.Contains(err.Error(), "path not found:") || !strings.ContainsAny(path, " \t\n\r") {
+		return err
+	}
+	parts := strings.Fields(path)
+	if len(parts) < 2 {
+		return err
+	}
+	for _, part := range parts {
+		resolved, resolveErr := resolveToolPath(part)
+		if resolveErr != nil {
+			return err
+		}
+		if _, statErr := os.Stat(resolved); statErr != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("%w. grep.path accepts one file or directory path only; to search multiple directories, run separate grep calls or search from a common parent", err)
 }
 
 // searchFile reads a file and returns matching lines in "path:linenum:content" format.

@@ -135,6 +135,72 @@ func TestGrepInvalidRegexExplainsEscaping(t *testing.T) {
 	}
 }
 
+func TestGrepPathParameterDescribesSinglePath(t *testing.T) {
+	params := GrepTool{}.Parameters()
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties has type %T, want map[string]any", params["properties"])
+	}
+	pathProp, ok := props["path"].(map[string]any)
+	if !ok {
+		t.Fatalf("path property has type %T, want map[string]any", props["path"])
+	}
+	desc, ok := pathProp["description"].(string)
+	if !ok {
+		t.Fatalf("path description has type %T, want string", pathProp["description"])
+	}
+	for _, want := range []string{"File or directory to search in (one path)", "Defaults to current directory"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("path description %q missing %q", desc, want)
+		}
+	}
+}
+
+func TestGrepPathErrorHintsForSpaceSeparatedExistingPaths(t *testing.T) {
+	dir := t.TempDir()
+	paths := make([]string, 0, 2)
+	for _, name := range []string{"cmd", "internal"} {
+		path := filepath.Join(dir, name)
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	searchPath := strings.Join(paths, " ")
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": searchPath})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected path error")
+	}
+	for _, want := range []string{"path not found: " + searchPath, "grep.path accepts one file or directory path only", "search multiple directories"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestGrepSupportsExistingPathWithSpaces(t *testing.T) {
+	dir := t.TempDir()
+	spaceDir := filepath.Join(dir, "dir with spaces")
+	if err := os.Mkdir(spaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(spaceDir, "notes.txt")
+	if err := os.WriteFile(path, []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": spaceDir})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "notes.txt") || !strings.Contains(out, "needle") {
+		t.Fatalf("missing match for path with spaces; got:\n%s", out)
+	}
+}
+
 func TestGrepLargeResultIsBoundedWithRefineHint(t *testing.T) {
 	dir := t.TempDir()
 	for i := range maxGrepMatches + 5 {

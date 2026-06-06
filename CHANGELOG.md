@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Improvements
 
 - Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
+- `grep.path` now describes that it accepts one file or directory path and adds a targeted hint when space-separated existing paths are passed as a single path.
 
 ### Fixes
 
