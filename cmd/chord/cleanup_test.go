@@ -2,11 +2,123 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/maintenance"
 )
+
+func setCleanupPathEnv(t *testing.T) (stateDir, cacheDir, sessionsDir, logsDir string) {
+	t.Helper()
+	root := t.TempDir()
+	stateDir = filepath.Join(root, "state")
+	cacheDir = filepath.Join(root, "cache")
+	sessionsDir = filepath.Join(root, "sessions")
+	logsDir = filepath.Join(root, "logs")
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_CACHE_DIR", cacheDir)
+	t.Setenv("CHORD_SESSIONS_DIR", sessionsDir)
+	t.Setenv("CHORD_LOGS_DIR", logsDir)
+	return stateDir, cacheDir, sessionsDir, logsDir
+}
+
+func TestCleanupStatusCommandUsesCommandOutput(t *testing.T) {
+	stateDir, cacheDir, sessionsDir, logsDir := setCleanupPathEnv(t)
+	for _, dir := range []string{stateDir, cacheDir, sessionsDir, logsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "state.bin"), []byte("abc"), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	cmd := newCleanupCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cleanup status Execute: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"state_dir: " + stateDir,
+		"cache_dir: " + cacheDir,
+		"logs_dir: " + logsDir,
+		"sessions: 0 across 0 projects",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cleanup status output = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestCleanupLogsCommandDryRunUsesCommandOutputAndKeepsFiles(t *testing.T) {
+	_, _, _, logsDir := setCleanupPathEnv(t)
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll logs: %v", err)
+	}
+	oldLog := filepath.Join(logsDir, "old.log")
+	if err := os.WriteFile(oldLog, []byte("old"), 0o600); err != nil {
+		t.Fatalf("write old log: %v", err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(oldLog, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes old log: %v", err)
+	}
+
+	var buf bytes.Buffer
+	cmd := newCleanupCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"logs", "--older-than", "1h"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cleanup logs Execute: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "would remove "+oldLog) || !strings.Contains(out, "dry-run: pass --yes to delete") {
+		t.Fatalf("cleanup logs dry-run output = %q", out)
+	}
+	if _, err := os.Stat(oldLog); err != nil {
+		t.Fatalf("dry-run should keep old log: %v", err)
+	}
+}
+
+func TestCleanupLogsCommandYesDeletesCandidates(t *testing.T) {
+	_, _, _, logsDir := setCleanupPathEnv(t)
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll logs: %v", err)
+	}
+	oldLog := filepath.Join(logsDir, "old.log")
+	if err := os.WriteFile(oldLog, []byte("old"), 0o600); err != nil {
+		t.Fatalf("write old log: %v", err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(oldLog, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes old log: %v", err)
+	}
+
+	var buf bytes.Buffer
+	cmd := newCleanupCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"logs", "--older-than", "1h", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cleanup logs --yes Execute: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "removed "+oldLog) || strings.Contains(out, "dry-run") {
+		t.Fatalf("cleanup logs --yes output = %q", out)
+	}
+	if _, err := os.Stat(oldLog); !os.IsNotExist(err) {
+		t.Fatalf("cleanup logs --yes should remove old log, stat err=%v", err)
+	}
+}
 
 func TestCleanupByteFormatter(t *testing.T) {
 	tests := []struct {

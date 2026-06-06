@@ -105,7 +105,7 @@ func newAuthStateCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List expired, deactivated, or invalidated OAuth accounts from auth.state.yaml",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			statePath, err := config.AuthStatePath()
 			if err != nil {
 				return fmt.Errorf("resolve auth state path: %w", err)
@@ -115,9 +115,9 @@ func newAuthStateCmd() *cobra.Command {
 				return fmt.Errorf("load auth state: %w", err)
 			}
 			entries := listInvalidOAuthStateEntries(state)
-			fmt.Fprintf(os.Stdout, "Found %d invalid OAuth accounts in %s\n", len(entries), statePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Found %d invalid OAuth accounts in %s\n", len(entries), statePath)
 			for _, entry := range entries {
-				fmt.Fprintf(os.Stdout, "- %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+				fmt.Fprintf(cmd.OutOrStdout(), "- %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
 			return nil
 		},
@@ -126,7 +126,7 @@ func newAuthStateCmd() *cobra.Command {
 		Use:   "clean",
 		Short: "Remove invalid or orphan OAuth state and invalid OAuth credentials",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			statePath, err := config.AuthStatePath()
 			if err != nil {
 				return fmt.Errorf("resolve auth state path: %w", err)
@@ -173,13 +173,13 @@ func newAuthStateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("clean auth config: %w", err)
 			}
-			fmt.Fprintf(os.Stdout, "Removed %d invalid/orphan OAuth state entries from %s\n", len(removedState), statePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d invalid/orphan OAuth state entries from %s\n", len(removedState), statePath)
 			for _, entry := range removedState {
-				fmt.Fprintf(os.Stdout, "- state: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+				fmt.Fprintf(cmd.OutOrStdout(), "- state: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
-			fmt.Fprintf(os.Stdout, "Removed %d invalid OAuth credentials from %s\n", len(removedCreds), authPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d invalid OAuth credentials from %s\n", len(removedCreds), authPath)
 			for _, entry := range removedCreds {
-				fmt.Fprintf(os.Stdout, "- auth: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
+				fmt.Fprintf(cmd.OutOrStdout(), "- auth: %s (provider=%s status=%s)\n", entry.DisplayName(), entry.Provider, entry.Status)
 			}
 			return nil
 		},

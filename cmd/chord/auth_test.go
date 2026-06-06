@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -365,6 +367,98 @@ func TestOpenAIOAuthCallbackAddressHelpers(t *testing.T) {
 	}
 }
 
+func TestStartOpenAICallbackServerHandlesCallbackOutcomes(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      url.Values
+		wantStatus int
+		wantCode   string
+		wantErr    string
+		wantBody   string
+	}{
+		{
+			name:       "success",
+			query:      url.Values{"state": {"state-123"}, "code": {"code-123"}},
+			wantStatus: http.StatusOK,
+			wantCode:   "code-123",
+			wantBody:   "Login successful",
+		},
+		{
+			name:       "oauth error uses description",
+			query:      url.Values{"error": {"access_denied"}, "error_description": {"denied by user"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "OAuth login failed: denied by user",
+			wantBody:   "denied by user",
+		},
+		{
+			name:       "state mismatch",
+			query:      url.Values{"state": {"wrong"}, "code": {"code-123"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "OAuth state verification failed",
+			wantBody:   "invalid state",
+		},
+		{
+			name:       "missing code",
+			query:      url.Values{"state": {"state-123"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "OAuth callback missing code",
+			wantBody:   "missing code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			codeCh := make(chan string, 1)
+			errCh := make(chan error, 2)
+			server, redirectURI, err := startOpenAICallbackServer("state-123", 0, codeCh, errCh)
+			if err != nil {
+				t.Fatalf("startOpenAICallbackServer: %v", err)
+			}
+			defer server.Shutdown(context.Background())
+
+			resp, err := http.Get(redirectURI + "?" + tt.query.Encode())
+			if err != nil {
+				t.Fatalf("GET callback: %v", err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read callback body: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body %q", resp.StatusCode, tt.wantStatus, body)
+			}
+			if !strings.Contains(string(body), tt.wantBody) {
+				t.Fatalf("body = %q, want substring %q", body, tt.wantBody)
+			}
+
+			select {
+			case got := <-codeCh:
+				if got != tt.wantCode {
+					t.Fatalf("callback code = %q, want %q", got, tt.wantCode)
+				}
+			default:
+				if tt.wantCode != "" {
+					t.Fatalf("callback code missing, want %q", tt.wantCode)
+				}
+			}
+			select {
+			case gotErr := <-errCh:
+				if tt.wantErr == "" {
+					t.Fatalf("unexpected callback error: %v", gotErr)
+				}
+				if !strings.Contains(gotErr.Error(), tt.wantErr) {
+					t.Fatalf("callback error = %v, want substring %q", gotErr, tt.wantErr)
+				}
+			default:
+				if tt.wantErr != "" {
+					t.Fatalf("callback error missing, want %q", tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildOpenAIAuthorizeURL(t *testing.T) {
 	pkce := &openAIPKCECodes{Verifier: "verifier", Challenge: "challenge"}
 	redirectURI := openAIOAuthCallbackRedirectURI(openAIOAuthCallbackDefaultPort)
@@ -394,6 +488,17 @@ func TestBuildOpenAIAuthorizeURL(t *testing.T) {
 	}
 	if q.Get("codex_cli_simplified_flow") != "true" {
 		t.Fatalf("expected codex_cli_simplified_flow=true, got %q", q.Get("codex_cli_simplified_flow"))
+	}
+}
+
+func TestBuildOpenAILoginHTTPClientRejectsInvalidProxy(t *testing.T) {
+	proxyURL := "ftp://proxy.example.invalid:1080"
+	client, err := buildOpenAILoginHTTPClient(config.ProviderConfig{Proxy: &proxyURL}, "")
+	if err == nil || client != nil {
+		t.Fatalf("buildOpenAILoginHTTPClient() = (%v, %v), want nil client and error", client, err)
+	}
+	if !strings.Contains(err.Error(), "create login HTTP client") || !strings.Contains(err.Error(), "unsupported proxy scheme") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -522,6 +627,52 @@ func TestRunAuthLoginDevice_OpenAICodexHeadlessSuccess(t *testing.T) {
 	}
 }
 
+func TestRunOpenAICodexDeviceLoginWrapperSuccess(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	var serverURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/accounts/deviceauth/usercode":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"device_auth_id": "device-auth-123",
+				"user_code":      "ABCD-EFGH",
+				"interval":       "1",
+			})
+		case "/api/accounts/deviceauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"authorization_code": "auth-code-123",
+				"code_verifier":      "verifier-123",
+			})
+		case "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(openAITokenResponse{
+				IDToken:      "header." + base64Payload(`{"chatgpt_account_id":"acc-123"}`) + ".sig",
+				AccessToken:  "access-123",
+				RefreshToken: "refresh-123",
+				ExpiresIn:    3600,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	serverURL = srv.URL
+
+	if err := runOpenAICodexDeviceLogin(context.Background(), "codex", srv.Client(), serverURL+"/oauth/token", "client-123"); err != nil {
+		t.Fatalf("runOpenAICodexDeviceLogin: %v", err)
+	}
+	auth, err := config.LoadAuthConfig(filepath.Join(configHome, "auth.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if creds := auth["codex"]; len(creds) != 1 || creds[0].OAuth == nil || creds[0].OAuth.Refresh != "refresh-123" {
+		t.Fatalf("stored credentials = %#v", creds)
+	}
+}
+
 type recordingRoundTripper struct {
 	t          *testing.T
 	wantCtxKey any
@@ -566,6 +717,166 @@ func TestAuthHTTPRequestsUseProvidedContext(t *testing.T) {
 	if _, err := exchangeOpenAICodeForTokensWithParams(ctx, client, "https://issuer.example/oauth/token", "https://issuer.example/callback", "client-123", "auth-code", "verifier"); err != nil {
 		t.Fatalf("exchangeOpenAICodeForTokensWithParams: %v", err)
 	}
+}
+
+func TestExchangeOpenAICodeForTokensWithParamsSubmitsExpectedForm(t *testing.T) {
+	var gotForm url.Values
+	var gotUserAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
+			t.Fatalf("Content-Type = %q", got)
+		}
+		gotUserAgent = r.Header.Get("User-Agent")
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		gotForm = make(url.Values, len(r.Form))
+		for key, values := range r.Form {
+			gotForm[key] = append([]string(nil), values...)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAITokenResponse{
+			AccessToken:  "access-123",
+			RefreshToken: "refresh-123",
+			ExpiresIn:    3600,
+		})
+	}))
+	defer srv.Close()
+
+	tokens, err := exchangeOpenAICodeForTokensWithParams(
+		context.Background(),
+		srv.Client(),
+		srv.URL,
+		"http://localhost:1455/auth/callback",
+		"client-123",
+		"code-123",
+		"verifier-123",
+	)
+	if err != nil {
+		t.Fatalf("exchangeOpenAICodeForTokensWithParams: %v", err)
+	}
+	if tokens.AccessToken != "access-123" || tokens.RefreshToken != "refresh-123" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	want := map[string]string{
+		"grant_type":    "authorization_code",
+		"code":          "code-123",
+		"redirect_uri":  "http://localhost:1455/auth/callback",
+		"client_id":     "client-123",
+		"code_verifier": "verifier-123",
+	}
+	for key, wantValue := range want {
+		if got := gotForm.Get(key); got != wantValue {
+			t.Fatalf("form[%s] = %q, want %q", key, got, wantValue)
+		}
+	}
+	if gotUserAgent == "" {
+		t.Fatal("User-Agent header was empty")
+	}
+}
+
+func TestExchangeOpenAICodeForTokensUsesDefaultOAuthParams(t *testing.T) {
+	var gotURL string
+	var gotForm url.Values
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		gotURL = req.URL.String()
+		if err := req.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		gotForm = make(url.Values, len(req.Form))
+		for key, values := range req.Form {
+			gotForm[key] = append([]string(nil), values...)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"access-123","refresh_token":"refresh-123","expires_in":3600}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	tokens, err := exchangeOpenAICodeForTokens(context.Background(), client, "code-123", "verifier-123", "http://localhost:1455/auth/callback")
+	if err != nil {
+		t.Fatalf("exchangeOpenAICodeForTokens: %v", err)
+	}
+	if tokens.AccessToken != "access-123" || tokens.RefreshToken != "refresh-123" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	if gotURL != config.OpenAIOAuthTokenURL {
+		t.Fatalf("token URL = %q, want %q", gotURL, config.OpenAIOAuthTokenURL)
+	}
+	if got := gotForm.Get("client_id"); got != config.OpenAIOAuthClientID {
+		t.Fatalf("client_id = %q, want default", got)
+	}
+	if got := gotForm.Get("redirect_uri"); got != "http://localhost:1455/auth/callback" {
+		t.Fatalf("redirect_uri = %q", got)
+	}
+}
+
+func TestExchangeOpenAICodeForTokensWithParamsReportsFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantErr string
+	}{
+		{
+			name: "http status",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "invalid grant", http.StatusBadRequest)
+			},
+			wantErr: "token exchange failed: invalid grant",
+		},
+		{
+			name: "invalid json",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("{"))
+			},
+			wantErr: "parse token exchange response",
+		},
+		{
+			name: "missing refresh",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"access-123"}`))
+			},
+			wantErr: "missing access_token or refresh_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+			_, err := exchangeOpenAICodeForTokensWithParams(context.Background(), srv.Client(), srv.URL, "http://localhost/callback", "client-123", "code-123", "verifier-123")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestExchangeOpenAICodeForTokensWithParamsReportsTransportError(t *testing.T) {
+	client := &http.Client{Transport: failingRoundTripper{err: errors.New("network down")}}
+	_, err := exchangeOpenAICodeForTokensWithParams(context.Background(), client, "https://issuer.example/oauth/token", "http://localhost/callback", "client-123", "code-123", "verifier-123")
+	if err == nil || !strings.Contains(err.Error(), "token exchange request failed") || !strings.Contains(err.Error(), "network down") {
+		t.Fatalf("error = %v, want transport failure", err)
+	}
+}
+
+type failingRoundTripper struct {
+	err error
+}
+
+func (rt failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, rt.err
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestPersistOAuthCredential_RequiresAccountID(t *testing.T) {
@@ -715,23 +1026,10 @@ func TestAuthStateListOnlyPrintsInvalidEntries(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"state", "list"})
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	defer r.Close()
 	if err := cmd.Execute(); err != nil {
-		_ = w.Close()
 		t.Fatalf("Execute: %v", err)
 	}
-	_ = w.Close()
-	output, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll(stdout): %v", err)
-	}
+	output := out.String()
 	got := string(output)
 	if !strings.Contains(got, "Found 1 invalid OAuth accounts") || !strings.Contains(got, "expired@example.com") {
 		t.Fatalf("expected only expired state in output, got %q", got)
@@ -772,23 +1070,10 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"state", "clean"})
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	defer r.Close()
 	if err := cmd.Execute(); err != nil {
-		_ = w.Close()
 		t.Fatalf("Execute: %v", err)
 	}
-	_ = w.Close()
-	output, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll(stdout): %v", err)
-	}
+	output := out.String()
 	if !strings.Contains(string(output), "expired@example.com") {
 		t.Fatalf("expected output to contain removed email, got %q", string(output))
 	}
@@ -830,23 +1115,10 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"state", "clean"})
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	defer r.Close()
 	if err := cmd.Execute(); err != nil {
-		_ = w.Close()
 		t.Fatalf("Execute: %v", err)
 	}
-	_ = w.Close()
-	output, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll(stdout): %v", err)
-	}
+	output := out.String()
 	if !strings.Contains(string(output), "Removed 1 invalid OAuth credentials") {
 		t.Fatalf("expected clean to remove one auth credential, got %q", string(output))
 	}
@@ -902,23 +1174,10 @@ func TestAuthStateCleanKeepsMatchedRefreshOnlyState(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"state", "clean"})
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	defer r.Close()
 	if err := cmd.Execute(); err != nil {
-		_ = w.Close()
 		t.Fatalf("Execute: %v", err)
 	}
-	_ = w.Close()
-	output, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll(stdout): %v", err)
-	}
+	output := out.String()
 	if !strings.Contains(string(output), "Removed 0 invalid/orphan OAuth state entries") {
 		t.Fatalf("expected clean to keep matched refresh-only state, got %q", string(output))
 	}
@@ -964,23 +1223,10 @@ func TestAuthStateCleanRemovesOrphanState(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"state", "clean"})
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	defer r.Close()
 	if err := cmd.Execute(); err != nil {
-		_ = w.Close()
 		t.Fatalf("Execute: %v", err)
 	}
-	_ = w.Close()
-	output, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll(stdout): %v", err)
-	}
+	output := out.String()
 	if !strings.Contains(string(output), "Removed 1 invalid/orphan OAuth state entries") {
 		t.Fatalf("expected clean to remove one orphan state, got %q", string(output))
 	}
@@ -1153,6 +1399,46 @@ func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.
 	}
 	if len(backfills) != 0 {
 		t.Fatalf("backfills = %#v, want none", backfills)
+	}
+}
+
+func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.yaml")
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token"},"email":"token@example.com"}`)
+	auth := config.AuthConfig{
+		"codex": {
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-123"}},
+		},
+	}
+	if err := config.SaveAuthConfig(authPath, auth); err != nil {
+		t.Fatalf("SaveAuthConfig: %v", err)
+	}
+	_, backfills, err := oauthCredentialMap(auth["codex"])
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
+	var mu sync.Mutex
+	if err := persistOAuthMetadataBackfills(authPath, &auth, &mu, "codex", backfills); err != nil {
+		t.Fatalf("persistOAuthMetadataBackfills: %v", err)
+	}
+	if got := auth["codex"][0].OAuth.AccountID; got != "acct-token" {
+		t.Fatalf("in-memory account_id = %q", got)
+	}
+	if got := auth["codex"][0].OAuth.Email; got != "token@example.com" {
+		t.Fatalf("in-memory email = %q", got)
+	}
+	loaded, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := loaded["codex"][0].OAuth.AccountID; got != "acct-token" {
+		t.Fatalf("persisted account_id = %q", got)
+	}
+	if got := loaded["codex"][0].OAuth.Email; got != "token@example.com" {
+		t.Fatalf("persisted email = %q", got)
+	}
+	if err := persistOAuthMetadataBackfills(authPath, &auth, &mu, "codex", []oauthMetadataBackfill{{Email: "ignored@example.com"}}); err != nil {
+		t.Fatalf("persistOAuthMetadataBackfills empty account id: %v", err)
 	}
 }
 

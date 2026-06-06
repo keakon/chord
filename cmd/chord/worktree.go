@@ -130,10 +130,10 @@ func newWorktreeListCmd() *cobra.Command {
 				return rows[i].LastUsedAt.After(rows[j].LastUsedAt)
 			})
 			if len(rows) == 0 {
-				fmt.Fprintln(os.Stdout, "No chord-managed worktrees in this repository.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No chord-managed worktrees in this repository.")
 				return nil
 			}
-			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tBRANCH\tPATH\tSTATUS\tLAST_USED")
 			for _, r := range rows {
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.Path, r.Status, worktree.FormatRelativeTime(r.LastUsedAt))
@@ -208,9 +208,9 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if err := worktree.Remove(ctx, cwd, name, worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix}, pl); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stdout, "Removed worktree %s\n", name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed worktree %s\n", name)
 			if !force && !deleteBranch {
-				fmt.Fprintln(os.Stdout, "Note: branch was kept. Pass --delete-branch (only if merged) or --force (always) to remove the branch.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Note: branch was kept. Pass --delete-branch (only if merged) or --force (always) to remove the branch.")
 			}
 			return nil
 		},
@@ -268,16 +268,16 @@ func newWorktreeFinishCmd() *cobra.Command {
 			}
 			if check {
 				if ontoUsed != "" {
-					fmt.Fprintf(os.Stdout, "Worktree %s can merge %s cleanly and finish cleanly\n", name, ontoUsed)
+					fmt.Fprintf(cmd.OutOrStdout(), "Worktree %s can merge %s cleanly and finish cleanly\n", name, ontoUsed)
 				} else {
-					fmt.Fprintf(os.Stdout, "Worktree %s can merge its target branch cleanly and finish cleanly\n", name)
+					fmt.Fprintf(cmd.OutOrStdout(), "Worktree %s can merge its target branch cleanly and finish cleanly\n", name)
 				}
 				return nil
 			}
 			if ontoUsed != "" {
-				fmt.Fprintf(os.Stdout, "Finished worktree %s into %s\n", name, ontoUsed)
+				fmt.Fprintf(cmd.OutOrStdout(), "Finished worktree %s into %s\n", name, ontoUsed)
 			} else {
-				fmt.Fprintf(os.Stdout, "Finished worktree %s\n", name)
+				fmt.Fprintf(cmd.OutOrStdout(), "Finished worktree %s\n", name)
 			}
 			return nil
 		},

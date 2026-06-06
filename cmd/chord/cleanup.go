@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,7 +16,7 @@ func newCleanupCmd() *cobra.Command {
 	var olderThan time.Duration
 	var yes bool
 	cmd := &cobra.Command{Use: "cleanup", Short: "Inspect or clean Chord state/cache/logs managed by the path locator"}
-	statusCmd := &cobra.Command{Use: "status", Short: "Show state/cache/log sizes", RunE: func(*cobra.Command, []string) error {
+	statusCmd := &cobra.Command{Use: "status", Short: "Show state/cache/log sizes", RunE: func(cmd *cobra.Command, _ []string) error {
 		locator, err := config.DefaultPathLocator()
 		if err != nil {
 			return err
@@ -26,10 +25,10 @@ func newCleanupCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		writeCleanupStatus(os.Stdout, st)
+		writeCleanupStatus(cmd.OutOrStdout(), st)
 		return nil
 	}}
-	runCleanup := func(kind string) error {
+	runCleanup := func(cmd *cobra.Command, kind string) error {
 		locator, err := config.DefaultPathLocator()
 		if err != nil {
 			return err
@@ -55,17 +54,18 @@ func newCleanupCmd() *cobra.Command {
 		if yes {
 			verb = "removed"
 		}
+		out := cmd.OutOrStdout()
 		for _, c := range res.Candidates {
-			writeCleanupCandidate(os.Stdout, verb, c)
+			writeCleanupCandidate(out, verb, c)
 		}
 		if !yes {
-			fmt.Fprintln(os.Stdout, "dry-run: pass --yes to delete")
+			fmt.Fprintln(out, "dry-run: pass --yes to delete")
 		}
 		return nil
 	}
 	for _, kind := range []string{"sessions", "cache", "logs", "project"} {
 		k := kind
-		sub := &cobra.Command{Use: k, Short: "Clean " + k + " under managed Chord paths", RunE: func(*cobra.Command, []string) error { return runCleanup(k) }}
+		sub := &cobra.Command{Use: k, Short: "Clean " + k + " under managed Chord paths", RunE: func(cmd *cobra.Command, _ []string) error { return runCleanup(cmd, k) }}
 		sub.Flags().DurationVar(&olderThan, "older-than", 0, "only clean entries older than this duration (for example 720h)")
 		sub.Flags().BoolVar(&yes, "yes", false, "actually delete; default is dry-run")
 		cmd.AddCommand(sub)

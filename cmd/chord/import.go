@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,22 +68,22 @@ func newImportCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				enc := json.NewEncoder(os.Stdout)
+				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				return enc.Encode(res)
 			}
 
 			if dryRun {
-				fmt.Fprintf(os.Stdout, "Dry-run import (%s)\nProject: %s\nMessages: %d\n", source, res.ProjectRoot, res.Messages)
-				printImportSummary(os.Stdout, source, res, "")
-				printImportWarnings(os.Stdout, res.Report.Warnings, "")
+				fmt.Fprintf(cmd.OutOrStdout(), "Dry-run import (%s)\nProject: %s\nMessages: %d\n", source, res.ProjectRoot, res.Messages)
+				printImportSummary(cmd.OutOrStdout(), source, res, "")
+				printImportWarnings(cmd.OutOrStdout(), res.Report.Warnings, "")
 				return nil
 			}
 
 			reportPath := filepath.Join(res.SessionDir, "import-report.json")
-			fmt.Fprintf(os.Stdout, "Imported %s session\nPWD:  %s\nSID:  %s\nPath: %s\nResume: chord resume %s\nMessages: %d\n", source, res.ProjectRoot, res.SessionID, res.SessionDir, res.SessionID, res.Messages)
-			printImportSummary(os.Stdout, source, res, reportPath)
-			printImportWarnings(os.Stdout, res.Report.Warnings, reportPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Imported %s session\nPWD:  %s\nSID:  %s\nPath: %s\nResume: chord resume %s\nMessages: %d\n", source, res.ProjectRoot, res.SessionID, res.SessionDir, res.SessionID, res.Messages)
+			printImportSummary(cmd.OutOrStdout(), source, res, reportPath)
+			printImportWarnings(cmd.OutOrStdout(), res.Report.Warnings, reportPath)
 			return nil
 		},
 	}
