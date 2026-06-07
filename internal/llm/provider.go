@@ -85,6 +85,7 @@ type KeyState struct {
 // OAuthKeySetup mirrors auth.yaml OAuth credential state needed to initialize a key slot.
 type OAuthKeySetup struct {
 	CredentialIndex       int
+	AccountUserID         string
 	AccountID             string
 	Email                 string
 	Access                string
@@ -102,6 +103,7 @@ type OAuthKeySetup struct {
 type OAuthKeyInfo struct {
 	Expires               int64 // millisecond-precision Unix timestamp
 	CredentialIndex       int   // index in auth[providerName]
+	AccountUserID         string
 	AccountID             string
 	Email                 string
 	Access                string

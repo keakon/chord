@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -44,7 +45,7 @@ func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, s
 	}, config.ExtractAPIKeys(creds))
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
-	provider.SetOAuthRefresher("https://auth.openai.com/oauth/token", "app_EMoamEEZ73f0CkXaXp7hrann", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+	provider.SetOAuthRefresher(apiURL, "app_EMoamEEZ73f0CkXaXp7hrann", "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		accessToken: {
 			CredentialIndex: 0,
 			AccountID:       "acc-test",
@@ -98,6 +99,27 @@ func TestResolveOpenAIOAuthAPIURL(t *testing.T) {
 				t.Fatalf("resolveOpenAIOAuthAPIURL(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProviderConfig_RefreshOAuthKeyRequiresAccountUserID(t *testing.T) {
+	refreshedAccess := testOAuthJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test"}}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":`+strconv.Quote(refreshedAccess)+`,"expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL)
+	_, refreshed, err := provider.TryRefreshOAuthKey(context.Background(), accessToken)
+	if err == nil {
+		t.Fatal("expected missing account_user_id refresh error")
+	}
+	if refreshed {
+		t.Fatal("expected refresh flag to be false on account_user_id error")
+	}
+	if !strings.Contains(err.Error(), "missing account_user_id") {
+		t.Fatalf("expected missing account_user_id error, got %v", err)
 	}
 }
 

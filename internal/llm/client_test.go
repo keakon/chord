@@ -937,8 +937,8 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 
 func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	ctx := context.Background()
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
-	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
+	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 			t.Fatalf("Content-Type = %q, want application/json", got)
@@ -969,7 +969,7 @@ func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
 	result := markKeyCooldown(ctx, p, oldAccess, &APIError{StatusCode: 401, Message: "unauthorized"})
 	if !result.oauthRefreshed {
@@ -993,8 +993,8 @@ func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 
 func TestMarkKeyCooldown403OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	ctx := context.Background()
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
-	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
+	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"`+newAccess+`","refresh_token":"new-refresh-token","expires_in":3600}`)
@@ -1011,7 +1011,7 @@ func TestMarkKeyCooldown403OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
-	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
 	result := markKeyCooldown(ctx, p, oldAccess, &APIError{StatusCode: 403, Message: "forbidden"})
 	if !result.oauthRefreshed {
@@ -1028,15 +1028,15 @@ func TestMarkKeyCooldown403OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 func TestMarkKeyCooldown401OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) {
 	ctx := context.Background()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   time.Now().Add(time.Hour).UnixMilli(),
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       time.Now().Add(time.Hour).UnixMilli(),
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "account deactivated"})
@@ -1086,15 +1086,15 @@ func TestMarkKeyCooldown401OAuthInvalidatedSkipsRefreshAndDeactivatesKey(t *test
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_invalidated", Message: "account invalidated"})
@@ -1125,14 +1125,14 @@ func TestMarkKeyCooldown401OAuthEmptyRefreshTokenMarksExpiredWithoutHTTP(t *test
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "unauthorized"})
@@ -1163,15 +1163,15 @@ func TestMarkKeyCooldown401OAuthTokenInvalidatedCodeSkipsRefreshAndInvalidatesKe
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "token_invalidated", Message: "Your authentication token has been invalidated. Please try signing in again."})
@@ -1198,15 +1198,15 @@ func TestMarkKeyCooldown401OAuthMalformedAuthTokenDetailInvalidatesKey(t *testin
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	apiErr := parseOpenAIHTTPErrorFromBytes(http.StatusUnauthorized, nil, []byte(`{"detail":"Could not parse your authentication token. Please try signing in again."}`))
@@ -1232,15 +1232,15 @@ func TestMarkKeyCooldown401OAuthRefreshUnknownUnauthorizedMarksExpired(t *testin
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "unauthorized"})
@@ -1256,16 +1256,16 @@ func TestCompleteStreamTerminal401MarksInvalidatedOAuthBeforeReturning(t *testin
 	ctx := context.Background()
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
-		Email:     "user@example.com",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
+		Email: "user@example.com",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Email: "user@example.com", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Expires: expires},
 	}, "")
 	impl := &constantErrProvider{err: &APIError{StatusCode: 401, Code: "account_invalidated", Message: "account invalidated"}}
 	client := NewClient(p, impl, "model", 128, "")
@@ -1305,15 +1305,15 @@ func TestMarkKeyCooldown403OAuthInvalidatedSkipsRefreshAndInvalidatesKey(t *test
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Code: "account_invalidated", Message: "account invalidated"})
@@ -1335,15 +1335,15 @@ func TestMarkKeyCooldown403OAuthInvalidatedSkipsRefreshAndInvalidatesKey(t *test
 func TestMarkKeyCooldown403OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) {
 	ctx := context.Background()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   time.Now().Add(time.Hour).UnixMilli(),
-		AccountID: "acc-1",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       time.Now().Add(time.Hour).UnixMilli(),
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
 	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Code: "account_deactivated", Message: "account deactivated"})
@@ -1391,16 +1391,16 @@ func TestCompleteStreamTerminal401MarksExpiredOAuthBeforeReturning(t *testing.T)
 
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    "oauth-key",
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
-		Email:     "user@example.com",
+		Access:        "oauth-key",
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
+		Email: "user@example.com",
 	}}}}
 	var authMu sync.Mutex
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		"oauth-key": {CredentialIndex: 0, AccountID: "acc-1", Email: "user@example.com", Expires: expires},
+		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Expires: expires},
 	}, "")
 	impl := &constantErrProvider{err: &APIError{StatusCode: 401, Message: "unauthorized"}}
 	client := NewClient(p, impl, "model", 128, "")
@@ -1466,7 +1466,7 @@ func TestMarkKeyCooldown401NonOAuthUsesCooldown(t *testing.T) {
 }
 
 func TestClientComplete401OAuthRefreshRotatesToNextKey(t *testing.T) {
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1475,7 +1475,7 @@ func TestClientComplete401OAuthRefreshRotatesToNextKey(t *testing.T) {
 	defer refreshServer.Close()
 
 	creds := []config.ProviderCredential{
-		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		{APIKey: "key-2"},
 	}
 	auth := config.AuthConfig{"openai": creds}
@@ -1486,7 +1486,7 @@ func TestClientComplete401OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -2335,7 +2335,7 @@ func TestCompleteStreamCoolingStatusUsesMergedRoundWait(t *testing.T) {
 }
 
 func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2344,7 +2344,7 @@ func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
 	defer refreshServer.Close()
 
 	creds := []config.ProviderCredential{
-		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		{APIKey: "key-2"},
 	}
 	auth := config.AuthConfig{"openai": creds}
@@ -2355,7 +2355,7 @@ func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -2383,7 +2383,7 @@ func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
 }
 
 func TestClientComplete403OAuthRefreshRotatesToNextKey(t *testing.T) {
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2392,7 +2392,7 @@ func TestClientComplete403OAuthRefreshRotatesToNextKey(t *testing.T) {
 	defer refreshServer.Close()
 
 	creds := []config.ProviderCredential{
-		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		{APIKey: "key-2"},
 	}
 	auth := config.AuthConfig{"openai": creds}
@@ -2403,7 +2403,7 @@ func TestClientComplete403OAuthRefreshRotatesToNextKey(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -2585,7 +2585,7 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 }
 
 func TestClientCompleteStream401OAuthRefreshThenFallback(t *testing.T) {
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2594,7 +2594,7 @@ func TestClientCompleteStream401OAuthRefreshThenFallback(t *testing.T) {
 	defer refreshServer.Close()
 
 	creds := []config.ProviderCredential{
-		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-1", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		{APIKey: "key-2"},
 	}
 	auth := config.AuthConfig{"openai": creds}
@@ -2605,7 +2605,7 @@ func TestClientCompleteStream401OAuthRefreshThenFallback(t *testing.T) {
 			"gpt-test": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, config.ExtractAPIKeys(creds))
-	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
+	primaryCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
 
 	primaryImpl := &recordingProvider{}

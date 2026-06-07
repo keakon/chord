@@ -69,7 +69,7 @@ func (p *stubProviderImpl) CompleteStream(
 func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pollCtxCh := make(chan context.Context, 1)
-	access := testOAuthJWTForCommonTest(`{"chatgpt_account_id":"account-1"}`)
+	access := testOAuthJWTForCommonTest(`{"chatgpt_account_id":"account-1","chatgpt_user_id":"user-1"}`)
 	cache := &providerCache{
 		ctx:      ctx,
 		m:        make(map[string]*llm.ProviderConfig),

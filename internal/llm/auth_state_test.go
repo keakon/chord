@@ -14,7 +14,7 @@ import (
 
 func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.CodexPrimaryUsedPct = 10
 		record.CodexPrimaryWindowMin = 60
@@ -29,11 +29,11 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	}
 
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex, KeyOrder: config.KeyOrderSmart}, []string{"key-a", "key-b"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}, {OAuth: &config.OAuthCredential{Access: "key-b", Refresh: "refresh-b", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-2"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}, {OAuth: &config.OAuthCredential{Access: "key-b", Refresh: "refresh-b", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-2__acc-2", AccountID: "acc-2"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
-		"key-b": {CredentialIndex: 1, AccountID: "acc-2", Access: "key-b", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-b": {CredentialIndex: 1, AccountUserID: "user-2__acc-2", AccountID: "acc-2", Access: "key-b", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
@@ -58,10 +58,10 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 	defer p.Close()
 
@@ -77,7 +77,7 @@ func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 	})
 
 	captured := time.Now()
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = captured.UnixMilli()
 		record.CodexPrimaryUsedPct = 25
@@ -105,10 +105,10 @@ func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 	defer p.Close()
 
@@ -123,7 +123,7 @@ func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) 
 		}
 	})
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 55
@@ -161,13 +161,13 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	auth := config.AuthConfig{"openai": {
-		{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
-		{OAuth: &config.OAuthCredential{Access: "key-b", Refresh: "refresh-b", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-2"}},
+		{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
+		{OAuth: &config.OAuthCredential{Access: "key-b", Refresh: "refresh-b", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-2__acc-2", AccountID: "acc-2"}},
 	}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
-		"key-b": {CredentialIndex: 1, AccountID: "acc-2", Access: "key-b", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-b": {CredentialIndex: 1, AccountUserID: "user-2__acc-2", AccountID: "acc-2", Access: "key-b", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 	defer p.Close()
 
@@ -182,7 +182,7 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 		}
 	})
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-2"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-2__acc-2", AccountID: "acc-2"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 90
@@ -214,10 +214,10 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 func TestProviderCloseStopsAuthStateMonitor(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 
 	p.mu.Lock()
@@ -242,14 +242,14 @@ func TestProviderCloseStopsAuthStateMonitor(t *testing.T) {
 func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
 	}, "")
 	defer p.Close()
 
-	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
 		record.CodexPrimaryUsedPct = 40
@@ -289,10 +289,10 @@ func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1", Status: config.OAuthStatusDeactivated}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1", Status: config.OAuthStatusDeactivated}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusDeactivated},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusDeactivated},
 	}, "")
 
 	p.mu.Lock()
@@ -306,7 +306,7 @@ func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"})
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"})
 	if !ok {
 		t.Fatal("expected auth.state record for key-a")
 	}
@@ -318,10 +318,10 @@ func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 func TestPersistAuthStateForKeyPreservesRuntimeDeactivatedStatus(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
-	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}}}}
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
 	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
-		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusNormal},
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli(), Status: config.OAuthStatusNormal},
 	}, "")
 
 	p.MarkDeactivated("key-a")
@@ -332,7 +332,7 @@ func TestPersistAuthStateForKeyPreservesRuntimeDeactivatedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"})
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"})
 	if !ok {
 		t.Fatal("expected auth.state record for key-a")
 	}

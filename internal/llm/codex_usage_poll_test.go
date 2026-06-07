@@ -266,7 +266,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing
 	// Mark the single key as Codex OAuth so polled snapshots can be associated with it.
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -277,7 +277,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineMissing(t *testing
 		"",
 		&authCfg,
 		&authMu,
-		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
 		"",
 	)
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
@@ -327,7 +327,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 	// Mark the single key as Codex OAuth so polled snapshots can be associated with it.
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -338,7 +338,7 @@ func TestCurrentRateLimitSnapshotForRefPrefersPolledWhenInlineStale(t *testing.T
 		"",
 		&authCfg,
 		&authMu,
-		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()}},
 		"",
 	)
 	if _, _, err := prov.SelectKeyWithContext(t.Context()); err != nil {
@@ -371,7 +371,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 	prov := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	authCfg := config.AuthConfig{
 		"openai": {
-			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}},
+			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
 		},
 	}
 	var authMu sync.Mutex
@@ -383,7 +383,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 		&authCfg,
 		&authMu,
 		map[string]OAuthKeySetup{
-			access: {CredentialIndex: 0, AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()},
+			access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: time.Now().Add(time.Hour).UnixMilli()},
 		},
 		"",
 	)
@@ -448,7 +448,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 		strings.TrimSuffix(authPath, ".yaml")+".state.yaml",
 		&auth,
 		&authMu,
-		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountID: "acc-1", Expires: 32503680000000}},
+		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: 32503680000000}},
 		"",
 	)
 	pollHit := make(chan struct{}, 1)
@@ -477,7 +477,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
 	state, err := config.LoadAuthState(statePath)
 	if err == nil {
-		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {
+		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {
 			t.Fatalf("polling auth failure changed persisted status to %q", record.Status)
 		}
 	}

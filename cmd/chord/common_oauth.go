@@ -9,9 +9,10 @@ import (
 )
 
 type oauthMetadataBackfill struct {
-	Match     config.OAuthCredentialMatch
-	AccountID string
-	Email     string
+	Match         config.OAuthCredentialMatch
+	AccountUserID string
+	AccountID     string
+	Email         string
 }
 
 func oauthRefreshStateKey(refresh string) string {
@@ -30,6 +31,7 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			continue
 		}
 		access := cred.OAuth.Access
+		accountUserID := ""
 		accountID := ""
 		email := ""
 		if access != "" {
@@ -37,8 +39,15 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			if accountID == "" {
 				return nil, nil, fmt.Errorf("OAuth access token at credential %d is missing account_id claim", credIdx)
 			}
+			accountUserID = config.ExtractOAuthAccountUserIDFromToken(access)
+			if accountUserID == "" {
+				return nil, nil, fmt.Errorf("OAuth access token at credential %d is missing account_user_id claims", credIdx)
+			}
 			if cred.OAuth.AccountID != "" && cred.OAuth.AccountID != accountID {
 				return nil, nil, fmt.Errorf("OAuth access token account_id %q does not match configured account_id %q at credential %d", accountID, cred.OAuth.AccountID, credIdx)
+			}
+			if cred.OAuth.AccountUserID != "" && cred.OAuth.AccountUserID != accountUserID {
+				return nil, nil, fmt.Errorf("OAuth access token account_user_id %q does not match configured account_user_id %q at credential %d", accountUserID, cred.OAuth.AccountUserID, credIdx)
 			}
 			email = config.ExtractOAuthEmailFromToken(access)
 			if cred.OAuth.Expires == 0 {
@@ -48,12 +57,17 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			if cred.OAuth.Refresh == "" {
 				continue
 			}
+			accountUserID = cred.OAuth.AccountUserID
 			accountID = cred.OAuth.AccountID
 		}
 		if email == "" {
 			email = cred.OAuth.Email
 		}
 		needsBackfill := false
+		if access == "" && cred.OAuth.AccountUserID == "" {
+			cred.OAuth.AccountUserID = accountUserID
+			needsBackfill = true
+		}
 		if cred.OAuth.AccountID == "" {
 			cred.OAuth.AccountID = accountID
 			needsBackfill = true
@@ -62,11 +76,12 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 			cred.OAuth.Email = email
 			needsBackfill = true
 		}
-		if needsBackfill && accountID != "" {
+		if needsBackfill && accountUserID != "" {
 			backfills = append(backfills, oauthMetadataBackfill{
-				Match:     config.OAuthCredentialMatch{AccountID: accountID, Access: access, CredentialIndex: &credIdx},
-				AccountID: accountID,
-				Email:     email,
+				Match:         config.OAuthCredentialMatch{AccountUserID: accountUserID, Access: access, CredentialIndex: &credIdx},
+				AccountUserID: accountUserID,
+				AccountID:     accountID,
+				Email:         email,
 			})
 		}
 		key := access
@@ -80,6 +95,7 @@ func oauthCredentialMap(creds []config.ProviderCredential) (map[string]llm.OAuth
 		}
 		result[key] = llm.OAuthKeySetup{
 			CredentialIndex:       credIdx,
+			AccountUserID:         accountUserID,
 			AccountID:             accountID,
 			Email:                 email,
 			Access:                access,
@@ -101,13 +117,17 @@ func persistOAuthMetadataBackfills(
 	backfills []oauthMetadataBackfill,
 ) error {
 	for _, backfill := range backfills {
-		if backfill.AccountID == "" {
+		if backfill.AccountUserID == "" {
 			continue
 		}
 		updatedAuth, _, changed, err := config.UpdateOAuthCredentialInFile(authPath, provider, backfill.Match, func(cred *config.OAuthCredential) (bool, error) {
 			dirty := false
 			if cred.AccountID == "" && backfill.AccountID != "" {
 				cred.AccountID = backfill.AccountID
+				dirty = true
+			}
+			if cred.Access == "" && cred.Refresh != "" && cred.AccountUserID == "" && backfill.AccountUserID != "" {
+				cred.AccountUserID = backfill.AccountUserID
 				dirty = true
 			}
 			if cred.Email == "" && backfill.Email != "" {

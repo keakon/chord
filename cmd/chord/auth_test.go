@@ -593,7 +593,7 @@ func TestRunAuthLoginDevice_OpenAICodexHeadlessSuccess(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(openAITokenResponse{
-				IDToken:      "header." + base64Payload(`{"chatgpt_account_id":"acc-123"}`) + ".sig",
+				IDToken:      "header." + base64Payload(`{"chatgpt_account_id":"acc-123","chatgpt_user_id":"user-123"}`) + ".sig",
 				AccessToken:  "access-123",
 				RefreshToken: "refresh-123",
 				ExpiresIn:    3600,
@@ -649,7 +649,7 @@ func TestRunOpenAICodexDeviceLoginWrapperSuccess(t *testing.T) {
 		case "/oauth/token":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(openAITokenResponse{
-				IDToken:      "header." + base64Payload(`{"chatgpt_account_id":"acc-123"}`) + ".sig",
+				IDToken:      "header." + base64Payload(`{"chatgpt_account_id":"acc-123","chatgpt_user_id":"user-123"}`) + ".sig",
 				AccessToken:  "access-123",
 				RefreshToken: "refresh-123",
 				ExpiresIn:    3600,
@@ -917,7 +917,7 @@ anthropic:
 
 	_, _, err := persistOAuthCredential(
 		"openai",
-		"header."+base64Payload(`{"chatgpt_account_id":"acc-123","email":"user@example.com"}`)+".sig",
+		"header."+base64Payload(`{"chatgpt_account_id":"acc-123","chatgpt_user_id":"user-123","email":"user@example.com"}`)+".sig",
 		"access-123",
 		"refresh-123",
 		3600,
@@ -942,6 +942,20 @@ anthropic:
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "account_user_id:") {
+		t.Fatalf("auth.yaml should not persist account_user_id for access credentials, got:\n%s", text)
+	}
+	statePath := filepath.Join(configHome, "auth.state.yaml")
+	stateData, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile(state): %v", err)
+	}
+	stateText := string(stateData)
+	for _, want := range []string{"user-123__acc-123:", "account_user_id: user-123__acc-123", "account_id: acc-123", "email: user@example.com"} {
+		if !strings.Contains(stateText, want) {
+			t.Fatalf("expected auth.state.yaml to contain %q, got:\n%s", want, stateText)
 		}
 	}
 }
@@ -1006,14 +1020,14 @@ func TestAuthStateListOnlyPrintsInvalidEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthStatePath: %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-normal", Email: "normal@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-normal__acc-normal", Email: "normal@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		return true, nil
 	})
 	if err != nil {
 		t.Fatalf("UpsertOAuthStateRecord(normal): %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-expired", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-expired__acc-expired", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusExpired
 		return true, nil
 	})
@@ -1057,7 +1071,7 @@ func TestAuthStateCleanPrintsRemovedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthStatePath: %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", Email: "expired@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusExpired
 		return true, nil
 	})
@@ -1091,8 +1105,10 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	}
 	if err := os.WriteFile(authPath, []byte(`openai:
   - access: stale-access
+    account_user_id: user-1__acc-1
     account_id: acc-1
   - access: good-access
+    account_user_id: user-2__acc-2
     account_id: acc-2
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
@@ -1101,8 +1117,7 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	if err != nil {
 		t.Fatalf("AuthStatePath: %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
-		record.AccountID = "acc-1"
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusExpired
 		return true, nil
 	})
@@ -1136,7 +1151,7 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-1"}); ok {
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1"}); ok {
 		t.Fatal("expired state record should be removed")
 	}
 }
@@ -1210,7 +1225,8 @@ func TestAuthStateCleanRemovesOrphanState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthStatePath: %v", err)
 	}
-	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountID: "acc-orphan", Email: "orphan@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+	orphanRefreshKey := config.OAuthRefreshStateKey("orphan-refresh")
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", RefreshSHA256: orphanRefreshKey, Email: "orphan@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		return true, nil
 	})
@@ -1234,7 +1250,7 @@ func TestAuthStateCleanRemovesOrphanState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountID: "acc-orphan"}); ok {
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", RefreshSHA256: orphanRefreshKey}); ok {
 		t.Fatal("orphan state record should be removed")
 	}
 	auth, err := config.LoadAuthConfig(authPath)
@@ -1299,18 +1315,18 @@ func TestOpenBrowserCommandPlansPerPlatform(t *testing.T) {
 }
 
 func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
-	entry := config.RemovedOAuthStateEntry{AccountID: "acct-1", Email: "user@example.com"}
+	entry := config.RemovedOAuthStateEntry{AccountUserID: "user-1__acct-1", AccountID: "acct-1", Email: "user@example.com"}
 	tests := []struct {
 		name string
 		cred *config.OAuthCredential
 		want bool
 	}{
 		{name: "nil", cred: nil, want: false},
-		{name: "account id", cred: &config.OAuthCredential{AccountID: "acct-1"}, want: true},
+		{name: "account user id", cred: &config.OAuthCredential{AccountUserID: "user-1__acct-1", AccountID: "acct-1"}, want: true},
 		{name: "email only does not match", cred: &config.OAuthCredential{Email: "user@example.com"}, want: false},
-		{name: "different account with same email does not match", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "user@example.com"}, want: false},
+		{name: "different account with same email does not match", cred: &config.OAuthCredential{AccountUserID: "user-2__acct-2", AccountID: "acct-2", Email: "user@example.com"}, want: false},
 		{name: "empty fields do not match", cred: &config.OAuthCredential{}, want: false},
-		{name: "different", cred: &config.OAuthCredential{AccountID: "acct-2", Email: "other@example.com", Access: "other"}, want: false},
+		{name: "different", cred: &config.OAuthCredential{AccountUserID: "user-2__acct-2", AccountID: "acct-2", Email: "other@example.com", Access: "other"}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1322,7 +1338,7 @@ func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 }
 
 func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
-	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token"}, "email": "token@example.com"}`)
+	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-token", "chatgpt_user_id": "user-token"}, "email": "token@example.com"}`)
 	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access}}})
 	if err != nil {
 		t.Fatalf("oauthCredentialMap: %v", err)
@@ -1332,16 +1348,16 @@ func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	if !ok {
 		t.Fatalf("OAuth map missing access token key: %#v", got)
 	}
-	if setup.AccountID != "acct-token" || setup.Email != "token@example.com" {
+	if setup.AccountUserID != "user-token__acct-token" || setup.AccountID != "acct-token" || setup.Email != "token@example.com" {
 		t.Fatalf("setup metadata = (%q, %q), want token metadata", setup.AccountID, setup.Email)
 	}
 	if len(backfills) != 1 || backfills[0].AccountID != "acct-token" || backfills[0].Email != "token@example.com" {
-		t.Fatalf("backfills = %#v, want parsed metadata", backfills)
+		t.Fatalf("backfills = %#v, want non-user metadata only", backfills)
 	}
 }
 
 func TestOAuthCredentialMapRejectsAccessTokenWithoutAccountID(t *testing.T) {
-	access := testUnsignedJWT(`{"exp":4102444800,"email":"token@example.com"}`)
+	access := testUnsignedJWT(`{"chatgpt_user_id":"user-token","exp":4102444800,"email":"token@example.com"}`)
 	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Email: "stored@example.com"}}})
 	if err == nil {
 		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want missing account_id error", got, backfills)
@@ -1352,12 +1368,23 @@ func TestOAuthCredentialMapRejectsAccessTokenWithoutAccountID(t *testing.T) {
 }
 
 func TestOAuthCredentialMapRejectsMismatchedAccountID(t *testing.T) {
-	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token"}}`)
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"}}`)
 	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-other"}}})
 	if err == nil {
 		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want mismatch error", got, backfills)
 	}
 	if !strings.Contains(err.Error(), "does not match configured account_id") {
+		t.Fatalf("error = %v, want mismatch", err)
+	}
+}
+
+func TestOAuthCredentialMapRejectsMismatchedAccountUserID(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"}}`)
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountUserID: "user-other__acct-token"}}})
+	if err == nil {
+		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want mismatch error", got, backfills)
+	}
+	if !strings.Contains(err.Error(), "does not match configured account_user_id") {
 		t.Fatalf("error = %v, want mismatch", err)
 	}
 }
@@ -1387,8 +1414,8 @@ func TestOAuthCredentialMapRefreshOnlyUsesRefreshStateKey(t *testing.T) {
 }
 
 func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.T) {
-	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-existing"}, "email": "token@example.com"}`)
-	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-existing", Email: "existing@example.com"}}})
+	access := testUnsignedJWT(`{"https://api.openai.com/auth": {"chatgpt_account_id": "acct-existing", "chatgpt_user_id": "user-existing"}, "email": "token@example.com"}`)
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountUserID: "user-existing__acct-existing", AccountID: "acct-existing", Email: "existing@example.com"}}})
 	if err != nil {
 		t.Fatalf("oauthCredentialMap: %v", err)
 	}
@@ -1404,7 +1431,7 @@ func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.
 
 func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token"},"email":"token@example.com"}`)
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"},"email":"token@example.com"}`)
 	auth := config.AuthConfig{
 		"codex": {
 			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-123"}},

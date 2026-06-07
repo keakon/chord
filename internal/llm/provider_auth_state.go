@@ -18,11 +18,12 @@ func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
 	if ks == nil || ks.OAuthInfo == nil {
 		return config.OAuthStateKey{}
 	}
-	if strings.TrimSpace(ks.OAuthInfo.AccountID) == "" && strings.TrimSpace(ks.OAuthInfo.RefreshSHA256) == "" {
+	if strings.TrimSpace(ks.OAuthInfo.AccountUserID) == "" && strings.TrimSpace(ks.OAuthInfo.RefreshSHA256) == "" {
 		return config.OAuthStateKey{}
 	}
 	return config.OAuthStateKey{
 		Provider:      p.name,
+		AccountUserID: ks.OAuthInfo.AccountUserID,
 		AccountID:     ks.OAuthInfo.AccountID,
 		RefreshSHA256: ks.OAuthInfo.RefreshSHA256,
 		Email:         ks.OAuthInfo.Email,
@@ -81,6 +82,9 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		if !ok {
 			p.clearPolledRateLimitForCredLocked(credIdx)
 			continue
+		}
+		if record.AccountUserID != "" {
+			ks.OAuthInfo.AccountUserID = record.AccountUserID
 		}
 		if record.AccountID != "" {
 			ks.OAuthInfo.AccountID = record.AccountID
@@ -236,12 +240,13 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		}
 	}
 	p.mu.Unlock()
-	if strings.TrimSpace(stateKey.AccountID) == "" && strings.TrimSpace(stateKey.RefreshSHA256) == "" {
+	if strings.TrimSpace(stateKey.AccountUserID) == "" && strings.TrimSpace(stateKey.RefreshSHA256) == "" {
 		return
 	}
 	state, updated, changed, err := config.UpsertOAuthStateRecord(p.authStatePath, stateKey, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
-		if stateKey.AccountID != "" {
+		if stateKey.AccountUserID != "" {
+			record.AccountUserID = firstNonEmptyOAuthAccess(stateKey.AccountUserID, record.AccountUserID)
 			record.AccountID = firstNonEmptyOAuthAccess(stateKey.AccountID, record.AccountID)
 		} else {
 			record.RefreshSHA256 = firstNonEmptyOAuthAccess(stateKey.RefreshSHA256, record.RefreshSHA256)

@@ -224,7 +224,7 @@ func TestResolveModelRefReusesCachedProviderImpl(t *testing.T) {
 
 func TestTestProvidersWiresOAuthMetadataForCodexPreset(t *testing.T) {
 	creds := []config.ProviderCredential{{OAuth: &config.OAuthCredential{
-		Access:    testOAuthJWTForCommonTest(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test"}}`),
+		Access:    testOAuthJWTForCommonTest(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test","chatgpt_user_id":"user-test"}}`),
 		Refresh:   "refresh-token",
 		Expires:   32503680000000,
 		AccountID: "acc-test",

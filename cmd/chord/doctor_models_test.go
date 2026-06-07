@@ -1021,8 +1021,8 @@ func TestRunDoctorModelsUnsupportedProviderTypeIsConfigError(t *testing.T) {
 
 func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	accessA := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
-	accessB := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
+	accessA := testUnsignedJWT(`{"chatgpt_account_id":"acc-a","chatgpt_user_id":"user-a"}`)
+	accessB := testUnsignedJWT(`{"chatgpt_account_id":"acc-b","chatgpt_user_id":"user-b"}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: refresh-a
     access: %s
@@ -1077,9 +1077,9 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 
 func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	oldAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
-	siblingAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-b"}`)
-	newAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a"}`)
+	oldAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a","chatgpt_user_id":"user-a"}`)
+	siblingAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-b","chatgpt_user_id":"user-b"}`)
+	newAccess := testUnsignedJWT(`{"chatgpt_account_id":"acc-a","chatgpt_user_id":"user-a"}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
     access: %s

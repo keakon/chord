@@ -52,6 +52,7 @@ type OAuthCredential struct {
 	Refresh               string                `yaml:"refresh,omitempty"`
 	Access                string                `yaml:"access,omitempty"`
 	Expires               int64                 `yaml:"expires,omitempty"`
+	AccountUserID         string                `yaml:"account_user_id,omitempty"`
 	AccountID             string                `yaml:"account_id,omitempty"`
 	Email                 string                `yaml:"email,omitempty"`
 	Status                OAuthCredentialStatus `yaml:"-"`
@@ -60,14 +61,20 @@ type OAuthCredential struct {
 }
 
 type oauthTokenClaims struct {
-	ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
-	Email            string `json:"email,omitempty"`
-	ExpiresAt        int64  `json:"exp,omitempty"`
-	Organizations    []struct {
+	ChatGPTAccountID     string `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID        string `json:"chatgpt_user_id,omitempty"`
+	ChatGPTAccountUserID string `json:"chatgpt_account_user_id,omitempty"`
+	UserID               string `json:"user_id,omitempty"`
+	Email                string `json:"email,omitempty"`
+	ExpiresAt            int64  `json:"exp,omitempty"`
+	Organizations        []struct {
 		ID string `json:"id"`
 	} `json:"organizations,omitempty"`
 	OpenAIAuth struct {
-		ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
+		ChatGPTAccountID     string `json:"chatgpt_account_id,omitempty"`
+		ChatGPTUserID        string `json:"chatgpt_user_id,omitempty"`
+		ChatGPTAccountUserID string `json:"chatgpt_account_user_id,omitempty"`
+		UserID               string `json:"user_id,omitempty"`
 	} `json:"https://api.openai.com/auth"`
 	OpenAIProfile struct {
 		Email string `json:"email,omitempty"`
@@ -85,6 +92,34 @@ func extractOAuthAccountIDFromClaims(claims oauthTokenClaims) string {
 		return claims.Organizations[0].ID
 	}
 	return ""
+}
+
+func extractOAuthUserIDFromClaims(claims oauthTokenClaims) string {
+	if claims.ChatGPTUserID != "" {
+		return claims.ChatGPTUserID
+	}
+	if claims.OpenAIAuth.ChatGPTUserID != "" {
+		return claims.OpenAIAuth.ChatGPTUserID
+	}
+	if claims.UserID != "" {
+		return claims.UserID
+	}
+	return claims.OpenAIAuth.UserID
+}
+
+func extractOAuthAccountUserIDFromClaims(claims oauthTokenClaims) string {
+	if claims.ChatGPTAccountUserID != "" {
+		return claims.ChatGPTAccountUserID
+	}
+	if claims.OpenAIAuth.ChatGPTAccountUserID != "" {
+		return claims.OpenAIAuth.ChatGPTAccountUserID
+	}
+	accountID := extractOAuthAccountIDFromClaims(claims)
+	userID := extractOAuthUserIDFromClaims(claims)
+	if accountID == "" || userID == "" {
+		return ""
+	}
+	return userID + "__" + accountID
 }
 
 // extractOAuthClaims decodes the payload of an OpenAI OAuth JWT without
@@ -109,6 +144,10 @@ func extractOAuthClaims(token string) oauthTokenClaims {
 // expected claims.
 func ExtractOAuthAccountIDFromToken(token string) string {
 	return extractOAuthAccountIDFromClaims(extractOAuthClaims(token))
+}
+
+func ExtractOAuthAccountUserIDFromToken(token string) string {
+	return extractOAuthAccountUserIDFromClaims(extractOAuthClaims(token))
 }
 
 // ExtractOAuthEmailFromToken extracts the email claim from an OpenAI OAuth JWT
@@ -175,6 +214,11 @@ func (c *ProviderCredential) UnmarshalYAML(value *yaml.Node) error {
 		var o OAuthCredential
 		if err := value.Decode(&o); err != nil {
 			return err
+		}
+		if o.Access != "" {
+			if o.AccountUserID == "" {
+				o.AccountUserID = ExtractOAuthAccountUserIDFromToken(o.Access)
+			}
 		}
 		if o.AccountID == "" && o.Access != "" {
 			o.AccountID = ExtractOAuthAccountIDFromToken(o.Access)
@@ -256,8 +300,8 @@ func findMatchingOAuthStateRecord(state AuthStateFile, provider string, cred *OA
 	if cred == nil {
 		return OAuthStateRecord{}, false
 	}
-	if cred.AccountID != "" {
-		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountID: cred.AccountID})
+	if cred.AccountUserID != "" {
+		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountUserID: cred.AccountUserID})
 	}
 	if cred.Refresh != "" {
 		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, RefreshSHA256: OAuthRefreshStateKey(cred.Refresh)})
@@ -523,6 +567,13 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 	if accountID == "" {
 		accountID = cred.AccountID
 	}
+	accountUserID := extractOAuthAccountUserIDFromClaims(idClaims)
+	if accountUserID == "" {
+		accountUserID = extractOAuthAccountUserIDFromClaims(accessClaims)
+	}
+	if accountUserID == "" {
+		accountUserID = cred.AccountUserID
+	}
 
 	email := idClaims.Email
 	if email == "" {
@@ -539,11 +590,12 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 	}
 
 	return &OAuthCredential{
-		Access:    access,
-		Refresh:   refresh,
-		Expires:   expires,
-		AccountID: accountID,
-		Email:     email,
+		Access:        access,
+		Refresh:       refresh,
+		Expires:       expires,
+		AccountUserID: accountUserID,
+		AccountID:     accountID,
+		Email:         email,
 		// Status is cleared on successful refresh (credential is now valid)
 	}
 }

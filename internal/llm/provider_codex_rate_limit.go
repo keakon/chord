@@ -270,7 +270,7 @@ func (p *ProviderConfig) persistCodexResetHintsForKey(key string, primaryResetAt
 		return false
 	}
 	credentialIndex := ks.OAuthInfo.CredentialIndex
-	match := config.OAuthCredentialMatch{AccountID: ks.OAuthInfo.AccountID, Access: ks.Key, CredentialIndex: &credentialIndex}
+	match := config.OAuthCredentialMatch{AccountUserID: ks.OAuthInfo.AccountUserID, AccountID: ks.OAuthInfo.AccountID, Access: ks.Key, CredentialIndex: &credentialIndex}
 	if primaryResetAt == 0 && secondaryResetAt == 0 {
 		ks.SoftCooldownUntil = time.Time{}
 	} else if until := codexSoftCooldownUntilFromMillis(primaryResetAt, secondaryResetAt, time.Now()); !until.IsZero() {

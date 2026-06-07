@@ -15,6 +15,7 @@ openai:
   - refresh: old-refresh
     access: old-access
     expires: 111
+    account_user_id: user-1__acc-1
     account_id: acc-1
     # email field comment
     email: old@example.com
@@ -25,11 +26,12 @@ anthropic:
 	t.Setenv("OPENAI_API_KEY", "env-openai-key")
 
 	cred := &OAuthCredential{
-		Refresh:   "new-refresh",
-		Access:    "new-access",
-		Expires:   222,
-		AccountID: "acc-1",
-		Email:     "new@example.com",
+		Refresh:       "new-refresh",
+		Access:        "new-access",
+		Expires:       222,
+		AccountUserID: "user-1__acc-1",
+		AccountID:     "acc-1",
+		Email:         "new@example.com",
 	}
 
 	auth, err := UpsertOAuthCredentialInFile(path, "openai", cred)
@@ -77,11 +79,12 @@ func TestUpsertOAuthCredentialInFile_AppendsWhenExistingSlotHasNoAccountID(t *te
 `)
 
 	cred := &OAuthCredential{
-		Refresh:   "new-refresh",
-		Access:    "new-access",
-		Expires:   222,
-		AccountID: "acc-1",
-		Email:     "new@example.com",
+		Refresh:       "new-refresh",
+		Access:        "new-access",
+		Expires:       222,
+		AccountUserID: "user-1__acc-1",
+		AccountID:     "acc-1",
+		Email:         "new@example.com",
 	}
 
 	auth, err := UpsertOAuthCredentialInFile(path, "openai", cred)
@@ -101,19 +104,52 @@ func TestUpsertOAuthCredentialInFile_AppendsWhenExistingSlotHasNoAccountID(t *te
 	}
 }
 
-func TestUpsertOAuthCredentialInFile_RejectsMissingAccountID(t *testing.T) {
+func TestUpsertOAuthCredentialInFile_RefreshOnlyDoesNotMergeTeamUsersSharingAccountID(t *testing.T) {
+	path := writeAuthFixture(t, `openai:
+  - refresh: refresh-a
+    expires: 111
+    account_user_id: user-a__team-1
+    account_id: team-1
+    email: user-a@example.com
+`)
+
+	cred := &OAuthCredential{
+		Refresh:       "refresh-b",
+		Expires:       222,
+		AccountUserID: "user-b__team-1",
+		AccountID:     "team-1",
+		Email:         "user-b@example.com",
+	}
+
+	auth, err := UpsertOAuthCredentialInFile(path, "openai", cred)
+	if err != nil {
+		t.Fatalf("UpsertOAuthCredentialInFile: %v", err)
+	}
+	creds := auth["openai"]
+	if len(creds) != 2 {
+		t.Fatalf("expected same-team users to remain separate, got %#v", creds)
+	}
+	if got := creds[0].OAuth; got == nil || got.AccountUserID != "user-a__team-1" || got.Refresh != "refresh-a" {
+		t.Fatalf("first team user was overwritten: %#v", got)
+	}
+	if got := creds[1].OAuth; got == nil || got.AccountUserID != "user-b__team-1" || got.AccountID != "team-1" || got.Refresh != "refresh-b" {
+		t.Fatalf("second team user not appended correctly: %#v", got)
+	}
+}
+
+func TestUpsertOAuthCredentialInFile_DoesNotRequireAccountUserIDForAccessCredential(t *testing.T) {
 	path := writeAuthFixture(t, "")
 
-	_, err := UpsertOAuthCredentialInFile(path, "openai", &OAuthCredential{
+	auth, err := UpsertOAuthCredentialInFile(path, "openai", &OAuthCredential{
 		Refresh: "refresh-token",
 		Access:  "access-token",
 		Expires: 111,
 	})
-	if err == nil {
-		t.Fatal("expected missing account_id to be rejected")
+	if err != nil {
+		t.Fatalf("UpsertOAuthCredentialInFile: %v", err)
 	}
-	if !strings.Contains(err.Error(), "account_id is required") {
-		t.Fatalf("unexpected error: %v", err)
+	if got := auth["openai"][0].OAuth; got == nil || got.Access != "access-token" || got.AccountUserID != "" {
+		t.Fatalf("oauth credential = %#v, want access token without persisted account_user_id", got)
 	}
 }
 
@@ -195,15 +231,18 @@ func TestUpdateOAuthCredentialInFile_PrefersAccessAndCredentialIndexWhenAccountI
   - refresh: refresh-a
     access: access-a
     expires: 111
+    account_user_id: user-a__shared-acc
     account_id: shared-acc
   - refresh: refresh-b
     access: access-b
     expires: 222
+    account_user_id: user-b__shared-acc
     account_id: shared-acc
 `)
 
 	credentialIndex := 1
 	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{
+		AccountUserID:   "user-b__shared-acc",
 		AccountID:       "shared-acc",
 		Access:          "access-b",
 		CredentialIndex: &credentialIndex,
@@ -243,6 +282,7 @@ openai:
   - refresh: refresh-token
     access: access-token
     expires: 111
+    account_user_id: user-1__acc-1
     account_id: acc-1
     # provider-local hints
     codex_primary_reset_at: 1000
@@ -251,7 +291,7 @@ anthropic:
   - sk-ant-test
 `)
 
-	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{AccountID: "acc-1"}, func(cred *OAuthCredential) (bool, error) {
+	auth, updated, changed, err := UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{Access: "access-token"}, func(cred *OAuthCredential) (bool, error) {
 		cred.CodexPrimaryResetAt = 3333
 		cred.CodexSecondaryResetAt = 4444
 		return true, nil
@@ -269,7 +309,7 @@ anthropic:
 		t.Fatalf("auth config oauth = %#v, want reset hints 3333/4444", got)
 	}
 
-	auth, updated, changed, err = UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{AccountID: "acc-1"}, func(cred *OAuthCredential) (bool, error) {
+	auth, updated, changed, err = UpdateOAuthCredentialInFile(path, "openai", OAuthCredentialMatch{Access: "access-token"}, func(cred *OAuthCredential) (bool, error) {
 		cred.CodexPrimaryResetAt = 0
 		cred.CodexSecondaryResetAt = 0
 		return true, nil

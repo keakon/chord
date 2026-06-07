@@ -14,10 +14,11 @@ import (
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
-// AccountID is used directly as the account-level key below the provider.
+// AccountUserID is used directly as the user-in-workspace key below the provider.
 // RefreshSHA256 is only used for refresh-only credentials before account_id is known.
 type OAuthStateKey struct {
 	Provider      string
+	AccountUserID string
 	AccountID     string
 	RefreshSHA256 string
 	Email         string
@@ -25,6 +26,7 @@ type OAuthStateKey struct {
 
 // OAuthStateRecord stores dynamic OAuth runtime state shared across processes.
 type OAuthStateRecord struct {
+	AccountUserID           string                `yaml:"account_user_id,omitempty"`
 	AccountID               string                `yaml:"account_id,omitempty"`
 	Email                   string                `yaml:"email,omitempty"`
 	RefreshSHA256           string                `yaml:"refresh_sha256,omitempty"`
@@ -48,7 +50,7 @@ func (r OAuthStateRecord) IsValid() bool {
 	return r.Status.IsValid()
 }
 
-// AuthStateFile is the on-disk shared runtime state keyed by provider then account_id.
+// AuthStateFile is the on-disk shared runtime state keyed by provider then account_user_id.
 type AuthStateFile map[string]map[string]OAuthStateRecord
 
 func AuthStatePath() (string, error) {
@@ -64,10 +66,13 @@ func OAuthRefreshStateKey(refresh string) string {
 }
 
 func OAuthStateRecordKey(key OAuthStateKey) string {
+	if accountUserID := strings.TrimSpace(key.AccountUserID); accountUserID != "" {
+		return accountUserID
+	}
 	if key.RefreshSHA256 != "" {
 		return normalizeOAuthRefreshStateKey(key.RefreshSHA256)
 	}
-	return strings.TrimSpace(key.AccountID)
+	return ""
 }
 
 func normalizeOAuthRefreshStateKey(value string) string {
@@ -191,6 +196,12 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 			state[provider] = make(map[string]OAuthStateRecord)
 		}
 		rec := state[provider][recordKey]
+		if strings.TrimSpace(key.AccountUserID) != "" {
+			rec.AccountUserID = strings.TrimSpace(key.AccountUserID)
+		}
+		if strings.TrimSpace(key.AccountID) != "" {
+			rec.AccountID = strings.TrimSpace(key.AccountID)
+		}
 		rec.Email = strings.TrimSpace(key.Email)
 		changed, err := mutate(&rec)
 		if err != nil {
@@ -239,6 +250,7 @@ func RemoveOAuthStateRecord(path string, key OAuthStateKey) (AuthStateFile, bool
 type RemovedOAuthStateEntry struct {
 	Provider      string
 	StateKey      string
+	AccountUserID string
 	AccountID     string
 	RefreshSHA256 string
 	Email         string
@@ -248,6 +260,9 @@ type RemovedOAuthStateEntry struct {
 func (e RemovedOAuthStateEntry) DisplayName() string {
 	if email := strings.TrimSpace(e.Email); email != "" {
 		return email
+	}
+	if accountUserID := strings.TrimSpace(e.AccountUserID); accountUserID != "" {
+		return accountUserID
 	}
 	if accountID := strings.TrimSpace(e.AccountID); accountID != "" {
 		return accountID
@@ -259,6 +274,7 @@ func (e RemovedOAuthStateEntry) DisplayName() string {
 }
 
 func RemovedOAuthStateEntryFromRecord(provider, stateKey string, record OAuthStateRecord) RemovedOAuthStateEntry {
+	accountUserID := strings.TrimSpace(record.AccountUserID)
 	accountID := strings.TrimSpace(record.AccountID)
 	refreshSHA256 := strings.TrimSpace(record.RefreshSHA256)
 	if refreshSHA256 == "" && strings.HasPrefix(stateKey, "refresh_sha256:") {
@@ -266,12 +282,13 @@ func RemovedOAuthStateEntryFromRecord(provider, stateKey string, record OAuthSta
 	} else if refreshSHA256 != "" {
 		refreshSHA256 = normalizeOAuthRefreshStateKey(refreshSHA256)
 	}
-	if accountID == "" && refreshSHA256 == "" {
-		accountID = strings.TrimSpace(stateKey)
+	if accountUserID == "" && accountID == "" && refreshSHA256 == "" {
+		accountUserID = strings.TrimSpace(stateKey)
 	}
 	return RemovedOAuthStateEntry{
 		Provider:      provider,
 		StateKey:      stateKey,
+		AccountUserID: accountUserID,
 		AccountID:     accountID,
 		RefreshSHA256: refreshSHA256,
 		Email:         record.Email,
@@ -327,7 +344,10 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 				continue
 			}
 			record.Email = strings.TrimSpace(record.Email)
+			record.AccountUserID = strings.TrimSpace(record.AccountUserID)
+			record.AccountID = strings.TrimSpace(record.AccountID)
 			if strings.HasPrefix(recordKey, "refresh_sha256:") {
+				record.AccountUserID = ""
 				record.AccountID = ""
 				record.RefreshSHA256 = recordKey
 				normalizedEntries[recordKey] = record
@@ -336,7 +356,9 @@ func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 			if strings.Contains(recordKey, ":") {
 				continue
 			}
-			record.AccountID = ""
+			if record.AccountUserID == "" {
+				record.AccountUserID = recordKey
+			}
 			record.RefreshSHA256 = ""
 			normalizedEntries[recordKey] = record
 		}
@@ -362,6 +384,7 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 	}
 	record, ok := entries[recordKey]
 	if ok {
+		record.AccountUserID = strings.TrimSpace(key.AccountUserID)
 		record.AccountID = strings.TrimSpace(key.AccountID)
 		record.RefreshSHA256 = strings.TrimSpace(key.RefreshSHA256)
 	}
@@ -369,6 +392,9 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 }
 
 func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord) OAuthStateRecord {
+	if incoming.AccountUserID != "" {
+		existing.AccountUserID = incoming.AccountUserID
+	}
 	if incoming.AccountID != "" {
 		existing.AccountID = incoming.AccountID
 	}
@@ -401,7 +427,7 @@ func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord)
 }
 
 func EqualOAuthStateRecord(a, b OAuthStateRecord) bool {
-	if a.AccountID != b.AccountID || a.RefreshSHA256 != b.RefreshSHA256 || a.Email != b.Email || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
+	if a.AccountUserID != b.AccountUserID || a.AccountID != b.AccountID || a.RefreshSHA256 != b.RefreshSHA256 || a.Email != b.Email || a.Expires != b.Expires || a.Status != b.Status || a.UpdatedAt != b.UpdatedAt || a.LastWarmupAt != b.LastWarmupAt || a.CodexPrimaryUsedPct != b.CodexPrimaryUsedPct || a.CodexPrimaryWindowMin != b.CodexPrimaryWindowMin || a.CodexPrimaryResetAt != b.CodexPrimaryResetAt || a.CodexSecondaryUsedPct != b.CodexSecondaryUsedPct || a.CodexSecondaryWindowMin != b.CodexSecondaryWindowMin || a.CodexSecondaryResetAt != b.CodexSecondaryResetAt || a.CodexBalance != b.CodexBalance {
 		return false
 	}
 	if (a.CodexHasCredits == nil) != (b.CodexHasCredits == nil) {

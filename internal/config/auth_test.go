@@ -231,6 +231,53 @@ func TestExtractOAuthAccountIDFromToken(t *testing.T) {
 	}
 }
 
+func TestExtractOAuthAccountUserIDFromToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{
+			name:  "top level account-user claim",
+			token: testJWT(`{"chatgpt_account_user_id":"acct-user-top","https://api.openai.com/auth":{"chatgpt_account_user_id":"acct-user-nested","chatgpt_account_id":"acc-nested","chatgpt_user_id":"user-nested"}}`),
+			want:  "acct-user-top",
+		},
+		{
+			name:  "nested account-user claim",
+			token: testJWT(`{"https://api.openai.com/auth":{"chatgpt_account_user_id":"acct-user-nested","chatgpt_account_id":"acc-nested","chatgpt_user_id":"user-nested"}}`),
+			want:  "acct-user-nested",
+		},
+		{
+			name:  "derived from chatgpt user and account claims",
+			token: testJWT(`{"chatgpt_user_id":"user-top","chatgpt_account_id":"acc-top"}`),
+			want:  "user-top__acc-top",
+		},
+		{
+			name:  "derived from generic user and organization fallback",
+			token: testJWT(`{"user_id":"user-generic","organizations":[{"id":"org-123"}]}`),
+			want:  "user-generic__org-123",
+		},
+		{
+			name:  "missing user claim",
+			token: testJWT(`{"chatgpt_account_id":"acc-only"}`),
+			want:  "",
+		},
+		{
+			name:  "invalid token",
+			token: "not-a-jwt",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractOAuthAccountUserIDFromToken(tt.token); got != tt.want {
+				t.Fatalf("ExtractOAuthAccountUserIDFromToken() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractOAuthEmailFromToken(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -254,7 +301,7 @@ func TestExtractOAuthEmailFromToken(t *testing.T) {
 		},
 		{
 			name:  "no email claim",
-			token: testJWT(`{"chatgpt_account_id":"acc-1"}`),
+			token: testJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`),
 			want:  "",
 		},
 		{
@@ -307,7 +354,7 @@ func TestLoadAuthConfig_Mixed(t *testing.T) {
 func TestExtractAPIKeys(t *testing.T) {
 	creds := []ProviderCredential{
 		{APIKey: "key1"},
-		{OAuth: &OAuthCredential{Refresh: "r", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 123}},
+		{OAuth: &OAuthCredential{Refresh: "r", Access: testJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`), Expires: 123}},
 		{APIKey: "key2"},
 		{APIKey: ""},
 	}
@@ -323,7 +370,7 @@ func TestExtractAPIKeys(t *testing.T) {
 
 func TestExtractAPIKeys_OAuth(t *testing.T) {
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 9999999999000}},
+		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`), Expires: 9999999999000}},
 		{APIKey: "plain-key"},
 	}
 	keys := ExtractAPIKeys(creds)
@@ -340,7 +387,7 @@ func TestExtractAPIKeys_OAuth(t *testing.T) {
 
 func TestExtractAPIKeys_OAuthDeactivatedStillIncludedForDeferredFiltering(t *testing.T) {
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1"}`), Expires: 9999999999000, Status: OAuthStatusDeactivated}},
+		{OAuth: &OAuthCredential{Refresh: "refresh-tok", Access: testJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`), Expires: 9999999999000, Status: OAuthStatusDeactivated}},
 	}
 	keys := ExtractAPIKeys(creds)
 	if len(keys) != 1 || keys[0] == "" {
@@ -360,7 +407,7 @@ func TestExtractAPIKeys_OAuthWithoutAccountIDSkipped(t *testing.T) {
 
 func TestExtractAPIKeys_OAuthMismatchedAccountIDSkipped(t *testing.T) {
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Access: testJWT(`{"chatgpt_account_id":"acc-token"}`), AccountID: "acc-other", Expires: 9999999999000}},
+		{OAuth: &OAuthCredential{Access: testJWT(`{"chatgpt_account_id":"acc-token","chatgpt_user_id":"user-token"}`), AccountID: "acc-other", Expires: 9999999999000}},
 	}
 	keys := ExtractAPIKeys(creds)
 	if len(keys) != 0 {

@@ -86,13 +86,14 @@ func TestSelectKey_DeactivatedOnlyOAuthKeysReturnsNoUsableKeys(t *testing.T) {
 func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(time.Hour).UnixMilli()
-	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
-	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
+	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
+	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1","exp":4102444800}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   # primary oauth comment
   - refresh: old-refresh
     access: %s
     expires: %d
+    account_user_id: user-1__acc-1
     account_id: acc-1
     codex_primary_reset_at: 111
     codex_secondary_reset_at: 222
@@ -100,9 +101,10 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
   - refresh: sibling-refresh
     access: %s
     expires: %d
+    account_user_id: user-2__acc-2
     account_id: acc-2
     email: sibling@example.com
-`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2","chatgpt_user_id":"user-2"}`), expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(initial auth): %v", err)
 	}
 
@@ -122,6 +124,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
 		oldAccess: {
 			CredentialIndex:       0,
+			AccountUserID:         "user-1__acc-1",
 			AccountID:             "acc-1",
 			Expires:               auth["openai"][0].OAuth.Expires,
 			CodexPrimaryResetAt:   auth["openai"][0].OAuth.CodexPrimaryResetAt,
@@ -134,6 +137,7 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
   - refresh: old-refresh
     access: %s
     expires: %d
+    account_user_id: user-1__acc-1
     account_id: acc-1
     codex_primary_reset_at: 333
     codex_secondary_reset_at: 444
@@ -141,9 +145,10 @@ func TestTryRefreshOAuthKey_PreservesLatestAuthFileChanges(t *testing.T) {
   - refresh: sibling-refresh
     access: %s
     expires: %d
+    account_user_id: user-2__acc-2
     account_id: acc-2
     email: external@example.com
-`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2"}`), expires), 0o600); err != nil {
+`, oldAccess, expires, testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2","chatgpt_user_id":"user-2"}`), expires), 0o600); err != nil {
 		t.Fatalf("WriteFile(latest auth): %v", err)
 	}
 
@@ -211,12 +216,12 @@ func TestSetOAuthRefresherRefreshOnlyBindsByRefreshStateKey(t *testing.T) {
 
 func TestSelectKeyUsesExistingOAuthAccessTokenWithoutPreRefresh(t *testing.T) {
 	expires := time.Now().Add(-time.Minute).UnixMilli()
-	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
-		Access:    access,
-		Refresh:   "refresh-token",
-		Expires:   expires,
-		AccountID: "acc-1",
+		Access:        access,
+		Refresh:       "refresh-token",
+		Expires:       expires,
+		AccountUserID: "user-1__acc-1", AccountID: "acc-1",
 	}}}}
 	var authMu sync.Mutex
 	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +231,7 @@ func TestSelectKeyUsesExistingOAuthAccessTokenWithoutPreRefresh(t *testing.T) {
 
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access})
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
-		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
@@ -296,10 +301,63 @@ func TestSelectKeyRefreshOnlyUnrecoverableFailurePersistsRefreshState(t *testing
 	}
 }
 
+func TestSelectKeyRefreshOnlyBackfillsAccountUserIDAfterRefresh(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.yaml")
+	statePath := filepath.Join(dir, "auth.state.json")
+	if err := os.WriteFile(authPath, []byte(`openai:
+  - refresh: refresh-only
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1","email":"user@example.com","exp":4102444800}`)
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"`+newAccess+`","refresh_token":"refresh-new","expires_in":3600}`)
+	}))
+	defer refreshServer.Close()
+
+	var authMu sync.Mutex
+	refreshStateKey := config.OAuthRefreshStateKey("refresh-only")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{""})
+	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		refreshStateKey: {CredentialIndex: 0, RefreshSHA256: refreshStateKey, Status: config.OAuthStatusNormal},
+	}, "")
+
+	key, _, err := p.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext: %v", err)
+	}
+	if key != newAccess {
+		t.Fatalf("selected key = %q, want refreshed access", key)
+	}
+	if got := auth["openai"][0].OAuth.AccountUserID; got != "user-1__acc-1" {
+		t.Fatalf("in-memory account_user_id = %q, want refreshed account user", got)
+	}
+	loaded, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := loaded["openai"][0].OAuth.AccountUserID; got != "user-1__acc-1" {
+		t.Fatalf("persisted account_user_id = %q, want refreshed account user", got)
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	if _, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1"}); !ok {
+		t.Fatalf("refreshed auth.state missing account_user_id record: %#v", state)
+	}
+}
+
 func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
-	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
     access: %s
@@ -321,7 +379,7 @@ func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T)
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
@@ -342,7 +400,7 @@ func TestSelectKeyRefreshFailureDoesNotMarkExpiredFromLocalExpires(t *testing.T)
 func TestSelectKeyMissingRefreshTokenStillUsesExistingAccessToken(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expires := time.Now().Add(-time.Minute).UnixMilli()
-	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	access := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - access: %s
     expires: %d
@@ -361,7 +419,7 @@ func TestSelectKeyMissingRefreshTokenStillUsesExistingAccessToken(t *testing.T) 
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		access: {CredentialIndex: 0, AccountID: "acc-1", Expires: expires},
+		access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())
@@ -380,7 +438,7 @@ func TestSelectKeyDoesNotSkipExpiredOAuthTokenBeforeProbe(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	expired := time.Now().Add(-time.Minute).UnixMilli()
 	valid := time.Now().Add(time.Hour).UnixMilli()
-	expiredAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1"}`)
+	expiredAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	validAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-2","exp":4102444800}`)
 	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - refresh: old-refresh
@@ -407,8 +465,8 @@ func TestSelectKeyDoesNotSkipExpiredOAuthTokenBeforeProbe(t *testing.T) {
 	}))
 	defer refreshServer.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, "", &auth, &authMu, map[string]OAuthKeySetup{
-		expiredAccess: {CredentialIndex: 0, AccountID: "acc-1", Expires: expired},
-		validAccess:   {CredentialIndex: 1, AccountID: "acc-2", Expires: valid},
+		expiredAccess: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expired},
+		validAccess:   {CredentialIndex: 1, AccountUserID: "user-2__acc-2", AccountID: "acc-2", Expires: valid},
 	}, "")
 
 	key, _, err := p.SelectKeyWithContext(context.Background())

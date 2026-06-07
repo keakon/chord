@@ -52,16 +52,17 @@ func (r *OAuthRefresher) persistOAuthStateStatus(cred *config.OAuthCredential, s
 	if r == nil || strings.TrimSpace(r.authStatePath) == "" || cred == nil {
 		return nil
 	}
-	key := config.OAuthStateKey{Provider: r.providerName, AccountID: cred.AccountID, Email: cred.Email}
-	if strings.TrimSpace(key.AccountID) == "" && strings.TrimSpace(cred.Refresh) != "" {
+	key := config.OAuthStateKey{Provider: r.providerName, AccountUserID: cred.AccountUserID, AccountID: cred.AccountID, Email: cred.Email}
+	if strings.TrimSpace(key.AccountUserID) == "" && strings.TrimSpace(cred.Refresh) != "" {
 		key.RefreshSHA256 = config.OAuthRefreshStateKey(cred.Refresh)
 	}
-	if strings.TrimSpace(key.AccountID) == "" && strings.TrimSpace(key.RefreshSHA256) == "" {
+	if strings.TrimSpace(key.AccountUserID) == "" && strings.TrimSpace(key.RefreshSHA256) == "" {
 		return nil
 	}
 	_, _, _, err := config.UpsertOAuthStateRecord(r.authStatePath, key, func(record *config.OAuthStateRecord) (bool, error) {
 		before := *record
-		if strings.TrimSpace(key.AccountID) != "" {
+		if strings.TrimSpace(key.AccountUserID) != "" {
+			record.AccountUserID = key.AccountUserID
 			record.AccountID = key.AccountID
 		} else {
 			record.RefreshSHA256 = key.RefreshSHA256
@@ -131,7 +132,7 @@ func (r *OAuthRefresher) mutateCredential(
 			if creds[i].OAuth == nil {
 				continue
 			}
-			if creds[i].OAuth.AccountID == updated.AccountID || creds[i].OAuth.Access == updated.Access {
+			if creds[i].OAuth.AccountUserID == updated.AccountUserID || creds[i].OAuth.Access == updated.Access {
 				creds[i].OAuth.Status = updated.Status
 				break
 			}
@@ -149,7 +150,7 @@ func (r *OAuthRefresher) mutateCredentialInMemory(
 	r.authConfigMu.Lock()
 	defer r.authConfigMu.Unlock()
 
-	if match.AccountID == "" && match.Access == "" && match.CredentialIndex == nil {
+	if match.AccountUserID == "" && match.AccountID == "" && match.Access == "" && match.CredentialIndex == nil {
 		return nil, false, fmt.Errorf("oauth credential selector is required for provider %q", r.providerName)
 	}
 	creds := (*r.authConfig)[r.providerName]
@@ -161,6 +162,20 @@ func (r *OAuthRefresher) mutateCredentialInMemory(
 			continue
 		}
 		oauth := creds[i].OAuth
+		if match.AccountUserID != "" && oauth.AccountUserID == match.AccountUserID {
+			if match.Access != "" && oauth.Access == match.Access {
+				matchIdx = i
+				break
+			}
+			if match.CredentialIndex != nil && i == *match.CredentialIndex {
+				matchIdx = i
+				break
+			}
+			if matchIdx < 0 {
+				matchIdx = i
+			}
+			continue
+		}
 		if match.AccountID != "" && oauth.AccountID == match.AccountID {
 			if match.Access != "" && oauth.Access == match.Access {
 				matchIdx = i
@@ -264,6 +279,7 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath, a
 		ks.OAuthInfo = &OAuthKeyInfo{
 			Expires:               setup.Expires,
 			CredentialIndex:       setup.CredentialIndex,
+			AccountUserID:         setup.AccountUserID,
 			AccountID:             setup.AccountID,
 			Email:                 setup.Email,
 			Access:                firstNonEmptyOAuthAccess(setup.Access, ks.Key),
@@ -378,6 +394,7 @@ func (p *ProviderConfig) markInvalidKeyStateLocked(ks *KeyState, status config.O
 	if ks.OAuthInfo != nil {
 		ks.OAuthInfo.Status = status
 		credentialIndex := ks.OAuthInfo.CredentialIndex
+		match.AccountUserID = ks.OAuthInfo.AccountUserID
 		match.AccountID = ks.OAuthInfo.AccountID
 		match.RefreshSHA256 = ks.OAuthInfo.RefreshSHA256
 		match.CredentialIndex = &credentialIndex
@@ -386,7 +403,7 @@ func (p *ProviderConfig) markInvalidKeyStateLocked(ks *KeyState, status config.O
 }
 
 func (p *ProviderConfig) persistInvalidOAuthCredential(persist invalidOAuthCredentialPersist) {
-	if persist.refresher == nil || (persist.match.AccountID == "" && persist.match.Access == "" && persist.match.RefreshSHA256 == "" && persist.match.CredentialIndex == nil) {
+	if persist.refresher == nil || (persist.match.AccountUserID == "" && persist.match.AccountID == "" && persist.match.Access == "" && persist.match.RefreshSHA256 == "" && persist.match.CredentialIndex == nil) {
 		return
 	}
 	if err := persist.refresher.persistCredentialStatus(persist.match, persist.status); err != nil {
@@ -461,8 +478,18 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	if strings.TrimSpace(newCred.Access) != "" {
 		refreshedAccountID = config.ExtractOAuthAccountIDFromToken(newCred.Access)
 	}
+	refreshedAccountUserID := ""
+	if strings.TrimSpace(newCred.Access) != "" {
+		refreshedAccountUserID = config.ExtractOAuthAccountUserIDFromToken(newCred.Access)
+	}
+	if refreshedAccountUserID == "" {
+		return fmt.Errorf("refreshed OAuth access token missing account_user_id provider=%v", p.name)
+	}
 	if refreshedAccountID == "" {
 		return fmt.Errorf("refreshed OAuth access token missing account_id provider=%v", p.name)
+	}
+	if persistedAccountUserID := strings.TrimSpace(newCred.AccountUserID); persistedAccountUserID != "" && persistedAccountUserID != refreshedAccountUserID {
+		return fmt.Errorf("refreshed OAuth access token account_user_id mismatch provider=%v", p.name)
 	}
 	if persistedAccountID := strings.TrimSpace(newCred.AccountID); persistedAccountID != "" && persistedAccountID != refreshedAccountID {
 		return fmt.Errorf("refreshed OAuth access token account_id mismatch provider=%v", p.name)
@@ -470,7 +497,7 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	newCred.AccountID = refreshedAccountID
 
 	credentialIndex := credIdx
-	match := config.OAuthCredentialMatch{AccountID: credCopy.AccountID, Access: credCopy.Access, CredentialIndex: &credentialIndex}
+	match := config.OAuthCredentialMatch{AccountUserID: credCopy.AccountUserID, Access: credCopy.Access, CredentialIndex: &credentialIndex}
 	preservedPrimaryResetAt := credCopy.CodexPrimaryResetAt
 	preservedSecondaryResetAt := credCopy.CodexSecondaryResetAt
 	persistedCred, _, persistErr := r.mutateCredential(match, func(cred *config.OAuthCredential) (bool, error) {
@@ -506,12 +533,20 @@ func (p *ProviderConfig) refreshOAuthKey(ctx context.Context, ks *KeyState) erro
 	ks.OAuthInfo.CodexPrimaryResetAt = persistedCred.CodexPrimaryResetAt
 	ks.OAuthInfo.CodexSecondaryResetAt = persistedCred.CodexSecondaryResetAt
 	ks.SoftCooldownUntil = codexSoftCooldownUntilFromMillis(persistedCred.CodexPrimaryResetAt, persistedCred.CodexSecondaryResetAt, time.Now())
+	ks.OAuthInfo.AccountUserID = refreshedAccountUserID
 	if persistedCred.AccountID != "" {
 		ks.OAuthInfo.AccountID = persistedCred.AccountID
 		ks.OAuthInfo.RefreshSHA256 = ""
 	}
 	if persistedCred.Email != "" {
 		ks.OAuthInfo.Email = persistedCred.Email
+	}
+	if r.authStatePath != "" {
+		stateCred := *persistedCred
+		stateCred.AccountUserID = refreshedAccountUserID
+		if err := r.persistOAuthStateStatus(&stateCred, config.OAuthStatusNormal); err != nil {
+			log.Warnf("failed to persist refreshed OAuth state provider=%v error=%v", p.name, err)
+		}
 	}
 	log.Infof("OAuth token refreshed provider=%v", p.name)
 

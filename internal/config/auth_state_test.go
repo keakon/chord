@@ -8,8 +8,8 @@ import (
 )
 
 func TestMergeAuthConfigWithStateOverlaysStatus(t *testing.T) {
-	auth := AuthConfig{"openai": {{OAuth: &OAuthCredential{Access: "access-a", AccountID: "acc-1", Email: "user@example.com"}}}}
-	state := AuthStateFile{"openai": {"acc-1": {Email: "user@example.com", Status: OAuthStatusExpired}}}
+	auth := AuthConfig{"openai": {{OAuth: &OAuthCredential{Access: "access-a", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com"}}}}
+	state := AuthStateFile{"openai": {"user-1__acc-1": {AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Status: OAuthStatusExpired}}}
 	merged := MergeAuthConfigWithState(auth, state)
 	if got := merged["openai"][0].OAuth; got == nil || got.Status != OAuthStatusExpired {
 		t.Fatalf("merged oauth = %#v, want expired status from auth.state", got)
@@ -35,8 +35,8 @@ func TestParseAuthStateIgnoresUnrecognizedStateKeys(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("len(entries) = %d, want 1: %#v", len(entries), entries)
 	}
-	if got := entries["acc-ok"]; got.Status != OAuthStatusExpired || got.Email != "user@example.com" || got.AccountID != "" {
-		t.Fatalf("normalized entry = %#v, want simplified account_id keyed record without duplicated account_id", got)
+	if got := entries["acc-ok"]; got.Status != OAuthStatusExpired || got.Email != "user@example.com" || got.AccountUserID != "acc-ok" || got.AccountID != "" {
+		t.Fatalf("normalized entry = %#v, want account_user_id keyed record", got)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestAuthStateRoundTripAndFind(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.yaml")
 	hasCredits := true
 	unlimited := false
-	_, updated, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
+	_, updated, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusNormal
 		record.CodexPrimaryUsedPct = 25
 		record.CodexPrimaryWindowMin = 60
@@ -66,26 +66,40 @@ func TestAuthStateRoundTripAndFind(t *testing.T) {
 	if strings.Contains(string(mustReadFile(t, path)), "access:") {
 		t.Fatalf("auth.state.yaml should not persist access token:\n%s", mustReadFile(t, path))
 	}
-	record, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountID: "acc-1"})
+	record, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"})
 	if !ok {
-		t.Fatal("expected record by account id")
+		t.Fatal("expected record by account user id")
 	}
-	if record.CodexPrimaryUsedPct != 25 || record.CodexPrimaryResetAt != 12345 || record.AccountID != "acc-1" {
+	if record.CodexPrimaryUsedPct != 25 || record.CodexPrimaryResetAt != 12345 || record.AccountUserID != "user-1__acc-1" || record.AccountID != "acc-1" {
 		t.Fatalf("unexpected record: %#v", record)
 	}
-	if _, ok := state["openai"]["acc-1"]; !ok {
-		t.Fatalf("state keys = %#v, want direct account_id key", state["openai"])
+	if _, ok := state["openai"]["user-1__acc-1"]; !ok {
+		t.Fatalf("state keys = %#v, want direct account_user_id key", state["openai"])
 	}
 }
 
-func TestUpsertOAuthStateRecordRequiresAccountID(t *testing.T) {
+func TestUpsertOAuthStateRecordRequiresAccountUserID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.yaml")
 	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusInvalidated
 		return true, nil
 	})
 	if err == nil {
-		t.Fatal("expected empty state key error without account_id")
+		t.Fatal("expected empty state key error without account_user_id")
+	}
+	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-only"}, func(record *OAuthStateRecord) (bool, error) {
+		record.Status = OAuthStatusInvalidated
+		return true, nil
+	})
+	if err == nil {
+		t.Fatal("expected empty state key error without account_user_id or refresh_sha256")
+	}
+	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", RefreshSHA256: OAuthRefreshStateKey("refresh-token")}, func(record *OAuthStateRecord) (bool, error) {
+		record.Status = OAuthStatusInvalidated
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("expected refresh_sha256 state key to be accepted: %v", err)
 	}
 }
 
@@ -100,7 +114,7 @@ func TestUpsertOAuthStateRecordNormalizesLegacyAccessWhenRecordUnchanged(t *test
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, _, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
+	_, _, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
 		before := *record
 		record.Status = OAuthStatusNormal
 		return !EqualOAuthStateRecord(before, *record), nil
@@ -128,14 +142,14 @@ func mustReadFile(t *testing.T, path string) []byte {
 
 func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.yaml")
-	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-ok"}, func(record *OAuthStateRecord) (bool, error) {
+	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-ok__acc-ok", AccountID: "acc-ok"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusNormal
 		return true, nil
 	})
 	if err != nil {
 		t.Fatalf("Upsert ok: %v", err)
 	}
-	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountID: "acc-expired", Email: "expired@example.com"}, func(record *OAuthStateRecord) (bool, error) {
+	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-expired__acc-expired", AccountID: "acc-expired", Email: "expired@example.com"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusExpired
 		return true, nil
 	})
@@ -152,10 +166,10 @@ func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
 	if removed[0].AccountID != "acc-expired" || removed[0].Email != "expired@example.com" {
 		t.Fatalf("removed = %#v, want expired account entry", removed)
 	}
-	if _, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountID: "acc-expired"}); ok {
+	if _, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountUserID: "user-expired__acc-expired"}); ok {
 		t.Fatal("expired state should be removed")
 	}
-	if _, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountID: "acc-ok"}); !ok {
+	if _, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountUserID: "user-ok__acc-ok"}); !ok {
 		t.Fatal("valid state should remain")
 	}
 }

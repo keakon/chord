@@ -13,11 +13,12 @@ import (
 )
 
 // OAuthCredentialMatch identifies an OAuth credential slot inside auth.yaml.
-// AccountID is the primary selector. Access and CredentialIndex disambiguate
-// matching OAuth slots when multiple entries share the same account_id.
+// AccountUserID is the primary selector. Access and CredentialIndex disambiguate
+// matching OAuth slots if duplicated entries exist.
 // CredentialIndex uses the normalized AuthConfig index, after filtering unset
 // environment-variable credentials the same way LoadAuthConfig does.
 type OAuthCredentialMatch struct {
+	AccountUserID   string
 	AccountID       string
 	Access          string
 	RefreshSHA256   string
@@ -27,6 +28,7 @@ type OAuthCredentialMatch struct {
 type RemovedOAuthCredentialEntry struct {
 	Provider        string
 	CredentialIndex int
+	AccountUserID   string
 	AccountID       string
 	Email           string
 	Access          string
@@ -36,6 +38,9 @@ type RemovedOAuthCredentialEntry struct {
 func (e RemovedOAuthCredentialEntry) DisplayName() string {
 	if email := strings.TrimSpace(e.Email); email != "" {
 		return email
+	}
+	if accountUserID := strings.TrimSpace(e.AccountUserID); accountUserID != "" {
+		return accountUserID
 	}
 	if accountID := strings.TrimSpace(e.AccountID); accountID != "" {
 		return accountID
@@ -81,9 +86,6 @@ func UpsertAPIKeyCredentialInFile(path, provider, value string) (bool, error) {
 func UpsertOAuthCredentialInFile(path, provider string, cred *OAuthCredential) (AuthConfig, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("oauth credential is nil")
-	}
-	if strings.TrimSpace(cred.AccountID) == "" {
-		return nil, fmt.Errorf("oauth credential account_id is required")
 	}
 	return mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
 		return doc.upsertOAuthCredential(provider, cred)
@@ -442,6 +444,7 @@ func (d *authYAMLDocument) removeOAuthCredentials(remove func(provider string, c
 					removed = append(removed, RemovedOAuthCredentialEntry{
 						Provider:        provider,
 						CredentialIndex: idx,
+						AccountUserID:   cred.OAuth.AccountUserID,
 						AccountID:       cred.OAuth.AccountID,
 						Email:           cred.OAuth.Email,
 						Access:          cred.OAuth.Access,
@@ -465,14 +468,17 @@ func (d *authYAMLDocument) removeOAuthCredentials(remove func(provider string, c
 }
 
 func findOAuthCredentialUpsertTarget(refs []authCredentialNodeRef, cred *OAuthCredential) *authCredentialNodeRef {
-	if cred == nil || cred.AccountID == "" {
+	if cred == nil {
 		return nil
 	}
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
 			continue
 		}
-		if refs[i].credential.OAuth.AccountID == cred.AccountID {
+		if cred.AccountUserID != "" && refs[i].credential.OAuth.AccountUserID == cred.AccountUserID {
+			return &refs[i]
+		}
+		if cred.Access != "" && refs[i].credential.OAuth.Access == cred.Access {
 			return &refs[i]
 		}
 	}
@@ -508,16 +514,31 @@ func (d *authYAMLDocument) updateOAuthCredential(
 
 func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCredentialMatch) *authCredentialNodeRef {
 	var (
-		accountIDMatch    *authCredentialNodeRef
-		accountIndexMatch *authCredentialNodeRef
-		accessMatch       *authCredentialNodeRef
-		indexMatch        *authCredentialNodeRef
+		accountUserIDMatch    *authCredentialNodeRef
+		accountUserIndexMatch *authCredentialNodeRef
+		accountIDMatch        *authCredentialNodeRef
+		accountIndexMatch     *authCredentialNodeRef
+		accessMatch           *authCredentialNodeRef
+		indexMatch            *authCredentialNodeRef
 	)
 	for i := range refs {
 		if refs[i].credential.OAuth == nil {
 			continue
 		}
 		oauth := refs[i].credential.OAuth
+		if match.AccountUserID != "" && oauth.AccountUserID == match.AccountUserID {
+			if match.Access != "" && oauth.Access == match.Access {
+				return &refs[i]
+			}
+			if match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
+				accountUserIndexMatch = &refs[i]
+				continue
+			}
+			if accountUserIDMatch == nil {
+				accountUserIDMatch = &refs[i]
+			}
+			continue
+		}
 		if match.AccountID != "" && oauth.AccountID == match.AccountID {
 			if match.Access != "" && oauth.Access == match.Access {
 				return &refs[i]
@@ -540,6 +561,12 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 		if indexMatch == nil && match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
 			indexMatch = &refs[i]
 		}
+	}
+	if accountUserIndexMatch != nil {
+		return accountUserIndexMatch
+	}
+	if accountUserIDMatch != nil {
+		return accountUserIDMatch
 	}
 	if accountIndexMatch != nil {
 		return accountIndexMatch
@@ -564,6 +591,11 @@ func updateOAuthMappingNode(node *yaml.Node, cred *OAuthCredential) bool {
 	changed = setMappingString(node, "refresh", cred.Refresh, true) || changed
 	changed = setMappingString(node, "access", cred.Access, true) || changed
 	changed = setMappingOptionalInt64(node, "expires", cred.Expires) || changed
+	if cred.Access == "" && cred.Refresh != "" {
+		changed = setMappingString(node, "account_user_id", cred.AccountUserID, true) || changed
+	} else {
+		changed = removeMappingKey(node, "account_user_id") || changed
+	}
 	changed = setMappingString(node, "account_id", cred.AccountID, true) || changed
 	changed = setMappingString(node, "email", cred.Email, true) || changed
 	changed = removeMappingKey(node, "status") || changed

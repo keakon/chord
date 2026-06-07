@@ -242,7 +242,7 @@ func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config
 	if cred == nil {
 		return false
 	}
-	return (cred.AccountID != "" && entry.AccountID != "" && cred.AccountID == entry.AccountID) ||
+	return (cred.AccountUserID != "" && entry.AccountUserID != "" && cred.AccountUserID == entry.AccountUserID) ||
 		(cred.Refresh != "" && entry.RefreshSHA256 != "" && config.OAuthRefreshStateKey(cred.Refresh) == entry.RefreshSHA256)
 }
 
@@ -394,6 +394,9 @@ exchange:
 	fmt.Fprintf(out, "provider: %s\n", providerName)
 	if cred.Email != "" {
 		fmt.Fprintf(out, "email: %s\n", cred.Email)
+	}
+	if cred.AccountUserID != "" {
+		fmt.Fprintf(out, "account_user_id: %s\n", cred.AccountUserID)
 	}
 	if cred.AccountID != "" {
 		fmt.Fprintf(out, "account_id: %s\n", cred.AccountID)
@@ -640,16 +643,24 @@ func persistOAuthCredential(providerName, idToken, accessToken, refreshToken str
 	if accountID == "" {
 		return nil, "", fmt.Errorf("OAuth response missing account_id claim")
 	}
+	accountUserID := config.ExtractOAuthAccountUserIDFromToken(idToken)
+	if accountUserID == "" {
+		accountUserID = config.ExtractOAuthAccountUserIDFromToken(accessToken)
+	}
+	if accountUserID == "" {
+		return nil, "", fmt.Errorf("OAuth response missing account_user_id claims")
+	}
 	email := config.ExtractOAuthEmailFromToken(idToken)
 	if email == "" {
 		email = config.ExtractOAuthEmailFromToken(accessToken)
 	}
 	cred := &config.OAuthCredential{
-		Refresh:   refreshToken,
-		Access:    accessToken,
-		Expires:   time.Now().Add(time.Duration(expiresIn) * time.Second).UnixMilli(),
-		AccountID: accountID,
-		Email:     email,
+		Refresh:       refreshToken,
+		Access:        accessToken,
+		Expires:       time.Now().Add(time.Duration(expiresIn) * time.Second).UnixMilli(),
+		AccountUserID: accountUserID,
+		AccountID:     accountID,
+		Email:         email,
 	}
 
 	configHome, err := config.ConfigHomeDir()
@@ -660,8 +671,27 @@ func persistOAuthCredential(providerName, idToken, accessToken, refreshToken str
 		return nil, "", fmt.Errorf("create config home: %w", err)
 	}
 	authPath := filepath.Join(configHome, "auth.yaml")
-	if _, err := config.UpsertOAuthCredentialInFile(authPath, providerName, cred); err != nil {
+	authCred := *cred
+	authCred.AccountUserID = ""
+	if _, err := config.UpsertOAuthCredentialInFile(authPath, providerName, &authCred); err != nil {
 		return nil, "", fmt.Errorf("save auth config: %w", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve auth state path: %w", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: providerName, AccountUserID: accountUserID, AccountID: accountID, Email: email}, func(record *config.OAuthStateRecord) (bool, error) {
+		before := *record
+		record.AccountUserID = accountUserID
+		record.AccountID = accountID
+		record.Email = email
+		record.Expires = cred.Expires
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		return !config.EqualOAuthStateRecord(before, *record), nil
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("save auth state: %w", err)
 	}
 	return cred, authPath, nil
 }
