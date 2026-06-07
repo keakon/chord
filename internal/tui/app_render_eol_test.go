@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	tea "github.com/keakon/bubbletea/v2"
+	uv "github.com/keakon/ultraviolet"
 )
 
 func TestViewPropagatesWindowTitle(t *testing.T) {

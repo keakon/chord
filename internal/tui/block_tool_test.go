@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/alecthomas/chroma/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	uv "github.com/keakon/ultraviolet"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"

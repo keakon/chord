@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
+	"github.com/keakon/bubbles/v2/textarea"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"

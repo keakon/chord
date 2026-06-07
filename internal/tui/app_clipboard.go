@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/imageutil"
 )

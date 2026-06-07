@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
+	"github.com/keakon/bubbles/v2/textinput"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func (m *Model) deferredStartupTranscriptDirectoryEntries() []DirectoryEntry {

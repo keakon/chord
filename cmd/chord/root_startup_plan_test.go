@@ -3,10 +3,11 @@ package main
 import (
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -164,6 +165,59 @@ func TestTUIProgramFactoryUsesTTYSize(t *testing.T) {
 	}
 	if plan.initialWidth != 120 || plan.initialHeight != 40 {
 		t.Fatalf("size = %dx%d, want 120x40", plan.initialWidth, plan.initialHeight)
+	}
+}
+
+type optionProbeModel struct{}
+
+func (optionProbeModel) Init() tea.Cmd { return nil }
+
+func (optionProbeModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return optionProbeModel{}, nil }
+
+func (optionProbeModel) View() tea.View { return tea.NewView("") }
+
+func programDisableScrollRegionOptim(t *testing.T, p *tea.Program) bool {
+	t.Helper()
+	field := reflect.ValueOf(p).Elem().FieldByName("disableScrollRegionOptim")
+	if !field.IsValid() || field.Kind() != reflect.Bool {
+		t.Fatal("tea.Program no longer exposes a disableScrollRegionOptim bool field")
+	}
+	return field.Bool()
+}
+
+func TestTUIProgramFactoryDisablesScrollRegionOptimization(t *testing.T) {
+	stdin, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdin.Close()
+	stdout, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdout.Close()
+	var captured []tea.ProgramOption
+	factory := tuiProgramFactory{
+		stdin:      stdin,
+		stdout:     stdout,
+		isTerminal: func(uintptr) bool { return false },
+		openTTY: func() (*os.File, *os.File, error) {
+			return stdin, stdout, nil
+		},
+		newProgram: func(_ tea.Model, opts ...tea.ProgramOption) tuiProgramRunner {
+			captured = append([]tea.ProgramOption(nil), opts...)
+			return &fakeTUIRunner{}
+		},
+	}
+	if _, err := factory.build(&AppContext{}); err != nil {
+		t.Fatalf("factory.build: %v", err)
+	}
+
+	if programDisableScrollRegionOptim(t, tea.NewProgram(optionProbeModel{})) {
+		t.Fatal("default Bubble Tea program unexpectedly disables scroll-region optimization")
+	}
+	if !programDisableScrollRegionOptim(t, tea.NewProgram(optionProbeModel{}, captured...)) {
+		t.Fatal("factory options did not include WithoutScrollRegionOptimization")
 	}
 }
 

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	uv "github.com/keakon/ultraviolet"
 )
 
 func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {

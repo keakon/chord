@@ -1,6 +1,6 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import tea "github.com/keakon/bubbletea/v2"
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	if m.interactionSuppressed() {

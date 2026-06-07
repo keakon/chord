@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	tea "github.com/keakon/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"

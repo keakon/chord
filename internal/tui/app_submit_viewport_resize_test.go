@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 // TestSendDraftRecalcsViewportBeforeAppend regresses the bug where sendDraft

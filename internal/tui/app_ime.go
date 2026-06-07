@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 // SetIMESwitchTarget sets the im-select target (e.g. com.apple.keylayout.ABC). When set,

@@ -7,7 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/runtimecache"

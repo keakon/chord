@@ -229,6 +229,8 @@ Interpretation:
 
 For maintainer-level isolation, replaying the final ANSI output in multiple terminals is useful: if the same captured output only shows stale lines in Ghostty/libghostty but not in Terminal.app, iTerm2, or WezTerm, keep both the replay file and the Ghostty screenshot. If multiple terminals show the same duplicate line, prefer investigating Chord or the Bubble Tea/Ultraviolet renderer output.
 
+Note: starting in v0.6.x, Chord disables only Bubble Tea / Ultraviolet DECSTBM scroll-region optimization for its TUI. Other hard-scroll optimizations stay enabled, while streaming scroll updates that would require DECSTBM fall back to in-place line redraws. This sidesteps terminals that mishandle region scrolls (especially libghostty during the post-focus-restore surface-invalidation window, the path that left stale separators and stale borders behind). The cost is a few extra bytes for affected scroll frames and is usually negligible over local PTYs. The existing `useFocusResizeFreeze` full-frame rendering, `safe_width` right-edge avoidance, and the host-redraw / fallback machinery are preserved as orthogonal defenses.
+
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:

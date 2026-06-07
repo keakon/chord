@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 const normalChordTimeout = 5 * time.Second

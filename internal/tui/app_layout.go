@@ -4,7 +4,7 @@ import (
 	"image"
 
 	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
+	uv "github.com/keakon/ultraviolet"
 )
 
 // inputAreaHeight returns the height of the input area (separator line + content lines + bottom margin).

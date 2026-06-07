@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 // ImageBackend describes the terminal image protocol backend available in the

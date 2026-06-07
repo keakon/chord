@@ -1,7 +1,7 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 
 	agentrt "github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"

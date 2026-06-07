@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func TestInputDoubleClickSelectsWord(t *testing.T) {

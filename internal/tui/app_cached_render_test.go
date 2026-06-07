@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	uv "github.com/charmbracelet/ultraviolet"
+	uv "github.com/keakon/ultraviolet"
 )
 
 func TestInvalidateDrawCachesPreservesRuntimeState(t *testing.T) {

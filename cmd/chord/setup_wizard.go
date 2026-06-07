@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/term"
+	tea "github.com/keakon/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"

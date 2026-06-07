@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/buildinfo"
 )

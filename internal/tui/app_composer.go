@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func (m *Model) syncAtMentionIfOpen() tea.Cmd {

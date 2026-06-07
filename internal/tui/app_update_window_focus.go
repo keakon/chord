@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func (m *Model) handleBlurUpdate() tea.Cmd {

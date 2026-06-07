@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
+	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tui"
 )
@@ -129,5 +129,11 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 	}
 
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))
+	// Chord renders streaming transcript updates near sticky separators and side
+	// panels; DECSTBM hardware scroll regions have left stale rows behind on some
+	// terminals (notably libghostty after focus restore). Keep safe hard-scroll
+	// optimizations enabled, but avoid scroll-region state. See
+	// docs/troubleshooting.md "Repeated separator lines / stale border artifacts".
+	opts = append(opts, tea.WithoutScrollRegionOptimization())
 	return tuiProgramPlan{model: tuiModel, runner: f.newProgram(&tuiModel, opts...), initialWidth: initialWidth, initialHeight: initialHeight}, nil
 }

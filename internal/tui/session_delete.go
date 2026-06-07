@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func (m *Model) openSessionDeleteConfirm() tea.Cmd {

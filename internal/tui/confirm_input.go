@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"charm.land/bubbles/v2/textarea"
-	tea "charm.land/bubbletea/v2"
+	"github.com/keakon/bubbles/v2/textarea"
+	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"

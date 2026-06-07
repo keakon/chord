@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
+	tea "github.com/keakon/bubbletea/v2"
 )
 
 func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
