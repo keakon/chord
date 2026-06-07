@@ -325,17 +325,21 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.agent.SendUserMessage(value)
 			return nil
 		}
-		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes {
+		fileRefTexts := append([]string{value}, inlinePasteTexts...)
+		fileRefs := atMentionFileRefs(fileRefTexts, m.workingDir)
+		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {
 			m.finalizeTurn()
-			draft := queuedDraft{Content: value, DisplayContent: value, FileRefs: atMentionFileRefs([]string{value}, m.workingDir), QueuedAt: time.Now()}
+			draft := queuedDraft{Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now()}
 			m.editingQueuedDraftID = ""
 			return m.sendDraft(draft)
 		}
 		draftID := m.draftIDForSubmit()
 		var draft queuedDraft
-		fileRefTexts := append([]string{value}, inlinePasteTexts...)
-		fileRefs := atMentionFileRefs(fileRefTexts, m.workingDir)
-		fileRefParts := m.buildFileRefParts(value, inlineParts, inlinePasteTexts...)
+		composerParts := inlineParts
+		if len(composerParts) == 0 && value != "" {
+			composerParts = []message.ContentPart{{Type: "text", Text: value}}
+		}
+		fileRefParts := m.buildFileRefParts(value, composerParts, inlinePasteTexts...)
 		if fileRefParts != nil || len(m.attachments) > 0 || len(inlineParts) > 0 {
 			var parts []message.ContentPart
 			if fileRefParts != nil {

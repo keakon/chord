@@ -151,6 +151,45 @@ func TestLoadAtMentionFilesUsesGitTrackedAndUntracked(t *testing.T) {
 	}
 }
 
+func TestSubmitPlainAtMentionSendsFileParts(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agent rules\n")
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(wd); err != nil {
+		t.Fatalf("Chdir(%q) error = %v", wd, err)
+	}
+
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	m.mode = ModeInsert
+	m.focusedAgentID = "worker-1"
+	m.input.SetValue("update @AGENTS.md")
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
+	}
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	parts := backend.sentMultipart[0]
+	if len(parts) != 2 {
+		t.Fatalf("sent parts = %#v, want prompt text plus file part", parts)
+	}
+	if got := parts[0].Text; got != "update @AGENTS.md" {
+		t.Fatalf("prompt part text = %q, want original prompt", got)
+	}
+	if !message.IsFileRefContent(parts[1].Text) || !strings.Contains(parts[1].Text, `<file path="AGENTS.md">`) || !strings.Contains(parts[1].Text, "agent rules") {
+		t.Fatalf("file part = %q, want injected AGENTS.md content", parts[1].Text)
+	}
+}
+
 func TestLoadAtMentionFilesIncludesAttachableMediaAndExcludesOtherBinary(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "main.go"), "package main")

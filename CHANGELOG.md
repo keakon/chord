@@ -18,6 +18,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixes
 
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
+- Focused-agent submissions now include `@file` mention content parts instead of sending plain text only.
 - Resuming sessions after `view_image` no longer shows tool-returned images as user-authored messages.
 - TUI rendering now disables terminal hardware scroll regions to avoid duplicate separators or stale border rows on terminals affected by DECSTBM scroll restoration issues.
 
