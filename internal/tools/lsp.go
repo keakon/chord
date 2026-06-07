@@ -29,7 +29,7 @@ func (LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t LspTool) Description() string {
-	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over grep/glob once the file path and cursor position are known and the file type has LSP coverage. Use grep/glob only to discover candidate files or positions when the location is not known yet. Use 1-based line and character from the raw file content. If the position comes from read output, do not count the read output's left line-number gutter or separator tab; count tabs in the source line as a single character, and prefer the start of the target identifier."
+	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over grep/glob once the file path and cursor position are known and the file type has LSP coverage. Use grep/glob only to discover candidate files or positions when the location is not known yet. Use 1-based line and character from the raw file content; count tabs in the source line as a single character, and prefer the start of the target identifier."
 	if t.LSP == nil {
 		return base
 	}
@@ -67,7 +67,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"character": map[string]any{
 				"type":        "integer",
-				"description": "1-based character offset on the raw source line. If the position comes from read output, do not count the read output's left line-number gutter or separator tab; count tabs in the source line as a single character.",
+				"description": "1-based character offset on the raw source line. Count tabs in the source line as a single character.",
 			},
 			"include_declaration": map[string]any{
 				"type":        "boolean",

@@ -141,10 +141,12 @@ func TestWriteAndReadToolSupportTildePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
-	for _, want := range []string{"     1\thello", "     2\tworld"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("Read output %q missing %q", out, want)
-		}
+	header, body, ok := strings.Cut(out, "\n")
+	if !ok || !strings.HasPrefix(header, "READ_RESULT ") {
+		t.Fatalf("Read output = %q, want READ_RESULT header", out)
+	}
+	if body != content {
+		t.Fatalf("Read body = %q, want raw content %q", body, content)
 	}
 }
 

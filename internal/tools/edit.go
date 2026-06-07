@@ -595,7 +595,7 @@ func diagnoseMissingHunk(fileLines, oldSeq []string, start int) string {
 		return "Add at least one unchanged or removed line to anchor the hunk."
 	}
 	if hunkLooksLikeReadOutput(oldSeq) {
-		return "The hunk appears to include Read output line numbers or the tab separator; remove the left line-number gutter and use only source text."
+		return "The hunk appears to include tool-added read metadata, copied line numbers, or a tab separator from old numbered output; remove the READ_RESULT line and any prefix so the hunk uses only source text."
 	}
 	if start >= len(fileLines) {
 		return "The previous hunk matched near the end of the file, so this hunk starts searching past EOF; combine nearby edits or include context after the previous match."
@@ -665,6 +665,9 @@ func fileContainsSubstring(fileLines []string, needle string, start int) bool {
 
 func hunkLooksLikeReadOutput(lines []string) bool {
 	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "READ_RESULT ") {
+			return true
+		}
 		trimmed := strings.TrimLeft(line, " ")
 		digits := 0
 		for digits < len(trimmed) && trimmed[digits] >= '0' && trimmed[digits] <= '9' {

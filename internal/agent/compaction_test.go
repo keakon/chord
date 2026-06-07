@@ -1213,6 +1213,20 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 	}
 }
 
+func TestParseDisplayedReadRangeSupportsReadResultHeader(t *testing.T) {
+	content := strings.Join([]string{
+		`READ_RESULT path="internal/agent/compaction_policy.go" lines=41-43/200 content_lines=3 truncated=true encoding="utf-8"`,
+		"func important() {",
+		"\treturn true",
+		"}",
+	}, "\n")
+
+	got := parseDisplayedReadRange(content)
+	if !got.OK || got.Start != 41 || got.End != 43 || got.Total != 200 {
+		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-43/200", got)
+	}
+}
+
 func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{

@@ -582,9 +582,9 @@ func TestExtractSelectionTextStripsRenderedIndentForReadBlock(t *testing.T) {
 		Type:     BlockToolCall,
 		ToolName: "read",
 		Content:  `{"path":"main.go"}`,
-		ResultContent: "     1\tfunc main() {\n" +
-			"     2\t    return\n" +
-			"     3\t}",
+		ResultContent: "func main() {\n" +
+			"    return\n" +
+			"}",
 	}
 	v.AppendBlock(block)
 

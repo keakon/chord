@@ -54,7 +54,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
 	} else if b.ResultContent != "" {
-		rows, sourceSample := parseReadDisplayLines(b.ResultContent)
+		rows, sourceSample := parseReadDisplayLines(b.ResultContent, readArgs.Offset+1)
 		result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
 			filePath:            filePath,
 			rows:                rows,

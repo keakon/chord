@@ -24,24 +24,35 @@ func (r *recordingLSPStarter) Start(ctx context.Context, path string) {
 	r.calls++
 }
 
-func TestReadToolDescriptionExplainsDisplayedGutterForLspPositions(t *testing.T) {
+func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	desc := (ReadTool{}).Description()
 	for _, want := range []string{
-		"formatted with line numbers (cat -n format)",
+		"Successful output starts with one READ_RESULT metadata line",
+		"everything after that first line is exact file text without line-number gutters or extra indentation",
+		"copy only the text after READ_RESULT into edit hunks",
 		"approximate 20k-token read budget",
 		"truncated to fit",
-		"The displayed line-number gutter and separator tab are not part of the file content",
-		"copy exact text from the raw source portion only",
 		"Before edit, the file must have been observed via read or a system-resolved @file mention",
 		"read the intended nearby block before patching",
 		"For edit, include a few unchanged source lines around the intended change",
 		"read output normalizes line endings to LF",
-		"When using lsp line/character positions, count from the raw source line only",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
 		}
 	}
+}
+
+func readTestHeaderAndBody(t *testing.T, out string) (string, string) {
+	t.Helper()
+	header, body, ok := strings.Cut(out, "\n")
+	if !ok {
+		t.Fatalf("read output missing READ_RESULT header newline: %q", out)
+	}
+	if !strings.HasPrefix(header, "READ_RESULT ") {
+		t.Fatalf("read output header = %q, want READ_RESULT", header)
+	}
+	return header, body
 }
 
 func TestSplitReadToolLinesNormalizesLineEndings(t *testing.T) {
@@ -78,8 +89,12 @@ func TestReadToolExecuteReportsEmptyContentForEmptyRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
-	if got != "(empty content)" {
-		t.Fatalf("ReadTool.Execute output = %q, want empty content marker", got)
+	header, body := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, "lines=2-1/1") || !strings.Contains(header, "content_lines=0") || !strings.Contains(header, "truncated=false") {
+		t.Fatalf("ReadTool.Execute header = %q, want empty range metadata", header)
+	}
+	if body != "" {
+		t.Fatalf("ReadTool.Execute body = %q, want empty body", body)
 	}
 }
 
@@ -100,8 +115,12 @@ func TestReadToolExecuteNormalizesCRLFOutput(t *testing.T) {
 	if got == "" {
 		t.Fatal("ReadTool.Execute returned empty content")
 	}
-	if got != "     1\tcol1,col2\n     2\t\"a\",\"b\"\n" {
-		t.Fatalf("ReadTool.Execute output = %q, want normalized LF cat -n output", got)
+	header, body := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, "lines=1-2/2") || !strings.Contains(header, "content_lines=2") || !strings.Contains(header, "encoding=\"utf-8\"") {
+		t.Fatalf("ReadTool.Execute header = %q, want range metadata", header)
+	}
+	if body != "col1,col2\n\"a\",\"b\"\n" {
+		t.Fatalf("ReadTool.Execute body = %q, want normalized raw LF output", body)
 	}
 	if containsRawCarriageReturn(got) {
 		t.Fatalf("ReadTool.Execute output should not contain raw carriage returns: %q", got)
@@ -174,13 +193,11 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
-	if !strings.Contains(got, "content truncated to fit the approximate 20000-token read budget") {
-		t.Fatalf("expected token-budget truncation note, got %q", got)
+	header, body := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, "READ_RESULT ") || !strings.Contains(header, "lines=1-") || !strings.Contains(header, "/1200") || !strings.Contains(header, "truncated=true") || !strings.Contains(header, "budget_truncated=true") || !strings.Contains(header, "token_budget=20000") {
+		t.Fatalf("expected token-budget truncation metadata, got header %q", header)
 	}
-	if !strings.Contains(got, "(showing lines 1-") {
-		t.Fatalf("expected truncated range footer, got %q", got)
-	}
-	if strings.Contains(got, "  1200\t") {
+	if strings.Contains(body, strings.Repeat("abcdefghij", 8)+"\n"+"READ_RESULT") {
 		t.Fatalf("expected inline read output to truncate before the end of file, got %q", got)
 	}
 	if !readOutputFitsBudget(got) {
@@ -205,8 +222,12 @@ func TestReadToolExecuteAllowsTargetedRangeWithinTokenBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
-	if !strings.Contains(got, "(showing lines 1-50 of 1200 total)") {
-		t.Fatalf("expected ranged output marker, got %q", got)
+	header, body := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, "lines=1-50/1200") || !strings.Contains(header, "content_lines=50") || !strings.Contains(header, "truncated=true") {
+		t.Fatalf("expected ranged output metadata, got %q", header)
+	}
+	if strings.Count(body, "\n") != 50 {
+		t.Fatalf("expected 50 content lines, got body with %d newlines", strings.Count(body, "\n"))
 	}
 }
 

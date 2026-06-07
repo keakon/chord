@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -26,6 +27,8 @@ var (
 	lspSeverityRe = regexp.MustCompile(`^\s*\[(E|W|I|H)\]`)
 
 	lspDiagnosticsOmittedLineRe = regexp.MustCompile(`^\s*\.\.\. \d+ diagnostics not shown due to output limits; they may still need fixing\.$`)
+
+	readResultHeaderRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)/(\d+)\b`)
 )
 
 // maxToolCallCompactResultLines is the default visible height for generic tool output until space expands.
@@ -675,36 +678,33 @@ func toolDisplayControlLiteral(c byte) string {
 	}
 }
 
-func isReadLineNumberPrefix(s string) bool {
-	trimmed := strings.TrimSpace(s)
-	if trimmed == "" {
-		return false
-	}
-	for _, r := range trimmed {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func parseReadDisplayLines(result string) ([]readDisplayLine, string) {
+func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, string) {
 	if result == "" {
 		return nil, ""
+	}
+	if startLine < 1 {
+		startLine = 1
 	}
 	rawLines := strings.Split(strings.TrimRight(result, "\n"), "\n")
 	rows := make([]readDisplayLine, 0, len(rawLines))
 	codeLines := make([]string, 0, len(rawLines))
+	sourceLineNo := startLine
 
-	for _, line := range rawLines {
+	for i, line := range rawLines {
 		line = strings.TrimSuffix(line, "\r")
-		if before, after, ok := strings.Cut(line, "\t"); ok && isReadLineNumberPrefix(before) {
-			content := sanitizeToolDisplayText(after)
-			rows = append(rows, readDisplayLine{IsCode: true, LineNo: strings.TrimSpace(before), Content: content})
-			codeLines = append(codeLines, content)
-			continue
+		content := sanitizeToolDisplayText(line)
+		if i == 0 {
+			if m := readResultHeaderRe.FindStringSubmatch(content); len(m) == 4 {
+				if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+					sourceLineNo = n
+				}
+				rows = append(rows, readDisplayLine{IsCode: false, Content: content})
+				continue
+			}
 		}
-		rows = append(rows, readDisplayLine{Content: sanitizeToolDisplayText(line)})
+		rows = append(rows, readDisplayLine{IsCode: true, LineNo: fmt.Sprintf("%d", sourceLineNo), Content: content})
+		codeLines = append(codeLines, content)
+		sourceLineNo++
 	}
 
 	return rows, strings.Join(codeLines, "\n")

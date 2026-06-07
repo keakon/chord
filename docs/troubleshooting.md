@@ -268,7 +268,7 @@ If you see this:
 
 - re-run `read` on the file and rebuild the patch from the latest content;
 - if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
-- if the error says the hunk was not found, re-copy the target block from the latest `read` output and make sure context/removal lines omit the displayed line-number gutter and match the current indentation;
+- if the error says the hunk was not found, re-copy the target block from the latest `read` output and make sure context/removal lines match the current indentation; if the hunk came from old numbered output, remove any copied line-number prefix first;
 - split a broad patch into smaller single-file patches or smaller hunks;
 - do not run external `apply_patch` through `shell`; use Chord's native `edit` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 

@@ -135,7 +135,7 @@ func approximateSearchMatchInnerOffset(block *Block, query string, width int) in
 		}
 	}
 	if block.ToolName == tools.NameRead && block.ResultContent != "" {
-		rows, _ := parseReadDisplayLines(block.ResultContent)
+		rows, _ := parseReadDisplayLines(block.ResultContent, 1)
 		for i, row := range rows {
 			if strings.Contains(strings.ToLower(row.Content), lowerQuery) {
 				return i + 1

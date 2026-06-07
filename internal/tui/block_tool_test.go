@@ -2211,14 +2211,12 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 
 func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	block := &Block{
-		ID:         1,
-		Type:       BlockToolCall,
-		ToolName:   "read",
-		Content:    `{"path":"internal/tui/input.go","limit":1,"offset":358}`,
-		ResultDone: true,
-		ResultContent: strings.Join([]string{
-			"   359\t",
-		}, "\n"),
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       `{"path":"internal/tui/input.go","limit":1,"offset":358}`,
+		ResultDone:    true,
+		ResultContent: "\n",
 	}
 
 	lines := block.renderReadCall(80, "")
@@ -2242,12 +2240,12 @@ func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
 		Content:    `{"path":"/tmp/chord-diag/tui-dump.txt","limit":120,"offset":1535}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
-			"  1281\t\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m",
+			"\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m",
 			"[screen_buffer]",
 		}, "\n"),
 	}
 
-	rows, source := parseReadDisplayLines(block.ResultContent)
+	rows, source := parseReadDisplayLines(block.ResultContent, 1536)
 	if len(rows) != 2 {
 		t.Fatalf("rows len = %d, want 2", len(rows))
 	}
@@ -2281,13 +2279,13 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 		Content:    `{"path":"sample.csv","limit":20}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
-			"     1\tissue,label\r",
-			"     2\t\"a\",\"b\"\r",
+			"issue,label\r",
+			"\"a\",\"b\"\r",
 			"(showing lines 1-2 of 10)\r",
 		}, "\n"),
 	}
 
-	rows, source := parseReadDisplayLines(block.ResultContent)
+	rows, source := parseReadDisplayLines(block.ResultContent, 1)
 	if len(rows) != 3 {
 		t.Fatalf("rows len = %d, want 3", len(rows))
 	}
@@ -2311,6 +2309,31 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 	}
 }
 
+func TestReadCallTreatsReadResultHeaderAsMetadata(t *testing.T) {
+	result := strings.Join([]string{
+		`READ_RESULT path="sample.csv" lines=41-42/200 content_lines=2 truncated=true encoding="utf-8"`,
+		"issue,label",
+		`"a","b"`,
+	}, "\n")
+
+	rows, source := parseReadDisplayLines(result, 1)
+	if len(rows) != 3 {
+		t.Fatalf("rows len = %d, want 3", len(rows))
+	}
+	if rows[0].IsCode {
+		t.Fatalf("READ_RESULT header should be metadata, got code row %#v", rows[0])
+	}
+	if !rows[1].IsCode || rows[1].LineNo != "41" || rows[1].Content != "issue,label" {
+		t.Fatalf("first source row = %#v, want line 41 issue,label", rows[1])
+	}
+	if !rows[2].IsCode || rows[2].LineNo != "42" || rows[2].Content != `"a","b"` {
+		t.Fatalf("second source row = %#v, want line 42 quoted row", rows[2])
+	}
+	if source != "issue,label\n\"a\",\"b\"" {
+		t.Fatalf("source = %q, want raw content without header", source)
+	}
+}
+
 func TestReadCallAlignsLineNumberGutterAcrossDigitWidths(t *testing.T) {
 	block := &Block{
 		ID:         1,
@@ -2319,9 +2342,9 @@ func TestReadCallAlignsLineNumberGutterAcrossDigitWidths(t *testing.T) {
 		Content:    `{"path":"sample.go","limit":3}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
-			"     9\tpackage main",
-			"    10\timport \"fmt\"",
-			"   100\tfunc main() {}",
+			"package main",
+			"import \"fmt\"",
+			"func main() {}",
 		}, "\n"),
 	}
 
@@ -2347,22 +2370,22 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 		ID:         1,
 		Type:       BlockToolCall,
 		ToolName:   "read",
-		Content:    `{"path":"sample.go","limit":2}`,
+		Content:    `{"path":"sample.go","limit":2,"offset":9}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
-			"    10\talpha",
-			"    11\tbeta",
+			"alpha",
+			"beta",
 		}, "\n"),
 	}
 	threeDigitBlock := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
 		ToolName:   "read",
-		Content:    `{"path":"sample.go","limit":2}`,
+		Content:    `{"path":"sample.go","limit":2,"offset":98}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
-			"    99\talpha",
-			"   100\tbeta",
+			"alpha",
+			"beta",
 		}, "\n"),
 	}
 
@@ -2381,7 +2404,7 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
 	lines := make([]string, 1000)
 	for i := range lines {
-		lines[i] = fmt.Sprintf("%6d\tline %d", i+1, i+1)
+		lines[i] = fmt.Sprintf("line %d", i+1)
 	}
 	block := &Block{
 		ID:                  1,

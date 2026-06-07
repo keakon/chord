@@ -29,8 +29,7 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 		"Use this tool first for definition, references, and implementation at a known file position.",
 		"Prefer it over grep/glob once the file path and cursor position are known",
 		"Use grep/glob only to discover candidate files or positions when the location is not known yet.",
-		"Use 1-based line and character from the raw file content.",
-		"do not count the read output's left line-number gutter or separator tab",
+		"Use 1-based line and character from the raw file content",
 		"count tabs in the source line as a single character",
 		"prefer the start of the target identifier",
 	} {
@@ -50,8 +49,7 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 	desc := character["description"].(string)
 	for _, want := range []string{
 		"raw source line",
-		"do not count the read output's left line-number gutter or separator tab",
-		"count tabs in the source line as a single character",
+		"Count tabs in the source line as a single character",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("character description missing %q: %q", want, desc)

@@ -321,7 +321,21 @@ func TestEditToolDiagnosesMissingHunkLineNumbers(t *testing.T) {
 	patch := "@@\n 1\talpha\n-2\tbeta\n+gamma\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
 	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
-	if err == nil || !strings.Contains(err.Error(), "line numbers or the tab separator") {
+	if err == nil || !strings.Contains(err.Error(), "tool-added read metadata, copied line numbers, or a tab separator") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEditToolDiagnosesMissingHunkReadResultHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n READ_RESULT path=\"demo.txt\" lines=1-2/2 content_lines=2 truncated=false encoding=\"utf-8\"\n-alpha\n+gamma\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "remove the READ_RESULT line") {
 		t.Fatalf("err = %v", err)
 	}
 }

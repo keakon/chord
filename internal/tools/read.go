@@ -32,7 +32,7 @@ func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines, formatted with line numbers (cat -n format). Very large formatted reads are truncated to fit the approximate 20k-token read budget with a tail note; use offset/limit to narrow the range. The displayed line-number gutter and separator tab are not part of the file content; copy exact text from the raw source portion only, and do not copy the gutter into edit hunks. Before edit, the file must have been observed via read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For edit, include a few unchanged source lines around the intended change. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing. When using lsp line/character positions, count from the raw source line only."
+	return "Read file contents with optional offset/limit paging, up to 2000 lines. Successful output starts with one READ_RESULT metadata line; everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. Very large reads are truncated to fit the approximate 20k-token read budget and report that in the READ_RESULT line; use offset/limit to narrow the range. Before edit, the file must have been observed via read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For edit, include a few unchanged source lines around the intended change. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
 }
 
 func (ReadTool) Parameters() map[string]any {
@@ -104,50 +104,62 @@ func readOutputFitsBudget(content string) bool {
 	return len(content) <= maxReadInlineBytes() && estimateReadOutputTokens(content) <= MaxReadOutputTokens
 }
 
-func buildReadContent(prefixLines, numberedLines []string, footer string) string {
+func quoteReadHeaderValue(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "\"\""
+	}
+	return string(encoded)
+}
+
+func readResultHeader(displayPath string, startLine, endLine, contentLineCount, totalLines int, truncated bool, encoding string, budgetTruncated bool) string {
+	if encoding == "" {
+		encoding = "utf-8"
+	}
+	header := fmt.Sprintf(
+		"READ_RESULT path=%s lines=%d-%d/%d content_lines=%d truncated=%t encoding=%s",
+		quoteReadHeaderValue(displayPath),
+		startLine,
+		endLine,
+		totalLines,
+		contentLineCount,
+		truncated,
+		quoteReadHeaderValue(encoding),
+	)
+	if budgetTruncated {
+		header += fmt.Sprintf(" budget_truncated=true token_budget=%d", MaxReadOutputTokens)
+	}
+	return header
+}
+
+func buildReadContent(header string, contentLines []string) string {
 	var b strings.Builder
-	for _, line := range prefixLines {
+	b.WriteString(header)
+	b.WriteByte('\n')
+	for _, line := range contentLines {
 		b.WriteString(line)
 		b.WriteByte('\n')
-	}
-	for _, line := range numberedLines {
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	if footer != "" {
-		b.WriteByte('\n')
-		b.WriteString(footer)
 	}
 	return b.String()
 }
 
-func readRangeFooter(startLine, endLine, totalLines int) string {
-	return fmt.Sprintf("(showing lines %d-%d of %d total)", startLine, endLine, totalLines)
-}
-
-func readBudgetTruncationFooter(startLine, endLine, totalLines int) string {
-	return fmt.Sprintf(
-		"(showing lines %d-%d of %d total; content truncated to fit the approximate %d-token read budget; use offset/limit or grep to inspect more)",
-		startLine,
-		endLine,
-		totalLines,
-		MaxReadOutputTokens,
-	)
-}
-
-func truncateReadContentToBudget(prefixLines, numberedLines []string, startLine, totalLines int) string {
-	if len(numberedLines) == 0 {
-		return buildReadContent(prefixLines, nil, "")
+func truncateReadContentToBudget(displayPath string, contentLines []string, startLine, totalLines int, encoding string) string {
+	if len(contentLines) == 0 {
+		line := 0
+		if totalLines > 0 {
+			line = startLine
+		}
+		return buildReadContent(readResultHeader(displayPath, line, max(line-1, 0), 0, totalLines, startLine <= totalLines, encoding, false), nil)
 	}
 
-	lo, hi := 1, len(numberedLines)
+	lo, hi := 1, len(contentLines)
 	best := ""
 	for lo <= hi {
 		mid := lo + (hi-lo)/2
+		header := readResultHeader(displayPath, startLine, startLine+mid-1, mid, totalLines, true, encoding, true)
 		candidate := buildReadContent(
-			prefixLines,
-			numberedLines[:mid],
-			readBudgetTruncationFooter(startLine, startLine+mid-1, totalLines),
+			header,
+			contentLines[:mid],
 		)
 		if readOutputFitsBudget(candidate) {
 			best = candidate
@@ -159,14 +171,8 @@ func truncateReadContentToBudget(prefixLines, numberedLines []string, startLine,
 	if best != "" {
 		return best
 	}
-	return buildReadContent(
-		prefixLines,
-		nil,
-		fmt.Sprintf(
-			"(content truncated to fit the approximate %d-token read budget; use offset/limit or grep to inspect more)",
-			MaxReadOutputTokens,
-		),
-	)
+	header := readResultHeader(displayPath, startLine, max(startLine-1, 0), 0, totalLines, true, encoding, true)
+	return buildReadContent(header, nil)
 }
 
 func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -206,16 +212,14 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("reading file: %w", err)
 	}
 	lines := splitReadToolLines(decoded.Text)
-	if len(lines) == 0 {
-		return "(empty content)", nil
-	}
+	totalLines := len(lines)
 
 	// Determine offset.
 	offset := 0
 	if a.Offset != nil {
 		offset = max(*a.Offset, 0)
-		if offset > len(lines) {
-			offset = len(lines)
+		if offset > totalLines {
+			offset = totalLines
 		}
 	}
 
@@ -225,37 +229,32 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		limit = *a.Limit
 	}
 
-	end := min(offset+limit, len(lines))
+	end := min(offset+limit, totalLines)
 
 	selected := lines[offset:end]
-	numberedLines := make([]string, 0, len(selected))
+	contentLines := make([]string, 0, len(selected))
 
-	for i, line := range selected {
-		lineNum := offset + i + 1 // 1-based
+	for _, line := range selected {
 		// Truncate excessively long lines.
 		if len(line) > MaxLineLength {
 			line = line[:MaxLineLength] + "..."
 		}
-		numberedLines = append(numberedLines, fmt.Sprintf("%6d\t%s", lineNum, line))
+		contentLines = append(contentLines, line)
 	}
 
-	var prefixLines []string
-	if decoded.Encoding.Name != "utf-8" {
-		prefixLines = append(prefixLines, fmt.Sprintf("(encoding: %s)", decoded.Encoding.Name))
+	startLine := 0
+	endLine := 0
+	if len(contentLines) > 0 {
+		startLine = offset + 1
+		endLine = offset + len(contentLines)
+	} else if totalLines > 0 {
+		startLine = offset + 1
+		endLine = offset
 	}
-
-	footer := ""
-	totalLines := len(lines)
-	if end < totalLines {
-		footer = readRangeFooter(offset+1, end, totalLines)
-	}
-
-	content := buildReadContent(prefixLines, numberedLines, footer)
-	if content == "" {
-		return "(empty content)", nil
-	}
+	truncated := end < totalLines
+	content := buildReadContent(readResultHeader(a.Path, startLine, endLine, len(contentLines), totalLines, truncated, decoded.Encoding.Name, false), contentLines)
 	if !readOutputFitsBudget(content) {
-		content = truncateReadContentToBudget(prefixLines, numberedLines, offset+1, totalLines)
+		content = truncateReadContentToBudget(a.Path, contentLines, offset+1, totalLines, decoded.Encoding.Name)
 	}
 
 	if t.LSP != nil {

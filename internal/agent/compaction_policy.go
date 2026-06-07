@@ -3,7 +3,9 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,8 @@ func evidencePackTokenBudget(contextLimit int) int {
 	b = min(b, compactEvidenceMaxTokens)
 	return b
 }
+
+var readResultRangeRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)/(\d+)\b`)
 
 func splitMessagesForCompactionWithSelections(messages []message.Message, recentTail []message.Message, evidenceItems []evidenceItem) (head []message.Message, evidence []message.Message) {
 	if len(messages) < 4 {
@@ -1279,6 +1283,18 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		var out displayedReadRange
+		if m := readResultRangeRe.FindStringSubmatch(line); len(m) == 4 {
+			start, startErr := strconv.Atoi(m[1])
+			end, endErr := strconv.Atoi(m[2])
+			total, totalErr := strconv.Atoi(m[3])
+			if startErr == nil && endErr == nil && totalErr == nil {
+				out.Start = start
+				out.End = end
+				out.Total = total
+				out.OK = true
+				return out
+			}
+		}
 		if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
 			out.OK = true
 			return out

@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Improvements
 
 - Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
+- `read` now returns raw file text without line-number gutters or extra indentation, making copied snippets safe for patch hunks and indentation-sensitive formats.
 - `grep.path` now describes that it accepts one file or directory path and adds a targeted hint when space-separated existing paths are passed as a single path.
 - Request-level context reduction now protects recent high-risk tool outputs such as diffs, failed assertions, stack traces, and permission/security errors from being pruned solely because a long single-turn tool chain advances effective age. The default `context.reduction.read_like_age_turns` is also raised from 1 to 2 based on recent-session statistics, preserving freshly read file context one effective turn longer at low observed token cost.
 - Context reduction now waits until the third consecutive request on the same model before preserving the prompt-cache surface; switching models resets that model-run count, so the first two requests on a new model can still trim cached context under pressure.
