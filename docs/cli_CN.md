@@ -79,7 +79,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-在基础配置完成后再用它登录。该命令用于 `preset: codex` 的 OAuth provider，并把凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.yaml`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。首次向导也可以在初始化过程中直接完成这条 Codex OAuth 登录链路；`chord auth codex` 仍然适合后续重新登录或补登录。
+在基础配置完成后再用它登录。该命令用于 `preset: codex` 的 OAuth provider，并把凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.json`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。首次向导也可以在初始化过程中直接完成这条 Codex OAuth 登录链路；`chord auth codex` 仍然适合后续重新登录或补登录。
 
 ### Flag
 
@@ -112,7 +112,7 @@ chord auth refresh codex
 
 ### `chord auth state list`
 
-列出 `~/.config/chord/auth.state.yaml` 中已过期、已停用或已失效的 OAuth 运行时状态条目。该命令不会列出 `auth.yaml` 中已不存在对应 OAuth 凭据的孤儿 state；如需同时清理无效和孤儿 state，请使用 `chord auth state clean`。
+列出 `~/.config/chord/auth.state.json` 中已过期、已停用或已失效的 OAuth 运行时状态条目。该命令不会列出 `auth.yaml` 中已不存在对应 OAuth 凭据的孤儿 state；如需同时清理无效和孤儿 state，请使用 `chord auth state clean`。
 
 ```bash
 chord auth state list
@@ -120,12 +120,12 @@ chord auth state list
 
 ### `chord auth state clean`
 
-清理 `~/.config/chord/auth.state.yaml` 中已失效的 OAuth 运行时状态条目、`auth.yaml` 中已不存在对应 OAuth 凭据的孤儿状态，并同步清理 `~/.config/chord/auth.yaml` 中匹配的过期 / 已停用 / 已失效 OAuth 凭据。
+清理 `~/.config/chord/auth.state.json` 中已失效的 OAuth 运行时状态条目、`auth.yaml` 中已不存在对应 OAuth 凭据的孤儿状态，并同步清理 `~/.config/chord/auth.yaml` 中匹配的过期 / 已停用 / 已失效 OAuth 凭据。
 
 典型用途：
 
 - 清理过期 / 已停用 / 已失效账号残留的共享缓存状态和匹配凭据；
-- 在轮换或下线账号后让 `auth.state.yaml` 与 `auth.yaml` 保持同步；
+- 在轮换或下线账号后让 `auth.state.json` 与 `auth.yaml` 保持同步；
 - 移除已被 Chord 标记为过期、已停用或已失效的不可用 OAuth 凭据。
 
 ```bash

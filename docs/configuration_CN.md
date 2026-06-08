@@ -276,38 +276,42 @@ openai:
 
 可配置多个 key 作为轮换或备用。
 
-对于 `preset: codex` 的 OAuth provider，Chord 会把高频变化的运行时状态（额度快照、重置时间、最近 warm-up 时间、共享 OAuth 状态缓存）写入 `auth.state.yaml`，而不是继续频繁改写 `auth.yaml`。
+对于 `preset: codex` 的 OAuth provider，Chord 会把高频变化的运行时状态（额度快照、重置时间、最近 warm-up 时间、共享 OAuth 状态缓存）写入 `auth.state.json`，而不是继续频繁改写 `auth.yaml`。
 
 这样拆分是有意为之：
 
 - `auth.yaml` 仍是用户可编辑的凭据与稳定 OAuth 字段来源，例如 `refresh`、`access`、`expires`、`account_id`、`email`；Chord 重写文件时会省略空 OAuth 字段，OAuth `status` 不属于 `auth.yaml`；
-- `auth.state.yaml` 是机器维护的共享运行时状态。普通条目在每个 provider 下直接以 `account_user_id` 为 key；quota / reset 更新，以及 `expired`、`deactivated`、`invalidated` 这类账号状态，不会在用户可能同时编辑 `auth.yaml` 时频繁改写该文件。尚不知道账号的 refresh-only 凭据可临时使用 `refresh_sha256:<digest>` state 条目，直到首次成功 refresh 后回填 `account_user_id`。`chord auth state clean` 会移除没有对应 `auth.yaml` OAuth 凭据的孤儿状态，以及无法识别的旧 state key 格式。
+- `auth.state.json` 是机器维护的共享运行时状态。普通条目在每个 provider 下直接以 `account_user_id` 为 key；quota / reset 更新，以及 `expired`、`deactivated`、`invalidated` 这类账号状态，不会在用户可能同时编辑 `auth.yaml` 时频繁改写该文件。尚不知道账号的 refresh-only 凭据可临时使用 `refresh_sha256:<digest>` state 条目，直到首次成功 refresh 后回填 `account_user_id`。`chord auth state clean` 会移除没有对应 `auth.yaml` OAuth 凭据的孤儿状态，以及无法识别的旧 state key 格式。
 
 对带 `access` 的 OAuth 凭据来说，access token 必须能解析出 account 与 user/account-user claim。如果 `auth.yaml` 已有 `account_id`，token 中的账号 ID 必须一致；否则该 access token 会被视为账号不匹配而拒绝。Chord 也支持只包含 `refresh`、没有 `access` 的 OAuth 条目，并会在首次使用时刷新；成功刷新后会解析 `account_id` 并把运行时状态切换到 `account_user_id` key。如果在账号未知前 refresh 发生不可恢复失败，Chord 会在 `refresh_sha256:<digest>` 下记录无效状态，之后由用户执行 `chord auth state clean` 清理该不可用凭据。既没有 `access` 也没有 `refresh` 的 OAuth 条目不可用。
 
-`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可将得到的过期时间缓存到 `auth.state.yaml`，但不会在 state 文件里保存 access token。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired` 或不健康。Chord 仍会先尝试已有的 access token，只有在认证失败后，才会在可恢复时刷新凭据，或者在无法恢复时标记为 expired。
+`expires` 是 access token 的 Unix 毫秒过期时间。如果 `access` 是带 `exp` claim 的 JWT，Chord 会优先使用该值作为更准确的过期元数据，并可将得到的过期时间缓存到 `auth.state.json`，但不会在 state 文件里保存 access token。缺失或本地已过期的 `expires` 不会单独把 OAuth slot 标记为 `expired` 或不健康。Chord 仍会先尝试已有的 access token，只有在认证失败后，才会在可恢复时刷新凭据，或者在无法恢复时标记为 expired。
 
-典型的 `auth.state.yaml` 条目形态如下：
+典型的 `auth.state.json` 内容如下：
 
-```yaml
-openai:
-  user-1__acc-1:
-    account_user_id: user-1__acc-1
-    account_id: acc-1
-    email: user@example.com
-    expires: 1774009702606
-    status: expired
-    updated_at: 1774009702606
-    last_warmup_at: 1774009702606
-    codex_primary_used_pct: 12.5
-    codex_primary_window_minutes: 60
-    codex_primary_reset_at: 1774013302000
-    codex_secondary_used_pct: 40
-    codex_secondary_window_minutes: 10080
-    codex_secondary_reset_at: 1774600000000
+```json
+{
+  "openai": {
+    "user-1__acc-1": {
+      "account_user_id": "user-1__acc-1",
+      "account_id": "acc-1",
+      "email": "user@example.com",
+      "expires": 1774009702606,
+      "status": "expired",
+      "updated_at": 1774009702606,
+      "last_warmup_at": 1774009702606,
+      "codex_primary_used_pct": 12.5,
+      "codex_primary_window_minutes": 60,
+      "codex_primary_reset_at": 1774013302000,
+      "codex_secondary_used_pct": 40,
+      "codex_secondary_window_minutes": 10080,
+      "codex_secondary_reset_at": 1774600000000
+    }
+  }
+}
 ```
 
-`status` 字段只在 `auth.state.yaml` 中权威生效。当 access token 已不可用且凭据无法刷新时，Chord 会写入 `expired`（包括 refresh token 缺失、无效、过期或已被复用），服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
+`status` 字段只在 `auth.state.json` 中权威生效。当 access token 已不可用且凭据无法刷新时，Chord 会写入 `expired`（包括 refresh token 缺失、无效、过期或已被复用），服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
 
 这些 Codex 缓存字段是跨重启保留的调度与展示提示，不是硬封禁：
 
@@ -375,7 +379,7 @@ warm-up 本身也会参考共享状态优先级：
 
 - 从未在共享状态里 warm-up 过的账号优先；
 - 缓存较旧的账号优先于最近刚刷新的账号；
-- warm-up 或轮询拿到更新后的快照后，会写回 `auth.state.yaml`，其他进程会在下次读取选 key 或额度状态时按需吸收这些更新。
+- warm-up 或轮询拿到更新后的快照后，会写回 `auth.state.json`，其他进程会在下次读取选 key 或额度状态时按需吸收这些更新。
 
 ```bash
 # 自动选择已配置的 codex provider

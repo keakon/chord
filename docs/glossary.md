@@ -48,7 +48,7 @@ A persistent conversation record stored under `<state-dir>/sessions/<project-key
 
 ## OAuth
 
-An authentication flow (device-code flow) used by Codex preset providers to obtain API access tokens. Chord stores stable OAuth fields in `auth.yaml` and frequently changing runtime state (quota snapshots, reset times) in `auth.state.yaml`. Use `chord auth` to log in; `chord auth codex --device-code` for headless environments.
+An authentication flow (device-code flow) used by Codex preset providers to obtain API access tokens. Chord stores stable OAuth fields in `auth.yaml` and frequently changing runtime state (quota snapshots, reset times) in `auth.state.json`. Use `chord auth` to log in; `chord auth codex --device-code` for headless environments.
 
 ## Key rotation
 

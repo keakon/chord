@@ -22,7 +22,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 ~/.config/chord/
 ├── config.yaml            # chord 全局配置
 ├── auth.yaml              # API key / OAuth 凭据（建议 chmod 600）
-├── auth.state.yaml        # 机器维护的共享 OAuth 运行时状态 / 额度缓存
+├── auth.state.json        # 机器维护的共享 OAuth 运行时状态 / 额度缓存
 ├── agents/                # 全局 agent 定义（.md 或 .yaml）
 ├── commands/              # 全局自定义 slash 命令（每个 .md 一个）
 └── skills/                # 全局 skill，每个为 <name>/SKILL.md
@@ -30,7 +30,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 
 `config.yaml` 的 schema 见 [配置与认证](./configuration_CN.md)。Agent 见 [扩展与定制 — Agent](./customization_CN.md#agent)。Skill 见 [扩展与定制 — Skills](./customization_CN.md#skills)。自定义 slash 命令见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。
 
-`auth.state.yaml` 是共享运行时缓存，用来保存 OAuth 状态、Codex 额度快照、reset 时间和 warm-up 时间戳。它由 Chord 自动维护，通常不需要手工编辑。删除它是安全的，但在后续 warm-up 重新填充前，会暂时失去跨重启保留的额度排序缓存。
+`auth.state.json` 是共享运行时缓存，用来保存 OAuth 状态、Codex 额度快照、reset 时间和 warm-up 时间戳。它由 Chord 自动维护，通常不需要手工编辑。删除它是安全的，但在后续 warm-up 重新填充前，会暂时失去跨重启保留的额度排序缓存。
 
 ## state 目录 — `~/.local/state/chord/`
 
@@ -145,7 +145,7 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 | `<state-dir>/sessions/<project-key>/`             | **不建议**：会丢这个项目**所有**会话。                                                                               |
 | `<state-dir>/projects/<project-key>.json`         | **不建议**：手动改会让注册表不一致。请用 `chord cleanup project`。                                                     |
 | `<state-dir>/worktrees/...`                       | **不建议**：用 `chord worktree remove <name>`。                                                                      |
-| `~/.config/chord/auth.state.yaml`                 | 可以。它只是机器维护的共享缓存；删掉只会丢失已缓存的 OAuth / quota 状态，之后可由 warm-up 重新生成。                    |
+| `~/.config/chord/auth.state.json`                 | 可以。它只是机器维护的共享缓存；删掉只会丢失已缓存的 OAuth / quota 状态，之后可由 warm-up 重新生成。                    |
 | `~/.config/chord/`                                | 仅当想完全重装时。删 `auth.yaml` 之前确保 key 还在别处。                                                       |
 | `<project>/.chord/`                               | 仅当确实想丢弃项目级 chord 配置时。这个目录通常入 git。                                                       |
 

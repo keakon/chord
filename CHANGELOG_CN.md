@@ -14,6 +14,7 @@
 - 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口，避免最终回复前临时剪裁打破已有 prompt cache；模型切换或高压上下文会跳过该宽限。可通过 `context.reduction.wrap_up_grace_requests` 配置。
 - 上下文剪裁现在默认只保留更短的成功 shell 输出片段，减少上下文压力下保留的低信号终端输出。
 - Codex OAuth 运行时状态现在用用户在工作区内的组合键（`account_user_id`）识别账号，不再只按 account/workspace ID 区分，避免多个用户共享同一工作区时 quota/status 更新互相覆盖。只含 refresh 的凭据在首次成功刷新后会从临时 `refresh_sha256:<digest>` state key 迁移；OAuth access token 现在需要能解析出 account 与 user/account-user claim。
+- Codex OAuth 运行时状态现在改用 `auth.state.json`，不再使用已发布版本中的 `auth.state.yaml`；已有运行时缓存可由 warm-up/轮询重新生成，但 YAML 文件中的 quota/reset/账号状态缓存不会自动迁移。
 - `chord auth refresh <provider>` 现在可以刷新某个 provider 下所有带 refresh token 的 Codex OAuth 凭据，逐账号报告成功 / 失败 / 跳过状态，并保留 rate-limit reset 提示。
 - `view_image` 等工具返回的图片现在会保留在对应的工具结果上，在 TUI 的工具结果卡片中显示为可打开的缩略图，并会对支持该能力的 API 通过 provider 原生的多模态 tool/function result 格式发送。`view_image` 只会在权限允许、有效 model pool 的第一个模型支持 image 输入且该模型不是 OpenAI Chat Completions 时可见；会话已包含图片/PDF 工具结果后，Chord 会跳过不支持所需 image/PDF 输入或使用 Chat Completions 的 fallback 候选。
 

@@ -48,7 +48,7 @@ Chord 自主连续执行任务的模式，适合长时间任务。loop 模式下
 
 ## OAuth
 
-Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存在 `auth.yaml`，将额度快照、reset 时间等频繁变化的运行时状态保存在 `auth.state.yaml`。使用 `chord auth` 登录；无桌面 / SSH 环境可用 `chord auth codex --device-code`。
+Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存在 `auth.yaml`，将额度快照、reset 时间等频繁变化的运行时状态保存在 `auth.state.json`。使用 `chord auth` 登录；无桌面 / SSH 环境可用 `chord auth codex --device-code`。
 
 ## Key rotation
 

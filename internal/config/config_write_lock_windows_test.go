@@ -51,16 +51,16 @@ func TestWindowsLockConfigMutationSerializesConcurrentWriters(t *testing.T) {
 
 func TestWindowsAuthFileLockReentrantAfterRelease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.yaml")
-	lock, err := lockAuthYAMLFile(path)
+	lock, err := lockAuthFile(path)
 	if err != nil {
-		t.Fatalf("lockAuthYAMLFile first: %v", err)
+		t.Fatalf("lockAuthFile first: %v", err)
 	}
 	if err := lock.Close(); err != nil {
 		t.Fatalf("close first lock: %v", err)
 	}
-	lock, err = lockAuthYAMLFile(path)
+	lock, err = lockAuthFile(path)
 	if err != nil {
-		t.Fatalf("lockAuthYAMLFile second: %v", err)
+		t.Fatalf("lockAuthFile second: %v", err)
 	}
 	if err := lock.Close(); err != nil {
 		t.Fatalf("close second lock: %v", err)

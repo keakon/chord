@@ -155,7 +155,7 @@ func mutateAuthYAMLFile(path string, mutate func(*authYAMLDocument) error) (Auth
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create auth config dir: %w", err)
 	}
-	lock, err := lockAuthYAMLFile(path)
+	lock, err := lockAuthFile(path)
 	if err != nil {
 		return nil, err
 	}

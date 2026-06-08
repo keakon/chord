@@ -1,18 +1,18 @@
 package config
 
-type authYAMLLock struct {
+type authFileLock struct {
 	lock *configMutationLock
 }
 
-func lockAuthYAMLFile(path string) (*authYAMLLock, error) {
+func lockAuthFile(path string) (*authFileLock, error) {
 	lock, err := LockConfigMutation(path)
 	if err != nil {
 		return nil, err
 	}
-	return &authYAMLLock{lock: lock}, nil
+	return &authFileLock{lock: lock}, nil
 }
 
-func (l *authYAMLLock) Close() error {
+func (l *authFileLock) Close() error {
 	if l == nil || l.lock == nil {
 		return nil
 	}

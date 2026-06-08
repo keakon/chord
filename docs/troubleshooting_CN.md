@@ -51,7 +51,7 @@ chord doctor models --pool thinking
 界面说明：
 
 - 右侧 RATE LIMIT 面板展示的是 Codex 最近一次用量/限流快照（如 `5h: 42% 2h30m`）。到达 reset 时间点后倒计时会短暂消失，Chord 触发一次用量刷新；由于服务端可能使用滚动窗口，刷新后百分比不一定立即变成 0%，可能是逐步下降。
-- Codex OAuth 运行时状态也会在其它 Chord 进程更新 `auth.state.yaml` 后自动重新加载，因此额度快照、reset 计时、账号元数据和账号状态变化无需重启当前会话也应能生效。
+- Codex OAuth 运行时状态也会在其它 Chord 进程更新 `auth.state.json` 后自动重新加载，因此额度快照、reset 计时、账号元数据和账号状态变化无需重启当前会话也应能生效。
 - 如果 RATE LIMIT 面板长期不更新，可打开 `log_level: debug`，在 `chord.log` 中搜索 `responses codex ws: rate_limits event ...`（收到事件）或 `responses codex ws: rate_limits event ignored ...`（事件未识别/解析失败）。
 
 ## TUI 启动了但无法正常请求

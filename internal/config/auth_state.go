@@ -117,6 +117,15 @@ func SaveAuthState(path string, state AuthStateFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create auth state dir: %w", err)
 	}
+	lock, err := lockAuthFile(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	return saveAuthStateUnlocked(path, state)
+}
+
+func saveAuthStateUnlocked(path string, state AuthStateFile) error {
 	data, err := json.MarshalIndent(normalizeAuthStateFile(state), "", "  ")
 	if err != nil {
 		return err
@@ -142,7 +151,7 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create auth state dir: %w", err)
 	}
-	lock, err := lockAuthYAMLFile(path)
+	lock, err := lockAuthFile(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -168,7 +177,7 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 	if !changed && bytes.Equal(bytes.TrimSpace(beforeData), bytes.TrimSpace(data)) {
 		return state, false, nil
 	}
-	if err := SaveAuthState(path, state); err != nil {
+	if err := saveAuthStateUnlocked(path, state); err != nil {
 		return nil, false, err
 	}
 	return state, true, nil

@@ -281,38 +281,42 @@ openai:
 
 You can list multiple keys for rotation or backup.
 
-For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime status (quota snapshots, reset times, last warm-up timestamps, shared OAuth status cache) in `auth.state.yaml`, not in `auth.yaml`.
+For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime status (quota snapshots, reset times, last warm-up timestamps, shared OAuth status cache) in `auth.state.json`, not in `auth.yaml`.
 
 That split is intentional:
 
 - `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; empty OAuth fields are omitted when Chord rewrites the file, and OAuth `status` does not belong in `auth.yaml`;
-- `auth.state.yaml` is machine-managed shared runtime state. Normal entries are keyed directly by `account_user_id` below each provider so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it. Refresh-only credentials whose account is not known yet can temporarily use a `refresh_sha256:<digest>` state entry until the first successful refresh backfills `account_user_id`. State entries without a matching `auth.yaml` OAuth credential, and unrecognized legacy state-key formats, are removed by `chord auth state clean`.
+- `auth.state.json` is machine-managed shared runtime state. Normal entries are keyed directly by `account_user_id` below each provider so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it. Refresh-only credentials whose account is not known yet can temporarily use a `refresh_sha256:<digest>` state entry until the first successful refresh backfills `account_user_id`. State entries without a matching `auth.yaml` OAuth credential, and unrecognized legacy state-key formats, are removed by `chord auth state clean`.
 
 For OAuth credentials with `access`, the access token must carry parseable account and user/account-user claims. If `auth.yaml` already has `account_id`, the token's account ID must match; otherwise the access token is rejected as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use; after a successful refresh, Chord extracts `account_id` and switches runtime state to the `account_user_id` key. If refresh fails unrecoverably before the account is known, Chord records the invalid state under `refresh_sha256:<digest>` so `chord auth state clean` can remove the unusable credential later. An OAuth entry with neither `access` nor `refresh` is unusable.
 
-`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache the resulting expiry in `auth.state.yaml` without storing the access token there. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired` or unhealthy. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
+`expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache the resulting expiry in `auth.state.json` without storing the access token there. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired` or unhealthy. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
 
-A typical `auth.state.yaml` entry looks like:
+Typical `auth.state.json` content looks like:
 
-```yaml
-openai:
-  user-1__acc-1:
-    account_user_id: user-1__acc-1
-    account_id: acc-1
-    email: user@example.com
-    expires: 1774009702606
-    status: expired
-    updated_at: 1774009702606
-    last_warmup_at: 1774009702606
-    codex_primary_used_pct: 12.5
-    codex_primary_window_minutes: 60
-    codex_primary_reset_at: 1774013302000
-    codex_secondary_used_pct: 40
-    codex_secondary_window_minutes: 10080
-    codex_secondary_reset_at: 1774600000000
+```json
+{
+  "openai": {
+    "user-1__acc-1": {
+      "account_user_id": "user-1__acc-1",
+      "account_id": "acc-1",
+      "email": "user@example.com",
+      "expires": 1774009702606,
+      "status": "expired",
+      "updated_at": 1774009702606,
+      "last_warmup_at": 1774009702606,
+      "codex_primary_used_pct": 12.5,
+      "codex_primary_window_minutes": 60,
+      "codex_primary_reset_at": 1774013302000,
+      "codex_secondary_used_pct": 40,
+      "codex_secondary_window_minutes": 10080,
+      "codex_secondary_reset_at": 1774600000000
+    }
+  }
+}
 ```
 
-The `status` field is authoritative only in `auth.state.yaml`. Chord writes `expired` when an access token can no longer be used and the credential cannot be refreshed (including missing, invalid, expired, or reused refresh tokens), `deactivated` when the service reports a disabled/banned account, and `invalidated` when the account must be re-authenticated. Any non-empty status makes that OAuth slot unselectable until it is cleaned up or replaced.
+The `status` field is authoritative only in `auth.state.json`. Chord writes `expired` when an access token can no longer be used and the credential cannot be refreshed (including missing, invalid, expired, or reused refresh tokens), `deactivated` when the service reports a disabled/banned account, and `invalidated` when the account must be re-authenticated. Any non-empty status makes that OAuth slot unselectable until it is cleaned up or replaced.
 
 These cached Codex quota/reset fields are restart-stable scheduling and display hints, not hard blocks by themselves:
 
@@ -380,7 +384,7 @@ Warm-up priority is also state-aware:
 
 - OAuth slots that have never been warmed up in shared state are probed first;
 - older cached entries are refreshed before recently refreshed ones;
-- after warm-up or polling returns a newer snapshot, Chord writes it to `auth.state.yaml` and other processes adopt it lazily when they next read key-selection or rate-limit state.
+- after warm-up or polling returns a newer snapshot, Chord writes it to `auth.state.json` and other processes adopt it lazily when they next read key-selection or rate-limit state.
 
 ```bash
 # auto-select a configured codex provider

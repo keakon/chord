@@ -79,7 +79,7 @@ chord --worktree feat-auth --continue
 
 ## `chord auth [provider]`
 
-Sign in after the base configuration is in place. This command is for `preset: codex` OAuth providers and stores credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.yaml` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured. The first-run wizard can complete this same Codex OAuth sign-in flow during setup; `chord auth codex` remains the direct command when you want to sign in again later.
+Sign in after the base configuration is in place. This command is for `preset: codex` OAuth providers and stores credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.json` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured. The first-run wizard can complete this same Codex OAuth sign-in flow during setup; `chord auth codex` remains the direct command when you want to sign in again later.
 
 ### Flags
 
@@ -112,7 +112,7 @@ chord auth refresh codex
 
 ### `chord auth state list`
 
-List expired, deactivated, or invalidated OAuth runtime-state entries from `~/.config/chord/auth.state.yaml`. This command does not report orphan state entries whose matching OAuth credential was removed from `auth.yaml`; use `chord auth state clean` to remove both invalid and orphan state.
+List expired, deactivated, or invalidated OAuth runtime-state entries from `~/.config/chord/auth.state.json`. This command does not report orphan state entries whose matching OAuth credential was removed from `auth.yaml`; use `chord auth state clean` to remove both invalid and orphan state.
 
 ```bash
 chord auth state list
@@ -120,12 +120,12 @@ chord auth state list
 
 ### `chord auth state clean`
 
-Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.yaml`, orphan state entries whose OAuth credential no longer exists in `auth.yaml`, and matching expired / deactivated / invalidated OAuth credentials from `~/.config/chord/auth.yaml`.
+Remove invalid OAuth runtime-state entries from `~/.config/chord/auth.state.json`, orphan state entries whose OAuth credential no longer exists in `auth.yaml`, and matching expired / deactivated / invalidated OAuth credentials from `~/.config/chord/auth.yaml`.
 
 Typical use cases:
 
 - clear shared cached state and matching credentials for expired / deactivated / invalidated accounts;
-- keep `auth.state.yaml` and `auth.yaml` in sync after rotating or retiring accounts;
+- keep `auth.state.json` and `auth.yaml` in sync after rotating or retiring accounts;
 - remove unusable OAuth credentials after Chord marks them expired, deactivated, or invalidated.
 
 ```bash
