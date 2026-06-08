@@ -56,8 +56,8 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		args = unwrapJSONString(args)
 		log.Warnf("responses: recovering tool call from response.completed output (output_item.added was missed) tool=%v call_id=%v", out.Name, callID)
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   callID,
-			Name: out.Name,
+			ID:   cloneLongLivedLLMString(callID),
+			Name: cloneLongLivedLLMString(out.Name),
 			Args: args,
 		})
 		if cb != nil {
@@ -107,8 +107,8 @@ func finalizeOneResponsesToolCall(
 	}
 	log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 	resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-		ID:   acc.id,
-		Name: acc.name,
+		ID:   cloneLongLivedLLMString(acc.id),
+		Name: cloneLongLivedLLMString(acc.name),
 		Args: args,
 	})
 	if cb != nil {
@@ -171,8 +171,8 @@ func finalizeResponsesToolCalls(
 		}
 		log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   acc.id,
-			Name: acc.name,
+			ID:   cloneLongLivedLLMString(acc.id),
+			Name: cloneLongLivedLLMString(acc.name),
 			Args: args,
 		})
 		if cb != nil {

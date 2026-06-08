@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	sonicjson "github.com/bytedance/sonic"
+
 	"github.com/keakon/golog/log"
 )
 
@@ -153,7 +155,7 @@ func (t *StdioTransport) readLoop() {
 		}
 
 		var resp JSONRPCResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
+		if err := mcpWireJSON.Unmarshal(line, &resp); err != nil {
 			log.Debugf("mcp stdio: ignoring non-JSON line line=%v", string(line))
 			continue
 		}
@@ -211,7 +213,7 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	t.mu.Unlock()
 
 	// Marshal and write.
-	data, err := json.Marshal(req)
+	data, err := sonicjson.ConfigDefault.Marshal(req)
 	if err != nil {
 		t.removePending(req.ID)
 		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: marshal request: %w", err)
@@ -247,7 +249,7 @@ func (t *StdioTransport) Notify(_ context.Context, notif JSONRPCNotification) er
 	}
 	t.mu.Unlock()
 
-	data, err := json.Marshal(notif)
+	data, err := sonicjson.ConfigDefault.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("mcp stdio: marshal notification: %w", err)
 	}
@@ -376,7 +378,7 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 		return readSSERPCResponse(br, wantID)
 	}
 	var resp JSONRPCResponse
-	if err := json.NewDecoder(br).Decode(&resp); err != nil {
+	if err := mcpWireJSON.NewDecoder(br).Decode(&resp); err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: decode response: %w", err)
 	}
 	if resp.ID != wantID && wantID != 0 {
@@ -401,7 +403,7 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 			continue
 		}
 		var resp JSONRPCResponse
-		if err := json.Unmarshal([]byte(payload), &resp); err != nil {
+		if err := mcpWireJSON.UnmarshalFromString(payload, &resp); err != nil {
 			continue
 		}
 		if resp.ID != wantID {
@@ -417,7 +419,7 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 
 // Send posts a JSON-RPC request and reads the response.
 func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
-	data, err := json.Marshal(req)
+	data, err := sonicjson.ConfigDefault.Marshal(req)
 	if err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: marshal request: %w", err)
 	}
@@ -448,7 +450,7 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 
 // Notify sends a JSON-RPC notification via HTTP POST (fire-and-forget).
 func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) error {
-	data, err := json.Marshal(notif)
+	data, err := sonicjson.ConfigDefault.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("mcp http: marshal notification: %w", err)
 	}

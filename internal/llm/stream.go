@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 
+	sonicjson "github.com/bytedance/sonic"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -14,6 +16,15 @@ import (
 
 // StreamCallback is the function signature for receiving streaming deltas.
 type StreamCallback func(delta message.StreamDelta)
+
+// Copy small decoded fields that are stored in message.Response so they do not
+// keep larger parser inputs alive for the whole TUI session.
+func cloneLongLivedLLMString(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.Clone(s)
+}
 
 // --- SSE JSON structures for Anthropic streaming ---
 
@@ -150,7 +161,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 			switch eventType {
 			case "message_start":
 				var ev sseMessageStart
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_start: %w", err)
 				}
 				if resp.Usage == nil {
@@ -179,7 +190,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_start":
 				var ev sseContentBlockStart
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_start: %w", err)
 				}
 				block := &contentBlock{
@@ -211,7 +222,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_delta":
 				var ev sseContentBlockDelta
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_delta: %w", err)
 				}
 				block, ok := blocks[ev.Index]
@@ -249,12 +260,12 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					}
 				case "signature_delta":
 					// Signature is stored for replay; not shown to the user.
-					block.signature = ev.Delta.Signature
+					block.signature = cloneLongLivedLLMString(ev.Delta.Signature)
 				}
 
 			case "content_block_stop":
 				var ev sseContentBlockStop
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_stop: %w", err)
 				}
 				if p, ok := reader.(chunkPhaser); ok {
@@ -275,8 +286,8 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					}
 				case "tool_use":
 					tc := message.ToolCall{
-						ID:   block.toolID,
-						Name: block.toolName,
+						ID:   cloneLongLivedLLMString(block.toolID),
+						Name: cloneLongLivedLLMString(block.toolName),
 						Args: json.RawMessage(block.toolInput.String()),
 					}
 					// Default to empty object if no input was received.
@@ -313,10 +324,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "message_delta":
 				var ev sseMessageDelta
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_delta: %w", err)
 				}
-				resp.StopReason = ev.Delta.StopReason
+				resp.StopReason = cloneLongLivedLLMString(ev.Delta.StopReason)
 				if resp.Usage == nil {
 					resp.Usage = &message.TokenUsage{}
 				}
@@ -328,7 +339,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case message.StreamDeltaError:
 				var ev sseError
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
 				}
 				// Some proxies embed the HTTP status in the message (e.g. "HTTP 429 - ...").
@@ -387,8 +398,8 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					args = json.RawMessage(MalformedArgsSentinel)
 				}
 				resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-					ID:   block.toolID,
-					Name: block.toolName,
+					ID:   cloneLongLivedLLMString(block.toolID),
+					Name: cloneLongLivedLLMString(block.toolName),
 					Args: args,
 				})
 			}

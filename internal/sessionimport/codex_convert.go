@@ -39,7 +39,7 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 		}
 
 		var lineObj map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &lineObj); err != nil {
+		if err := importJSONUnmarshalString(line, &lineObj); err != nil {
 			return nil, "", fmt.Errorf("codex import: line %d: parse JSON: %w", lineNo, err)
 		}
 
@@ -48,7 +48,7 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 			continue
 		}
 		var typeStr string
-		if err := json.Unmarshal(rawType, &typeStr); err != nil || typeStr == "" {
+		if err := importJSONUnmarshal(rawType, &typeStr); err != nil || typeStr == "" {
 			continue
 		}
 		payload := lineObj["payload"]
@@ -61,7 +61,7 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 			var meta struct {
 				ID string `json:"id"`
 			}
-			if json.Unmarshal(payload, &meta) == nil && meta.ID != "" {
+			if importJSONUnmarshal(payload, &meta) == nil && meta.ID != "" {
 				sessionID = meta.ID
 			}
 		}
@@ -80,7 +80,7 @@ func pickJSONString(m map[string]json.RawMessage, keys ...string) string {
 			continue
 		}
 		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
+		if err := importJSONUnmarshal(raw, &s); err == nil {
 			s = strings.TrimSpace(s)
 			if s != "" {
 				return s

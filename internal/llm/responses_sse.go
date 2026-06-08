@@ -470,7 +470,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 }
 
 func responsesSSEUnmarshal(data []byte, v any) error {
-	return sonicjson.ConfigStd.Unmarshal(data, v)
+	return sonicjson.ConfigDefault.Unmarshal(data, v)
 }
 
 func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIError, error) {

@@ -134,7 +134,7 @@ func convertClaudeTranscript(data []byte, toolMode string, reasoningMode string,
 			continue
 		}
 		var env claudeTranscriptEnvelope
-		if err := json.Unmarshal([]byte(line), &env); err != nil {
+		if err := importJSONUnmarshalString(line, &env); err != nil {
 			return nil, fmt.Errorf("claude import: line %d: parse JSON: %w", lineNo, err)
 		}
 		entry, skipped := classifyClaudeEntry(claudeNode{Envelope: env, Index: lineNo}, report.Claude)

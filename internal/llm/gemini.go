@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	sonicjson "github.com/bytedance/sonic"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -469,7 +471,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		}
 
 		var chunk geminiStreamChunk
-		if err := json.Unmarshal(data, &chunk); err != nil {
+		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
 		}
 
@@ -514,7 +516,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				}
 			}
 			if candidate.FinishReason != "" {
-				resp.StopReason = candidate.FinishReason
+				resp.StopReason = cloneLongLivedLLMString(candidate.FinishReason)
 				finalizeGeminiToolCalls(toolCalls, &resp, cb, candidate.FinishReason == "MAX_TOKENS")
 			}
 		}
@@ -574,7 +576,7 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 			log.Warnf("malformed Gemini tool call arguments tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 			args = json.RawMessage(MalformedArgsSentinel)
 		}
-		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: acc.id, Name: acc.name, Args: args})
+		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: cloneLongLivedLLMString(acc.id), Name: cloneLongLivedLLMString(acc.name), Args: args})
 		if cb != nil {
 			cb(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: string(args)}})
 		}

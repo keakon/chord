@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	sonicjson "github.com/bytedance/sonic"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/imageutil"
@@ -146,7 +148,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("mcp initialize %s: %w", c.name, resp.Error)
 	}
 
-	if err := json.Unmarshal(resp.Result, &c.serverInfo); err != nil {
+	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &c.serverInfo); err != nil {
 		return fmt.Errorf("mcp initialize %s: decode result: %w", c.name, err)
 	}
 
@@ -182,7 +184,7 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 	}
 
 	var result toolsListResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
+	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("mcp tools/list %s: decode: %w", c.name, err)
 	}
 
@@ -197,7 +199,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	// Parse args into a map so the MCP server receives a proper object.
 	var argsMap map[string]any
 	if len(args) > 0 {
-		if err := json.Unmarshal(args, &argsMap); err != nil {
+		if err := sonicjson.ConfigDefault.Unmarshal(args, &argsMap); err != nil {
 			return "", nil, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err)
 		}
 	}
@@ -221,7 +223,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	}
 
 	var result toolCallResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
+	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
 	}
 

@@ -731,7 +731,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		}
 
 		var chunk openAIStreamChunk
-		if err := sonicjson.ConfigStd.Unmarshal(data, &chunk); err != nil {
+		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse stream chunk: %w", err)
 		}
 
@@ -836,7 +836,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				// bytes, not nested-quoted escaped text.
 				if len(tc.Function.Arguments) > 0 {
 					var frag string
-					if err := sonicjson.ConfigStd.Unmarshal(tc.Function.Arguments, &frag); err == nil {
+					if err := sonicjson.ConfigDefault.Unmarshal(tc.Function.Arguments, &frag); err == nil {
 						acc.args.WriteString(frag)
 					} else {
 						// Fallback: some proxies send raw JSON instead of a string.
@@ -857,7 +857,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 			// Handle finish reason — finalize all accumulated tool calls.
 			if choice.FinishReason != nil {
-				resp.StopReason = *choice.FinishReason
+				resp.StopReason = cloneLongLivedLLMString(*choice.FinishReason)
 				switch *choice.FinishReason {
 				case "tool_calls":
 					finalizeToolCalls(toolCalls, &resp, cb, false)
@@ -988,8 +988,8 @@ func finalizeToolCalls(
 		}
 		log.Debugf("finalized tool call tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   acc.id,
-			Name: acc.name,
+			ID:   cloneLongLivedLLMString(acc.id),
+			Name: cloneLongLivedLLMString(acc.name),
 			Args: args,
 		})
 		if cb != nil {

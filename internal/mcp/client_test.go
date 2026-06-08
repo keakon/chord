@@ -581,6 +581,20 @@ func TestHTTPTransport_Send(t *testing.T) {
 	}
 }
 
+func TestHTTPTransportRejectsInvalidStringInResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte{'{', '"', 'j', 's', 'o', 'n', 'r', 'p', 'c', '"', ':', '"', '2', '.', '0', '"', ',', '"', 'i', 'd', '"', ':', '1', ',', '"', 'r', 'e', 's', 'u', 'l', 't', '"', ':', '{', '"', 's', '"', ':', '"', 'a', 1, 'b', '"', '}', '}'})
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(server.URL)
+	_, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"})
+	if err == nil || !strings.Contains(err.Error(), "decode response") {
+		t.Fatalf("Send error = %v, want decode response error", err)
+	}
+}
+
 func TestHTTPTransport_SSE_Stream(t *testing.T) {
 	var sessionOnSecond bool
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
