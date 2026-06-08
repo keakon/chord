@@ -55,6 +55,88 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 	p.mu.Unlock()
 }
 
+func TestMaybeReloadAuthStateSkipsUnchangedFile(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.CodexPrimaryUsedPct = 25
+		record.CodexPrimaryWindowMin = 300
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	p.mu.Lock()
+	if got := p.polledRateLimitByCredIdx[0]; got == nil || got.Primary == nil || got.Primary.UsedPct != 25 {
+		p.mu.Unlock()
+		t.Fatalf("expected initial auth.state snapshot, got %#v", got)
+	}
+	p.polledRateLimitByCredIdx[0] = &ratelimit.KeyRateLimitSnapshot{Primary: &ratelimit.RateLimitWindow{UsedPct: 99}}
+	changed := p.maybeReloadAuthStateLocked()
+	got := p.polledRateLimitByCredIdx[0]
+	p.mu.Unlock()
+
+	if changed {
+		t.Fatal("maybeReloadAuthStateLocked changed unchanged file")
+	}
+	if got == nil || got.Primary == nil || got.Primary.UsedPct != 99 {
+		t.Fatalf("unchanged file was reapplied from YAML, got %#v", got)
+	}
+}
+
+func TestKeyStatsDoNotReloadAuthState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+	p.mu.Lock()
+	p.stopAuthStateMonitorLocked()
+	p.mu.Unlock()
+
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusDeactivated
+		record.UpdatedAt = time.Now().UnixMilli()
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord deactivate: %v", err)
+	}
+
+	if healthy, total := p.HealthyKeyCount(); healthy != 1 || total != 1 {
+		t.Fatalf("HealthyKeyCount reloaded auth.state: healthy=%d total=%d, want 1/1", healthy, total)
+	}
+
+	p.mu.Lock()
+	changed := p.maybeReloadAuthStateLocked()
+	p.mu.Unlock()
+	if !changed {
+		t.Fatal("explicit auth.state reload did not observe changed file")
+	}
+	if healthy, total := p.HealthyKeyCount(); healthy != 0 || total != 0 {
+		t.Fatalf("HealthyKeyCount after explicit reload = %d/%d, want 0/0", healthy, total)
+	}
+}
+
 func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})

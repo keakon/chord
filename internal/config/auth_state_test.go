@@ -17,17 +17,14 @@ func TestMergeAuthConfigWithStateOverlaysStatus(t *testing.T) {
 }
 
 func TestParseAuthStateIgnoresUnrecognizedStateKeys(t *testing.T) {
-	state, err := ParseAuthState([]byte(`openai:
-  openai:account_id:acc-old:
-    status: expired
-  account_id:acc-old2:
-    status: expired
-  openai:access_sha256:deadbeef:
-    status: invalidated
-  acc-ok:
-    email: user@example.com
-    status: expired
-`))
+	state, err := ParseAuthState([]byte(`{
+  "openai": {
+    "openai:account_id:acc-old": {"status": "expired"},
+    "account_id:acc-old2": {"status": "expired"},
+    "openai:access_sha256:deadbeef": {"status": "invalidated"},
+    "acc-ok": {"email": "user@example.com", "status": "expired"}
+  }
+}`))
 	if err != nil {
 		t.Fatalf("ParseAuthState: %v", err)
 	}
@@ -41,7 +38,7 @@ func TestParseAuthStateIgnoresUnrecognizedStateKeys(t *testing.T) {
 }
 
 func TestAuthStateRoundTripAndFind(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.state.yaml")
+	path := filepath.Join(t.TempDir(), "auth.state.json")
 	hasCredits := true
 	unlimited := false
 	_, updated, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
@@ -63,8 +60,8 @@ func TestAuthStateRoundTripAndFind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
-	if strings.Contains(string(mustReadFile(t, path)), "access:") {
-		t.Fatalf("auth.state.yaml should not persist access token:\n%s", mustReadFile(t, path))
+	if strings.Contains(string(mustReadFile(t, path)), "access") {
+		t.Fatalf("auth.state.json should not persist access token:\n%s", mustReadFile(t, path))
 	}
 	record, ok := FindOAuthStateRecord(state, OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"})
 	if !ok {
@@ -79,7 +76,7 @@ func TestAuthStateRoundTripAndFind(t *testing.T) {
 }
 
 func TestUpsertOAuthStateRecordRequiresAccountUserID(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.state.yaml")
+	path := filepath.Join(t.TempDir(), "auth.state.json")
 	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusInvalidated
 		return true, nil
@@ -100,34 +97,6 @@ func TestUpsertOAuthStateRecordRequiresAccountUserID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected refresh_sha256 state key to be accepted: %v", err)
-	}
-}
-
-func TestUpsertOAuthStateRecordNormalizesLegacyAccessWhenRecordUnchanged(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.state.yaml")
-	if err := os.WriteFile(path, []byte(`openai:
-  acc-1:
-    email: user@example.com
-    access: stale-access-token
-    status: normal
-`), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	_, _, changed, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "acc-1", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
-		before := *record
-		record.Status = OAuthStatusNormal
-		return !EqualOAuthStateRecord(before, *record), nil
-	})
-	if err != nil {
-		t.Fatalf("UpsertOAuthStateRecord: %v", err)
-	}
-	if !changed {
-		t.Fatal("expected rewrite to report changed when normalizing legacy access")
-	}
-	data := mustReadFile(t, path)
-	if strings.Contains(string(data), "access:") {
-		t.Fatalf("auth.state.yaml should drop legacy access token after rewrite:\n%s", data)
 	}
 }
 

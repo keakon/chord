@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 
 	"github.com/keakon/chord/internal/hook"
 )
+
+const outputDropLogMinInterval = 2 * time.Second
 
 // Run starts the blocking event loop. It returns when ctx is cancelled,
 // the agent's parent context is cancelled, or an unrecoverable error occurs.
@@ -172,6 +175,33 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 	}
 }
 
+func outputEventType(evt AgentEvent) string {
+	if evt == nil {
+		return "<nil>"
+	}
+	return reflect.TypeOf(evt).String()
+}
+
+func (a *MainAgent) shouldLogDroppedOutputEvent(eventType string, now time.Time) (bool, int) {
+	a.outputDropLogMu.Lock()
+	defer a.outputDropLogMu.Unlock()
+	if a.outputDropLogLastByType == nil {
+		a.outputDropLogLastByType = make(map[string]time.Time)
+	}
+	if a.outputDropLogSuppressedByType == nil {
+		a.outputDropLogSuppressedByType = make(map[string]int)
+	}
+	last := a.outputDropLogLastByType[eventType]
+	if last.IsZero() || now.Sub(last) >= outputDropLogMinInterval {
+		suppressed := a.outputDropLogSuppressedByType[eventType]
+		a.outputDropLogSuppressedByType[eventType] = 0
+		a.outputDropLogLastByType[eventType] = now
+		return true, suppressed
+	}
+	a.outputDropLogSuppressedByType[eventType]++
+	return false, 0
+}
+
 func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs ...any) {
 	a.outputMu.RLock()
 	if a.outputClosed.Load() {
@@ -246,7 +276,14 @@ func (a *MainAgent) emitToTUI(evt AgentEvent) {
 	select {
 	case a.outputCh <- evt:
 	default:
-		log.Warnf("TUI output channel full, dropping event event_type=%v", fmt.Sprintf("%T", evt))
+		eventType := outputEventType(evt)
+		if shouldLog, suppressed := a.shouldLogDroppedOutputEvent(eventType, time.Now()); shouldLog {
+			if suppressed > 0 {
+				log.Warnf("TUI output channel full, dropping event event_type=%v suppressed_since_last=%v", eventType, suppressed)
+			} else {
+				log.Warnf("TUI output channel full, dropping event event_type=%v", eventType)
+			}
+		}
 	}
 }
 

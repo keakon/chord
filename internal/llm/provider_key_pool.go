@@ -515,7 +515,6 @@ func (p *ProviderConfig) UpdateKeySnapshot(key string, snap *ratelimit.KeyRateLi
 func (p *ProviderConfig) KeySnapshot(key string) *ratelimit.KeyRateLimitSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.maybeReloadAuthStateLocked()
 	for _, ks := range p.keyStates {
 		if ks.Key == key {
 			return ks.RateLimit
@@ -533,7 +532,6 @@ func (p *ProviderConfig) ClearInlineDisplayRateLimitSnapshot() {
 func (p *ProviderConfig) CurrentKeySnapshot() *ratelimit.KeyRateLimitSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.maybeReloadAuthStateLocked()
 	if p.lastSelectedKey == "" {
 		if p.inlineDisplaySnap != nil {
 			return p.inlineDisplaySnap
@@ -559,7 +557,6 @@ func (p *ProviderConfig) CurrentKeySnapshot() *ratelimit.KeyRateLimitSnapshot {
 func (p *ProviderConfig) KeyCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.maybeReloadAuthStateLocked()
 	count := 0
 	for _, ks := range p.keyStates {
 		if !ks.Invalid {
@@ -576,7 +573,6 @@ func (p *ProviderConfig) KeyCount() int {
 func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {
@@ -597,7 +593,6 @@ func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 func (p *ProviderConfig) HealthyKeyCount() (healthy, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {

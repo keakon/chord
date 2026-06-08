@@ -3,14 +3,13 @@ package config
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
@@ -26,23 +25,23 @@ type OAuthStateKey struct {
 
 // OAuthStateRecord stores dynamic OAuth runtime state shared across processes.
 type OAuthStateRecord struct {
-	AccountUserID           string                `yaml:"account_user_id,omitempty"`
-	AccountID               string                `yaml:"account_id,omitempty"`
-	Email                   string                `yaml:"email,omitempty"`
-	RefreshSHA256           string                `yaml:"refresh_sha256,omitempty"`
-	Expires                 int64                 `yaml:"expires,omitempty"`
-	Status                  OAuthCredentialStatus `yaml:"status,omitempty"`
-	UpdatedAt               int64                 `yaml:"updated_at,omitempty"`
-	LastWarmupAt            int64                 `yaml:"last_warmup_at,omitempty"`
-	CodexPrimaryUsedPct     float64               `yaml:"codex_primary_used_pct,omitempty"`
-	CodexPrimaryWindowMin   int64                 `yaml:"codex_primary_window_minutes,omitempty"`
-	CodexPrimaryResetAt     int64                 `yaml:"codex_primary_reset_at,omitempty"`
-	CodexSecondaryUsedPct   float64               `yaml:"codex_secondary_used_pct,omitempty"`
-	CodexSecondaryWindowMin int64                 `yaml:"codex_secondary_window_minutes,omitempty"`
-	CodexSecondaryResetAt   int64                 `yaml:"codex_secondary_reset_at,omitempty"`
-	CodexHasCredits         *bool                 `yaml:"codex_has_credits,omitempty"`
-	CodexUnlimited          *bool                 `yaml:"codex_unlimited,omitempty"`
-	CodexBalance            string                `yaml:"codex_balance,omitempty"`
+	AccountUserID           string                `json:"account_user_id,omitempty"`
+	AccountID               string                `json:"account_id,omitempty"`
+	Email                   string                `json:"email,omitempty"`
+	RefreshSHA256           string                `json:"refresh_sha256,omitempty"`
+	Expires                 int64                 `json:"expires,omitempty"`
+	Status                  OAuthCredentialStatus `json:"status,omitempty"`
+	UpdatedAt               int64                 `json:"updated_at,omitempty"`
+	LastWarmupAt            int64                 `json:"last_warmup_at,omitempty"`
+	CodexPrimaryUsedPct     float64               `json:"codex_primary_used_pct,omitempty"`
+	CodexPrimaryWindowMin   int64                 `json:"codex_primary_window_minutes,omitempty"`
+	CodexPrimaryResetAt     int64                 `json:"codex_primary_reset_at,omitempty"`
+	CodexSecondaryUsedPct   float64               `json:"codex_secondary_used_pct,omitempty"`
+	CodexSecondaryWindowMin int64                 `json:"codex_secondary_window_minutes,omitempty"`
+	CodexSecondaryResetAt   int64                 `json:"codex_secondary_reset_at,omitempty"`
+	CodexHasCredits         *bool                 `json:"codex_has_credits,omitempty"`
+	CodexUnlimited          *bool                 `json:"codex_unlimited,omitempty"`
+	CodexBalance            string                `json:"codex_balance,omitempty"`
 }
 
 // IsValid reports whether the runtime status is usable.
@@ -58,7 +57,7 @@ func AuthStatePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(h, "auth.state.yaml"), nil
+	return filepath.Join(h, "auth.state.json"), nil
 }
 
 func OAuthRefreshStateKey(refresh string) string {
@@ -97,7 +96,7 @@ func LoadAuthState(path string) (AuthStateFile, error) {
 	return ParseAuthState(data)
 }
 
-// ParseAuthState parses raw auth.state.yaml bytes. It returns an empty file
+// ParseAuthState parses raw auth.state JSON bytes. It returns an empty file
 // when the payload is blank so callers can treat "no file" and "empty file"
 // uniformly without re-reading from disk.
 func ParseAuthState(data []byte) (AuthStateFile, error) {
@@ -105,7 +104,7 @@ func ParseAuthState(data []byte) (AuthStateFile, error) {
 		return make(AuthStateFile), nil
 	}
 	var raw AuthStateFile
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 	return normalizeAuthStateFile(raw), nil
@@ -118,7 +117,7 @@ func SaveAuthState(path string, state AuthStateFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create auth state dir: %w", err)
 	}
-	data, err := yaml.Marshal(normalizeAuthStateFile(state))
+	data, err := json.MarshalIndent(normalizeAuthStateFile(state), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -162,7 +161,7 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 		return nil, false, err
 	}
 	state = normalizeAuthStateFile(state)
-	data, err := yaml.Marshal(state)
+	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return nil, false, err
 	}

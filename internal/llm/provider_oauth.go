@@ -249,6 +249,8 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath, a
 			log.Warnf("failed to create OAuth refresh HTTP client with proxy, using default proxy=%v error=%v", proxyURL, clientErr)
 		}
 	}
+	p.mu.Lock()
+	var monitorToStart *authStateMonitor
 	p.oauthRefresher = &OAuthRefresher{
 		tokenURL:       tokenURL,
 		clientID:       clientID,
@@ -263,7 +265,7 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath, a
 	p.stopAuthStateMonitorLocked()
 	if authStatePath != "" {
 		p.authStateMonitor = newAuthStateMonitor(authStatePath, p.reloadAuthStateFromMonitor)
-		p.authStateMonitor.start()
+		monitorToStart = p.authStateMonitor
 	}
 	p.effectiveProxyURL = proxyURL
 	for keySlot, ks := range p.keyStates {
@@ -311,6 +313,8 @@ func (p *ProviderConfig) SetOAuthRefresher(tokenURL, clientID, authConfigPath, a
 		}
 	}
 	p.loadAuthStateLocked()
+	p.mu.Unlock()
+	monitorToStart.start()
 }
 
 func (p *ProviderConfig) TryRefreshOAuthKey(ctx context.Context, key string) (string, bool, error) {

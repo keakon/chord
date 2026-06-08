@@ -32,11 +32,22 @@ func (p *ProviderConfig) authStateKeyLocked(ks *KeyState) config.OAuthStateKey {
 
 const missingAuthStateDigest = "<missing>"
 
+func authStateStat(path string) (time.Time, int64, string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return time.Time{}, 0, missingAuthStateDigest, nil
+		}
+		return time.Time{}, 0, "", fmt.Errorf("stat auth state: %w", err)
+	}
+	return info.ModTime(), info.Size(), "", nil
+}
+
 func (p *ProviderConfig) loadAuthStateLocked() {
 	if strings.TrimSpace(p.authStatePath) == "" {
 		return
 	}
-	state, mtime, digest, err := loadAuthStateSnapshot(p.authStatePath)
+	state, mtime, size, digest, err := loadAuthStateSnapshot(p.authStatePath)
 	if err != nil {
 		log.Warnf("failed to load auth state path=%v error=%v", p.authStatePath, err)
 		return
@@ -46,27 +57,28 @@ func (p *ProviderConfig) loadAuthStateLocked() {
 	}
 	p.authState = state
 	p.authStateMTime = mtime
+	p.authStateSize = size
 	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, true)
 }
 
-func loadAuthStateSnapshot(path string) (config.AuthStateFile, time.Time, string, error) {
+func loadAuthStateSnapshot(path string) (config.AuthStateFile, time.Time, int64, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return make(config.AuthStateFile), time.Time{}, missingAuthStateDigest, nil
+			return make(config.AuthStateFile), time.Time{}, 0, missingAuthStateDigest, nil
 		}
-		return nil, time.Time{}, "", fmt.Errorf("read auth state: %w", err)
+		return nil, time.Time{}, 0, "", fmt.Errorf("read auth state: %w", err)
 	}
 	state, err := config.ParseAuthState(data)
 	if err != nil {
-		return nil, time.Time{}, "", err
+		return nil, time.Time{}, 0, "", err
 	}
 	mtime, err := config.ReadAuthStateMTime(path)
 	if err != nil {
-		return nil, time.Time{}, "", err
+		return nil, time.Time{}, 0, "", err
 	}
-	return state, mtime, fmt.Sprintf("%x", sha256.Sum256(data)), nil
+	return state, mtime, int64(len(data)), fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
 
 func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetPollTTL bool) {
@@ -150,16 +162,38 @@ func (p *ProviderConfig) maybeReloadAuthStateLocked() bool {
 	if strings.TrimSpace(p.authStatePath) == "" {
 		return false
 	}
-	state, mtime, digest, err := loadAuthStateSnapshot(p.authStatePath)
+	mtime, size, statDigest, err := authStateStat(p.authStatePath)
+	if err != nil {
+		log.Warnf("failed to stat auth state path=%v error=%v", p.authStatePath, err)
+		return false
+	}
+	if statDigest == missingAuthStateDigest {
+		if p.authStateDigest == missingAuthStateDigest {
+			return false
+		}
+		p.authState = make(config.AuthStateFile)
+		p.authStateMTime = time.Time{}
+		p.authStateSize = 0
+		p.authStateDigest = missingAuthStateDigest
+		p.applyAuthStateLocked(p.authState, true)
+		return true
+	}
+	if p.authStateDigest != "" && !p.authStateMTime.IsZero() && p.authStateMTime.Equal(mtime) && p.authStateSize == size {
+		return false
+	}
+	state, loadedMTime, loadedSize, digest, err := loadAuthStateSnapshot(p.authStatePath)
 	if err != nil {
 		log.Warnf("failed to reload auth state path=%v error=%v", p.authStatePath, err)
 		return false
 	}
 	if digest == p.authStateDigest {
+		p.authStateMTime = loadedMTime
+		p.authStateSize = loadedSize
 		return false
 	}
 	p.authState = state
-	p.authStateMTime = mtime
+	p.authStateMTime = loadedMTime
+	p.authStateSize = loadedSize
 	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, true)
 	return true
@@ -264,13 +298,19 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		return
 	}
 	mtime, _ := config.ReadAuthStateMTime(p.authStatePath)
+	var size int64
+	if info, statErr := os.Stat(p.authStatePath); statErr == nil {
+		size = info.Size()
+	}
 	digest := ""
-	if _, _, loadedDigest, loadErr := loadAuthStateSnapshot(p.authStatePath); loadErr == nil {
+	if _, _, loadedSize, loadedDigest, loadErr := loadAuthStateSnapshot(p.authStatePath); loadErr == nil {
+		size = loadedSize
 		digest = loadedDigest
 	}
 	p.mu.Lock()
 	p.authState = state
 	p.authStateMTime = mtime
+	p.authStateSize = size
 	p.authStateDigest = digest
 	p.applyAuthStateLocked(state, false)
 	p.mu.Unlock()

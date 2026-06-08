@@ -303,3 +303,23 @@ func TestEmitToTUIStreamEventStillDropsWhenChannelFull(t *testing.T) {
 	default:
 	}
 }
+
+func TestDroppedOutputEventLogIsThrottledByType(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	now := time.Unix(100, 0)
+	eventType := "agent.StreamTextEvent"
+
+	if ok, suppressed := a.shouldLogDroppedOutputEvent(eventType, now); !ok || suppressed != 0 {
+		t.Fatalf("first drop log = (%v, %d), want (true, 0)", ok, suppressed)
+	}
+	if ok, suppressed := a.shouldLogDroppedOutputEvent(eventType, now.Add(time.Second)); ok || suppressed != 0 {
+		t.Fatalf("throttled drop log = (%v, %d), want (false, 0)", ok, suppressed)
+	}
+	if ok, suppressed := a.shouldLogDroppedOutputEvent(eventType, now.Add(2*time.Second)); !ok || suppressed != 1 {
+		t.Fatalf("interval drop log = (%v, %d), want (true, 1)", ok, suppressed)
+	}
+	if ok, suppressed := a.shouldLogDroppedOutputEvent("agent.RequestProgressEvent", now.Add(500*time.Millisecond)); !ok || suppressed != 0 {
+		t.Fatalf("other event type drop log = (%v, %d), want (true, 0)", ok, suppressed)
+	}
+}

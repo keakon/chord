@@ -25,12 +25,24 @@ type contextLengthExceededPendingCompactionError struct {
 	inner error
 }
 
+const requestProgressEmitMinInterval = 100 * time.Millisecond
+
 func (e *contextLengthExceededPendingCompactionError) Error() string {
 	return fmt.Sprintf("context length exceeded (compaction in progress): %v", e.inner)
 }
 
 func (e *contextLengthExceededPendingCompactionError) Unwrap() error {
 	return e.inner
+}
+
+func shouldEmitRequestProgress(now, lastEmitAt time.Time, bytes, events, lastBytes, lastEvents int64) bool {
+	if lastEmitAt.IsZero() {
+		return true
+	}
+	if bytes == lastBytes && events == lastEvents {
+		return false
+	}
+	return now.Sub(lastEmitAt) >= requestProgressEmitMinInterval
 }
 
 // IsContextLengthExceededPendingCompaction reports whether err is a
@@ -381,10 +393,19 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.emitActivity("main", activity, detail)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
+	var lastProgressEmitAt time.Time
+	var lastProgressEmitBytes int64
+	var lastProgressEmitEvents int64
 	streamReducer.onProgress = func(progress *message.StreamProgressDelta) {
 		state.requestProgressBytes = progress.Bytes
 		state.requestProgressEvents = progress.Events
-		a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
+		now := time.Now()
+		if shouldEmitRequestProgress(now, lastProgressEmitAt, state.requestProgressBytes, state.requestProgressEvents, lastProgressEmitBytes, lastProgressEmitEvents) {
+			lastProgressEmitAt = now
+			lastProgressEmitBytes = state.requestProgressBytes
+			lastProgressEmitEvents = state.requestProgressEvents
+			a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
+		}
 	}
 	streamReducer.beforeStatus = func(status *message.StatusDelta) {
 		// Any status carrying ModelRef means the retry loop is actively attempting

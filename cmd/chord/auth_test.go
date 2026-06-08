@@ -739,7 +739,7 @@ func TestRunAuthRefreshRefreshesAllCodexOAuthCredentials(t *testing.T) {
 	if got := creds[2].OAuth; got.Refresh != "refresh-b-new" || got.AccountUserID != "user-b__acct-b" || got.CodexSecondaryResetAt != 222 {
 		t.Fatalf("second refreshed credential = %#v", got)
 	}
-	state, err := config.LoadAuthState(filepath.Join(configHome, "auth.state.yaml"))
+	state, err := config.LoadAuthState(filepath.Join(configHome, "auth.state.json"))
 	if err != nil {
 		t.Fatalf("LoadAuthState: %v", err)
 	}
@@ -854,7 +854,7 @@ func TestRunAuthRefreshRollsBackAuthCredentialWhenStatePersistFails(t *testing.T
 	}}); err != nil {
 		t.Fatalf("SaveAuthConfig: %v", err)
 	}
-	if err := os.Mkdir(filepath.Join(configHome, "auth.state.yaml.tmp"), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(configHome, "auth.state.json.tmp"), 0o700); err != nil {
 		t.Fatalf("block auth state temp path: %v", err)
 	}
 
@@ -1189,15 +1189,15 @@ anthropic:
 	if strings.Contains(text, "account_user_id:") {
 		t.Fatalf("auth.yaml should not persist account_user_id for access credentials, got:\n%s", text)
 	}
-	statePath := filepath.Join(configHome, "auth.state.yaml")
+	statePath := filepath.Join(configHome, "auth.state.json")
 	stateData, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("ReadFile(state): %v", err)
 	}
 	stateText := string(stateData)
-	for _, want := range []string{"user-123__acc-123:", "account_user_id: user-123__acc-123", "account_id: acc-123", "email: user@example.com"} {
+	for _, want := range []string{"\"user-123__acc-123\"", "\"account_user_id\": \"user-123__acc-123\"", "\"account_id\": \"acc-123\"", "\"email\": \"user@example.com\""} {
 		if !strings.Contains(stateText, want) {
-			t.Fatalf("expected auth.state.yaml to contain %q, got:\n%s", want, stateText)
+			t.Fatalf("expected auth.state.json to contain %q, got:\n%s", want, stateText)
 		}
 	}
 }

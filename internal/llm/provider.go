@@ -157,6 +157,7 @@ type ProviderConfig struct {
 	authStatePath              string
 	authState                  config.AuthStateFile
 	authStateMTime             time.Time
+	authStateSize              int64
 	authStateDigest            string
 	authStateMonitor           *authStateMonitor
 }

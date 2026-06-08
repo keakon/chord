@@ -281,9 +281,12 @@ type MainAgent struct {
 	pausePendingUserDrainOnce bool
 
 	// Output channel consumed by the TUI or any external observer.
-	outputCh     chan AgentEvent
-	outputMu     sync.RWMutex
-	outputClosed atomic.Bool
+	outputCh                      chan AgentEvent
+	outputMu                      sync.RWMutex
+	outputClosed                  atomic.Bool
+	outputDropLogMu               sync.Mutex
+	outputDropLogLastByType       map[string]time.Time
+	outputDropLogSuppressedByType map[string]int
 
 	turn       *Turn
 	nextTurnID uint64
