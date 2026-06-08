@@ -100,6 +100,16 @@ chord auth codex
 chord auth codex --device-code
 ```
 
+### `chord auth refresh <provider>`
+
+刷新某个 `preset: codex` provider 下所有带 refresh token 的 OAuth 凭据。命令会逐条输出 refreshed、failed 或 skipped；API key 和没有 refresh token 的 OAuth 条目会被跳过。任一刷新失败时，命令会继续处理剩余凭据，并在结束后返回错误。
+
+刷新成功后会更新 `auth.yaml`，并同步 `~/.config/chord/auth.state.json` 中匹配的运行时条目，同时保留 quota/reset 提示。
+
+```bash
+chord auth refresh codex
+```
+
 ### `chord auth state list`
 
 列出 `~/.config/chord/auth.state.yaml` 中已过期、已停用或已失效的 OAuth 运行时状态条目。该命令不会列出 `auth.yaml` 中已不存在对应 OAuth 凭据的孤儿 state；如需同时清理无效和孤儿 state，请使用 `chord auth state clean`。

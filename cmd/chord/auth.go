@@ -96,7 +96,232 @@ func newAuthCmd() *cobra.Command {
 	}
 	bindAuthLoginFlags(cmd)
 	cmd.AddCommand(newAuthStateCmd())
+	cmd.AddCommand(newAuthRefreshCmd())
 	return cmd
+}
+
+func newAuthRefreshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "refresh <provider>",
+		Short: "Refresh all Codex OAuth accounts for a provider",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runAuthRefresh,
+	}
+}
+
+type authRefreshResult struct {
+	refreshed []string
+	failed    []string
+	skipped   []string
+}
+
+func runAuthRefresh(cmd *cobra.Command, args []string) error {
+	providerName := strings.TrimSpace(args[0])
+	if providerName == "" {
+		return fmt.Errorf("provider name is empty")
+	}
+
+	providers, globalProxy, err := loadAuthLoginProviders()
+	if err != nil {
+		return err
+	}
+	providerCfg, ok := providers[providerName]
+	if !ok {
+		return fmt.Errorf("provider %q was not found", providerName)
+	}
+	normalizedCfg, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
+	if err != nil {
+		return fmt.Errorf("provider %q has invalid OAuth config: %w", providerName, err)
+	}
+	if !meta.Enabled {
+		return fmt.Errorf("provider %q is not configured for preset: codex; configure `preset: codex`", providerName)
+	}
+
+	authPath, err := config.AuthPath()
+	if err != nil {
+		return fmt.Errorf("resolve auth config path: %w", err)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		return fmt.Errorf("load auth config: %w", err)
+	}
+	client, err := buildOpenAILoginHTTPClient(normalizedCfg, globalProxy)
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Refreshing OAuth credentials for provider: %s\n", providerName)
+	result := refreshProviderOAuthCredentials(cmd.Context(), client, authPath, providerName, normalizedCfg, auth[providerName], out)
+	fmt.Fprintf(out, "Summary: %d refreshed, %d failed, %d skipped\n", len(result.refreshed), len(result.failed), len(result.skipped))
+	if len(result.failed) > 0 {
+		return fmt.Errorf("failed to refresh %d OAuth credential(s) for provider %q", len(result.failed), providerName)
+	}
+	return nil
+}
+
+func refreshProviderOAuthCredentials(ctx context.Context, client *http.Client, authPath, providerName string, providerCfg config.ProviderConfig, creds []config.ProviderCredential, out io.Writer) authRefreshResult {
+	var result authRefreshResult
+	for credIdx, cred := range creds {
+		if cred.OAuth == nil {
+			displayName := fmt.Sprintf("credential %d", credIdx+1)
+			result.skipped = append(result.skipped, displayName)
+			fmt.Fprintf(out, "- %s skipped: API key\n", displayName)
+			continue
+		}
+		oldCred := *cred.OAuth
+		displayName := authRefreshCredentialDisplayName(&oldCred, credIdx)
+		if strings.TrimSpace(oldCred.Refresh) == "" {
+			result.skipped = append(result.skipped, displayName)
+			fmt.Fprintf(out, "- %s skipped: missing refresh token\n", displayName)
+			continue
+		}
+
+		newCred, err := config.RefreshOpenAICodexOAuthToken(ctx, client, providerCfg.TokenURL, providerCfg.ClientID, &oldCred)
+		if err == nil {
+			err = validateRefreshedCodexOAuthCredential(&oldCred, newCred)
+		}
+		if err != nil {
+			result.failed = append(result.failed, fmt.Sprintf("%s: %v", displayName, err))
+			fmt.Fprintf(out, "✗ %s failed: %v\n", displayName, err)
+			continue
+		}
+
+		credentialIndex := credIdx
+		match := config.OAuthCredentialMatch{AccountUserID: oldCred.AccountUserID, Access: oldCred.Access, CredentialIndex: &credentialIndex}
+		if match.AccountUserID == "" && oldCred.Access == "" && oldCred.Refresh != "" {
+			match.RefreshSHA256 = config.OAuthRefreshStateKey(oldCred.Refresh)
+		}
+		persistedCred, err := persistRefreshedOAuthCredential(authPath, providerName, match, &oldCred, newCred)
+		if err != nil {
+			result.failed = append(result.failed, fmt.Sprintf("%s: %v", displayName, err))
+			fmt.Fprintf(out, "✗ %s failed: %v\n", displayName, err)
+			continue
+		}
+		if err := persistRefreshedOAuthState(providerName, persistedCred); err != nil {
+			stateErr := err
+			rollbackMatch := config.OAuthCredentialMatch{AccountUserID: persistedCred.AccountUserID, Access: persistedCred.Access, CredentialIndex: &credentialIndex}
+			if _, err := persistRefreshedOAuthCredential(authPath, providerName, rollbackMatch, persistedCred, &oldCred); err != nil {
+				stateErr = fmt.Errorf("%w; additionally failed to restore previous auth credential: %v", stateErr, err)
+			}
+			result.failed = append(result.failed, fmt.Sprintf("%s: %v", displayName, stateErr))
+			fmt.Fprintf(out, "✗ %s failed: %v\n", displayName, stateErr)
+			continue
+		}
+		newDisplayName := authRefreshCredentialDisplayName(persistedCred, credIdx)
+		result.refreshed = append(result.refreshed, newDisplayName)
+		fmt.Fprintf(out, "✓ %s refreshed\n", newDisplayName)
+	}
+	return result
+}
+
+func validateRefreshedCodexOAuthCredential(oldCred, newCred *config.OAuthCredential) error {
+	if newCred == nil {
+		return fmt.Errorf("refreshed OAuth credential is nil")
+	}
+	if strings.TrimSpace(newCred.Access) == "" {
+		return fmt.Errorf("refreshed OAuth credential missing access token")
+	}
+	accountID := strings.TrimSpace(newCred.AccountID)
+	if accountID == "" {
+		accountID = config.ExtractOAuthAccountIDFromToken(newCred.Access)
+	}
+	if accountID == "" {
+		return fmt.Errorf("refreshed OAuth credential missing account_id claim")
+	}
+	accountUserID := strings.TrimSpace(newCred.AccountUserID)
+	if accountUserID == "" {
+		accountUserID = config.ExtractOAuthAccountUserIDFromToken(newCred.Access)
+	}
+	if accountUserID == "" {
+		return fmt.Errorf("refreshed OAuth credential missing account_user_id claims")
+	}
+	if oldCred != nil {
+		if oldCred.AccountID != "" && oldCred.AccountID != accountID {
+			return fmt.Errorf("refreshed OAuth account_id %q does not match existing account_id %q", accountID, oldCred.AccountID)
+		}
+		if oldCred.AccountUserID != "" && oldCred.AccountUserID != accountUserID {
+			return fmt.Errorf("refreshed OAuth account_user_id %q does not match existing account_user_id %q", accountUserID, oldCred.AccountUserID)
+		}
+	}
+	newCred.AccountID = accountID
+	newCred.AccountUserID = accountUserID
+	if newCred.Email == "" {
+		newCred.Email = config.ExtractOAuthEmailFromToken(newCred.Access)
+	}
+	return nil
+}
+
+func persistRefreshedOAuthCredential(authPath, providerName string, match config.OAuthCredentialMatch, oldCred, newCred *config.OAuthCredential) (*config.OAuthCredential, error) {
+	if newCred == nil {
+		return nil, fmt.Errorf("refreshed OAuth credential is nil")
+	}
+	_, persistedCred, _, err := config.UpdateOAuthCredentialInFile(authPath, providerName, match, func(cred *config.OAuthCredential) (bool, error) {
+		next := *newCred
+		next.CodexPrimaryResetAt = cred.CodexPrimaryResetAt
+		if next.CodexPrimaryResetAt == 0 && oldCred != nil {
+			next.CodexPrimaryResetAt = oldCred.CodexPrimaryResetAt
+		}
+		next.CodexSecondaryResetAt = cred.CodexSecondaryResetAt
+		if next.CodexSecondaryResetAt == 0 && oldCred != nil {
+			next.CodexSecondaryResetAt = oldCred.CodexSecondaryResetAt
+		}
+		*cred = next
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("save auth config: %w", err)
+	}
+	if persistedCred == nil {
+		return nil, fmt.Errorf("matching OAuth credential was not found in auth config")
+	}
+	return persistedCred, nil
+}
+
+func persistRefreshedOAuthState(providerName string, cred *config.OAuthCredential) error {
+	if cred == nil {
+		return fmt.Errorf("OAuth credential is nil")
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		return fmt.Errorf("resolve auth state path: %w", err)
+	}
+	accountUserID := strings.TrimSpace(cred.AccountUserID)
+	if accountUserID == "" {
+		return fmt.Errorf("OAuth credential missing account_user_id")
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: providerName, AccountUserID: accountUserID, Email: cred.Email}, func(record *config.OAuthStateRecord) (bool, error) {
+		before := *record
+		record.AccountUserID = accountUserID
+		record.AccountID = cred.AccountID
+		record.Email = cred.Email
+		record.Expires = cred.Expires
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = time.Now().UnixMilli()
+		record.CodexPrimaryResetAt = cred.CodexPrimaryResetAt
+		record.CodexSecondaryResetAt = cred.CodexSecondaryResetAt
+		return !config.EqualOAuthStateRecord(before, *record), nil
+	})
+	if err != nil {
+		return fmt.Errorf("save auth state: %w", err)
+	}
+	return nil
+}
+
+func authRefreshCredentialDisplayName(cred *config.OAuthCredential, idx int) string {
+	if cred == nil {
+		return fmt.Sprintf("credential %d", idx+1)
+	}
+	if email := strings.TrimSpace(cred.Email); email != "" {
+		return email
+	}
+	if accountUserID := strings.TrimSpace(cred.AccountUserID); accountUserID != "" {
+		return accountUserID
+	}
+	if accountID := strings.TrimSpace(cred.AccountID); accountID != "" {
+		return accountID
+	}
+	return fmt.Sprintf("credential %d", idx+1)
 }
 
 func newAuthStateCmd() *cobra.Command {

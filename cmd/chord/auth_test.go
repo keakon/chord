@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -670,6 +671,247 @@ func TestRunOpenAICodexDeviceLoginWrapperSuccess(t *testing.T) {
 	}
 	if creds := auth["codex"]; len(creds) != 1 || creds[0].OAuth == nil || creds[0].OAuth.Refresh != "refresh-123" {
 		t.Fatalf("stored credentials = %#v", creds)
+	}
+}
+
+func TestRunAuthRefreshRefreshesAllCodexOAuthCredentials(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode refresh request: %v", err)
+		}
+		requests = append(requests, payload["refresh_token"])
+		w.Header().Set("Content-Type", "application/json")
+		switch payload["refresh_token"] {
+		case "refresh-a":
+			_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-a", "user-a", "a-new@example.com"), RefreshToken: "refresh-a-new", ExpiresIn: 3600})
+		case "refresh-b":
+			_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-b", "user-b", "b-new@example.com"), RefreshToken: "refresh-b-new", ExpiresIn: 3600})
+		default:
+			t.Fatalf("unexpected refresh token %q", payload["refresh_token"])
+		}
+	}))
+	defer srv.Close()
+
+	authPath := filepath.Join(configHome, "auth.yaml")
+	if err := config.SaveAuthConfig(filepath.Join(configHome, "auth.yaml"), config.AuthConfig{
+		"codex": {
+			{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-a", "user-a", "a@example.com"), Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com", CodexPrimaryResetAt: 111}},
+			{APIKey: "api-key"},
+			{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-b", "user-b", "b@example.com"), Refresh: "refresh-b", AccountUserID: "user-b__acct-b", AccountID: "acct-b", Email: "b@example.com", CodexSecondaryResetAt: 222}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveAuthConfig: %v", err)
+	}
+
+	var out bytes.Buffer
+	initialAuth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	result := refreshProviderOAuthCredentials(context.Background(), srv.Client(), authPath, "codex", config.ProviderConfig{TokenURL: srv.URL + "/oauth/token", ClientID: "client-123"}, initialAuth["codex"], &out)
+	if len(result.failed) != 0 || len(result.refreshed) != 2 || len(result.skipped) != 1 {
+		t.Fatalf("refresh result = %#v\noutput:\n%s", result, out.String())
+	}
+	if !reflect.DeepEqual(requests, []string{"refresh-a", "refresh-b"}) {
+		t.Fatalf("refresh requests = %#v", requests)
+	}
+
+	auth, err := config.LoadAuthConfig(filepath.Join(configHome, "auth.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	creds := auth["codex"]
+	if got := creds[0].OAuth; got.Access != testCodexAccessToken("acct-a", "user-a", "a-new@example.com") || got.Refresh != "refresh-a-new" || got.AccountUserID != "user-a__acct-a" || got.Email != "a-new@example.com" || got.CodexPrimaryResetAt != 111 {
+		t.Fatalf("first refreshed credential = %#v", got)
+	}
+	if got := creds[2].OAuth; got.Refresh != "refresh-b-new" || got.AccountUserID != "user-b__acct-b" || got.CodexSecondaryResetAt != 222 {
+		t.Fatalf("second refreshed credential = %#v", got)
+	}
+	state, err := config.LoadAuthState(filepath.Join(configHome, "auth.state.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "codex", AccountUserID: "user-a__acct-a"}); !ok || record.Status != config.OAuthStatusNormal || record.Email != "a-new@example.com" {
+		t.Fatalf("state record for user-a = %#v, ok=%v", record, ok)
+	}
+	if !strings.Contains(out.String(), "✓ a-new@example.com refreshed") || !strings.Contains(out.String(), "skipped: API key") {
+		t.Fatalf("output missing refresh details: %s", out.String())
+	}
+}
+
+func TestRunAuthRefreshRejectsNonCodexProvider(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(`providers:
+  openai:
+    type: chat_completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      gpt-4o:
+        limit:
+          context: 8192
+          output: 1024
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"refresh", "openai"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "preset: codex") {
+		t.Fatalf("auth refresh error = %v, want preset: codex", err)
+	}
+}
+
+func TestRunAuthRefreshContinuesAfterFailures(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode refresh request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch payload["refresh_token"] {
+		case "refresh-a":
+			_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-a", "user-a", "a-new@example.com"), RefreshToken: "refresh-a-new", ExpiresIn: 3600})
+		case "refresh-b":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"invalid_grant","message":"expired"}}`))
+		case "refresh-c":
+			_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-c", "user-c", "c-new@example.com"), RefreshToken: "refresh-c-new", ExpiresIn: 3600})
+		default:
+			t.Fatalf("unexpected refresh token %q", payload["refresh_token"])
+		}
+	}))
+	defer srv.Close()
+
+	authPath := filepath.Join(configHome, "auth.yaml")
+	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-a", "user-a", "a@example.com"), Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com"}},
+		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-b", "user-b", "b@example.com"), Refresh: "refresh-b", AccountID: "acct-b", Email: "b@example.com"}},
+		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-c", "user-c", "c@example.com"), Refresh: "refresh-c", AccountID: "acct-c", Email: "c@example.com"}},
+	}}); err != nil {
+		t.Fatalf("SaveAuthConfig: %v", err)
+	}
+
+	initialAuth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var out bytes.Buffer
+	result := refreshProviderOAuthCredentials(context.Background(), srv.Client(), authPath, "codex", config.ProviderConfig{TokenURL: srv.URL + "/oauth/token", ClientID: "client-123"}, initialAuth["codex"], &out)
+	if len(result.failed) != 1 || len(result.refreshed) != 2 {
+		t.Fatalf("refresh result = %#v, want one failure\noutput:\n%s", result, out.String())
+	}
+	auth, err := config.LoadAuthConfig(filepath.Join(configHome, "auth.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := auth["codex"][0].OAuth.Refresh; got != "refresh-a-new" {
+		t.Fatalf("first refresh = %q", got)
+	}
+	if got := auth["codex"][1].OAuth.Refresh; got != "refresh-b" {
+		t.Fatalf("failed credential changed refresh = %q", got)
+	}
+	if got := auth["codex"][2].OAuth.Refresh; got != "refresh-c-new" {
+		t.Fatalf("third refresh = %q", got)
+	}
+	if !strings.Contains(out.String(), "failed: token endpoint returned 400") {
+		t.Fatalf("output missing failure detail: %s", out.String())
+	}
+}
+
+func TestRunAuthRefreshRollsBackAuthCredentialWhenStatePersistFails(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-a", "user-a", "a-new@example.com"), RefreshToken: "refresh-new", ExpiresIn: 3600})
+	}))
+	defer srv.Close()
+
+	authPath := filepath.Join(configHome, "auth.yaml")
+	oldAccess := testCodexAccessToken("acct-a", "user-a", "a@example.com")
+	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-old", AccountID: "acct-a", Email: "a@example.com", CodexPrimaryResetAt: 111}},
+	}}); err != nil {
+		t.Fatalf("SaveAuthConfig: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(configHome, "auth.state.yaml.tmp"), 0o700); err != nil {
+		t.Fatalf("block auth state temp path: %v", err)
+	}
+
+	initialAuth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	var out bytes.Buffer
+	result := refreshProviderOAuthCredentials(context.Background(), srv.Client(), authPath, "codex", config.ProviderConfig{TokenURL: srv.URL, ClientID: "client-123"}, initialAuth["codex"], &out)
+	if len(result.failed) != 1 || len(result.refreshed) != 0 {
+		t.Fatalf("refresh result = %#v, want one failed rollback\noutput:\n%s", result, out.String())
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig after failed state persist: %v", err)
+	}
+	got := auth["codex"][0].OAuth
+	if got.Access != oldAccess || got.Refresh != "refresh-old" || got.Email != "a@example.com" || got.CodexPrimaryResetAt != 111 {
+		t.Fatalf("credential was not rolled back after state persist failure: %#v", got)
+	}
+	if !strings.Contains(out.String(), "save auth state") {
+		t.Fatalf("output missing state persist failure detail: %s", out.String())
+	}
+}
+
+func TestRunAuthRefreshRejectsMismatchedAccount(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAITokenResponse{AccessToken: testCodexAccessToken("acct-other", "user-other", "other@example.com"), RefreshToken: "refresh-new", ExpiresIn: 3600})
+	}))
+	defer srv.Close()
+
+	authPath := filepath.Join(configHome, "auth.yaml")
+	oldAccess := testCodexAccessToken("acct-a", "user-a", "a@example.com")
+	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com"}},
+	}}); err != nil {
+		t.Fatalf("SaveAuthConfig: %v", err)
+	}
+
+	initialAuth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	result := refreshProviderOAuthCredentials(context.Background(), srv.Client(), authPath, "codex", config.ProviderConfig{TokenURL: srv.URL, ClientID: "client-123"}, initialAuth["codex"], io.Discard)
+	if len(result.failed) != 1 || len(result.refreshed) != 0 {
+		t.Fatalf("refresh result = %#v, want mismatch failure", result)
+	}
+	auth, err := config.LoadAuthConfig(filepath.Join(configHome, "auth.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := auth["codex"][0].OAuth; got.Access != oldAccess || got.Refresh != "refresh-a" {
+		t.Fatalf("credential changed after mismatch: %#v", got)
 	}
 }
 
@@ -1471,6 +1713,10 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 
 func testUnsignedJWT(payload string) string {
 	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
+}
+
+func testCodexAccessToken(accountID, userID, email string) string {
+	return testUnsignedJWT(fmt.Sprintf(`{"https://api.openai.com/auth":{"chatgpt_account_id":%q,"chatgpt_user_id":%q},"email":%q,"exp":4102444800}`, accountID, userID, email))
 }
 
 func base64Payload(payload string) string {

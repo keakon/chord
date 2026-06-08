@@ -100,6 +100,16 @@ chord auth codex
 chord auth codex --device-code
 ```
 
+### `chord auth refresh <provider>`
+
+Refresh every refresh-token backed OAuth credential for a `preset: codex` provider. The command prints one line per credential as refreshed, failed, or skipped; skipped credentials include API keys and OAuth entries without a refresh token. Any failed refresh makes the command return an error after processing the remaining credentials.
+
+Successful refreshes update `auth.yaml` and synchronize the matching runtime entry in `~/.config/chord/auth.state.json` while preserving quota/reset hints.
+
+```bash
+chord auth refresh codex
+```
+
 ### `chord auth state list`
 
 List expired, deactivated, or invalidated OAuth runtime-state entries from `~/.config/chord/auth.state.yaml`. This command does not report orphan state entries whose matching OAuth credential was removed from `auth.yaml`; use `chord auth state clean` to remove both invalid and orphan state.
