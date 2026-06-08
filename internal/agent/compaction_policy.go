@@ -361,7 +361,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		if compacted, ok := compactDiagnosticsToolOutput(ctx.Content); ok {
 			return compacted, "diagnostics", true
 		}
-		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	case requestReductionReadLike:
 		return compactReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
 	case requestReductionSearch:
@@ -370,13 +370,13 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		if compacted, ok := compactJSONBlobSummary(ctx); ok {
 			return compacted, "json_blob", true
 		}
-		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	case requestReductionLongLog:
 		return compactLongLogOutputSummary(ctx), "long_log", true
 	case requestReductionShellOK:
-		return fmt.Sprintf("[Older %s output omitted to save context; re-run the command if needed.]", tools.NameShell), "shell_success", true
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", tools.NameShell), "shell_success", true
 	case requestReductionGeneric:
-		return fmt.Sprintf("[Older %s output omitted to save context; refer to exported history if needed.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	default:
 		return "", "", false
 	}
@@ -445,7 +445,7 @@ func compactSearchLikeOutputSummary(ctx requestReductionContext) string {
 		snippetLines = []string{"- (no preserved matches)"}
 	}
 	scope := compactSearchScope(ctx)
-	return fmt.Sprintf("[Older %s results summarized to save context; %s; matches=%d]\n%s\n\n[Re-run the same %s query if full results are needed.]", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"), toolName)
+	return fmt.Sprintf("[Older %s results summarized for this request to save context; %s; matches=%d]\n%s", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"))
 }
 
 func compactSearchScope(ctx requestReductionContext) string {
@@ -524,7 +524,7 @@ func compactLongLogOutputSummary(ctx requestReductionContext) string {
 	if len(lines) == 0 {
 		lines = []string{"- (no preserved log lines)"}
 	}
-	return fmt.Sprintf("[Older %s log summarized to save context; errors=%d warnings=%d failed=%d]\n%s\n\n[Re-run the command if the full log is needed.]", toolNameOrUnknown(ctx.ToolName), counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
+	return fmt.Sprintf("[Older %s log summarized for this request to save context; errors=%d warnings=%d failed=%d]\n%s", toolNameOrUnknown(ctx.ToolName), counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
 }
 
 type logSignalCounts struct {
@@ -1109,9 +1109,9 @@ func compactReadOutputSummary(argsJSON, content string) string {
 		displayedRange = fmt.Sprintf("\n- displayed range: lines %d-%d of %d total", displayed.Start, displayed.End, displayed.Total)
 	}
 	if path == "" {
-		return "[Older " + tools.NameRead + " output truncated to save context" + requestedRange + "]\n" + snippet + displayedRange + "\n\n[Re-run " + tools.NameRead + " with offset/limit if needed.]"
+		return "[Older " + tools.NameRead + " output truncated for this request to save context" + requestedRange + "]\n" + snippet + displayedRange
 	}
-	return fmt.Sprintf("[Older %s output truncated to save context; path=%q%s]\n%s%s\n\n[Re-run %s(path=%q, offset, limit) if needed.]", tools.NameRead, path, requestedRange, snippet, displayedRange, tools.NameRead, path)
+	return fmt.Sprintf("[Older %s output truncated for this request to save context; path=%q%s]\n%s%s", tools.NameRead, path, requestedRange, snippet, displayedRange)
 }
 
 func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
@@ -1121,7 +1121,7 @@ func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
 	case tools.NameWebFetch:
 		return compactWebFetchOutputSummary(argsJSON, content)
 	default:
-		return fmt.Sprintf("[Older %s output omitted to save context; re-run the tool if needed.]", toolNameOrUnknown(toolName))
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(toolName))
 	}
 }
 
@@ -1138,16 +1138,12 @@ func compactWebFetchOutputSummary(argsJSON, content string) string {
 		snippet = "(no preserved excerpt)"
 	}
 	return fmt.Sprintf(
-		"[Older %s output truncated to save context; url=%q raw=%t timeout=%d]\n%s\n\n[Re-run %s(url=%q, raw=%t, timeout=%d) if needed.]",
+		"[Older %s output truncated for this request to save context; url=%q raw=%t timeout=%d]\n%s",
 		tools.NameWebFetch,
 		strings.TrimSpace(parsed.URL),
 		parsed.Raw,
 		parsed.Timeout,
 		snippet,
-		tools.NameWebFetch,
-		strings.TrimSpace(parsed.URL),
-		parsed.Raw,
-		parsed.Timeout,
 	)
 }
 

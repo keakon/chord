@@ -16,11 +16,11 @@ func TestCompactGlobOutputSummaryUsesCanonicalToolName(t *testing.T) {
 			Args: `{"pattern":"**/*.go","path":"internal"}`,
 		},
 	})
-	if !strings.Contains(summary, "Re-run the same glob query if full results are needed.") {
-		t.Fatalf("summary = %q, want canonical glob re-run hint", summary)
+	if !strings.Contains(summary, "Older "+tools.NameGlob+" results summarized for this request to save context") {
+		t.Fatalf("summary = %q, want canonical glob summary", summary)
 	}
-	if strings.Contains(summary, "Re-run Glob(") {
-		t.Fatalf("summary should not use legacy Glob tool name: %q", summary)
+	if strings.Contains(summary, "Re-run") || strings.Contains(summary, "re-run") {
+		t.Fatalf("summary should not include re-run hints: %q", summary)
 	}
 }
 
@@ -47,10 +47,10 @@ func TestCompactWebFetchOutputSummaryStripsResultHeadersFromSnippet(t *testing.T
 	if strings.Contains(summary, "browser=") {
 		t.Fatalf("summary should not mention removed browser arg: %q", summary)
 	}
-	if !strings.Contains(summary, "Re-run "+tools.NameWebFetch+"(") {
-		t.Fatalf("summary = %q, want canonical web_fetch re-run hint", summary)
+	if !strings.Contains(summary, "Older "+tools.NameWebFetch+" output truncated for this request to save context") {
+		t.Fatalf("summary = %q, want canonical web_fetch summary", summary)
 	}
-	if strings.Contains(summary, "Re-run WebFetch(") {
-		t.Fatalf("summary should not use legacy WebFetch tool name: %q", summary)
+	if strings.Contains(summary, "Re-run") || strings.Contains(summary, "re-run") {
+		t.Fatalf("summary should not include re-run hints: %q", summary)
 	}
 }

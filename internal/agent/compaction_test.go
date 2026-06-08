@@ -244,7 +244,7 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated to save context; path=\"a.go\"") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request to save context; path=\"a.go\"") {
 		t.Fatalf("expected old read output to keep path hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, "large read output") {
@@ -299,7 +299,7 @@ func TestPrepareMessagesForLLM_PrunesOldWebFetchOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated to save context") ||
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request to save context") ||
 		!strings.Contains(prepared[2].Content, `url="https://example.com"`) {
 		t.Fatalf("expected web_fetch output compaction, got %q", prepared[2].Content)
 	}
@@ -333,10 +333,10 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted to save context; re-run the command if needed.]" {
+	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
 		t.Fatalf("expected early shell output in same user turn to be pruned, got %q", prepared[2].Content)
 	}
-	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated to save context; path=\"a.go\"") {
+	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated for this request to save context; path=\"a.go\"") {
 		t.Fatalf("expected early read output in same user turn to be pruned, got %q", prepared[4].Content)
 	}
 	lastIndex := len(prepared) - 1
@@ -524,7 +524,7 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted to save context; re-run the command if needed.]" {
+	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
 		t.Fatalf("expected old successful Shell output to be pruned, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
@@ -731,8 +731,8 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 	if !strings.Contains(prepared[2].Content, "Older "+tools.NameGrep+" results summarized") {
 		t.Fatalf("expected search summary, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
-		t.Fatalf("expected specialized search summary instead of generic stale fallback, got %q", prepared[2].Content)
+	if strings.Contains(prepared[2].Content, "refer to exported history") || strings.Contains(strings.ToLower(prepared[2].Content), "re-run") {
+		t.Fatalf("expected search summary without history/re-run hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, `pattern="prepareMessagesForLLM"`) {
 		t.Fatalf("expected grep pattern in summary, got %q", prepared[2].Content)
@@ -782,8 +782,8 @@ func TestPrepareMessagesForLLM_LSPReferencesSearchReducerParsesFormattedArgs(t *
 	if !strings.Contains(prepared[2].Content, "Older "+tools.NameLsp+" results summarized") {
 		t.Fatalf("expected LSP references search summary, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
-		t.Fatalf("expected specialized LSP search summary instead of generic stale fallback, got %q", prepared[2].Content)
+	if strings.Contains(prepared[2].Content, "refer to exported history") || strings.Contains(strings.ToLower(prepared[2].Content), "re-run") {
+		t.Fatalf("expected LSP summary without history/re-run hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, `operation="references"`) {
 		t.Fatalf("expected LSP operation in summary, got %q", prepared[2].Content)
@@ -819,8 +819,8 @@ func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T
 	if !strings.Contains(prepared[2].Content, "JSON array summarized") {
 		t.Fatalf("expected json summary, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "refer to exported history if needed") {
-		t.Fatalf("expected specialized json summary instead of generic stale fallback, got %q", prepared[2].Content)
+	if strings.Contains(prepared[2].Content, "refer to exported history") || strings.Contains(strings.ToLower(prepared[2].Content), "re-run") {
+		t.Fatalf("expected json summary without history/re-run hint, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
@@ -861,11 +861,11 @@ func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "log summarized to save context") {
+	if !strings.Contains(prepared[2].Content, "log summarized for this request to save context") {
 		t.Fatalf("expected long log summary, got %q", prepared[2].Content)
 	}
-	if strings.Contains(prepared[2].Content, "re-run the command if needed") && !strings.Contains(prepared[2].Content, "full log") {
-		t.Fatalf("expected specialized long-log summary instead of shell success marker, got %q", prepared[2].Content)
+	if strings.Contains(prepared[2].Content, "refer to exported history") || strings.Contains(strings.ToLower(prepared[2].Content), "re-run") {
+		t.Fatalf("expected long-log summary without history/re-run hint, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
