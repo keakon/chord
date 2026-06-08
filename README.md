@@ -128,7 +128,7 @@ For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to
 
 - [Docs home](./docs/index.md)
 - Getting started: [Quickstart](./docs/quickstart.md) · [Usage](./docs/usage.md) · [Glossary](./docs/glossary.md)
-- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md)
+- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
 - Going further: [Customization](./docs/customization.md) · [Hooks](./docs/hooks.md) · [Examples](./docs/examples/index.md)
 - Integration: [Headless](./docs/headless.md)
 - Safety: [Permissions & Safety](./docs/permissions-and-safety.md)

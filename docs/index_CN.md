@@ -13,6 +13,7 @@
 - **远程控制**：[Headless](./headless_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
 - **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式)
 - **扩展定制**：[扩展与定制](./customization_CN.md) · [Hooks](./hooks_CN.md)
+- **理解性能**：[性能优化](./performance_CN.md)
 - **排障**：[常见问题排查](./troubleshooting_CN.md)
 
 ## 入门
@@ -29,6 +30,7 @@
 - [目录与路径](./paths_CN.md) —— 配置 / state / cache / 项目级布局，哪些可删
 - [环境变量](./environment_CN.md) —— Chord 读取的所有 `CHORD_*` / `XDG_*` / 代理变量
 - [平台支持](./platforms_CN.md) —— macOS / Linux / Windows / WSL 各支持到什么程度
+- [性能优化](./performance_CN.md) —— TUI 流式输出、渲染、滚屏与 benchmark 指南
 
 ## 进阶
 

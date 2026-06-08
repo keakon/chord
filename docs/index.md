@@ -13,6 +13,7 @@ Start with what works out of the box; move on to customization and advanced work
 - **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode)
 - **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
+- **Understand performance**: [Performance](./performance.md)
 - **Troubleshoot issues**: [Troubleshooting](./troubleshooting.md)
 
 ## Getting started
@@ -29,6 +30,7 @@ Start with what works out of the box; move on to customization and advanced work
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads
 - [Platform support](./platforms.md) — what works on macOS / Linux / Windows / WSL
+- [Performance](./performance.md) — TUI streaming, rendering, scrolling, and benchmark guidance
 
 ## Going further
 

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
@@ -25,7 +27,19 @@ func agentEventMayChangeKeyPool(msg agentEventMsg) bool {
 	}
 }
 
-const agentEventBatchMax = 32
+const (
+	agentEventBatchMax          = 32
+	agentEventStreamBatchWindow = 16 * time.Millisecond
+)
+
+func isStreamTextDeltaEvent(evt agent.AgentEvent) bool {
+	switch evt.(type) {
+	case agent.StreamTextEvent:
+		return true
+	default:
+		return false
+	}
+}
 
 func waitForAgentEvent(ch <-chan agent.AgentEvent) tea.Cmd {
 	return func() tea.Msg {
@@ -33,6 +47,22 @@ func waitForAgentEvent(ch <-chan agent.AgentEvent) tea.Cmd {
 		evt, ok := <-ch
 		batch := []agentEventMsg{{event: evt, closed: !ok}}
 		if !ok {
+			return agentEventBatchMsg(batch)
+		}
+		if isStreamTextDeltaEvent(evt) {
+			deadline := time.NewTimer(agentEventStreamBatchWindow)
+			defer deadline.Stop()
+			for len(batch) < agentEventBatchMax {
+				select {
+				case ev, ok := <-ch:
+					batch = append(batch, agentEventMsg{event: ev, closed: !ok})
+					if !ok {
+						return agentEventBatchMsg(batch)
+					}
+				case <-deadline.C:
+					return agentEventBatchMsg(batch)
+				}
+			}
 			return agentEventBatchMsg(batch)
 		}
 		// Drain any additional events that are already buffered.
