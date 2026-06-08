@@ -655,7 +655,7 @@ func streamFlushTick(generation uint64, delay time.Duration) tea.Cmd {
 
 func scrollFlushTick(generation uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
-		delay = 16 * time.Millisecond
+		delay = foregroundScrollFlushCadence
 	}
 	return tea.Tick(delay, func(time.Time) tea.Msg {
 		return scrollFlushTickMsg{generation: generation}

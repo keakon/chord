@@ -12,6 +12,7 @@ import (
 
 func (m *Model) finalizeAssistantBlock() {
 	if m.currentThinkingBlock != nil {
+		m.currentThinkingBlock.finishStreamingContent()
 		m.currentThinkingBlock.Streaming = false
 		// Only set ThinkingDuration here if it wasn't already frozen by
 		// StreamThinkingEvent (e.g. when thinking_end was never received
@@ -35,6 +36,7 @@ func (m *Model) finalizeAssistantBlock() {
 		m.thinkingBlockAppended = false
 	}
 	if m.currentAssistantBlock != nil {
+		m.currentAssistantBlock.finishStreamingContent()
 		m.currentAssistantBlock.Streaming = false
 		// Heuristic: discard very-short streaming assistant prefix if it's
 		// likely an orphan fragment before a tool call (e.g. "Okay," "Sure", "Let").

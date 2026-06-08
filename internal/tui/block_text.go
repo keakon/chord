@@ -602,6 +602,9 @@ func wrapText(text string, width int) []string {
 	if text == "" {
 		return []string{""}
 	}
+	if isPlainASCIIWrapText(text) {
+		return wrapPlainASCIIText(text, width)
+	}
 
 	var result []string
 	for para := range strings.SplitSeq(text, "\n") {
@@ -666,6 +669,96 @@ func wrapText(text string, width int) []string {
 		result = append(result, "")
 	}
 	return result
+}
+
+func isPlainASCIIWrapText(text string) bool {
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c == '\x1b' || c == '\t' || c >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+func wrapPlainASCIIText(text string, width int) []string {
+	var result []string
+	for para := range strings.SplitSeq(text, "\n") {
+		if para == "" {
+			result = append(result, "")
+			continue
+		}
+		trimmed := strings.TrimLeft(para, " ")
+		indent := para[:len(para)-len(trimmed)]
+		indentWidth := len(indent)
+		if trimmed == "" {
+			result = append(result, "")
+			continue
+		}
+		var cur strings.Builder
+		cur.WriteString(indent)
+		curWidth := indentWidth
+		for i := 0; i < len(trimmed); {
+			for i < len(trimmed) && trimmed[i] == ' ' {
+				i++
+			}
+			if i >= len(trimmed) {
+				break
+			}
+			wordStart := i
+			for i < len(trimmed) && trimmed[i] != ' ' {
+				i++
+			}
+			word := trimmed[wordStart:i]
+			wordWidth := len(word)
+			if curWidth == indentWidth {
+				appendASCIIWord(&result, &cur, &curWidth, word, width)
+			} else if curWidth+1+wordWidth > width {
+				result = append(result, cur.String())
+				cur.Reset()
+				cur.WriteString(indent)
+				curWidth = indentWidth
+				appendASCIIWord(&result, &cur, &curWidth, word, width)
+			} else {
+				cur.WriteByte(' ')
+				cur.WriteString(word)
+				curWidth += 1 + wordWidth
+			}
+		}
+		if cur.Len() > 0 {
+			result = append(result, cur.String())
+		}
+	}
+	if len(result) == 0 {
+		return []string{""}
+	}
+	return result
+}
+
+func appendASCIIWord(result *[]string, cur *strings.Builder, curWidth *int, word string, width int) {
+	if len(word) <= width {
+		cur.WriteString(word)
+		*curWidth += len(word)
+		return
+	}
+	for len(word) > 0 {
+		space := width - *curWidth
+		if space <= 0 {
+			*result = append(*result, cur.String())
+			cur.Reset()
+			*curWidth = 0
+			space = width
+		}
+		n := min(space, len(word))
+		cur.WriteString(word[:n])
+		*curWidth += n
+		word = word[n:]
+		if len(word) > 0 {
+			*result = append(*result, cur.String())
+			cur.Reset()
+			*curWidth = 0
+		}
+	}
 }
 
 // appendWord adds a word to the builder, breaking it by runes if its display

@@ -537,6 +537,60 @@ func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 	}
 }
 
+func BenchmarkModelViewFocusResizeFullFrame(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	m := benchmarkModelForView()
+	m.SetFocusResizeFreezeEnabled(true)
+	_ = m.View()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = m.View()
+	}
+}
+
+func BenchmarkModelViewHostRedrawReplay(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	m := benchmarkModelForView()
+	m.SetFocusResizeFreezeEnabled(true)
+	m.hostRedrawFrameNonce = 1
+	_ = m.View()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = m.View()
+	}
+}
+
+func BenchmarkModelViewScrollLargeTranscript(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	m := benchmarkModelForView()
+	m.viewport = benchmarkLargeViewport(5000)
+	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
+	_ = m.View()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		m.viewport.offset = 1000 + i%120
+		_ = m.View()
+	}
+}
+
+func BenchmarkModelViewScrollLargeTranscriptFocusResize(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	m := benchmarkModelForView()
+	m.SetFocusResizeFreezeEnabled(true)
+	m.viewport = benchmarkLargeViewport(5000)
+	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
+	_ = m.View()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		m.viewport.offset = 1000 + i%120
+		_ = m.View()
+	}
+}
+
 // (no lipgloss calls, just data reads and string formatting).
 func BenchmarkInfoPanelFingerprint(b *testing.B) {
 	backend := newInfoPanelAgent()

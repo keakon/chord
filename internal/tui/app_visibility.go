@@ -49,6 +49,8 @@ type cadenceProfile struct {
 // Cadence constants – tuned for text-first streaming and lower background cost.
 const (
 	foregroundContentFlushCadence       = 200 * time.Millisecond
+	foregroundBoundaryFlushCadence      = foregroundContentFlushCadence
+	foregroundScrollFlushCadence        = 33 * time.Millisecond
 	backgroundActiveContentFlushCadence = 1 * time.Second
 	visualSpinnerCadence                = 200 * time.Millisecond // running tool/local-shell spinner tick (foreground only)
 	backgroundActiveVisualAnimCadence   = 0                      // terminal is blurred; keep housekeeping but skip invisible visual frames

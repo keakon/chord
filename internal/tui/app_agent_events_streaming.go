@@ -8,6 +8,33 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+func (b *Block) appendStreamingContent(delta string) {
+	if b == nil || delta == "" {
+		return
+	}
+	if b.streamContentBuilder == nil {
+		b.streamContentBuilder = &strings.Builder{}
+		b.streamContentBuilder.Grow(len(b.Content) + len(delta))
+		b.streamContentBuilder.WriteString(b.Content)
+	}
+	b.streamContentBuilder.WriteString(delta)
+	b.Content = b.streamContentBuilder.String()
+}
+
+func (b *Block) syncStreamingContent() {
+	if b == nil || b.streamContentBuilder == nil {
+		return
+	}
+	b.Content = b.streamContentBuilder.String()
+}
+
+func (b *Block) finishStreamingContent() {
+	b.syncStreamingContent()
+	if b != nil {
+		b.streamContentBuilder = nil
+	}
+}
+
 func (m *Model) currentMainAssistantMsgIndex() int {
 	if m == nil || m.agent == nil {
 		return -1
@@ -53,7 +80,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.nextBlockID++
 			m.assistantBlockAppended = false
 		}
-		m.currentAssistantBlock.Content += evt.Text
+		m.currentAssistantBlock.appendStreamingContent(evt.Text)
 		if !m.assistantBlockAppended {
 			m.appendViewportBlock(m.currentAssistantBlock)
 			m.assistantBlockAppended = true
@@ -65,7 +92,10 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.assistantBlockAppended {
 			m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
 		}
-		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
+		if m.hasDeferredStartupTranscript() {
+			m.currentAssistantBlock.syncStreamingContent()
+			m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
+		}
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
@@ -85,7 +115,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.finalizeAssistantBlock()
 		}
 		m.ensureStreamingThinkingBlock(evt.AgentID)
-		m.currentThinkingBlock.Content += evt.Text
+		m.currentThinkingBlock.appendStreamingContent(evt.Text)
 		if strings.TrimSpace(m.currentThinkingBlock.Content) != "" && !m.thinkingBlockAppended {
 			m.appendViewportBlock(m.currentThinkingBlock)
 			m.thinkingBlockAppended = true
@@ -97,7 +127,10 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		if m.thinkingBlockAppended {
 			m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
 		}
-		m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+		if m.hasDeferredStartupTranscript() {
+			m.currentThinkingBlock.syncStreamingContent()
+			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+		}
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
@@ -105,7 +138,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 	case agent.StreamThinkingEvent:
 		if strings.TrimSpace(evt.Text) != "" {
 			m.ensureStreamingThinkingBlock(evt.AgentID)
-			m.currentThinkingBlock.Content += evt.Text
+			m.currentThinkingBlock.appendStreamingContent(evt.Text)
 			if !m.thinkingBlockAppended {
 				m.appendViewportBlock(m.currentThinkingBlock)
 				m.thinkingBlockAppended = true
@@ -117,7 +150,10 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			if m.thinkingBlockAppended {
 				m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
 			}
-			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+			if m.hasDeferredStartupTranscript() {
+				m.currentThinkingBlock.syncStreamingContent()
+				m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+			}
 			m.exitRenderFreeze()
 			m.markStreamRenderDirty()
 			effects.addFollowup(m.scheduleStreamFlush(0))

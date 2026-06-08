@@ -47,6 +47,28 @@ func TestScheduleStreamFlushUrgentDelayBypassesCadenceFloor(t *testing.T) {
 	}
 }
 
+func TestStreamBoundaryFlushUsesForegroundBoundaryCadence(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	if cmd := m.requestStreamBoundaryFlush(); cmd == nil {
+		t.Fatal("requestStreamBoundaryFlush should return a tick command")
+	}
+	if m.streamFlushDelay != foregroundBoundaryFlushCadence {
+		t.Fatalf("streamFlushDelay = %s, want %s", m.streamFlushDelay, foregroundBoundaryFlushCadence)
+	}
+}
+
+func TestStreamBoundaryFlushUsesBackgroundCadence(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	if cmd := m.requestStreamBoundaryFlush(); cmd == nil {
+		t.Fatal("background-active requestStreamBoundaryFlush should return a tick command")
+	}
+	if m.streamFlushDelay != backgroundActiveContentFlushCadence {
+		t.Fatalf("streamFlushDelay = %s, want %s", m.streamFlushDelay, backgroundActiveContentFlushCadence)
+	}
+}
+
 func TestScheduleStreamFlushUrgentDelayPreemptsSlowerPendingFlush(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	if cmd := m.scheduleStreamFlush(0); cmd == nil {
@@ -98,6 +120,9 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 	m := newStreamTextRenderedModel(t, "first")
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " second"}})
+	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "first second" {
+		t.Fatalf("assistant block content = %q, want accumulated stream text before flush", blockContentForTest(m.currentAssistantBlock))
+	}
 	deferred := stripANSI(m.View().Content)
 	if strings.Contains(deferred, "second") {
 		t.Fatalf("View should reuse cached content before stream flush, got:\n%s", deferred)
@@ -107,6 +132,25 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 	flushed := stripANSI(m.View().Content)
 	if !strings.Contains(flushed, "first second") {
 		t.Fatalf("View should include accumulated stream text after flush, got:\n%s", flushed)
+	}
+}
+
+func TestStreamThinkingDeltasAccumulateContentBeforeFlush(t *testing.T) {
+	m := newStreamThinkingRenderedModel(t, "first")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: " second"}})
+	if m.currentThinkingBlock == nil || m.currentThinkingBlock.Content != "first second" {
+		t.Fatalf("thinking block content = %q, want accumulated thinking text before flush", blockContentForTest(m.currentThinkingBlock))
+	}
+	deferred := stripANSI(m.View().Content)
+	if strings.Contains(deferred, "second") {
+		t.Fatalf("View should reuse cached thinking content before stream flush, got:\n%s", deferred)
+	}
+
+	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
+	flushed := stripANSI(m.View().Content)
+	if !strings.Contains(flushed, "first second") {
+		t.Fatalf("View should include accumulated thinking text after flush, got:\n%s", flushed)
 	}
 }
 
@@ -131,8 +175,8 @@ func TestStreamThinkingEventFinalBoundaryKeepsUrgentFlush(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("stream thinking event should schedule final boundary flush")
 	}
-	if m.streamFlushDelay != 1*time.Millisecond {
-		t.Fatalf("stream thinking final flush delay = %s, want 1ms", m.streamFlushDelay)
+	if m.streamFlushDelay != foregroundBoundaryFlushCadence {
+		t.Fatalf("stream thinking final flush delay = %s, want %s", m.streamFlushDelay, foregroundBoundaryFlushCadence)
 	}
 	if !m.streamRenderForceView || m.streamRenderDeferred || m.streamRenderDeferNext {
 		t.Fatalf("final thinking invalidation = force:%v deferred:%v next:%v, want forced boundary render", m.streamRenderForceView, m.streamRenderDeferred, m.streamRenderDeferNext)
@@ -146,8 +190,8 @@ func assertNewlineDeltaUsesCoalescedFlushAfterInitialBoundary(t *testing.T, m *M
 	if cmd == nil {
 		t.Fatalf("first %s should schedule initial boundary flush", label)
 	}
-	if m.streamFlushDelay != 1*time.Millisecond {
-		t.Fatalf("initial %s flush delay = %s, want 1ms", label, m.streamFlushDelay)
+	if m.streamFlushDelay != foregroundBoundaryFlushCadence {
+		t.Fatalf("initial %s flush delay = %s, want %s", label, m.streamFlushDelay, foregroundBoundaryFlushCadence)
 	}
 
 	if !m.consumeStreamFlush(streamFlushTickMsg{generation: m.streamFlushGeneration}) {
@@ -184,6 +228,22 @@ func BenchmarkStreamTextDeltaBurstDeferredView(b *testing.B) {
 
 func BenchmarkStreamTextDeltaBurstCadenceFlush(b *testing.B) {
 	deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
+	b.ReportAllocs()
+	for b.Loop() {
+		m := newStreamTextRenderedModel(b, "seed")
+		for i, delta := range deltas {
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
+			if (i+1)%32 == 0 {
+				m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
+			}
+			_ = m.View()
+		}
+	}
+}
+
+func BenchmarkStreamTextDeltaSteadyStateCadenceFlush(b *testing.B) {
+	deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
+	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
 		m := newStreamTextRenderedModel(b, "seed")
@@ -256,6 +316,13 @@ func newStreamThinkingRenderedModel(tb testing.TB, seed string) *Model {
 		tb.Fatalf("initial thinking stream was not rendered, got:\n%s", rendered)
 	}
 	return &m
+}
+
+func blockContentForTest(block *Block) string {
+	if block == nil {
+		return ""
+	}
+	return block.Content
 }
 
 func repeatedStreamDeltas(count int, delta string) []string {

@@ -36,20 +36,34 @@ func formatStatusBarSubAgentLabel(agentDefName, instanceID string) string {
 }
 
 func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
-	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
+	focused := m.focusedAgentIDOrMain()
+	latestStatusStart := false
+	if _, ok := m.latestStatusStartWall(focused); ok {
+		latestStatusStart = true
+	}
+	return m.statusBarDynamicCacheKeyFromState(
+		now,
+		focused,
+		m.viewport != nil && m.viewport.HasUserLocalShellPending(),
+		m.renderRequestProgressSummary(focused),
+		m.activities[focused].Type == agent.ActivityCompacting,
+		m.isFocusedAgentBusy(),
+		latestStatusStart,
+	)
+}
+
+func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, focused string, localShellPending bool, progress string, compacting, busy, latestStatusStart bool) string {
+	if localShellPending {
 		return m.visualAnimationCacheKeyAt(now)
 	}
-	if prog := m.renderRequestProgressSummary(m.focusedAgentIDOrMain()); prog != "" {
-		return m.visualAnimationCacheKeyAt(now) + "|" + prog
+	if progress != "" {
+		return m.visualAnimationCacheKeyAt(now) + "|" + progress
 	}
-	if m.activities[m.focusedAgentIDOrMain()].Type == agent.ActivityCompacting {
+	if compacting || busy {
 		return m.visualAnimationCacheKeyAt(now)
 	}
-	if m.isFocusedAgentBusy() {
-		return m.visualAnimationCacheKeyAt(now)
-	}
-	if _, ok := m.latestStatusStartWall(m.focusedAgentIDOrMain()); ok {
-		return fmt.Sprintf("min:%d", now.Unix()/60)
+	if latestStatusStart {
+		return "min:" + strconv.FormatInt(now.Unix()/60, 10)
 	}
 	return ""
 }
@@ -57,9 +71,9 @@ func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 func (m *Model) visualAnimationCacheKeyAt(now time.Time) string {
 	cadence := m.currentCadence()
 	if cadence.visualAnimDelay <= 0 {
-		return fmt.Sprintf("sec:%d", now.Unix())
+		return "sec:" + strconv.FormatInt(now.Unix(), 10)
 	}
-	return fmt.Sprintf("frame:%d", now.UnixMilli()/cadence.visualAnimDelay.Milliseconds())
+	return "frame:" + strconv.FormatInt(now.UnixMilli()/cadence.visualAnimDelay.Milliseconds(), 10)
 }
 
 func (m *Model) inputAnimationCacheKeyAt(now time.Time) string {
@@ -131,6 +145,20 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 	if statusActiveID == "" {
 		statusActiveID = "main"
 	}
+	localShellPending := m.viewport != nil && m.viewport.HasUserLocalShellPending()
+	latestStatusStart := false
+	if _, ok := m.latestStatusStartWall(statusActiveID); ok {
+		latestStatusStart = true
+	}
+	dynamicCacheKey := m.statusBarDynamicCacheKeyFromState(
+		now,
+		statusActiveID,
+		localShellPending,
+		m.renderRequestProgressSummary(statusActiveID),
+		m.activities[statusActiveID].Type == agent.ActivityCompacting,
+		snap.busy,
+		latestStatusStart,
+	)
 	loopState := agent.LoopState("")
 	loopIteration := 0
 	loopMaxIterations := 0
@@ -158,9 +186,9 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		LoopIteration:     loopIteration,
 		LoopMaxIterations: loopMaxIterations,
 		ServiceTier:       m.effectiveServiceTier(),
-		DynamicCacheKey:   m.statusBarDynamicCacheKeyAt(now),
+		DynamicCacheKey:   dynamicCacheKey,
 		InflightDraft:     m.inflightDraft != nil,
-		LocalShellPending: m.viewport != nil && m.viewport.HasUserLocalShellPending(),
+		LocalShellPending: localShellPending,
 		Width:             m.width,
 		Height:            m.height,
 		ViewportOffset:    m.viewport.offset,

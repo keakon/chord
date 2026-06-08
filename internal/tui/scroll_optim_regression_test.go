@@ -147,3 +147,96 @@ func TestUVStreamingScrollWithoutRegionOptimAvoidsDECSTBM(t *testing.T) {
 		t.Fatalf("scroll-region-disabled path re-emitted separator runes; got %q", got)
 	}
 }
+
+func benchmarkUVStreamingScroll(b *testing.B, scrollOptim, scrollRegionOptim bool) {
+	const width, height = 120, 40
+	out := &bytes.Buffer{}
+	scr := uv.NewTerminalRenderer(out, nil)
+	scr.SetFullscreen(true)
+	scr.SetRelativeCursor(false)
+	scr.SetScrollOptim(scrollOptim)
+	scr.SetScrollRegionOptim(scrollRegionOptim)
+	cell := uv.NewScreenBuffer(width, height)
+	cell.Clear()
+	uv.NewStyledString(buildScrollFrame(width, height, 0)).Draw(&cell, cell.Bounds())
+	scr.Render(cell.RenderBuffer)
+	if err := scr.Flush(); err != nil {
+		b.Fatalf("initial flush: %v", err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var bytesWritten int
+	for i := 1; b.Loop(); i++ {
+		out.Reset()
+		cell.Clear()
+		uv.NewStyledString(buildScrollFrame(width, height, i)).Draw(&cell, cell.Bounds())
+		scr.Render(cell.RenderBuffer)
+		if err := scr.Flush(); err != nil {
+			b.Fatalf("flush: %v", err)
+		}
+		bytesWritten += out.Len()
+	}
+	b.ReportMetric(float64(bytesWritten)/float64(b.N), "bytes_out/op")
+}
+
+func BenchmarkUVStreamingScrollOptimOn(b *testing.B) {
+	benchmarkUVStreamingScroll(b, true, true)
+}
+
+func BenchmarkUVStreamingScrollOptimOff(b *testing.B) {
+	benchmarkUVStreamingScroll(b, false, true)
+}
+
+func BenchmarkUVStreamingScrollRegionOptimOff(b *testing.B) {
+	benchmarkUVStreamingScroll(b, true, false)
+}
+
+func benchmarkUVRendererScrollBuffers(b *testing.B, scrollOptim, scrollRegionOptim bool) {
+	const width, height = 120, 40
+	frames := make([]uv.ScreenBuffer, 128)
+	for i := range frames {
+		frames[i] = uv.NewScreenBuffer(width, height)
+		uv.NewStyledString(buildScrollFrame(width, height, i)).Draw(&frames[i], frames[i].Bounds())
+	}
+	out := &bytes.Buffer{}
+	scr := uv.NewTerminalRenderer(out, nil)
+	scr.SetFullscreen(true)
+	scr.SetRelativeCursor(false)
+	scr.SetScrollOptim(scrollOptim)
+	scr.SetScrollRegionOptim(scrollRegionOptim)
+	for y := range height {
+		frames[0].RenderBuffer.TouchLine(0, y, width)
+	}
+	scr.Render(frames[0].RenderBuffer)
+	if err := scr.Flush(); err != nil {
+		b.Fatalf("initial flush: %v", err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var bytesWritten int
+	for i := 1; b.Loop(); i++ {
+		out.Reset()
+		frame := &frames[i%len(frames)]
+		for y := range height {
+			frame.RenderBuffer.TouchLine(0, y, width)
+		}
+		scr.Render(frame.RenderBuffer)
+		if err := scr.Flush(); err != nil {
+			b.Fatalf("flush: %v", err)
+		}
+		bytesWritten += out.Len()
+	}
+	b.ReportMetric(float64(bytesWritten)/float64(b.N), "bytes_out/op")
+}
+
+func BenchmarkUVRendererScrollBuffersOptimOn(b *testing.B) {
+	benchmarkUVRendererScrollBuffers(b, true, true)
+}
+
+func BenchmarkUVRendererScrollBuffersOptimOff(b *testing.B) {
+	benchmarkUVRendererScrollBuffers(b, false, true)
+}
+
+func BenchmarkUVRendererScrollBuffersRegionOptimOff(b *testing.B) {
+	benchmarkUVRendererScrollBuffers(b, true, false)
+}

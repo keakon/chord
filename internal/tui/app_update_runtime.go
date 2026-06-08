@@ -102,6 +102,12 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 	if !m.consumeStreamFlush(msg) {
 		return nil
 	}
+	if m.currentAssistantBlock != nil {
+		m.currentAssistantBlock.syncStreamingContent()
+	}
+	if m.currentThinkingBlock != nil {
+		m.currentThinkingBlock.syncStreamingContent()
+	}
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	// Do NOT issue ClearScreen during streaming. On cmux/libghostty,

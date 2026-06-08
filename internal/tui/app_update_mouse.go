@@ -614,10 +614,10 @@ func (m *Model) handleMouseWheel(mouse tea.Mouse) tea.Cmd {
 	switch mouse.Button {
 	case tea.MouseWheelUp:
 		m.pendingScrollDelta -= mouseWheelScrollStep
-		return m.scheduleScrollFlush(16 * time.Millisecond)
+		return m.scheduleScrollFlush(0)
 	case tea.MouseWheelDown:
 		m.pendingScrollDelta += mouseWheelScrollStep
-		return m.scheduleScrollFlush(16 * time.Millisecond)
+		return m.scheduleScrollFlush(0)
 	default:
 		return nil
 	}

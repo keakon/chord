@@ -13,8 +13,12 @@ import (
 )
 
 type cachedRenderable struct {
-	text  string
-	lines [][]uv.Cell
+	text       string
+	lines      [][]uv.Cell
+	cellsValid bool
+	scratch    uv.ScreenBuffer
+	scratchW   int
+	scratchOK  bool
 }
 
 func (m *Model) shouldFreezeRender() bool {
@@ -126,9 +130,22 @@ func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	return tea.Batch(
-		m.scheduleStreamFlush(1*time.Millisecond),
+		m.scheduleStreamFlush(m.streamBoundaryFlushDelay()),
 		m.hostRedrawForContentBoundaryCmd("content-boundary"),
 	)
+}
+
+func (m *Model) streamBoundaryFlushDelay() time.Duration {
+	if m == nil {
+		return 0
+	}
+	if m.displayState == stateForeground {
+		return foregroundBoundaryFlushCadence
+	}
+	if delay := m.currentCadence().contentFlushDelay; delay > 0 {
+		return delay
+	}
+	return foregroundBoundaryFlushCadence
 }
 
 func (m *Model) scheduleStreamFlush(delay time.Duration) tea.Cmd {
@@ -237,7 +254,7 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 	if cache == nil {
 		return
 	}
-	if cache.text == text {
+	if cache.text == text && cache.cellsValid {
 		return
 	}
 	cache.text = text
@@ -252,13 +269,38 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 		if w <= 0 {
 			w = 1
 		}
-		buf := newScreenBuffer(w, 1)
+		buf := cache.renderScratchBuffer(w)
 		uv.NewStyledString(part).Draw(buf, buf.Bounds())
 		line := buf.Line(0)
-		copied := make([]uv.Cell, len(line))
-		copy(copied, line)
+		copied := make([]uv.Cell, min(w, len(line)))
+		copy(copied, line[:len(copied)])
 		cache.lines[i] = copied
 	}
+	cache.cellsValid = true
+}
+
+func (cache *cachedRenderable) renderScratchBuffer(width int) uv.ScreenBuffer {
+	if width <= 0 {
+		width = 1
+	}
+	if !cache.scratchOK || cache.scratch.RenderBuffer == nil {
+		cache.scratch = newScreenBuffer(width, 1)
+		cache.scratchW = width
+		cache.scratchOK = true
+		return cache.scratch
+	}
+	if cache.scratchW < width {
+		cache.scratch.Resize(width, 1)
+		cache.scratchW = width
+	} else {
+		cache.scratch.Resize(cache.scratchW, 1)
+	}
+	cache.scratch.Method = ansi.GraphemeWidth
+	line := cache.scratch.Line(0)
+	for i := range line {
+		line[i] = uv.EmptyCell
+	}
+	return cache.scratch
 }
 
 func (m *Model) SetFocusResizeFreezeEnabled(enabled bool) {

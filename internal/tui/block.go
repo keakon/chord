@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
@@ -241,6 +242,7 @@ type Block struct {
 	streamTailLines                    []string
 	streamTailSyntheticPrefixWidths    []int
 	streamTailSoftWrapContinuations    []bool
+	streamContentBuilder               *strings.Builder
 	lineCache                          []string
 	lineCacheWidth                     int
 	lineCountCache                     int

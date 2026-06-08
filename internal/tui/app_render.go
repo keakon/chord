@@ -164,6 +164,13 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 				m.cachedMainSelActive = true
 				m.cachedMainSel = *selection
 			}
+			m.cachedMainRender.text = mainContent
+			m.cachedMainRender.lines = nil
+			m.cachedMainRender.cellsValid = false
+			uv.NewStyledString(mainContent).Draw(scr, layout.main)
+			return
+		}
+		if !m.cachedMainRender.cellsValid {
 			m.renderToCache(&m.cachedMainRender, mainContent)
 		}
 		m.drawCachedRenderableToClearedArea(scr, layout.main, &m.cachedMainRender)
@@ -485,9 +492,19 @@ const ansiNoopSGRAlt = "\x1b[0m"
 // not stored in cached views, so cached/deferred paths do not accumulate duplicate
 // no-op sequences.
 func (m *Model) applyHostRedrawReplaySuffix(v tea.View) tea.View {
-	if suffix := m.hostRedrawReplaySuffix(); suffix != "" {
-		v.Content += suffix
+	suffix := m.hostRedrawReplaySuffix()
+	if suffix == "" {
+		return v
 	}
+	if m.cachedReplayNonce == m.hostRedrawFrameNonce && m.cachedReplayBase == v.Content {
+		v.Content = m.cachedReplayContent
+		return v
+	}
+	base := v.Content
+	v.Content += suffix
+	m.cachedReplayNonce = m.hostRedrawFrameNonce
+	m.cachedReplayBase = base
+	m.cachedReplayContent = v.Content
 	return v
 }
 
