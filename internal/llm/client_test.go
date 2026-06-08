@@ -904,6 +904,44 @@ func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 			t.Fatalf("expected ~1s cooldown for 402 without Retry-After, got remaining %v", remain)
 		}
 	})
+
+	t.Run("402_deactivated_workspace_code_deactivates_oauth_key", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+		p.mu.Lock()
+		p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1", Email: "user@example.com"}
+		p.mu.Unlock()
+
+		res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 402, Code: "deactivated_workspace", Message: `{"detail":{"code":"deactivated_workspace"}}`})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true")
+		}
+		if res.deactivatedAccountID != "acc-1" || res.deactivatedEmail != "user@example.com" {
+			t.Fatalf("deactivated identity = %q/%q, want acc-1/user@example.com", res.deactivatedAccountID, res.deactivatedEmail)
+		}
+		_, total := p.AvailableKeyCount()
+		if total != 0 {
+			t.Fatalf("total = %d, want 0: deactivated OAuth key should be excluded", total)
+		}
+	})
+
+	t.Run("402_deactivated_workspace_message_deactivates_oauth_key", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+		p.mu.Lock()
+		p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}
+		p.mu.Unlock()
+
+		res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 402, Message: `{"detail":{"code":"deactivated_workspace"}}`})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true")
+		}
+		if res.deactivatedAccountID != "acc-1" {
+			t.Fatalf("deactivatedAccountID = %q, want acc-1", res.deactivatedAccountID)
+		}
+		_, total := p.AvailableKeyCount()
+		if total != 0 {
+			t.Fatalf("total = %d, want 0: deactivated OAuth key should be excluded", total)
+		}
+	})
 }
 
 func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T) {

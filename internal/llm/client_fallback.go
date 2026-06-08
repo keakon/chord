@@ -118,11 +118,13 @@ type markKeyCooldownResult struct {
 // isAccountDeactivated reports whether the API error indicates a permanently
 // deactivated account (as opposed to a temporary auth failure or proxy error).
 func isAccountDeactivated(apiErr *APIError) bool {
-	if apiErr.Code == "account_deactivated" {
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	if code == "account_deactivated" || code == "deactivated_workspace" {
 		return true
 	}
 	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "deactivated") ||
+	return strings.Contains(msg, "deactivated_workspace") ||
+		strings.Contains(msg, "deactivated") ||
 		strings.Contains(msg, "account has been disabled")
 }
 
@@ -195,7 +197,21 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		log.Warnf("compatible API key returned 400, marking cooldown key_suffix=%v cooldown=%v", keySuffix(key), cooldown)
 		provider.MarkCooldown(key, cooldown)
 		return markKeyCooldownResult{cooldownApplied: true}
-	case 402, 429:
+	case 402:
+		if provider != nil {
+			if info := provider.oauthInfoForKey(key); info != nil && isAccountDeactivated(apiErr) {
+				log.Warnf("OAuth account deactivated (402), permanently removing key key_suffix=%v code=%v", keySuffix(key), apiErr.Code)
+				provider.MarkDeactivated(key)
+				return markKeyCooldownResult{
+					cooldownApplied:      true,
+					deactivatedAccountID: info.AccountID,
+					deactivatedEmail:     info.Email,
+				}
+			}
+		}
+		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Second, time.Minute,
+			"API key quota exhausted", "API key temporarily unavailable")
+	case 429:
 		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Second, time.Minute,
 			"API key quota exhausted", "API key temporarily unavailable")
 	case 401:
