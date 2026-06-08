@@ -251,11 +251,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
-		result = append(result, ErrorStyle.Render("  ↳ Error:"))
-		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 		if b.ToolName == tools.NameEdit {
 			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 		}
+		result = append(result, ErrorStyle.Render("  ↳ Error:"))
+		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = append(result, DimStyle.Render("  ↳ Cancelled"))
 		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {

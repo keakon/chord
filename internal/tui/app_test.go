@@ -4834,12 +4834,13 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testin
 
 func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *testing.T) {
 	tests := []struct {
-		name     string
-		toolName string
-		args     json.RawMessage
-		content  string
-		status   agent.ToolResultStatus
-		want     []string
+		name      string
+		toolName  string
+		args      json.RawMessage
+		content   string
+		status    agent.ToolResultStatus
+		want      []string
+		wantOrder []string
 	}{
 		{
 			name:     "write error",
@@ -4850,12 +4851,13 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			want:     []string{"↳ Error:", "permission denied"},
 		},
 		{
-			name:     "apply patch error",
-			toolName: tools.NameEdit,
-			args:     json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
-			content:  "hunk not found; re-read the file before applying the patch",
-			status:   agent.ToolResultStatusError,
-			want:     []string{"↳ Error:", "hunk not found", "↳ Patch:", "-old", "+new"},
+			name:      "apply patch error",
+			toolName:  tools.NameEdit,
+			args:      json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
+			content:   "hunk not found; re-read the file before applying the patch",
+			status:    agent.ToolResultStatusError,
+			want:      []string{"↳ Patch:", "-old", "+new", "↳ Error:", "hunk not found"},
+			wantOrder: []string{"↳ Patch:", "-old", "+new", "↳ Error:", "hunk not found"},
 		},
 		{
 			name:     "delete success",
@@ -4888,6 +4890,17 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 				if !strings.Contains(plain, want) {
 					t.Fatalf("restored %s render missing %q; got:\n%s", tt.toolName, want, plain)
 				}
+			}
+			last := -1
+			for _, want := range tt.wantOrder {
+				idx := strings.Index(plain, want)
+				if idx < 0 {
+					t.Fatalf("restored %s render missing ordered item %q; got:\n%s", tt.toolName, want, plain)
+				}
+				if idx <= last {
+					t.Fatalf("restored %s render order mismatch at %q; got:\n%s", tt.toolName, want, plain)
+				}
+				last = idx
 			}
 		})
 	}
@@ -4927,10 +4940,21 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 		t.Fatalf("display args should stay compact, got %s", block.Content)
 	}
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"edit foo.txt", "↳ Error:", "hunk not found", "↳ Patch:", "*** Begin Patch", "*** End Patch", "@@", "-old", "+new"} {
+	for _, want := range []string{"edit foo.txt", "↳ Patch:", "*** Begin Patch", "*** End Patch", "@@", "-old", "+new", "↳ Error:", "hunk not found"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("live Edit error render missing %q; got:\n%s", want, plain)
 		}
+	}
+	last := -1
+	for _, want := range []string{"↳ Patch:", "*** Begin Patch", "@@", "-old", "+new", "*** End Patch", "↳ Error:", "hunk not found"} {
+		idx := strings.Index(plain, want)
+		if idx < 0 {
+			t.Fatalf("live Edit error render missing ordered item %q; got:\n%s", want, plain)
+		}
+		if idx <= last {
+			t.Fatalf("live Edit error render order mismatch at %q; got:\n%s", want, plain)
+		}
+		last = idx
 	}
 }
 

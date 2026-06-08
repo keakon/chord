@@ -195,7 +195,7 @@ func formatEditErrorResult(patch string, err error) string {
 	if patch == "" || !shouldShowEditPatchExcerpt(msg) {
 		return msg
 	}
-	return msg + "\n\nPatch excerpt:\n" + fencedPatchExcerpt(patch)
+	return "Patch excerpt:\n" + fencedPatchExcerpt(patch) + "\n\nError: " + msg
 }
 
 func shouldShowEditPatchExcerpt(msg string) bool {
