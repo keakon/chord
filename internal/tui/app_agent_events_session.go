@@ -13,6 +13,9 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.RunningModelChangedEvent:
+		if m.agent != nil && m.runningModelEventMatchesFocus(evt) && strings.TrimSpace(m.pendingPoolSwitch.to) == strings.TrimSpace(m.agent.CurrentPoolName()) {
+			m.pendingPoolSwitch = pendingPoolSwitchState{}
+		}
 		effects.refreshSidebar = true
 		effects.invalidateUsage = true
 		return true, effects
@@ -66,4 +69,12 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	default:
 		return false, effects
 	}
+}
+
+func (m *Model) runningModelEventMatchesFocus(evt agent.RunningModelChangedEvent) bool {
+	focused := m.focusedAgentIDOrMain()
+	if focused != "main" {
+		return evt.AgentID == focused
+	}
+	return evt.AgentID == "" || evt.AgentID == "main" || strings.HasPrefix(evt.AgentID, "main-")
 }

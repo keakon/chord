@@ -137,6 +137,35 @@ func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
 	}
 }
 
+func TestBusyPoolSwitchClearsTransitionWhenFallbackReachesTargetPool(t *testing.T) {
+	m, backend := newPoolSwitchModel()
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.mainModelPool = "slow"
+	backend.currentPoolByFocus = map[string]string{"": "slow"}
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	m.modelSelect = modelSelectState{
+		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
+		poolNames:  []string{"slow", "fast"},
+		poolCursor: 1,
+		prevMode:   ModeNormal,
+	}
+	runCmdTree(m.selectPoolAtCursor())
+	backend.currentPoolByFocus[""] = "fast"
+	backend.mainModelPool = "fast"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{AgentID: "main-1", ProviderModelRef: "fast-provider/gpt-5.5", RunningModelRef: "fast-provider/gpt-5.5"}})
+
+	plain := stripANSI(m.renderInfoPanel(100, 20))
+	if !strings.Contains(plain, "Pool: fast") {
+		t.Fatalf("info panel = %q, want current pool after fallback", plain)
+	}
+	if strings.Contains(plain, "Pool: slow -> fast") {
+		t.Fatalf("info panel = %q, should clear completed pool transition", plain)
+	}
+}
+
 func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}
