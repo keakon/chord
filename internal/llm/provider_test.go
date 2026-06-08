@@ -249,7 +249,7 @@ func TestSelectKeyUsesExistingOAuthAccessTokenWithoutPreRefresh(t *testing.T) {
 func TestSelectKeyRefreshOnlyUnrecoverableFailurePersistsRefreshState(t *testing.T) {
 	dir := t.TempDir()
 	authPath := filepath.Join(dir, "auth.yaml")
-	statePath := filepath.Join(dir, "auth.state.yaml")
+	statePath := filepath.Join(dir, "auth.state.json")
 	if err := os.WriteFile(authPath, []byte(`openai:
   - refresh: refresh-only
 `), 0o600); err != nil {

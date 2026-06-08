@@ -13,7 +13,7 @@ import (
 )
 
 func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.CodexPrimaryUsedPct = 10
@@ -56,7 +56,7 @@ func TestSelectKeyUsesAuthStateSnapshotCache(t *testing.T) {
 }
 
 func TestMaybeReloadAuthStateSkipsUnchangedFile(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
@@ -94,7 +94,7 @@ func TestMaybeReloadAuthStateSkipsUnchangedFile(t *testing.T) {
 }
 
 func TestKeyStatsDoNotReloadAuthState(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
 		record.UpdatedAt = time.Now().UnixMilli()
@@ -138,7 +138,7 @@ func TestKeyStatsDoNotReloadAuthState(t *testing.T) {
 }
 
 func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
@@ -185,7 +185,7 @@ func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 }
 
 func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
@@ -240,7 +240,7 @@ func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) 
 }
 
 func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})
 	auth := config.AuthConfig{"openai": {
 		{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}},
@@ -294,7 +294,7 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 }
 
 func TestProviderCloseStopsAuthStateMonitor(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
@@ -322,7 +322,7 @@ func TestProviderCloseStopsAuthStateMonitor(t *testing.T) {
 }
 
 func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex
@@ -369,7 +369,7 @@ func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 }
 
 func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1", Status: config.OAuthStatusDeactivated}}}}
 	var authMu sync.Mutex
@@ -398,7 +398,7 @@ func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 }
 
 func TestPersistAuthStateForKeyPreservesRuntimeDeactivatedStatus(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "auth.state.yaml")
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
 	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
 	var authMu sync.Mutex

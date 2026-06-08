@@ -113,12 +113,12 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 		return nil, fmt.Errorf("resolve OAuth settings for provider %q: %w", provName, err)
 	} else if ok {
 		var globalProxy string
-		var authStatePath string
 		if c.cfg != nil {
 			globalProxy = c.cfg.Proxy
 		}
-		if c.authPath != "" {
-			authStatePath = strings.TrimSuffix(c.authPath, ".yaml") + ".state.yaml"
+		authStatePath, statePathErr := config.AuthStatePath()
+		if statePathErr != nil {
+			return nil, fmt.Errorf("resolve auth state path: %w", statePathErr)
 		}
 		effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, globalProxy)
 		oauthMap, backfills, oauthErr := oauthCredentialMap(creds)

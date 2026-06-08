@@ -328,7 +328,7 @@ func newAuthStateCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "state", Short: "Manage shared OAuth runtime state"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
-		Short: "List expired, deactivated, or invalidated OAuth accounts from auth.state.yaml",
+		Short: "List expired, deactivated, or invalidated OAuth accounts from auth.state.json",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			statePath, err := config.AuthStatePath()

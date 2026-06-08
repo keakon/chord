@@ -110,7 +110,7 @@ func mustReadFile(t *testing.T, path string) []byte {
 }
 
 func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.state.yaml")
+	path := filepath.Join(t.TempDir(), "auth.state.json")
 	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-ok__acc-ok", AccountID: "acc-ok"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusNormal
 		return true, nil

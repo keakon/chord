@@ -501,7 +501,10 @@ func resolveModelRef(
 			if pathErr == nil {
 				authCopy := auth
 				var authMu sync.Mutex
-				authStatePath := strings.TrimSuffix(authConfigPath, ".yaml") + ".state.yaml"
+				authStatePath, statePathErr := config.AuthStatePath()
+				if statePathErr != nil {
+					return nil, nil, "", 0, 0, fmt.Errorf("resolve auth state path: %w", statePathErr)
+				}
 				effectiveProxy := llm.ResolveEffectiveProxy(normalizedProviderCfg.Proxy, globalProxy)
 				oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
 				if oauthErr != nil {

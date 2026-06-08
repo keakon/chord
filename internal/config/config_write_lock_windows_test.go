@@ -49,7 +49,7 @@ func TestWindowsLockConfigMutationSerializesConcurrentWriters(t *testing.T) {
 	}
 }
 
-func TestWindowsAuthYAMLLockReentrantAfterRelease(t *testing.T) {
+func TestWindowsAuthFileLockReentrantAfterRelease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.yaml")
 	lock, err := lockAuthYAMLFile(path)
 	if err != nil {

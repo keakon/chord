@@ -126,7 +126,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		Preset:   config.ProviderPresetCodex,
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
-	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, strings.TrimSuffix(authPath, ".yaml")+".state.yaml", &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, authPath, strings.TrimSuffix(authPath, ".yaml")+".state.json", &auth, &authMu, map[string]OAuthKeySetup{
 		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
@@ -221,7 +221,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 		Preset:   config.ProviderPresetCodex,
 		KeyOrder: config.KeyOrderSequential,
 	}, config.ExtractAPIKeys(auth["openai"]))
-	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, strings.TrimSuffix(authPath, ".yaml")+".state.yaml", &auth, &authMu, map[string]OAuthKeySetup{
+	prov.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, strings.TrimSuffix(authPath, ".yaml")+".state.json", &auth, &authMu, map[string]OAuthKeySetup{
 		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
@@ -445,7 +445,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 		config.OpenAIOAuthTokenURL,
 		config.OpenAIOAuthClientID,
 		authPath,
-		strings.TrimSuffix(authPath, ".yaml")+".state.yaml",
+		strings.TrimSuffix(authPath, ".yaml")+".state.json",
 		&auth,
 		&authMu,
 		map[string]OAuthKeySetup{access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: 32503680000000}},
@@ -474,7 +474,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 		t.Fatalf("available/total = %d/%d, want 1/1: usage polling auth failures must not affect key health", available, total)
 	}
 
-	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.yaml"
+	statePath := strings.TrimSuffix(authPath, ".yaml") + ".state.json"
 	state, err := config.LoadAuthState(statePath)
 	if err == nil {
 		if record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}); ok && record.Status != "" && record.Status != config.OAuthStatusNormal {

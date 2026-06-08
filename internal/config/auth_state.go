@@ -245,7 +245,7 @@ func RemoveOAuthStateRecord(path string, key OAuthStateKey) (AuthStateFile, bool
 	})
 }
 
-// RemovedOAuthStateEntry describes an invalid runtime-state entry removed from auth.state.yaml.
+// RemovedOAuthStateEntry describes an invalid runtime-state entry removed from auth.state.json.
 type RemovedOAuthStateEntry struct {
 	Provider      string
 	StateKey      string
