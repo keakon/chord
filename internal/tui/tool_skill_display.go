@@ -185,10 +185,37 @@ func toolShouldHideSuccessfulFileOpResult(b *Block) bool {
 	}
 	switch tools.NormalizeName(b.ToolName) {
 	case tools.NameEdit:
-		return !strings.Contains(b.ResultContent, "Diagnostics summary:")
+		return !toolResultContainsLSPDiagnostics(b.ResultContent)
 	default:
 		return false
 	}
+}
+
+func toolResultContainsLSPDiagnostics(result string) bool {
+	s := strings.TrimSpace(result)
+	if s == "" {
+		return false
+	}
+	if strings.Contains(s, "Diagnostics:") || strings.Contains(s, "Diagnostics summary:") || strings.Contains(s, "LSP:") || strings.Contains(s, "LSP errors detected") || strings.Contains(s, "<diagnostics") {
+		return true
+	}
+	for line := range strings.SplitSeq(s, "\n") {
+		if lspSeverityRe.MatchString(line) || lspDiagLineRe.MatchString(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
+func editSuccessDiagnosticsContent(result string) string {
+	lines := strings.Split(strings.ReplaceAll(result, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		switch strings.TrimSpace(line) {
+		case "Diagnostics:", "Diagnostics summary:":
+			return strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+		}
+	}
+	return strings.TrimSpace(result)
 }
 
 func toolSuccessfulFileOpSummary(b *Block) string {

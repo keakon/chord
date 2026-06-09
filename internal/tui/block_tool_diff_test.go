@@ -60,11 +60,14 @@ func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(plain, "Diagnostics summary:") {
-		t.Fatalf("expected diagnostics summary to render with edit diff, got:\n%s", plain)
+	if !strings.Contains(plain, "↳ Diagnostics:") {
+		t.Fatalf("expected diagnostics section to render with edit diff, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "undefined: DefaultContextReductionConfig") {
 		t.Fatalf("expected diagnostic detail to render with edit diff, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Diagnostics summary:") || strings.Contains(plain, "Applied patch to internal/config/config_project_test.go") {
+		t.Fatalf("expected only diagnostics detail in edit success diagnostics section, got:\n%s", plain)
 	}
 }
 

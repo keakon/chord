@@ -247,8 +247,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	if b.ToolName == tools.NameEdit && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
-		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
-		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
+		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
+		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		if b.ToolName == tools.NameEdit {

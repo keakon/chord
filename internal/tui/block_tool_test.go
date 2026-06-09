@@ -203,6 +203,41 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	}
 }
 
+func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	for _, header := range []string{"Diagnostics:", "Diagnostics summary:"} {
+		block := &Block{
+			ID:         1,
+			Type:       BlockToolCall,
+			ToolName:   tools.NameEdit,
+			Content:    `{"path":"cmd/chord/setup_templates.go","patch":"@@\n-old\n+new\n"}`,
+			Collapsed:  false,
+			ResultDone: true,
+			ResultContent: strings.Join([]string{
+				"Applied patch to cmd/chord/setup_templates.go (+12 -12)",
+				"",
+				header,
+				"[E] 139:10 [UndeclaredName] undefined: config",
+				"[E] 141:10 [UndeclaredName] undefined: config",
+			}, "\n"),
+		}
+
+		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		if !strings.Contains(plain, "↳ Diagnostics:") {
+			t.Fatalf("%s: expected edit diagnostics section to render; got:\n%s", header, plain)
+		}
+		if !strings.Contains(plain, "undefined: config") {
+			t.Fatalf("%s: expected edit LSP error to render; got:\n%s", header, plain)
+		}
+		if strings.Contains(plain, "↳ Result:") {
+			t.Fatalf("%s: expected edit diagnostics not to render as a generic result; got:\n%s", header, plain)
+		}
+		if strings.Contains(plain, "Applied patch to cmd/chord/setup_templates.go") {
+			t.Fatalf("%s: expected routine edit success text to stay hidden; got:\n%s", header, plain)
+		}
+	}
+}
+
 func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	content := strings.Join([]string{
