@@ -65,49 +65,8 @@ func setupStartupRepo(t *testing.T) string {
 	return canonical
 }
 
-// withTestStateDir points the persistent flags at a fresh state/cache
-// dir for the duration of the test, restoring originals on cleanup.
-func withTestStateDir(t *testing.T) {
-	t.Helper()
-	prevState, prevCache, prevSessions, prevLogs, prevHome :=
-		flagStateDir, flagCacheDir, flagSessionsDir, flagLogsDir, flagConfigHome
-	state := filepath.Join(t.TempDir(), "state")
-	cache := filepath.Join(t.TempDir(), "cache")
-	sessions := filepath.Join(state, "sessions")
-	logs := filepath.Join(t.TempDir(), "logs")
-	home := filepath.Join(t.TempDir(), "config")
-	for _, p := range []string{state, cache, sessions, logs, home} {
-		if err := os.MkdirAll(p, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-	}
-	flagStateDir = state
-	flagCacheDir = cache
-	flagSessionsDir = sessions
-	flagLogsDir = logs
-	flagConfigHome = home
-	t.Cleanup(func() {
-		flagStateDir = prevState
-		flagCacheDir = prevCache
-		flagSessionsDir = prevSessions
-		flagLogsDir = prevLogs
-		flagConfigHome = prevHome
-	})
-}
-
-func chdirForTest(t *testing.T, dir string) {
-	t.Helper()
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-}
-
 func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
+	withTestStateDir(t)
 	repo := setupStartupRepo(t)
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)

@@ -27,6 +27,51 @@ func testOAuthJWTForCommonTest(payload string) string {
 	return header + "." + body + ".sig"
 }
 
+func withTestStateDir(t *testing.T) {
+	t.Helper()
+	prevState, prevCache, prevSessions, prevLogs, prevHome :=
+		flagStateDir, flagCacheDir, flagSessionsDir, flagLogsDir, flagConfigHome
+	state := filepath.Join(t.TempDir(), "state")
+	cache := filepath.Join(t.TempDir(), "cache")
+	sessions := filepath.Join(state, "sessions")
+	logs := filepath.Join(t.TempDir(), "logs")
+	home := filepath.Join(t.TempDir(), "config")
+	for _, p := range []string{state, cache, sessions, logs, home} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+	}
+	flagStateDir = state
+	flagCacheDir = cache
+	flagSessionsDir = sessions
+	flagLogsDir = logs
+	flagConfigHome = home
+	t.Setenv("CHORD_STATE_DIR", state)
+	t.Setenv("CHORD_CACHE_DIR", cache)
+	t.Setenv("CHORD_SESSIONS_DIR", sessions)
+	t.Setenv("CHORD_LOGS_DIR", logs)
+	t.Setenv("CHORD_CONFIG_HOME", home)
+	t.Cleanup(func() {
+		flagStateDir = prevState
+		flagCacheDir = prevCache
+		flagSessionsDir = prevSessions
+		flagLogsDir = prevLogs
+		flagConfigHome = prevHome
+	})
+}
+
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+}
+
 func TestNewLSPShutdownContextHasGracePeriodAfterParentCancellation(t *testing.T) {
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 	parentCancel()
@@ -316,6 +361,7 @@ func TestRuntimeMCPControlAggregatesValidationErrors(t *testing.T) {
 }
 
 func TestInitAppReturnsProjectConfigParseError(t *testing.T) {
+	withTestStateDir(t)
 	configHome := t.TempDir()
 	projectRoot := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)

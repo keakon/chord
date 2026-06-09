@@ -44,11 +44,13 @@ func TestPlanInitAppStartupResolvesStorageAndProjectPaths(t *testing.T) {
 }
 
 func TestPlanInitAppStartupReturnsSessionPathError(t *testing.T) {
+	withTestStateDir(t)
 	configHome := t.TempDir()
 	projectRoot := t.TempDir()
 	badSessionsRoot := filepath.Join(t.TempDir(), "sessions-file")
 
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte("paths:\n  sessions_dir: "+badSessionsRoot+"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
