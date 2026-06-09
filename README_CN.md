@@ -2,11 +2,17 @@
 
 [![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
 
-📖 **文档站：** <https://keakon.github.io/chord/zh/> · **English：** [README.md](./README.md)
+📖 **文档站：** <https://keakon.github.io/chord/zh/>
+
+🌐 [English introduction](./README.md)
 
 **让 AI 编码体验从容下来。** 一个轻量、本地优先的终端 Coding Agent——会话再长也不崩、模型组合可热切、脱离电脑时还能远程操控。
 
 - 配套网关：[keakon/chord-gateway](https://github.com/keakon/chord-gateway) —— 把 Chord 接到微信、飞书等聊天平台
+
+<p align="center">
+  <img src="./docs/assets/screenshot.png" alt="Chord 终端界面截图" width="900">
+</p>
 
 ## 性能实测
 
@@ -144,6 +150,10 @@ codesign --force --sign - /path/to/chord
 ## 平台支持
 
 Chord 主要在 macOS 上开发和测试。Linux 表现良好；Windows 大体可用但可能存在未发现的 bug。`prevent_sleep` 等少数能力仅 macOS 生效，其他平台静默 no-op。具体能力矩阵见 [平台支持](./docs/platforms_CN.md)。
+
+## 致谢
+
+Chord 基于 [Bubble Tea](https://github.com/charmbracelet/bubbletea) 构建，设计与功能借鉴了 Claude Code、Codex、OpenCode 和 Crush，主要使用 GPT-5.4/5.5 辅助开发。感谢 [linux.do](https://linux.do/) 上大量公益站提供 tokens。
 
 ## License
 

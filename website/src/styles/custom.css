@@ -13,3 +13,13 @@
   --sl-color-accent: #2a6cff;
   --sl-color-accent-high: #1a3a86;
 }
+
+.chord-screenshot {
+  margin: 2rem auto;
+  max-width: 900px;
+}
+
+.chord-screenshot img {
+  width: 100%;
+  border-radius: 0.75rem;
+}

@@ -2,11 +2,17 @@
 
 [![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
 
-📖 **Docs site:** <https://keakon.github.io/chord/> · **中文版：** [README_CN.md](./README_CN.md)
+📖 **Docs site:** <https://keakon.github.io/chord/>
+
+🌐 [中文介绍](./README_CN.md)
 
 **Calm AI coding in your terminal.** A lightweight, local-first coding agent built for long sessions that do not fall over, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
 
 - Companion gateway: [keakon/chord-gateway](https://github.com/keakon/chord-gateway) — drive Chord from WeChat, Feishu, and other chat surfaces
+
+<p align="center">
+  <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
+</p>
 
 ## Performance
 
@@ -144,6 +150,10 @@ For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to
 ## Platform support
 
 Chord is developed and tested primarily on macOS. Linux works well; Windows mostly works but may have undiscovered bugs. Some features (`prevent_sleep`) are macOS-only and silently no-op elsewhere. See [Platform support](./docs/platforms.md) for the per-feature matrix.
+
+## Acknowledgements
+
+Chord is built on [Bubble Tea](https://github.com/charmbracelet/bubbletea), with design and feature inspiration from Claude Code, Codex, OpenCode, and Crush. Most of its development was assisted by GPT-5.4/5.5. Thanks to the many community-run API proxies on [linux.do](https://linux.do/) for providing token access.
 
 ## License
 
