@@ -65,7 +65,7 @@ func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments 
 		return []message.ContentPart{part}
 	}
 	if !isInlineImagePlaceholderPart(part) {
-		return []message.ContentPart{part}
+		return interleavePlainImagePlaceholdersInTextPart(part, attachments, used)
 	}
 	imageIndex, ok := inlineImagePlaceholderIndex(part.Text)
 	if !ok {
@@ -79,14 +79,68 @@ func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments 
 	return []message.ContentPart{attachmentContentPart(attachments[attachmentIndex])}
 }
 
-// interleaveImageAttachments replaces atomic inline image placeholder parts with
-// image content parts in the same positions.
+func interleavePlainImagePlaceholdersInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
+	placeholderCount := strings.Count(part.Text, inlineImagePlaceholderDisplay)
+	if placeholderCount == 0 {
+		return []message.ContentPart{part}
+	}
+	if placeholderCount != countUnusedInlineImageAttachments(attachments, used) {
+		return []message.ContentPart{part}
+	}
+	segments := strings.Split(part.Text, inlineImagePlaceholderDisplay)
+	out := make([]message.ContentPart, 0, len(segments)*2-1)
+	for i, segment := range segments {
+		if segment != "" {
+			out = append(out, message.ContentPart{Type: message.ContentPartText, Text: segment})
+		}
+		if i == len(segments)-1 {
+			break
+		}
+		attachmentIndex, ok := nextUnusedImageAttachmentIndex(attachments, used)
+		if !ok {
+			out = append(out, message.ContentPart{Type: message.ContentPartText, Text: inlineImagePlaceholderDisplay})
+			continue
+		}
+		used[attachmentIndex] = true
+		out = append(out, attachmentContentPart(attachments[attachmentIndex]))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func countUnusedInlineImageAttachments(attachments []Attachment, used []bool) int {
+	count := 0
+	for i, att := range attachments {
+		if used[i] || !att.InlineImagePlaceholder || attachmentPartType(att.MimeType) != message.ContentPartImage {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func nextUnusedImageAttachmentIndex(attachments []Attachment, used []bool) (int, bool) {
+	for i, att := range attachments {
+		if used[i] || !att.InlineImagePlaceholder || attachmentPartType(att.MimeType) != message.ContentPartImage {
+			continue
+		}
+		return i, true
+	}
+	return 0, false
+}
+
+// interleaveImageAttachments replaces inline image placeholders with image
+// content parts in the same positions.
 //
 // Placeholders:
-// - N is 1-based and refers to the Nth pending attachment (current attachments slice order).
-// - Only explicit inline image placeholder parts are converted.
-// - Unknown/out-of-range placeholders are kept as literal text.
-// - Any attachment not referenced by a placeholder is appended to the end.
+//   - N is 1-based and refers to the Nth pending attachment (current attachments slice order).
+//   - Explicit inline image placeholder parts are converted.
+//   - Plain text placeholders are converted only when their count exactly matches
+//     the unused inline image attachments, avoiding ambiguous literal [image] text.
+//   - Unknown/out-of-range placeholders are kept as literal text.
+//   - Any attachment not referenced by a placeholder is appended to the end.
 func interleaveImageAttachments(parts []message.ContentPart, attachments []Attachment) []message.ContentPart {
 	if len(parts) == 0 && len(attachments) == 0 {
 		return nil

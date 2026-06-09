@@ -90,3 +90,20 @@ func TestInterleaveImageAttachments_MapsInlineImagesAfterPDF(t *testing.T) {
 		t.Fatalf("out[1] = %#v, want appended pdf report.pdf", out[1])
 	}
 }
+
+func TestInterleaveImageAttachments_KeepsLiteralImageTextForRegularAttachment(t *testing.T) {
+	parts := []message.ContentPart{{Type: "text", Text: "literal [image] text"}}
+	atts := []Attachment{
+		{FileName: "shot.png", MimeType: "image/png", Data: []byte("png")},
+	}
+	out := interleaveImageAttachments(parts, atts)
+	if len(out) != 2 {
+		t.Fatalf("interleave len = %d, want 2", len(out))
+	}
+	if out[0].Type != "text" || out[0].Text != "literal [image] text" {
+		t.Fatalf("out[0] = %#v, want literal text", out[0])
+	}
+	if out[1].Type != "image" || out[1].FileName != "shot.png" {
+		t.Fatalf("out[1] = %#v, want appended image shot.png", out[1])
+	}
+}

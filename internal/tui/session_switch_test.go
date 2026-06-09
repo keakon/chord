@@ -4202,6 +4202,82 @@ func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
 	}
 }
 
+func TestForkSessionEventSubmitRestoresImageAfterPlainTextEdit(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeNormal
+
+	imageData := []byte{0x89, 'P', 'N', 'G'}
+	parts := []message.ContentPart{
+		{Type: "text", Text: "what is this?"},
+		{Type: "image", MimeType: "image/png", Data: imageData, FileName: "screenshot.png"},
+	}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ForkSessionEvent{Parts: parts}})
+	applyTestCmd(t, &m, cmd)
+
+	// Simulate an edit path that preserves the visible image placeholder text but
+	// rebuilds the composer as plain text, losing inline image metadata.
+	m.input.SetValue("edited " + m.input.Value())
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	sent := backend.sentMultipart[0]
+	if got := len(sent); got != 2 {
+		t.Fatalf("sent parts = %d, want 2", got)
+	}
+	if got := sent[0].Text; got != "edited what is this?" {
+		t.Fatalf("sent text = %q, want edited prompt", got)
+	}
+	img := sent[1]
+	if img.Type != "image" {
+		t.Fatalf("sent[1].Type = %q, want image", img.Type)
+	}
+	if !bytes.Equal(img.Data, imageData) {
+		t.Fatalf("sent image data = %v, want %v", img.Data, imageData)
+	}
+}
+
+func TestForkSessionEventSubmitKeepsLiteralImageTextAfterPlainTextEdit(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeNormal
+
+	imageData := []byte{0x89, 'P', 'N', 'G'}
+	parts := []message.ContentPart{
+		{Type: "text", Text: "literal [image] text"},
+		{Type: "image", MimeType: "image/png", Data: imageData, FileName: "screenshot.png"},
+	}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ForkSessionEvent{Parts: parts}})
+	applyTestCmd(t, &m, cmd)
+
+	// Simulate an edit path that loses inline image metadata. The literal [image]
+	// in the user's original text must not be consumed as the attachment marker.
+	m.input.SetValue("edited " + m.input.Value())
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if got := len(backend.sentMultipart); got != 1 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	}
+	sent := backend.sentMultipart[0]
+	if got := len(sent); got != 2 {
+		t.Fatalf("sent parts = %d, want 2", got)
+	}
+	if got := sent[0].Text; got != "edited literal [image] text"+inlineImagePlaceholderDisplay {
+		t.Fatalf("sent text = %q, want literal text plus visible placeholder", got)
+	}
+	img := sent[1]
+	if img.Type != "image" {
+		t.Fatalf("sent[1].Type = %q, want image", img.Type)
+	}
+	if !bytes.Equal(img.Data, imageData) {
+		t.Fatalf("sent image data = %v, want %v", img.Data, imageData)
+	}
+}
+
 // TestForkSessionEventBackfillsPlainText verifies that a ForkSessionEvent
 // with a plain text part (no inline paste, no images) loads the text into
 // the composer and switches to insert mode.
