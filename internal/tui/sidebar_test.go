@@ -180,6 +180,28 @@ func TestSidebarBuildLinesDeletedFileUsesStrikethroughWithoutStats(t *testing.T)
 	}
 }
 
+func TestSidebarBuildLinesPrioritizesFileStatsWhenNarrow(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+	sidebar.AddFileEdit("main", "/tmp/README_CN.md", 14, 4)
+
+	const width = 12
+	lines := sidebar.buildLines(width)
+	if len(lines) < 2 {
+		t.Fatalf("sidebar lines = %#v, want main row + file row", lines)
+	}
+	fileLine := stripANSI(lines[1])
+	if !strings.Contains(fileLine, "+14 -4") {
+		t.Fatalf("narrow file row should keep full stats, got %q", fileLine)
+	}
+	if got := tuiStringWidth(fileLine); got > width {
+		t.Fatalf("narrow file row width = %d, want <= %d: %q", got, width, fileLine)
+	}
+	if !strings.HasPrefix(fileLine, "  REA ") {
+		t.Fatalf("narrow file row should truncate filename before stats, got %q", fileLine)
+	}
+}
+
 func TestSidebarPendingTaskUsesIconOnlyPlaceholder(t *testing.T) {
 	sidebar := NewSidebar(DefaultTheme())
 	sidebar.Update(nil, "main", "builder")

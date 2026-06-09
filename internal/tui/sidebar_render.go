@@ -256,20 +256,30 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 				}
 			}
 			statStr := parts
-			maxStatW := 0
+			statW := 0
 			if statStr != "" {
-				maxStatW = len(fmt.Sprintf("+%d -%d", fe.Added, fe.Removed))
+				statW = lipgloss.Width(statStr)
 			}
-			maxNameW := innerWidth - 2 - 1 - maxStatW
-			if maxNameW < 4 {
-				maxNameW = 4
+			nameW := innerWidth - 2
+			if statStr != "" {
+				nameW -= statW + 1
 			}
-			baseName = truncateOneLine(baseName, maxNameW)
-			namePart := SidebarFileStyle.Render(baseName)
+			if nameW < 0 {
+				nameW = 0
+			}
+			baseName = truncateOneLine(baseName, nameW)
+			namePart := ""
+			if baseName != "" {
+				namePart = SidebarFileStyle.Render(baseName)
+			}
 			if fe.Deleted {
 				namePart = SidebarFileStyle.Strikethrough(true).Render(baseName)
 			}
-			fileLine := SidebarFileStyle.Render("  ") + namePart + SidebarFileStyle.Render(" ") + statStr
+			sep := ""
+			if namePart != "" && statStr != "" {
+				sep = SidebarFileStyle.Render(" ")
+			}
+			fileLine := SidebarFileStyle.Render("  ") + namePart + sep + statStr
 			lines = append(lines, fileLine)
 		}
 		if extra > 0 {
