@@ -630,6 +630,17 @@ func sanitizeToolDisplayText(s string) string {
 	return sanitizeDisplayText(s)
 }
 
+func toolErrorDisplayContent(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "Error: ") {
+		return strings.TrimSpace(strings.TrimPrefix(trimmed, "Error: "))
+	}
+	if strings.HasPrefix(trimmed, "Error:\n") {
+		return strings.TrimSpace(strings.TrimPrefix(trimmed, "Error:"))
+	}
+	return content
+}
+
 func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, string) {
 	if result == "" {
 		return nil, ""

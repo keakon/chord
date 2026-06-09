@@ -4919,7 +4919,7 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 		CallID:   "patch-1",
 		Name:     tools.NameEdit,
 		ArgsJSON: args,
-		Result:   "hunk not found; re-read the file before applying the patch",
+		Result:   "Error: hunk not found; re-read the file before applying the patch",
 		Status:   agent.ToolResultStatusError,
 	}})
 
@@ -4944,6 +4944,9 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("live Edit error render missing %q; got:\n%s", want, plain)
 		}
+	}
+	if strings.Contains(plain, "Error: hunk not found") {
+		t.Fatalf("live Edit error render should not repeat Error prefix in the error body; got:\n%s", plain)
 	}
 	last := -1
 	for _, want := range []string{"↳ Patch:", "*** Begin Patch", "@@", "-old", "+new", "*** End Patch", "↳ Error:", "hunk not found"} {

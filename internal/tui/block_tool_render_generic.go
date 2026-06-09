@@ -290,7 +290,11 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), width-30)
 			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ ✓ %s", summary)))
 		} else if b.ResultContent != "" {
-			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
+			displayContent := toolDisplayResultContent(b)
+			if b.toolResultIsError() {
+				displayContent = toolErrorDisplayContent(displayContent)
+			}
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, displayContent))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, width-30)
 			if b.toolResultIsError() {
@@ -342,7 +346,11 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			if b.ToolName == tools.NameDelete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				lineStyle = ToolResultExpandedStyle
 			}
-			displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
+			displayContent := toolDisplayResultContent(b)
+			if b.toolResultIsError() {
+				displayContent = toolErrorDisplayContent(displayContent)
+			}
+			displayResult := sanitizeToolDisplayText(displayContent)
 			for _, line := range wrapText(displayResult, contentWidth) {
 				result = append(result, lineStyle.Render("    "+line))
 			}
@@ -379,6 +387,9 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 	}
 	if b.ResultDone && strings.TrimSpace(b.ResultContent) != "" {
 		statusText := strings.TrimSpace(b.ResultContent)
+		if b.toolResultIsError() {
+			statusText = toolErrorDisplayContent(statusText)
+		}
 		if doneResultIsRejected(statusText) {
 			statusText = doneRejectedReason(statusText)
 			result = append(result, "")
