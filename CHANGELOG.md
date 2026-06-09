@@ -25,6 +25,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Successful `edit` tool cards now show LSP diagnostics when an applied patch leaves errors, while hiding routine success boilerplate.
 - Narrow TUI sidebars now prioritize changed-file `+N -N` stats over long filenames, keeping file change counts visible.
 - Editing forked TUI messages now preserves inline image attachments even when the visible prompt text is edited before resubmission.
+- Provider-reported usage now remains authoritative for automatic compaction: request-level local token estimates no longer clear an already-triggered usage-driven compaction request.
 - TUI message rendering now escapes raw control characters before drawing cards, avoiding background color artifacts when pasted or model-generated text contains bytes such as `\x01`.
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
 - Failed `edit` tool cards now show the attempted patch before the error text, making the failed hunk easier to inspect before reading the diagnostic.

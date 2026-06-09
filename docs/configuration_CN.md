@@ -849,6 +849,8 @@ Chord 提供两层互补的上下文管理机制：**上下文压缩（Compactio
 
 **两者的关系**：Reduction 是轻量级的第一道防线——每次请求前自动裁剪过时的工具输出，减缓上下文膨胀速度。当 Reduction 仍不够、上下文持续增长到 Compaction 阈值时，Compaction 启动做深度压缩。大多数用户只需关注 Compaction 配置；Reduction 的默认值已经适配常见场景，通常无需调整。
 
+自动压缩由 provider 返回的输入 usage 触发。请求级剪裁可能让当前 prompt 变小，但剪裁后得到的本地估算不会取消已经由 provider usage 触发的压缩请求。
+
 ### 上下文压缩（Compaction）
 
 当主会话上下文使用量接近模型上限时，Chord 会自动触发上下文压缩。压缩过程调用 LLM 分析当前对话，生成结构化摘要（目标、进度、关键决策、文件证据等），归档旧消息，用摘要替换对话历史。压缩结果持久保存到磁盘，会话文件体积显著缩小。
@@ -873,6 +875,8 @@ context:
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 
 **触发阈值如何计算**：以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。TUI 信息面板和底部栏的 `Context` 百分比使用同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
+
+provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。
 
 **预留 headroom 示例**：
 

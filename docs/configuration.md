@@ -918,6 +918,11 @@ compaction threshold, compaction steps in for a deep compression pass. Most
 users only need to care about compaction settings; reduction defaults are
 already tuned for common usage patterns.
 
+Automatic compaction is driven by provider-reported input usage. Request-level
+reduction may make the current prompt smaller, but local estimates from that
+reduced prompt do not cancel a compaction request that was already triggered by
+provider usage.
+
 ### Context compaction
 
 When the main conversation approaches the model context limit, Chord
@@ -956,6 +961,11 @@ baseline, so its percentage matches automatic compaction thresholds. For
 providers that report prompt-cache writes separately, Chord counts the current
 prompt-side usage as `input_tokens + cache_write_tokens` so newly cached prompt
 segments are included in the displayed context burden.
+
+Provider usage is the authority for this automatic trigger. Chord does not use
+local token estimates from request-level reduction to clear an already-triggered
+automatic compaction request, because those estimates can diverge from provider
+accounting for multimodal inputs, tool schemas, and gateway-specific framing.
 
 **Reserved headroom example**:
 

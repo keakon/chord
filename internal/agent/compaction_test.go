@@ -3031,9 +3031,6 @@ func TestUsageDrivenCompactionEnabledInLoop(t *testing.T) {
 	if !a.shouldDurableCompactBeforeMainLLM() {
 		t.Fatal("loop mode should allow usage-driven durable compaction")
 	}
-	if a.trySkipUsageDrivenCompactionAfterShrink([]message.Message{{Role: "user", Content: strings.Repeat("old output ", 1000)}}) {
-		t.Fatal("loop mode should not use request pruning to clear durable compaction")
-	}
 	if !a.autoCompactRequested.Load() {
 		t.Fatal("expected auto compact request to remain armed")
 	}
@@ -3055,72 +3052,6 @@ func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 	}
 	if a.shouldDurableCompactBeforeMainLLM() {
 		t.Fatal("expected usage-driven compaction to stop retrying after breaker trips")
-	}
-}
-
-func TestUsageDrivenCompactionSkipsAfterPreRequestShrink(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(8000, 0.8)
-	a.autoCompactRequested.Store(true)
-	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: ""})
-	snapshot := []message.Message{
-		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("very old read output ", 800)},
-		{Role: "user", Content: "u2"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: "tool", ToolCallID: "tc2", Content: "new read output"},
-		{Role: "user", Content: "u3"},
-		{Role: "user", Content: "u4"},
-		{Role: "user", Content: "u5"},
-		{Role: "user", Content: "u6"},
-		{Role: "user", Content: "u7"},
-		{Role: "user", Content: "continue"},
-	}
-
-	if !a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
-		t.Fatal("expected shrink stage to skip usage-driven durable compaction")
-	}
-	if a.autoCompactRequested.Load() {
-		t.Fatal("expected usage-driven auto compact request to be cleared after shrink skip")
-	}
-}
-
-func TestUsageDrivenCompactionStillNeededWhenShrinkEstimateRemainsHigh(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(1000, 0.8)
-	a.autoCompactRequested.Store(true)
-	a.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: strings.Repeat("system ", 120)})
-	snapshot := []message.Message{
-		{Role: "user", Content: strings.Repeat("keep a lot of context ", 200)},
-		{Role: "assistant", Content: strings.Repeat("recent detailed answer ", 180)},
-		{Role: "user", Content: strings.Repeat("follow-up ", 160)},
-	}
-
-	if a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
-		t.Fatal("expected durable compaction to remain armed when shrink estimate stays high")
-	}
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("expected auto compact request to remain armed")
-	}
-}
-
-func TestUsageDrivenCompactionShrinkUsesInputBudget(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
-	a.autoCompactRequested.Store(true)
-	snapshot := []message.Message{
-		{Role: "user", Content: strings.Repeat("x", 750000)}, // ~250k estimated input tokens
-	}
-
-	if a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
-		t.Fatal("expected durable compaction to remain armed above input-budget threshold")
-	}
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("expected auto compact request to remain armed")
 	}
 }
 

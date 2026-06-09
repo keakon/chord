@@ -111,37 +111,6 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 	a.scheduleCompaction(false)
 }
 
-func (a *MainAgent) trySkipUsageDrivenCompactionAfterShrink(snapshot []message.Message) bool {
-	if a.loopState.Enabled {
-		return false
-	}
-	if !a.autoCompactRequested.Load() || snapshot == nil {
-		return false
-	}
-	inputBudget := a.ctxMgr.GetUsableInputBudget()
-	if inputBudget <= 0 {
-		return false
-	}
-	threshold := a.ctxMgr.Threshold()
-	if threshold <= 0 {
-		return false
-	}
-	prepared := a.prepareMessagesForLLM(snapshot)
-	estimate := llm.EstimateRequestInputTokens(
-		a.ctxMgr.SystemPrompt().Content,
-		prepared,
-		a.mainLLMToolDefinitions(),
-	)
-	thresholdTokens := int(float64(inputBudget) * threshold)
-	if estimate >= thresholdTokens {
-		return false
-	}
-	log.Debugf("skipping durable compaction after pre-request shrink estimated_tokens=%v threshold_tokens=%v message_count=%v", estimate, thresholdTokens, len(snapshot))
-	a.clearUsageDrivenAutoCompactRequest()
-	a.resetAutoCompactionFailureState()
-	return true
-}
-
 // maybeRunBarrierCompaction runs compaction at the ContinuationBarrier (all
 // foreground tools done, about to call LLM again). Unlike maybeRunAutoCompaction
 // it does not require the agent to be idle, and does not emit IdleEvent.

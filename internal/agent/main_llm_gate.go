@@ -271,11 +271,6 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	}
 
 	snapshot := a.ctxMgr.Snapshot()
-	if a.trySkipUsageDrivenCompactionAfterShrink(snapshot) {
-		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
-		return
-	}
 	trigger := a.compactionTriggerForMainLLM()
 	if !trigger.needed() {
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
