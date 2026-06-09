@@ -29,6 +29,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Narrow TUI sidebars now prioritize changed-file `+N -N` stats over long filenames, keeping file change counts visible.
 - Editing forked TUI messages now preserves inline image attachments even when the visible prompt text is edited before resubmission.
 - Provider-reported usage now remains authoritative for automatic compaction: request-level local token estimates no longer clear an already-triggered usage-driven compaction request.
+- Switching Codex OAuth keys now clears stale inline rate-limit snapshots so a previously exhausted key no longer keeps request-level context reduction frozen for the next key.
 - TUI tool error cards now avoid repeating a leading `Error:` prefix in the displayed error body.
 - Assistant Markdown tables in the TUI can use wider cards on large terminals, reducing vertical wrapping in wide review tables.
 - TUI message rendering now escapes raw control characters before drawing cards, avoiding background color artifacts when pasted or model-generated text contains bytes such as `\x01`.

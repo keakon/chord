@@ -126,6 +126,16 @@ func (a *MainAgent) providerUsesCodexRateLimit(providerName string) bool {
 	return strings.EqualFold(strings.TrimSpace(prov.Preset), config.ProviderPresetCodex)
 }
 
+func (a *MainAgent) clearInlineRateLimitSnapshotForCurrentMainClient() {
+	client, _ := a.mainLLMAndRef()
+	if client == nil {
+		return
+	}
+	if prov := client.ProviderConfig(); prov != nil {
+		prov.ClearInlineDisplayRateLimitSnapshot()
+	}
+}
+
 func (a *MainAgent) clearCurrentRateLimitSnapshot() {
 	providerName := a.currentRateLimitProviderName()
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {

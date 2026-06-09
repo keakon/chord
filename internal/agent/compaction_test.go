@@ -1450,6 +1450,73 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningWhenCodexQuotaLow(t *testin
 	}
 }
 
+func TestPrepareMessagesForLLM_KeySwitchClearsStaleInlineQuotaFreeze(t *testing.T) {
+	largeOutput := strings.Repeat("test output line\n", 500)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "shell", Args: json.RawMessage(`{"command":"npm test"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key-low", "key-fresh"})
+	selected, _, err := providerCfg.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext initial: %v", err)
+	}
+	if selected != "key-low" {
+		t.Fatalf("initial selected key = %q, want key-low", selected)
+	}
+	providerCfg.UpdateKeySnapshot("key-low", &ratelimit.KeyRateLimitSnapshot{
+		Provider:   "codex",
+		Source:     ratelimit.SnapshotSourceInlineKey,
+		CapturedAt: time.Now(),
+		Primary:    &ratelimit.RateLimitWindow{UsedPct: 100},
+	})
+
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 1024, "")
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+
+	lowQuotaPrepared := a.prepareMessagesForLLM(msgs)
+	if lowQuotaPrepared[2].Content != largeOutput {
+		t.Fatalf("low inline quota should preserve full tool output, got %q", lowQuotaPrepared[2].Content)
+	}
+
+	providerCfg.MarkCooldown("key-low", time.Minute)
+	selected, _, err = providerCfg.SelectKeyWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("SelectKeyWithContext after cooldown: %v", err)
+	}
+	if selected != "key-fresh" {
+		t.Fatalf("selected key after cooldown = %q, want key-fresh", selected)
+	}
+	reducer := a.newMainLLMStreamReducer(a.llmClient, "codex/gpt-5.5", "codex/gpt-5.5", nil, false, nil)
+	reducer.onKeySwitched()
+
+	freshKeyPrepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(freshKeyPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+		t.Fatalf("key switch should clear stale inline quota freeze and resume pruning, got %q", freshKeyPrepared[2].Content)
+	}
+	if msgs[2].Content != largeOutput {
+		t.Fatalf("prepareMessagesForLLM mutated original messages")
+	}
+}
+
 func TestPrepareMessagesForLLM_LoopGateIgnoresFocusedSubAgentProvider(t *testing.T) {
 	largeOutput := strings.Repeat("test output line\n", 500)
 	msgs := []message.Message{

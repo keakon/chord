@@ -432,6 +432,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		}
 	}
 	streamReducer.onKeySwitched = func() {
+		a.clearInlineRateLimitSnapshotForCurrentMainClient()
 		a.clearCurrentRateLimitSnapshot()
 		a.noteContextSurfaceIdentityChanged()
 		state.pendingKeySwitch = true
