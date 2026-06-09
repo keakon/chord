@@ -61,12 +61,36 @@ func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GrepTool{}).Description()
 	for _, want := range []string{
 		"pattern uses regex syntax, not glob syntax or plain text",
-		"Use glob only to filter filenames by basename.",
+		"Use glob only to filter filenames by basename, not paths.",
 		"Best for discovering candidate files, symbols, or text matches when the exact location is not known yet.",
 		"For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestGrepToolParameterDescriptionsClarifyPathAndGlobScope(t *testing.T) {
+	props := (GrepTool{}).Parameters()["properties"].(map[string]any)
+	pathDesc := props["path"].(map[string]any)["description"].(string)
+	globDesc := props["glob"].(map[string]any)["description"].(string)
+
+	for _, want := range []string{
+		"Single file or directory to search",
+		"for multiple roots, call grep multiple times",
+	} {
+		if !strings.Contains(pathDesc, want) {
+			t.Fatalf("path description missing %q: %q", want, pathDesc)
+		}
+	}
+	for _, want := range []string{
+		"Filename-only glob filter",
+		"matched against basename",
+		"not a recursive path glob",
+	} {
+		if !strings.Contains(globDesc, want) {
+			t.Fatalf("glob description missing %q: %q", want, globDesc)
 		}
 	}
 }
@@ -79,6 +103,30 @@ func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.T) {
+	props := (GlobTool{}).Parameters()["properties"].(map[string]any)
+	pathDesc := props["path"].(map[string]any)["description"].(string)
+	patternDesc := props["pattern"].(map[string]any)["description"].(string)
+
+	for _, want := range []string{
+		"Single base directory to search from",
+		"Supports ~",
+	} {
+		if !strings.Contains(pathDesc, want) {
+			t.Fatalf("path description missing %q: %q", want, pathDesc)
+		}
+	}
+	for _, want := range []string{
+		"Path glob relative to path",
+		"src/**/*.ts",
+		"Supports **",
+	} {
+		if !strings.Contains(patternDesc, want) {
+			t.Fatalf("pattern description missing %q: %q", want, patternDesc)
 		}
 	}
 }

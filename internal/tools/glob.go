@@ -42,11 +42,11 @@ func (GlobTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Path glob relative to path (e.g. \"**/*.go\", \"src/**/*.ts\"). Supports ** for recursive directory matching. This is glob syntax, not regex and not a file-contents search.",
+				"description": "Path glob relative to path (e.g. \"src/**/*.ts\"). Supports ** for recursive directory matching. This is glob syntax, not regex and not a file-contents search.",
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Base directory to search in. Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "Single base directory to search from. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 		},
 		"required":             []string{"pattern"},

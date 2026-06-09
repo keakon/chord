@@ -39,7 +39,7 @@ func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 
 func (GrepTool) Description() string {
 	return "Search file contents using a regular expression. pattern uses regex syntax, not glob syntax or plain text; escape literal special characters like \\[\\], (), and {} when needed." +
-		" Use glob only to filter filenames by basename." +
+		" Use glob only to filter filenames by basename, not paths." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
 		" For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool when the file type has LSP coverage."
@@ -55,11 +55,11 @@ func (GrepTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "File or directory to search in (one path). Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "Single file or directory to search; for multiple roots, call grep multiple times. Supports ~ for the current user's home directory. Defaults to current directory.",
 			},
 			"glob": map[string]any{
 				"type":        "string",
-				"description": "Glob pattern to filter filenames only, matched against each file's basename (e.g. \"*.go\", \"*.{ts,tsx}\"). Not a recursive path glob; use glob for **/ path matching.",
+				"description": "Filename-only glob filter, matched against basename (e.g. \"*.go\", \"*.{ts,tsx}\"); not a recursive path glob.",
 			},
 		},
 		"required":             []string{"pattern"},

@@ -149,7 +149,7 @@ func TestGrepPathParameterDescribesSinglePath(t *testing.T) {
 	if !ok {
 		t.Fatalf("path description has type %T, want string", pathProp["description"])
 	}
-	for _, want := range []string{"File or directory to search in (one path)", "Defaults to current directory"} {
+	for _, want := range []string{"Single file or directory to search", "for multiple roots, call grep multiple times", "Defaults to current directory"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("path description %q missing %q", desc, want)
 		}
