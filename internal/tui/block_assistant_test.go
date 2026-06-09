@@ -781,6 +781,40 @@ These accounts need to sign in again before new tokens can be issued.`}
 	}
 }
 
+func TestAssistantMarkdownRenderWidthUsesWiderLimitForTables(t *testing.T) {
+	prose := "This is a long ordinary paragraph without a table."
+	if got := assistantMarkdownRenderWidth(prose, 202); got != maxTextWidth {
+		t.Fatalf("ordinary markdown width = %d, want %d", got, maxTextWidth)
+	}
+
+	table := "| commit | reason | follow-up |\n|---|---|---|\n| abc123 | done | none |"
+	if got := assistantMarkdownRenderWidth(table, 202); got != 200 {
+		t.Fatalf("table markdown width = %d, want 200", got)
+	}
+
+	fencedTable := "```md\n| commit | reason |\n|---|---|\n| abc123 | done |\n```"
+	if got := assistantMarkdownRenderWidth(fencedTable, 202); got != maxTextWidth {
+		t.Fatalf("fenced table markdown width = %d, want %d", got, maxTextWidth)
+	}
+}
+
+func TestRenderAssistantWideTableUsesAvailableCardWidth(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+	block := &Block{Type: BlockAssistant, Content: `| commit | 分类 | 理由 | 后续 commit 影响 |
+|---|---|---|---|
+| 85c621e show LSP diagnostics for edit | keep（或并入下条） | 修复带 Diagnostics: 的成功 edit 被整段隐藏 | 其测试与断言被 6c41486 重命名并反转 |
+| 89a69dc skip wrap-up guard for queued input | keep | 排队用户输入时跳过保护，依赖既有 hasQueuedUserInputForRecovery，含触发该路径的测试 | 无；changelog 第 15 行已覆盖 wrap-up grace |`}
+
+	joinedPlain := stripANSI(stripOSC8(strings.Join(block.Render(224, ""), "\n")))
+	if !strings.Contains(joinedPlain, "其测试与断言") {
+		t.Fatalf("expected wide table to keep follow-up text readable, got:\n%s", joinedPlain)
+	}
+	if strings.Contains(joinedPlain, "其\n测\n试\n与\n断\n言") {
+		t.Fatalf("expected wide table not to wrap follow-up text vertically, got:\n%s", joinedPlain)
+	}
+}
+
 func TestRenderAssistantMarkdownCacheInvalidatesOnContentChange(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{Type: BlockAssistant, Content: "first **bold**"}

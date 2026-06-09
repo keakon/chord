@@ -483,6 +483,88 @@ func renderAssistantMarkdownContent(content, codeSample string, width, continuat
 	return out, synthetic, softWraps
 }
 
+func assistantMarkdownRenderWidth(content string, innerWidth int) int {
+	contentWidth := innerWidth - 2
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	limit := maxTextWidth
+	if containsMarkdownTable(content) {
+		limit = maxMarkdownTableWidth
+	}
+	if contentWidth > limit {
+		contentWidth = limit
+	}
+	return contentWidth
+}
+
+func containsMarkdownTable(content string) bool {
+	for _, seg := range splitAssistantMarkdownSegments(content) {
+		if seg.code {
+			continue
+		}
+		if containsMarkdownTableInText(seg.raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMarkdownTableInText(content string) bool {
+	var previous string
+	for _, line := range strings.Split(markdownutil.NormalizeNewlines(content), "\n") {
+		if isMarkdownTableDelimiterLine(line) && isMarkdownTableHeaderLine(previous) {
+			return true
+		}
+		previous = line
+	}
+	return false
+}
+
+func isMarkdownTableHeaderLine(line string) bool {
+	return len(markdownTableCells(line)) >= 2
+}
+
+func isMarkdownTableDelimiterLine(line string) bool {
+	cells := markdownTableCells(line)
+	if len(cells) < 2 {
+		return false
+	}
+	for _, cell := range cells {
+		if cell == "" {
+			return false
+		}
+		hyphens := 0
+		for _, r := range cell {
+			switch r {
+			case '-':
+				hyphens++
+			case ':':
+			default:
+				return false
+			}
+		}
+		if hyphens < 3 {
+			return false
+		}
+	}
+	return true
+}
+
+func markdownTableCells(line string) []string {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, "|") {
+		return nil
+	}
+	line = strings.Trim(line, "|")
+	parts := strings.Split(line, "|")
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, strings.TrimSpace(part))
+	}
+	return cells
+}
+
 func (b *Block) renderAssistant(width int) []string {
 	// (Note: we removed the "[assistant]" string header for a cleaner conversational look)
 	style := AssistantCardStyle
@@ -497,18 +579,11 @@ func (b *Block) renderAssistant(width int) []string {
 		innerWidth = 10
 	}
 
-	contentWidth := innerWidth - 2
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	if contentWidth > maxTextWidth {
-		contentWidth = maxTextWidth
-	}
-
 	// Parse summary metadata from content (if present at the start)
 	rawContent := removeTrailingCursorGlyph(b.Content)
 	summary := parseAssistantSummary(rawContent)
 	bodyContent := stripAssistantSummary(rawContent, summary)
+	contentWidth := assistantMarkdownRenderWidth(bodyContent, innerWidth)
 
 	var out []string
 

@@ -19,6 +19,9 @@ const (
 	// maxTextWidth is the maximum width for text content to prevent unreadable
 	// wide text on large terminals.
 	maxTextWidth = 120
+	// maxMarkdownTableWidth lets tables use more of a wide viewport without making
+	// ordinary prose harder to read.
+	maxMarkdownTableWidth = 220
 	// preformattedTabWidth is the visual tab stop used when rendering pasted
 	// user content.
 	preformattedTabWidth = 4
