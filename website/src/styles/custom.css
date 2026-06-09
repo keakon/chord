@@ -15,11 +15,23 @@
 }
 
 .chord-screenshot {
-  margin: 2rem auto;
-  max-width: 900px;
+  margin: clamp(-3rem, -5vw, -1.5rem) auto 3rem;
+  max-width: 960px;
 }
 
 .chord-screenshot img {
   width: 100%;
-  border-radius: 0.75rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.9rem;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 28%);
+}
+
+:root[data-theme='light'] .chord-screenshot img {
+  box-shadow: 0 24px 80px rgb(15 23 42 / 16%);
+}
+
+@media (max-width: 50rem) {
+  .chord-screenshot {
+    margin: -1rem auto 2rem;
+  }
 }
