@@ -79,7 +79,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
 		modelSnapshot := a.llmModelContinuitySnapshot()
 		usage := policy.contextUsage(estimatedTokens, inputBudget)
-		if modelSnapshot.ProjectedModelRunLength > 1 && (policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage) && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
+		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && (policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage) && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
 			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && len(previous.Messages) > 0 && len(prepared) >= len(previous.Messages) {
 				reused := reuseStableReductionPrefix(previous.Messages, prepared)
 				stats := highLevelContextReductionStats(prepared, reused)

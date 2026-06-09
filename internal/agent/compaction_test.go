@@ -290,6 +290,39 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsOneDestructiveReduction(t *testin
 	}
 }
 
+func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectWithQueuedUserMessage(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	a.pendingUserMessages = []pendingUserMessage{{Content: "queued follow-up"}}
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
+		{Role: "user", Content: "u2"},
+	}
+
+	a.beginContextReductionWrapUpGrace()
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+		t.Fatalf("queued user message should bypass wrap-up grace protection, got %q", prepared[2].Content)
+	}
+	if stats := a.GetContextReductionStats(); stats.Protected || stats.ProtectReason == contextProtectReasonWrapUpGrace {
+		t.Fatalf("stats = %+v, want unprotected reduction", stats)
+	}
+}
+
 func TestPrepareMessagesForLLM_WrapUpGraceReusesPreviouslyReducedPrefix(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ReadLikeAgeTurns:     1,
