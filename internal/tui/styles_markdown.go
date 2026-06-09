@@ -92,6 +92,7 @@ func renderMarkdownContent(content string, width int) []string {
 	if width <= 0 {
 		width = 80
 	}
+	content = sanitizeDisplayText(content)
 	content = markdownutil.RepairForDisplay(content)
 	if glamourContentRenderer == nil || glamourContentRendererWidth != width {
 		r, err := glamour.NewTermRenderer(

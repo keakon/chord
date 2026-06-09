@@ -305,7 +305,7 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 		innerWidth = 1
 	}
 
-	code := seg.raw
+	code := sanitizeDisplayText(seg.raw)
 	fenceDelim := seg.fenceMarker
 	if fenceDelim == 0 {
 		fenceDelim = '`'
@@ -426,6 +426,8 @@ func renderRichMarkdownContent(content string, width int, hl **codeHighlighter) 
 }
 
 func renderAssistantMarkdownContent(content, codeSample string, width, continuationExtra int, hl **codeHighlighter) ([]string, []int, []bool) {
+	content = sanitizeDisplayText(content)
+	codeSample = sanitizeDisplayText(codeSample)
 	segments := splitAssistantMarkdownSegments(content)
 	if len(segments) == 0 {
 		lines := renderMarkdownContent(content, width)

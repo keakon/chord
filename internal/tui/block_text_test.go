@@ -138,6 +138,49 @@ func TestWrapPreformattedTextPreservesIndentationAndTabs(t *testing.T) {
 	}
 }
 
+func TestSanitizeDisplayTextEscapesRawControlCharacters(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("start\tkeep\n")
+	for c := byte(0); c < 0x20; c++ {
+		if c == '\t' || c == '\n' {
+			continue
+		}
+		input.WriteByte(c)
+	}
+	input.WriteByte(0x7f)
+	input.WriteString("end")
+
+	got := sanitizeDisplayText(input.String())
+	if strings.ContainsRune(got, '\x00') {
+		t.Fatalf("sanitized text still contains NUL: %q", got)
+	}
+	for _, r := range got {
+		if (r < 0x20 && r != '\t' && r != '\n') || r == 0x7f {
+			t.Fatalf("sanitized text leaked raw control character %#U in %q", r, got)
+		}
+	}
+	for _, want := range []string{`\x00`, `\x01`, `\x1b`, `\x1f`, `\x7f`, `\a`, `\b`, `\f`, `\v`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sanitized text missing %s in %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "start\tkeep\n") {
+		t.Fatalf("sanitized text should preserve tab and newline, got %q", got)
+	}
+}
+
+func TestRenderUserPlainSanitizesControlCharacters(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{ID: 1, Type: BlockUser, Content: "default <nil> map[s:a\x01b]"}
+	plain := strings.Join(stripANSILines(block.renderUserPlain(120)), "\n")
+	if strings.ContainsRune(plain, '\x01') {
+		t.Fatalf("rendered user output leaked raw control character: %q", plain)
+	}
+	if !strings.Contains(plain, `map[s:a\x01b]`) {
+		t.Fatalf("user card should show escaped control character, got %q", plain)
+	}
+}
+
 func TestRenderUserPlainDoesNotInsertSyntheticBlankLineInIndentedYAML(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{

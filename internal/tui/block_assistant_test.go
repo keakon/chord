@@ -319,6 +319,22 @@ func TestRenderAssistantCodeBlockUsesFullWidthCodeSurface(t *testing.T) {
 	}
 }
 
+func TestRenderAssistantSanitizesControlCharacters(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := "before map[s:a\x01b] after\n\n```text\ncase a\x01b\n```"
+	block := &Block{Type: BlockAssistant, Content: content}
+	plain := strings.Join(stripANSILines(block.Render(120, "")), "\n")
+	if strings.ContainsRune(plain, '\x01') {
+		t.Fatalf("rendered assistant output leaked raw control character: %q", plain)
+	}
+	if !strings.Contains(plain, `map[s:a\x01b]`) {
+		t.Fatalf("assistant paragraph should show escaped control character, got %q", plain)
+	}
+	if !strings.Contains(plain, `case a\x01b`) {
+		t.Fatalf("assistant code block should show escaped control character, got %q", plain)
+	}
+}
+
 func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{

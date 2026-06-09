@@ -21,6 +21,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- TUI message rendering now escapes raw control characters before drawing cards, avoiding background color artifacts when pasted or model-generated text contains bytes such as `\x01`.
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
 - Failed `edit` tool cards now show the attempted patch before the error text, making the failed hunk easier to inspect before reading the diagnostic.
 - Focused-agent submissions now include `@file` mention content parts instead of sending plain text only.

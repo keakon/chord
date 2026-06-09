@@ -627,55 +627,7 @@ func highlightCodeLines(h *codeHighlighter, lines []string, bgTerm string) []str
 }
 
 func sanitizeToolDisplayText(s string) string {
-	if s == "" {
-		return ""
-	}
-	needsSanitization := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
-			needsSanitization = true
-			break
-		}
-	}
-	if !needsSanitization {
-		return s
-	}
-
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\r':
-			if i+1 < len(s) && s[i+1] == '\n' {
-				continue
-			}
-			b.WriteString(`\r`)
-		case c == '\t' || c == '\n':
-			b.WriteByte(c)
-		case c < 0x20 || c == 0x7f:
-			b.WriteString(toolDisplayControlLiteral(c))
-		default:
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
-}
-
-func toolDisplayControlLiteral(c byte) string {
-	switch c {
-	case '\a':
-		return `\a`
-	case '\b':
-		return `\b`
-	case '\f':
-		return `\f`
-	case '\v':
-		return `\v`
-	default:
-		return fmt.Sprintf(`\x%02x`, c)
-	}
+	return sanitizeDisplayText(s)
 }
 
 func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, string) {

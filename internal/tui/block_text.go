@@ -240,6 +240,58 @@ func preserveCardBg(lines []string, bgColorNum string) []string {
 	return lines
 }
 
+func sanitizeDisplayText(s string) string {
+	if s == "" {
+		return ""
+	}
+	needsSanitization := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
+			needsSanitization = true
+			break
+		}
+	}
+	if !needsSanitization {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\r':
+			if i+1 < len(s) && s[i+1] == '\n' {
+				continue
+			}
+			b.WriteString(`\r`)
+		case c == '\t' || c == '\n':
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			b.WriteString(displayControlLiteral(c))
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func displayControlLiteral(c byte) string {
+	switch c {
+	case '\a':
+		return `\a`
+	case '\b':
+		return `\b`
+	case '\f':
+		return `\f`
+	case '\v':
+		return `\v`
+	default:
+		return fmt.Sprintf(`\x%02x`, c)
+	}
+}
+
 // hasExplicitStyleColor reports whether a lipgloss getter returned a real
 // configured color rather than the package's NoColor sentinel.
 func hasExplicitStyleColor(c color.Color) bool {
@@ -496,6 +548,7 @@ func railANSISeq(kind string, focused bool) string {
 
 func renderUserText(text string, width int) []string {
 	// Preserve original newlines and indentation; expand tabs; soft-wrap by display width.
+	text = sanitizeDisplayText(text)
 	return wrapPreformattedText(text, width)
 }
 
