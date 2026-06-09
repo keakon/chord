@@ -81,8 +81,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/keakon/bubbles/v2 v2.1.0-fork h1:9l2Jjo6O0LPlo6/FrhnsEsi565Io1UF1Fw7n14uRwps=
 github.com/keakon/bubbles/v2 v2.1.0-fork/go.mod h1:kiyvj2Gc+UqUn5jduEwvuoovmJLQA9fiPjyib11EZwU=
-github.com/keakon/bubbletea/v2 v2.0.7-fork h1:pbWkDhtoG53b5c11acGwoSMru6EvCm4Xd1ZUFc33+Bg=
-github.com/keakon/bubbletea/v2 v2.0.7-fork/go.mod h1:RVwlK/+PKUIKjMOzvwLeSdIL/tvxjYVtUufbmZ0GFgE=
+github.com/keakon/bubbletea/v2 v2.0.7-fork.1 h1:mLjUusOAJKeQxC9z3n9kTmvvPguv4zPFv1pUxmlgyNE=
+github.com/keakon/bubbletea/v2 v2.0.7-fork.1/go.mod h1:RVwlK/+PKUIKjMOzvwLeSdIL/tvxjYVtUufbmZ0GFgE=
 github.com/keakon/golog v0.3.0 h1:6ia9XMXE12c0DxoPxem+FDbmuCrZaPwxHoj5HiH/R20=
 github.com/keakon/golog v0.3.0/go.mod h1:VaRf1sNrjyL0MBAGAJUXajaJ3Zg0Z8+5A6faep08BHA=
 github.com/keakon/ultraviolet v0.0.1-fork h1:+GF+SlpaJh1GlnEOzMYFliwGTPkyU57kUAo/7GZsgLw=
