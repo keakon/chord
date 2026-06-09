@@ -1291,6 +1291,40 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	}
 }
 
+func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "shell",
+		Content:                `{"command":"first command line\nsecond command line\nthird command line","timeout":120}`,
+		ResultContent:          `tool "shell" rejected by user: sample rejection reason`,
+		ResultStatus:           agent.ToolResultStatusError,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	lines := stripANSILines(block.Render(120, ""))
+	hintIdx := -1
+	rejectedIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "more lines · [space] toggle expand/collapse") {
+			hintIdx = i
+		}
+		if strings.Contains(line, `tool "shell" rejected by user: sample rejection reason`) {
+			rejectedIdx = i
+		}
+	}
+	if hintIdx < 0 {
+		t.Fatalf("expected collapsed Shell rejection to show expand hint; got:\n%s", strings.Join(lines, "\n"))
+	}
+	if rejectedIdx < 0 {
+		t.Fatalf("expected collapsed Shell rejection to show rejection reason; got:\n%s", strings.Join(lines, "\n"))
+	}
+	if hintIdx > rejectedIdx {
+		t.Fatalf("expand hint should render before rejection reason; got:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
 func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testing.T) {
 	block := &Block{
 		ID:                     1,

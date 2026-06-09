@@ -609,6 +609,10 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	if b.ToolName == tools.NameShell {
 		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded, expanded)
+		if !expanded && shellCollapsedResultIsShort(b, contentWidth) && hiddenDetail > 0 {
+			result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
+			expandHintAdded = true
+		}
 		if expanded {
 			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {
