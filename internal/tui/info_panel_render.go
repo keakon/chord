@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/keakon/chord/internal/agent"
 )
 
@@ -328,10 +330,62 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		}
 		finalContent = sb.String()
 	}
+	finalContent = m.clampAndSliceInfoPanelContent(finalContent, height)
 	out := InfoPanelStyle.
 		Width(width).
 		Height(height).
 		Render(finalContent)
 	m.cachedInfoPanelOut = out
 	return out
+}
+
+func (m *Model) clampAndSliceInfoPanelContent(content string, height int) string {
+	contentHeight := lipgloss.Height(content)
+	m.infoPanelContentHeight = contentHeight
+	m.infoPanelViewportHeight = height
+	maxOffset := contentHeight - height
+	if maxOffset <= 0 {
+		m.infoPanelScrollOffset = 0
+		return content
+	}
+	if m.infoPanelScrollOffset < 0 {
+		m.infoPanelScrollOffset = 0
+	} else if m.infoPanelScrollOffset > maxOffset {
+		m.infoPanelScrollOffset = maxOffset
+	}
+	lines := strings.Split(content, "\n")
+	start := m.infoPanelScrollOffset
+	if start >= len(lines) {
+		return ""
+	}
+	end := start + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+func (m *Model) clearInfoPanelRenderCache() {
+	m.cachedInfoPanelW = 0
+	m.cachedInfoPanelH = 0
+	m.cachedInfoPanelFP = ""
+	m.cachedInfoPanelOut = ""
+}
+
+func (m *Model) scrollInfoPanel(delta int) bool {
+	if delta == 0 || m.infoPanelViewportHeight <= 0 || m.infoPanelContentHeight <= m.infoPanelViewportHeight {
+		return false
+	}
+	maxOffset := m.infoPanelContentHeight - m.infoPanelViewportHeight
+	next := m.infoPanelScrollOffset + delta
+	if next < 0 {
+		next = 0
+	} else if next > maxOffset {
+		next = maxOffset
+	}
+	if next != m.infoPanelScrollOffset {
+		m.infoPanelScrollOffset = next
+		m.clearInfoPanelRenderCache()
+	}
+	return true
 }

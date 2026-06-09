@@ -324,6 +324,9 @@ type Model struct {
 	infoPanelCollapsedSections map[infoPanelSectionID]bool
 	infoPanelHitBoxes          []infoPanelSectionHitBox
 	infoPanelRenderCursorY     int
+	infoPanelScrollOffset      int
+	infoPanelContentHeight     int
+	infoPanelViewportHeight    int
 
 	// Layered drawing layout.
 	layout tuiLayout

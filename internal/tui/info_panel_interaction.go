@@ -27,10 +27,7 @@ func (m *Model) toggleInfoPanelSection(section infoPanelSectionID) {
 		m.infoPanelCollapsedSections = make(map[infoPanelSectionID]bool)
 	}
 	m.infoPanelCollapsedSections[section] = !m.isInfoPanelSectionCollapsed(section)
-	m.cachedInfoPanelW = 0
-	m.cachedInfoPanelH = 0
-	m.cachedInfoPanelFP = ""
-	m.cachedInfoPanelOut = ""
+	m.clearInfoPanelRenderCache()
 	m.infoPanelHitBoxes = nil
 }
 
@@ -41,7 +38,7 @@ func (m *Model) infoPanelSectionAtPoint(x, y int) (infoPanelSectionID, bool) {
 	if x < m.layout.infoPanel.Min.X || x >= m.layout.infoPanel.Max.X || y < m.layout.infoPanel.Min.Y || y >= m.layout.infoPanel.Max.Y {
 		return "", false
 	}
-	localY := y - m.layout.infoPanel.Min.Y
+	localY := y - m.layout.infoPanel.Min.Y + m.infoPanelScrollOffset
 	for _, hit := range m.infoPanelHitBoxes {
 		if hit.section == "" {
 			continue
@@ -60,7 +57,7 @@ func (m *Model) infoPanelAgentAtPoint(x, y int) (string, bool) {
 	if x < m.layout.infoPanel.Min.X || x >= m.layout.infoPanel.Max.X || y < m.layout.infoPanel.Min.Y || y >= m.layout.infoPanel.Max.Y {
 		return "", false
 	}
-	localY := y - m.layout.infoPanel.Min.Y
+	localY := y - m.layout.infoPanel.Min.Y + m.infoPanelScrollOffset
 	for _, hit := range m.infoPanelHitBoxes {
 		if hit.agentID == "" {
 			continue

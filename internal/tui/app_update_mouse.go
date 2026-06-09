@@ -611,6 +611,16 @@ func (m *Model) handleMouseRelease(mouse tea.Mouse) tea.Cmd {
 }
 
 func (m *Model) handleMouseWheel(mouse tea.Mouse) tea.Cmd {
+	if m.infoPanelContainsPoint(mouse.X, mouse.Y) {
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			m.scrollInfoPanel(-mouseWheelScrollStep)
+			return nil
+		case tea.MouseWheelDown:
+			m.scrollInfoPanel(mouseWheelScrollStep)
+			return nil
+		}
+	}
 	switch mouse.Button {
 	case tea.MouseWheelUp:
 		m.pendingScrollDelta -= mouseWheelScrollStep

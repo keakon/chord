@@ -1709,7 +1709,7 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	m.sidebar.AddFileEdit("main", "/tmp/foo.go", 2, 1)
 
-	rawLines := infoPanelRawLines(m.renderInfoPanel(48, 24))
+	rawLines := infoPanelRawLines(m.renderInfoPanel(48, 80))
 	cases := []struct {
 		title string
 		want  string

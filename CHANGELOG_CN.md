@@ -22,6 +22,7 @@
 ### 修复
 
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
+- TUI 信息面板现在会在鼠标指针位于其上方时响应鼠标滚轮或触摸板独立滚动，较长的 changed files 或状态区块不再被输入区截断。
 - 成功的 `edit` 工具卡片现在会在 patch 应用后仍存在 LSP 诊断时显示 `↳ Diagnostics:`，同时隐藏常规成功样板文本。
 - TUI 侧边栏较窄时现在会优先保留 changed-file 的 `+N -N` 统计，而不是让长文件名挤掉改动数量。
 - 编辑 forked TUI 消息后重新提交时，现在会保留 inline 图片附件，即使可见 prompt 文本已被修改。
