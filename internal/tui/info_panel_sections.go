@@ -549,20 +549,27 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 			}
 		}
 		statStr := parts
-		availName := lineW - infoPanelCollapsibleContentInset
-		if statStr != "" {
-			availName -= lipgloss.Width(statStr) + 1
+		contentW := lineW - infoPanelCollapsibleContentInset
+		if contentW < 0 {
+			contentW = 0
 		}
-		if availName < 1 {
-			availName = 1
+		availName := contentW
+		if statStr != "" {
+			availName -= lipgloss.Width(statStr)
+			if availName > 0 {
+				availName--
+			}
 		}
 		nameStyle := InfoPanelDim
 		if fe.Deleted {
 			nameStyle = nameStyle.Strikethrough(true)
 		}
-		namePart := nameStyle.Render(truncateOneLine(baseName, availName))
+		namePart := ""
+		if availName > 0 {
+			namePart = nameStyle.Render(truncateOneLine(baseName, availName))
+		}
 		var fileLine string
-		if statStr != "" {
+		if statStr != "" && namePart != "" {
 			fileLine = renderInfoPanelCollapsibleContentLine(lineW,
 				lipgloss.JoinHorizontal(lipgloss.Left,
 					namePart,
@@ -570,6 +577,8 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 					statStr,
 				),
 			)
+		} else if statStr != "" {
+			fileLine = renderInfoPanelCollapsibleContentLine(lineW, statStr)
 		} else {
 			fileLine = renderInfoPanelCollapsibleContentLine(lineW, namePart)
 		}

@@ -17,6 +17,8 @@ After startup, the input box is focused by default. Type a message and press `En
 
 Tool-call cards try to keep file paths concise: for file tools such as `read`, `edit`, `write`, and `delete`, paths inside the current working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
 
+The sidebar and info panel changed-file lists prioritize showing full `+N -N` line-change stats. When space is tight, filenames are truncated or omitted instead of cutting off the counts.
+
 Tool arguments and results are displayed as terminal-safe plain text. Chord escapes embedded ANSI/control sequences from external output instead of executing them as terminal styling, and generic tool results that look like Markdown remain literal output rather than being reformatted as assistant Markdown.
 
 Discovery tools use stable LLM-facing output caps before results enter session history: `grep` returns at most 120 matches and 12 KiB of text; `glob` returns at most 250 paths and 16 KiB of text. These caps are fixed rather than based on the current remaining context window, so the same tool call stays reproducible across model switches and unrelated history growth. The byte caps are the primary guard because context pressure tracks bytes/tokens more closely than line count: using Chord's rough `1 token ~= 3 bytes` estimate, 12 KiB keeps one Grep result around 4k tokens, while 16 KiB keeps one Glob result around 5.3k tokens. The match/path caps are secondary guards against floods of very short lines.

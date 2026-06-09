@@ -1032,6 +1032,18 @@ func TestRenderInfoPanelEditedFilesStatsPreserveInfoPanelBackground(t *testing.T
 	}
 }
 
+func TestRenderInfoPanelEditedFilesPrioritizesStatsWhenNarrow(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileEdit("main", "/tmp/app_update_input_row.go", 14, 4)
+
+	block := stripANSI(m.buildInfoPanelFilesBlock(8))
+	if !strings.Contains(block, "+14 -4") {
+		t.Fatalf("narrow CHANGED FILES row should keep full stats, got %q", block)
+	}
+}
+
 func TestRenderInfoPanelChangedFilesDeletedFileUsesStrikethroughWithoutStats(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)

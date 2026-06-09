@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixes
 
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
+- The TUI info panel changed-files section now prioritizes full `+N -N` line-change stats over long filenames, matching the narrow sidebar behavior.
 - The TUI info panel now scrolls independently with the mouse wheel or touchpad when the pointer is over it, so long changed-file or status sections are no longer clipped by the input area.
 - Successful `edit` tool cards now show LSP diagnostics when an applied patch leaves errors, while hiding routine success boilerplate.
 - Narrow TUI sidebars now prioritize changed-file `+N -N` stats over long filenames, keeping file change counts visible.
