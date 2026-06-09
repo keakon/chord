@@ -81,7 +81,7 @@ func (m *Model) pasteImageFromClipboard() tea.Msg {
 	if err != nil {
 		return nil
 	}
-	imageName := fmt.Sprintf("image%d%s", len(m.attachments)+1, attachmentExtForMimeType(mimeType))
+	imageName := fmt.Sprintf("image%d%s", m.nextInlineImageOrdinal(), attachmentExtForMimeType(mimeType))
 	return attachmentReadyMsg{attachment: Attachment{
 		FileName: imageName,
 		MimeType: mimeType,
@@ -91,17 +91,6 @@ func (m *Model) pasteImageFromClipboard() tea.Msg {
 
 func (m *Model) pasteFromClipboard() tea.Cmd {
 	return func() tea.Msg {
-		// Try to attach an image from the system clipboard first.
-		data, mimeType, err := readImageFromClipboard()
-		if err == nil {
-			imageName := fmt.Sprintf("image%d%s", len(m.attachments)+1, attachmentExtForMimeType(mimeType))
-			return attachmentReadyMsg{attachment: Attachment{
-				FileName: imageName,
-				MimeType: mimeType,
-				Data:     data,
-			}}
-		}
-		// No image in clipboard: fall back to textual clipboard contents.
 		return readClipboardTextMsg()
 	}
 }

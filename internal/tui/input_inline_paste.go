@@ -261,6 +261,26 @@ func (i *Input) ReindexInlineImagePlaceholdersAfterRemoval(removedIndex int) {
 	}
 }
 
+func (i *Input) ReindexInlineImagePlaceholders(mapping map[int]int) {
+	if len(mapping) == 0 || len(i.inlinePastes) == 0 {
+		return
+	}
+	for idx := range i.inlinePastes {
+		if i.inlinePastes[idx].Kind != inlineTokenImage {
+			continue
+		}
+		imageIndex, ok := inlineImagePlaceholderIndex(i.inlinePastes[idx].RawContent)
+		if !ok {
+			continue
+		}
+		newIndex, ok := mapping[imageIndex]
+		if !ok {
+			continue
+		}
+		i.inlinePastes[idx].RawContent = imagePlaceholder(newIndex)
+	}
+}
+
 func (i *Input) SetDisplayValueAndPastes(display string, pastes []inlineLargePaste, nextSeq int) {
 	i.SetValue(display)
 	i.inlinePastes = copyInlineLargePastes(pastes)

@@ -179,7 +179,7 @@ func TestHandleInsertKeySubmitsImagePlaceholderBeforeLargePasteAndFileRef(t *tes
 	if !m.input.InsertLargePaste(longText) {
 		t.Fatal("InsertLargePaste() = false, want true")
 	}
-	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}, InlineImagePlaceholder: true}}
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
@@ -235,8 +235,8 @@ func TestBackspaceRemovesInlineImagePlaceholderAndAttachmentAsWhole(t *testing.T
 	m := NewModel(nil)
 	m.mode = ModeInsert
 	m.attachments = []Attachment{
-		{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}},
-		{FileName: "image2.png", MimeType: "image/png", Data: []byte{2}},
+		{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}, InlineImagePlaceholder: true},
+		{FileName: "image2.png", MimeType: "image/png", Data: []byte{2}, InlineImagePlaceholder: true},
 	}
 	if !m.input.InsertImagePlaceholder(1) {
 		t.Fatal("InsertImagePlaceholder(1) = false, want true")
@@ -282,7 +282,7 @@ func TestTypingAfterInlineImagePlaceholderAppendsText(t *testing.T) {
 func TestTypingInsideInlineImagePlaceholderMovesCursorWithoutSplittingToken(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
-	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}}}
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}, InlineImagePlaceholder: true}}
 	if !m.input.InsertImagePlaceholder(1) {
 		t.Fatal("InsertImagePlaceholder(1) = false, want true")
 	}

@@ -128,13 +128,14 @@ func normalizeDraftAgentID(agentID string) string {
 
 // Attachment holds a pending binary attachment to be sent with the next user message.
 type Attachment struct {
-	FileName    string
-	MimeType    string
-	Data        []byte
-	SizeBytes   int
-	ImagePath   string
-	Unsupported bool
-	Encrypted   bool
+	FileName               string
+	MimeType               string
+	Data                   []byte
+	SizeBytes              int
+	ImagePath              string
+	Unsupported            bool
+	Encrypted              bool
+	InlineImagePlaceholder bool
 }
 
 func attachmentExtForMimeType(mimeType string) string {
@@ -162,10 +163,11 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 		imageIndex++
 		fileName := imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, imageIndex)
 		attachments = append(attachments, Attachment{
-			FileName:  fileName,
-			MimeType:  part.MimeType,
-			Data:      part.Data,
-			ImagePath: part.ImagePath,
+			FileName:               fileName,
+			MimeType:               part.MimeType,
+			Data:                   part.Data,
+			ImagePath:              part.ImagePath,
+			InlineImagePlaceholder: part.Type == "image",
 		})
 	}
 	return attachments

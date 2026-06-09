@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
@@ -210,6 +212,89 @@ func TestPasteImageDeduplicatesPasteMsgAndKey(t *testing.T) {
 	}
 }
 
+func TestPasteImageSecondPasteAddsOneAttachment(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tiny png: %v", err)
+	}
+
+	origImage := readImageFromClipboard
+	readImageFromClipboard = func() ([]byte, string, error) {
+		return data, "image/jpeg", nil
+	}
+	origText := clipboardReadAll
+	clipboardReadAll = func() (string, error) {
+		return "clipboard text", nil
+	}
+	t.Cleanup(func() {
+		readImageFromClipboard = origImage
+		clipboardReadAll = origText
+	})
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after first ctrl+v = %d, want 1", got)
+	}
+	if got := m.attachments[0].FileName; got != "image1.jpg" {
+		t.Fatalf("first attachment name = %q, want image1.jpg", got)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if got := len(m.attachments); got != 2 {
+		t.Fatalf("attachments after second ctrl+v = %d, want 2", got)
+	}
+	if got := m.attachments[1].FileName; got != "image2.jpg" {
+		t.Fatalf("second attachment name = %q, want image2.jpg", got)
+	}
+	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+inlineImagePlaceholderDisplay {
+		t.Fatalf("input value after second ctrl+v = %q, want two placeholders", got)
+	}
+}
+
+func TestPasteImageAfterPDFUsesNextInlineImageOrdinal(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tiny png: %v", err)
+	}
+
+	origImage := readImageFromClipboard
+	readImageFromClipboard = func() ([]byte, string, error) {
+		return data, "image/png", nil
+	}
+	t.Cleanup(func() { readImageFromClipboard = origImage })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")}}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if got := len(m.attachments); got != 2 {
+		t.Fatalf("attachments after ctrl+v = %d, want 2", got)
+	}
+	if got := m.attachments[1].FileName; got != "image1.png" {
+		t.Fatalf("clipboard image name = %q, want image1.png", got)
+	}
+	pastes := m.input.InlinePastes()
+	if len(pastes) != 1 || pastes[0].RawContent != imagePlaceholder(1) {
+		t.Fatalf("inline image paste = %#v, want image1 placeholder", pastes)
+	}
+	parts := interleaveImageAttachments([]message.ContentPart{{Type: "text", Text: imagePlaceholder(1), DisplayText: inlineImagePlaceholderDisplay, InlineToken: inlineImageTokenMarker}}, m.attachments)
+	if len(parts) != 2 {
+		t.Fatalf("interleaved parts len = %d, want 2", len(parts))
+	}
+	if parts[0].Type != "image" || parts[0].FileName != "image1.png" {
+		t.Fatalf("parts[0] = %#v, want inline image1.png", parts[0])
+	}
+	if parts[1].Type != "pdf" || parts[1].FileName != "report.pdf" {
+		t.Fatalf("parts[1] = %#v, want appended report.pdf", parts[1])
+	}
+}
+
 func TestInsertAttachClipboardThenEnterSendsImageImmediately(t *testing.T) {
 	path := writeTinyPNG(t)
 	data, err := os.ReadFile(path)
@@ -371,5 +456,132 @@ func TestAttachmentReadyMsgSizeLimitRollsBackOnlyNewPendingInlineImagePlaceholde
 	pastes := model.input.InlinePastes()
 	if len(pastes) != 1 || pastes[0].RawContent != imagePlaceholder(1) {
 		t.Fatalf("inline pastes after rollback = %#v, want only image1 placeholder", pastes)
+	}
+}
+
+func TestEditingTextReclaimsDeletedInlineImageAttachments(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{{FileName: "image1.png", MimeType: "image/png", Data: []byte{1}, InlineImagePlaceholder: true}}
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
+	}
+
+	m.insertComposerText("")
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments before deletion = %d, want 1", got)
+	}
+
+	for m.input.Value() != "" {
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	}
+	if got := len(m.attachments); got != 0 {
+		t.Fatalf("attachments after deleting placeholder = %d, want 0", got)
+	}
+	if m.input.HasInlinePastes() {
+		t.Fatal("inline image placeholder should be removed")
+	}
+}
+
+func TestEditingTextKeepsPathAttachmentWithoutInlinePlaceholder(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.input.SetValue("attached file")
+	m.attachments = []Attachment{{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")}}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'x'}))
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after editing path attachment = %d, want 1", got)
+	}
+	if got := m.attachments[0].FileName; got != "report.pdf" {
+		t.Fatalf("attachment after editing = %q, want report.pdf", got)
+	}
+}
+
+func TestEditingTextKeepsPathImageWithoutInlinePlaceholder(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.input.SetValue("attached image")
+	m.attachments = []Attachment{{FileName: "path.png", MimeType: "image/png", Data: []byte("png")}}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'x'}))
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after editing path image = %d, want 1", got)
+	}
+	if got := m.attachments[0].FileName; got != "path.png" {
+		t.Fatalf("attachment after editing = %q, want path.png", got)
+	}
+}
+
+func TestRemovingInlineImagePlaceholderDoesNotRemovePDFBeforeImage(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{
+		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
+		{FileName: "image1.png", MimeType: "image/png", Data: []byte("png"), InlineImagePlaceholder: true},
+	}
+	if !m.input.InsertImagePlaceholder(1) {
+		t.Fatal("InsertImagePlaceholder(1) = false, want true")
+	}
+
+	for m.input.Value() != "" {
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	}
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after deleting image placeholder = %d, want 1", got)
+	}
+	if got := m.attachments[0].FileName; got != "report.pdf" {
+		t.Fatalf("remaining attachment = %q, want report.pdf", got)
+	}
+}
+
+func TestSyncAttachmentsReindexesKeptInlineImagesAfterDroppedMiddleImage(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.attachments = []Attachment{
+		{FileName: "image1.png", MimeType: "image/png", Data: []byte("a"), InlineImagePlaceholder: true},
+		{FileName: "image2.png", MimeType: "image/png", Data: []byte("b"), InlineImagePlaceholder: true},
+		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
+		{FileName: "image3.png", MimeType: "image/png", Data: []byte("c"), InlineImagePlaceholder: true},
+	}
+	text := imagePlaceholder(1) + " keep " + imagePlaceholder(3)
+	pastes := []inlineLargePaste{
+		{Kind: inlineTokenImage, RawContent: imagePlaceholder(1), DisplayText: inlineImagePlaceholderDisplay, Start: 0, End: len([]rune(imagePlaceholder(1)))},
+		{Kind: inlineTokenImage, RawContent: imagePlaceholder(3), DisplayText: inlineImagePlaceholderDisplay, Start: len([]rune(imagePlaceholder(1) + " keep ")), End: len([]rune(text))},
+	}
+	m.input.SetDisplayValueAndPastes(text, pastes, 4)
+
+	m.syncAttachmentsToInlineImagePlaceholders()
+	if got := len(m.attachments); got != 3 {
+		t.Fatalf("attachments after sync = %d, want 3", got)
+	}
+	if got := []string{m.attachments[0].FileName, m.attachments[1].FileName, m.attachments[2].FileName}; got[0] != "image1.png" || got[1] != "report.pdf" || got[2] != "image3.png" {
+		t.Fatalf("attachments after sync = %v, want [image1.png report.pdf image3.png]", got)
+	}
+	inlinePastes := m.input.InlinePastes()
+	if got := len(inlinePastes); got != 2 {
+		t.Fatalf("inline pastes after sync = %d, want 2", got)
+	}
+	if inlinePastes[0].RawContent != imagePlaceholder(1) || inlinePastes[1].RawContent != imagePlaceholder(2) {
+		t.Fatalf("inline placeholders after sync = [%q %q], want [%q %q]", inlinePastes[0].RawContent, inlinePastes[1].RawContent, imagePlaceholder(1), imagePlaceholder(2))
+	}
+}
+
+func TestSyncAttachmentsWithoutInlinePastesReclaimsOnlyInlineImageAttachments(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	m.input.SetValue("still has text")
+	m.attachments = []Attachment{
+		{FileName: "image1.png", MimeType: "image/png", Data: []byte("png"), InlineImagePlaceholder: true},
+		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
+		{FileName: "path.png", MimeType: "image/png", Data: []byte("path")},
+	}
+
+	m.syncAttachmentsToInlineImagePlaceholders()
+	if got := len(m.attachments); got != 2 {
+		t.Fatalf("attachments after orphan reclaim = %d, want 2", got)
+	}
+	if got := []string{m.attachments[0].FileName, m.attachments[1].FileName}; got[0] != "report.pdf" || got[1] != "path.png" {
+		t.Fatalf("attachments after orphan reclaim = %v, want [report.pdf path.png]", got)
 	}
 }

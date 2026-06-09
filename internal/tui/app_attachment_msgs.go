@@ -40,6 +40,7 @@ func (m *Model) handleAttachmentReadyMsg(msg attachmentReadyMsg) tea.Cmd {
 	if msg.attachment.SizeBytes == 0 {
 		msg.attachment.SizeBytes = len(msg.attachment.Data)
 	}
+	msg.attachment.InlineImagePlaceholder = msg.inlineImagePlaceholderRaw != ""
 	m.attachments = append(m.attachments, msg.attachment)
 	m.recalcViewportSize()
 	var cmds []tea.Cmd

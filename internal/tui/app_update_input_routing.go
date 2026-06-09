@@ -68,11 +68,15 @@ func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments 
 		return []message.ContentPart{part}
 	}
 	imageIndex, ok := inlineImagePlaceholderIndex(part.Text)
-	if !ok || imageIndex < 1 || imageIndex > len(attachments) {
+	if !ok {
 		return []message.ContentPart{{Type: "text", Text: part.Text}}
 	}
-	used[imageIndex-1] = true
-	return []message.ContentPart{attachmentContentPart(attachments[imageIndex-1])}
+	attachmentIndex, ok := imageAttachmentIndex(attachments, imageIndex)
+	if !ok {
+		return []message.ContentPart{{Type: "text", Text: part.Text}}
+	}
+	used[attachmentIndex] = true
+	return []message.ContentPart{attachmentContentPart(attachments[attachmentIndex])}
 }
 
 // interleaveImageAttachments replaces atomic inline image placeholder parts with
@@ -105,16 +109,77 @@ func interleaveImageAttachments(parts []message.ContentPart, attachments []Attac
 	return out
 }
 
+func imageAttachmentIndex(attachments []Attachment, imageOrdinal int) (int, bool) {
+	if imageOrdinal < 1 {
+		return 0, false
+	}
+	seen := 0
+	for idx, att := range attachments {
+		if !att.InlineImagePlaceholder {
+			continue
+		}
+		seen++
+		if seen == imageOrdinal {
+			return idx, true
+		}
+	}
+	return 0, false
+}
+
 func (m *Model) removeAttachmentForInlinePaste(paste inlineLargePaste) {
 	if paste.Kind != inlineTokenImage {
 		return
 	}
 	imageIndex, ok := inlineImagePlaceholderIndex(paste.RawContent)
-	if !ok || imageIndex < 1 || imageIndex > len(m.attachments) {
+	if !ok {
 		return
 	}
-	m.attachments = append(m.attachments[:imageIndex-1], m.attachments[imageIndex:]...)
+	attachmentIndex, ok := imageAttachmentIndex(m.attachments, imageIndex)
+	if !ok {
+		return
+	}
+	m.attachments = append(m.attachments[:attachmentIndex], m.attachments[attachmentIndex+1:]...)
 	m.input.ReindexInlineImagePlaceholdersAfterRemoval(imageIndex)
+}
+
+func (m *Model) syncAttachmentsToInlineImagePlaceholders() {
+	if len(m.attachments) == 0 {
+		return
+	}
+	usedImages := make(map[int]bool)
+	for _, paste := range m.input.InlinePastes() {
+		if paste.Kind != inlineTokenImage {
+			continue
+		}
+		imageIndex, ok := inlineImagePlaceholderIndex(paste.RawContent)
+		if !ok {
+			continue
+		}
+		attachmentIndex, ok := imageAttachmentIndex(m.attachments, imageIndex)
+		if !ok {
+			continue
+		}
+		usedImages[attachmentIndex] = true
+	}
+	mapping := make(map[int]int, len(m.attachments))
+	kept := make([]Attachment, 0, len(m.attachments))
+	oldImageOrdinal := 0
+	newImageOrdinal := 0
+	for idx, att := range m.attachments {
+		if att.InlineImagePlaceholder {
+			oldImageOrdinal++
+		}
+		if att.InlineImagePlaceholder && !usedImages[idx] {
+			continue
+		}
+		kept = append(kept, att)
+		if att.InlineImagePlaceholder {
+			newImageOrdinal++
+			mapping[oldImageOrdinal] = newImageOrdinal
+		}
+	}
+	m.attachments = kept
+	m.input.ReindexInlineImagePlaceholders(mapping)
 }
 
 func (m *Model) insertComposerText(text string) tea.Cmd {
@@ -122,6 +187,7 @@ func (m *Model) insertComposerText(text string) tea.Cmd {
 	if !m.input.InsertLargePaste(text) {
 		m.input.InsertStringPreserveInlinePastes(text)
 	}
+	m.syncAttachmentsToInlineImagePlaceholders()
 	m.input.syncHeight()
 	cmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
@@ -172,8 +238,9 @@ func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
 		return func() tea.Msg { return img }
 	}
 	m.input.ClearSelection()
-	placeholderRaw := imagePlaceholder(len(m.attachments) + 1)
-	m.input.InsertImagePlaceholder(len(m.attachments) + 1)
+	imageOrdinal := m.nextInlineImageOrdinal()
+	placeholderRaw := imagePlaceholder(imageOrdinal)
+	m.input.InsertImagePlaceholder(imageOrdinal)
 	var syncCmd tea.Cmd
 	if pastedText != "" {
 		syncCmd = m.insertComposerText(pastedText)
@@ -184,6 +251,16 @@ func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
 	}
 	attach.inlineImagePlaceholderRaw = placeholderRaw
 	return tea.Batch(syncCmd, m.handleAttachmentReadyMsg(attach))
+}
+
+func (m *Model) nextInlineImageOrdinal() int {
+	ordinal := 1
+	for _, att := range m.attachments {
+		if att.InlineImagePlaceholder {
+			ordinal++
+		}
+	}
+	return ordinal
 }
 
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {

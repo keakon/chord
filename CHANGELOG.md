@@ -27,6 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - OAuth keys are now permanently removed from selection when the provider reports account or workspace deactivation, including deactivation responses surfaced as HTTP 402 errors.
 - Resuming sessions after `view_image` no longer shows tool-returned images as user-authored messages.
 - TUI rendering now disables terminal hardware scroll regions to avoid duplicate separators or stale border rows on terminals affected by DECSTBM scroll restoration issues.
+- Pasting clipboard images in the TUI composer no longer adds duplicate image attachments, and deleted inline image placeholders now remove their attachment chips.
 
 ## 0.6.3 - 2026-06-05
 

@@ -167,6 +167,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		cmd := m.input.Update(msg)
+		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
@@ -185,6 +186,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		cmd := m.input.Update(msg)
+		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
@@ -199,6 +201,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		cmd := m.input.Update(msg)
+		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		return cmd
@@ -206,6 +209,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(key, m.keyMap.InsertNewline):
 		m.input.preExpandHeight()
 		cmd := m.input.Update(msg)
+		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		return cmd
@@ -502,6 +506,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 		cmd := m.input.Update(msg)
+		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
