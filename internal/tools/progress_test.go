@@ -28,7 +28,7 @@ func TestGrepToolReportsScannedFileProgress(t *testing.T) {
 	ctx := WithToolProgressReporter(context.Background(), recorder)
 	out, err := (GrepTool{}).Execute(ctx, mustMarshal(t, map[string]any{
 		"pattern": "needle",
-		"path":    dir,
+		"paths":   []string{dir},
 	}))
 	if err != nil {
 		t.Fatalf("Execute(): %v", err)

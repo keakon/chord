@@ -183,6 +183,38 @@ func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPo
 	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
 }
 
+func pathsToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPolicy {
+	if strings.TrimSpace(field) == "" {
+		return ConcurrencyPolicy{}
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return ConcurrencyPolicy{}
+	}
+	raw, ok := parsed[field]
+	if !ok {
+		return pathToolConcurrencyPolicy(args, "path")
+	}
+	// Mirror the executor's scalar->array coercion so a bare-string path still
+	// gets a precise per-path read policy instead of a workspace-wide one.
+	values, _, err := DecodeStringOrList(raw)
+	if err != nil || len(values) != 1 {
+		return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeRead}
+	}
+	value := strings.TrimSpace(values[0])
+	if value == "" {
+		value = "."
+	}
+	resolved, err := resolveToolPath(value)
+	if err != nil {
+		return ConcurrencyPolicy{}
+	}
+	if resolved == "" {
+		resolved = "."
+	}
+	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
+}
+
 func urlToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	var parsed struct {
 		URL string `json:"url"`

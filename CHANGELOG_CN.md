@@ -9,7 +9,7 @@
 - JSON 热路径处理更快，包括 LLM 流解析、MCP JSON-RPC 编解码、会话导入 JSONL 解析和 `auth.state.json` 加载。
 - 本地文件工具读取已有文本文件时现在优先使用 UTF-8 或带 BOM 的 Unicode，并保留对 GB18030、Big5、Shift-JIS 等常见地区性编码的受限支持。无法明确识别或不受支持的编码仍会快速失败；`web_fetch` 仍会按 HTTP 响应声明的 charset 解码。
 - `read` 现在返回不带行号 gutter、也不额外缩进的原始文件文本，复制片段用于 patch hunk 或缩进敏感格式时更安全。
-- `grep.path` 现在会说明它只接受一个文件或目录路径；当把多个已存在路径用空格拼成一个路径传入时，会给出更有针对性的提示。`grep.glob` 和 `glob` 参数说明也会区分仅按文件名过滤、递归路径 glob 与单一基础目录范围。
+- `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
 - 请求级上下文剪裁现在会保护近期高风险工具输出，例如 diff、失败断言、stack trace、权限/安全错误，避免它们仅因很长的单轮工具链推进了 effective age 就被剪裁。默认 `context.reduction.read_like_age_turns` 也基于近期会话统计从 1 上调到 2，让刚读取的文件上下文以较低的观测 token 成本多保留一个 effective turn。
 - 上下文剪裁现在会等到同一模型连续第 3 次请求时才保护 prompt cache surface；切换模型会重置这个连续计数，因此新模型的前两次请求在压力下仍可剪裁已缓存上下文。
 - 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口，避免最终回复前临时剪裁打破已有 prompt cache；模型切换或高压上下文会跳过该宽限。可通过 `context.reduction.wrap_up_grace_requests` 配置。
@@ -22,6 +22,7 @@
 ### 修复
 
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
+- Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。
 - TUI 信息面板的 changed-files 区域现在会优先完整显示 `+N -N` 行数统计，而不是让长文件名挤掉改动数量，与较窄侧边栏的行为一致。
 - TUI 信息面板现在会在鼠标指针位于其上方时响应鼠标滚轮或触摸板独立滚动，较长的 changed files 或状态区块不再被输入区截断。
 - 被拒绝的折叠 Shell 工具卡片现在会把展开提示显示在拒绝原因之前，提示不再被挤到结果文本下方。

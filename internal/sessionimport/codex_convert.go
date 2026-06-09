@@ -1141,22 +1141,22 @@ func codexNormalizeGrepArgs(args map[string]any) json.RawMessage {
 		return nil
 	}
 	result := map[string]any{"pattern": pattern}
-	if path := codexPickString(args, "path", "directory"); path != "" {
-		result["path"] = path
+	if paths := codexPickStringList(args, "paths", "path", "directory"); len(paths) > 0 {
+		result["paths"] = paths
 	}
-	if glob := codexPickString(args, "glob", "file_pattern", "include"); glob != "" {
-		result["glob"] = glob
+	if includes := codexPickStringList(args, "includes", "glob", "file_pattern", "include"); len(includes) > 0 {
+		result["includes"] = includes
 	}
 	b, _ := json.Marshal(result)
 	return b
 }
 
 func codexNormalizeGlobArgs(args map[string]any) json.RawMessage {
-	pattern := codexPickString(args, "pattern", "glob", "path")
-	if pattern == "" {
+	patterns := codexPickStringList(args, "patterns", "pattern", "glob")
+	if len(patterns) == 0 {
 		return nil
 	}
-	result := map[string]any{"pattern": pattern}
+	result := map[string]any{"patterns": patterns}
 	if path := codexPickString(args, "path", "directory"); path != "" {
 		result["path"] = path
 	}

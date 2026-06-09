@@ -9,7 +9,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - JSON processing is faster on hot paths including LLM stream parsing, MCP JSON-RPC encoding/decoding, session import JSONL parsing, and `auth.state.json` loading.
 - Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
 - `read` now returns raw file text without line-number gutters or extra indentation, making copied snippets safe for patch hunks and indentation-sensitive formats.
-- `grep.path` now describes that it accepts one file or directory path and adds a targeted hint when space-separated existing paths are passed as a single path. `grep.glob` and `glob` parameter descriptions now also clarify filename-only filters versus recursive path globs and single-base-directory scope.
+- `grep` now accepts `paths` and `includes` arrays for multi-root searches and path glob filters, `glob` now accepts a `patterns` array, and invalid `grep` regex patterns automatically fall back to literal-text search with a visible result note. `glob` permission checks also evaluate every requested pattern so a later deny/ask rule cannot be bypassed by an earlier allowed pattern.
 - Request-level context reduction now protects recent high-risk tool outputs such as diffs, failed assertions, stack traces, and permission/security errors from being pruned solely because a long single-turn tool chain advances effective age. The default `context.reduction.read_like_age_turns` is also raised from 1 to 2 based on recent-session statistics, preserving freshly read file context one effective turn longer at low observed token cost.
 - Context reduction now waits until the third consecutive request on the same model before preserving the prompt-cache surface; switching models resets that model-run count, so the first two requests on a new model can still trim cached context under pressure.
 - Context reduction now gives the first main-model request after all TODOs are completed a one-request wrap-up grace window, avoiding cache-breaking last-minute pruning before final answers unless the model changed or the context is under high pressure. The grace is configurable with `context.reduction.wrap_up_grace_requests`.
@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixes
 
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
+- Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.
 - The TUI info panel changed-files section now prioritizes full `+N -N` line-change stats over long filenames, matching the narrow sidebar behavior.
 - The TUI info panel now scrolls independently with the mouse wheel or touchpad when the pointer is over it, so long changed-file or status sections are no longer clipped by the input area.
 - Collapsed Shell tool cards that were rejected now show the expand hint before the rejection reason, so the hint is no longer pushed below the result text.

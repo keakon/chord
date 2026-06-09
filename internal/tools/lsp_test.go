@@ -60,8 +60,9 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GrepTool{}).Description()
 	for _, want := range []string{
-		"pattern uses regex syntax, not glob syntax or plain text",
-		"Use glob only to filter filenames by basename, not paths.",
+		"If pattern is not valid regex, it is safely searched as literal text",
+		"Use paths for one or more files/directories",
+		"includes for optional path globs",
 		"Best for discovering candidate files, symbols, or text matches when the exact location is not known yet.",
 		"For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool",
 	} {
@@ -71,26 +72,26 @@ func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	}
 }
 
-func TestGrepToolParameterDescriptionsClarifyPathAndGlobScope(t *testing.T) {
+func TestGrepToolParameterDescriptionsClarifyPathsAndIncludes(t *testing.T) {
 	props := (GrepTool{}).Parameters()["properties"].(map[string]any)
-	pathDesc := props["path"].(map[string]any)["description"].(string)
-	globDesc := props["glob"].(map[string]any)["description"].(string)
+	pathDesc := props["paths"].(map[string]any)["description"].(string)
+	includeDesc := props["includes"].(map[string]any)["description"].(string)
 
 	for _, want := range []string{
-		"Single file or directory to search",
-		"for multiple roots, call grep multiple times",
+		"One or more files/directories to search",
+		"Defaults to the current directory",
 	} {
 		if !strings.Contains(pathDesc, want) {
-			t.Fatalf("path description missing %q: %q", want, pathDesc)
+			t.Fatalf("paths description missing %q: %q", want, pathDesc)
 		}
 	}
 	for _, want := range []string{
-		"Filename-only glob filter",
-		"matched against basename",
-		"not a recursive path glob",
+		"path glob filters",
+		"**/*.go",
+		"internal/**/*.ts",
 	} {
-		if !strings.Contains(globDesc, want) {
-			t.Fatalf("glob description missing %q: %q", want, globDesc)
+		if !strings.Contains(includeDesc, want) {
+			t.Fatalf("includes description missing %q: %q", want, includeDesc)
 		}
 	}
 }
@@ -98,7 +99,7 @@ func TestGrepToolParameterDescriptionsClarifyPathAndGlobScope(t *testing.T) {
 func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GlobTool{}).Description()
 	for _, want := range []string{
-		"pattern is a path glob, not a regular expression and not a file-contents search.",
+		"patterns are path globs, not regular expressions and not file-contents searches.",
 		"Best for discovering candidate files by path or extension before using read, grep, or lsp.",
 	} {
 		if !strings.Contains(desc, want) {
@@ -110,7 +111,7 @@ func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.T) {
 	props := (GlobTool{}).Parameters()["properties"].(map[string]any)
 	pathDesc := props["path"].(map[string]any)["description"].(string)
-	patternDesc := props["pattern"].(map[string]any)["description"].(string)
+	patternDesc := props["patterns"].(map[string]any)["description"].(string)
 
 	for _, want := range []string{
 		"Single base directory to search from",
@@ -121,7 +122,7 @@ func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.
 		}
 	}
 	for _, want := range []string{
-		"Path glob relative to path",
+		"Path globs relative to path",
 		"src/**/*.ts",
 		"Supports **",
 	} {

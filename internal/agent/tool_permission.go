@@ -44,6 +44,8 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 	switch toolName {
 	case tools.NameDelete:
 		return evaluateDeleteToolPermission(ruleset, unwrapped)
+	case tools.NameGlob:
+		return evaluateGlobToolPermission(ruleset, unwrapped)
 	case tools.NameShell:
 		return evaluateShellToolPermission(ruleset, unwrapped)
 	default:
@@ -78,6 +80,51 @@ func evaluateDeleteToolPermission(ruleset permission.Ruleset, args json.RawMessa
 			item.AllowList = []string{path}
 		}
 		items = append(items, item)
+	}
+	return aggregatePermissionItems(items, permission.ActionAllow, "*")
+}
+
+// evaluateGlobToolPermission aggregates permission decisions across every
+// pattern in glob.patterns so a deny/ask rule on any later pattern cannot be
+// bypassed by an earlier allowed pattern.
+func evaluateGlobToolPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {
+	var parsed struct {
+		Patterns json.RawMessage `json:"patterns"`
+	}
+	var patterns []string
+	err := json.Unmarshal(args, &parsed)
+	if err == nil {
+		// patterns may be a JSON array or a single bare string; mirror the
+		// executor's scalar->array coercion so permission rules are evaluated
+		// against the real pattern instead of a wildcard fallback.
+		patterns, _, err = tools.DecodeStringOrList(parsed.Patterns)
+	}
+	if err != nil || len(patterns) == 0 {
+		arg := extractToolArgument(tools.NameGlob, args)
+		return toolPermissionDecision{
+			Action:        normalizeToolPermissionAction(tools.NameGlob, ruleset.Evaluate(tools.NameGlob, arg)),
+			MatchArgument: arg,
+		}
+	}
+	items := make([]permissionAggregateItem, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		action := normalizeToolPermissionAction(tools.NameGlob, ruleset.Evaluate(tools.NameGlob, pattern))
+		item := permissionAggregateItem{Argument: pattern, Action: action}
+		if action == permission.ActionAsk {
+			item.AskList = []string{pattern}
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		arg := extractToolArgument(tools.NameGlob, args)
+		return toolPermissionDecision{
+			Action:        normalizeToolPermissionAction(tools.NameGlob, ruleset.Evaluate(tools.NameGlob, arg)),
+			MatchArgument: arg,
+		}
 	}
 	return aggregatePermissionItems(items, permission.ActionAllow, "*")
 }

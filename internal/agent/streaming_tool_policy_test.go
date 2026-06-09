@@ -19,8 +19,8 @@ func TestSpeculativeExecutionPolicyAllowsSafeReadOnlyTools(t *testing.T) {
 		args string
 	}{
 		{tools.NameRead, `{"path":"README.md"}`},
-		{tools.NameGrep, `{"pattern":"TODO","path":"internal"}`},
-		{tools.NameGlob, `{"pattern":"**/*.go","path":"internal"}`},
+		{tools.NameGrep, `{"pattern":"TODO","paths":["internal"]}`},
+		{tools.NameGlob, `{"patterns":["**/*.go"],"path":"internal"}`},
 	}
 	for _, tc := range cases {
 		decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tc.name, json.RawMessage(tc.args), nil)
@@ -162,7 +162,7 @@ func TestSpeculativeExecutionPolicyAllowsReadOnlyPrefix(t *testing.T) {
 	registry.Register(tools.ReadTool{})
 	registry.Register(tools.GrepTool{})
 	prior := []PendingToolCall{{CallID: "call-1", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}}
-	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameGrep, json.RawMessage(`{"pattern":"TODO","path":"internal"}`), prior)
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameGrep, json.RawMessage(`{"pattern":"TODO","paths":["internal"]}`), prior)
 	if !decision.Allowed {
 		t.Fatalf("Grep behind prior read-only call rejected: %s", decision.Reason)
 	}

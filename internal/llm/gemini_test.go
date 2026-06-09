@@ -55,10 +55,11 @@ func TestConvertToolsToGemini(t *testing.T) {
 		Name:        "search",
 		Description: "search docs",
 		InputSchema: map[string]any{
-			"type":     "object",
-			"nullable": true,
+			"type":             "object",
+			"nullable":         true,
+			"coerceFromObject": true,
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "default": "x"},
+				"query": map[string]any{"type": "string", "default": "x", "coerceFromString": true},
 				"limit": map[string]any{"type": "integer"},
 				"tags":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			},
@@ -77,6 +78,9 @@ func TestConvertToolsToGemini(t *testing.T) {
 	if _, ok := params["nullable"]; ok {
 		t.Fatalf("nullable should be omitted: %#v", params)
 	}
+	if _, ok := params["coerceFromObject"]; ok {
+		t.Fatalf("coerceFromObject should be omitted: %#v", params)
+	}
 	props := params["properties"].(map[string]any)
 	query := props["query"].(map[string]any)
 	if query["type"] != "STRING" {
@@ -84,6 +88,9 @@ func TestConvertToolsToGemini(t *testing.T) {
 	}
 	if _, ok := query["default"]; ok {
 		t.Fatalf("default should be omitted: %#v", query)
+	}
+	if _, ok := query["coerceFromString"]; ok {
+		t.Fatalf("coerceFromString should be omitted: %#v", query)
 	}
 	items := props["tags"].(map[string]any)["items"].(map[string]any)
 	if items["type"] != "STRING" {

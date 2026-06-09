@@ -389,7 +389,7 @@ func convertSchemaToGemini(schema map[string]any) map[string]any {
 	out := make(map[string]any, len(schema))
 	for k, v := range schema {
 		switch k {
-		case "nullable", "default", "$schema", "additionalProperties":
+		case "nullable", "default", "$schema", "additionalProperties", "coerceFromString", "coerceFromObject":
 			continue
 		case "type":
 			if s, ok := v.(string); ok {

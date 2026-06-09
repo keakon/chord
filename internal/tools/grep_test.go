@@ -47,7 +47,7 @@ func TestGrepSkipsBinaryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, _ := json.Marshal(map[string]any{"pattern": "thinking", "path": dir})
+	raw, _ := json.Marshal(map[string]any{"pattern": "thinking", "paths": []string{dir}})
 	out, err := GrepTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -73,7 +73,7 @@ func TestGrepSanitizesEmbeddedControlBytes(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"pattern": "match", "path": dir})
+	raw, _ := json.Marshal(map[string]any{"pattern": "match", "paths": []string{dir}})
 	out, err := GrepTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -97,7 +97,7 @@ func TestGrepRejectsNamedPipePath(t *testing.T) {
 		t.Fatalf("Mkfifo: %v", err)
 	}
 
-	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "path": path})
+	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "paths": []string{path}})
 	_, err := GrepTool{}.Execute(context.Background(), raw)
 	if err == nil {
 		t.Fatal("expected error for named pipe path")
@@ -112,7 +112,7 @@ func TestGrepRejectsBlockedDevicePath(t *testing.T) {
 		t.Skip("device path blacklist is unix-specific")
 	}
 
-	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "path": "/dev/stdin"})
+	raw, _ := json.Marshal(map[string]any{"pattern": "FAIL", "paths": []string{"/dev/stdin"}})
 	_, err := GrepTool{}.Execute(context.Background(), raw)
 	if err == nil {
 		t.Fatal("expected error for blocked device path")
@@ -122,36 +122,40 @@ func TestGrepRejectsBlockedDevicePath(t *testing.T) {
 	}
 }
 
-func TestGrepInvalidRegexExplainsEscaping(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{"pattern": "Args []byte", "path": "."})
-	_, err := GrepTool{}.Execute(context.Background(), raw)
-	if err == nil {
-		t.Fatal("expected invalid regex error")
+func TestGrepInvalidRegexFallsBackToLiteralSearch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "args.txt")
+	if err := os.WriteFile(path, []byte("Args []byte\nArgs string\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"invalid regex pattern", `escape literal special characters such as [] as \[\]`} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q missing %q", err.Error(), want)
-		}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "Args []byte", "paths": []string{dir}})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "searched as literal text") || !strings.Contains(out, "Args []byte") {
+		t.Fatalf("literal fallback output missing note or match:\n%s", out)
 	}
 }
 
-func TestGrepPathParameterDescribesSinglePath(t *testing.T) {
+func TestGrepPathsParameterDescribesMultiplePaths(t *testing.T) {
 	params := GrepTool{}.Parameters()
 	props, ok := params["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("properties has type %T, want map[string]any", params["properties"])
 	}
-	pathProp, ok := props["path"].(map[string]any)
+	pathProp, ok := props["paths"].(map[string]any)
 	if !ok {
-		t.Fatalf("path property has type %T, want map[string]any", props["path"])
+		t.Fatalf("paths property has type %T, want map[string]any", props["paths"])
 	}
 	desc, ok := pathProp["description"].(string)
 	if !ok {
-		t.Fatalf("path description has type %T, want string", pathProp["description"])
+		t.Fatalf("paths description has type %T, want string", pathProp["description"])
 	}
-	for _, want := range []string{"Single file or directory to search", "for multiple roots, call grep multiple times", "Defaults to current directory"} {
+	for _, want := range []string{"One or more files/directories to search", "Supports ~", "Defaults to the current directory"} {
 		if !strings.Contains(desc, want) {
-			t.Fatalf("path description %q missing %q", desc, want)
+			t.Fatalf("paths description %q missing %q", desc, want)
 		}
 	}
 }
@@ -168,15 +172,66 @@ func TestGrepPathErrorHintsForSpaceSeparatedExistingPaths(t *testing.T) {
 	}
 	searchPath := strings.Join(paths, " ")
 
-	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": searchPath})
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{searchPath}})
 	_, err := GrepTool{}.Execute(context.Background(), raw)
 	if err == nil {
 		t.Fatal("expected path error")
 	}
-	for _, want := range []string{"path not found: " + searchPath, "grep.path accepts one file or directory path only", "search multiple directories"} {
+	for _, want := range []string{"path not found: " + searchPath, "grep.paths accepts an array", "separate array item"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err.Error(), want)
 		}
+	}
+}
+
+func TestGrepSupportsMultiplePaths(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"cmd", "internal"} {
+		root := filepath.Join(dir, name)
+		if err := os.Mkdir(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name+".go"), []byte("needle\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{filepath.Join(dir, "cmd"), filepath.Join(dir, "internal")}})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"cmd.go", "internal.go"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestGrepIncludesPathGlobs(t *testing.T) {
+	dir := t.TempDir()
+	paths := map[string]string{
+		"internal/a.go": "needle\n",
+		"cmd/a.go":      "needle\n",
+		"internal/a.md": "needle\n",
+	}
+	for rel, content := range paths {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{dir}, "includes": []string{"internal/**/*.go"}})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "internal/a.go") || strings.Contains(out, "cmd/a.go") || strings.Contains(out, "internal/a.md") {
+		t.Fatalf("path include filter mismatch:\n%s", out)
 	}
 }
 
@@ -191,7 +246,7 @@ func TestGrepSupportsExistingPathWithSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": spaceDir})
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{spaceDir}})
 	out, err := GrepTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -209,7 +264,7 @@ func TestGrepLargeResultIsBoundedWithRefineHint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": dir})
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{dir}})
 	out, err := GrepTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -217,7 +272,7 @@ func TestGrepLargeResultIsBoundedWithRefineHint(t *testing.T) {
 	if got := strings.Count(out, "needle"); got <= 0 || got > maxGrepMatches {
 		t.Fatalf("match count = %d, want within 1..%d", got, maxGrepMatches)
 	}
-	if !strings.Contains(out, "narrow path/glob/pattern") {
+	if !strings.Contains(out, "narrow paths/includes/pattern") {
 		t.Fatalf("missing refine hint in output:\n%s", out)
 	}
 }
@@ -230,7 +285,7 @@ func TestGrepLongLinesAreBoundedByBytes(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "path": path})
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{path}})
 	out, err := GrepTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -238,21 +293,38 @@ func TestGrepLongLinesAreBoundedByBytes(t *testing.T) {
 	if got := strings.Count(out, "needle"); got <= 0 || got >= 10 {
 		t.Fatalf("match count = %d, want byte-bounded subset of 10; output length=%d", got, len(out))
 	}
-	if !strings.Contains(out, "within 12 KiB") || !strings.Contains(out, "narrow path/glob/pattern") {
+	if !strings.Contains(out, "within 12 KiB") || !strings.Contains(out, "narrow paths/includes/pattern") {
 		t.Fatalf("missing byte-bound refine hint in output:\n%s", out)
 	}
 }
 
 func TestGlobInvalidPatternExplainsGlobSyntax(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{"pattern": "[", "path": "."})
+	raw, _ := json.Marshal(map[string]any{"patterns": []string{"["}, "path": "."})
 	_, err := GlobTool{}.Execute(context.Background(), raw)
 	if err == nil {
 		t.Fatal("expected invalid glob error")
 	}
-	for _, want := range []string{"glob error", "pattern uses glob syntax like **/*.go, not regex syntax"} {
+	for _, want := range []string{"glob error", "patterns use glob syntax like **/*.go, not regex syntax"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err.Error(), want)
 		}
+	}
+}
+
+func TestGlobSupportsMultiplePatterns(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.go", "b.md", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.go", "*.md"}, "path": dir})
+	out, err := GlobTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "a.go") || !strings.Contains(out, "b.md") || strings.Contains(out, "c.txt") {
+		t.Fatalf("multi-pattern output mismatch:\n%s", out)
 	}
 }
 
@@ -264,7 +336,7 @@ func TestGlobLargeResultIsBoundedWithRefineHint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"pattern": "*.txt", "path": dir})
+	raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
 	out, err := GlobTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -287,7 +359,7 @@ func TestGlobLongPathsAreBoundedByBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"pattern": "*.txt", "path": dir})
+	raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
 	out, err := GlobTool{}.Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -297,5 +369,109 @@ func TestGlobLongPathsAreBoundedByBytes(t *testing.T) {
 	}
 	if !strings.Contains(out, "within 16 KiB") || !strings.Contains(out, "refine pattern/path") {
 		t.Fatalf("missing byte-bound refine hint in output:\n%s", out)
+	}
+}
+
+func TestGrepAcceptsScalarPathsAndIncludesWithCoerceNote(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(path, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"pattern":"hello","paths":"` + dir + `","includes":"**/*.go"}`)
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "paths was a single string") || !strings.Contains(out, "includes was a single string") {
+		t.Fatalf("scalar coerce notes missing:\n%s", out)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("expected match line, got:\n%s", out)
+	}
+}
+
+func TestGrepConcurrencyPolicyCoercesScalarPaths(t *testing.T) {
+	scalar := GrepTool{}.ConcurrencyPolicy(json.RawMessage(`{"pattern":"x","paths":"."}`))
+	array := GrepTool{}.ConcurrencyPolicy(json.RawMessage(`{"pattern":"x","paths":["."]}`))
+	if scalar != array {
+		t.Fatalf("scalar policy = %+v, want array-form policy %+v", scalar, array)
+	}
+	if scalar.Resource == "workspace" {
+		t.Fatalf("single scalar path should keep a per-path policy, got %+v", scalar)
+	}
+}
+
+func TestGrepArrayPathsAndIncludesDoNotEmitCoerceNote(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"pattern":  "hello",
+		"paths":    []string{dir},
+		"includes": []string{"**/*.go"},
+	})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out, "single string") {
+		t.Fatalf("array form must not emit coerce note:\n%s", out)
+	}
+}
+
+func TestValidateGrepArgsAcceptsLegacyPathAndGlobFields(t *testing.T) {
+	if err := ValidateToolArgs(GrepTool{}, json.RawMessage(`{"pattern":"x","path":"internal","glob":"*.go"}`)); err != nil {
+		t.Fatalf("legacy singular path/glob fields should validate via alias, got %v", err)
+	}
+}
+
+func TestGrepExecutesWithLegacyPathAndGlobFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"pattern":"needle","path":"` + dir + `","glob":"**/*.go"}`)
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute with legacy path/glob fields: %v", err)
+	}
+	if !strings.Contains(out, "a.go") || strings.Contains(out, "a.md") {
+		t.Fatalf("legacy path/glob filter mismatch:\n%s", out)
+	}
+}
+
+func TestGrepIncludesBraceAlternationViaDoublestar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "a.ts"), []byte("hit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "b.tsx"), []byte("hit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "c.go"), []byte("hit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"pattern":  "hit",
+		"paths":    []string{dir},
+		"includes": []string{"**/*.{ts,tsx}"},
+	})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "a.ts") || !strings.Contains(out, "b.tsx") {
+		t.Fatalf("expected brace alternation to match .ts and .tsx, got:\n%s", out)
+	}
+	if strings.Contains(out, "c.go") {
+		t.Fatalf("brace include filter should exclude .go, got:\n%s", out)
 	}
 }

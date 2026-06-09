@@ -1096,7 +1096,7 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 	}, "\n") + "\n" + strings.Repeat("internal/agent/compaction_policy.go:999:func extraMatch()\n", 40)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"path":"internal/agent","glob":"*.go","pattern":"prepareMessagesForLLM"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"paths":["internal/agent"],"includes":["*.go"],"pattern":"prepareMessagesForLLM"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", Content: "ack"},
@@ -1334,7 +1334,7 @@ func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) 
 	}, "\n")
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"path":"internal/agent","glob":"*.go","pattern":"prepareMessagesForLLM"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"paths":["internal/agent"],"includes":["*.go"],"pattern":"prepareMessagesForLLM"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 	}
 

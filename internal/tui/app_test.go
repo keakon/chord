@@ -3225,7 +3225,7 @@ func TestSingleHiddenLineCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.
 		{
 			name:     "glob",
 			toolName: "glob",
-			content:  `{"pattern":"**/*.go"}`,
+			content:  `{"patterns":["**/*.go"]}`,
 			result:   strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
 		},
 	}

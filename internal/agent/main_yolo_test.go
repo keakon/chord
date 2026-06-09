@@ -117,7 +117,7 @@ func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) 
 	if !a.YoloEnabled() {
 		t.Fatal("YOLO should enable while busy")
 	}
-	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"pattern":"*"}`))
+	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`))
 	if decision.Action != permission.ActionDeny {
 		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
 	}
@@ -207,7 +207,7 @@ func TestYoloLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 	if !a.YoloEnabled() {
 		t.Fatal("YOLO should enable while busy")
 	}
-	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"pattern":"*"}`))
+	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`))
 	if decision.Action != permission.ActionDeny {
 		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
 	}

@@ -161,6 +161,50 @@ func formatParamValue(v any) string {
 	}
 }
 
+func paramStringList(raw string) []string {
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		return []string{raw}
+	}
+	out := values[:0]
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func formatStringListParam(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	if len(values) == 1 {
+		return values[0]
+	}
+	return strings.Join(values, ",")
+}
+
+func mapStringListParam(raw string, mapValue func(string) string) string {
+	values := paramStringList(raw)
+	if len(values) == 0 {
+		return raw
+	}
+	for i, value := range values {
+		values[i] = mapValue(value)
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
 func displayToolPath(path, workingDir string) string {
 	path = sanitizeToolDisplayText(strings.TrimSpace(path))
 	if path == "" {
@@ -219,6 +263,9 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 	}
 	cloned := make(map[string]string, len(vals))
 	maps.Copy(cloned, vals)
+	if paths, ok := cloned["paths"]; ok && b.ToolName == tools.NameGrep {
+		cloned["paths"] = mapStringListParam(paths, b.displayToolDir)
+	}
 	if path, ok := cloned["path"]; ok {
 		switch b.ToolName {
 		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
@@ -268,22 +315,22 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return "", ""
 		}
 		var opts []string
-		filePath := vals["path"]
-		if filePath != "" && filePath != "." {
-			opts = append(opts, "path="+filePath)
+		if paths := paramStringList(vals["paths"]); len(paths) > 0 && !(len(paths) == 1 && paths[0] == ".") {
+			opts = append(opts, "paths="+formatStringListParam(paths))
 		}
-		if v := vals["glob"]; v != "" {
-			opts = append(opts, "glob="+v)
+		if includes := paramStringList(vals["includes"]); len(includes) > 0 {
+			opts = append(opts, "includes="+formatStringListParam(includes))
 		}
 		if len(opts) == 0 {
 			return pattern, ""
 		}
 		return pattern, "(" + strings.Join(opts, ", ") + ")"
 	case tools.NameGlob:
-		pattern := vals["pattern"]
-		if pattern == "" {
+		patterns := paramStringList(vals["patterns"])
+		if len(patterns) == 0 {
 			return "", ""
 		}
+		pattern := formatStringListParam(patterns)
 		filePath := vals["path"]
 		if filePath != "" && filePath != "." {
 			return pattern, "(path=" + filePath + ")"
@@ -396,34 +443,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return summary + " " + gray
 		}
 		return summary
-	case tools.NameGrep:
-		pattern := vals["pattern"]
-		if pattern == "" {
-			return ""
-		}
-		var opts []string
-		filePath := b.displayToolDir(vals["path"])
-		if filePath != "" && filePath != "." {
-			opts = append(opts, "path="+filePath)
-		}
-		if v := vals["glob"]; v != "" {
-			opts = append(opts, "glob="+v)
-		}
-		if len(opts) == 0 {
-			return pattern
-		}
-		return pattern + " (" + strings.Join(opts, ", ") + ")"
-	case tools.NameGlob:
-		pattern := vals["pattern"]
-		if pattern == "" {
-			return ""
-		}
-		filePath := b.displayToolDir(vals["path"])
-		if filePath != "" && filePath != "." {
-			return pattern + " (path=" + filePath + ")"
-		}
-		return pattern
-	case tools.NameShell, tools.NameSpawn, tools.NameLsp:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
 		return formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
@@ -482,22 +502,22 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return ""
 		}
 		var opts []string
-		filePath := vals["path"]
-		if filePath != "" && filePath != "." {
-			opts = append(opts, "path="+filePath)
+		if paths := paramStringList(vals["paths"]); len(paths) > 0 && !(len(paths) == 1 && paths[0] == ".") {
+			opts = append(opts, "paths="+formatStringListParam(paths))
 		}
-		if v := vals["glob"]; v != "" {
-			opts = append(opts, "glob="+v)
+		if includes := paramStringList(vals["includes"]); len(includes) > 0 {
+			opts = append(opts, "includes="+formatStringListParam(includes))
 		}
 		if len(opts) == 0 {
 			return pattern
 		}
 		return pattern + " (" + strings.Join(opts, ", ") + ")"
 	case tools.NameGlob:
-		pattern := vals["pattern"]
-		if pattern == "" {
+		patterns := paramStringList(vals["patterns"])
+		if len(patterns) == 0 {
 			return ""
 		}
+		pattern := formatStringListParam(patterns)
 		filePath := vals["path"]
 		if filePath != "" && filePath != "." {
 			return pattern + " (path=" + filePath + ")"

@@ -125,3 +125,49 @@ func TestValidateToolArgsAcceptsValidArgs(t *testing.T) {
 		t.Fatalf("ValidateToolArgs returned error: %v", err)
 	}
 }
+
+func TestValidateToolArgsCoercesScalarIntoArrayWhenOptedIn(t *testing.T) {
+	tool := validationStubTool{
+		name: "Grep",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"pattern": map[string]any{"type": "string"},
+				"paths": map[string]any{
+					"type":             "array",
+					"items":            map[string]any{"type": "string"},
+					"coerceFromString": true,
+				},
+			},
+			"required":             []string{"pattern"},
+			"additionalProperties": false,
+		},
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"pattern":"x","paths":"internal/tools"}`)); err != nil {
+		t.Fatalf("scalar paths with coerceFromString should pass, got %v", err)
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"pattern":"x","paths":7}`)); err == nil || !strings.Contains(err.Error(), "args.paths must be an array") {
+		t.Fatalf("non-matching scalar type should still fail, got %v", err)
+	}
+}
+
+func TestValidateToolArgsScalarRejectedWithoutCoerceOptIn(t *testing.T) {
+	tool := validationStubTool{
+		name: "Delete",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"paths": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+			"required":             []string{"paths"},
+			"additionalProperties": false,
+		},
+	}
+	err := ValidateToolArgs(tool, json.RawMessage(`{"paths":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "args.paths must be an array") {
+		t.Fatalf("scalar without opt-in should still fail, got %v", err)
+	}
+}

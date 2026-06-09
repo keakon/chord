@@ -25,10 +25,48 @@ func ValidateToolArgs(tool Tool, args json.RawMessage) error {
 		return fmt.Errorf("decode arguments: %w", err)
 	}
 
+	if aliaser, ok := tool.(legacyArgAliaser); ok {
+		value = applyLegacyArgAliases(value, aliaser.legacyArgAliases())
+	}
+
 	if err := validateValueAgainstSchema(value, tool.Parameters(), "args"); err != nil {
 		return fmt.Errorf("arguments do not match %s schema: %w", tool.Name(), err)
 	}
 	return nil
+}
+
+// legacyArgAliaser is implemented by tools that still accept deprecated
+// argument field names mapped onto their current schema fields. Aliases are
+// honored by validation and the tool's own decoding for backward compatibility,
+// but are intentionally excluded from Parameters() so models only ever see the
+// current field names and are not tempted to choose between two spellings.
+type legacyArgAliaser interface {
+	legacyArgAliases() map[string]string
+}
+
+// applyLegacyArgAliases rewrites a decoded argument object in place, renaming
+// any present legacy field to its current name when the current field is not
+// already set. This lets validation accept legacy field names without exposing
+// them in the schema. The current field always wins when both are present.
+func applyLegacyArgAliases(value any, aliases map[string]string) any {
+	if len(aliases) == 0 {
+		return value
+	}
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	for legacy, current := range aliases {
+		legacyVal, hasLegacy := obj[legacy]
+		if !hasLegacy {
+			continue
+		}
+		if _, hasCurrent := obj[current]; !hasCurrent {
+			obj[current] = legacyVal
+		}
+		delete(obj, legacy)
+	}
+	return obj
 }
 
 func validateValueAgainstSchema(value any, schema map[string]any, path string) error {
@@ -79,7 +117,14 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 	case "array":
 		items, ok := value.([]any)
 		if !ok {
-			return fmt.Errorf("%s must be an array", path)
+			// Schemas that opt in via "coerceFromString": true accept a single
+			// scalar matching items.type and treat it as a one-element array.
+			// This keeps the documented contract array-only while preventing
+			// hard failures when models supply a bare string by habit.
+			if !schemaCoercesFromScalar(schema, value) {
+				return fmt.Errorf("%s must be an array", path)
+			}
+			items = []any{value}
 		}
 		if minItems, ok := asInt(schema["minItems"]); ok && len(items) < minItems {
 			return fmt.Errorf("%s must contain at least %d item(s)", path, minItems)
@@ -119,6 +164,35 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 func disallowAdditionalProperties(schema map[string]any) bool {
 	v, ok := schema["additionalProperties"].(bool)
 	return ok && !v
+}
+
+// schemaCoercesFromScalar returns true when the schema explicitly opts in to
+// accepting a single scalar in place of an array, and the supplied value's
+// JSON type matches items.type (or no items.type is declared).
+func schemaCoercesFromScalar(schema map[string]any, value any) bool {
+	coerce, _ := schema["coerceFromString"].(bool)
+	if !coerce {
+		return false
+	}
+	itemSchema, _ := schema["items"].(map[string]any)
+	itemType, _ := itemSchema["type"].(string)
+	if itemType == "" {
+		return true
+	}
+	switch itemType {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "integer":
+		return isIntegerJSONValue(value)
+	case "number":
+		return isNumberJSONValue(value)
+	default:
+		return false
+	}
 }
 
 func requiredFields(raw any) []string {

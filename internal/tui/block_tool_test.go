@@ -1449,7 +1449,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 		{
 			name:        "glob",
 			toolName:    "glob",
-			content:     `{"pattern":"**/*.go"}`,
+			content:     `{"patterns":["**/*.go"]}`,
 			result:      strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
 			wantPrefix:  "✓ glob",
 			wantVisible: "k.go",
@@ -1644,12 +1644,12 @@ func TestGrepHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 		ID:                1,
 		Type:              BlockToolCall,
 		ToolName:          "grep",
-		Content:           fmt.Sprintf(`{"pattern":"TODO","path":%q,"glob":"*.go"}`, abs),
+		Content:           fmt.Sprintf(`{"pattern":"TODO","paths":[%q],"includes":["*.go"]}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "grep TODO (path=internal/tui, glob=*.go)") {
+	if !strings.Contains(joined, "grep TODO (paths=internal/tui, includes=*.go)") {
 		t.Fatalf("expected grep header to show relative search path; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
@@ -1664,7 +1664,7 @@ func TestGlobHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 		ID:                1,
 		Type:              BlockToolCall,
 		ToolName:          "glob",
-		Content:           fmt.Sprintf(`{"pattern":"**/*.go","path":%q}`, abs),
+		Content:           fmt.Sprintf(`{"patterns":["**/*.go"],"path":%q}`, abs),
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
@@ -1674,6 +1674,39 @@ func TestGlobHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect glob header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestSearchHeadersShowMultipleArrayParams(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	cmd := filepath.Join(wd, "cmd")
+	internal := filepath.Join(wd, "internal")
+	grepBlock := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "grep",
+		Content:           fmt.Sprintf(`{"pattern":"TODO","paths":[%q,%q],"includes":["**/*.go","**/*.md"]}`, cmd, internal),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	grepJoined := stripANSI(strings.Join(grepBlock.Render(140, ""), "\n"))
+	if !strings.Contains(grepJoined, "grep TODO (paths=cmd,internal, includes=**/*.go,**/*.md)") {
+		t.Fatalf("expected grep header to show multiple paths/includes; got:\n%s", grepJoined)
+	}
+	if strings.Contains(grepJoined, cmd) || strings.Contains(grepJoined, internal) {
+		t.Fatalf("did not expect grep header to show absolute paths; got:\n%s", grepJoined)
+	}
+
+	globBlock := &Block{
+		ID:         2,
+		Type:       BlockToolCall,
+		ToolName:   "glob",
+		Content:    `{"patterns":["**/*.go","**/*.md"],"path":"."}`,
+		ResultDone: true,
+	}
+	globJoined := stripANSI(strings.Join(globBlock.Render(140, ""), "\n"))
+	if !strings.Contains(globJoined, "glob **/*.go,**/*.md") {
+		t.Fatalf("expected glob header to show multiple patterns; got:\n%s", globJoined)
 	}
 }
 
@@ -1947,7 +1980,7 @@ func TestCollapsedGlobShowsFileCountSummary(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "glob",
-		Content:                `{"pattern":"**/*.go"}`,
+		Content:                `{"patterns":["**/*.go"]}`,
 		ResultContent:          "a.go\nb.go\nc.go",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
@@ -1986,7 +2019,7 @@ func TestCollapsedGlobOmitsLowCountSummary(t *testing.T) {
 				ID:                     1,
 				Type:                   BlockToolCall,
 				ToolName:               "glob",
-				Content:                `{"pattern":"**/*.go"}`,
+				Content:                `{"patterns":["**/*.go"]}`,
 				ResultContent:          tt.resultContent,
 				ResultDone:             true,
 				ToolCallDetailExpanded: false,

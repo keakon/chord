@@ -79,6 +79,90 @@ delete:
 	}
 }
 
+func TestEvaluateToolPermissionGlobDenyWinsAcrossPatterns(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+glob:
+  "allowed/**": allow
+  "secret/**": deny
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := json.RawMessage(`{"patterns":["allowed/**","secret/**"]}`)
+
+	got := evaluateToolPermission(ruleset, "glob", args)
+	if got.Action != permission.ActionDeny {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
+	}
+	if got.MatchArgument != "secret/**" {
+		t.Fatalf("match argument = %q, want secret/**", got.MatchArgument)
+	}
+}
+
+func TestEvaluateToolPermissionGlobAskWinsOverAllowedPattern(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+glob:
+  "allowed/**": allow
+  "ask/**": ask
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := json.RawMessage(`{"patterns":["allowed/**","ask/**"]}`)
+
+	got := evaluateToolPermission(ruleset, "glob", args)
+	if got.Action != permission.ActionAsk {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+	}
+	if got.MatchArgument != "ask/**" {
+		t.Fatalf("match argument = %q, want ask/**", got.MatchArgument)
+	}
+	if want := []string{"ask/**"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
+		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
+	}
+}
+
+func TestEvaluateToolPermissionGlobAllPatternsAllow(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+glob:
+  "**/*.go": allow
+  "**/*.md": allow
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := json.RawMessage(`{"patterns":["**/*.go","**/*.md"]}`)
+
+	got := evaluateToolPermission(ruleset, "glob", args)
+	if got.Action != permission.ActionAllow {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
+	}
+}
+
+func TestEvaluateToolPermissionGlobScalarPatternMatchesArrayDeny(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": allow
+glob:
+  "secret/**": deny
+`)
+	ruleset := permission.ParsePermission(&node)
+
+	arrayArgs := json.RawMessage(`{"patterns":["secret/**"]}`)
+	scalarArgs := json.RawMessage(`{"patterns":"secret/**"}`)
+
+	arrayGot := evaluateToolPermission(ruleset, "glob", arrayArgs)
+	scalarGot := evaluateToolPermission(ruleset, "glob", scalarArgs)
+
+	if arrayGot.Action != permission.ActionDeny {
+		t.Fatalf("array action = %q, want %q", arrayGot.Action, permission.ActionDeny)
+	}
+	// A single bare-string pattern must not bypass a deny rule that the array
+	// form would have matched.
+	if scalarGot.Action != arrayGot.Action {
+		t.Fatalf("scalar action = %q, want %q (parity with array form)", scalarGot.Action, arrayGot.Action)
+	}
+	if scalarGot.MatchArgument != "secret/**" {
+		t.Fatalf("scalar match argument = %q, want secret/**", scalarGot.MatchArgument)
+	}
+}
+
 func TestEvaluateToolPermissionBashDenyWinsForCompoundCommand(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny

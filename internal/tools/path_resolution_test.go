@@ -266,8 +266,8 @@ func TestGlobToolSupportsTildeBasePath(t *testing.T) {
 	}
 
 	out, err := (GlobTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
-		"path":    "~",
-		"pattern": "*.go",
+		"path":     "~",
+		"patterns": []string{"*.go"},
 	}))
 	if err != nil {
 		t.Fatalf("GlobTool.Execute: %v", err)
@@ -286,7 +286,7 @@ func TestGrepToolSupportsTildePath(t *testing.T) {
 	}
 
 	out, err := (GrepTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
-		"path":    tildePathForTest("notes.txt"),
+		"paths":   []string{tildePathForTest("notes.txt")},
 		"pattern": "match",
 	}))
 	if err != nil {

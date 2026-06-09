@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	mainToolOutputGuidance = "Process it with " + tools.NameRead + "(path, limit, offset) or " + tools.NameGrep + "(path=...) in chunks. Use the " + tools.NameDelegate + " tool only when you need a separate agent for substantial multi-step work on this content."
+	mainToolOutputGuidance = "Process it with " + tools.NameRead + "(path, limit, offset) or " + tools.NameGrep + "(paths=[...]) in chunks. Use the " + tools.NameDelegate + " tool only when you need a separate agent for substantial multi-step work on this content."
 	subToolOutputGuidance  = "Use " + tools.NameGrep + " to search the full content or " + tools.NameRead + " with offset/limit to view specific sections."
 )
 

@@ -13,7 +13,7 @@ func TestCompactGlobOutputSummaryUsesCanonicalToolName(t *testing.T) {
 		Content:  "internal/agent/compaction_policy.go",
 		Meta: toolCallMeta{
 			Name: tools.NameGlob,
-			Args: `{"pattern":"**/*.go","path":"internal"}`,
+			Args: `{"patterns":["**/*.go"],"path":"internal"}`,
 		},
 	})
 	if !strings.Contains(summary, "Older "+tools.NameGlob+" results summarized for this request to save context") {

@@ -337,7 +337,7 @@ func buildWebFetchConfirmSummary(summary *confirmSummary, parsed map[string]any)
 }
 
 func buildGenericConfirmSummary(summary *confirmSummary, parsed map[string]any) {
-	priority := []string{"path", "paths", "reason", "url", "command", "workdir", "timeout", "limit", "offset", "pattern", "glob"}
+	priority := []string{"path", "paths", "patterns", "includes", "reason", "url", "command", "workdir", "timeout", "limit", "offset", "pattern"}
 	seen := map[string]bool{}
 	for _, key := range priority {
 		value, ok := parsed[key]

@@ -595,6 +595,45 @@ func TestConvertCodexRollout_WebSearchEndRestoresAsUnsupportedToolCard(t *testin
 	}
 }
 
+func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
+	grepRaw := codexNormalizeGrepArgs(map[string]any{
+		"pattern": "TODO",
+		"path":    "internal",
+		"glob":    "**/*.go",
+	})
+	var grepArgs map[string]any
+	if err := json.Unmarshal(grepRaw, &grepArgs); err != nil {
+		t.Fatalf("unmarshal grep args: %v", err)
+	}
+	if _, ok := grepArgs["path"]; ok {
+		t.Fatalf("grep args use legacy path field: %#v", grepArgs)
+	}
+	if _, ok := grepArgs["glob"]; ok {
+		t.Fatalf("grep args use legacy glob field: %#v", grepArgs)
+	}
+	paths, _ := grepArgs["paths"].([]any)
+	includes, _ := grepArgs["includes"].([]any)
+	if grepArgs["pattern"] != "TODO" || len(paths) != 1 || paths[0] != "internal" || len(includes) != 1 || includes[0] != "**/*.go" {
+		t.Fatalf("grep args=%#v", grepArgs)
+	}
+
+	globRaw := codexNormalizeGlobArgs(map[string]any{
+		"pattern": "**/*.go",
+		"path":    ".",
+	})
+	var globArgs map[string]any
+	if err := json.Unmarshal(globRaw, &globArgs); err != nil {
+		t.Fatalf("unmarshal glob args: %v", err)
+	}
+	if _, ok := globArgs["pattern"]; ok {
+		t.Fatalf("glob args use legacy pattern field: %#v", globArgs)
+	}
+	patterns, _ := globArgs["patterns"].([]any)
+	if len(patterns) != 1 || patterns[0] != "**/*.go" || globArgs["path"] != "." {
+		t.Fatalf("glob args=%#v", globArgs)
+	}
+}
+
 func TestImport_Codex_WritesRecoverableSession(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("CHORD_STATE_DIR", stateDir)

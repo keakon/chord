@@ -2,26 +2,69 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // GrepTool searches file contents using a regex pattern.
 type GrepTool struct{}
 
 type grepArgs struct {
-	Pattern  string `json:"pattern"`
-	FilePath string `json:"path,omitempty"`
-	Include  string `json:"glob,omitempty"`
+	Pattern         string   `json:"pattern"`
+	Paths           []string `json:"paths,omitempty"`
+	Includes        []string `json:"includes,omitempty"`
+	PathsCoerced    bool     `json:"-"`
+	IncludesCoerced bool     `json:"-"`
+}
+
+// UnmarshalJSON accepts either a string or array of strings for paths and
+// includes, recording whether a scalar was coerced into a single-element list.
+// This keeps strict array semantics in the documented schema while preventing
+// hard failures when models supply a single string by habit.
+func (a *grepArgs) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Pattern  string          `json:"pattern"`
+		Paths    json.RawMessage `json:"paths,omitempty"`
+		Includes json.RawMessage `json:"includes,omitempty"`
+		Path     json.RawMessage `json:"path,omitempty"`
+		Glob     json.RawMessage `json:"glob,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	a.Pattern = raw.Pattern
+	// Accept deprecated singular fields when their current counterparts are
+	// absent so legacy-shaped calls still work; current fields always win.
+	if len(raw.Paths) == 0 {
+		raw.Paths = raw.Path
+	}
+	if len(raw.Includes) == 0 {
+		raw.Includes = raw.Glob
+	}
+	paths, pathsCoerced, err := DecodeStringOrList(raw.Paths)
+	if err != nil {
+		return fmt.Errorf("paths: %w", err)
+	}
+	includes, includesCoerced, err := DecodeStringOrList(raw.Includes)
+	if err != nil {
+		return fmt.Errorf("includes: %w", err)
+	}
+	a.Paths = paths
+	a.Includes = includes
+	a.PathsCoerced = pathsCoerced
+	a.IncludesCoerced = includesCoerced
+	return nil
 }
 
 const (
@@ -34,12 +77,13 @@ var errMaxGrepMatchesReached = errors.New("max grep matches reached")
 func (GrepTool) Name() string { return NameGrep }
 
 func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameGrep, pathToolConcurrencyPolicy(args, "path"))
+	return normalizeConcurrencyPolicy(NameGrep, pathsToolConcurrencyPolicy(args, "paths"))
 }
 
 func (GrepTool) Description() string {
-	return "Search file contents using a regular expression. pattern uses regex syntax, not glob syntax or plain text; escape literal special characters like \\[\\], (), and {} when needed." +
-		" Use glob only to filter filenames by basename, not paths." +
+	return "Search file contents using a regular expression. If pattern is not valid regex, it is safely searched as literal text and the result reports that fallback." +
+		" Use paths for one or more files/directories (JSON array, e.g. paths: [\"internal\", \"cmd\"]), and includes for optional path globs such as **/*.go (JSON array, e.g. includes: [\"**/*.go\"])." +
+		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
 		" For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool when the file type has LSP coverage."
@@ -51,15 +95,23 @@ func (GrepTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Regular expression for file contents. This is regex syntax, not a glob pattern or plain text (for example, use .* rather than * or **, and escape literal [] as \\[\\]).",
+				"description": "Regular expression for file contents. If invalid as regex, it is searched as literal text and the result reports that fallback.",
 			},
-			"path": map[string]any{
-				"type":        "string",
-				"description": "Single file or directory to search; for multiple roots, call grep multiple times. Supports ~ for the current user's home directory. Defaults to current directory.",
+			"paths": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "string",
+				},
+				"description":      "One or more files/directories to search (JSON array, e.g. [\"internal\", \"cmd\"]). Supports ~ for the current user's home directory. Defaults to the current directory when omitted.",
+				"coerceFromString": true,
 			},
-			"glob": map[string]any{
-				"type":        "string",
-				"description": "Filename-only glob filter, matched against basename (e.g. \"*.go\", \"*.{ts,tsx}\"); not a recursive path glob.",
+			"includes": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "string",
+				},
+				"description":      "Optional path glob filters relative to each searched directory, as a JSON array (e.g. [\"**/*.go\"] or [\"internal/**/*.ts\", \"cmd/**/*.ts\"]). Omit to search all non-ignored text files.",
+				"coerceFromString": true,
 			},
 		},
 		"required":             []string{"pattern"},
@@ -68,6 +120,13 @@ func (GrepTool) Parameters() map[string]any {
 }
 
 func (GrepTool) IsReadOnly() bool { return true }
+
+// legacyArgAliases maps deprecated singular field names to the current plural
+// schema fields so legacy-shaped calls validate without exposing the old names
+// in Parameters().
+func (GrepTool) legacyArgAliases() map[string]string {
+	return map[string]string{"path": "paths", "glob": "includes"}
+}
 
 func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	startedAt := time.Now()
@@ -80,133 +139,49 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 
 	re, err := regexp.Compile(a.Pattern)
+	literalFallback := false
 	if err != nil {
-		return "", fmt.Errorf("invalid regex pattern: %w (pattern uses regex syntax; escape literal special characters such as [] as \\[\\])", err)
-	}
-
-	searchPath := a.FilePath
-	if searchPath == "" {
-		searchPath = "."
-	}
-	resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
-	if err != nil {
-		return "", grepPathErrorWithHint(searchPath, err)
+		re = regexp.MustCompile(regexp.QuoteMeta(a.Pattern))
+		literalFallback = true
 	}
 
 	var matches []string
 	var outputBytes int
 	var scannedFiles int64
 	truncated := false
+	paths := grepSearchPaths(a)
+	includes := grepIncludes(a)
+	searched := make([]string, 0, len(paths))
 
-	if !info.IsDir() {
-		if err := ensureRegularFilePath(searchPath, info); err != nil {
-			return "", err
+	for _, searchPath := range paths {
+		resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
+		if err != nil {
+			return "", grepPathErrorWithHint(searchPath, err)
 		}
-		// Search a single file. Honor the binary-extension fast-path so that
-		// e.g. `Grep pattern path=foo.pyc` never returns mojibake.
-		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
-			return "No matches found.", nil
-		}
-		fileMatches, truncatedByBytes, err := searchFile(resolvedSearchPath, re, maxGrepMatches, maxGrepOutputBytes)
+		searched = append(searched, resolvedSearchPath)
+		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
 		if err != nil {
 			return "", err
 		}
-		matches = fileMatches
-		outputBytes = joinedLinesBytes(matches)
-		truncated = truncatedByBytes
-		scannedFiles = 1
-		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
-	} else {
-		// Walk the directory tree.
-		// Load .gitignore rules from the search root (if any).
-		ignore := newGitIgnoreMatcher(resolvedSearchPath)
-
-		err = filepath.WalkDir(resolvedSearchPath, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return nil // skip errors
-			}
-
-			// Skip known VCS / tool directories.
-			if d.IsDir() && skipDirNames[d.Name()] {
-				return filepath.SkipDir
-			}
-
-			// Skip directories matched by .gitignore.
-			if d.IsDir() {
-				if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
-					rel = filepath.ToSlash(rel)
-					if ignore.Match(rel, true) {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			}
-
-			// Skip files matched by .gitignore.
-			if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
-				rel = filepath.ToSlash(rel)
-				if ignore.Match(rel, false) {
-					return nil
-				}
-			}
-
-			// Apply include filter on the filename.
-			if a.Include != "" {
-				matched, matchErr := matchIncludePattern(d.Name(), a.Include)
-				if matchErr != nil || !matched {
-					return nil
-				}
-			}
-
-			// Skip binary/unreadable files by checking if the file is regular.
-			if !d.Type().IsRegular() {
-				return nil
-			}
-
-			// Fast-path: skip files with known binary extensions without
-			// opening them. searchFile still does a content sniff for files
-			// with no extension or with a text-looking extension but binary
-			// contents.
-			if IsBinaryExtension(d.Name()) {
-				return nil
-			}
-
-			remainingMatches := maxGrepMatches - len(matches)
-			remainingBytes := maxGrepOutputBytes - outputBytes
-			if remainingMatches <= 0 || remainingBytes <= 0 {
-				truncated = true
-				return errMaxGrepMatchesReached
-			}
-			fileMatches, truncatedByBytes, err := searchFile(path, re, remainingMatches, remainingBytes)
-			if err != nil {
-				return nil // skip files we can't read
-			}
-			matches = append(matches, fileMatches...)
-			outputBytes = joinedLinesBytes(matches)
-			scannedFiles++
-			if scannedFiles <= 5 || scannedFiles%10 == 0 {
-				reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
-			}
-
-			// Stop early if we have enough matches.
-			if len(matches) >= maxGrepMatches || truncatedByBytes || outputBytes >= maxGrepOutputBytes {
-				truncated = true
-				return errMaxGrepMatchesReached
-			}
-			return nil
-		})
-		// Ignore the max-match sentinel and surface real walk failures.
-		if err != nil && !errors.Is(err, errMaxGrepMatchesReached) {
-			return "", fmt.Errorf("walking directory: %w", err)
-		}
-		if scannedFiles > 0 {
-			reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
+		matches = append(matches, rootMatches...)
+		outputBytes += rootBytes
+		scannedFiles += rootScanned
+		if rootTruncated || len(matches) >= maxGrepMatches || outputBytes >= maxGrepOutputBytes {
+			truncated = true
+			break
 		}
 	}
 
+	filter := strings.Join(includes, ",")
+	searchLabel := strings.Join(searched, ",")
+	notes := grepCoerceNotes(a)
 	if len(matches) == 0 {
-		logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
-		return "No matches found.", nil
+		logSlowSearch("Grep", searchLabel, a.Pattern, filter, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
+		msg := "No matches found."
+		if literalFallback {
+			msg = "No matches found. (pattern was invalid regex; searched as literal text)"
+		}
+		return prependNotes(notes, msg), nil
 	}
 
 	if len(matches) > maxGrepMatches {
@@ -214,11 +189,172 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	}
 
 	result := strings.Join(matches, "\n")
-	if truncated || len(matches) == maxGrepMatches || len(result) >= maxGrepOutputBytes {
-		result += fmt.Sprintf("\n\n(showing first %d matches within %d KiB; narrow path/glob/pattern for more precise results)", len(matches), maxGrepOutputBytes/1024)
+	if literalFallback {
+		result = "Note: pattern was invalid regex; searched as literal text.\n" + result
 	}
-	logSlowSearch("Grep", resolvedSearchPath, a.Pattern, a.Include, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
+	result = prependNotes(notes, result)
+	if truncated || len(matches) == maxGrepMatches || len(result) >= maxGrepOutputBytes {
+		result += fmt.Sprintf("\n\n(showing first %d matches within %d KiB; narrow paths/includes/pattern for more precise results)", len(matches), maxGrepOutputBytes/1024)
+	}
+	logSlowSearch("Grep", searchLabel, a.Pattern, filter, startedAt, "scanned_files", int(scannedFiles), len(matches), truncated)
 	return result, nil
+}
+
+func grepSearchPaths(a grepArgs) []string {
+	paths := normalizeStringList(a.Paths)
+	if len(paths) == 0 {
+		paths = []string{"."}
+	}
+	return paths
+}
+
+func grepIncludes(a grepArgs) []string {
+	return normalizeStringList(a.Includes)
+}
+
+func grepCoerceNotes(a grepArgs) []string {
+	var notes []string
+	if a.PathsCoerced {
+		notes = append(notes, "Note: paths was a single string; treated as one path. Prefer paths: [...] next time.")
+	}
+	if a.IncludesCoerced {
+		notes = append(notes, "Note: includes was a single string; treated as one filter. Prefer includes: [...] next time.")
+	}
+	return notes
+}
+
+func prependNotes(notes []string, body string) string {
+	if len(notes) == 0 {
+		return body
+	}
+	return strings.Join(notes, "\n") + "\n" + body
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+// DecodeStringOrList decodes a JSON value that may be either a single string or
+// an array of strings. coerced is true when the caller supplied a bare string,
+// so the executor can attach a result-level hint nudging the documented array
+// shape and permission/display layers can reproduce the same scalar->array
+// coercion instead of falling back to a wildcard argument. An empty/missing
+// field returns (nil, false, nil).
+func DecodeStringOrList(raw json.RawMessage) ([]string, bool, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || string(raw) == "null" {
+		return nil, false, nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return list, false, nil
+	}
+	var single string
+	if err := json.Unmarshal(raw, &single); err != nil {
+		return nil, false, err
+	}
+	return []string{single}, true, nil
+}
+
+func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
+	if maxMatches <= 0 || maxBytes <= 0 {
+		return nil, 0, 0, true, nil
+	}
+	if !info.IsDir() {
+		if err := ensureRegularFilePath(searchPath, info); err != nil {
+			return nil, 0, 0, false, err
+		}
+		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
+			return nil, 0, 1, false, nil
+		}
+		fileMatches, truncated, err := searchFile(resolvedSearchPath, re, maxMatches, maxBytes)
+		if err != nil {
+			return nil, 0, 0, false, err
+		}
+		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: 1})
+		return fileMatches, joinedLinesBytes(fileMatches), 1, truncated, nil
+	}
+
+	var matches []string
+	var outputBytes int
+	var scannedFiles int64
+	truncated := false
+	ignore := newGitIgnoreMatcher(resolvedSearchPath)
+	err := filepath.WalkDir(resolvedSearchPath, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() && skipDirNames[d.Name()] {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
+				rel = filepath.ToSlash(rel)
+				if ignore.Match(rel, true) {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
+			rel = filepath.ToSlash(rel)
+			if ignore.Match(rel, false) {
+				return nil
+			}
+			if len(includes) > 0 {
+				matched, matchErr := matchAnyIncludePattern(rel, includes)
+				if matchErr != nil || !matched {
+					return nil
+				}
+			}
+		}
+		if !d.Type().IsRegular() || IsBinaryExtension(d.Name()) {
+			return nil
+		}
+		remainingMatches := maxMatches - len(matches)
+		remainingBytes := maxBytes - outputBytes
+		if remainingMatches <= 0 || remainingBytes <= 0 {
+			truncated = true
+			return errMaxGrepMatchesReached
+		}
+		fileMatches, truncatedByBytes, err := searchFile(path, re, remainingMatches, remainingBytes)
+		if err != nil {
+			return nil
+		}
+		matches = append(matches, fileMatches...)
+		outputBytes = joinedLinesBytes(matches)
+		scannedFiles++
+		if scannedFiles <= 5 || scannedFiles%10 == 0 {
+			reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
+		}
+		if len(matches) >= maxMatches || truncatedByBytes || outputBytes >= maxBytes {
+			truncated = true
+			return errMaxGrepMatchesReached
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errMaxGrepMatchesReached) {
+		return nil, 0, scannedFiles, truncated, fmt.Errorf("walking directory: %w", err)
+	}
+	if scannedFiles > 0 {
+		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
+	}
+	return matches, outputBytes, scannedFiles, truncated, nil
 }
 
 func grepPathErrorWithHint(path string, err error) error {
@@ -238,7 +374,7 @@ func grepPathErrorWithHint(path string, err error) error {
 			return err
 		}
 	}
-	return fmt.Errorf("%w. grep.path accepts one file or directory path only; to search multiple directories, run separate grep calls or search from a common parent", err)
+	return fmt.Errorf("%w. grep.paths accepts an array of file or directory paths; to search multiple directories, pass each path as a separate array item", err)
 }
 
 // searchFile reads a file and returns matching lines in "path:linenum:content" format.
@@ -355,4 +491,22 @@ func matchIncludePattern(name string, pattern string) (bool, error) {
 	}
 
 	return filepath.Match(pattern, name)
+}
+
+func matchAnyIncludePattern(path string, patterns []string) (bool, error) {
+	base := filepath.Base(path)
+	for _, pattern := range patterns {
+		if strings.Contains(pattern, "/") || strings.Contains(pattern, "**") {
+			matched, err := doublestar.PathMatch(pattern, path)
+			if err != nil || matched {
+				return matched, err
+			}
+			continue
+		}
+		matched, err := matchIncludePattern(base, pattern)
+		if err != nil || matched {
+			return matched, err
+		}
+	}
+	return false, nil
 }

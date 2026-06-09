@@ -50,7 +50,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	assistant := message.Message{
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{
-			{ID: "grep-1", Name: "grep", Args: []byte(`{"pattern":"TODO","path":"internal","glob":"**/*.go"}`)},
+			{ID: "grep-1", Name: "grep", Args: []byte(`{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`)},
 		},
 	}
 	a.ctxMgr.Append(assistant)
@@ -58,7 +58,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	a.flushPersist()
 	a.turn.PendingToolCalls.Store(1)
 	a.turn.TotalToolCalls.Store(1)
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","path":"internal","glob":"**/*.go"}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
 	payload := &tools.SpawnFinishedPayload{
 		BackgroundID: "job-1",
@@ -179,13 +179,13 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 	assistant := message.Message{
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{
-			{ID: "grep-1", Name: "grep", Args: []byte(`{"pattern":"TODO","path":"internal","glob":"**/*.go"}`)},
+			{ID: "grep-1", Name: "grep", Args: []byte(`{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`)},
 		},
 	}
 	a.ctxMgr.Append(assistant)
 	a.turn.PendingToolCalls.Store(1)
 	a.turn.TotalToolCalls.Store(1)
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","path":"internal","glob":"**/*.go"}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
 	payload := &tools.SpawnFinishedPayload{
 		BackgroundID: "job-1",
@@ -200,7 +200,7 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 	a.handleToolResult(Event{Type: EventToolResult, TurnID: a.turn.ID, Payload: &ToolResultPayload{
 		CallID:   "grep-1",
 		Name:     "grep",
-		ArgsJSON: `{"pattern":"TODO","path":"internal","glob":"**/*.go"}`,
+		ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`,
 		Result:   "No matches found.",
 		TurnID:   a.turn.ID,
 	}})

@@ -624,19 +624,21 @@ func compactSearchScope(ctx requestReductionContext) string {
 	switch ctx.ToolName {
 	case tools.NameGrep:
 		var parsed struct {
-			Pattern string `json:"pattern"`
-			Path    string `json:"path"`
-			Glob    string `json:"glob"`
+			Pattern  string   `json:"pattern"`
+			Paths    []string `json:"paths"`
+			Includes []string `json:"includes"`
 		}
 		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
-		return fmt.Sprintf("pattern=%q path=%q glob=%q", strings.TrimSpace(parsed.Pattern), blankToDefault(strings.TrimSpace(parsed.Path), "."), strings.TrimSpace(parsed.Glob))
+		paths := compactSearchList(parsed.Paths, ".")
+		includes := compactSearchList(parsed.Includes, "")
+		return fmt.Sprintf("pattern=%q paths=%q includes=%q", strings.TrimSpace(parsed.Pattern), paths, includes)
 	case tools.NameGlob:
 		var parsed struct {
-			Pattern string `json:"pattern"`
-			Path    string `json:"path"`
+			Patterns []string `json:"patterns"`
+			Path     string   `json:"path"`
 		}
 		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
-		return fmt.Sprintf("pattern=%q path=%q", strings.TrimSpace(parsed.Pattern), blankToDefault(strings.TrimSpace(parsed.Path), "."))
+		return fmt.Sprintf("patterns=%q path=%q", compactSearchList(parsed.Patterns, ""), blankToDefault(strings.TrimSpace(parsed.Path), "."))
 	case tools.NameLsp:
 		var parsed struct {
 			Operation string `json:"operation"`
@@ -648,6 +650,19 @@ func compactSearchScope(ctx requestReductionContext) string {
 	default:
 		return "query preserved"
 	}
+}
+
+func compactSearchList(values []string, fallback string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	if len(parts) == 0 {
+		return fallback
+	}
+	return strings.Join(parts, ",")
 }
 
 func compactJSONBlobSummary(ctx requestReductionContext) (string, bool) {

@@ -104,12 +104,22 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 		if err == nil && len(req.Paths) > 0 {
 			return req.Paths[0]
 		}
-	case tools.NameGrep, tools.NameGlob:
+	case tools.NameGrep:
 		var parsed struct {
 			Pattern string `json:"pattern"`
 		}
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Pattern != "" {
 			return parsed.Pattern
+		}
+	case tools.NameGlob:
+		var parsed struct {
+			Patterns json.RawMessage `json:"patterns"`
+		}
+		if err := json.Unmarshal(args, &parsed); err == nil {
+			// patterns may be a JSON array or a single bare string.
+			if patterns, _, derr := tools.DecodeStringOrList(parsed.Patterns); derr == nil && len(patterns) > 0 {
+				return patterns[0]
+			}
 		}
 	}
 	return "*"

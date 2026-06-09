@@ -17,7 +17,7 @@ func TestBuildToolExecutionBatchesKeepsMutationsAsBoundaries(t *testing.T) {
 	calls := []message.ToolCall{
 		{ID: "1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
 		{ID: "2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"README.md","content":"x"}`)},
-		{ID: "3", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","path":"."}`)},
+		{ID: "3", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["."]}`)},
 	}
 
 	batches := buildToolExecutionBatches(registry, calls)
@@ -38,8 +38,8 @@ func TestBuildToolExecutionBatchesGroupsOnlyConsecutiveReadOnlyCalls(t *testing.
 	registry.Register(tools.GlobTool{})
 	calls := []message.ToolCall{
 		{ID: "1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
-		{ID: "2", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","path":"docs"}`)},
-		{ID: "3", Name: tools.NameGlob, Args: json.RawMessage(`{"path":"src","pattern":"**/*.go"}`)},
+		{ID: "2", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["docs"]}`)},
+		{ID: "3", Name: tools.NameGlob, Args: json.RawMessage(`{"path":"src","patterns":["**/*.go"]}`)},
 	}
 
 	batches := buildToolExecutionBatches(registry, calls)
@@ -56,7 +56,7 @@ func TestBuildToolExecutionBatchesSplitsDirectoryReadFromFileWrite(t *testing.T)
 	registry.Register(tools.GrepTool{})
 	registry.Register(tools.WriteTool{})
 	calls := []message.ToolCall{
-		{ID: "1", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","path":"."}`)},
+		{ID: "1", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["."]}`)},
 		{ID: "2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"internal/agent/main.go","content":"x"}`)},
 	}
 
