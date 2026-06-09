@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -263,7 +264,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 
 	// Persist assistant message for crash recovery (including usage for session resume).
 	if a.recovery != nil {
-		a.persistAsync("main", assistantMsg)
+		a.persistAsync(identity.MainAgentID, assistantMsg)
 	}
 
 	// Thinking translation is a best-effort post-processing enhancement. It is
@@ -573,7 +574,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) {
 	}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
-		a.persistAsync("main", msg)
+		a.persistAsync(identity.MainAgentID, msg)
 	}
 	log.Debugf("saved partial assistant message after stream interruption len=%v turn_id=%v", len(text), turn.ID)
 }

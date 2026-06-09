@@ -107,7 +107,7 @@ func BuildFilePartsWithOptions(paths []string, resolvePath func(string) string, 
 			result.TruncatedFiles++
 		}
 		result.Parts = append(result.Parts, message.ContentPart{
-			Type: "text",
+			Type: message.ContentPartText,
 			Text: fmt.Sprintf("<file path=%q>\n%s\n</file>", path, body),
 		})
 		result.LoadedFiles++
@@ -118,7 +118,7 @@ func BuildFilePartsWithOptions(paths []string, resolvePath func(string) string, 
 	}
 	if opts.MaxTotalBytes > 0 && result.OmittedFiles > 0 {
 		result.Parts = append(result.Parts, message.ContentPart{
-			Type: "text",
+			Type: message.ContentPartText,
 			Text: fmt.Sprintf("[... additional files omitted after reaching the total file-context budget (%s)]", formatByteBudget(opts.MaxTotalBytes)),
 		})
 	}

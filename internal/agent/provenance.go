@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -114,13 +115,13 @@ func splitModelRef(ref string) (providerID, modelID, variant string) {
 
 func wireFamilyFromProviderType(providerType string) string {
 	switch strings.ToLower(strings.TrimSpace(providerType)) {
-	case "messages":
+	case config.ProviderTypeMessages:
 		return "anthropic"
-	case "chat-completions":
+	case config.ProviderTypeChatCompletions:
 		return "openai-chat"
-	case "responses":
+	case config.ProviderTypeResponses:
 		return "openai-responses"
-	case "generate-content":
+	case config.ProviderTypeGenerateContent:
 		return "gemini"
 	default:
 		return "unknown"

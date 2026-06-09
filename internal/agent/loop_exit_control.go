@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -193,10 +195,10 @@ func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
 	if callID == "" || result == "" {
 		return
 	}
-	toolMsg := message.Message{Role: "tool", Content: result, ToolCallID: callID, ToolStatus: string(ToolResultStatusSuccess)}
+	toolMsg := message.Message{Role: message.RoleTool, Content: result, ToolCallID: callID, ToolStatus: string(ToolResultStatusSuccess)}
 	a.ctxMgr.Append(toolMsg)
 	if a.recovery != nil {
-		a.persistAsync("main", toolMsg)
+		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	if a.turn != nil {
 		a.recordEvidenceFromMessage(toolMsg)
@@ -258,7 +260,7 @@ func (a *MainAgent) shouldRequireToolCallInLoop() bool {
 	// Conservative gate: only enable request-level tool_choice on OpenAI-compatible
 	// provider families that are known to carry tool_choice in this codebase.
 	switch provider.Type() {
-	case "chat-completions", "chat_completions", "responses":
+	case config.ProviderTypeChatCompletions, config.ProviderTypeChatCompletionsLegacy, config.ProviderTypeResponses:
 		return true
 	default:
 		return false

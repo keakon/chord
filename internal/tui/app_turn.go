@@ -7,6 +7,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -137,7 +138,7 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 	// Update terminal title from the first user message.
 	if m.terminalTitleBase == "" {
 		content := draft.Content
-		if len(draft.Parts) > 0 && draft.Parts[0].Type == "text" {
+		if len(draft.Parts) > 0 && draft.Parts[0].Type == message.ContentPartText {
 			content = draft.Parts[0].Text
 		}
 		m.setTerminalTitleFromMessage(content)
@@ -173,7 +174,7 @@ func (m *Model) drainQueuedDrafts() tea.Cmd {
 
 func (m *Model) resetStreamingToIdle() {
 	m.finalizeTurn()
-	m.markAgentIdle("main")
+	m.markAgentIdle(identity.MainAgentID)
 	m.stopActiveAnimationIfIdle()
 }
 
@@ -182,7 +183,7 @@ func (m *Model) resetStreamingToIdle() {
 // but active streaming" from "connection silently lost".
 func (m *Model) touchStreamDelta(agentID string) {
 	if agentID == "" {
-		agentID = "main"
+		agentID = identity.MainAgentID
 	}
 	m.streamLastDeltaAt[agentID] = time.Now()
 }
@@ -197,7 +198,7 @@ func (m Model) inflightDraftBelongsToAgent(agentID string) bool {
 func (m *Model) streamingStale() bool {
 	aid := m.focusedAgentID
 	if aid == "" {
-		aid = "main"
+		aid = identity.MainAgentID
 	}
 	a, ok := m.activities[aid]
 	if !ok || a.Type != agent.ActivityStreaming {
@@ -220,7 +221,7 @@ func (m *Model) isAgentBusy() bool {
 
 func (m *Model) focusedAgentIDOrMain() string {
 	if m.focusedAgentID == "" {
-		return "main"
+		return identity.MainAgentID
 	}
 	return m.focusedAgentID
 }
@@ -271,10 +272,10 @@ func (m *Model) tryContinue() tea.Cmd {
 	}
 	last := msgs[len(msgs)-1]
 	switch last.Role {
-	case "user", "tool":
+	case message.RoleUser, message.RoleTool:
 		m.agent.ContinueFromContext()
 		return m.startActiveAnimation()
-	case "assistant":
+	case message.RoleAssistant:
 		if len(last.ToolCalls) > 0 {
 			m.agent.ContinueFromContext()
 			return m.startActiveAnimation()
@@ -321,7 +322,7 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 	msgs := m.agent.GetMessages()
 	var last *message.Message
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
+		if msgs[i].Role == message.RoleUser {
 			last = &msgs[i]
 			break
 		}
@@ -333,7 +334,7 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 	if len(last.Parts) > 0 {
 		parts = last.Parts
 	} else if last.Content != "" {
-		parts = []message.ContentPart{{Type: "text", Text: last.Content}}
+		parts = []message.ContentPart{{Type: message.ContentPartText, Text: last.Content}}
 	}
 	if len(parts) == 0 {
 		return nil

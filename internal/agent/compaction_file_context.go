@@ -25,7 +25,7 @@ const (
 func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (int, string) {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		msg := msgs[i]
-		if msg.Role != "user" || !msg.IsCompactionSummary {
+		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
 			continue
 		}
 		raw := strings.TrimSpace(msg.Content)
@@ -43,7 +43,7 @@ func compactionFileContextAlreadyInjected(msgs []message.Message, checkpointIdx 
 		return false
 	}
 	msg := msgs[next]
-	if msg.Role != "user" || len(msg.Parts) == 0 {
+	if msg.Role != message.RoleUser || len(msg.Parts) == 0 {
 		return false
 	}
 	return strings.Contains(msg.Parts[0].Text, compactionFileCtxPrefix)
@@ -93,9 +93,9 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) []me
 	}
 
 	injected := message.Message{
-		Role: "user",
+		Role: message.RoleUser,
 		Parts: append([]message.ContentPart{{
-			Type: "text",
+			Type: message.ContentPartText,
 			Text: compactionFileCtxPrefix + " for continuation.\n",
 		}}, result.Parts...),
 	}

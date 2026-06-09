@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -26,7 +27,7 @@ type sessionStartupPlan struct {
 func planSessionStartup(sessionsDir string, opts sessionStartupOptions) (sessionStartupPlan, error) {
 	if opts.ResumeID != "" {
 		sessionDir := filepath.Join(sessionsDir, opts.ResumeID)
-		mainPath := filepath.Join(sessionDir, "main.jsonl")
+		mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
 		if err != nil || info.Size() == 0 {
 			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages", opts.ResumeID)

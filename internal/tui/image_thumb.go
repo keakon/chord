@@ -34,7 +34,7 @@ func imagePartsFromContentParts(parts []message.ContentPart) []BlockImagePart {
 	imageParts := make([]BlockImagePart, 0, len(parts))
 	imageIndex := 0
 	for _, part := range parts {
-		if part.Type != "image" {
+		if part.Type != message.ContentPartImage {
 			continue
 		}
 		imageIndex++
@@ -63,7 +63,7 @@ func pdfNamesFromContentParts(parts []message.ContentPart) []string {
 	var names []string
 	pdfIndex := 0
 	for _, part := range parts {
-		if part.Type != "pdf" {
+		if part.Type != message.ContentPartPDF {
 			continue
 		}
 		pdfIndex++

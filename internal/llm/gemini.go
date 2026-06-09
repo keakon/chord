@@ -221,7 +221,7 @@ func (g *GeminiProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingHeaders}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))

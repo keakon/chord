@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -118,7 +119,7 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 		}
 		a.ctxMgr.Append(toolMsg)
 		if a.recovery != nil {
-			a.persistAsync("main", toolMsg)
+			a.persistAsync(identity.MainAgentID, toolMsg)
 		}
 		persisted++
 	}
@@ -189,7 +190,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	}
 	a.ctxMgr.Append(toolMsg)
 	if a.recovery != nil {
-		a.persistAsync("main", toolMsg)
+		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	a.recordEvidenceFromMessage(toolMsg)
 }
@@ -383,7 +384,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 		a.ctxMgr.Append(toolMsg)
 		if a.recovery != nil {
-			a.persistAsync("main", toolMsg)
+			a.persistAsync(identity.MainAgentID, toolMsg)
 		}
 		a.recordEvidenceFromMessage(toolMsg)
 	}

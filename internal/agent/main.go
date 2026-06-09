@@ -20,6 +20,7 @@ import (
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
@@ -652,7 +653,7 @@ func NewMainAgent(
 		sessionDir:               sessionDir,
 		modelName:                modelName,
 		runningModelRef:          modelName,
-		instanceID:               NextInstanceID("main"),
+		instanceID:               NextInstanceID(identity.MainAgentID),
 		mcpClientInfo:            mcpClientInfo,
 		done:                     make(chan struct{}),
 		stoppingCh:               make(chan struct{}),
@@ -1172,7 +1173,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 		}
 	}
 	switch msg.Role {
-	case "user":
+	case message.RoleUser:
 		switch {
 		case isEscalateMessage(text):
 			a.addEvidenceCandidate(buildEvidenceItem(
@@ -1205,7 +1206,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			item.Sequence = len(a.evidenceCandidates) + 1
 			a.addEvidenceCandidate(item)
 		}
-	case "tool":
+	case message.RoleTool:
 		if reason, ok := extractDoneRejectedReason(text); ok {
 			item := buildDoneRejectedEvidence("runtime tool result", reason)
 			item.Sequence = len(a.evidenceCandidates) + 1
@@ -1292,12 +1293,12 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 	var dropped []string
 	for _, p := range parts {
 		switch p.Type {
-		case "image":
+		case message.ContentPartImage:
 			if !client.SupportsInput("image") {
 				dropped = append(dropped, "image")
 				continue
 			}
-		case "pdf":
+		case message.ContentPartPDF:
 			if !client.SupportsInput("pdf") {
 				dropped = append(dropped, "pdf")
 				continue
@@ -1330,7 +1331,7 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 	}
 	allText := true
 	for _, p := range filtered {
-		if p.Type != "text" {
+		if p.Type != message.ContentPartText {
 			allText = false
 			break
 		}
@@ -1393,7 +1394,7 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 		a.ctxMgr.Append(item.msg)
 		a.recordEvidenceFromMessage(item.msg)
 		if a.recovery != nil {
-			a.persistAsync("main", item.msg)
+			a.persistAsync(identity.MainAgentID, item.msg)
 		}
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
 	}
@@ -1418,7 +1419,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		parts = p
 		// Extract text parts for slash-command detection.
 		for _, part := range parts {
-			if part.Type == "text" {
+			if part.Type == message.ContentPartText {
 				content += part.Text
 			}
 		}
@@ -1475,7 +1476,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	outC, outP := a.expandSlashCommandForModel(content, parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
 	userMsg := message.Message{
-		Role:    "user",
+		Role:    message.RoleUser,
 		Content: outC,
 		Parts:   outP,
 	}
@@ -1551,7 +1552,7 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 	case message.Message:
 		msg = p
 	case string:
-		msg = message.Message{Role: "user", Content: p}
+		msg = message.Message{Role: message.RoleUser, Content: p}
 	default:
 		return
 	}
@@ -1566,7 +1567,7 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 		if strings.TrimSpace(persistMsg.Content) == "" {
 			persistMsg.Content = message.UserPromptPlainText(msg)
 		}
-		a.persistAsync("main", persistMsg)
+		a.persistAsync(identity.MainAgentID, persistMsg)
 	}
 }
 
@@ -1641,7 +1642,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		a.commitPendingUserMessagesWithoutTurn()
 	}
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
-	a.emitActivity("main", ActivityIdle, "")
+	a.emitActivity(identity.MainAgentID, ActivityIdle, "")
 	a.markActiveSubAgentMailboxAck(false)
 	a.setIdleAndDrainPending()
 }
@@ -1673,7 +1674,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 
 	// Guard: SourceID "main" or empty means MainAgent's own LLM/tool error —
 	// no SubAgent to clean up.
-	if evt.SourceID == "main" || evt.SourceID == "" {
+	if evt.SourceID == identity.MainAgentID || evt.SourceID == "" {
 		// Turn isolation: discard errors from cancelled/stale turns.
 		if a.turn != nil && evt.TurnID != 0 && evt.TurnID != a.turn.ID {
 			log.Debugf("discarding stale error event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
@@ -1931,8 +1932,8 @@ func (a *MainAgent) buildPlanExecutionBootstrapMessage(planPath string) message.
 			" "+a.executionPacingInstruction(),
 		escapePlanAtMentionPath(planPath),
 	)
-	parts := append([]message.ContentPart{{Type: "text", Text: instruction}}, filectx.BuildFileParts([]string{planPath}, func(path string) string { return path })...)
-	return message.Message{Role: "user", Content: instruction, Parts: parts}
+	parts := append([]message.ContentPart{{Type: message.ContentPartText, Text: instruction}}, filectx.BuildFileParts([]string{planPath}, func(path string) string { return path })...)
+	return message.Message{Role: message.RoleUser, Content: instruction, Parts: parts}
 }
 
 func escapePlanAtMentionPath(path string) string {
@@ -2106,7 +2107,7 @@ func (a *MainAgent) installSystemPrompt(prompt string) {
 		client.SetSystemPrompt(prompt)
 	}
 	a.ctxMgr.SetSystemPrompt(message.Message{
-		Role:    "system",
+		Role:    message.RoleSystem,
 		Content: prompt,
 	})
 }

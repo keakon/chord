@@ -256,7 +256,7 @@ func (a *AnthropicProvider) CompleteStream(
 		httpResp.Body = gr
 	}
 
-	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_headers"}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingHeaders}, Progress: &message.StreamProgressDelta{Bytes: responseHeaderBytes(httpResp)}})
 
 	// Handle non-2xx responses.
 	if httpResp.StatusCode != http.StatusOK {

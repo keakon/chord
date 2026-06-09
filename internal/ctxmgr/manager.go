@@ -252,7 +252,7 @@ func (m *Manager) AnyAssistantDeclaresToolCallID(callID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for i := range m.messages {
-		if m.messages[i].Role != "assistant" {
+		if m.messages[i].Role != message.RoleAssistant {
 			continue
 		}
 		for _, tc := range m.messages[i].ToolCalls {
@@ -496,7 +496,7 @@ func (m *Manager) CompressForTarget(messages []message.Message, targetTokens int
 
 	// Adjust boundary to avoid starting with an orphaned tool result.
 	startIdx := 0
-	for startIdx < len(kept) && kept[startIdx].Role == "tool" {
+	for startIdx < len(kept) && kept[startIdx].Role == message.RoleTool {
 		startIdx++
 	}
 	if startIdx >= len(kept) {
@@ -507,7 +507,7 @@ func (m *Manager) CompressForTarget(messages []message.Message, targetTokens int
 	// Build the compressed message list.
 	discarded := len(messages) - 1 - len(kept) // -1 for first message
 	header := message.Message{
-		Role: "user",
+		Role: message.RoleUser,
 		Content: fmt.Sprintf(
 			"[system] Context was compressed to fit a smaller model. %d earlier messages were removed. Recent conversation continues below.",
 			discarded,
@@ -540,7 +540,7 @@ func SafeKeepBoundary(msgs []message.Message, rawBoundary int) int {
 
 	// Walk backwards while the boundary message is a tool result. We need to
 	// include the assistant message that initiated the tool call.
-	for boundary > 0 && boundary < len(msgs) && msgs[boundary].Role == "tool" {
+	for boundary > 0 && boundary < len(msgs) && msgs[boundary].Role == message.RoleTool {
 		boundary--
 	}
 
@@ -555,7 +555,7 @@ func SafeKeepBoundary(msgs []message.Message, rawBoundary int) int {
 	// split point safely covers any later pending assistants too because they sit
 	// in the kept tail.
 	for i := 0; i < boundary; i++ {
-		if msgs[i].Role != "assistant" || len(msgs[i].ToolCalls) == 0 {
+		if msgs[i].Role != message.RoleAssistant || len(msgs[i].ToolCalls) == 0 {
 			continue
 		}
 		if boundary-i > incompleteToolCallProtectedTailMessages {
@@ -568,7 +568,7 @@ func SafeKeepBoundary(msgs []message.Message, rawBoundary int) int {
 			}
 			found := false
 			for j := i + 1; j < boundary; j++ {
-				if msgs[j].Role == "tool" && msgs[j].ToolCallID == tc.ID {
+				if msgs[j].Role == message.RoleTool && msgs[j].ToolCallID == tc.ID {
 					found = true
 					break
 				}
@@ -582,7 +582,7 @@ func SafeKeepBoundary(msgs []message.Message, rawBoundary int) int {
 			// Pull the boundary just before this assistant. Walk back over any
 			// preceding tool results so the kept tail does not start mid-chain.
 			split := i
-			for split > 0 && msgs[split-1].Role == "tool" {
+			for split > 0 && msgs[split-1].Role == message.RoleTool {
 				split--
 			}
 			return split
@@ -671,7 +671,7 @@ func repairOrphanToolResultsInTail(prefix []message.Message, tail []message.Mess
 	// (tool results can reference tool_calls from earlier in tail)
 	tailCallIDs := make(map[string]struct{})
 	for _, msg := range tail {
-		if msg.Role == "assistant" {
+		if msg.Role == message.RoleAssistant {
 			for _, tc := range msg.ToolCalls {
 				if tc.ID != "" {
 					tailCallIDs[tc.ID] = struct{}{}
@@ -684,7 +684,7 @@ func repairOrphanToolResultsInTail(prefix []message.Message, tail []message.Mess
 	var repaired []message.Message
 	dropped := 0
 	for _, msg := range tail {
-		if msg.Role == "tool" && msg.ToolCallID != "" {
+		if msg.Role == message.RoleTool && msg.ToolCallID != "" {
 			// Check if the tool_call_id exists in prefix or earlier in tail
 			_, inPrefix := prefixCallIDs[msg.ToolCallID]
 			_, inTail := tailCallIDs[msg.ToolCallID]

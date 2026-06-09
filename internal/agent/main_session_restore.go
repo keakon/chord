@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/filelock"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
@@ -232,7 +233,7 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 	}
 	if sessionID != "" {
 		sessionPath := filepath.Join(sessionsDir, sessionID)
-		mainPath := filepath.Join(sessionPath, "main.jsonl")
+		mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
 		if err != nil || info.Size() == 0 {
 			return "", fmt.Errorf("session %s not found or has no messages", sessionID)
@@ -248,7 +249,7 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 
 func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, sessionPath string) ([]message.Message, time.Duration, time.Duration, error) {
 	mainLoadStarted := time.Now()
-	msgs, err := tmpRecovery.LoadMessages("main")
+	msgs, err := tmpRecovery.LoadMessages(identity.MainAgentID)
 	mainLoadDuration := time.Since(mainLoadStarted)
 	if err != nil || len(msgs) == 0 {
 		return nil, mainLoadDuration, 0, fmt.Errorf("no messages found in session %s", filepath.Base(sessionPath))

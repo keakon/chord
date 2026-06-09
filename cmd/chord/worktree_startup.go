@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/worktree"
 )
@@ -264,7 +265,7 @@ func sessionExistsInProject(pl *config.PathLocator, projectKey, sid string) bool
 	if projectKey == "" || sid == "" {
 		return false
 	}
-	main := filepath.Join(pl.SessionsRoot, projectKey, sid, "main.jsonl")
+	main := filepath.Join(pl.SessionsRoot, projectKey, sid, identity.MainSessionLogFilename)
 	st, err := os.Stat(main)
 	return err == nil && st.Size() > 0
 }

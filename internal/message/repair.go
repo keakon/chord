@@ -13,7 +13,7 @@ func toolMessageSupportedByHistory(msgs []Message, toolIdx int) bool {
 		return true
 	}
 	for j := toolIdx - 1; j >= 0; j-- {
-		if msgs[j].Role != "assistant" || len(msgs[j].ToolCalls) == 0 {
+		if msgs[j].Role != RoleAssistant || len(msgs[j].ToolCalls) == 0 {
 			continue
 		}
 		for _, tc := range msgs[j].ToolCalls {
@@ -37,7 +37,7 @@ func RepairOrphanToolResults(msgs []Message) ([]Message, int) {
 	removed := 0
 	for i := range msgs {
 		msg := msgs[i]
-		if msg.Role == "tool" && !toolMessageSupportedByHistory(msgs, i) {
+		if msg.Role == RoleTool && !toolMessageSupportedByHistory(msgs, i) {
 			removed++
 			continue
 		}

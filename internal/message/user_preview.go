@@ -13,7 +13,7 @@ func UserPromptPlainText(msg Message) string {
 	if len(msg.Parts) > 0 {
 		var sb strings.Builder
 		for _, p := range msg.Parts {
-			if p.Type != "text" || IsFileRefContent(p.Text) {
+			if p.Type != ContentPartText || IsFileRefContent(p.Text) {
 				continue
 			}
 			sb.WriteString(p.Text)

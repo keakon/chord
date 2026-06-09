@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -32,7 +33,7 @@ func (a *MainAgent) GetSidebarUsageStats() analytics.SessionStats {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return a.usageTracker.SessionStatsForAgent(sub.instanceID)
 	}
-	return a.usageTracker.SessionStatsForAgent("main")
+	return a.usageTracker.SessionStatsForAgent(identity.MainAgentID)
 }
 
 // GetContextStats returns current input-context usage and usable input budget for the focused agent.
@@ -113,11 +114,11 @@ func (a *MainAgent) handleSpawnResultForMain(payload *tools.SpawnFinishedPayload
 		return
 	}
 	content := a.mainBackgroundResultContent(payload)
-	msg := message.Message{Role: "user", Content: content}
+	msg := message.Message{Role: message.RoleUser, Content: content}
 	a.ctxMgr.Append(msg)
 	a.recordEvidenceFromMessage(msg)
 	if a.recovery != nil {
-		a.persistAsync("main", msg)
+		a.persistAsync(identity.MainAgentID, msg)
 	}
 }
 

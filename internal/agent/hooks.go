@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -392,7 +393,7 @@ func (a *MainAgent) appendHookFeedback(content string) {
 	msg := message.Message{Role: "user", Content: content}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
-		a.persistAsync("main", msg)
+		a.persistAsync(identity.MainAgentID, msg)
 	}
 }
 

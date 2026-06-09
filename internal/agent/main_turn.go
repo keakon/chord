@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -79,7 +80,7 @@ func pendingUserMessageFromDraft(draftID string, parts []message.ContentPart) pe
 	cloned := cloneContentParts(parts)
 	var b strings.Builder
 	for _, part := range cloned {
-		if part.Type == "text" {
+		if part.Type == message.ContentPartText {
 			b.WriteString(part.Text)
 		}
 	}
@@ -98,7 +99,7 @@ func pendingDraftParts(p pendingUserMessage) []message.ContentPart {
 	if p.Content == "" {
 		return nil
 	}
-	return []message.ContentPart{{Type: "text", Text: p.Content}}
+	return []message.ContentPart{{Type: message.ContentPartText, Text: p.Content}}
 }
 
 func pendingUserMessageText(p pendingUserMessage) string {
@@ -107,7 +108,7 @@ func pendingUserMessageText(p pendingUserMessage) string {
 	}
 	var sb strings.Builder
 	for _, part := range p.Parts {
-		if part.Type == "text" {
+		if part.Type == message.ContentPartText {
 			sb.WriteString(part.Text)
 		}
 	}
@@ -136,7 +137,7 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 		})
 	}
 	if a.recovery != nil {
-		a.persistAsync("main", userMsg)
+		a.persistAsync(identity.MainAgentID, userMsg)
 	}
 }
 
@@ -147,7 +148,7 @@ func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage
 	}
 	outC, outP := a.expandSlashCommandForModel(content, p.Parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
-	return message.Message{Role: "user", Content: outC, Parts: outP}, true
+	return message.Message{Role: message.RoleUser, Content: outC, Parts: outP}, true
 }
 
 func (a *MainAgent) injectGitStatusIntoFirstUserMessage(messages []message.Message) bool {
@@ -159,7 +160,7 @@ func (a *MainAgent) injectGitStatusIntoFirstUserMessage(messages []message.Messa
 		return false
 	}
 	for i := range messages {
-		if messages[i].Role != "user" {
+		if messages[i].Role != message.RoleUser {
 			continue
 		}
 		if !a.gitStatusInjected.CompareAndSwap(false, true) {
@@ -167,7 +168,7 @@ func (a *MainAgent) injectGitStatusIntoFirstUserMessage(messages []message.Messa
 		}
 		if len(messages[i].Parts) > 0 {
 			parts := make([]message.ContentPart, 0, len(messages[i].Parts)+1)
-			parts = append(parts, message.ContentPart{Type: "text", Text: gitStatus + "\n\n"})
+			parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: gitStatus + "\n\n"})
 			parts = append(parts, cloneContentParts(messages[i].Parts)...)
 			messages[i].Parts = parts
 			return true
@@ -185,7 +186,7 @@ func messagePartsForTUI(msg message.Message) []message.ContentPart {
 	if msg.Content == "" {
 		return nil
 	}
-	return []message.ContentPart{{Type: "text", Text: msg.Content}}
+	return []message.ContentPart{{Type: message.ContentPartText, Text: msg.Content}}
 }
 
 func (a *MainAgent) emitPendingDraftConsumed(draftID string, msg message.Message) {
@@ -241,7 +242,7 @@ func (a *MainAgent) latestRecoverableUserIntent() string {
 	msgs := a.ctxMgr.Snapshot()
 	for i := len(msgs) - 1; i >= 0; i-- {
 		msg := msgs[i]
-		if msg.Role != "user" || msg.IsCompactionSummary {
+		if msg.Role != message.RoleUser || msg.IsCompactionSummary {
 			continue
 		}
 		if text := strings.TrimSpace(message.UserPromptPlainText(msg)); text != "" {

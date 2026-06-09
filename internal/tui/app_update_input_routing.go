@@ -36,7 +36,7 @@ func inlineImagePlaceholderIndex(raw string) (int, bool) {
 }
 
 func isInlineImagePlaceholderPart(part message.ContentPart) bool {
-	if part.Type != "text" {
+	if part.Type != message.ContentPartText {
 		return false
 	}
 	if part.InlineToken != "" && part.InlineToken != inlineImageTokenMarker {
@@ -49,11 +49,11 @@ func isInlineImagePlaceholderPart(part message.ContentPart) bool {
 	return ok
 }
 
-func attachmentPartType(mimeType string) string {
+func attachmentPartType(mimeType string) message.ContentPartType {
 	if mimeType == "application/pdf" {
-		return "pdf"
+		return message.ContentPartPDF
 	}
-	return "image"
+	return message.ContentPartImage
 }
 
 func attachmentContentPart(att Attachment) message.ContentPart {
@@ -61,7 +61,7 @@ func attachmentContentPart(att Attachment) message.ContentPart {
 }
 
 func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
-	if part.Type != "text" || part.Text == "" || message.IsFileRefContent(part.Text) {
+	if part.Type != message.ContentPartText || part.Text == "" || message.IsFileRefContent(part.Text) {
 		return []message.ContentPart{part}
 	}
 	if !isInlineImagePlaceholderPart(part) {
@@ -69,11 +69,11 @@ func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments 
 	}
 	imageIndex, ok := inlineImagePlaceholderIndex(part.Text)
 	if !ok {
-		return []message.ContentPart{{Type: "text", Text: part.Text}}
+		return []message.ContentPart{{Type: message.ContentPartText, Text: part.Text}}
 	}
 	attachmentIndex, ok := imageAttachmentIndex(attachments, imageIndex)
 	if !ok {
-		return []message.ContentPart{{Type: "text", Text: part.Text}}
+		return []message.ContentPart{{Type: message.ContentPartText, Text: part.Text}}
 	}
 	used[attachmentIndex] = true
 	return []message.ContentPart{attachmentContentPart(attachments[attachmentIndex])}

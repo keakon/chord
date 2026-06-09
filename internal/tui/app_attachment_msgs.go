@@ -76,10 +76,10 @@ func localShellContextMessage(userLine, cmd, output string, err error) message.M
 	readable := convformat.UserShellReadableBody(userLine, cmd, output, failed)
 	persisted := convformat.UserShellPersistedBody(userLine, cmd, output, failed)
 	return message.Message{
-		Role:    "user",
+		Role:    message.RoleUser,
 		Content: convformat.BlockString(convformat.LabelUser, persisted),
 		Parts: []message.ContentPart{{
-			Type: "text",
+			Type: message.ContentPartText,
 			Text: convformat.BlockString(convformat.LabelUser, readable),
 		}},
 	}

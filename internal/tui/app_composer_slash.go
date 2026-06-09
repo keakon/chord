@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -48,7 +49,7 @@ func fileRefsFromParts(parts []message.ContentPart) []string {
 	var refs []string
 	seen := make(map[string]bool)
 	for _, p := range parts {
-		if p.Type != "text" {
+		if p.Type != message.ContentPartText {
 			continue
 		}
 		// Match <file path="..."> or <file path='...'>
@@ -88,7 +89,7 @@ func queuedDraftTextAndImageCount(draft queuedDraft) (string, int) {
 	}
 	imageCount := 0
 	for _, part := range draft.Parts {
-		if part.Type == "image" {
+		if part.Type == message.ContentPartImage {
 			imageCount++
 		}
 	}
@@ -115,13 +116,13 @@ func (d queuedDraft) contentParts() []message.ContentPart {
 	if d.Content == "" {
 		return nil
 	}
-	return []message.ContentPart{{Type: "text", Text: d.Content}}
+	return []message.ContentPart{{Type: message.ContentPartText, Text: d.Content}}
 }
 
 func normalizeDraftAgentID(agentID string) string {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return "main"
+		return identity.MainAgentID
 	}
 	return agentID
 }
@@ -167,7 +168,7 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 			MimeType:               part.MimeType,
 			Data:                   part.Data,
 			ImagePath:              part.ImagePath,
-			InlineImagePlaceholder: part.Type == "image",
+			InlineImagePlaceholder: part.Type == message.ContentPartImage,
 		})
 	}
 	return attachments

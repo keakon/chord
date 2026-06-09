@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -74,7 +75,7 @@ func buildSessionSummaryForDir(sessionDir string, locked bool) *SessionSummary {
 		ID:     filepath.Base(sessionDir),
 		Locked: locked,
 	}
-	mainPath := filepath.Join(sessionDir, "main.jsonl")
+	mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
 	if info, err := os.Stat(mainPath); err == nil {
 		summary.LastModTime = info.ModTime()
 	}

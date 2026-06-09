@@ -6,16 +6,39 @@ import (
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
+type Role string
+
+const (
+	RoleSystem    Role = "system"
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+)
+
+type ContentPartType string
+
+func (t ContentPartType) String() string {
+	return string(t)
+}
+
+const (
+	ContentPartText  ContentPartType = "text"
+	ContentPartImage ContentPartType = "image"
+	ContentPartPDF   ContentPartType = "pdf"
+)
+
+const StatusDeltaWaitingHeaders = "waiting_headers"
+
 // ContentPart is one part of a multi-part user message (text, image, or pdf).
 type ContentPart struct {
-	Type        string `json:"type"`                   // "text", "image", or "pdf"
-	Text        string `json:"text,omitempty"`         // for type="text"
-	DisplayText string `json:"display_text,omitempty"` // optional TUI-only summary for large hidden text parts
-	InlineToken string `json:"inline_token,omitempty"` // optional TUI-only marker for atomic inline composer tokens
-	MimeType    string `json:"mime_type,omitempty"`    // for type="image"/"pdf", e.g. "image/png" or "application/pdf"
-	Data        []byte `json:"data,omitempty"`         // for type="image"/"pdf", raw bytes (not persisted; loaded from ImagePath)
-	ImagePath   string `json:"image_path,omitempty"`   // for type="image"/"pdf", path to persisted file on disk
-	FileName    string `json:"file_name,omitempty"`    // optional display name for image/pdf attachments
+	Type        ContentPartType `json:"type"`                   // "text", "image", or "pdf"
+	Text        string          `json:"text,omitempty"`         // for type="text"
+	DisplayText string          `json:"display_text,omitempty"` // optional TUI-only summary for large hidden text parts
+	InlineToken string          `json:"inline_token,omitempty"` // optional TUI-only marker for atomic inline composer tokens
+	MimeType    string          `json:"mime_type,omitempty"`    // for type="image"/"pdf", e.g. "image/png" or "application/pdf"
+	Data        []byte          `json:"data,omitempty"`         // for type="image"/"pdf", raw bytes (not persisted; loaded from ImagePath)
+	ImagePath   string          `json:"image_path,omitempty"`   // for type="image"/"pdf", path to persisted file on disk
+	FileName    string          `json:"file_name,omitempty"`    // optional display name for image/pdf attachments
 }
 
 // IsBinary reports whether the part carries out-of-band binary bytes (an image
@@ -23,7 +46,7 @@ type ContentPart struct {
 // a session file and reloaded on restore, so persistence/restore/clone paths
 // treat image and pdf parts identically.
 func (p ContentPart) IsBinary() bool {
-	return p.Type == "image" || p.Type == "pdf"
+	return p.Type == ContentPartImage || p.Type == ContentPartPDF
 }
 
 // ToolArgsAudit records how a tool call's effective execution arguments differ
@@ -85,7 +108,7 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
-	Role                string             `json:"role"` // "user", "assistant", "tool"
+	Role                Role               `json:"role"` // "user", "assistant", "tool"
 	Content             string             `json:"content"`
 	Parts               []ContentPart      `json:"parts,omitempty"`                 // multi-part content (text + images); when set, supersedes Content
 	ThinkingBlocks      []ThinkingBlock    `json:"thinking_blocks,omitempty"`       // assistant only; must be replayed verbatim

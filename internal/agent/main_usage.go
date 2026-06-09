@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -73,8 +74,8 @@ func (a *MainAgent) emitUsageEvent(event analytics.UsageEvent) {
 
 func (a *MainAgent) recordCompactionPolicyAnalyticsEvent(detail string) {
 	a.emitUsageEvent(analytics.UsageEvent{
-		AgentID:          "main",
-		AgentKind:        "main",
+		AgentID:          identity.MainAgentID,
+		AgentKind:        identity.MainAgentID,
 		AgentName:        a.currentAgentName(),
 		Purpose:          compactionPolicyAnalyticsPurpose + "/" + detail,
 		SelectedModelRef: a.ProviderModelRef(),
@@ -96,8 +97,8 @@ func (a *MainAgent) recordCompactionFailureAnalyticsEvent(err error, class compa
 	}
 	diagnostic["trigger"] = a.compactionState.trigger.analyticsName()
 	a.emitUsageEvent(analytics.UsageEvent{
-		AgentID:          "main",
-		AgentKind:        "main",
+		AgentID:          identity.MainAgentID,
+		AgentKind:        identity.MainAgentID,
 		AgentName:        a.currentAgentName(),
 		Purpose:          compactionFailureAnalyticsPurpose,
 		SelectedModelRef: a.compactionModelRef(),
@@ -128,8 +129,8 @@ func (a *MainAgent) recordOversizeRecoveryAnalyticsEvent(action, stage, selected
 		diagnostic["trigger"] = a.compactionState.trigger.analyticsName()
 	}
 	a.emitUsageEvent(analytics.UsageEvent{
-		AgentID:          "main",
-		AgentKind:        "main",
+		AgentID:          identity.MainAgentID,
+		AgentKind:        identity.MainAgentID,
 		AgentName:        a.currentAgentName(),
 		Purpose:          purpose,
 		SelectedModelRef: selectedModelRef,

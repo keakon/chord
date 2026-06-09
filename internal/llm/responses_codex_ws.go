@@ -366,7 +366,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	if cb != nil {
 		cb(message.StreamDelta{
 			Type:   message.StreamDeltaStatus,
-			Status: &message.StatusDelta{Type: "waiting_headers"},
+			Status: &message.StatusDelta{Type: message.StatusDeltaWaitingHeaders},
 			Progress: &message.StreamProgressDelta{
 				Bytes: waitingHeaderBytes,
 			},

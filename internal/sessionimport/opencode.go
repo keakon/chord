@@ -85,18 +85,19 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 	kind := pickStringField(obj, "type", "kind", "role")
 	kind = strings.ToLower(strings.TrimSpace(kind))
 
-	role := pickStringField(obj, "role", "sender")
-	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		role = pickNestedStringField(obj, "info", "role", "sender")
-		role = strings.ToLower(strings.TrimSpace(role))
+	roleText := pickStringField(obj, "role", "sender")
+	roleText = strings.ToLower(strings.TrimSpace(roleText))
+	if roleText == "" {
+		roleText = pickNestedStringField(obj, "info", "role", "sender")
+		roleText = strings.ToLower(strings.TrimSpace(roleText))
 	}
+	role := openCodeMessageRole(roleText)
 	if role == "" {
 		switch kind {
 		case "user", "human":
-			role = "user"
+			role = message.RoleUser
 		case "assistant", "ai", "model":
-			role = "assistant"
+			role = message.RoleAssistant
 		}
 	}
 
@@ -106,14 +107,12 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 		return msg, true, 0, 0, false, []string{"skipped non-conversation event type=" + kind}, nil
 	}
 
-	if role != "user" && role != "assistant" {
+	if role != message.RoleUser && role != message.RoleAssistant {
 		// Many OpenCode exports are message-like but not chat roles (e.g. shell). Import as assistant-visible text.
-		if role == "" {
-			role = "assistant"
-		} else {
-			role = "assistant"
-			warns = append(warns, fmt.Sprintf("unknown role %q; imported as assistant text", role))
+		if roleText != "" {
+			warns = append(warns, fmt.Sprintf("unknown role %q; imported as assistant text", roleText))
 		}
+		role = message.RoleAssistant
 	}
 
 	var contentText string
@@ -177,6 +176,17 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msg mess
 	}
 
 	return message.Message{Role: role, Content: contentText, Provenance: importedOpenCodeProvenance()}, false, toolRenderedCount, unsupportedToolCount, reasoningSkipped, warns, nil
+}
+
+func openCodeMessageRole(roleText string) message.Role {
+	switch roleText {
+	case "user":
+		return message.RoleUser
+	case "assistant":
+		return message.RoleAssistant
+	default:
+		return ""
+	}
 }
 
 func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, contentTypes []string, warns []string, err error) {

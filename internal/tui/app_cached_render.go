@@ -327,7 +327,7 @@ func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 		b.WriteString(draft.Content)
 		for _, part := range draft.Parts {
 			b.WriteByte(':')
-			b.WriteString(part.Type)
+			b.WriteString(part.Type.String())
 			b.WriteByte('=')
 			b.WriteString(part.DisplayText)
 		}

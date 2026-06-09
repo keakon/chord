@@ -75,7 +75,7 @@ func (m *Model) buildFileRefParts(displayText string, composerParts []message.Co
 	}
 	parts := make([]message.ContentPart, 0, len(composerParts)+len(fileParts)+len(attachmentParts))
 	for _, p := range composerParts {
-		if p.Type != "text" || message.IsFileRefContent(p.Text) {
+		if p.Type != message.ContentPartText || message.IsFileRefContent(p.Text) {
 			continue
 		}
 		parts = append(parts, p)

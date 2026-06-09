@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -179,7 +180,7 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	// instead of injecting another user message.
 	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: "loop_notice"}
 	a.ctxMgr.Append(msg)
-	a.persistAsync("main", msg)
+	a.persistAsync(identity.MainAgentID, msg)
 }
 
 func (a *MainAgent) emitLoopContinuationNote(note *LoopContinuationNote, persistUserMessage bool) {

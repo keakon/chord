@@ -27,6 +27,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/worktree"
@@ -425,7 +426,7 @@ func sessionDirHasMessages(sessionDir string) bool {
 	if sessionDir == "" {
 		return false
 	}
-	info, err := os.Stat(filepath.Join(sessionDir, "main.jsonl"))
+	info, err := os.Stat(filepath.Join(sessionDir, identity.MainSessionLogFilename))
 	return err == nil && info.Size() > 0
 }
 

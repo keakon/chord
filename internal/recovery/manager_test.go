@@ -650,15 +650,15 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeMsg := func(dir, role, content string) {
+	writeMsg := func(dir string, role message.Role, content string) {
 		f, _ := os.OpenFile(filepath.Join(dir, "main.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		data, _ := json.Marshal(message.Message{Role: role, Content: content})
 		f.Write(append(data, '\n'))
 		f.Close()
 	}
-	writeMsg(s1, "user", "First user message in session 1000")
-	writeMsg(s1, "assistant", "Hi")
-	writeMsg(s2, "user", "Second session first message")
+	writeMsg(s1, message.RoleUser, "First user message in session 1000")
+	writeMsg(s1, message.RoleAssistant, "Hi")
+	writeMsg(s2, message.RoleUser, "Second session first message")
 	if err := SaveSessionMeta(s2, SessionMeta{ForkedFrom: "1000"}); err != nil {
 		t.Fatalf("SaveSessionMeta: %v", err)
 	}

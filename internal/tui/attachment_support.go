@@ -7,13 +7,14 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/message"
 )
 
 type inputSupportProvider interface {
 	SupportsInput(modality string) bool
 }
 
-func (m *Model) supportsAttachmentInput(kind string) bool {
+func (m *Model) supportsAttachmentInput(kind message.ContentPartType) bool {
 	if m == nil || m.agent == nil {
 		return false
 	}
@@ -21,27 +22,27 @@ func (m *Model) supportsAttachmentInput(kind string) bool {
 	if !ok {
 		return false
 	}
-	return provider.SupportsInput(kind)
+	return provider.SupportsInput(kind.String())
 }
 
-func attachmentKindForMimeType(mimeType string) string {
+func attachmentKindForMimeType(mimeType string) message.ContentPartType {
 	if strings.HasPrefix(mimeType, "image/") {
-		return "image"
+		return message.ContentPartImage
 	}
 	if mimeType == "application/pdf" {
-		return "pdf"
+		return message.ContentPartPDF
 	}
 	return ""
 }
 
-func attachmentKindForPath(path string) string {
+func attachmentKindForPath(path string) message.ContentPartType {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".pdf" {
-		return "pdf"
+		return message.ContentPartPDF
 	}
 	mimeType := mime.TypeByExtension(ext)
 	if strings.HasPrefix(mimeType, "image/") {
-		return "image"
+		return message.ContentPartImage
 	}
 	return ""
 }
@@ -62,9 +63,9 @@ func (m *Model) unsupportedAttachmentWarning(a Attachment) string {
 		return ""
 	}
 	switch attachmentKindForMimeType(a.MimeType) {
-	case "image":
+	case message.ContentPartImage:
 		return "Current model does not support image input; this attachment will be ignored unless you switch models"
-	case "pdf":
+	case message.ContentPartPDF:
 		return "Current model does not support PDF input; this attachment will be ignored unless you switch models"
 	default:
 		return "Current model does not support this attachment; it will be ignored unless you switch models"
@@ -97,7 +98,7 @@ func (m Model) atMentionAttachmentPreviews() []Attachment {
 			continue
 		}
 		mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(clean)))
-		if attachmentKindForPath(clean) == "pdf" {
+		if attachmentKindForPath(clean) == message.ContentPartPDF {
 			mimeType = "application/pdf"
 		}
 		previews = append(previews, (&m).markAttachmentSupport(Attachment{

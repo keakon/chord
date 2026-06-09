@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -448,7 +449,7 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		if excludeDir != "" && sessionPath == excludeDir {
 			continue
 		}
-		mainPath := filepath.Join(sessionPath, "main.jsonl")
+		mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
 		if err != nil || info.Size() == 0 {
 			continue
@@ -515,7 +516,7 @@ func firstUserMessageFromFile(mainPath string) (string, error) {
 			}
 			continue // skip malformed lines
 		}
-		if msg.Role != "user" {
+		if msg.Role != message.RoleUser {
 			continue
 		}
 		// Skip compaction summary messages: after a compaction has rewritten
@@ -546,7 +547,7 @@ func FirstUserMessageFromFile(mainPath string) (string, error) {
 // SessionInfoForDir returns SessionInfo for a single session directory.
 // Returns nil if the directory has no main.jsonl or it is empty.
 func SessionInfoForDir(sessionPath string) *SessionInfo {
-	mainPath := filepath.Join(sessionPath, "main.jsonl")
+	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 	info, err := os.Stat(mainPath)
 	if err != nil || info.Size() == 0 {
 		return nil
@@ -622,7 +623,7 @@ func FindMostRecentSession(sessionsDir string, excludeDir string) string {
 		}
 
 		// Check for main.jsonl with content.
-		mainJSONL := filepath.Join(sessionPath, "main.jsonl")
+		mainJSONL := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 		if info, err := os.Stat(mainJSONL); err == nil && info.Size() > 0 {
 			return sessionPath
 		}
@@ -635,8 +636,8 @@ func FindMostRecentSession(sessionsDir string, excludeDir string) string {
 // "main" maps to {sessionDir}/main.jsonl; all other agents map to
 // {sessionDir}/agents/{agentID}.jsonl.
 func (r *RecoveryManager) messageLogPath(agentID string) string {
-	if agentID == "main" {
-		return filepath.Join(r.sessionDir, "main.jsonl")
+	if agentID == identity.MainAgentID {
+		return filepath.Join(r.sessionDir, identity.MainSessionLogFilename)
 	}
 	return filepath.Join(r.sessionDir, "agents", agentID+".jsonl")
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -361,7 +362,7 @@ func (l *UsageLedger) prepareEventLocked(event UsageEvent) UsageEvent {
 		event.Provider, event.ModelID = SplitModelRef(event.RunningModelRef)
 	}
 	if event.AgentID == "" {
-		event.AgentID = "main"
+		event.AgentID = identity.MainAgentID
 	}
 	if event.BillingUsage.BillingTotalTokens == 0 &&
 		event.BillingUsage.InputTokens == 0 &&
@@ -767,7 +768,7 @@ func (l *UsageLedger) firstUserMessageLocked() string {
 		if err := dec.Decode(&msg); err != nil {
 			break
 		}
-		if msg.Role != "user" {
+		if msg.Role != message.RoleUser {
 			continue
 		}
 		// Skip compaction summary messages: when called after a compaction has
@@ -802,5 +803,5 @@ func (l *UsageLedger) summaryPath() string {
 }
 
 func (l *UsageLedger) mainPath() string {
-	return filepath.Join(l.sessionDir, "main.jsonl")
+	return filepath.Join(l.sessionDir, identity.MainSessionLogFilename)
 }

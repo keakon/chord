@@ -162,7 +162,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		fmt.Fprintln(out, "  - /chat/completions  OpenAI Chat Completions compatible gateways (example: https://gateway.example.com/v1/chat/completions)")
 		fmt.Fprintln(out, "  - /models            Gemini Generate Content base path (example: https://generativelanguage.googleapis.com/v1beta/models)")
 		fmt.Fprintln(out)
-		defaultAPIURL := defaultAPIURLForProviderType("responses")
+		defaultAPIURL := defaultAPIURLForProviderType(config.ProviderTypeResponses)
 		cfgInput.APIURL, err = promptText(termIO, "API URL", defaultAPIURL)
 		if err != nil {
 			return err
@@ -176,13 +176,13 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 			}
 			switch providerTypeChoice {
 			case "2":
-				cfgInput.ProviderType = "messages"
+				cfgInput.ProviderType = config.ProviderTypeMessages
 			case "3":
-				cfgInput.ProviderType = "chat-completions"
+				cfgInput.ProviderType = config.ProviderTypeChatCompletions
 			case "4":
-				cfgInput.ProviderType = "generate-content"
+				cfgInput.ProviderType = config.ProviderTypeGenerateContent
 			default:
-				cfgInput.ProviderType = "responses"
+				cfgInput.ProviderType = config.ProviderTypeResponses
 			}
 			defaults = initialSetupDefaultsForProviderType(cfgInput.ProviderType)
 		}
@@ -199,17 +199,17 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		cfgInput.InputLimit = defaults.InputLimit
 		cfgInput.OutputLimit = defaults.OutputLimit
 		switch cfgInput.ProviderType {
-		case "chat-completions":
+		case config.ProviderTypeChatCompletions:
 			limitReminder = "This compatible gateway uses starter limit defaults for chat-completions. If your provider documents different limits, edit config.yaml after setup."
-		case "messages":
+		case config.ProviderTypeMessages:
 			if !strings.EqualFold(strings.TrimSpace(cfgInput.APIURL), "https://api.anthropic.com/v1/messages") {
 				limitReminder = "This compatible gateway uses starter limit defaults for messages. If your provider documents different limits, edit config.yaml after setup."
 			}
-		case "generate-content":
+		case config.ProviderTypeGenerateContent:
 			if !strings.EqualFold(strings.TrimSpace(cfgInput.APIURL), "https://generativelanguage.googleapis.com/v1beta/models") {
 				limitReminder = "This compatible gateway uses starter limit defaults for generate-content. If your provider documents different limits, edit config.yaml after setup."
 			}
-		case "responses":
+		case config.ProviderTypeResponses:
 			if !strings.EqualFold(strings.TrimSpace(cfgInput.APIURL), defaultAPIURL) {
 				limitReminder = "This compatible gateway uses starter limit defaults for responses. If your provider documents different limits, edit config.yaml after setup."
 			}

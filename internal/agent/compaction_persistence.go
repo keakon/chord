@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/session"
@@ -251,7 +252,7 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 			usageSummaryFirstUser = strings.TrimSpace(usageSummary.FirstUserMessage)
 		}
 	}
-	mainPath := filepath.Join(a.sessionDir, "main.jsonl")
+	mainPath := filepath.Join(a.sessionDir, identity.MainSessionLogFilename)
 	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
 		if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
 			if v := strings.TrimSpace(first); v != "" {
@@ -260,7 +261,7 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 		}
 	}
 	for _, msg := range a.ctxMgr.Snapshot() {
-		if msg.Role != "user" || msg.IsCompactionSummary {
+		if msg.Role != message.RoleUser || msg.IsCompactionSummary {
 			continue
 		}
 		candidate := strings.TrimSpace(message.UserPromptPlainText(msg))
@@ -274,7 +275,7 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {
 	a.flushPersist()
 
-	mainPath := filepath.Join(a.sessionDir, "main.jsonl")
+	mainPath := filepath.Join(a.sessionDir, identity.MainSessionLogFilename)
 	backupPath := filepath.Join(a.sessionDir, fmt.Sprintf("main.pre-compress-%d.jsonl", index))
 	hadMain := false
 	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
@@ -303,7 +304,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	}
 	if originalFirstUser == "" {
 		for _, msg := range messages {
-			if msg.Role != "user" || msg.IsCompactionSummary {
+			if msg.Role != message.RoleUser || msg.IsCompactionSummary {
 				continue
 			}
 			if v := strings.TrimSpace(message.UserPromptPlainText(msg)); v != "" {
@@ -333,7 +334,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 
 	rm := recovery.NewRecoveryManager(a.sessionDir)
 	for _, msg := range messages {
-		if err := rm.PersistMessage("main", msg); err != nil {
+		if err := rm.PersistMessage(identity.MainAgentID, msg); err != nil {
 			rm.Close()
 			_ = os.Remove(mainPath)
 			if hadMain {
@@ -347,7 +348,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	if a.usageLedger != nil {
 		firstUser := ""
 		for _, msg := range messages {
-			if msg.Role == "user" {
+			if msg.Role == message.RoleUser {
 				firstUser = message.UserPromptPlainText(msg)
 				if strings.TrimSpace(firstUser) != "" {
 					break

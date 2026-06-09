@@ -341,7 +341,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		var draft queuedDraft
 		composerParts := inlineParts
 		if len(composerParts) == 0 && value != "" {
-			composerParts = []message.ContentPart{{Type: "text", Text: value}}
+			composerParts = []message.ContentPart{{Type: message.ContentPartText, Text: value}}
 		}
 		fileRefParts := m.buildFileRefParts(value, composerParts, inlinePasteTexts...)
 		if fileRefParts != nil || len(m.attachments) > 0 || len(inlineParts) > 0 {
@@ -351,7 +351,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			} else if len(inlineParts) > 0 {
 				parts = append(parts, inlineParts...)
 			} else if value != "" {
-				parts = []message.ContentPart{{Type: "text", Text: value}}
+				parts = []message.ContentPart{{Type: message.ContentPartText, Text: value}}
 			}
 
 			if len(m.attachments) > 0 {

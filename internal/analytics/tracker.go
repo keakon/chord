@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -91,7 +92,7 @@ func (t *UsageTracker) RestoreStats(s SessionStats) {
 //   - cost is the per-token pricing from config (may be nil if not configured).
 //   - usage is the raw token usage from the API response.
 func (t *UsageTracker) Record(model string, cost *config.ModelCost, usage message.TokenUsage) {
-	t.RecordForAgent("main", model, cost, usage)
+	t.RecordForAgent(identity.MainAgentID, model, cost, usage)
 }
 
 // RecordForAgent records token usage and cost from one LLM API call, grouped
@@ -379,7 +380,7 @@ func cloneAgentStatsMap(in map[string]*AgentStats) map[string]*AgentStats {
 func normalizeAgentID(agentID string) string {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return "main"
+		return identity.MainAgentID
 	}
 	return agentID
 }

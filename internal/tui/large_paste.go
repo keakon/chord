@@ -29,7 +29,7 @@ func userBlockTextFromParts(parts []message.ContentPart, fallback string) string
 	}
 	var b strings.Builder
 	for _, part := range parts {
-		if part.Type != "text" || message.IsFileRefContent(part.Text) {
+		if part.Type != message.ContentPartText || message.IsFileRefContent(part.Text) {
 			continue
 		}
 		b.WriteString(part.Text)
@@ -118,7 +118,7 @@ func displayTextFromParts(parts []message.ContentPart, fallback string) string {
 	}
 	var b strings.Builder
 	for _, part := range parts {
-		if part.Type != "text" || message.IsFileRefContent(part.Text) {
+		if part.Type != message.ContentPartText || message.IsFileRefContent(part.Text) {
 			continue
 		}
 		if part.DisplayText != "" {
@@ -153,7 +153,7 @@ func inlineLargePastesFromParts(parts []message.ContentPart) []inlineLargePaste 
 	)
 	for _, part := range parts {
 		switch {
-		case part.Type == "image":
+		case part.Type == message.ContentPartImage:
 			token := newInlineImagePlaceholder(imageIndex)
 			displayRunes := []rune(token.DisplayText)
 			token.Start = offset
@@ -161,7 +161,7 @@ func inlineLargePastesFromParts(parts []message.ContentPart) []inlineLargePaste 
 			out = append(out, *token)
 			offset += len(displayRunes)
 			imageIndex++
-		case part.Type != "text" || message.IsFileRefContent(part.Text):
+		case part.Type != message.ContentPartText || message.IsFileRefContent(part.Text):
 			continue
 		case inlineTokenKindFromContentPart(part) == inlineTokenImage:
 			token := newInlineImagePlaceholder(imageIndex)
@@ -191,7 +191,7 @@ func contentPartsWithInlinePastes(display string, pastes []inlineLargePaste) []m
 		return nil
 	}
 	if len(pastes) == 0 {
-		return []message.ContentPart{{Type: "text", Text: display}}
+		return []message.ContentPart{{Type: message.ContentPartText, Text: display}}
 	}
 	runes := []rune(display)
 	var parts []message.ContentPart
@@ -200,16 +200,16 @@ func contentPartsWithInlinePastes(display string, pastes []inlineLargePaste) []m
 		if paste.Start > cursor {
 			segment := string(runes[cursor:paste.Start])
 			if segment != "" {
-				parts = append(parts, message.ContentPart{Type: "text", Text: segment})
+				parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: segment})
 			}
 		}
-		parts = append(parts, message.ContentPart{Type: "text", Text: paste.RawContent, DisplayText: paste.DisplayText, InlineToken: inlineTokenMarker(paste.Kind)})
+		parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: paste.RawContent, DisplayText: paste.DisplayText, InlineToken: inlineTokenMarker(paste.Kind)})
 		cursor = paste.End
 	}
 	if cursor < len(runes) {
 		segment := string(runes[cursor:])
 		if segment != "" {
-			parts = append(parts, message.ContentPart{Type: "text", Text: segment})
+			parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: segment})
 		}
 	}
 	if len(parts) == 0 {
@@ -225,9 +225,9 @@ func displayTextAndInlinePastes(parts []message.ContentPart, fallback string) (s
 	var b strings.Builder
 	for _, part := range parts {
 		switch {
-		case part.Type == "image":
+		case part.Type == message.ContentPartImage:
 			b.WriteString(inlineImagePlaceholderDisplay)
-		case part.Type != "text" || message.IsFileRefContent(part.Text):
+		case part.Type != message.ContentPartText || message.IsFileRefContent(part.Text):
 			continue
 		case inlineTokenKindFromContentPart(part) == inlineTokenImage:
 			b.WriteString(inlineImagePlaceholderDisplay)

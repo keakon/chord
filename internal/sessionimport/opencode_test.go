@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestConvertOpenCodeExport_ParsesBasicMessages(t *testing.T) {
@@ -30,6 +32,36 @@ func TestConvertOpenCodeExport_ParsesBasicMessages(t *testing.T) {
 	}
 	if report.SourceSessionID != "sess-1" {
 		t.Fatalf("SourceSessionID=%q, want sess-1", report.SourceSessionID)
+	}
+}
+
+func TestConvertOpenCodeExport_WarnsForUnknownRole(t *testing.T) {
+	data := []byte(`{
+  "messages": [
+    {"role": "developer", "content": "internal guidance"}
+  ]
+}`)
+	var report ImportReport
+	msgs, err := convertOpenCodeExport(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertOpenCodeExport: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("msgs len=%d, want 1", len(msgs))
+	}
+	if msgs[0].Role != message.RoleAssistant {
+		t.Fatalf("role=%q, want assistant", msgs[0].Role)
+	}
+	wantWarning := `unknown role "developer"; imported as assistant text`
+	found := false
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning, wantWarning) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings=%q, want %q", report.Warnings, wantWarning)
 	}
 }
 

@@ -33,7 +33,7 @@ type ExportedSession struct {
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
 type ExportedMessage struct {
-	Role            string                  `json:"role"`
+	Role            message.Role            `json:"role"`
 	Content         string                  `json:"content"`
 	ToolCallID      string                  `json:"tool_call_id,omitempty"`
 	ToolDiff        string                  `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results

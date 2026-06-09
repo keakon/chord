@@ -171,7 +171,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	toolResults := countToolResults(prepared)
 
 	for i := range prepared {
-		if prepared[i].Role != "tool" {
+		if prepared[i].Role != message.RoleTool {
 			continue
 		}
 		original := prepared[i].Content
@@ -929,7 +929,7 @@ func (a *MainAgent) resetContextReductionStats() {
 
 type contextContributor struct {
 	Index  int
-	Role   string
+	Role   message.Role
 	Tool   string
 	Bytes  int
 	Tokens int
@@ -968,7 +968,7 @@ func topContextContributors(messages []message.Message, limit int) []contextCont
 			continue
 		}
 		toolName := ""
-		if msg.Role == "tool" {
+		if msg.Role == message.RoleTool {
 			toolName = strings.TrimSpace(callMeta[msg.ToolCallID].Name)
 		}
 		contributors = append(contributors, contextContributor{
@@ -1391,7 +1391,7 @@ func userTurnsAfter(messages []message.Message) []int {
 	seenUsers := 0
 	for i := len(messages) - 1; i >= 0; i-- {
 		turnsAfter[i] = seenUsers
-		if messages[i].Role == "user" {
+		if messages[i].Role == message.RoleUser {
 			seenUsers++
 		}
 	}
@@ -1420,7 +1420,7 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 	seen := make(map[string]bool)
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if msg.Role != "tool" {
+		if msg.Role != message.RoleTool {
 			continue
 		}
 		call, ok := meta[msg.ToolCallID]
@@ -1440,7 +1440,7 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 func countToolResults(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
-		if msg.Role == "tool" {
+		if msg.Role == message.RoleTool {
 			total++
 		}
 	}
@@ -1512,7 +1512,7 @@ func trimMessagesToBudget(messages []message.Message, targetTokens int) ([]messa
 	out := make([]message.Message, 0, len(messages[start:])+1)
 	omitted := start
 	out = append(out, message.Message{
-		Role: "user",
+		Role: message.RoleUser,
 		Content: fmt.Sprintf(
 			"[system] The earliest %d messages from the compacted history were omitted from the summary input to fit the compression model budget. The exported history file remains authoritative for those details.",
 			omitted,
@@ -1637,7 +1637,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 func buildGoalAnchor(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if msg.Role != "user" {
+		if msg.Role != message.RoleUser {
 			continue
 		}
 		text := strings.TrimSpace(msg.Content)
@@ -1672,7 +1672,7 @@ func buildConstraintAnchor(items []evidenceItem) string {
 func buildDecisionAnchor(messages []message.Message) string {
 	var lines []string
 	for _, msg := range messages {
-		if msg.Role != "assistant" {
+		if msg.Role != message.RoleAssistant {
 			continue
 		}
 		text := strings.TrimSpace(msg.Content)
@@ -1706,7 +1706,7 @@ func buildProgressAnchor(messages []message.Message, items []evidenceItem) strin
 	if len(lines) == 0 {
 		for i := len(messages) - 1; i >= 0 && len(lines) < 3; i-- {
 			msg := messages[i]
-			if msg.Role != "assistant" && msg.Role != "tool" {
+			if msg.Role != message.RoleAssistant && msg.Role != message.RoleTool {
 				continue
 			}
 			text := strings.TrimSpace(msg.Content)
@@ -1791,7 +1791,7 @@ func selectRecentTailMessages(messages []message.Message, userTurns int, maxToke
 		start := len(messages)
 		for i := len(messages) - 1; i >= 0; i-- {
 			start = i
-			if messages[i].Role == "user" {
+			if messages[i].Role == message.RoleUser {
 				usersSeen++
 				if usersSeen >= turns {
 					break
