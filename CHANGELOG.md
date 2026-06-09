@@ -21,6 +21,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
 - TUI message rendering now escapes raw control characters before drawing cards, avoiding background color artifacts when pasted or model-generated text contains bytes such as `\x01`.
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
 - Failed `edit` tool cards now show the attempted patch before the error text, making the failed hunk easier to inspect before reading the diagnostic.

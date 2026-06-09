@@ -58,7 +58,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := a.primaryAgentCoordinationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
-	if block := a.agentsMDReminderFramingPromptBlock(agentsMD); block != "" {
+	if block := agentsMDReminderFramingPromptBlock(agentsMD); block != "" {
 		parts = append(parts, block)
 	}
 	// AGENTS.md is injected as a <system-reminder> user message via
@@ -81,14 +81,14 @@ func (a *MainAgent) buildSystemPrompt() string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (a *MainAgent) agentsMDReminderFramingPromptBlock(agentsMD string) string {
+func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
 		return ""
 	}
 	return strings.TrimSpace(`## Workspace Instructions
-- This workspace provides repository guidance in a <system-reminder> block before the user's first message.
-- Treat repository guidance inside that <system-reminder> block as durable workspace context and follow it unless it conflicts with higher-priority system, developer, or user instructions.
-- Do not ignore or override that repository guidance just because it appears in a user-context block; it is system-provided workspace context, not ordinary user content.`)
+- This workspace provides AGENTS.md repository instructions in a <system-reminder> block before the user's first message.
+- Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context and follow them unless they conflict with higher-priority system, developer, or user instructions.
+- Do not ignore or override those AGENTS.md instructions just because they appear in a user-context block; they are system-provided workspace context, not ordinary user content.`)
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {

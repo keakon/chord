@@ -1513,9 +1513,9 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
 	}
 	for _, want := range []string{
-		"<system-reminder> block before the user's first message",
-		"Treat repository guidance inside that <system-reminder> block as durable workspace context",
-		"it is system-provided workspace context, not ordinary user content",
+		"AGENTS.md repository instructions in a <system-reminder> block before the user's first message",
+		"Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context",
+		"they are system-provided workspace context, not ordinary user content",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
@@ -1529,6 +1529,30 @@ func TestBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *tes
 	got := a.buildSystemPrompt()
 	if strings.Contains(got, "## Workspace Instructions") {
 		t.Fatalf("buildSystemPrompt() unexpectedly included AGENTS.md workspace framing without AGENTS.md, got:\n%s", got)
+	}
+}
+
+func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
+	s := &SubAgent{tools: tools.NewRegistry(), agentsMD: "repo rules", workDir: "/tmp/project", taskDesc: "Inspect the parser."}
+
+	got := s.buildSystemPrompt()
+	for _, want := range []string{
+		"## Workspace Instructions",
+		"AGENTS.md repository instructions in a <system-reminder> block before the user's first message",
+		"Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestSubAgentBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *testing.T) {
+	s := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
+
+	got := s.buildSystemPrompt()
+	if strings.Contains(got, "## Workspace Instructions") {
+		t.Fatalf("SubAgent buildSystemPrompt() unexpectedly included AGENTS.md workspace framing without AGENTS.md, got:\n%s", got)
 	}
 }
 

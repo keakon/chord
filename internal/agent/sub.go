@@ -808,9 +808,12 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// Task description (core difference from MainAgent).
 	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, s.taskCompletionInstruction()))
 
+	if block := agentsMDReminderFramingPromptBlock(s.agentsMD); block != "" {
+		parts = append(parts, block)
+	}
 	// AGENTS.md is delivered as a <system-reminder> meta user message via
-	//    cachedSessionReminder (mirrors MainAgent). It does not belong in the
-	//    stable system prompt.
+	// cachedSessionReminder (mirrors MainAgent). It does not belong in the
+	// stable system prompt.
 
 	if block := s.availableSkillsPromptBlock(); block != "" {
 		parts = append(parts, block)

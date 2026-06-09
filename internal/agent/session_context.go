@@ -23,9 +23,12 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n")
 	if hasAgentsMD {
-		sb.WriteString("# claudeMd\n")
+		sb.WriteString("<system-reminder>\nThe following repository instructions are from AGENTS.md. Read and follow them as durable workspace guidance unless they conflict with higher-priority system, developer, or user instructions.\n\n")
+	} else {
+		sb.WriteString("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n")
+	}
+	if hasAgentsMD {
 		sb.WriteString(agentsMD)
 		sb.WriteString("\n")
 	}
@@ -36,7 +39,11 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 		sb.WriteString("# currentDate\n")
 		fmt.Fprintf(&sb, "Today's date is %s.\n", now.Format("2006-01-02"))
 	}
-	sb.WriteString("\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>")
+	if hasAgentsMD {
+		sb.WriteString("\n      IMPORTANT: The AGENTS.md instructions above are durable workspace guidance. Use supplemental context such as the current date only when relevant to the task.\n</system-reminder>")
+	} else {
+		sb.WriteString("\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>")
+	}
 	return sb.String()
 }
 
