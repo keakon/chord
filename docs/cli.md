@@ -316,7 +316,7 @@ Import an external agent session into a resumable Chord session. Currently suppo
 
 For Claude Code imports, Chord reconstructs the best-effort **main non-sidechain conversation** instead of blindly importing the newest raw leaf. Compact boundaries are used for reconstruction, not rendered as visible transcript messages. Sidechain/sub-agent entries are excluded from the main imported session by default; when detected, CLI output reports the skipped count and `import-report.json` records Claude-specific diagnostics, including sidechain agent IDs when present.
 
-Recognizable imported tools are displayed as the closest current Chord tool card when possible, including file mutations as `edit`, `write`, or `delete`. Tools without a usable mapping remain visible as unsupported tool cards or readable fallback assistant messages instead of raw JSON. Converted imported tools do not restore Chord FileTracker read/write state, so re-run `read` before continuing file edits from an imported session.
+Recognizable imported tool calls are always converted to the closest current Chord tool card when their arguments can be normalized, including file mutations as `edit`, `write`, or `delete`. Only records without a usable mapping (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback messages instead of raw JSON. Converted imported tools do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
 
 ### Flags
 
@@ -326,7 +326,6 @@ Recognizable imported tools are displayed as the closest current Chord tool card
 | `--sid <id>`              | Specify the Chord session id (default: auto-generated)                                                            |
 | `--id <session-id>`       | Import by source session id instead of file path (supported for `codex` and `claude`)                             |
 | `--root <path>`           | Root directory for `--id` lookup (codex default `~/.codex/sessions`, claude default `~/.claude/projects`)         |
-| `--tool-mode <mode>`      | Tool import policy: `auto`, `text`, or `structured` (default depends on source)                                   |
 | `--reasoning <mode>`      | Reasoning import policy: `off`, `visible`, or `strict` (default `strict`)                                         |
 | `--dry-run`               | Parse and report only; do not write a session                                                                     |
 | `--json`                  | Machine-readable JSON summary                                                                                     |

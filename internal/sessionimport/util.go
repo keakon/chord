@@ -12,35 +12,10 @@ import (
 )
 
 const (
-	ToolModeAuto       = "auto"
-	ToolModeText       = "text"
-	ToolModeStructured = "structured"
-
 	ReasoningOff     = "off"
 	ReasoningVisible = "visible"
 	ReasoningStrict  = "strict"
 )
-
-func normalizeToolMode(source, raw string) (string, error) {
-	mode := strings.TrimSpace(raw)
-	if mode == "" {
-		// Per-source defaults.
-		switch source {
-		case "codex", "claude":
-			return ToolModeAuto, nil
-		case "opencode":
-			return ToolModeText, nil
-		default:
-			return ToolModeText, nil
-		}
-	}
-	switch mode {
-	case ToolModeAuto, ToolModeText, ToolModeStructured:
-		return mode, nil
-	default:
-		return "", fmt.Errorf("invalid --tool-mode %q (allowed: auto, text, structured)", mode)
-	}
-}
 
 func normalizeReasoningMode(raw string) (string, error) {
 	mode := strings.TrimSpace(raw)

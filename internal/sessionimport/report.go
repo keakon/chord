@@ -13,7 +13,6 @@ type ImportReport struct {
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 	ImportedAt      time.Time `json:"imported_at"`
 
-	ToolMode      string `json:"tool_mode,omitempty"`
 	ReasoningMode string `json:"reasoning_mode,omitempty"`
 
 	ImportedMessages int `json:"imported_messages"`

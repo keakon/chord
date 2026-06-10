@@ -2,6 +2,7 @@ package modelcompat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -9,7 +10,7 @@ import (
 
 func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) {
 	msgs := []message.Message{{
-		Role:           "assistant",
+		Role:           message.RoleAssistant,
 		Content:        "hello",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "import:claude", WireFamily: WireFamilyAnthropic},
@@ -25,7 +26,7 @@ func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) 
 
 func TestNormalizeForTarget_DropsAnthropicThinkingWithoutReplayEnable(t *testing.T) {
 	msgs := []message.Message{{
-		Role:           "assistant",
+		Role:           message.RoleAssistant,
 		Content:        "hello",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", WireFamily: WireFamilyAnthropic},
@@ -41,7 +42,7 @@ func TestNormalizeForTarget_DropsAnthropicThinkingWithoutReplayEnable(t *testing
 
 func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T) {
 	msgs := []message.Message{{
-		Role:             "assistant",
+		Role:             message.RoleAssistant,
 		ReasoningContent: "hidden reasoning",
 		Provenance:       &message.MessageProvenance{WireFamily: WireFamilyOpenAIChat},
 	}}
@@ -56,7 +57,7 @@ func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T
 
 func TestNormalizeForTarget_DropsAnthropicThinkingForOpenAI(t *testing.T) {
 	msgs := []message.Message{{
-		Role:           "assistant",
+		Role:           message.RoleAssistant,
 		Content:        "hello",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "import:claude", WireFamily: WireFamilyAnthropic},
@@ -72,7 +73,7 @@ func TestNormalizeForTarget_DropsAnthropicThinkingForOpenAI(t *testing.T) {
 
 func TestNormalizeForTarget_DropsThinkingWithoutProvenance(t *testing.T) {
 	msgs := []message.Message{{
-		Role:           "assistant",
+		Role:           message.RoleAssistant,
 		Content:        "hello",
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     nil,
@@ -89,17 +90,17 @@ func TestNormalizeForTarget_DropsThinkingWithoutProvenance(t *testing.T) {
 	}
 }
 
-func TestNormalizeForTarget_DowngradesStructuredToolsWhenDisabled(t *testing.T) {
+func TestNormalizeForTarget_DowngradesImportedStructuredToolsWhenDisabled(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{
-		{Role: "assistant", Content: "", ToolCalls: []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}}},
-		{Role: "tool", ToolCallID: "toolu_1", Content: "ok"},
+		{Role: message.RoleAssistant, Content: "", ToolCalls: []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}}, Provenance: &message.MessageProvenance{Imported: true}},
+		{Role: message.RoleTool, ToolCallID: "toolu_1", Content: "ok", Provenance: &message.MessageProvenance{Imported: true}},
 	}
 	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
 	if len(out) != 1 {
 		t.Fatalf("len(out)=%d, want 1 after assistant merge", len(out))
 	}
-	if out[0].Role != "assistant" || len(out[0].ToolCalls) != 0 {
+	if out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 {
 		t.Fatalf("expected assistant text downgrade, got %+v", out[0])
 	}
 	if rep.DowngradedToolCalls == 0 {
@@ -107,10 +108,42 @@ func TestNormalizeForTarget_DowngradesStructuredToolsWhenDisabled(t *testing.T) 
 	}
 }
 
+func TestNormalizeForTarget_DropsNonImportedUnreplayableToolsWithoutImportedMarker(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{"command": "ls"})
+	msgs := []message.Message{
+		{
+			Role:       message.RoleAssistant,
+			Content:    "I will inspect the workspace.",
+			ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "shell", Args: args}},
+			Provenance: &message.MessageProvenance{Source: "chord", WireFamily: WireFamilyOpenAIChat},
+		},
+	}
+
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, SupportsStructuredTools: true, ToolResultEncoding: ToolResultEncodingAnthropicUserBlock}, NormalizeOptions{StructuredTools: true})
+	if len(out) != 1 {
+		t.Fatalf("len(out)=%d, want 1", len(out))
+	}
+	if len(out[0].ToolCalls) != 0 {
+		t.Fatalf("tool calls should be dropped from request copy, got %+v", out[0].ToolCalls)
+	}
+	if out[0].Content != "I will inspect the workspace." {
+		t.Fatalf("content=%q", out[0].Content)
+	}
+	if rep.DowngradedToolCalls != 0 {
+		t.Fatalf("DowngradedToolCalls=%d, want 0", rep.DowngradedToolCalls)
+	}
+	if strings.Contains(out[0].Content, "[Imported tool call") {
+		t.Fatalf("non-imported tool call was rendered as imported marker: %q", out[0].Content)
+	}
+	if len(rep.Warnings) == 0 {
+		t.Fatalf("expected warning for dropped non-imported tool call")
+	}
+}
+
 func TestNormalizeForTarget_DoesNotMutateInput(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{{
-		Role:           "assistant",
+		Role:           message.RoleAssistant,
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}},
 	}}

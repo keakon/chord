@@ -29,6 +29,12 @@ const (
 
 const StatusDeltaWaitingHeaders = "waiting_headers"
 
+const (
+	ToolStatusSuccess   = "success"
+	ToolStatusError     = "error"
+	ToolStatusCancelled = "cancelled"
+)
+
 // ContentPart is one part of a multi-part user message (text, image, or pdf).
 type ContentPart struct {
 	Type        ContentPartType `json:"type"`                   // "text", "image", or "pdf"

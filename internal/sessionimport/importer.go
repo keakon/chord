@@ -20,7 +20,6 @@ type ImportOptions struct {
 	SourceRoot    string
 	ProjectRoot   string
 	SessionID     string
-	ToolMode      string
 	ReasoningMode string
 	DryRun        bool
 	JSONOutput    bool
@@ -58,10 +57,6 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		projectRoot = "."
 	}
 
-	toolMode, err := normalizeToolMode(source, opts.ToolMode)
-	if err != nil {
-		return nil, err
-	}
 	reasoningMode, err := normalizeReasoningMode(opts.ReasoningMode)
 	if err != nil {
 		return nil, err
@@ -84,7 +79,6 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	report := ImportReport{
 		Source:           source,
 		SourcePath:       input,
-		ToolMode:         toolMode,
 		ReasoningMode:    reasoningMode,
 		ImportedAt:       time.Now().UTC(),
 		ImportedMessages: 0,
@@ -93,20 +87,17 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	var msgs []message.Message
 	switch source {
 	case "claude":
-		msgs, err = convertClaudeTranscript(data, toolMode, reasoningMode, &report)
+		msgs, err = convertClaudeTranscript(data, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
 	case "opencode":
-		if toolMode == ToolModeStructured {
-			return nil, fmt.Errorf("opencode import: --tool-mode structured is not supported for opencode; use --tool-mode text")
-		}
 		msgs, err = convertOpenCodeExport(data, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
 	case "codex":
-		msgs, err = convertCodexRollout(data, toolMode, reasoningMode, &report)
+		msgs, err = convertCodexRollout(data, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +126,6 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		SourcePath:      resolvedInput,
 		SourceSessionID: report.SourceSessionID,
 		ImportedAt:      report.ImportedAt,
-		ToolMode:        toolMode,
 		ReasoningMode:   reasoningMode,
 		ReportPath:      "import-report.json",
 	}})

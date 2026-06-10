@@ -119,7 +119,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 说明：
 
-- **Tools**：默认策略按来源区分。Chord 会在参数能标准化时，把可识别的外部工具调用转换成最接近的当前 Chord 工具卡：Codex、Claude Code 与 OpenCode 记录中的对应工具会显示为 `read`、`shell`、`grep`、`glob`、`edit`、`write` 或 `delete`。未知、参数缺失或暂不支持的来源工具仍会作为 unsupported tool card 保留，而不是丢弃。导入 provenance 会在内部保留，因此这些转换后的工具卡只代表 transcript/history，不会恢复 Chord FileTracker 的 read/write 状态；导入后继续修改相关文件前仍需要重新 `read`。
+- **Tools**：Chord 始终在参数能标准化时，把可识别的外部工具调用转换成最接近的当前 Chord 工具卡：Codex、Claude Code 与 OpenCode 记录中的对应工具会显示为 `read`、`shell`、`grep`、`glob`、`edit`、`write` 或 `delete`。只有无法识别的记录（没有 Chord 映射、缺少 call id、或参数无法标准化）才会作为可读的 fallback 卡片保留，而不是丢弃。导入 provenance 会在内部保留，因此这些转换后的工具卡只代表 transcript/history，不会恢复 Chord FileTracker snapshot；如果编辑导入会话涉及的文件前需要最新文件上下文或 stale-change 风险提示，请重新 `read`。
 - **Reasoning**：Chord 只会把 Anthropic signed thinking 导入为 `thinking_blocks`；非签名 reasoning 默认（`--reasoning strict`）丢弃，使用 `--reasoning visible` 可作为普通文本导入。
 - **Claude 主会话重建**：Claude 导入会尽力重建非 sidechain 的主会话连续片段，而不是简单选择最新的原始叶子节点。compact 边界会参与重建，但不会作为普通 transcript 消息渲染。
 - **Claude sidechain**：sidechain / sub-agent transcript 条目默认不会导入到主 session。存在这些条目时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在可用时记录 sidechain agent ID。
@@ -133,7 +133,6 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 - `--sid <id>`：指定 session id（默认自动生成）
 - `--id <session-id>`：按来源 session id 查找输入文件（支持 `codex` / `claude`）
 - `--root <path>`：`--id` 查找的根目录
-- `--tool-mode auto|text|structured`：工具导入策略（默认值取决于来源）
 - `--reasoning off|visible|strict`：reasoning 导入策略（默认 `strict`）
 - `--dry-run`：只解析输出报告，不写入 session
 - `--json`：输出机器可读 JSON

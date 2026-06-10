@@ -25,7 +25,7 @@ func TestConvertClaudeTranscript_AcceptsStringContentMessages(t *testing.T) {
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestConvertClaudeTranscript_StructuredThinkingAndTools(t *testing.T) {
 {"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"/tmp"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestConvertClaudeTranscript_DoesNotRestoreEarlierRetryFailure(t *testing.T)
 {"uuid":"a2","parentUuid":"r1","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 {"uuid":"a2","parentUuid":"u2","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/tmp/a.txt","offset":2,"limit":5}}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestConvertClaudeTranscript_UnsupportedToolPreservesMetadata(t *testing.T) 
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_unknown","name":"WebSearch","input":{"query":"golang"}}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 {"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_edit","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_multi","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_write","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_update","content":"ok"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatc
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"remove me\n","new_string":""}]}}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestConvertClaudeTranscript_AutoKeepsUnsignedToolTurnAsToolCard(t *testing.
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reason"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"pwd","description":"print working dir"}}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestConvertClaudeTranscript_SelectsLongestCompleteNonSidechainChain(t *test
 {"uuid":"short","message":{"role":"assistant","content":[{"type":"text","text":"short-tail"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestConvertClaudeTranscript_CompactBoundaryPreservedSegmentBridge(t *testin
 {"uuid":"u2","parentUuid":"cb1","message":{"role":"user","content":[{"type":"text","text":"after compact"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestConvertClaudeTranscript_SelectsAssistantEndedChainOnTie(t *testing.T) {
 {"uuid":"a2","parentUuid":"u3","message":{"role":"assistant","content":[{"type":"text","text":"alt-2"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestConvertClaudeTranscript_ToolLineageCountsAreAccurate(t *testing.T) {
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Shell","input":{"command":"pwd"}}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestConvertClaudeTranscript_LogicalParentCountsAsLeafBridge(t *testing.T) {
 {"uuid":"m2","logicalParentUuid":"m1","message":{"role":"user","content":[{"type":"text","text":"after-relink"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestConvertClaudeTranscript_SkipsSidechainsFromMainImport(t *testing.T) {
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"main-reply"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestConvertClaudeTranscript_SkipsSidechainsFromMainImport(t *testing.T) {
 func TestConvertClaudeTranscript_UnsupportedVisibleRoleFallsBackToReadableMessage(t *testing.T) {
 	data := []byte(`{"uuid":"sys1","type":"system","subtype":"tool_use_summary","message":{"role":"system","content":[{"type":"text","text":"tool summary"}]}}`)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestConvertClaudeTranscript_CompactBoundaryWithoutPreservedTailCutsOffHisto
 {"uuid":"u2","parentUuid":"cb1","message":{"role":"user","content":[{"type":"text","text":"after compact"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestConvertClaudeTranscript_TombstoneExcludesTargetMessage(t *testing.T) {
 {"uuid":"u2","logicalParentUuid":"u1","message":{"role":"user","content":[{"type":"text","text":"after delete"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestConvertClaudeTranscript_AllowsPendingToolUseAtLeafWhenSelectingChain(t 
 {"uuid":"x2","parentUuid":"x1","message":{"role":"assistant","content":[{"type":"text","text":"complete"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestConvertClaudeTranscript_MixedUnsupportedVisibleEntryFallsBackInChain(t 
 {"uuid":"a1","parentUuid":"sys1","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestConvertClaudeTranscript_PrefersCompleteToolLineageOverLongerBrokenChain
 {"uuid":"x3","parentUuid":"x2","message":{"role":"user","content":[{"type":"text","text":"still longer"}]}}
 `)
 	var report ImportReport
-	msgs, err := convertClaudeTranscript(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}

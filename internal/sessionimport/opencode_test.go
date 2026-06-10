@@ -65,6 +65,29 @@ func TestConvertOpenCodeExport_WarnsForUnknownRole(t *testing.T) {
 	}
 }
 
+func TestConvertOpenCodeExport_ToolFallbackWarnsOnlyActualCause(t *testing.T) {
+	data := []byte(`{
+  "messages": [
+    {"role": "assistant", "parts": [
+      {"type": "tool", "tool": "bash", "state": {"input": {"command": "ls"}, "status": "completed", "output": "ok"}}
+    ]}
+  ]
+}`)
+	var report ImportReport
+	if _, err := convertOpenCodeExport(data, ReasoningStrict, &report); err != nil {
+		t.Fatalf("convertOpenCodeExport: %v", err)
+	}
+	var toolWarns []string
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning, "imported as text") {
+			toolWarns = append(toolWarns, warning)
+		}
+	}
+	if len(toolWarns) != 1 || !strings.Contains(toolWarns[0], "missing call id") {
+		t.Fatalf("warnings=%q, want exactly one missing-call-id warning", report.Warnings)
+	}
+}
+
 func TestConvertOpenCodeExport_ParsesCurrentExportPartsAndToolFallback(t *testing.T) {
 	data := []byte(`{
   "info": {"id": "sess-2"},
@@ -142,17 +165,29 @@ func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertOpenCodeExport: %v", err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("msgs len=%d, want 1", len(msgs))
+	if len(msgs) != 5 {
+		t.Fatalf("msgs len=%d, want 5", len(msgs))
 	}
-	content := msgs[0].Content
-	for _, want := range []string{"[Imported tool: read]", `"tool": "read"`, `"path": "README.md"`, "[Imported tool: edit]", `"tool": "edit"`, "[Imported unsupported tool: unknown-tool]"} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("content missing %q:\n%s", want, content)
-		}
+	if msgs[0].Role != message.RoleAssistant || len(msgs[0].ToolCalls) != 1 || msgs[0].ToolCalls[0].Name != "read" || msgs[0].ToolCalls[0].ID != "call-read" {
+		t.Fatalf("read tool call not structured: %+v", msgs[0])
+	}
+	if msgs[1].Role != message.RoleTool || msgs[1].ToolCallID != "call-read" || msgs[1].Content != "contents" || msgs[1].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("read tool result not structured: %+v", msgs[1])
+	}
+	if msgs[2].Role != message.RoleAssistant || len(msgs[2].ToolCalls) != 1 || msgs[2].ToolCalls[0].Name != "edit" || msgs[2].ToolCalls[0].ID != "call-patch" {
+		t.Fatalf("edit tool call not structured: %+v", msgs[2])
+	}
+	if msgs[3].Role != message.RoleTool || msgs[3].ToolCallID != "call-patch" || msgs[3].Content != "ok" || msgs[3].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("edit tool result not structured: %+v", msgs[3])
+	}
+	if !strings.Contains(msgs[4].Content, "[Imported unsupported tool: unknown-tool]") {
+		t.Fatalf("unknown tool should remain fallback text: %+v", msgs[4])
 	}
 	if report.ToolEntriesRendered != 3 {
 		t.Fatalf("ToolEntriesRendered=%d, want 3", report.ToolEntriesRendered)
+	}
+	if report.StructuredToolCalls != 2 || report.StructuredToolResults != 2 {
+		t.Fatalf("structured tool counts = %d/%d, want 2/2", report.StructuredToolCalls, report.StructuredToolResults)
 	}
 	if report.UnsupportedToolCalls != 1 {
 		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
@@ -194,5 +229,36 @@ func TestConvertOpenCodeExport_ToleratesArrayRoot(t *testing.T) {
 	}
 	if len(msgs) != 2 {
 		t.Fatalf("msgs len=%d, want 2", len(msgs))
+	}
+}
+
+func TestConvertOpenCodeExport_StructuresContentArrayToolBlocks(t *testing.T) {
+	data := []byte(`{
+  "messages": [
+    {"role":"assistant","content":[
+      {"type":"text","text":"checking"},
+      {"type":"tool","callID":"call-c","tool":"shell","input":{"command":"pwd"},"output":"/tmp","status":"completed"}
+    ]}
+  ]
+}`)
+	var report ImportReport
+	msgs, err := convertOpenCodeExport(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertOpenCodeExport: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != message.RoleAssistant || msgs[0].Content != "checking" {
+		t.Fatalf("leading text not preserved: %+v", msgs[0])
+	}
+	if msgs[1].Role != message.RoleAssistant || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" || msgs[1].ToolCalls[0].ID != "call-c" {
+		t.Fatalf("content-array tool call not structured: %+v", msgs[1])
+	}
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call-c" || msgs[2].Content != "/tmp" {
+		t.Fatalf("content-array tool result not structured: %+v", msgs[2])
+	}
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 {
+		t.Fatalf("structured tool counts = %d/%d, want 1/1", report.StructuredToolCalls, report.StructuredToolResults)
 	}
 }

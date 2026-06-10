@@ -34,7 +34,6 @@ type ImportMeta struct {
 	SourcePath      string    `json:"source_path,omitempty"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 	ImportedAt      time.Time `json:"imported_at"`
-	ToolMode        string    `json:"tool_mode,omitempty"`
 	ReasoningMode   string    `json:"reasoning_mode,omitempty"`
 	ReportPath      string    `json:"report_path,omitempty"`
 }

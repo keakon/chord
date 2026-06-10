@@ -17,6 +17,9 @@ const (
 	ToolResultEncodingOpenAIToolRole     = "openai_tool_role"
 	ToolResultEncodingAnthropicUserBlock = "anthropic_user_blocks"
 	ToolResultEncodingGeminiUserParts    = "gemini_user_parts"
+
+	importedToolCallMarkerPrefix   = "[Imported tool call"
+	importedToolResultMarkerPrefix = "[Imported tool result for "
 )
 
 type TargetModel struct {
@@ -56,6 +59,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	allowThinking := strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && target.ThinkingReplayEnabled
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
+	droppedNonImportedToolIDs := make(map[string]bool)
+	droppedNonImportedAssistantIdx := make(map[int]bool)
 
 	for i := range out {
 		msg := &out[i]
@@ -87,32 +92,64 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 		}
 
 		if len(msg.ToolCalls) > 0 && !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools) {
-			downgraded := downgradeAssistantToolCallsToText(*msg)
-			if downgraded.Content != msg.Content || len(msg.ToolCalls) > 0 {
-				out[i] = downgraded
-				report.DowngradedToolCalls++
+			if canDowngradeToolCallsToText(*msg) {
+				downgraded := downgradeAssistantToolCallsToText(*msg)
+				if downgraded.Content != msg.Content || len(msg.ToolCalls) > 0 {
+					out[i] = downgraded
+					report.DowngradedToolCalls++
+				}
+			} else {
+				for _, tc := range msg.ToolCalls {
+					if id := strings.TrimSpace(tc.ID); id != "" {
+						droppedNonImportedToolIDs[id] = true
+					}
+				}
+				msg.ToolCalls = nil
+				droppedNonImportedAssistantIdx[i] = true
+				report.Warnings = append(report.Warnings, "dropped unreplayable non-imported tool calls from request context")
 			}
 		}
 	}
 
 	if !allowStructuredTools {
 		for i := range out {
-			if out[i].Role != "tool" {
+			if out[i].Role != message.RoleTool {
+				continue
+			}
+			if !canDowngradeToolResultToText(out[i]) {
+				out[i].Role = ""
+				report.Warnings = append(report.Warnings, "dropped non-imported tool result from request context")
 				continue
 			}
 			callID := strings.TrimSpace(out[i].ToolCallID)
 			content := strings.TrimSpace(out[i].Content)
 			marker := content
 			if callID != "" {
-				marker = joinNonEmpty("[Imported tool result for "+callID+"]", content)
+				marker = joinNonEmpty(importedToolResultMarkerPrefix+callID+"]", content)
 			}
 			out[i] = message.Message{
-				Role:       "assistant",
+				Role:       message.RoleAssistant,
 				Content:    marker,
 				Provenance: cloneProvenance(out[i].Provenance),
 			}
 			report.DowngradedToolCalls++
 		}
+	}
+	if len(droppedNonImportedToolIDs) > 0 || !allowStructuredTools {
+		filtered := out[:0]
+		for i, msg := range out {
+			if msg.Role == "" {
+				continue
+			}
+			if msg.Role == message.RoleTool && droppedNonImportedToolIDs[strings.TrimSpace(msg.ToolCallID)] {
+				continue
+			}
+			if droppedNonImportedAssistantIdx[i] && msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
+				continue
+			}
+			filtered = append(filtered, msg)
+		}
+		out = filtered
 	}
 
 	return compactAdjacentAssistantMessages(out), report
@@ -139,14 +176,6 @@ func toolCallsReplayAllowed(msg message.Message, toolResultsByID map[string]bool
 	if !allowStructuredTools {
 		return false
 	}
-	if msg.Provenance != nil {
-		wire := strings.TrimSpace(msg.Provenance.WireFamily)
-		if wire != "" && wire != WireFamilyUnknown && wire != strings.TrimSpace(target.WireFamily) {
-			if strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic {
-				return false
-			}
-		}
-	}
 	for _, tc := range msg.ToolCalls {
 		if strings.TrimSpace(tc.ID) == "" || !toolResultsByID[strings.TrimSpace(tc.ID)] {
 			return false
@@ -163,7 +192,7 @@ func toolCallsReplayAllowed(msg message.Message, toolResultsByID map[string]bool
 func collectToolResults(msgs []message.Message) map[string]bool {
 	m := make(map[string]bool)
 	for _, msg := range msgs {
-		if msg.Role != "tool" {
+		if msg.Role != message.RoleTool {
 			continue
 		}
 		id := strings.TrimSpace(msg.ToolCallID)
@@ -174,13 +203,21 @@ func collectToolResults(msgs []message.Message) map[string]bool {
 	return m
 }
 
+func canDowngradeToolCallsToText(msg message.Message) bool {
+	return msg.Provenance != nil && msg.Provenance.Imported
+}
+
+func canDowngradeToolResultToText(msg message.Message) bool {
+	return msg.Provenance != nil && msg.Provenance.Imported
+}
+
 func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 	blocks := make([]string, 0, len(msg.ToolCalls)+1)
 	if strings.TrimSpace(msg.Content) != "" {
 		blocks = append(blocks, strings.TrimSpace(msg.Content))
 	}
 	for _, tc := range msg.ToolCalls {
-		marker := "[Imported tool call"
+		marker := importedToolCallMarkerPrefix
 		if strings.TrimSpace(tc.Name) != "" {
 			marker += ": " + strings.TrimSpace(tc.Name)
 		}
@@ -189,7 +226,7 @@ func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 		blocks = append(blocks, joinNonEmpty(marker, payload))
 	}
 	return message.Message{
-		Role:             "assistant",
+		Role:             message.RoleAssistant,
 		Content:          strings.TrimSpace(strings.Join(blocks, "\n\n")),
 		ThinkingBlocks:   msg.ThinkingBlocks,
 		ReasoningContent: msg.ReasoningContent,
@@ -210,7 +247,7 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 			continue
 		}
 		last := &out[len(out)-1]
-		if last.Role == "assistant" && msg.Role == "assistant" && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
+		if last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
 			last.Content = joinNonEmpty(last.Content, msg.Content)
 			continue
 		}

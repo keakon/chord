@@ -18,7 +18,6 @@ func newImportCmd() *cobra.Command {
 	var sid string
 	var sourceID string
 	var sourceRoot string
-	var toolMode string
 	var reasoningMode string
 	var dryRun bool
 	var jsonOut bool
@@ -56,7 +55,6 @@ func newImportCmd() *cobra.Command {
 					SourceRoot:    sourceRoot,
 					ProjectRoot:   projectRoot,
 					SessionID:     sid,
-					ToolMode:      toolMode,
 					ReasoningMode: reasoningMode,
 					DryRun:        dryRun,
 					JSONOutput:    jsonOut,
@@ -92,7 +90,6 @@ func newImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sid, "sid", "", "specify the Chord session id (default: auto-generated)")
 	cmd.Flags().StringVar(&sourceID, "id", "", "import by source session id (codex/claude); requires --root or default roots")
 	cmd.Flags().StringVar(&sourceRoot, "root", "", "root directory for --id lookup (codex: ~/.codex/sessions, claude: ~/.claude/projects)")
-	cmd.Flags().StringVar(&toolMode, "tool-mode", "", "tool import mode: auto|text|structured")
 	cmd.Flags().StringVar(&reasoningMode, "reasoning", "", "reasoning import mode: off|visible|strict")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "parse and report only; do not write session")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output machine-readable JSON summary")

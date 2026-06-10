@@ -90,6 +90,18 @@ const (
 	claudeEntryVisibleMessage claudeEntryKind = "visible_message"
 	claudeEntryMetadata       claudeEntryKind = "metadata"
 	claudeEntryUnsupported    claudeEntryKind = "unsupported"
+
+	claudeRoleUser      = "user"
+	claudeRoleAssistant = "assistant"
+	claudeRoleTool      = "tool"
+
+	claudeBlockTypeText             = "text"
+	claudeBlockTypeThinking         = "thinking"
+	claudeBlockTypeRedactedThinking = "redacted_thinking"
+	claudeBlockTypeToolUse          = "tool_use"
+	claudeBlockTypeToolResult       = "tool_result"
+
+	claudeUnsupportedTranscriptHeader = "[Imported Claude transcript entry]"
 )
 
 type claudeEntry struct {
@@ -113,7 +125,7 @@ type claudeChainCandidate struct {
 	IncludesPreservedSegments bool
 }
 
-func convertClaudeTranscript(data []byte, toolMode string, reasoningMode string, report *ImportReport) ([]message.Message, error) {
+func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return nil, fmt.Errorf("claude import: empty input")
@@ -166,7 +178,7 @@ func convertClaudeTranscript(data []byte, toolMode string, reasoningMode string,
 
 	var out []message.Message
 	for _, node := range chain {
-		msg, skipped, toolRendered, reasoningSkipped, warns, err := convertClaudeNode(node, toolMode, reasoningMode)
+		msg, skipped, toolRendered, reasoningSkipped, warns, err := convertClaudeNode(node, reasoningMode)
 		for _, w := range warns {
 			report.warnf("claude line %d: %s", node.Index, w)
 			report.Claude.Diagnostics = append(report.Claude.Diagnostics, fmt.Sprintf("line %d: %s", node.Index, w))
@@ -189,7 +201,7 @@ func convertClaudeTranscript(data []byte, toolMode string, reasoningMode string,
 			continue
 		}
 		for _, m := range msg {
-			if m.Role == "assistant" {
+			if m.Role == claudeRoleAssistant {
 				for _, tc := range m.ToolCalls {
 					if claudeToolCallHasUnsupportedMetadata(tc.Args) {
 						report.UnsupportedToolCalls++
@@ -199,7 +211,7 @@ func convertClaudeTranscript(data []byte, toolMode string, reasoningMode string,
 					report.Claude.StructuredToolCalls++
 				}
 			}
-			if m.Role == "tool" {
+			if m.Role == claudeRoleTool {
 				report.StructuredToolResults++
 				report.Claude.StructuredToolResults++
 			}
@@ -252,7 +264,7 @@ func classifyClaudeEntry(node claudeNode, stats *ClaudeImportReport) (claudeEntr
 		return claudeEntry{Node: node, Kind: claudeEntryUnsupported}, false
 	}
 	role := strings.ToLower(strings.TrimSpace(msg.Role))
-	if role == "assistant" || role == "user" {
+	if role == claudeRoleAssistant || role == claudeRoleUser {
 		stats.NonSidechainMessages++
 		return claudeEntry{Node: node, Kind: claudeEntryVisibleMessage, Role: role}, false
 	}
@@ -280,7 +292,7 @@ func isClaudeUnsupportedVisibleNode(node claudeNode) bool {
 		return true
 	}
 	role := strings.ToLower(strings.TrimSpace(cm.Role))
-	return role != "assistant" && role != "user"
+	return role != claudeRoleAssistant && role != claudeRoleUser
 }
 
 func convertClaudeUnsupportedEntries(entries []claudeEntry, report *ImportReport) ([]message.Message, bool) {
@@ -475,7 +487,7 @@ func buildClaudeCandidate(leaf claudeEntry, byUUID map[string]claudeEntry) claud
 		}
 	}
 	candidate.PendingLeafToolCalls = countClaudeToolUseBlocks(leaf.Node.Envelope.Message)
-	if leaf.Role == "assistant" && candidate.PendingLeafToolCalls > 0 {
+	if leaf.Role == claudeRoleAssistant && candidate.PendingLeafToolCalls > 0 {
 		candidate.OrphanToolCalls = max(0, candidate.OrphanToolCalls-candidate.PendingLeafToolCalls)
 	}
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
@@ -506,8 +518,8 @@ func compareClaudeCandidates(a, b claudeChainCandidate) int {
 		}
 		return -1
 	}
-	aAssistantEnd := a.LastRole == "assistant"
-	bAssistantEnd := b.LastRole == "assistant"
+	aAssistantEnd := a.LastRole == claudeRoleAssistant
+	bAssistantEnd := b.LastRole == claudeRoleAssistant
 	if aAssistantEnd != bAssistantEnd {
 		if aAssistantEnd {
 			return 1
@@ -590,13 +602,13 @@ func countClaudeToolConsistency(raw json.RawMessage, seenToolCalls map[string]st
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(block.Type)) {
-		case "tool_use":
+		case claudeBlockTypeToolUse:
 			id := strings.TrimSpace(block.ID)
 			if id == "" {
 				continue
 			}
 			seenToolCalls[id] = struct{}{}
-		case "tool_result":
+		case claudeBlockTypeToolResult:
 			id := strings.TrimSpace(block.ToolUseID)
 			if id == "" {
 				continue
@@ -617,20 +629,20 @@ func countClaudeToolUseBlocks(raw json.RawMessage) int {
 		if err := json.Unmarshal(blockRaw, &block); err != nil {
 			continue
 		}
-		if strings.ToLower(strings.TrimSpace(block.Type)) == "tool_use" && strings.TrimSpace(block.ID) != "" {
+		if strings.ToLower(strings.TrimSpace(block.Type)) == claudeBlockTypeToolUse && strings.TrimSpace(block.ID) != "" {
 			count++
 		}
 	}
 	return count
 }
 
-func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, err error) {
+func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, err error) {
 	var cm claudeMessage
 	if err := json.Unmarshal(node.Envelope.Message, &cm); err != nil {
 		return nil, false, false, false, nil, fmt.Errorf("parse message: %w", err)
 	}
 	role := strings.ToLower(strings.TrimSpace(cm.Role))
-	if role != "assistant" && role != "user" {
+	if role != claudeRoleAssistant && role != claudeRoleUser {
 		fallback := renderClaudeUnsupportedMessage(node.Envelope, role)
 		if strings.TrimSpace(fallback.Content) == "" {
 			return nil, true, false, false, []string{"skipped unsupported role=" + role}, nil
@@ -639,8 +651,8 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 	}
 
 	switch role {
-	case "assistant":
-		assistant := message.Message{Role: "assistant", Provenance: importedClaudeProvenance()}
+	case claudeRoleAssistant:
+		assistant := message.Message{Role: message.RoleAssistant, Provenance: importedClaudeProvenance()}
 		for _, raw := range cm.Content {
 			var block claudeContentBlock
 			if err := json.Unmarshal(raw, &block); err != nil {
@@ -648,9 +660,9 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 				continue
 			}
 			switch strings.ToLower(strings.TrimSpace(block.Type)) {
-			case "text":
+			case claudeBlockTypeText:
 				assistant.Content = joinNonEmpty(assistant.Content, block.Text)
-			case "thinking":
+			case claudeBlockTypeThinking:
 				if reasoningMode == ReasoningOff {
 					reasoningSkipped = true
 					continue
@@ -658,20 +670,15 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 				if strings.TrimSpace(block.Signature) == "" {
 					reasoningSkipped = true
 					if reasoningMode == ReasoningVisible {
-						assistant.Content = joinNonEmpty(assistant.Content, "[Imported reasoning]", block.Thinking)
+						assistant.Content = joinNonEmpty(assistant.Content, importedReasoningMarker, block.Thinking)
 					}
 					continue
 				}
 				assistant.ThinkingBlocks = append(assistant.ThinkingBlocks, message.ThinkingBlock{Thinking: block.Thinking, Signature: block.Signature})
-			case "redacted_thinking":
+			case claudeBlockTypeRedactedThinking:
 				reasoningSkipped = true
 				warns = append(warns, "redacted thinking was not imported")
-			case "tool_use":
-				if toolMode == ToolModeText {
-					assistant.Content = joinNonEmpty(assistant.Content, renderImportedToolMarker("tool call", raw))
-					toolRendered = true
-					continue
-				}
+			case claudeBlockTypeToolUse:
 				if strings.TrimSpace(block.ID) == "" {
 					warns = append(warns, "tool_use missing id; imported as text")
 					assistant.Content = joinNonEmpty(assistant.Content, renderImportedToolMarker("tool call", raw))
@@ -693,8 +700,8 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 		}
 		return []message.Message{assistant}, false, toolRendered, reasoningSkipped, warns, nil
 
-	case "user":
-		user := message.Message{Role: "user", Provenance: importedClaudeProvenance()}
+	case claudeRoleUser:
+		user := message.Message{Role: message.RoleUser, Provenance: importedClaudeProvenance()}
 		var toolMsgs []message.Message
 		for _, raw := range cm.Content {
 			var block claudeContentBlock
@@ -703,21 +710,16 @@ func convertClaudeNode(node claudeNode, toolMode string, reasoningMode string) (
 				continue
 			}
 			switch strings.ToLower(strings.TrimSpace(block.Type)) {
-			case "text":
+			case claudeBlockTypeText:
 				user.Content = joinNonEmpty(user.Content, block.Text)
-			case "tool_result":
-				if toolMode == ToolModeText {
-					user.Content = joinNonEmpty(user.Content, renderImportedToolMarker("tool result", raw))
-					toolRendered = true
-					continue
-				}
+			case claudeBlockTypeToolResult:
 				if strings.TrimSpace(block.ToolUseID) == "" {
 					warns = append(warns, "tool_result missing tool_use_id; imported as text")
 					user.Content = joinNonEmpty(user.Content, renderImportedToolMarker("tool result", raw))
 					toolRendered = true
 					continue
 				}
-				toolMsgs = append(toolMsgs, message.Message{Role: "tool", ToolCallID: block.ToolUseID, Content: rawContentString(block.Content), Provenance: importedClaudeProvenance()})
+				toolMsgs = append(toolMsgs, message.Message{Role: message.RoleTool, ToolCallID: block.ToolUseID, Content: rawContentString(block.Content), Provenance: importedClaudeProvenance()})
 			default:
 				warns = append(warns, "unsupported user content block type="+block.Type)
 			}
@@ -894,7 +896,7 @@ func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) m
 	if content != "" {
 		fields = append(fields, "Content:", content)
 	}
-	return message.Message{Role: "assistant", Content: renderImportedFallbackBlock("[Imported Claude transcript entry]", fields...), Provenance: importedClaudeProvenance()}
+	return message.Message{Role: message.RoleAssistant, Content: renderImportedFallbackBlock(claudeUnsupportedTranscriptHeader, fields...), Provenance: importedClaudeProvenance()}
 }
 
 func normalizeClaudeWriteArgs(raw json.RawMessage) json.RawMessage {

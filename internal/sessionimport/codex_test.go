@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -32,7 +33,7 @@ func TestConvertCodexRollout_IgnoresItemJSONL(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestConvertCodexRollout_ParsesNewPayloadSchema(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestConvertCodexRollout_SkipsStartupInstructionUserMessage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestConvertCodexRollout_StructuredShellTool(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestConvertCodexRollout_UnsupportedToolDowngrade(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestConvertCodexRollout_EventMsgDeduplication(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -253,7 +254,7 @@ func TestConvertCodexRollout_FallbackTurnBoundaryByUserMessages(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -265,24 +266,24 @@ func TestConvertCodexRollout_FallbackTurnBoundaryByUserMessages(t *testing.T) {
 	}
 }
 
-func TestConvertCodexRollout_TextToolModeDowngradesMappedTools(t *testing.T) {
+func TestConvertCodexRollout_KeepsMappedToolsStructured(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run pwd"}]}}
 {"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":\"pwd\"}","call_id":"call_1"}}
 {"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"/tmp","call_id":"call_1"}}
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeText, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if len(msgs[1].ToolCalls) != 0 || msgs[2].Role != "assistant" {
+	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" || msgs[2].Role != message.RoleTool {
 		t.Fatalf("msgs=%+v", msgs)
 	}
-	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -295,7 +296,7 @@ func TestConvertCodexRollout_AttachesReasoningAndUsage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningVisible, &report)
+	msgs, err := convertCodexRollout(data, ReasoningVisible, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -322,7 +323,7 @@ func TestConvertCodexRollout_TurnBoundaries(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -355,7 +356,7 @@ func TestConvertCodexRollout_PairsToolResultByCallOwnerAcrossTurnContextAdvance(
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -373,17 +374,7 @@ func TestConvertCodexRollout_PairsToolResultByCallOwnerAcrossTurnContextAdvance(
 	}
 }
 
-func TestNormalizeToolMode_DefaultsCodexToAuto(t *testing.T) {
-	mode, err := normalizeToolMode("codex", "")
-	if err != nil {
-		t.Fatalf("normalizeToolMode: %v", err)
-	}
-	if mode != ToolModeAuto {
-		t.Fatalf("mode=%q, want %q", mode, ToolModeAuto)
-	}
-}
-
-func TestConvertCodexRollout_AutoModeStructuresMappedAndDowngradesUnknown(t *testing.T) {
+func TestConvertCodexRollout_StructuresMappedAndDowngradesUnknown(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect files"}],"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":\"pwd\"}","call_id":"call_shell","turn_id":"turn-1"}}
@@ -393,7 +384,7 @@ func TestConvertCodexRollout_AutoModeStructuresMappedAndDowngradesUnknown(t *tes
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -435,7 +426,7 @@ func TestConvertCodexRollout_RealisticFixtureReportAndLineage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -469,7 +460,7 @@ func TestConvertCodexRollout_WriteToolConvertsToWrite(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -498,7 +489,7 @@ func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeStructured, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -529,7 +520,7 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -571,7 +562,7 @@ func TestConvertCodexRollout_WebSearchEndRestoresAsUnsupportedToolCard(t *testin
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ToolModeAuto, ReasoningStrict, &report)
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}

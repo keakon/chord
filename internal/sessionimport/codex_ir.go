@@ -1,6 +1,25 @@
 package sessionimport
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/keakon/chord/internal/message"
+)
+
+type codexMessageSource string
+
+const (
+	codexMessageSourceResponseItem codexMessageSource = codexTopLevelTypeResponseItem
+	codexMessageSourceEventMsg     codexMessageSource = codexTopLevelTypeEventMsg
+)
+
+type codexOrderedKind string
+
+const (
+	codexOrderedKindUser      codexOrderedKind = codexOrderedKind(message.RoleUser)
+	codexOrderedKindAssistant codexOrderedKind = codexOrderedKind(message.RoleAssistant)
+	codexOrderedKindToolCall  codexOrderedKind = "tool_call"
+)
 
 // ---------------------------------------------------------------------------
 // Codex intermediate representation (IR)
@@ -36,9 +55,9 @@ type codexTurn struct {
 // codexMessageItem holds a single user/assistant text message before
 // Chord linearization.
 type codexMessageItem struct {
-	Role        string // "user" or "assistant"
+	Role        message.Role
 	Content     string
-	Source      string // response_item or event_msg
+	Source      codexMessageSource
 	SourceOrder int
 }
 
@@ -86,7 +105,7 @@ type codexTokenUsageEvent struct {
 // stable output sequencing.
 type codexOrderRef struct {
 	SourceOrder int
-	ItemType    string // "user", "assistant", "tool_call", "tool_result", "reasoning"
+	ItemType    codexOrderedKind
 	CallID      string // for tool_call/tool_result
 }
 

@@ -119,7 +119,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- **Tools**: defaults are source-specific. Chord converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Unknown, malformed, or unsupported source tools remain visible as unsupported tool cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker read/write state; re-run `read` before continuing edits on imported files.
+- **Tools**: Chord always converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Only unknown, malformed, or unsupported source records (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
 - **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
 - **Claude main-session reconstruction**: Claude imports rebuild the best-effort main non-sidechain conversation span instead of simply choosing the latest raw leaf. Compact boundaries participate in reconstruction, but are not rendered as ordinary transcript messages.
 - **Claude sidechains**: sidechain / sub-agent transcript entries are excluded from the main imported session by default. When present, CLI output reports the skipped count, and `import-report.json` records Claude-specific diagnostics plus sidechain agent IDs when available.
@@ -133,7 +133,6 @@ Common flags:
 - `--sid <id>`: specify session id (default: auto-generated)
 - `--id <session-id>`: import by source session id instead of file path (supported for `codex` and `claude`)
 - `--root <path>`: root directory for `--id` lookup
-- `--tool-mode auto|text|structured`: tool import policy (default depends on source)
 - `--reasoning off|visible|strict`: reasoning import policy (default: `strict`)
 - `--dry-run`: parse and report only, no writes
 - `--json`: machine-readable output

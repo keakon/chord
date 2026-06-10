@@ -26,7 +26,7 @@ func TestImport_CodexStructured_WritesRecoverableSession(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	res, err := Import(context.Background(), ImportOptions{Source: "codex", InputPath: input, ProjectRoot: projectRoot, ToolMode: ToolModeStructured})
+	res, err := Import(context.Background(), ImportOptions{Source: "codex", InputPath: input, ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestImport_ClaudeStructured_WritesRecoverableSessionAndReport(t *testing.T)
 		t.Fatalf("write input: %v", err)
 	}
 
-	res, err := Import(context.Background(), ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot, ToolMode: ToolModeStructured, ReasoningMode: ReasoningStrict})
+	res, err := Import(context.Background(), ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot, ReasoningMode: ReasoningStrict})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}

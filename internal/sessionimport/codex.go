@@ -15,7 +15,7 @@ import (
 //     and source-precedence decisions
 //  3. Linearize IR into Chord messages with structured tool imports where
 //     safe, and readable fallback blocks where not
-func convertCodexRollout(data []byte, toolMode string, reasoningMode string, report *ImportReport) ([]message.Message, error) {
+func convertCodexRollout(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return nil, errEmptyInput
@@ -37,7 +37,7 @@ func convertCodexRollout(data []byte, toolMode string, reasoningMode string, rep
 	}
 
 	// Stage 3: Linearize IR into Chord messages.
-	msgs := linearizeCodexTurns(turns, toolMode, report)
+	msgs := linearizeCodexTurns(turns, report)
 	if err := validateImportedCodexMessages(msgs, report); err != nil {
 		return nil, err
 	}
