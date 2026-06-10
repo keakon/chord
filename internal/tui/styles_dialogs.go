@@ -9,6 +9,7 @@ var (
 	ModeNormalStyle           lipgloss.Style
 	SeparatorStyle            lipgloss.Style
 	DirectoryBorderStyle      lipgloss.Style
+	DialogBodyStyle           lipgloss.Style
 	DialogTitleStyle          lipgloss.Style
 	DimStyle                  lipgloss.Style
 	InputSeparatorStyle       lipgloss.Style

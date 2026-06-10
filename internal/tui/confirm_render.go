@@ -46,8 +46,7 @@ func (m *Model) renderConfirmDialog() string {
 		}
 		lines = append(lines, "", hint)
 		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-		body := strings.Join(lines, "\n")
-		return DirectoryBorderStyle.Width(maxWidth).Render(body)
+		return renderDialogBox(maxWidth, lines)
 	}
 
 	if m.confirm.denyingWithReason {
@@ -70,8 +69,7 @@ func (m *Model) renderConfirmDialog() string {
 		}
 		lines = append(lines, "", hint)
 		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-		body := strings.Join(lines, "\n")
-		return DirectoryBorderStyle.Width(maxWidth).Render(body)
+		return renderDialogBox(maxWidth, lines)
 	}
 
 	if m.confirm.pickingRule {
@@ -82,8 +80,7 @@ func (m *Model) renderConfirmDialog() string {
 	lines := m.renderConfirmSummary(title, summary, innerWidth)
 	lines = append(lines, "", m.renderConfirmOptions())
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-	body := strings.Join(lines, "\n")
-	out := DirectoryBorderStyle.Width(maxWidth).Render(body)
+	out := renderDialogBox(maxWidth, lines)
 	if m.confirm.deadline.IsZero() {
 		m.confirm.renderCacheWidth = m.width
 		m.confirm.renderCacheHeight = m.height
@@ -98,7 +95,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 	lines := []string{title, ""}
 	if toolNameKey(summary.ToolName) == tools.NameDone {
 		if strings.TrimSpace(summary.DoneReport) != "" {
-			lines = append(lines, renderRichMarkdownContent(summary.DoneReport, max(10, innerWidth-2), nil)...)
+			lines = append(lines, renderDialogMarkdownContent(summary.DoneReport, max(10, innerWidth-2))...)
 		}
 		return lines
 	}
@@ -258,8 +255,7 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 	lines = append(lines, hint)
 
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-	body := strings.Join(lines, "\n")
-	return DirectoryBorderStyle.Width(maxWidth).Render(body)
+	return renderDialogBox(maxWidth, lines)
 }
 
 func scopeLabel(scope permission.RuleScope) string {

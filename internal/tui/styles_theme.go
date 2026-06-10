@@ -304,7 +304,11 @@ func applyDialogStyles(t Theme) {
 	DirectoryBorderStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.DirectoryBorderFg)).
+		Background(lipgloss.Color(t.DialogBg)).
 		Padding(0, 1)
+
+	DialogBodyStyle = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.DialogBg))
 
 	DialogTitleStyle = lipgloss.NewStyle().
 		Bold(true).

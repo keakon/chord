@@ -139,6 +139,10 @@ type Theme struct {
 	// Directory border
 	DirectoryBorderFg string
 
+	// Dialog surfaces
+	DialogBg          string
+	DialogCodeBlockBg string
+
 	// Dim / secondary text
 	DimFg string
 
@@ -223,6 +227,7 @@ func DefaultTheme() Theme {
 	surfaceTool := "236"
 	surfacePanel := defaultInfoPanelBg
 	surfaceStatus := "236"
+	surfaceDialog := surfacePanel
 
 	accentUserBadge := "65"
 	accentAssistantBadge := "61"
@@ -290,6 +295,8 @@ func DefaultTheme() Theme {
 		InputPromptFg:           "82",
 		SeparatorFg:             "240",
 		DirectoryBorderFg:       "63",
+		DialogBg:                surfaceDialog,
+		DialogCodeBlockBg:       "236",
 		DimFg:                   "250", // lighter so dim text (thinking, tool body) is readable
 		ConfirmSeparatorFg:      "220",
 		ConfirmToolFg:           "252",

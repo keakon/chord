@@ -264,12 +264,38 @@ func addAssistantCodeWrapIndent(lines []string, width, continuationExtra int) ([
 	return out, synthetic, softWraps
 }
 
-func styleAssistantCodeBlockLines(lines []string, width int) []string {
+type codeFenceTheme struct {
+	bg      string
+	fg      string
+	labelFg string
+}
+
+func assistantCodeFenceTheme() codeFenceTheme {
+	return codeFenceTheme{
+		bg:      currentTheme.CodeBlockBg,
+		fg:      currentTheme.CodeBlockFg,
+		labelFg: currentTheme.CodeBlockLabelFg,
+	}
+}
+
+func dialogCodeFenceTheme() codeFenceTheme {
+	bg := currentTheme.DialogCodeBlockBg
+	if bg == "" {
+		bg = currentTheme.CodeBlockBg
+	}
+	return codeFenceTheme{
+		bg:      bg,
+		fg:      currentTheme.CodeBlockFg,
+		labelFg: currentTheme.CodeBlockLabelFg,
+	}
+}
+
+func styleCodeBlockLines(lines []string, width int, theme codeFenceTheme) []string {
 	if len(lines) == 0 {
 		return nil
 	}
-	bg := currentTheme.CodeBlockBg
-	fg := currentTheme.CodeBlockFg
+	bg := theme.bg
+	fg := theme.fg
 	if bg == "" {
 		return lines
 	}
@@ -296,6 +322,10 @@ func styleAssistantCodeBlockLines(lines []string, width int) []string {
 }
 
 func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **codeHighlighter) ([]string, []int, []bool) {
+	return renderCodeFence(seg, codeSample, width, continuationExtra, hl, assistantCodeFenceTheme())
+}
+
+func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **codeHighlighter, theme codeFenceTheme) ([]string, []int, []bool) {
 	const (
 		codeBlockInnerPadX = 1
 		codeBlockInnerPadY = 1
@@ -333,7 +363,7 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 	if label == "" {
 		label = "TEXT"
 	}
-	labelLine := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.CodeBlockLabelFg)).Bold(true).Render(label)
+	labelLine := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.labelFg)).Bold(true).Render(label)
 	labelLine = strings.Repeat(" ", codeBlockInnerPadX) + labelLine + strings.Repeat(" ", codeBlockInnerPadX)
 
 	var bodyLines []string
@@ -343,11 +373,11 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 			bodyLines = []string{""}
 		}
 		for i := range bodyLines {
-			bodyLines[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.CodeBlockFg)).Render(bodyLines[i])
+			bodyLines[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.fg)).Render(bodyLines[i])
 		}
 	} else {
 		h := ensureCodeHighlighterWithLanguage(hl, "", codeSample, lang)
-		bodyLines = highlightCodeLines(h, strings.Split(code, "\n"), currentTheme.CodeBlockBg)
+		bodyLines = highlightCodeLines(h, strings.Split(code, "\n"), theme.bg)
 		if len(bodyLines) == 0 {
 			bodyLines = []string{""}
 		}
@@ -380,11 +410,19 @@ func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, w
 		syntheticOut = append(syntheticOut, codeBlockInnerPadX)
 		softWrapsOut = append(softWrapsOut, false)
 	}
-	lines = styleAssistantCodeBlockLines(lines, width)
+	lines = styleCodeBlockLines(lines, width, theme)
 	return lines, syntheticOut, softWrapsOut
 }
 
 func renderRichMarkdownContent(content string, width int, hl **codeHighlighter) []string {
+	return renderRichMarkdownContentWithCodeFenceTheme(content, width, hl, assistantCodeFenceTheme())
+}
+
+func renderDialogMarkdownContent(content string, width int) []string {
+	return renderRichMarkdownContentWithCodeFenceTheme(content, width, nil, dialogCodeFenceTheme())
+}
+
+func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl **codeHighlighter, theme codeFenceTheme) []string {
 	var localHL *codeHighlighter
 	if hl == nil {
 		hl = &localHL
@@ -413,7 +451,7 @@ func renderRichMarkdownContent(content string, width int, hl **codeHighlighter) 
 
 	for _, seg := range segments {
 		if seg.code {
-			segLines, _, _ := renderAssistantCodeFence(seg, content, width, 0, hl)
+			segLines, _, _ := renderCodeFence(seg, content, width, 0, hl, theme)
 			appendSegment(segLines)
 			continue
 		}

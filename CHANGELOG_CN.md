@@ -38,6 +38,7 @@
 - 编辑 forked TUI 消息后重新提交时，现在会保留 inline 图片附件，即使可见 prompt 文本已被修改。
 - 自动压缩现在以 provider 返回的 usage 为权威依据：请求级本地 token 估算不再清除已经由 usage 触发的压缩请求。
 - 切换 Codex OAuth key 时现在会清除过期的 inline rate-limit 快照，避免上一个已耗尽 key 让下一个 key 继续冻结请求级上下文剪裁。
+- Done 确认对话框现在会用 dialog 专属 surface 渲染 Markdown 和 fenced code block，避免确认弹窗里混入助手卡片背景色。
 - TUI 工具错误卡片现在不会在错误正文里重复显示开头的 `Error:` 前缀。
 - TUI 中的助手 Markdown 表格现在可在大终端上使用更宽的卡片宽度，减少较宽 review 表格的纵向换行。
 - TUI 消息渲染现在会在绘制卡片前转义原始控制字符，避免粘贴内容或模型输出包含 `\x01` 等字节时出现背景色异常。
