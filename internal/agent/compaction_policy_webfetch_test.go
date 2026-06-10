@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompactGlobOutputSummaryUsesCanonicalToolName(t *testing.T) {
-	summary := compactSearchLikeOutputSummary(requestReductionContext{
+	summary := reduceSearchLikeOutputSummary(requestReductionContext{
 		ToolName: tools.NameGlob,
 		Content:  "internal/agent/compaction_policy.go",
 		Meta: toolCallMeta{
@@ -37,7 +37,7 @@ func TestCompactWebFetchOutputSummaryStripsResultHeadersFromSnippet(t *testing.T
 		"",
 		"This is the preserved body snippet.",
 	}, "\n")
-	summary := compactWebFetchOutputSummary(`{"url":"https://example.com/article","timeout":30}`, content)
+	summary := reduceWebFetchOutputSummary(`{"url":"https://example.com/article","timeout":30}`, content)
 	if !strings.Contains(summary, "This is the preserved body snippet.") {
 		t.Fatalf("summary = %q, want body snippet", summary)
 	}

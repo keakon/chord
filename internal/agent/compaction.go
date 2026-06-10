@@ -30,7 +30,7 @@ const (
 	compactHighRiskProtectAgeTurns  = 4
 	compactBashSuccessBytes         = 4000
 	compactReadLikeOutputBytes      = 4000
-	compactReadSnippetChars         = 500
+	reduceSnippetChars              = 500
 	compactStaleOutputBytes         = 1500
 	compactMinToolResultsPrune      = 8
 	compactMessagesPerEffectiveTurn = 8

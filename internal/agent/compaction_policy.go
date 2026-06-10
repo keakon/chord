@@ -321,7 +321,7 @@ func (a *MainAgent) resetLLMModelRun() {
 	a.llmModelRunLength = 0
 }
 
-func compactDiagnosticsToolOutput(content string) (string, bool) {
+func reduceDiagnosticsToolOutput(content string) (string, bool) {
 	idx := strings.Index(content, "\n\nDiagnostics:\n")
 	sepLen := len("\n\nDiagnostics:\n")
 	if idx < 0 {
@@ -530,21 +530,21 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionConfirm:
 		return "[Confirmed]", "confirmation", true
 	case requestReductionDiagnostics:
-		if compacted, ok := compactDiagnosticsToolOutput(ctx.Content); ok {
+		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content); ok {
 			return compacted, "diagnostics", true
 		}
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	case requestReductionReadLike:
-		return compactReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
+		return reduceReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
 	case requestReductionSearch:
-		return compactSearchLikeOutputSummary(ctx), "search_result", true
+		return reduceSearchLikeOutputSummary(ctx), "search_result", true
 	case requestReductionJSON:
-		if compacted, ok := compactJSONBlobSummary(ctx); ok {
+		if compacted, ok := reduceJSONBlobSummary(ctx); ok {
 			return compacted, "json_blob", true
 		}
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	case requestReductionLongLog:
-		return compactLongLogOutputSummary(ctx), "long_log", true
+		return reduceLongLogOutputSummary(ctx), "long_log", true
 	case requestReductionShellOK:
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", tools.NameShell), "shell_success", true
 	case requestReductionGeneric:
@@ -610,17 +610,17 @@ func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
 	return false
 }
 
-func compactSearchLikeOutputSummary(ctx requestReductionContext) string {
+func reduceSearchLikeOutputSummary(ctx requestReductionContext) string {
 	toolName := toolNameOrUnknown(ctx.ToolName)
 	snippetLines := summarizeRepresentativeLines(ctx.Content, 4)
 	if len(snippetLines) == 0 {
 		snippetLines = []string{"- (no preserved matches)"}
 	}
-	scope := compactSearchScope(ctx)
+	scope := reduceSearchScope(ctx)
 	return fmt.Sprintf("[Older %s results summarized for this request to save context; %s; matches=%d]\n%s", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"))
 }
 
-func compactSearchScope(ctx requestReductionContext) string {
+func reduceSearchScope(ctx requestReductionContext) string {
 	switch ctx.ToolName {
 	case tools.NameGrep:
 		var parsed struct {
@@ -629,8 +629,8 @@ func compactSearchScope(ctx requestReductionContext) string {
 			Includes []string `json:"includes"`
 		}
 		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
-		paths := compactSearchList(parsed.Paths, ".")
-		includes := compactSearchList(parsed.Includes, "")
+		paths := reduceSearchList(parsed.Paths, ".")
+		includes := reduceSearchList(parsed.Includes, "")
 		return fmt.Sprintf("pattern=%q paths=%q includes=%q", strings.TrimSpace(parsed.Pattern), paths, includes)
 	case tools.NameGlob:
 		var parsed struct {
@@ -638,7 +638,7 @@ func compactSearchScope(ctx requestReductionContext) string {
 			Path     string   `json:"path"`
 		}
 		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
-		return fmt.Sprintf("patterns=%q path=%q", compactSearchList(parsed.Patterns, ""), blankToDefault(strings.TrimSpace(parsed.Path), "."))
+		return fmt.Sprintf("patterns=%q path=%q", reduceSearchList(parsed.Patterns, ""), blankToDefault(strings.TrimSpace(parsed.Path), "."))
 	case tools.NameLsp:
 		var parsed struct {
 			Operation string `json:"operation"`
@@ -652,7 +652,7 @@ func compactSearchScope(ctx requestReductionContext) string {
 	}
 }
 
-func compactSearchList(values []string, fallback string) string {
+func reduceSearchList(values []string, fallback string) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -665,7 +665,7 @@ func compactSearchList(values []string, fallback string) string {
 	return strings.Join(parts, ",")
 }
 
-func compactJSONBlobSummary(ctx requestReductionContext) (string, bool) {
+func reduceJSONBlobSummary(ctx requestReductionContext) (string, bool) {
 	var decoded any
 	if err := json.Unmarshal([]byte(ctx.Content), &decoded); err != nil {
 		return "", false
@@ -705,7 +705,7 @@ func summarizeJSONArrayItems(items []any, limit int) []string {
 	return out
 }
 
-func compactLongLogOutputSummary(ctx requestReductionContext) string {
+func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 	counts := summarizeLogSignalCounts(ctx.Content)
 	lines := summarizeRepresentativeLogLines(ctx.Content, 4)
 	if len(lines) == 0 {
@@ -1340,14 +1340,14 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 	return displayedReadRange{}
 }
 
-func compactReadOutputSummary(argsJSON, content string) string {
+func reduceReadOutputSummary(argsJSON, content string) string {
 	displayed := parseDisplayedReadRange(content)
 	body := stripReadResultHeaderLine(content)
 
 	// Preferred path: a READ_RESULT range is present, so rebuild the same header
 	// the read tool emits, marked truncated=stale, keeping only leading lines.
 	if displayed.OK && strings.TrimSpace(body) != "" {
-		headLines, headEnd := reduceReadHeadLines(body, displayed.Start, displayed.End, compactReadSnippetChars)
+		headLines, headEnd := reduceReadHeadLines(body, displayed.Start, displayed.End, reduceSnippetChars)
 		if len(headLines) > 0 {
 			linesField := fmt.Sprintf("%d-%d", displayed.Start, headEnd)
 			header := tools.FormatReadResultHeader(linesField, displayed.Total, tools.ReadTruncatedStale, "", "")
@@ -1358,7 +1358,7 @@ func compactReadOutputSummary(argsJSON, content string) string {
 	// Fallback for read output without a parseable range (e.g. legacy sessions
 	// or non-paged content): keep the path hint and a short excerpt.
 	request := parseReadRequestSummary(argsJSON)
-	snippet := strings.TrimSpace(compactTextSnippet(content, compactReadSnippetChars))
+	snippet := strings.TrimSpace(compactTextSnippet(content, reduceSnippetChars))
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
 	}
@@ -1411,18 +1411,18 @@ func reduceReadHeadLines(body string, startLine, endLine, budget int) ([]string,
 	return lines[:kept], startLine + kept - 1
 }
 
-func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {
+func reduceReadLikeOutputSummary(toolName, argsJSON, content string) string {
 	switch strings.TrimSpace(toolName) {
 	case tools.NameRead:
-		return compactReadOutputSummary(argsJSON, content)
+		return reduceReadOutputSummary(argsJSON, content)
 	case tools.NameWebFetch:
-		return compactWebFetchOutputSummary(argsJSON, content)
+		return reduceWebFetchOutputSummary(argsJSON, content)
 	default:
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(toolName))
 	}
 }
 
-func compactWebFetchOutputSummary(argsJSON, content string) string {
+func reduceWebFetchOutputSummary(argsJSON, content string) string {
 	var parsed struct {
 		URL     string `json:"url"`
 		Raw     bool   `json:"raw"`
@@ -1430,7 +1430,7 @@ func compactWebFetchOutputSummary(argsJSON, content string) string {
 	}
 	_ = json.Unmarshal([]byte(argsJSON), &parsed)
 	snippetSource := stripWebFetchResultHeaders(content)
-	snippet := strings.TrimSpace(compactTextSnippet(snippetSource, compactReadSnippetChars))
+	snippet := strings.TrimSpace(compactTextSnippet(snippetSource, reduceSnippetChars))
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
 	}

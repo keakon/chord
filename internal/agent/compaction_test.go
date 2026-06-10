@@ -1090,7 +1090,7 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 	content := strings.Join([]string{
 		"internal/agent/compaction_policy.go:12:func prepareMessagesForLLM(...)",
 		"internal/agent/compaction_policy.go:88:func prepareMessagesForLLMWithOptions(...)",
-		"internal/agent/compaction_policy.go:150:func compactReadLikeOutputSummary(...)",
+		"internal/agent/compaction_policy.go:150:func reduceReadLikeOutputSummary(...)",
 		"internal/agent/compaction_test.go:50:func TestPrepareMessagesForLLM(...)",
 		"internal/agent/main_llm.go:125:candidateTools := llmToolDefinitionsFromVisibleTools(...)",
 	}, "\n") + "\n" + strings.Repeat("internal/agent/compaction_policy.go:999:func extraMatch()\n", 40)
