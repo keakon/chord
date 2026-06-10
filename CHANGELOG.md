@@ -31,6 +31,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
 - Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.
 - Shell permission fallback checks now keep compound-command review semantics when exposing matched rule suggestions, so narrow allow rules do not auto-approve unparsed compound commands.
+- Pending model-pool switches now preserve their original pool while a request is in flight, so cancelling or applying the switch restores the intended state.
 - The TUI info panel changed-files section now prioritizes full `+N -N` line-change stats over long filenames, matching the narrow sidebar behavior.
 - The TUI info panel now scrolls independently with the mouse wheel or touchpad when the pointer is over it, so long changed-file or status sections are no longer clipped by the input area.
 - Collapsed Shell tool cards that were rejected now show the expand hint before the rejection reason, so the hint is no longer pushed below the result text.

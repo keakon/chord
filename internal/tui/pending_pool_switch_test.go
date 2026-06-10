@@ -166,6 +166,48 @@ func TestBusyPoolSwitchClearsTransitionWhenFallbackReachesTargetPool(t *testing.
 	}
 }
 
+func TestBusyPoolSwitchBackToOriginBeforeRunningModelMovesClearsTransition(t *testing.T) {
+	m, backend := newPoolSwitchModel()
+	backend.mainModelPoolNames = []string{"slow", "fast"}
+	backend.poolNamesByFocus = map[string][]string{"": {"slow", "fast"}}
+	backend.mainModelPool = "slow"
+	backend.currentPoolByFocus = map[string]string{"": "slow"}
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+
+	m.modelSelect = modelSelectState{
+		target:     agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetMainRole},
+		poolNames:  []string{"slow", "fast"},
+		poolCursor: 1,
+		prevMode:   ModeNormal,
+	}
+	// Switch slow -> fast. The selected pool flips immediately, but the running
+	// model has not moved yet (no RunningModelChangedEvent).
+	runCmdTree(m.selectPoolAtCursor())
+	backend.currentPoolByFocus[""] = "fast"
+	backend.mainModelPool = "fast"
+
+	plain := stripANSI(m.renderInfoPanel(100, 20))
+	if !strings.Contains(plain, "Pool: slow -> fast") {
+		t.Fatalf("info panel = %q, want slow -> fast after first switch", plain)
+	}
+
+	// Switch back fast -> slow before the running model ever reached fast. The
+	// true origin is still slow, so this should clear the transition entirely
+	// rather than show "fast -> slow".
+	m.modelSelect.poolCursor = 0
+	runCmdTree(m.selectPoolAtCursor())
+	backend.currentPoolByFocus[""] = "slow"
+	backend.mainModelPool = "slow"
+
+	plain = stripANSI(m.renderInfoPanel(100, 20))
+	if !strings.Contains(plain, "Pool: slow") {
+		t.Fatalf("info panel = %q, want Pool: slow", plain)
+	}
+	if strings.Contains(plain, "->") {
+		t.Fatalf("info panel = %q, should not show any pool transition", plain)
+	}
+}
+
 func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}

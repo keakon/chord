@@ -41,11 +41,23 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 	}
 	ag := m.agent
 	setPending := func(currentPool string) {
-		if m.isFocusedAgentBusy() {
-			m.pendingPoolSwitch = pendingPoolSwitchState{from: currentPool, to: pool}
-		} else {
+		if !m.isFocusedAgentBusy() {
 			m.pendingPoolSwitch = pendingPoolSwitchState{}
+			return
 		}
+		// A pending switch means the running model has not moved yet, so its
+		// origin pool is unchanged. Keep that original origin instead of the
+		// freshly-selected pool; otherwise switching back to the origin would
+		// render a bogus "selected -> origin" transition.
+		from := currentPool
+		if existing := strings.TrimSpace(m.pendingPoolSwitch.from); existing != "" {
+			from = m.pendingPoolSwitch.from
+		}
+		if strings.TrimSpace(from) == strings.TrimSpace(pool) {
+			m.pendingPoolSwitch = pendingPoolSwitchState{}
+			return
+		}
+		m.pendingPoolSwitch = pendingPoolSwitchState{from: from, to: pool}
 	}
 	switch target.Kind {
 	case agent.ModelPoolSelectorTargetAgentOverride:
