@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -70,5 +72,46 @@ func TestQuestionToolParametersMentionUserLanguage(t *testing.T) {
 		if desc, _ := prop["description"].(string); !strings.Contains(desc, "user's current language") {
 			t.Fatalf("option %s.description missing user language guidance: %q", key, desc)
 		}
+	}
+}
+
+func TestQuestionToolParametersOptInToObjectCoercion(t *testing.T) {
+	params := NewQuestionTool(nil).Parameters()
+	properties, _ := params["properties"].(map[string]any)
+	questions, _ := properties["questions"].(map[string]any)
+	if coerce, _ := questions["coerceFromObject"].(bool); !coerce {
+		t.Fatalf("questions schema should opt in to coerceFromObject, got %v", questions["coerceFromObject"])
+	}
+}
+
+func TestQuestionToolExecuteAcceptsSingleObject(t *testing.T) {
+	var received []QuestionItem
+	tool := NewQuestionTool(func(_ context.Context, qs []QuestionItem) ([]QuestionAnswer, error) {
+		received = qs
+		out := make([]QuestionAnswer, len(qs))
+		for i, q := range qs {
+			out[i] = QuestionAnswer{Header: q.Header, Selected: []string{"ok"}}
+		}
+		return out, nil
+	})
+
+	// A single question object instead of the documented array is coerced into
+	// a one-element list and executes normally.
+	raw := json.RawMessage(`{"questions":{"header":"h","question":"q?"}}`)
+	out, err := tool.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute with single object: %v", err)
+	}
+	if len(received) != 1 || received[0].Header != "h" {
+		t.Fatalf("callback received %+v, want one question with header h", received)
+	}
+
+	// Result stays a clean JSON array of answers (no inline note).
+	var answers []QuestionAnswer
+	if err := json.Unmarshal([]byte(out), &answers); err != nil {
+		t.Fatalf("result is not a clean answers array: %v (out=%q)", err, out)
+	}
+	if len(answers) != 1 || answers[0].Header != "h" {
+		t.Fatalf("answers = %+v, want one answer for header h", answers)
 	}
 }

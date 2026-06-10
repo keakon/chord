@@ -171,3 +171,50 @@ func TestValidateToolArgsScalarRejectedWithoutCoerceOptIn(t *testing.T) {
 		t.Fatalf("scalar without opt-in should still fail, got %v", err)
 	}
 }
+
+func TestValidateToolArgsCoercesSingleObjectIntoArrayWhenOptedIn(t *testing.T) {
+	tool := validationStubTool{
+		name: "Question",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"questions": map[string]any{
+					"type":             "array",
+					"items":            map[string]any{"type": "object"},
+					"coerceFromObject": true,
+				},
+			},
+			"required":             []string{"questions"},
+			"additionalProperties": false,
+		},
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"questions":{"header":"h","question":"q"}}`)); err != nil {
+		t.Fatalf("single object with coerceFromObject should pass, got %v", err)
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"questions":[{"header":"h"}]}`)); err != nil {
+		t.Fatalf("array form should still pass, got %v", err)
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"questions":"oops"}`)); err == nil || !strings.Contains(err.Error(), "args.questions must be an array") {
+		t.Fatalf("non-object scalar should still fail, got %v", err)
+	}
+}
+
+func TestValidateToolArgsSingleObjectRejectedWithoutCoerceOptIn(t *testing.T) {
+	tool := validationStubTool{
+		name: "Question",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"questions": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "object"},
+				},
+			},
+			"required":             []string{"questions"},
+			"additionalProperties": false,
+		},
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"questions":{"header":"h"}}`)); err == nil || !strings.Contains(err.Error(), "args.questions must be an array") {
+		t.Fatalf("single object without opt-in should still fail, got %v", err)
+	}
+}

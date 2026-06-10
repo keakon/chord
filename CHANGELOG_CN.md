@@ -12,6 +12,7 @@
 - `read` 现在使用更精简的 `READ_RESULT lines=a-b total=N` header；只有实际丢弃请求行时才报告 `truncated=budget`，不再为 UTF-8 文件显示 encoding 噪音，并会在 `offset` 严格超过 EOF 时直接报错而不是静默夹到文件末尾。
 - `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
 - 当 `edit` 的 hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
+- `question` 现在容忍用单个问题对象代替文档中要求的 `questions` 数组，与 `grep`、`glob` 的标量转单元素列表容错保持一致。
 - 请求级上下文剪裁现在会保护近期高风险工具输出，例如 diff、失败断言、stack trace、权限/安全错误，避免它们仅因很长的单轮工具链推进了 effective age 就被剪裁。默认 `context.reduction.read_like_age_turns` 也基于近期会话统计从 1 上调到 2，让刚读取的文件上下文以较低的观测 token 成本多保留一个 effective turn。
 - 上下文剪裁现在会等到同一模型连续第 3 次请求时才保护 prompt cache surface；切换模型会重置这个连续计数，因此新模型的前两次请求在压力下仍可剪裁已缓存上下文。
 - 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口，避免最终回复前临时剪裁打破已有 prompt cache；模型切换或高压上下文会跳过该宽限。可通过 `context.reduction.wrap_up_grace_requests` 配置。

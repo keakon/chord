@@ -149,17 +149,13 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		contentWidth = 10
 	}
 
-	type questionArgs struct {
-		Questions []tools.QuestionItem `json:"questions"`
-	}
-	var args questionArgs
-	_ = json.Unmarshal([]byte(b.Content), &args)
+	questions, _ := tools.DecodeQuestionItems(json.RawMessage(b.Content))
 
 	var answers []tools.QuestionAnswer
 	hasStructuredAnswers := false
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
 		if err := json.Unmarshal([]byte(b.ResultContent), &answers); err == nil && len(answers) > 0 {
-			hasStructuredAnswers = true
+			hasStructuredAnswers = len(questions) > 0
 		}
 	}
 
@@ -170,7 +166,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	var result []string
 	result = append(result, headerLine)
 
-	for i, q := range args.Questions {
+	for i, q := range questions {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)
 		selectedOptions, customAnswers := splitQuestionSelections(q, answer)
 		if q.Header != "" {

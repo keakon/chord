@@ -74,8 +74,9 @@ func (QuestionTool) Parameters() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"questions": map[string]any{
-				"type":        "array",
-				"description": "List of questions to ask the user. Write all user-facing text in the user's current language.",
+				"type":             "array",
+				"description":      "List of questions to ask the user, as a JSON array. A single question object is tolerated and treated as a one-element array, but the array form is preferred. Write all user-facing text in the user's current language.",
+				"coerceFromObject": true,
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -121,19 +122,39 @@ func (QuestionTool) Parameters() map[string]any {
 
 func (QuestionTool) IsReadOnly() bool { return true }
 
-func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+// DecodeQuestionItems parses Question tool arguments and tolerates a single
+// question object in place of the documented questions array.
+func DecodeQuestionItems(raw json.RawMessage) ([]QuestionItem, error) {
 	var args struct {
 		Questions []QuestionItem `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
+		// Tolerate a single question object in place of the documented array
+		// (scalar->single-element list), mirroring grep/glob's coercion. The
+		// result stays a clean answers JSON array, so no inline note is added;
+		// the schema still steers callers toward the array shape.
+		var single struct {
+			Questions QuestionItem `json:"questions"`
+		}
+		if err2 := json.Unmarshal(raw, &single); err2 == nil && (single.Questions.Question != "" || single.Questions.Header != "") {
+			return []QuestionItem{single.Questions}, nil
+		}
+		return nil, err
+	}
+	return args.Questions, nil
+}
+
+func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	questions, err := DecodeQuestionItems(raw)
+	if err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if len(args.Questions) == 0 {
+	if len(questions) == 0 {
 		return "", fmt.Errorf("at least one question is required")
 	}
 
 	// Validate each question.
-	for i, q := range args.Questions {
+	for i, q := range questions {
 		if q.Question == "" {
 			return "", fmt.Errorf("question[%d]: question text is required", i)
 		}
@@ -146,7 +167,7 @@ func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		return "", fmt.Errorf("question callback not configured (running headless?)")
 	}
 
-	answers, err := t.questionFn(ctx, args.Questions)
+	answers, err := t.questionFn(ctx, questions)
 	if err != nil {
 		return "", fmt.Errorf("question failed: %w", err)
 	}

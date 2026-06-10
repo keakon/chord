@@ -121,7 +121,8 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 			// scalar matching items.type and treat it as a one-element array.
 			// This keeps the documented contract array-only while preventing
 			// hard failures when models supply a bare string by habit.
-			if !schemaCoercesFromScalar(schema, value) {
+			// "coerceFromObject": true does the same for a single object item.
+			if !schemaCoercesFromScalar(schema, value) && !schemaCoercesFromObject(schema, value) {
 				return fmt.Errorf("%s must be an array", path)
 			}
 			items = []any{value}
@@ -193,6 +194,24 @@ func schemaCoercesFromScalar(schema map[string]any, value any) bool {
 	default:
 		return false
 	}
+}
+
+// schemaCoercesFromObject returns true when the schema opts in via
+// "coerceFromObject": true and the supplied value is a single JSON object for an
+// array whose items are objects. This lets a lone item be accepted in place of a
+// one-element array (e.g. a single question object), mirroring the scalar
+// coercion while keeping the documented contract array-only.
+func schemaCoercesFromObject(schema map[string]any, value any) bool {
+	coerce, _ := schema["coerceFromObject"].(bool)
+	if !coerce {
+		return false
+	}
+	if _, ok := value.(map[string]any); !ok {
+		return false
+	}
+	itemSchema, _ := schema["items"].(map[string]any)
+	itemType, _ := itemSchema["type"].(string)
+	return itemType == "" || itemType == "object"
 }
 
 func requiredFields(raw any) []string {

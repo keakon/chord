@@ -2138,6 +2138,29 @@ func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) 
 	}
 }
 
+func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "question",
+		Content:       `{"questions":{"header":"log","question":"paste log"}}`,
+		ResultContent: `[{"header":"log","selected":["first line"]}]`,
+		ResultDone:    true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(70, ""), "\n"))
+	for _, want := range []string{"log", "paste log", "Answer: first line"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected question card to contain %q, got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, `selected`) {
+		t.Fatalf("expected structured answer to render inline instead of raw JSON, got:\n%s", plain)
+	}
+}
+
 func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
