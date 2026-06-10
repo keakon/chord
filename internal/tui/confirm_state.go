@@ -23,8 +23,8 @@ const (
 // ConfirmRuleIntent captures the user's intent to add a permission rule
 // alongside the approval decision.
 type ConfirmRuleIntent struct {
-	Pattern string
-	Scope   permission.RuleScope
+	Patterns []string
+	Scope    permission.RuleScope
 }
 
 // ConfirmRequest is sent from the agent to the TUI when a tool has "ask"
@@ -33,14 +33,16 @@ type ConfirmRuleIntent struct {
 // (ConfirmRequestEvent); the TUI then calls ResolveConfirm with this ID when
 // the user responds.
 type ConfirmRequest struct {
-	ToolName        string
-	ArgsJSON        string
-	DoneReport      string
-	RequestID       string
-	Timeout         time.Duration
-	NeedsApproval   []string
-	AlreadyAllowed  []string
-	ForceDenyReason bool
+	ToolName            string
+	ArgsJSON            string
+	DoneReport          string
+	RequestID           string
+	Timeout             time.Duration
+	NeedsApproval       []string
+	AlreadyAllowed      []string
+	NeedsApprovalRules  []string
+	AlreadyAllowedRules []string
+	ForceDenyReason     bool
 }
 
 // ConfirmResult is the user's response to a ConfirmRequest.
@@ -87,7 +89,8 @@ type confirmState struct {
 	pickingRule        bool               // true while in rule picker sub-mode
 	candidates         []PatternCandidate // suggested patterns
 	patternIdx         int                // selected pattern index
-	scopeIdx           int                // selected scope index (0=session, 1=project, 2=user-global)
+	selectedPatterns   map[int]struct{}
+	scopeIdx           int // selected scope index (0=session, 1=project, 2=user-global)
 	scopes             []permission.RuleScope
 	editingRulePattern bool
 	rulePatternInput   textarea.Model
@@ -136,13 +139,15 @@ func confirmTimeoutTick() tea.Cmd {
 // If timeout > 0 the call returns ConfirmDeny automatically after that
 // duration.
 
-func MakeConfirmFunc(reqCh chan<- ConfirmRequest, resCh <-chan ConfirmResult, timeout time.Duration) func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed []string) (agent.ConfirmResponse, error) {
-	return func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed []string) (agent.ConfirmResponse, error) {
+func MakeConfirmFunc(reqCh chan<- ConfirmRequest, resCh <-chan ConfirmResult, timeout time.Duration) func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
+	return func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
 		request := ConfirmRequest{
-			ToolName:       toolName,
-			ArgsJSON:       argsJSON,
-			NeedsApproval:  append([]string(nil), needsApproval...),
-			AlreadyAllowed: append([]string(nil), alreadyAllowed...),
+			ToolName:            toolName,
+			ArgsJSON:            argsJSON,
+			NeedsApproval:       append([]string(nil), needsApproval...),
+			AlreadyAllowed:      append([]string(nil), alreadyAllowed...),
+			NeedsApprovalRules:  append([]string(nil), needsApprovalRules...),
+			AlreadyAllowedRules: append([]string(nil), alreadyAllowedRules...),
 		}
 		// Send the request, but bail out if the context is already cancelled.
 		select {
@@ -182,8 +187,8 @@ func confirmResponseFromResult(result ConfirmResult, fallbackArgsJSON string) ag
 	var ruleIntent *agent.ConfirmRuleIntent
 	if result.RuleIntent != nil {
 		ruleIntent = &agent.ConfirmRuleIntent{
-			Pattern: result.RuleIntent.Pattern,
-			Scope:   int(result.RuleIntent.Scope),
+			Patterns: append([]string(nil), result.RuleIntent.Patterns...),
+			Scope:    int(result.RuleIntent.Scope),
 		}
 	}
 	return agent.ConfirmResponse{

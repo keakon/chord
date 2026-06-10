@@ -175,8 +175,8 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 
 	pipeline := sub.toolExecutionPipeline()
 	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
-		Pattern: "*",
-		Scope:   int(permission.ScopeSession),
+		Patterns: []string{"*"},
+		Scope:    int(permission.ScopeSession),
 	})
 
 	if got := refreshed.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {

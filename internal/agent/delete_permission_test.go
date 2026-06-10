@@ -202,8 +202,37 @@ shell:
 	if want := []string{"pwd"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
 		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
 	}
+	if want := []string{"*"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
+	}
 	if want := []string{"git status"}; !reflect.DeepEqual(got.AlreadyAllowedPaths, want) {
 		t.Fatalf("already allowed = %#v, want %#v", got.AlreadyAllowedPaths, want)
+	}
+	if want := []string{"git *"}; !reflect.DeepEqual(got.AlreadyAllowedRules, want) {
+		t.Fatalf("already allowed rules = %#v, want %#v", got.AlreadyAllowedRules, want)
+	}
+}
+
+func TestEvaluateToolPermissionBashReportsMultipleAskRuleMatches(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+shell:
+  "git reset *": ask
+  "git add *": ask
+  "git commit *": ask
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := mustBashPermissionArgs(t, `git reset HEAD^ && git add CHANGELOG.md && git commit -m fix`)
+
+	got := evaluateToolPermission(ruleset, "shell", args)
+	if got.Action != permission.ActionAsk {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+	}
+	if want := []string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
+		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
+	}
+	if want := []string{"git reset *", "git add *", "git commit *"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
 	}
 }
 
@@ -290,6 +319,31 @@ shell:
 	}
 	if len(got.NeedsApprovalPaths) != 0 || len(got.AlreadyAllowedPaths) != 0 {
 		t.Fatalf("expected deny to clear grouped paths, got ask=%#v allow=%#v", got.NeedsApprovalPaths, got.AlreadyAllowedPaths)
+	}
+}
+
+func TestEvaluateToolPermissionBashParseErrorDoesNotAllowCompoundCommandByNarrowRule(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+shell:
+  "*": ask
+  "git *": allow
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := mustBashPermissionArgs(t, `git status; "`)
+
+	got := evaluateToolPermission(ruleset, "shell", args)
+	if got.Action != permission.ActionAsk {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+	}
+	if got.MatchArgument != `git status; "` {
+		t.Fatalf("match argument = %q, want full command", got.MatchArgument)
+	}
+	if want := []string{"*"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
+	}
+	if len(got.AlreadyAllowedPaths) != 0 || len(got.AlreadyAllowedRules) != 0 {
+		t.Fatalf("already allowed = %#v/%#v, want empty", got.AlreadyAllowedPaths, got.AlreadyAllowedRules)
 	}
 }
 

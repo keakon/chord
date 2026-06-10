@@ -269,8 +269,8 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
 	a.newTurn()
-	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
-		return a.AwaitConfirm(ctx, toolName, args, 0, needsApproval, alreadyAllowed)
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
+		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
 
 	call := message.ToolCall{ID: "read-repeat-confirm", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
@@ -356,8 +356,8 @@ func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
 	a.newTurn()
-	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error) {
-		return a.AwaitConfirm(ctx, toolName, args, 0, needsApproval, alreadyAllowed)
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
+		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
 
 	call := message.ToolCall{ID: "read-repeat-confirm-approve", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}

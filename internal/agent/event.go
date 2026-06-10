@@ -590,12 +590,14 @@ func (KeyPoolChangedEvent) agentEvent() {}
 // confirmation. The TUI shows the dialog and then calls ResolveConfirm on the
 // agent with the user's choice.
 type ConfirmRequestEvent struct {
-	ToolName       string
-	ArgsJSON       string
-	RequestID      string
-	Timeout        time.Duration
-	NeedsApproval  []string
-	AlreadyAllowed []string
+	ToolName            string
+	ArgsJSON            string
+	RequestID           string
+	Timeout             time.Duration
+	NeedsApproval       []string
+	AlreadyAllowed      []string
+	NeedsApprovalRules  []string
+	AlreadyAllowedRules []string
 	// DoneReport is the completion report content for Done tool confirmation.
 	DoneReport string
 	// ForceDenyReason means the dialog must only allow denial with a non-empty reason.

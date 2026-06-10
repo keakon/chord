@@ -226,7 +226,7 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		if p.confirm == nil {
 			return wrapToolRequiresConfirmation(tc.Name)
 		}
-		resp, err := p.confirm(ctx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths)
+		resp, err := p.confirm(ctx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules)
 		if err != nil {
 			return wrapToolConfirmationFailed(tc.Name, err)
 		}

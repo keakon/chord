@@ -16,7 +16,13 @@ func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent
 	if intent == nil {
 		return
 	}
-	a.addPermissionRule(permission.Rule{Permission: toolName, Pattern: intent.Pattern, Action: permission.ActionAllow}, permission.RuleScope(intent.Scope))
+	for _, pattern := range intent.Patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		a.addPermissionRule(permission.Rule{Permission: toolName, Pattern: pattern, Action: permission.ActionAllow}, permission.RuleScope(intent.Scope))
+	}
 }
 
 // AddOverlayRule adds a permission rule from the /rules UI and refreshes runtime state.

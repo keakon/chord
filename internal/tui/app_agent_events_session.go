@@ -58,7 +58,18 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 				m.updateViewportBlock(block)
 			}
 		}
-		req := ConfirmRequest{ToolName: evt.ToolName, ArgsJSON: evt.ArgsJSON, DoneReport: evt.DoneReport, RequestID: evt.RequestID, Timeout: evt.Timeout, NeedsApproval: append([]string(nil), evt.NeedsApproval...), AlreadyAllowed: append([]string(nil), evt.AlreadyAllowed...), ForceDenyReason: evt.ForceDenyReason}
+		req := ConfirmRequest{
+			ToolName:            evt.ToolName,
+			ArgsJSON:            evt.ArgsJSON,
+			DoneReport:          evt.DoneReport,
+			RequestID:           evt.RequestID,
+			Timeout:             evt.Timeout,
+			NeedsApproval:       append([]string(nil), evt.NeedsApproval...),
+			AlreadyAllowed:      append([]string(nil), evt.AlreadyAllowed...),
+			NeedsApprovalRules:  append([]string(nil), evt.NeedsApprovalRules...),
+			AlreadyAllowedRules: append([]string(nil), evt.AlreadyAllowedRules...),
+			ForceDenyReason:     evt.ForceDenyReason,
+		}
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
 		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Permission confirmation required"))
 		return true, effects

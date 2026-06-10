@@ -220,6 +220,44 @@ func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) 
 	}
 }
 
+func TestSuggestRulePatterns_BashComplexCommandPrefersMatchedAskRules(t *testing.T) {
+	candidates := suggestRulePatternsWithContext(
+		"shell",
+		`{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
+		[]string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
+		[]string{"git reset *", "git add *", "git commit *"},
+		"",
+	)
+	if len(candidates) < 4 {
+		t.Fatalf("candidates = %#v, want matched ask rules", candidates)
+	}
+	for i, want := range []string{"git reset *", "git add *", "git commit *"} {
+		if got := candidates[i].Pattern; got != want {
+			t.Fatalf("candidate[%d] = %q, want %q", i, got, want)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if !candidates[i].Default {
+			t.Fatalf("expected matched ask rule candidate[%d] to be default, got %#v", i, candidates[i])
+		}
+	}
+	foundGitWildcard := false
+	var gitWildcard PatternCandidate
+	for _, c := range candidates {
+		if c.Pattern == "git *" {
+			foundGitWildcard = true
+			gitWildcard = c
+			break
+		}
+	}
+	if !foundGitWildcard {
+		t.Fatalf("expected broader git * candidate in %#v", candidates)
+	}
+	if gitWildcard.Default {
+		t.Fatalf("expected broad git * candidate to stay unselected by default: %#v", gitWildcard)
+	}
+}
+
 func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
 	candidates := suggestRulePatterns("shell", `{"command":"echo one\necho two"}`, nil, "")
 	if len(candidates) < 1 {

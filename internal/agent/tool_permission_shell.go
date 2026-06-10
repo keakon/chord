@@ -28,21 +28,33 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		switch exact.Rule.Action {
 		case permission.ActionAsk:
 			decision.NeedsApprovalPaths = []string{rawCommand}
+			decision.NeedsApprovalRules = []string{exact.Rule.Pattern}
 		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = []string{rawCommand}
+			decision.AlreadyAllowedRules = []string{exact.Rule.Pattern}
 		}
 		return decision
 	}
 
 	analysis, err := tools.AnalyzeShellCommand(rawCommand)
 	if err != nil || len(analysis.Subcommands) == 0 {
-		decision.Action = ruleset.Evaluate(tools.NameShell, rawCommand)
+		match := ruleset.LastEvaluatedMatch(tools.NameShell, rawCommand)
+		decision.Action = permission.ActionDeny
+		if match.Found {
+			decision.Action = match.Rule.Action
+		}
 		decision.MatchArgument = rawCommand
 		switch decision.Action {
 		case permission.ActionAsk:
 			decision.NeedsApprovalPaths = []string{rawCommand}
+			if match.Found {
+				decision.NeedsApprovalRules = []string{match.Rule.Pattern}
+			}
 		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = []string{rawCommand}
+			if match.Found {
+				decision.AlreadyAllowedRules = []string{match.Rule.Pattern}
+			}
 		}
 		return decision
 	}
@@ -55,18 +67,33 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		}
 		items = append(items, permissionAggregateItem{
 			Argument: source,
-			Action:   ruleset.Evaluate(tools.NameShell, source),
 		})
 		last := &items[len(items)-1]
+		match := ruleset.LastMatch(tools.NameShell, source)
+		if match.Found {
+			last.Action = match.Rule.Action
+		} else {
+			last.Action = permission.ActionDeny
+		}
 		switch last.Action {
 		case permission.ActionAsk:
 			last.AskList = []string{source}
+			if match.Found {
+				last.AskRuleList = []string{match.Rule.Pattern}
+			}
 		case permission.ActionAllow:
 			last.AllowList = []string{source}
+			if match.Found {
+				last.AllowRuleList = []string{match.Rule.Pattern}
+			}
 		}
 	}
 	if len(items) == 0 {
-		decision.Action = ruleset.Evaluate(tools.NameShell, rawCommand)
+		match := ruleset.LastEvaluatedMatch(tools.NameShell, rawCommand)
+		decision.Action = permission.ActionDeny
+		if match.Found {
+			decision.Action = match.Rule.Action
+		}
 		decision.MatchArgument = rawCommand
 		return decision
 	}

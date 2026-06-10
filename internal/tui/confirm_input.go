@@ -34,6 +34,11 @@ func isConfirmGenericShortcut(key string) bool {
 	return false
 }
 
+func isPlainKey(msg tea.KeyMsg, code rune) bool {
+	key := msg.Key()
+	return key.Code == code && key.Mod == 0
+}
+
 func confirmDialogWidth(totalWidth int) int {
 	maxWidth := min(totalWidth-6, confirmDialogMaxWidth)
 	if maxWidth < 40 {
@@ -147,8 +152,7 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 			return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
 		}
 		if m.confirm.request.ForceDenyReason {
-			switch msg.String() {
-			case "r", "R", "esc":
+			if msg.Key().Code == tea.KeyEscape || msg.String() == "r" || msg.String() == "R" {
 				m.confirm.denyingWithReason = true
 				m.confirm.editError = ""
 				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
@@ -162,10 +166,10 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 		} else {
-			switch msg.String() {
-			case "a", "A", "enter":
+			switch {
+			case isPlainKey(msg, tea.KeyEnter) || msg.String() == "a" || msg.String() == "A":
 				return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
-			case "r", "R", "esc":
+			case msg.Key().Code == tea.KeyEscape || msg.String() == "r" || msg.String() == "R":
 				m.confirm.denyingWithReason = true
 				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 				m.recalcViewportSize()
@@ -199,23 +203,23 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return m.refreshInlineImagesIfViewportMoved(prevOffset)
 	}
 
-	switch msg.String() {
-	case "a", "A", "enter":
+	switch {
+	case isPlainKey(msg, tea.KeyEnter) || msg.String() == "a" || msg.String() == "A":
 		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
 			return nil
 		}
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 
-	case "d", "D":
+	case msg.String() == "d" || msg.String() == "D":
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
 
-	case "r", "R":
+	case msg.String() == "r" || msg.String() == "R":
 		m.confirm.denyingWithReason = true
 		m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	case "e", "E":
+	case msg.String() == "e" || msg.String() == "E":
 		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 			return nil
 		}
@@ -225,14 +229,14 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	case "m", "M":
+	case msg.String() == "m" || msg.String() == "M":
 		if m.confirm.request != nil {
 			m.enterRulePicker()
 			m.recalcViewportSize()
 		}
 		return nil
 
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
 	}
 
@@ -245,23 +249,30 @@ func (m *Model) enterRulePicker() {
 		return
 	}
 	req := m.confirm.request
-	candidates := suggestRulePatterns(req.ToolName, req.ArgsJSON, req.NeedsApproval, m.workingDir)
+	candidates := suggestRulePatternsWithContext(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.NeedsApprovalRules, m.workingDir)
 	if len(candidates) == 0 {
 		return
 	}
 
-	// Find default selection
-	defaultIdx := 0
+	// Pre-select every default candidate so a command blocked by multiple
+	// matched ask rules pre-checks all of them, not just the first. The cursor
+	// starts on the first default. When no candidate is a default, pre-select
+	// nothing and leave the cursor on the first row.
+	cursorIdx := 0
+	selected := make(map[int]struct{})
 	for i, c := range candidates {
 		if c.Default {
-			defaultIdx = i
-			break
+			if len(selected) == 0 {
+				cursorIdx = i
+			}
+			selected[i] = struct{}{}
 		}
 	}
 
 	m.confirm.pickingRule = true
 	m.confirm.candidates = candidates
-	m.confirm.patternIdx = defaultIdx
+	m.confirm.patternIdx = cursorIdx
+	m.confirm.selectedPatterns = selected
 	m.confirm.scopeIdx = 0
 	m.confirm.scopes = []permission.RuleScope{
 		permission.ScopeSession,
@@ -272,8 +283,25 @@ func (m *Model) enterRulePicker() {
 
 // handleConfirmRulePickerKey processes key events in the rule picker sub-mode.
 func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "up", "k":
+	if msg.Key().Code == tea.KeySpace {
+		if len(m.confirm.candidates) == 0 {
+			return nil
+		}
+		if m.confirm.selectedPatterns == nil {
+			m.confirm.selectedPatterns = make(map[int]struct{})
+		}
+		if _, ok := m.confirm.selectedPatterns[m.confirm.patternIdx]; ok {
+			delete(m.confirm.selectedPatterns, m.confirm.patternIdx)
+		} else {
+			m.confirm.selectedPatterns[m.confirm.patternIdx] = struct{}{}
+		}
+		m.confirm.renderCacheText = ""
+		m.recalcViewportSize()
+		return nil
+	}
+
+	switch {
+	case msg.Key().Code == tea.KeyUp || msg.String() == "k":
 		if m.confirm.patternIdx > 0 {
 			m.confirm.patternIdx--
 			m.confirm.renderCacheText = ""
@@ -281,7 +309,7 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "down", "j":
+	case msg.Key().Code == tea.KeyDown || msg.String() == "j":
 		if m.confirm.patternIdx < len(m.confirm.candidates)-1 {
 			m.confirm.patternIdx++
 			m.confirm.renderCacheText = ""
@@ -289,20 +317,20 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "tab":
+	case msg.Key().Code == tea.KeyTab:
 		// Cycle scope
 		m.confirm.scopeIdx = (m.confirm.scopeIdx + 1) % len(m.confirm.scopes)
 		m.confirm.renderCacheText = ""
 		m.recalcViewportSize()
 		return nil
 
-	case "enter":
+	case isPlainKey(msg, tea.KeyEnter):
 		// Submit: allow + add rule
 		if len(m.confirm.candidates) == 0 || len(m.confirm.scopes) == 0 {
 			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 		}
-		pattern := strings.TrimSpace(m.confirm.candidates[m.confirm.patternIdx].Pattern)
-		if pattern == "" {
+		patterns := m.confirmSelectedRulePatterns()
+		if len(patterns) == 0 {
 			m.confirm.editError = "Pattern is required."
 			m.recalcViewportSize()
 			return nil
@@ -311,12 +339,12 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		return m.resolveConfirm(ConfirmResult{
 			Action: ConfirmAllow,
 			RuleIntent: &ConfirmRuleIntent{
-				Pattern: pattern,
-				Scope:   scope,
+				Patterns: patterns,
+				Scope:    scope,
 			},
 		})
 
-	case "e", "E":
+	case msg.String() == "e" || msg.String() == "E":
 		if len(m.confirm.candidates) == 0 {
 			return nil
 		}
@@ -326,10 +354,11 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		// Back to main confirm dialog
 		m.confirm.pickingRule = false
 		m.confirm.candidates = nil
+		m.confirm.selectedPatterns = nil
 		m.confirm.renderCacheText = ""
 		m.recalcViewportSize()
 		return nil
@@ -337,9 +366,36 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *Model) confirmSelectedRulePatterns() []string {
+	if len(m.confirm.candidates) == 0 {
+		return nil
+	}
+	selected := m.confirm.selectedPatterns
+	if len(selected) == 0 {
+		selected = map[int]struct{}{m.confirm.patternIdx: {}}
+	}
+	patterns := make([]string, 0, len(selected))
+	seen := make(map[string]struct{}, len(selected))
+	for i := range m.confirm.candidates {
+		if _, ok := selected[i]; !ok {
+			continue
+		}
+		pattern := strings.TrimSpace(m.confirm.candidates[i].Pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, ok := seen[pattern]; ok {
+			continue
+		}
+		seen[pattern] = struct{}{}
+		patterns = append(patterns, pattern)
+	}
+	return patterns
+}
+
 func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
+	switch {
+	case isPlainKey(msg, tea.KeyEnter):
 		pattern := strings.TrimSpace(m.confirm.rulePatternInput.Value())
 		if pattern == "" {
 			m.confirm.editError = "Pattern is required."
@@ -354,12 +410,16 @@ func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
 			m.confirm.candidates[m.confirm.patternIdx].Summary = "custom pattern"
 			m.confirm.candidates[m.confirm.patternIdx].Broad = pattern == "*"
 		}
+		if m.confirm.selectedPatterns == nil {
+			m.confirm.selectedPatterns = make(map[int]struct{})
+		}
+		m.confirm.selectedPatterns[m.confirm.patternIdx] = struct{}{}
 		m.confirm.editingRulePattern = false
 		m.confirm.rulePatternInput.Blur()
 		m.confirm.editError = ""
 		m.recalcViewportSize()
 		return nil
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		m.confirm.editingRulePattern = false
 		m.confirm.rulePatternInput.Blur()
 		m.confirm.editError = ""
@@ -377,8 +437,8 @@ func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
 
 // handleConfirmDenyReasonKey processes key events in the deny-reason sub-mode.
 func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
+	switch {
+	case isPlainKey(msg, tea.KeyEnter):
 		reason := normalizeConfirmDenyReason(m.confirm.denyReasonInput.Value())
 		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone && reason == "" {
 			m.confirm.editError = "Done rejection requires a reason."
@@ -390,7 +450,7 @@ func (m *Model) handleConfirmDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 			DenyReason: reason,
 		})
 
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
 			return nil
 		}
@@ -417,8 +477,8 @@ func normalizeConfirmDenyReason(reason string) string {
 
 // handleConfirmEditKey processes key events in the confirm-edit sub-mode.
 func (m *Model) handleConfirmEditKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
+	switch {
+	case isPlainKey(msg, tea.KeyEnter):
 		edited := m.confirm.editInput.Value()
 		if !json.Valid([]byte(edited)) {
 			m.confirm.editError = "Arguments must be valid JSON before submission."
@@ -430,7 +490,7 @@ func (m *Model) handleConfirmEditKey(msg tea.KeyMsg) tea.Cmd {
 			FinalArgsJSON: edited,
 		})
 
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		// Leave edit sub-mode but stay in ModeConfirm.
 		m.confirm.editing = false
 		m.confirm.editError = ""
@@ -464,7 +524,9 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	if result.RuleIntent != nil && m.confirm.request != nil {
 		if m.confirm.requestID == "" {
 			// In-process: /rules reads from agent overlay; track locally as a fallback.
-			m.addSessionRule(m.confirm.request.ToolName, result.RuleIntent.Pattern, result.RuleIntent.Scope)
+			for _, pattern := range result.RuleIntent.Patterns {
+				m.addSessionRule(m.confirm.request.ToolName, pattern, result.RuleIntent.Scope)
+			}
 		} else {
 			// Remote mode: never mutate local /rules state (paths/undo must come from backend).
 			if _, ok := m.agent.(confirmRuleIntentResolver); !ok {
@@ -479,8 +541,8 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 		actionStr := confirmActionToStr(result.Action)
 		if result.RuleIntent != nil {
 			intent := &agent.ConfirmRuleIntent{
-				Pattern: result.RuleIntent.Pattern,
-				Scope:   int(result.RuleIntent.Scope),
+				Patterns: append([]string(nil), result.RuleIntent.Patterns...),
+				Scope:    int(result.RuleIntent.Scope),
 			}
 			if resolver, ok := m.agent.(confirmRuleIntentResolver); ok {
 				resolver.ResolveConfirmWithRuleIntent(actionStr, result.FinalArgsJSON, result.EditSummary, result.DenyReason, m.confirm.requestID, intent)

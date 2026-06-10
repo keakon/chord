@@ -222,14 +222,16 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
 		env, err = NewEnvelope(TypeConfirmRequest, ConfirmRequestPayload{
-			ToolName:       e.ToolName,
-			ArgsJSON:       e.ArgsJSON,
-			RequestID:      e.RequestID,
-			TimeoutMS:      e.Timeout.Milliseconds(),
-			NeedsApproval:  append([]string(nil), e.NeedsApproval...),
-			AlreadyAllowed: append([]string(nil), e.AlreadyAllowed...),
-			DoneReport:     doneReport,
-			DoneReason:     doneReason,
+			ToolName:            e.ToolName,
+			ArgsJSON:            e.ArgsJSON,
+			RequestID:           e.RequestID,
+			TimeoutMS:           e.Timeout.Milliseconds(),
+			NeedsApproval:       append([]string(nil), e.NeedsApproval...),
+			AlreadyAllowed:      append([]string(nil), e.AlreadyAllowed...),
+			NeedsApprovalRules:  append([]string(nil), e.NeedsApprovalRules...),
+			AlreadyAllowedRules: append([]string(nil), e.AlreadyAllowedRules...),
+			DoneReport:          doneReport,
+			DoneReason:          doneReason,
 		})
 
 	case agent.QuestionRequestEvent:
@@ -456,13 +458,15 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 			return nil, err
 		}
 		return agent.ConfirmRequestEvent{
-			ToolName:       p.ToolName,
-			ArgsJSON:       p.ArgsJSON,
-			RequestID:      p.RequestID,
-			Timeout:        time.Duration(p.TimeoutMS) * time.Millisecond,
-			NeedsApproval:  append([]string(nil), p.NeedsApproval...),
-			AlreadyAllowed: append([]string(nil), p.AlreadyAllowed...),
-			DoneReport:     p.DoneReport,
+			ToolName:            p.ToolName,
+			ArgsJSON:            p.ArgsJSON,
+			RequestID:           p.RequestID,
+			Timeout:             time.Duration(p.TimeoutMS) * time.Millisecond,
+			NeedsApproval:       append([]string(nil), p.NeedsApproval...),
+			AlreadyAllowed:      append([]string(nil), p.AlreadyAllowed...),
+			NeedsApprovalRules:  append([]string(nil), p.NeedsApprovalRules...),
+			AlreadyAllowedRules: append([]string(nil), p.AlreadyAllowedRules...),
+			DoneReport:          p.DoneReport,
 		}, nil
 	case TypeQuestionRequest:
 		p, err := ParsePayload[QuestionRequestPayload](env)

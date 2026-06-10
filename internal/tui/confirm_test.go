@@ -359,7 +359,7 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	if !strings.Contains(picker, "Pattern:") {
 		t.Fatalf("expected rule picker pattern section, got:\n%s", picker)
 	}
-	if !strings.Contains(picker, "[Enter] add rule + allow") {
+	if !strings.Contains(picker, "[Enter] add selected + allow") {
 		t.Fatalf("expected rule picker enter hint, got:\n%s", picker)
 	}
 }
@@ -822,8 +822,8 @@ func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	_ = m.resolveConfirm(ConfirmResult{
 		Action: ConfirmAllow,
 		RuleIntent: &ConfirmRuleIntent{
-			Pattern: "git *",
-			Scope:   permission.ScopeProject,
+			Patterns: []string{"git *"},
+			Scope:    permission.ScopeProject,
 		},
 	})
 
@@ -839,7 +839,102 @@ func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	if backend.lastRuleIntent == nil {
 		t.Fatal("expected rule intent forwarded to extended resolver")
 	}
-	if backend.lastRuleIntent.Pattern != "git *" || backend.lastRuleIntent.Scope != int(permission.ScopeProject) {
+	if !reflect.DeepEqual(backend.lastRuleIntent.Patterns, []string{"git *"}) || backend.lastRuleIntent.Scope != int(permission.ScopeProject) {
 		t.Fatalf("rule intent = %#v, want pattern=git * scope=%d", backend.lastRuleIntent, int(permission.ScopeProject))
+	}
+}
+
+func TestConfirmRulePickerAllowsMultiplePatternSelection(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.confirm.request = &ConfirmRequest{
+		ToolName:           "shell",
+		ArgsJSON:           `{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
+		NeedsApproval:      []string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
+		NeedsApprovalRules: []string{"git reset *", "git add *", "git commit *"},
+	}
+
+	m.enterRulePicker()
+	if !m.confirm.pickingRule {
+		t.Fatal("expected rule picker to open")
+	}
+	// The three matched ask rules start pre-selected; manually add the broader
+	// "git *" candidate to confirm Space still extends the selection.
+	broadIdx := -1
+	for i, c := range m.confirm.candidates {
+		if c.Pattern == "git *" {
+			broadIdx = i
+			break
+		}
+	}
+	if broadIdx < 0 {
+		t.Fatal("expected a broader \"git *\" candidate")
+	}
+	for i := 0; i < broadIdx; i++ {
+		_ = m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	}
+	_ = m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	_ = m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	select {
+	case result := <-m.confirmResultCh:
+		if result.Action != ConfirmAllow {
+			t.Fatalf("action = %v, want allow", result.Action)
+		}
+		if result.RuleIntent == nil {
+			t.Fatal("expected rule intent")
+		}
+		want := []string{"git reset *", "git add *", "git commit *", "git *"}
+		if !reflect.DeepEqual(result.RuleIntent.Patterns, want) {
+			t.Fatalf("patterns = %#v, want %#v", result.RuleIntent.Patterns, want)
+		}
+	default:
+		t.Fatal("expected confirm result")
+	}
+}
+
+func TestConfirmRulePickerPreselectsAllMatchedAskRules(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.confirm.request = &ConfirmRequest{
+		ToolName:           "shell",
+		ArgsJSON:           `{"command":"git add internal/tui/x.go && git commit -m fix"}`,
+		NeedsApproval:      []string{"git add internal/tui/x.go", "git commit -m fix"},
+		NeedsApprovalRules: []string{"git add *", "git commit *"},
+	}
+
+	m.enterRulePicker()
+	if !m.confirm.pickingRule {
+		t.Fatal("expected rule picker to open")
+	}
+
+	// Both matched ask rules must be pre-checked, and the cursor sits on the first.
+	if m.confirm.patternIdx != 0 {
+		t.Fatalf("cursor idx = %d, want 0", m.confirm.patternIdx)
+	}
+	for i, c := range m.confirm.candidates {
+		_, selected := m.confirm.selectedPatterns[i]
+		if c.Pattern == "git add *" || c.Pattern == "git commit *" {
+			if !selected {
+				t.Fatalf("expected %q pre-selected", c.Pattern)
+			}
+		} else if selected {
+			t.Fatalf("did not expect %q pre-selected", c.Pattern)
+		}
+	}
+
+	// Submitting without manual toggling should record both matched ask rules.
+	_ = m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	select {
+	case result := <-m.confirmResultCh:
+		if result.RuleIntent == nil {
+			t.Fatal("expected rule intent")
+		}
+		want := []string{"git add *", "git commit *"}
+		if !reflect.DeepEqual(result.RuleIntent.Patterns, want) {
+			t.Fatalf("patterns = %#v, want %#v", result.RuleIntent.Patterns, want)
+		}
+	default:
+		t.Fatal("expected confirm result")
 	}
 }

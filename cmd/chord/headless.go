@@ -1070,7 +1070,7 @@ func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, e
 		return nil, fmt.Errorf("invalid rule_scope %q (expected session|project|user_global)", scope)
 	}
 	return &agent.ConfirmRuleIntent{
-		Pattern: pattern,
-		Scope:   ruleScope,
+		Patterns: []string{pattern},
+		Scope:    ruleScope,
 	}, nil
 }

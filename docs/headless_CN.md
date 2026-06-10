@@ -203,7 +203,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`text`、`tool_calls` |
 | `idle`               | Agent 再次可接收输入                         | `last_outcome`（`completed` / `cancelled` / `error`） |
 | `done_completion`   | 非 loop 模式下 Done 工具完成并给出最终报告 | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
-| `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`timeout_ms` |
+| `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |

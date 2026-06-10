@@ -196,15 +196,19 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 		}
 	} else {
 		for i, c := range m.confirm.candidates {
-			marker := "( )"
+			cursor := " "
 			if i == m.confirm.patternIdx {
-				marker = "(●)"
+				cursor = "›"
+			}
+			checked := "[ ]"
+			if _, ok := m.confirm.selectedPatterns[i]; ok {
+				checked = "[x]"
 			}
 			broadTag := ""
 			if c.Broad {
 				broadTag = "  ⚠ very broad"
 			}
-			line := fmt.Sprintf("  %s %s", marker, c.Pattern)
+			line := fmt.Sprintf("  %s %s %s", cursor, checked, c.Pattern)
 			if c.Summary != "" {
 				line += "  — " + c.Summary
 			}
@@ -250,7 +254,7 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 	}
 
 	lines = append(lines, "")
-	hint := ConfirmHintStyle.Render("[↑↓] pattern  [E] edit pattern  [Tab] scope  [Enter] add rule + allow  [Esc] back")
+	hint := ConfirmHintStyle.Render("[↑↓] pattern  [Space] select  [E] edit  [Tab] scope  [Enter] add selected + allow  [Esc] back")
 	lines = append(lines, hint)
 
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)

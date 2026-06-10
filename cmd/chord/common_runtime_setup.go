@@ -60,8 +60,8 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 }
 
 func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout time.Duration) {
-	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed []string) (agent.ConfirmResponse, error) {
-		resp, err := mainAgent.AwaitConfirm(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed)
+	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
+		resp, err := mainAgent.AwaitConfirmWithRuleContext(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 		if err != nil {
 			return agent.ConfirmResponse{}, err
 		}

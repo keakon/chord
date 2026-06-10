@@ -13,14 +13,18 @@ type toolPermissionDecision struct {
 	Action              permission.Action
 	MatchArgument       string
 	NeedsApprovalPaths  []string
+	NeedsApprovalRules  []string
 	AlreadyAllowedPaths []string
+	AlreadyAllowedRules []string
 }
 
 type permissionAggregateItem struct {
-	Argument  string
-	Action    permission.Action
-	AskList   []string
-	AllowList []string
+	Argument      string
+	Action        permission.Action
+	AskList       []string
+	AskRuleList   []string
+	AllowList     []string
+	AllowRuleList []string
 }
 
 func normalizeToolPermissionAction(toolName string, action permission.Action) permission.Action {
@@ -140,18 +144,40 @@ func aggregatePermissionItems(items []permissionAggregateItem, initial permissio
 			decision.Action = permission.ActionDeny
 			decision.MatchArgument = item.Argument
 			decision.NeedsApprovalPaths = nil
+			decision.NeedsApprovalRules = nil
 			decision.AlreadyAllowedPaths = nil
+			decision.AlreadyAllowedRules = nil
 			return decision
 		case permission.ActionAsk:
 			decision.Action = permission.ActionAsk
 			decision.MatchArgument = item.Argument
 			decision.NeedsApprovalPaths = append(decision.NeedsApprovalPaths, item.AskList...)
+			decision.NeedsApprovalRules = append(decision.NeedsApprovalRules, item.AskRuleList...)
 		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = append(decision.AlreadyAllowedPaths, item.AllowList...)
+			decision.AlreadyAllowedRules = append(decision.AlreadyAllowedRules, item.AllowRuleList...)
 		}
 	}
 	if len(items) > 0 && decision.MatchArgument == fallbackMatch {
 		decision.MatchArgument = items[0].Argument
 	}
+	decision.NeedsApprovalRules = dedupeStrings(decision.NeedsApprovalRules)
+	decision.AlreadyAllowedRules = dedupeStrings(decision.AlreadyAllowedRules)
 	return decision
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }

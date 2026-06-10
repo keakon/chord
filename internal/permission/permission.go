@@ -86,16 +86,8 @@ func ParsePermission(node *yaml.Node) Ruleset {
 // Both permission (tool name) and pattern (argument) support glob wildcards (* and ?).
 // Returns ActionDeny if no rule matches.
 func (rs Ruleset) Evaluate(permission, pattern string) Action {
-	permission = toolname.Normalize(permission)
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
-		if !globMatch(permission, toolname.Normalize(r.Permission)) || !globMatch(pattern, r.Pattern) {
-			continue
-		}
-		if r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
-			continue
-		}
-		return r.Action
+	if match := rs.LastEvaluatedMatch(permission, pattern); match.Found {
+		return match.Rule.Action
 	}
 	return ActionDeny // default deny if no rule matches
 }

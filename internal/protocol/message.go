@@ -298,14 +298,16 @@ type ActivityPayload struct {
 
 // ConfirmRequestPayload is the payload for TypeConfirmRequest.
 type ConfirmRequestPayload struct {
-	ToolName       string   `json:"tool_name"`
-	ArgsJSON       string   `json:"args_json"`
-	RequestID      string   `json:"request_id,omitempty"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
-	NeedsApproval  []string `json:"needs_approval,omitempty"`
-	AlreadyAllowed []string `json:"already_allowed,omitempty"`
-	DoneReport     string   `json:"done_report,omitempty"`
-	DoneReason     string   `json:"done_reason,omitempty"`
+	ToolName            string   `json:"tool_name"`
+	ArgsJSON            string   `json:"args_json"`
+	RequestID           string   `json:"request_id,omitempty"`
+	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
+	NeedsApproval       []string `json:"needs_approval,omitempty"`
+	AlreadyAllowed      []string `json:"already_allowed,omitempty"`
+	NeedsApprovalRules  []string `json:"needs_approval_rules,omitempty"`
+	AlreadyAllowedRules []string `json:"already_allowed_rules,omitempty"`
+	DoneReport          string   `json:"done_report,omitempty"`
+	DoneReason          string   `json:"done_reason,omitempty"`
 }
 
 // QuestionRequestPayload is the payload for TypeQuestionRequest.

@@ -12,6 +12,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `read` now uses a slimmer `READ_RESULT lines=a-b total=N` header, reports `truncated=budget` only when requested lines are actually dropped, omits UTF-8 encoding noise, and errors when `offset` is strictly past EOF instead of silently clamping it.
 - `grep` now accepts `paths` and `includes` arrays for multi-root searches and path glob filters, `glob` now accepts a `patterns` array, and invalid `grep` regex patterns automatically fall back to literal-text search with a visible result note. `glob` permission checks also evaluate every requested pattern so a later deny/ask rule cannot be bypassed by an earlier allowed pattern.
 - Failed `edit` hunks now point out a near-miss file line and the first differing column when the mismatch is only a small long-line drift, making stale single-line prompts, URLs, and doc strings easier to recover.
+- Permission confirmation rule suggestions now include the matched ask rules for compound Shell commands, and the rule picker pre-selects every matched ask rule so one approval can save all blocking rules.
 - `question` now tolerates a single question object in place of the documented `questions` array, mirroring the scalar-to-list tolerance used by `grep` and `glob`.
 - Request-level context reduction now protects recent high-risk tool outputs such as diffs, failed assertions, stack traces, and permission/security errors from being pruned solely because a long single-turn tool chain advances effective age. The default `context.reduction.read_like_age_turns` is also raised from 1 to 2 based on recent-session statistics, preserving freshly read file context one effective turn longer at low observed token cost.
 - Context reduction now waits until the third consecutive request on the same model before preserving the prompt-cache surface; switching models resets that model-run count, so the first two requests on a new model can still trim cached context under pressure.
@@ -26,6 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
 - Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.
+- Shell permission fallback checks now keep compound-command review semantics when exposing matched rule suggestions, so narrow allow rules do not auto-approve unparsed compound commands.
 - The TUI info panel changed-files section now prioritizes full `+N -N` line-change stats over long filenames, matching the narrow sidebar behavior.
 - The TUI info panel now scrolls independently with the mouse wheel or touchpad when the pointer is over it, so long changed-file or status sections are no longer clipped by the input area.
 - Collapsed Shell tool cards that were rejected now show the expand hint before the rejection reason, so the hint is no longer pushed below the result text.

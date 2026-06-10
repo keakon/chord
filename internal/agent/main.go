@@ -158,8 +158,8 @@ type ConfirmResponse struct {
 
 // ConfirmRuleIntent captures the user's intent to add a permission rule.
 type ConfirmRuleIntent struct {
-	Pattern string
-	Scope   int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+	Patterns []string
+	Scope    int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
 }
 
 // QuestionResponse carries the user's response to a QuestionRequestEvent.
@@ -179,11 +179,13 @@ type QuestionResponse struct {
 //   - ctx:          context for cancellation (e.g. turn cancelled while waiting)
 //   - toolName:     the name of the tool being invoked (e.g. "Shell")
 //   - args:         the raw JSON arguments string
-//   - needsApproval: explicit paths covered by this approval prompt (Delete only)
-//   - alreadyAllowed: explicit paths already allowed by rules in the same batch (Delete only)
+//   - needsApproval: explicit arguments covered by this approval prompt
+//   - alreadyAllowed: explicit arguments already allowed by rules in the same batch
+//   - needsApprovalRules: rule patterns that matched ask items in this prompt
+//   - alreadyAllowedRules: rule patterns that matched allowed items in the same batch
 //   - ConfirmResponse: approved decision plus the final args JSON chosen by the user
 //   - err:          non-nil if the confirmation flow itself fails
-type ConfirmFunc func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string) (ConfirmResponse, error)
+type ConfirmFunc func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error)
 
 // ---------------------------------------------------------------------------
 // SubAgentInfo

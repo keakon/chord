@@ -12,6 +12,7 @@
 - `read` 现在使用更精简的 `READ_RESULT lines=a-b total=N` header；只有实际丢弃请求行时才报告 `truncated=budget`，不再为 UTF-8 文件显示 encoding 噪音，并会在 `offset` 严格超过 EOF 时直接报错而不是静默夹到文件末尾。
 - `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
 - 当 `edit` 的 hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
+- 权限确认的规则建议现在会为复合 Shell 命令列出命中的 ask 规则，规则选择器也会预先勾选每一条命中的 ask 规则，让一次批准即可保存所有阻塞规则。
 - `question` 现在容忍用单个问题对象代替文档中要求的 `questions` 数组，与 `grep`、`glob` 的标量转单元素列表容错保持一致。
 - 请求级上下文剪裁现在会保护近期高风险工具输出，例如 diff、失败断言、stack trace、权限/安全错误，避免它们仅因很长的单轮工具链推进了 effective age 就被剪裁。默认 `context.reduction.read_like_age_turns` 也基于近期会话统计从 1 上调到 2，让刚读取的文件上下文以较低的观测 token 成本多保留一个 effective turn。
 - 上下文剪裁现在会等到同一模型连续第 3 次请求时才保护 prompt cache surface；切换模型会重置这个连续计数，因此新模型的前两次请求在压力下仍可剪裁已缓存上下文。
@@ -26,6 +27,7 @@
 
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
 - Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。
+- Shell 权限回退检查现在在展示命中规则建议时仍保留复合命令复审语义，避免窄 allow 规则自动放行未解析的复合命令。
 - TUI 信息面板的 changed-files 区域现在会优先完整显示 `+N -N` 行数统计，而不是让长文件名挤掉改动数量，与较窄侧边栏的行为一致。
 - TUI 信息面板现在会在鼠标指针位于其上方时响应鼠标滚轮或触摸板独立滚动，较长的 changed files 或状态区块不再被输入区截断。
 - 被拒绝的折叠 Shell 工具卡片现在会把展开提示显示在拒绝原因之前，提示不再被挤到结果文本下方。

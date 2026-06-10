@@ -27,22 +27,7 @@ func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 // handleQuestionOptionKey handles keys while navigating the option list.
 func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) tea.Cmd {
 	optCount := len(q.Options) + 1 // +1 for the "custom" virtual entry
-
-	switch msg.String() {
-	// Navigation
-	case "j", "down":
-		if m.question.cursor < optCount-1 {
-			m.question.cursor++
-		}
-		return nil
-	case "k", "up":
-		if m.question.cursor > 0 {
-			m.question.cursor--
-		}
-		return nil
-
-	// Toggle selection (multi-select). Space may be reported as " " or "space" (tea.KeySpace).
-	case " ", "space":
+	if msg.Key().Code == tea.KeySpace {
 		idx := m.question.cursor
 		if idx == len(q.Options) {
 			// Space on "custom" entry → switch to text input
@@ -59,9 +44,23 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 			}
 		}
 		return nil
+	}
+
+	switch {
+	// Navigation
+	case msg.Key().Code == tea.KeyDown || msg.String() == "j":
+		if m.question.cursor < optCount-1 {
+			m.question.cursor++
+		}
+		return nil
+	case msg.Key().Code == tea.KeyUp || msg.String() == "k":
+		if m.question.cursor > 0 {
+			m.question.cursor--
+		}
+		return nil
 
 	// Confirm / submit
-	case "enter":
+	case isPlainKey(msg, tea.KeyEnter):
 		idx := m.question.cursor
 		// "Custom" virtual entry
 		if idx == len(q.Options) {
@@ -82,7 +81,7 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 		return m.submitCurrentQuestion(q)
 
 	// Number keys 1-9 for quick selection
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case len(msg.String()) == 1 && msg.String() >= "1" && msg.String() <= "9":
 		num := int(msg.String()[0] - '0')
 		idx := num - 1
 		if idx < len(q.Options) {
@@ -100,14 +99,14 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 		return nil
 
 	// Tab → switch to custom input
-	case "tab":
+	case msg.Key().Code == tea.KeyTab:
 		m.question.custom = true
 		m.question.input.Focus()
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
 	// Cancel
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		return m.cancelQuestion()
 	}
 
@@ -116,8 +115,8 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 
 // handleQuestionTextKey handles keys while the custom text input is focused.
 func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.Cmd {
-	switch msg.String() {
-	case "enter":
+	switch {
+	case isPlainKey(msg, tea.KeyEnter):
 		text := m.question.input.Value()
 		if strings.TrimSpace(text) == "" {
 			return nil // ignore empty submit
@@ -128,7 +127,7 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		}
 		return m.advanceQuestion(answer)
 
-	case "esc":
+	case msg.Key().Code == tea.KeyEscape:
 		if len(q.Options) > 0 {
 			// Escape goes back to option selection.
 			m.question.custom = false
@@ -141,7 +140,7 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		// No options → Esc cancels
 		return m.cancelQuestion()
 
-	case "tab":
+	case msg.Key().Code == tea.KeyTab:
 		if len(q.Options) > 0 {
 			// Tab goes back to option selection.
 			m.question.custom = false

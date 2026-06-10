@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -386,8 +387,8 @@ func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 	if call.ruleIntent == nil {
 		t.Fatal("expected rule intent in confirm call")
 	}
-	if call.ruleIntent.Pattern != "git *" {
-		t.Fatalf("rule pattern = %q, want %q", call.ruleIntent.Pattern, "git *")
+	if !reflect.DeepEqual(call.ruleIntent.Patterns, []string{"git *"}) {
+		t.Fatalf("rule patterns = %#v, want %#v", call.ruleIntent.Patterns, []string{"git *"})
 	}
 	if call.ruleIntent.Scope != int(permission.ScopeProject) {
 		t.Fatalf("rule scope = %d, want %d(project)", call.ruleIntent.Scope, int(permission.ScopeProject))

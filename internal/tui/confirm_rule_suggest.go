@@ -25,9 +25,13 @@ type PatternCandidate struct {
 // needsApproval: explicit paths that need approval (for Delete)
 // cwd: current working directory (for relative path generation)
 func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
+	return suggestRulePatternsWithContext(toolName, argsJSON, needsApproval, nil, cwd)
+}
+
+func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []string, needsApprovalRules []string, cwd string) []PatternCandidate {
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
-		return suggestShellPatterns(argsJSON, needsApproval)
+		return suggestShellPatterns(argsJSON, needsApproval, needsApprovalRules)
 	case tools.NameEdit, tools.NameWrite:
 		return suggestFilePatterns(toolName, argsJSON, cwd)
 	case tools.NameWebFetch:
@@ -46,12 +50,16 @@ func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd 
 }
 
 // suggestShellPatterns generates pattern candidates for Shell commands.
-func suggestShellPatterns(argsJSON string, needsApproval []string) []PatternCandidate {
+func suggestShellPatterns(argsJSON string, needsApproval []string, needsApprovalRules []string) []PatternCandidate {
 	command := extractShellCommand(argsJSON)
 	if command == "" {
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any Shell command", Broad: true, Default: true},
 		})
+	}
+
+	if shellCommandIsComplex(command) && len(needsApprovalRules) > 0 {
+		return suggestShellPatternsFromMatchedRules(needsApprovalRules)
 	}
 
 	// If needsApproval has a specific subcommand, prefer that
@@ -63,12 +71,45 @@ func suggestShellPatterns(argsJSON string, needsApproval []string) []PatternCand
 	return buildBashCandidates(seed, command)
 }
 
+// suggestShellPatternsFromMatchedRules builds candidates for a compound command
+// from the user's matched ask rules only: the rules as written (pre-selected),
+// each generalized to "cmd *", and a final "*" catch-all. Literal candidates for
+// the exact command or blocked subcommands are intentionally omitted because a
+// rule carrying concrete file arguments is essentially never reusable.
+func suggestShellPatternsFromMatchedRules(needsApprovalRules []string) []PatternCandidate {
+	candidates := make([]PatternCandidate, 0, len(needsApprovalRules)*2+1)
+	for _, pattern := range needsApprovalRules {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		candidates = append(candidates, PatternCandidate{Pattern: pattern, Summary: "matched ask rule", Default: true})
+	}
+	for _, pattern := range generalizeShellRulePatterns(needsApprovalRules) {
+		candidates = append(candidates, PatternCandidate{Pattern: pattern, Summary: "broader matched rule", Broad: true})
+	}
+	candidates = append(candidates, PatternCandidate{Pattern: "*", Summary: "any Shell command", Broad: true})
+	return normalizePatternCandidates(candidates)
+}
+
+func generalizeShellRulePatterns(patterns []string) []string {
+	var result []string
+	for _, pattern := range patterns {
+		parts := strings.Fields(strings.TrimSpace(pattern))
+		if len(parts) < 2 || parts[0] == "*" {
+			continue
+		}
+		result = append(result, parts[0]+" *")
+	}
+	return result
+}
+
 // buildBashCandidates builds pattern candidates from a command string.
 func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
 	trimmed := strings.TrimSpace(seed)
 
 	// Check for complex commands (pipes, chains, subshells, or multi-line/heredoc)
-	isComplex := strings.ContainsAny(trimmed, "|;&") || strings.Contains(trimmed, "$(") || strings.Contains(trimmed, "`") || strings.Contains(trimmed, "\n") || strings.Contains(trimmed, "<<")
+	isComplex := shellCommandIsComplex(trimmed)
 
 	if isComplex {
 		// Complex commands: only literal + very broad
@@ -130,6 +171,10 @@ func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
 	})
 
 	return normalizePatternCandidates(candidates)
+}
+
+func shellCommandIsComplex(command string) bool {
+	return strings.ContainsAny(command, "|;&") || strings.Contains(command, "$(") || strings.Contains(command, "`") || strings.Contains(command, "\n") || strings.Contains(command, "<<")
 }
 
 // isHighRiskBashCommand checks if a command contains high-risk patterns.
@@ -353,11 +398,7 @@ func normalizePatternCandidates(candidates []PatternCandidate) []PatternCandidat
 		}
 		seen[c.Pattern] = struct{}{}
 		if c.Default {
-			if defaultSet {
-				c.Default = false
-			} else {
-				defaultSet = true
-			}
+			defaultSet = true
 		}
 		out = append(out, c)
 		if len(out) >= maxPatternCandidates {
