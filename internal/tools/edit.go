@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/toolname"
@@ -606,6 +608,9 @@ func diagnoseMissingHunk(fileLines, oldSeq []string, start int) string {
 	if hasTrimmedLineMatches(fileLines, oldSeq, start) {
 		return "The expected text is present only after trimming whitespace; rebuild the hunk with the file's exact indentation and blank-line spacing."
 	}
+	if hint := nearestLineDiagnostic(fileLines, oldSeq, start); hint != "" {
+		return hint
+	}
 	return "The hunk text was not found in the current file; Re-read the target area and rebuild the hunk from the latest contents."
 }
 
@@ -704,6 +709,111 @@ func hasTrimmedLineMatches(fileLines, oldSeq []string, start int) bool {
 		}
 	}
 	return false
+}
+
+// nearestLineDiagnostic finds the file line most similar to one of the hunk's
+// context/removed lines and, when the overlap is high, reports the 1-based
+// column of the first difference plus a short excerpt from each side. This is
+// aimed at long single lines (doc strings, prompts, URLs) where exact whole-line
+// matching fails over a single stray character and the model otherwise cannot
+// tell what differs. It returns "" when no line is similar enough to be useful.
+func nearestLineDiagnostic(fileLines, oldSeq []string, start int) string {
+	bestOverlap := -1
+	var bestWant, bestFile string
+	bestLine := -1
+
+	for _, want := range oldSeq {
+		if strings.TrimSpace(want) == "" {
+			continue
+		}
+		for i := start; i < len(fileLines); i++ {
+			file := fileLines[i]
+			if file == want {
+				continue
+			}
+			prefix, prefixBytes := commonPrefixLen(want, file)
+			suffix := commonSuffixLen(want, file, prefixBytes)
+			overlap := prefix + suffix
+			longer := max(utf8.RuneCountInString(want), utf8.RuneCountInString(file))
+			// Require substantial overlap so we only flag genuine near-misses.
+			if longer == 0 || overlap*5 < longer*3 {
+				continue
+			}
+			if overlap > bestOverlap {
+				bestOverlap = overlap
+				bestWant, bestFile = want, file
+				bestLine = i
+			}
+		}
+	}
+
+	if bestLine < 0 {
+		return ""
+	}
+	prefix, prefixBytes := commonPrefixLen(bestWant, bestFile)
+	col := prefix + 1
+	return fmt.Sprintf(
+		"The hunk text was not found, but file line %d is almost identical and first differs at column %d: file has %s, hunk has %s. Re-read that line and copy it verbatim (watch for whitespace, punctuation, or a single changed character).",
+		bestLine+1,
+		col,
+		quoteDiffExcerpt(bestFile, prefixBytes),
+		quoteDiffExcerpt(bestWant, prefixBytes),
+	)
+}
+
+func commonPrefixLen(a, b string) (runes int, bytes int) {
+	for bytes < len(a) && bytes < len(b) {
+		ra, sizeA := utf8.DecodeRuneInString(a[bytes:])
+		rb, sizeB := utf8.DecodeRuneInString(b[bytes:])
+		if sizeA != sizeB || ra != rb || a[bytes:bytes+sizeA] != b[bytes:bytes+sizeB] {
+			break
+		}
+		bytes += sizeA
+		runes++
+	}
+	return runes, bytes
+}
+
+// commonSuffixLen counts trailing equal runes without overlapping the already
+// matched prefix in either string.
+func commonSuffixLen(a, b string, prefixBytes int) int {
+	count := 0
+	for ai, bi := len(a), len(b); ai > prefixBytes && bi > prefixBytes; {
+		ra, sizeA := utf8.DecodeLastRuneInString(a[:ai])
+		rb, sizeB := utf8.DecodeLastRuneInString(b[:bi])
+		if sizeA != sizeB || ra != rb || ai-sizeA < prefixBytes || bi-sizeB < prefixBytes || a[ai-sizeA:ai] != b[bi-sizeB:bi] {
+			break
+		}
+		ai -= sizeA
+		bi -= sizeB
+		count++
+	}
+	return count
+}
+
+// quoteDiffExcerpt returns a quoted UTF-8-safe ~40-byte window of s starting at
+// byte offset off, so a difference deep inside a long line is shown without
+// dumping it all.
+func quoteDiffExcerpt(s string, off int) string {
+	if off < 0 {
+		off = 0
+	}
+	if off > len(s) {
+		off = len(s)
+	}
+	for off > 0 && off < len(s) && !utf8.RuneStart(s[off]) {
+		off--
+	}
+	const window = 40
+	end := min(off+window, len(s))
+	for end > off && end < len(s) && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	excerpt := s[off:end]
+	if end < len(s) {
+		excerpt += "…"
+	}
+	return strconv.Quote(excerpt)
 }
 
 func findMatchesWithNorm(fileLines, oldSeq []string, start int, norm func(string) string) []int {

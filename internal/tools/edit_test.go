@@ -347,6 +347,45 @@ func TestEditToolDiagnosesMissingHunkWhitespace(t *testing.T) {
 	}
 }
 
+func TestNearestLineDiagnosticReportsFirstDifferingColumn(t *testing.T) {
+	// File line and hunk line share a long prefix/suffix but differ by one word
+	// deep inside, the case where exact whole-line matching is unhelpful.
+	fileLine := `return "the quick brown fox jumps over the lazy dog and keeps going"`
+	hunkLine := `return "the quick brown cat jumps over the lazy dog and keeps going"`
+	got := diagnoseMissingHunk([]string{fileLine}, []string{hunkLine}, 0)
+	if !strings.Contains(got, "file line 1") {
+		t.Fatalf("diagnosis = %q, want file line reference", got)
+	}
+	if !strings.Contains(got, "column 25") {
+		t.Fatalf("diagnosis = %q, want first differing column 25", got)
+	}
+	if !strings.Contains(got, "fox") || !strings.Contains(got, "cat") {
+		t.Fatalf("diagnosis = %q, want both file and hunk excerpts", got)
+	}
+}
+
+func TestNearestLineDiagnosticReportsUnicodeColumn(t *testing.T) {
+	fileLine := "你好abcdef"
+	hunkLine := "你好abcxef"
+	got := diagnoseMissingHunk([]string{fileLine}, []string{hunkLine}, 0)
+	if !strings.Contains(got, "column 6") {
+		t.Fatalf("diagnosis = %q, want first differing character column 6", got)
+	}
+	if strings.Contains(got, "column 10") {
+		t.Fatalf("diagnosis = %q, should not report byte column 10", got)
+	}
+	if !strings.Contains(got, "def") || !strings.Contains(got, "xef") {
+		t.Fatalf("diagnosis = %q, want UTF-8-safe excerpts from both sides", got)
+	}
+}
+
+func TestNearestLineDiagnosticStaysSilentForDissimilarLines(t *testing.T) {
+	got := diagnoseMissingHunk([]string{"completely different content here"}, []string{"xyz"}, 0)
+	if strings.Contains(got, "almost identical") {
+		t.Fatalf("diagnosis = %q, should not claim near-match for dissimilar lines", got)
+	}
+}
+
 func TestEditToolDiagnosesMissingHunkStaleText(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
