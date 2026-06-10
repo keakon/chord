@@ -104,7 +104,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		if strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			lineCount := len(strings.Split(displayResult, "\n"))
-			summary := truncateOneLine(displayResult, width-30)
+			summary := truncateOneLine(displayResult, cardWidth-26)
 			if b.toolResultIsError() {
 				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
 			} else if b.toolResultIsCancelled() {

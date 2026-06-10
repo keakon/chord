@@ -55,6 +55,41 @@ func TestMessagesToBlocksSkipsStaleThinkingTranslationHash(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksRestoresReasoningContentAsThinkingFallback(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             "assistant",
+		ReasoningContent: "I should greet the user.",
+		Content:          "Hi!",
+	}}
+	var nextID int
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks len = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != BlockThinking || blocks[0].Content != "I should greet the user." {
+		t.Fatalf("first block = %#v, want restored reasoning content as thinking", blocks[0])
+	}
+	if blocks[1].Type != BlockAssistant || blocks[1].Content != "Hi!" {
+		t.Fatalf("second block = %#v, want assistant content", blocks[1])
+	}
+}
+
+func TestMessagesToBlocksPrefersThinkingBlocksOverReasoningContent(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             "assistant",
+		ThinkingBlocks:   []message.ThinkingBlock{{Thinking: "structured thinking"}},
+		ReasoningContent: "fallback thinking",
+	}}
+	var nextID int
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks len = %d, want 1", len(blocks))
+	}
+	if blocks[0].Type != BlockThinking || blocks[0].Content != "structured thinking" {
+		t.Fatalf("block = %#v, want structured thinking block", blocks[0])
+	}
+}
+
 func TestMessagesToBlocksReusesTranslationAfterTargetLangChange(t *testing.T) {
 	msgs := []message.Message{{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "thinking"}}}}
 	translations := map[string]ThinkingTranslationView{

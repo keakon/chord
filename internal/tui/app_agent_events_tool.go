@@ -131,33 +131,21 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			return effects
 		}
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
-		block.ResultContent = evt.Result
-		block.RawArgs = evt.ArgsJSON
-		block.Audit = evt.Audit.Clone()
-		block.ImageParts = imagePartsFromContentParts(evt.Parts)
+		applyStableToolResultToBlock(block, transcriptToolResult{
+			argsJSON:       evt.ArgsJSON,
+			result:         evt.Result,
+			status:         evt.Status,
+			audit:          evt.Audit,
+			diff:           evt.Diff,
+			doneReport:     evt.DoneReport,
+			displayArgs:    liveToolDisplayArgs,
+			imageParts:     imagePartsFromContentParts(evt.Parts),
+			resetExecution: true,
+		})
 		if toolNameKey(evt.Name) == tools.NameDone {
-			if strings.TrimSpace(evt.DoneReport) != "" {
-				block.DoneReport = evt.DoneReport
-			} else if parsed, err := tools.ParseDoneArgs(json.RawMessage(evt.ArgsJSON)); err == nil && strings.TrimSpace(parsed.Report) != "" {
-				block.DoneReport = strings.TrimSpace(parsed.Report)
-			}
 			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {
 				m.expectedAgentClose = true
 			}
-		}
-		if displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
-			block.Content = displayArgs
-		}
-		block.ResultStatus = evt.Status
-		block.ResultDone = true
-		block.ToolExecutionState = ""
-		block.ToolQueuedByExecutionEvent = false
-		block.ToolProgress = nil
-		if evt.Diff != "" {
-			block.Diff = evt.Diff
-		}
-		if shouldExpandToolResult(evt.Name) {
-			block.Collapsed = false
 		}
 		if shouldTrackSidebarFileEdit(evt.Name) && evt.Status != agent.ToolResultStatusError {
 			if evt.Name == tools.NameDelete {
@@ -175,18 +163,6 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		}
 		if shouldRefreshGitStatusAfterToolResult(evt) {
 			effects.addFollowup(m.requestGitStatusRefresh())
-		}
-		if evt.Name == tools.NameDelegate && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
-			if handle, ok := parseTaskToolHandle(evt.Result); ok {
-				if handle.AgentID != "" {
-					block.LinkedAgentID = handle.AgentID
-				}
-				if handle.TaskID != "" {
-					block.LinkedTaskID = handle.TaskID
-				}
-			} else if id := parseTaskResultInstanceID(evt.Result); id != "" {
-				block.LinkedAgentID = id
-			}
 		}
 		if evt.Name == tools.NameNotify && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
 			if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {

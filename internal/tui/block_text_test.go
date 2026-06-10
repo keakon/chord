@@ -499,6 +499,26 @@ func TestRenderPrewrappedCardSplitsEmbeddedNewlinesBeforeWrapping(t *testing.T) 
 	}
 }
 
+func TestRenderPrewrappedCardOwnsANSIBackgroundRestoration(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	bg := currentTheme.AssistantCardBg
+	bgSeq := colorToANSIBgSeq(bg)
+	if bgSeq == "" {
+		t.Fatal("default assistant card background should produce an ANSI background sequence")
+	}
+	style := lipgloss.NewStyle().Padding(0, 2).Background(lipgloss.Color(bg))
+	markdownANSI := "\x1b[1m" + strings.Repeat("x", 40) + "\x1b[0m"
+	out := renderPrewrappedCard(style, 12, []string{markdownANSI}, bg, railANSISeq("assistant", false))
+	if len(out) != 1 {
+		t.Fatalf("renderPrewrappedCard lines=%d want 1", len(out))
+	}
+
+	paddingAfterReset := ansi.ResetStyle + bgSeq + strings.Repeat(" ", style.GetPaddingRight()) + ansi.ResetStyle
+	if !strings.Contains(out[0], paddingAfterReset) {
+		t.Fatalf("card wrapper did not restore background before right padding after Markdown ANSI reset/truncation; want substring %q in %q", paddingAfterReset, out[0])
+	}
+}
+
 func TestFocusedAssistantCardKeepsBaseBackground(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	msg := "focused rail only should keep card background unchanged"

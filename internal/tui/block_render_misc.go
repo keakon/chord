@@ -13,6 +13,7 @@ func (b *Block) renderError(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.ID)), ""}
 	wrapped := wrapText(b.Content, innerWidth)
 	for i, line := range wrapped {
@@ -41,6 +42,8 @@ func (b *Block) renderStatus(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
+	contentWidth := min(innerWidth-2, maxTextWidth)
 
 	title := b.StatusTitle
 	if title == "" {
@@ -51,7 +54,7 @@ func (b *Block) renderStatus(width int) []string {
 	}
 	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.ID))
 
-	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth-2, &b.richMarkdownHL)
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), contentWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}
@@ -96,8 +99,10 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
+	contentWidth := min(innerWidth, maxTextWidth)
 	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.ID))
-	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), innerWidth, &b.richMarkdownHL)
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), contentWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}

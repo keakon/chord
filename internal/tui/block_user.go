@@ -22,6 +22,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	contentWidth := min(innerWidth-4, maxTextWidth)
 
 	argsJSON, _ := json.Marshal(map[string]string{"command": b.UserLocalShellCmd})
@@ -30,9 +31,9 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	grayPart := ""
 	paramSummary := formatToolHeaderParams(toolName, argsStr)
 	if paramSummary == "" {
-		paramSummary = extractToolParams(argsStr, width-20)
-	} else if runewidth.StringWidth(paramSummary) > width-20 {
-		paramSummary = runewidth.Truncate(paramSummary, width-20, "…")
+		paramSummary = extractToolParams(argsStr, innerWidth-16)
+	} else if runewidth.StringWidth(paramSummary) > innerWidth-16 {
+		paramSummary = runewidth.Truncate(paramSummary, innerWidth-16, "…")
 	}
 
 	pseudo := &Block{
@@ -92,7 +93,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false, true)
 		if b.UserLocalShellResult != "" {
 			lineCount := strings.Count(b.UserLocalShellResult, "\n") + 1
-			summary := truncateOneLine(sanitizeToolDisplayText(b.UserLocalShellResult), width-30)
+			summary := truncateOneLine(sanitizeToolDisplayText(b.UserLocalShellResult), innerWidth-26)
 			if b.UserLocalShellFailed {
 				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s (%d lines)", summary, lineCount)))
 			} else {
@@ -132,6 +133,7 @@ func (b *Block) renderUserPlain(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	contentWidth := min(innerWidth-2, maxTextWidth)
 
 	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 && len(b.PDFNames) == 0 {

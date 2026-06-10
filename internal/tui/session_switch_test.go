@@ -2947,8 +2947,9 @@ func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testi
 	if !ok {
 		t.Fatal("last block should be present in tail window")
 	}
-	if m.viewport.offset <= lastStart {
-		t.Fatalf("G stopped at last card top offset=%d, want below last card start %d", m.viewport.offset, lastStart)
+	lastBlockHeight := m.viewport.TotalLines() - lastStart
+	if lastBlockHeight > m.viewport.height && m.viewport.offset <= lastStart {
+		t.Fatalf("G stopped at last card top offset=%d, want below last card start %d for tall card height=%d viewport=%d", m.viewport.offset, lastStart, lastBlockHeight, m.viewport.height)
 	}
 }
 

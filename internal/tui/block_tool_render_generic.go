@@ -262,12 +262,12 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	keys, vals := b.toolArgsParsed()
 	paramSummary, mainPart, grayPart, _, _, _, _ := b.toolHeaderMeta()
 	if paramSummary == "" {
-		paramSummary = extractToolParamsWithParsed(keys, vals, width-20)
-	} else if runewidth.StringWidth(paramSummary) > width-20 {
-		paramSummary = runewidth.Truncate(paramSummary, width-20, "…")
+		paramSummary = extractToolParamsWithParsed(keys, vals, cardWidth-16)
+	} else if runewidth.StringWidth(paramSummary) > cardWidth-16 {
+		paramSummary = runewidth.Truncate(paramSummary, cardWidth-16, "…")
 	}
 	if mainPart != "" || grayPart != "" {
-		if maxMain := width - 20 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
+		if maxMain := cardWidth - 16 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
 			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
 		}
 	}
@@ -287,7 +287,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		result = append(result, headerLine)
 
 		if b.DoneSummary != "" {
-			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), width-30)
+			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), cardWidth-26)
 			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ ✓ %s", summary)))
 		} else if b.ResultContent != "" {
 			displayContent := toolDisplayResultContent(b)
@@ -296,7 +296,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			}
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, displayContent))
 			lineCount := len(strings.Split(displayResult, "\n"))
-			summary := truncateOneLine(displayResult, width-30)
+			summary := truncateOneLine(displayResult, cardWidth-26)
 			if b.toolResultIsError() {
 				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ Error: %s (%d lines)", summary, lineCount)))
 			} else if b.toolResultIsCancelled() {

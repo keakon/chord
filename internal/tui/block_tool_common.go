@@ -65,7 +65,10 @@ func newToolCardMetrics(width int) toolCardMetrics {
 	if cardWidth < 10 {
 		cardWidth = 10
 	}
-	contentWidth := cardWidth - 4
+	// Keep the card surface aligned with the prose cards' right edge on very
+	// wide viewports instead of stretching empty background past the text cap.
+	cardWidth = clampCardInnerWidth(cardWidth, blockStyle, maxTextWidth)
+	contentWidth := min(cardWidth-4, maxTextWidth)
 	if contentWidth < 10 {
 		contentWidth = 10
 	}

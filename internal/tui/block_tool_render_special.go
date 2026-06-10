@@ -47,14 +47,14 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		}
 		switch {
 		case strings.TrimSpace(b.DoneSummary) != "":
-			appendCollapsedSummaryLines(&result, b.DoneSummary, width-30, ToolResultStyle)
+			appendCollapsedSummaryLines(&result, b.DoneSummary, cardWidth-26, ToolResultStyle)
 		case hasResultText:
-			summary := truncateOneLine(sanitizeToolDisplayText(taskToolCollapsedHandleSummary(b.ResultContent)), width-24)
+			summary := truncateOneLine(sanitizeToolDisplayText(taskToolCollapsedHandleSummary(b.ResultContent)), cardWidth-20)
 			result = append(result, ToolResultStyle.Render("  ▸ ↳ "+summary))
 		case b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "":
-			appendCollapsedSummaryLines(&result, b.ResultContent, width-30, ErrorStyle)
+			appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-26, ErrorStyle)
 		case b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "":
-			appendCollapsedSummaryLines(&result, b.ResultContent, width-30, DimStyle)
+			appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-26, DimStyle)
 		}
 	} else {
 		if subType != "" {

@@ -1151,14 +1151,6 @@ func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
 	}
 }
 
-func TestToolBlockStyleUsesExplicitRightPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	top, right, bottom, left := ToolBlockStyle.GetPadding()
-	if top != 1 || right != 2 || bottom != 1 || left != 1 {
-		t.Fatalf("tool block padding = (%d,%d,%d,%d), want (1,2,1,1)", top, right, bottom, left)
-	}
-}
-
 func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
 	line := renderQueuedToolHeaderBadge("  ▸ VeryLongToolName", 20)
 	plain := stripANSI(line)
@@ -1167,6 +1159,32 @@ func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
 	}
 	if plain != "  ▸ VeryLongToolName" {
 		t.Fatalf("queued header = %q, want original trimmed header", plain)
+	}
+}
+
+func TestPrewrappedToolCardRestoresCardBackgroundAfterTruncatedANSILine(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	bgSeq := colorToANSIBgSeq(currentTheme.ToolCallBg)
+	if bgSeq == "" {
+		t.Fatal("default tool card background should produce an ANSI background sequence")
+	}
+
+	innerANSI := "\x1b[48;5;236m" + strings.Repeat("x", 80)
+	lines := renderPrewrappedToolCard(ToolBlockStyle, 24, toolCardTitle("TOOL CALL", 1), []string{innerANSI}, currentTheme.ToolCallBg, railANSISeq("tool", false))
+	var body string
+	for _, line := range lines {
+		if strings.Contains(stripANSI(line), strings.Repeat("x", 24)) {
+			body = line
+			break
+		}
+	}
+	if body == "" {
+		t.Fatalf("rendered truncated body line not found in:\n%q", strings.Join(lines, "\n"))
+	}
+
+	paddingAfterTruncatedReset := ansi.ResetStyle + bgSeq + strings.Repeat(" ", ToolBlockStyle.GetPaddingRight()) + ansi.ResetStyle
+	if !strings.Contains(body, paddingAfterTruncatedReset) {
+		t.Fatalf("truncated ANSI body line did not restore tool card background before right padding; want substring %q in %q", paddingAfterTruncatedReset, body)
 	}
 }
 

@@ -27,6 +27,21 @@ const (
 	preformattedTabWidth = 4
 )
 
+// clampCardInnerWidth caps a card's inner width so the card surface ends near
+// the wrapped-text cap instead of stretching a mostly-empty background across
+// very wide viewports. textCap is the renderer's content-width cap (usually
+// maxTextWidth; assistant passes its own so markdown tables can stretch). The
+// cap is expressed as a shared box width (horizontal padding + inner width)
+// so cards with different padding keep their right edges aligned: prose cards
+// use 2 padding columns + 2 content-indent columns around textCap, hence
+// textCap + 4.
+func clampCardInnerWidth(innerWidth int, style lipgloss.Style, textCap int) int {
+	if boxCap := textCap + 4 - style.GetHorizontalPadding(); innerWidth > boxCap {
+		return boxCap
+	}
+	return innerWidth
+}
+
 // ansiStrip removes ANSI CSI sequences for display-width calculation.
 var ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
@@ -440,9 +455,9 @@ func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix,
 }
 
 // renderPrewrappedCard applies card padding/margins/background to lines that
-// are already wrapped to the target inner width. Callers are expected to apply
-// preserveCardBg (or otherwise ensure equivalent card-bg reinsertion) before
-// handing ANSI-rich lines here; this helper only performs final card wrapping.
+// are already wrapped to the target inner width. Callers may pass raw ANSI-rich
+// lines from Markdown/Glamour/chroma renderers; this helper owns final card-bg
+// preservation after inner ANSI resets and after width truncation.
 // This avoids sending a large ANSI-rich multi-line string back through lipgloss
 // Width(...).Render(...), which would otherwise re-wrap and re-measure every line.
 func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, bgColorNum string, railSeq string) []string {
@@ -477,6 +492,7 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 		var rendered string
 		if lineDisplayWidth > innerWidth {
 			line = truncateLineToDisplayWidth(line, innerWidth)
+			line = preserveBackground(line, bgColorNum)
 		} else if lineDisplayWidth < innerWidth {
 			line += strings.Repeat(" ", innerWidth-lineDisplayWidth)
 		}

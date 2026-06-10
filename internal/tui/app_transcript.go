@@ -395,6 +395,115 @@ func contentOrPartsText(msg message.Message) string {
 	return msg.Content
 }
 
+func assistantThinkingBlocksForTranscript(msg message.Message) []message.ThinkingBlock {
+	if len(msg.ThinkingBlocks) > 0 {
+		return msg.ThinkingBlocks
+	}
+	if strings.TrimSpace(msg.ReasoningContent) == "" {
+		return nil
+	}
+	return []message.ThinkingBlock{{Thinking: msg.ReasoningContent}}
+}
+
+
+type transcriptToolResult struct {
+	argsJSON       string
+	result         string
+	status         agent.ToolResultStatus
+	audit          *message.ToolArgsAudit
+	diff           string
+	duration       time.Duration
+	doneReport     string
+	displayArgs    func(toolName, argsJSON, result string) string
+	imageParts     []BlockImagePart
+	resetExecution bool
+}
+
+func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
+	argsStr := string(tc.Args)
+	if argsStr == "" {
+		argsStr = "{}"
+	}
+	toolName := tools.NormalizeName(tc.Name)
+	b := &Block{
+		ID:        nextID,
+		Type:      BlockToolCall,
+		Content:   eventToolDisplayArgs(toolName, argsStr, ""),
+		RawArgs:   argsStr,
+		ToolName:  toolName,
+		ToolID:    tc.ID,
+		Collapsed: true,
+	}
+	applyDoneReportFromArgs(b, argsStr, "")
+	return b
+}
+
+func applyDoneReportFromArgs(block *Block, argsJSON, preferred string) {
+	if block == nil || toolNameKey(block.ToolName) != tools.NameDone {
+		return
+	}
+	if strings.TrimSpace(preferred) != "" {
+		block.DoneReport = preferred
+		return
+	}
+	if parsed, err := tools.ParseDoneArgs(json.RawMessage(argsJSON)); err == nil && strings.TrimSpace(parsed.Report) != "" {
+		block.DoneReport = strings.TrimSpace(parsed.Report)
+	}
+}
+
+func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
+	if block == nil {
+		return
+	}
+	block.ResultContent = result.result
+	if result.argsJSON != "" {
+		block.RawArgs = result.argsJSON
+	}
+	block.Audit = result.audit.Clone()
+	if result.imageParts != nil {
+		block.ImageParts = result.imageParts
+	}
+	applyDoneReportFromArgs(block, block.RawArgs, result.doneReport)
+	if result.displayArgs != nil {
+		if displayArgs := result.displayArgs(block.ToolName, block.RawArgs, block.ResultContent); displayArgs != "" {
+			block.Content = displayArgs
+		}
+	}
+	block.ResultStatus = result.status
+	block.ResultDone = true
+	if result.resetExecution {
+		block.ToolExecutionState = ""
+		block.ToolQueuedByExecutionEvent = false
+		block.ToolProgress = nil
+	}
+	if result.duration > 0 {
+		block.PersistedDuration = result.duration
+	}
+	if result.diff != "" {
+		block.Diff = result.diff
+	}
+	if shouldExpandToolResult(block.ToolName) {
+		block.Collapsed = false
+	}
+	applyTaskHandleFromResult(block)
+}
+
+func applyTaskHandleFromResult(block *Block) {
+	if block == nil || block.ToolName != tools.NameDelegate || block.ResultStatus == agent.ToolResultStatusError || strings.TrimSpace(block.ResultContent) == "" {
+		return
+	}
+	if handle, ok := parseTaskToolHandle(block.ResultContent); ok {
+		if handle.AgentID != "" {
+			block.LinkedAgentID = handle.AgentID
+		}
+		if handle.TaskID != "" {
+			block.LinkedTaskID = handle.TaskID
+		}
+	} else if id := parseTaskResultInstanceID(block.ResultContent); id != "" {
+		block.LinkedAgentID = id
+	}
+}
+
 func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 	return messagesToBlocksWithThinkingTranslations(msgs, nextID, nil)
 }
@@ -478,7 +587,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		case "assistant":
 			// Emit each thinking block as an independent BlockThinking so they
 			// can be focused / copied individually.
-			for blockIndex, tb := range msg.ThinkingBlocks {
+			for blockIndex, tb := range assistantThinkingBlocksForTranscript(msg) {
 				thinking := strings.TrimSpace(tb.Thinking)
 				if thinking != "" {
 					block := &Block{
@@ -511,63 +620,22 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				*nextID++
 			}
 			for _, tc := range msg.ToolCalls {
-				argsStr := string(tc.Args)
-				if argsStr == "" {
-					argsStr = "{}"
-				}
-				toolName := tools.NormalizeName(tc.Name)
-				b := &Block{
-					ID:        *nextID,
-					Type:      BlockToolCall,
-					Content:   eventToolDisplayArgs(toolName, argsStr, ""),
-					RawArgs:   argsStr,
-					ToolName:  toolName,
-					ToolID:    tc.ID,
-					Collapsed: true,
-				}
-				if toolName == tools.NameDone {
-					if parsed, err := tools.ParseDoneArgs(tc.Args); err == nil {
-						b.DoneReport = strings.TrimSpace(parsed.Report)
-					}
-				}
+				b := newTranscriptToolCallBlock(*nextID, tc)
 				blocks = append(blocks, b)
 				toolIDToBlock[tc.ID] = b
 				*nextID++
 			}
 		case "tool":
 			if b, ok := toolIDToBlock[msg.ToolCallID]; ok {
-				b.ResultContent = msg.Content
-				b.ResultStatus = toolResultStatusFromRestoredMessage(msg)
-				b.ResultDone = true // so restored tool cards stop spinning and render terminal state
-				b.ToolExecutionState = ""
-				b.Audit = msg.Audit.Clone()
-				if msg.ToolDurationMs > 0 {
-					b.PersistedDuration = time.Duration(msg.ToolDurationMs) * time.Millisecond
-				}
-				if b.ToolName == tools.NameSkill {
-					b.Content = eventToolDisplayArgs(b.ToolName, b.Content, b.ResultContent)
-				}
-				if msg.ToolDiff != "" {
-					b.Diff = msg.ToolDiff
-				}
-				if shouldExpandToolResult(b.ToolName) {
-					b.Collapsed = false
-				}
-				if b.ToolName == tools.NameRead {
-					b.Collapsed = false
-				}
-				if b.ToolName == tools.NameDelegate && b.ResultStatus != agent.ToolResultStatusError && strings.TrimSpace(b.ResultContent) != "" {
-					if handle, ok := parseTaskToolHandle(b.ResultContent); ok {
-						if handle.AgentID != "" {
-							b.LinkedAgentID = handle.AgentID
-						}
-						if handle.TaskID != "" {
-							b.LinkedTaskID = handle.TaskID
-						}
-					} else if id := parseTaskResultInstanceID(b.ResultContent); id != "" {
-						b.LinkedAgentID = id
-					}
-				}
+				applyStableToolResultToBlock(b, transcriptToolResult{
+					result:         msg.Content,
+					status:         toolResultStatusFromRestoredMessage(msg),
+					audit:          msg.Audit,
+					diff:           msg.ToolDiff,
+					duration:       time.Duration(msg.ToolDurationMs) * time.Millisecond,
+					displayArgs:    eventToolDisplayArgs,
+					resetExecution: true,
+				})
 			}
 		}
 	}

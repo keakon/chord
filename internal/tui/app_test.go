@@ -4762,6 +4762,51 @@ func TestMessagesToBlocksDoneToolRestoresMarkdownReport(t *testing.T) {
 	}
 }
 
+func TestLiveAndRestoredDoneToolShareStableResultFields(t *testing.T) {
+	args := `{"report":"## Completion status\nDone\n\n- verified"}`
+	result := "Done approved"
+
+	m := NewModelWithSize(nil, 120, 24)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "done-1",
+		Name:     tools.NameDone,
+		ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:     "done-1",
+		Name:       tools.NameDone,
+		ArgsJSON:   args,
+		Result:     result,
+		Status:     agent.ToolResultStatusSuccess,
+		DoneReport: "## Completion status\nDone\n\n- verified",
+	}})
+	live, ok := m.viewport.FindBlockByToolID("done-1")
+	if !ok {
+		t.Fatal("expected live done block")
+	}
+
+	nextID := 1
+	restored := messagesToBlocks([]message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "done-1", Name: tools.NameDone, Args: json.RawMessage(args)}}},
+		{Role: "tool", ToolCallID: "done-1", Content: result, ToolStatus: string(agent.ToolResultStatusSuccess)},
+	}, &nextID)
+	if len(restored) != 1 {
+		t.Fatalf("restored len = %d, want 1", len(restored))
+	}
+
+	for name, block := range map[string]*Block{"live": live, "restored": restored[0]} {
+		if block.DoneReport != "## Completion status\nDone\n\n- verified" {
+			t.Fatalf("%s DoneReport = %q", name, block.DoneReport)
+		}
+		if block.ResultContent != result || block.ResultStatus != agent.ToolResultStatusSuccess || !block.ResultDone {
+			t.Fatalf("%s result fields = content %q status %q done %t", name, block.ResultContent, block.ResultStatus, block.ResultDone)
+		}
+		if block.ToolExecutionState != "" || block.ToolProgress != nil {
+			t.Fatalf("%s should not keep runtime execution state: state=%q progress=%#v", name, block.ToolExecutionState, block.ToolProgress)
+		}
+	}
+}
+
 func TestMessagesToBlocksDelegateToolRestoresLinkedAgentMetadata(t *testing.T) {
 	msgs := []message.Message{
 		{

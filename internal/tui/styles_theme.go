@@ -21,6 +21,7 @@ func ApplyTheme(t Theme) {
 
 func applyBlockStyles(t Theme) {
 	ViewportLineStyle = lipgloss.NewStyle().Background(lipgloss.Color(""))
+	baseCardStyle := transcriptCardStyle()
 
 	HeaderStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -28,32 +29,20 @@ func applyBlockStyles(t Theme) {
 		Foreground(lipgloss.Color(t.HeaderFg)).
 		Padding(0, 1)
 
-	UserCardStyle = lipgloss.NewStyle().
-		Padding(1, 1).
-		MarginLeft(1).
-		MarginBottom(1).
+	UserCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.UserCardBg))
 
-	AssistantCardStyle = lipgloss.NewStyle().
-		Padding(1, 1).
-		MarginLeft(1).
-		MarginBottom(1).
+	AssistantCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.AssistantCardBg))
 
 	// Thinking blocks use extra left padding to visually nest them as
 	// "inner dialogue" compared to primary user/assistant cards.
-	ThinkingCardStyle = lipgloss.NewStyle().
-		Padding(1, 1).
+	ThinkingCardStyle = baseCardStyle.
 		PaddingLeft(2).
-		MarginLeft(1).
-		MarginBottom(1).
 		Background(lipgloss.Color(t.ThinkingCardBg)).
 		Foreground(lipgloss.Color(t.ThinkingCardFg))
 
-	CompactionSummaryCardStyle = lipgloss.NewStyle().
-		Padding(1, 1).
-		MarginLeft(1).
-		MarginBottom(1).
+	CompactionSummaryCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.CompactionSummaryBg))
 
 	// Role badges (USER / ASSISTANT / THINKING / TOOL CALL) at the top-left of
@@ -89,10 +78,11 @@ func applyBlockStyles(t Theme) {
 		Bold(true).
 		Foreground(lipgloss.Color(t.ToolCallFg))
 
-	ToolBlockStyle = lipgloss.NewStyle().
-		Padding(1, 2, 1, 1).
-		MarginLeft(1).
-		MarginBottom(1).
+	// Tool cards share the transcript card's vertical padding and outer margin
+	// so consecutive same-color tool calls remain visually distinct; only the
+	// right padding is wider to protect status badges and trailing content.
+	ToolBlockStyle = baseCardStyle.
+		PaddingRight(2).
 		Background(lipgloss.Color(t.ToolCallBg))
 
 	ToolArgsStyle = lipgloss.NewStyle().Padding(0, 0)
@@ -144,10 +134,7 @@ func applyBlockStyles(t Theme) {
 		Bold(true).
 		Foreground(lipgloss.Color(t.ErrorFg))
 
-	ErrorCardStyle = lipgloss.NewStyle().
-		Padding(1, 1).
-		MarginLeft(1).
-		MarginBottom(1).
+	ErrorCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.ErrorCardBg)).
 		Foreground(lipgloss.Color(t.ErrorCardFg))
 
@@ -172,6 +159,13 @@ func applyBlockStyles(t Theme) {
 
 	ThinkingTranslationRuleStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.SeparatorFg))
+}
+
+func transcriptCardStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Padding(1, 1).
+		MarginLeft(1).
+		MarginBottom(1)
 }
 
 func applyPanelStyles(t Theme) {

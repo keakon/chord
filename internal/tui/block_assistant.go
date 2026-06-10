@@ -622,6 +622,14 @@ func (b *Block) renderAssistant(width int) []string {
 	summary := parseAssistantSummary(rawContent)
 	bodyContent := stripAssistantSummary(rawContent, summary)
 	contentWidth := assistantMarkdownRenderWidth(bodyContent, innerWidth)
+	// End the card surface at the wrapped-text cap instead of stretching a
+	// mostly-empty background across very wide viewports. Tables widen the
+	// cap so wide-table content keeps its surface.
+	textCap := maxTextWidth
+	if containsMarkdownTable(bodyContent) {
+		textCap = maxMarkdownTableWidth
+	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, textCap)
 
 	var out []string
 
@@ -955,6 +963,7 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	if len(b.ThinkingParts) == 0 {
 		return nil
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, ThinkingCardStyle, maxTextWidth)
 	contentWidth := innerWidth - 2
 	if contentWidth < 10 {
 		contentWidth = 10
@@ -1011,6 +1020,7 @@ func (b *Block) renderThinking(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	contentWidth := innerWidth - 2
 	if contentWidth < 10 {
 		contentWidth = 10
