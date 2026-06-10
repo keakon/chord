@@ -4,6 +4,7 @@
 package recovery
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -411,6 +412,7 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 type SessionInfo struct {
 	ID                                  string    // directory name (e.g. Unix millisecond timestamp)
 	Path                                string    // full path to session directory
+	MessageCount                        int       // total messages in main.jsonl
 	LastModTime                         time.Time // last write to main.jsonl
 	FirstUserMessage                    string    // preview of first user message (truncated, newlines replaced)
 	FirstUserMessageIsCompactionSummary bool      // true when FirstUserMessage is the synthetic compaction summary
@@ -486,6 +488,7 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		list = append(list, SessionInfo{
 			ID:                                  entry.Name(),
 			Path:                                sessionPath,
+			MessageCount:                        countMessages(mainPath, info),
 			LastModTime:                         lastModTime,
 			FirstUserMessage:                    firstUser,
 			FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
@@ -495,6 +498,49 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		})
 	}
 	return list, nil
+}
+
+// messageCountCache memoizes per-log newline counts keyed by the file's
+// (size, mtime) identity, so reopening the session picker does not re-read
+// every session's main.jsonl in full. Entries are bounded by the number of
+// session directories on disk.
+var messageCountCache sync.Map // mainPath string -> messageCountEntry
+
+type messageCountEntry struct {
+	size    int64
+	modTime time.Time
+	count   int
+}
+
+func countMessages(mainPath string, info os.FileInfo) int {
+	if cached, ok := messageCountCache.Load(mainPath); ok {
+		entry := cached.(messageCountEntry)
+		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+			return entry.count
+		}
+	}
+
+	f, err := os.Open(mainPath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	// Each message is persisted by PersistMessage as a single JSON line
+	// terminated by '\n' (in-string newlines are escaped by json.Marshal), so
+	// counting newline bytes yields the message count without decoding every
+	// record — important when the picker lists hundreds of sessions.
+	buf := make([]byte, 64*1024)
+	count := 0
+	for {
+		n, err := f.Read(buf)
+		count += bytes.Count(buf[:n], []byte{'\n'})
+		if err != nil {
+			break
+		}
+	}
+	messageCountCache.Store(mainPath, messageCountEntry{size: info.Size(), modTime: info.ModTime(), count: count})
+	return count
 }
 
 // firstUserMessageFromFile reads main.jsonl and returns a preview of the first

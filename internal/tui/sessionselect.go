@@ -404,8 +404,15 @@ func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	}
 	return OverlayListItem{
 		ID:    s.ID,
-		Label: fmt.Sprintf("%s  %s", modStr, preview),
+		Label: fmt.Sprintf("%s  %5d  %s", modStr, s.MessageCount, preview),
 	}
+}
+
+// sessionSelectColumnHeader builds the dim column-header row for the session
+// picker. The 3-space lead matches OverlayList's cursor gutter and the field
+// widths mirror sessionSelectItemFor so the header aligns with the rows.
+func sessionSelectColumnHeader() string {
+	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %s", "Modified", "Msgs", "Preview"))
 }
 
 func buildSessionSearchCorpus(options []agent.SessionSummary) []string {
@@ -611,12 +618,14 @@ func (m *Model) renderSessionSelectDialog() string {
 		return dialog
 	}
 
+	header := sessionSelectColumnHeader()
+	prefix := filterLine + "\n\n" + header
 	extraKey := "filter=" + filterLine
 	return m.sessionSelect.selector.Render(
 		m,
 		overlayCfg,
-		filterLine,
-		1,
+		prefix,
+		0,
 		maxVisible,
 		extraKey,
 		nil,

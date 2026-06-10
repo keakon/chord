@@ -24,16 +24,19 @@ func testSessionSummaries() []agent.SessionSummary {
 	return []agent.SessionSummary{
 		{
 			ID:                       "sess-100",
+			MessageCount:             12,
 			OriginalFirstUserMessage: "Fix IME enter behavior",
 			LastModTime:              base,
 		},
 		{
 			ID:               "sess-200",
+			MessageCount:     3,
 			FirstUserMessage: "Line one\nLine two",
 			LastModTime:      base.Add(-time.Hour),
 		},
 		{
 			ID:                       "sess-300",
+			MessageCount:             27,
 			OriginalFirstUserMessage: "Legacy parser cleanup",
 			ForkedFrom:               "parent-001",
 			LastModTime:              base.Add(-2 * time.Hour),
@@ -148,6 +151,25 @@ func TestSessionSelectCurrentOptionMappingWithFilter(t *testing.T) {
 	m.rebuildSessionSelectFilteredView(true)
 	if got := m.sessionSelectCurrentOptionIndex(); got != -1 {
 		t.Fatalf("current option index with empty filtered list = %d, want -1", got)
+	}
+}
+
+func TestSessionSelectRendersMessageCountColumn(t *testing.T) {
+	item := sessionSelectItemFor(testSessionSummaries()[2])
+	if !strings.Contains(item.Label, "27") {
+		t.Fatalf("session row label should include message count, got %q", item.Label)
+	}
+	if !strings.Contains(item.Label, "Legacy parser cleanup") {
+		t.Fatalf("session row label should still include preview, got %q", item.Label)
+	}
+}
+
+func TestSessionSelectColumnHeader(t *testing.T) {
+	header := sessionSelectColumnHeader()
+	for _, want := range []string{"Modified", "Msgs", "Preview"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("column header should include %q, got %q", want, header)
+		}
 	}
 }
 
@@ -301,7 +323,7 @@ func TestSessionSelectOptionIndexAtUsesListContentBaseRow(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderSessionSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + 4
+	y := dialogRect.Min.Y + 1 + 5
 	idx, ok := m.sessionSelectOptionIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first list row")

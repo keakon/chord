@@ -683,6 +683,23 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	if list[1].FirstUserMessage != "First user message in session 1000" {
 		t.Errorf("session 1000 FirstUserMessage = %q", list[1].FirstUserMessage)
 	}
+	if list[0].MessageCount != 1 {
+		t.Errorf("session 2000 MessageCount = %d, want 1", list[0].MessageCount)
+	}
+	if list[1].MessageCount != 2 {
+		t.Errorf("session 1000 MessageCount = %d, want 2", list[1].MessageCount)
+	}
+
+	// Appending invalidates the (size, mtime) cache entry; a second list must
+	// reflect the new count instead of the memoized one.
+	writeMsg(s2, message.RoleAssistant, "Reply in session 2000")
+	list, err = ListSessions(sessionsDir, "")
+	if err != nil {
+		t.Fatalf("ListSessions after append: %v", err)
+	}
+	if list[0].MessageCount != 2 {
+		t.Errorf("session 2000 MessageCount after append = %d, want 2", list[0].MessageCount)
+	}
 
 	// Exclude s2
 	list, _ = ListSessions(sessionsDir, s2)

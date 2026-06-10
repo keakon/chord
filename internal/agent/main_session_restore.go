@@ -1050,6 +1050,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 // SessionSummary holds display info for one session (current or list entry).
 type SessionSummary struct {
 	ID                                  string
+	MessageCount                        int
 	LastModTime                         time.Time
 	FirstUserMessage                    string
 	FirstUserMessageIsCompactionSummary bool
@@ -1080,6 +1081,7 @@ func (a *MainAgent) ListSessionSummaries() ([]SessionSummary, error) {
 		}
 		out = append(out, SessionSummary{
 			ID:                                  s.ID,
+			MessageCount:                        s.MessageCount,
 			LastModTime:                         s.LastModTime,
 			FirstUserMessage:                    s.FirstUserMessage,
 			FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,

@@ -326,6 +326,7 @@ type QuestionRequestPayload struct {
 // SessionSummaryPayload is one session entry for the session picker (TypeSessionSelectRequest).
 type SessionSummaryPayload struct {
 	ID                                  string    `json:"id"`
+	MessageCount                        int       `json:"message_count,omitempty"`
 	LastModTime                         time.Time `json:"last_mod_time"`
 	FirstUserMessage                    string    `json:"first_user_message"`
 	FirstUserMessageIsCompactionSummary bool      `json:"first_user_message_is_compaction_summary,omitempty"`

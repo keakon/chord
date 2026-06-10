@@ -198,6 +198,7 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 		for _, s := range e.Sessions {
 			payload.Sessions = append(payload.Sessions, SessionSummaryPayload{
 				ID:                                  s.ID,
+				MessageCount:                        s.MessageCount,
 				LastModTime:                         s.LastModTime,
 				FirstUserMessage:                    s.FirstUserMessage,
 				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
@@ -436,6 +437,7 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 		for _, s := range p.Sessions {
 			list = append(list, agent.SessionSummary{
 				ID:                                  s.ID,
+				MessageCount:                        s.MessageCount,
 				LastModTime:                         s.LastModTime,
 				FirstUserMessage:                    s.FirstUserMessage,
 				FirstUserMessageIsCompactionSummary: s.FirstUserMessageIsCompactionSummary,
