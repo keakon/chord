@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -60,6 +61,60 @@ func TestCodeSurfacesDistinctFromCardSurfaces(t *testing.T) {
 		}
 		if theme.CodeBlockBg == s.bg {
 			t.Errorf("CodeBlockBg (%q) collides with %s (%q); fenced code blocks may become visually indistinct", theme.CodeBlockBg, s.name, s.bg)
+		}
+	}
+}
+
+// TestCardSurfaceLadderSteps guards the greyscale surface ladder: adjacent
+// card surfaces must keep at least a 2-index gap. A 1-index greyscale step
+// (~1.15:1 contrast) is invisible on most terminals, which made consecutive
+// tool/thinking cards visually merge when the ladder was 233/235/236/237.
+func TestCardSurfaceLadderSteps(t *testing.T) {
+	theme := DefaultTheme()
+	indices := make([]int, 0, 4)
+	for _, s := range cardSurfaces(theme) {
+		n, err := strconv.Atoi(s.bg)
+		if err != nil {
+			t.Fatalf("%s = %q: card surfaces are expected to be numeric ANSI greyscale indices", s.name, s.bg)
+		}
+		if n < 232 || n > 255 {
+			t.Fatalf("%s = %q: card surfaces are expected to stay in the ANSI greyscale ramp (232-255)", s.name, s.bg)
+		}
+		indices = append(indices, n)
+	}
+	slices.Sort(indices)
+	for i := 1; i < len(indices); i++ {
+		if gap := indices[i] - indices[i-1]; gap < 2 {
+			t.Errorf("card surface ladder gap %d-%d = %d: adjacent surfaces need >= 2 greyscale steps to stay distinguishable", indices[i-1], indices[i], gap)
+		}
+	}
+}
+
+// TestSecondaryGreysReadable pins the "dim but readable" floor for secondary
+// grey foregrounds rendered on the info panel surface (235) or the terminal
+// background. Values below these floors fall under ~3:1 contrast and were
+// effectively unreadable on low-quality displays.
+func TestSecondaryGreysReadable(t *testing.T) {
+	theme := DefaultTheme()
+	checks := []struct {
+		name  string
+		color string
+		min   int
+	}{
+		{"InfoPanelPendingFg", theme.InfoPanelPendingFg, 243},
+		{"InfoPanelDiagHintFg", theme.InfoPanelDiagHintFg, 243},
+		{"SidebarStatusFg", theme.SidebarStatusFg, 243},
+		{"SeparatorFg", theme.SeparatorFg, 242},
+		{"ParamKeyFg", theme.ParamKeyFg, 245},
+	}
+	for _, c := range checks {
+		n, err := strconv.Atoi(c.color)
+		if err != nil {
+			t.Errorf("%s = %q: expected a numeric ANSI greyscale index", c.name, c.color)
+			continue
+		}
+		if n < c.min {
+			t.Errorf("%s = %d: below readability floor %d", c.name, n, c.min)
 		}
 	}
 }

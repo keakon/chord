@@ -221,10 +221,13 @@ func DefaultTheme() Theme {
 	// (pure black #000000) 232 (#080808) is indistinguishable and the USER
 	// card disappears. 233 (#121212) keeps enough contrast without losing the
 	// "user is the calmest surface" layering.
+	// Adjacent steps keep a 2-index gap: 1-index greyscale steps (~1.15:1)
+	// are invisible on most terminals, so consecutive tool/thinking cards
+	// visually merged when the ladder was 233/235/236/237.
 	surfaceUser := "233"
 	surfaceAssistant := "235"
-	surfaceThinking := "237"
-	surfaceTool := "236"
+	surfaceTool := "237"
+	surfaceThinking := "239"
 	surfacePanel := defaultInfoPanelBg
 	surfaceStatus := "236"
 	surfaceDialog := surfacePanel
@@ -250,7 +253,7 @@ func DefaultTheme() Theme {
 		ToolResultFg:            "250", // lighter so tool result text is readable
 		ToolResultBg:            "",
 		ToolResultExpandedFg:    "252",
-		ParamKeyFg:              "244",
+		ParamKeyFg:              "246",
 		ParamValFg:              "252",
 		DiffAddFg:               "78",
 		DiffDelFg:               "167",
@@ -259,7 +262,7 @@ func DefaultTheme() Theme {
 		DiffDelLineBg:           "#3d2525",
 		DiffAddInlineBg:         "#2d5a2d",
 		DiffDelInlineBg:         "#5a2d2d",
-		InlineCodeBg:            "239", // inline code only; keep distinct from common card surfaces so it reads as an inset surface
+		InlineCodeBg:            "241", // inline code only; keep distinct from common card surfaces (thinking now sits at 239) so it reads as an inset surface
 		CodeBlockBg:             "232", // darker than any card surface (user=233) so fenced blocks read as inset surfaces; only rendered inside cards, never adjacent to the terminal background
 		CodeBlockFg:             "252",
 		CodeBlockLabelFg:        "245",
@@ -293,7 +296,7 @@ func DefaultTheme() Theme {
 		SelectedBg:              "62",
 		SelectedFg:              "230",
 		InputPromptFg:           "82",
-		SeparatorFg:             "240",
+		SeparatorFg:             "242",
 		DirectoryBorderFg:       "63",
 		DialogBg:                surfaceDialog,
 		DialogCodeBlockBg:       "236",
@@ -309,16 +312,16 @@ func DefaultTheme() Theme {
 		SidebarFocusedBg:        "62",
 		SidebarEntryFg:          "252",
 		SidebarTaskFg:           "245",
-		SidebarStatusFg:         "243",
+		SidebarStatusFg:         "245",
 		InfoPanelBg:             surfacePanel,
 		InfoPanelSuccessFg:      "82",
 		InfoPanelWarningFg:      "214",
 		InfoPanelCriticalFg:     "196",
-		InfoPanelPendingFg:      "240",
+		InfoPanelPendingFg:      "243",
 		InfoPanelDiagErrorFg:    "196",
 		InfoPanelDiagWarnFg:     "214",
 		InfoPanelDiagInfoFg:     "248",
-		InfoPanelDiagHintFg:     "242",
+		InfoPanelDiagHintFg:     "245",
 		InfoPanelKeyWarnFg:      "214",
 		InfoPanelKeyCriticalFg:  "196",
 		InfoPanelRateWarnFg:     "214",
