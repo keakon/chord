@@ -257,9 +257,13 @@ func (a *MainAgent) shouldRequireToolCallInLoop() bool {
 	if provider == nil {
 		return false
 	}
-	// Conservative gate: only enable request-level tool_choice on OpenAI-compatible
-	// provider families that are known to carry tool_choice in this codebase.
+	// Conservative gate: only enable request-level tool_choice on provider
+	// families that are known to carry tool_choice in this codebase.
 	switch provider.Type() {
+	case config.ProviderTypeMessages:
+		return true
+	case config.ProviderTypeGenerateContent:
+		return true
 	case config.ProviderTypeChatCompletions, config.ProviderTypeChatCompletionsLegacy, config.ProviderTypeResponses:
 		return true
 	default:
@@ -274,5 +278,7 @@ func (a *MainAgent) applyLoopToolChoiceRequirement(tuning llm.RequestTuning) llm
 	parallelFalse := false
 	tuning.OpenAI.ParallelToolCalls = &parallelFalse
 	tuning.OpenAI.ToolChoice = "required"
+	tuning.Anthropic.ToolChoice = "required"
+	tuning.Gemini.ToolChoice = "required"
 	return tuning
 }

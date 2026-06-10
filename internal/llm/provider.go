@@ -24,6 +24,8 @@ type AnthropicTuning struct {
 	PromptCacheTTL  string // ""|"1h"
 	CacheTools      bool
 	ServiceTier     string // ""|"fast" (Anthropic first-party service tier)
+	ToolChoice      string // ""|"auto"|"required" (required maps to Anthropic any)
+	Temperature     *float64
 }
 
 // OpenAITuning holds OpenAI-specific request tuning parameters.
@@ -41,6 +43,7 @@ type GeminiTuning struct {
 	ThinkingBudget  *int   // nil = omit; -1 dynamic; 0 disable (model-dependent); >0 fixed budget
 	ThinkingLevel   string // ""|"low"|"medium"|"high" (Gemini 3+)
 	IncludeThoughts *bool  // nil = omit; true/false explicit includeThoughts
+	ToolChoice      string // ""|"auto"|"required"|"none" (required maps to Gemini ANY)
 }
 
 // RequestTuning bundles all provider-specific tuning parameters for a single

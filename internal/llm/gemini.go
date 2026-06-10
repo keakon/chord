@@ -69,7 +69,16 @@ type geminiRequest struct {
 	Contents          []geminiContent         `json:"contents"`
 	SystemInstruction *geminiContent          `json:"system_instruction,omitempty"`
 	Tools             []geminiTool            `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig       `json:"toolConfig,omitempty"`
 	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig *geminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+}
+
+type geminiFunctionCallingConfig struct {
+	Mode string `json:"mode,omitempty"`
 }
 
 type geminiThinkingConfig struct {
@@ -123,16 +132,30 @@ type geminiFunctionDeclaration struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
+func geminiToolConfigFromTuning(choice string) *geminiToolConfig {
+	switch choice {
+	case "auto":
+		return &geminiToolConfig{FunctionCallingConfig: &geminiFunctionCallingConfig{Mode: "AUTO"}}
+	case "required":
+		return &geminiToolConfig{FunctionCallingConfig: &geminiFunctionCallingConfig{Mode: "ANY"}}
+	case "none":
+		return &geminiToolConfig{FunctionCallingConfig: &geminiFunctionCallingConfig{Mode: "NONE"}}
+	default:
+		return nil
+	}
+}
+
 type geminiStreamChunk struct {
 	Candidates []struct {
 		Content      geminiContent `json:"content"`
 		FinishReason string        `json:"finishReason"`
 	} `json:"candidates"`
 	UsageMetadata *struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		TotalTokenCount      int `json:"totalTokenCount"`
-		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+		PromptTokenCount        int `json:"promptTokenCount"`
+		CandidatesTokenCount    int `json:"candidatesTokenCount"`
+		CachedContentTokenCount int `json:"cachedContentTokenCount"`
+		TotalTokenCount         int `json:"totalTokenCount"`
+		ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
 	} `json:"usageMetadata,omitempty"`
 }
 
@@ -161,6 +184,9 @@ func (g *GeminiProvider) CompleteStream(
 	reqBody := geminiRequest{
 		Contents: contents,
 		Tools:    convertToolsToGemini(tools),
+	}
+	if tuning.Gemini.ToolChoice != "" {
+		reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
 	}
 	if systemPrompt != "" {
 		reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}}
@@ -526,6 +552,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			}
 			resp.Usage.InputTokens = chunk.UsageMetadata.PromptTokenCount
 			resp.Usage.OutputTokens = chunk.UsageMetadata.CandidatesTokenCount
+			resp.Usage.CacheReadTokens = chunk.UsageMetadata.CachedContentTokenCount
 			resp.Usage.ReasoningTokens = chunk.UsageMetadata.ThoughtsTokenCount
 		}
 	}

@@ -289,6 +289,164 @@ func TestAnthropicCompleteStreamEncodesAdaptiveThinkingAndAutoCache(t *testing.T
 	}
 }
 
+func TestAnthropicCompleteStreamEncodesToolChoiceAndTemperature(t *testing.T) {
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	temperature := 0.2
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		2048,
+		RequestTuning{Anthropic: AnthropicTuning{ToolChoice: "required", Temperature: &temperature}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+
+	if captured.ToolChoice == nil || captured.ToolChoice.Type != "any" {
+		t.Fatalf("tool_choice = %#v, want type=any", captured.ToolChoice)
+	}
+	if captured.Temperature == nil || *captured.Temperature != temperature {
+		t.Fatalf("temperature = %#v, want %v", captured.Temperature, temperature)
+	}
+}
+
+func TestAnthropicCompleteStreamOmitsTemperatureWhenThinkingEnabled(t *testing.T) {
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	temperature := 0.2
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		2048,
+		RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024, Temperature: &temperature}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.Temperature != nil {
+		t.Fatalf("temperature = %#v, want omitted when thinking is enabled", captured.Temperature)
+	}
+}
+
+func TestAnthropicCompleteStreamOmitsForcedToolChoiceWhenThinkingEnabled(t *testing.T) {
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		2048,
+		RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024, ToolChoice: "required"}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.ToolChoice != nil {
+		t.Fatalf("tool_choice = %#v, want omitted when thinking is enabled (forced any is rejected by Anthropic)", captured.ToolChoice)
+	}
+}
+
+func TestAnthropicCompleteStreamKeepsAutoToolChoiceWhenThinkingEnabled(t *testing.T) {
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		2048,
+		RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024, ToolChoice: "auto"}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.ToolChoice == nil || captured.ToolChoice.Type != "auto" {
+		t.Fatalf("tool_choice = %#v, want type=auto preserved when thinking is enabled", captured.ToolChoice)
+	}
+}
+
 func TestAnthropicCompleteStreamSetsDefaultUserAgent(t *testing.T) {
 	var gotUserAgent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -479,6 +637,131 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	}
 	if got := resp.Usage.CacheWrite1hTokens; got != 13 {
 		t.Fatalf("CacheWrite1hTokens = %d, want 13", got)
+	}
+}
+
+// TestParseSSEStreamAdoptsMessageDeltaInputUsage covers Anthropic-compatible
+// gateways (e.g. ModelGate) that report input/cache usage only in message_delta
+// and send input_tokens=0 in message_start.
+func TestParseSSEStreamAdoptsMessageDeltaInputUsage(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":0}",
+		"",
+		"event: message_delta",
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":90,\"output_tokens\":27,\"cache_read_input_tokens\":768,\"cache_creation_input_tokens\":0}}",
+		"",
+		"event: message_stop",
+		"data: {\"type\":\"message_stop\"}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatalf("resp/usage = %#v, want non-nil", resp)
+	}
+	// InputTokens normalizes to input_tokens + cache_read_input_tokens.
+	if got := resp.Usage.InputTokens; got != 858 {
+		t.Fatalf("InputTokens = %d, want 858", got)
+	}
+	if got := resp.Usage.OutputTokens; got != 27 {
+		t.Fatalf("OutputTokens = %d, want 27", got)
+	}
+	if got := resp.Usage.CacheReadTokens; got != 768 {
+		t.Fatalf("CacheReadTokens = %d, want 768", got)
+	}
+}
+
+func TestParseSSEStreamMessageDeltaZeroUsageDoesNotClobberStartUsage(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":100,\"output_tokens\":0,\"cache_read_input_tokens\":7,\"cache_creation\":{\"ephemeral_5m_input_tokens\":11,\"ephemeral_1h_input_tokens\":13}}}}",
+		"",
+		"event: message_delta",
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}",
+		"",
+		"event: message_stop",
+		"data: {\"type\":\"message_stop\"}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatalf("resp/usage = %#v, want non-nil", resp)
+	}
+	if got := resp.Usage.InputTokens; got != 107 {
+		t.Fatalf("InputTokens = %d, want 107", got)
+	}
+	if got := resp.Usage.CacheReadTokens; got != 7 {
+		t.Fatalf("CacheReadTokens = %d, want 7", got)
+	}
+	if got := resp.Usage.CacheWriteTokens; got != 24 {
+		t.Fatalf("CacheWriteTokens = %d, want 24", got)
+	}
+	if got := resp.Usage.CacheWrite1hTokens; got != 13 {
+		t.Fatalf("CacheWrite1hTokens = %d, want 13", got)
+	}
+}
+
+func TestParseSSEStreamRejectsIncompleteStreamWithoutMessageStop(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err == nil {
+		t.Fatalf("parseSSEStream returned resp=%#v, want incomplete stream error", resp)
+	}
+	if !strings.Contains(err.Error(), "without message_stop") {
+		t.Fatalf("error = %v, want message_stop error", err)
+	}
+}
+
+func TestParseSSEStreamAllowsMaxTokensTruncatedContentWithoutMessageStop(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}",
+		"",
+		"event: message_delta",
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":10}}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if resp == nil || resp.Content != " world" || resp.StopReason != "max_tokens" {
+		t.Fatalf("resp = %#v, want truncated content", resp)
 	}
 }
 

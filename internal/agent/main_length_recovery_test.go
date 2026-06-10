@@ -286,6 +286,93 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceMergesWithExistingOverride(t 
 	if got.OpenAI.ToolChoice != "required" {
 		t.Fatalf("tool_choice = %q, want required", got.OpenAI.ToolChoice)
 	}
+	if got.Anthropic.ToolChoice != "required" {
+		t.Fatalf("anthropic tool_choice = %q, want required", got.Anthropic.ToolChoice)
+	}
+	if got.Gemini.ToolChoice != "required" {
+		t.Fatalf("gemini tool_choice = %q, want required", got.Gemini.ToolChoice)
+	}
+}
+
+func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToMessagesProvider(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.loopState.Enabled = true
+	provider := &recordingLoopTuningProvider{}
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
+
+	a.beginMainLLMAfterPreparation(context.Background(), 1, "")
+	deadline := time.After(2 * time.Second)
+	for {
+		provider.mu.Lock()
+		gotCount := len(provider.tunes)
+		provider.mu.Unlock()
+		if gotCount == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for main LLM call")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.tunes) != 1 {
+		t.Fatalf("len(tunes) = %d, want 1", len(provider.tunes))
+	}
+	got := provider.tunes[0]
+	if got.Anthropic.ToolChoice != "required" {
+		t.Fatalf("anthropic tool_choice = %q, want required", got.Anthropic.ToolChoice)
+	}
+	if got.OpenAI.ToolChoice != "required" {
+		t.Fatalf("openai tool_choice = %q, want required", got.OpenAI.ToolChoice)
+	}
+}
+
+func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvider(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.loopState.Enabled = true
+	provider := &recordingLoopTuningProvider{}
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeGenerateContent,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
+
+	a.beginMainLLMAfterPreparation(context.Background(), 1, "")
+	deadline := time.After(2 * time.Second)
+	for {
+		provider.mu.Lock()
+		gotCount := len(provider.tunes)
+		provider.mu.Unlock()
+		if gotCount == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for main LLM call")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.tunes) != 1 {
+		t.Fatalf("len(tunes) = %d, want 1", len(provider.tunes))
+	}
+	got := provider.tunes[0]
+	if got.Gemini.ToolChoice != "required" {
+		t.Fatalf("gemini tool_choice = %q, want required", got.Gemini.ToolChoice)
+	}
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyRunning(t *testing.T) {

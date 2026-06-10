@@ -68,7 +68,9 @@ type anthropicRequest struct {
 	System       []anthropicContent     `json:"system,omitempty"`
 	Messages     []anthropicMessage     `json:"messages"`
 	Tools        []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
 	Stream       bool                   `json:"stream"`
+	Temperature  *float64               `json:"temperature,omitempty"`
 	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 	Speed        string                 `json:"speed,omitempty"`
@@ -90,6 +92,21 @@ type anthropicOutputConfig struct {
 
 type anthropicMetadata struct {
 	UserID string `json:"user_id,omitempty"`
+}
+
+type anthropicToolChoice struct {
+	Type string `json:"type"`
+}
+
+func anthropicToolChoiceFromTuning(choice string) *anthropicToolChoice {
+	switch choice {
+	case "auto":
+		return &anthropicToolChoice{Type: "auto"}
+	case "required":
+		return &anthropicToolChoice{Type: "any"}
+	default:
+		return nil
+	}
 }
 
 // anthropicMessage is a single message in the Anthropic API format.
@@ -184,6 +201,20 @@ func (a *AnthropicProvider) CompleteStream(
 		Messages:  apiMessages,
 		Tools:     apiTools,
 		Stream:    true,
+	}
+	if at.ToolChoice != "" {
+		// Extended thinking is incompatible with forced tool use: Anthropic
+		// returns 400 for tool_choice "any"/"tool" when thinking is
+		// enabled/adaptive. "auto" stays valid, so only the forced choice is
+		// suppressed here (the loop exit-control path requests "required",
+		// which maps to "any").
+		thinkingActive := at.ThinkingType == "enabled" || at.ThinkingType == "adaptive"
+		if tc := anthropicToolChoiceFromTuning(at.ToolChoice); tc != nil && !(thinkingActive && tc.Type == "any") {
+			reqBody.ToolChoice = tc
+		}
+	}
+	if at.Temperature != nil && at.ThinkingType != "enabled" && at.ThinkingType != "adaptive" {
+		reqBody.Temperature = at.Temperature
 	}
 
 	// Apply prompt caching strategy.

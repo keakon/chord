@@ -470,6 +470,9 @@ func (c *Client) SetNextRequestTuningOverride(tuning RequestTuning) {
 	if tuning.OpenAI.ParallelToolCalls != nil {
 		copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
 	}
+	if tuning.Anthropic.Temperature != nil {
+		copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
+	}
 	c.nextTuning = &copy
 }
 
@@ -484,12 +487,18 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 		if tuning.OpenAI.ParallelToolCalls != nil {
 			copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
 		}
+		if tuning.Anthropic.Temperature != nil {
+			copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
+		}
 		c.nextTuning = &copy
 		return
 	}
 	merged := *c.nextTuning
 	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
 		merged.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
+	}
+	if c.nextTuning.Anthropic.Temperature != nil {
+		merged.Anthropic.Temperature = new(*c.nextTuning.Anthropic.Temperature)
 	}
 	if tuning.Anthropic.ThinkingType != "" {
 		merged.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
@@ -515,6 +524,12 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	if tuning.Anthropic.ServiceTier != "" {
 		merged.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
 	}
+	if tuning.Anthropic.ToolChoice != "" {
+		merged.Anthropic.ToolChoice = tuning.Anthropic.ToolChoice
+	}
+	if tuning.Anthropic.Temperature != nil {
+		merged.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
+	}
 	if tuning.OpenAI.ReasoningEffort != "" {
 		merged.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
 	}
@@ -530,6 +545,9 @@ func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	if tuning.OpenAI.ToolChoice != "" {
 		merged.OpenAI.ToolChoice = tuning.OpenAI.ToolChoice
 	}
+	if tuning.Gemini.ToolChoice != "" {
+		merged.Gemini.ToolChoice = tuning.Gemini.ToolChoice
+	}
 	c.nextTuning = &merged
 }
 
@@ -541,6 +559,9 @@ func (c *Client) consumeRequestTuningOverrideLocked() (RequestTuning, bool) {
 	override := *c.nextTuning
 	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
 		override.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
+	}
+	if c.nextTuning.Anthropic.Temperature != nil {
+		override.Anthropic.Temperature = new(*c.nextTuning.Anthropic.Temperature)
 	}
 	c.nextTuning = nil
 	return override, true

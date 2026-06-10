@@ -28,23 +28,33 @@ func cloneLongLivedLLMString(s string) string {
 
 // --- SSE JSON structures for Anthropic streaming ---
 
+type sseUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheDeletedInputTokens  int `json:"cache_deleted_input_tokens"`
+	CacheCreation            *struct {
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation,omitempty"`
+	ServerToolUse struct {
+		WebSearchRequests int `json:"web_search_requests"`
+		WebFetchRequests  int `json:"web_fetch_requests"`
+	} `json:"server_tool_use"`
+	ServiceTier  string `json:"service_tier"`
+	InferenceGeo string `json:"inference_geo"`
+	Speed        string `json:"speed"`
+}
+
 // sseMessageStart represents the "message_start" SSE event payload.
 type sseMessageStart struct {
 	Type    string `json:"type"`
 	Message struct {
-		ID    string `json:"id"`
-		Role  string `json:"role"`
-		Model string `json:"model"`
-		Usage struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			CacheCreation            *struct {
-				Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
-				Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
-			} `json:"cache_creation,omitempty"`
-		} `json:"usage"`
+		ID    string   `json:"id"`
+		Role  string   `json:"role"`
+		Model string   `json:"model"`
+		Usage sseUsage `json:"usage"`
 	} `json:"message"`
 }
 
@@ -86,9 +96,7 @@ type sseMessageDelta struct {
 	Delta struct {
 		StopReason string `json:"stop_reason"`
 	} `json:"delta"`
-	Usage struct {
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	Usage sseUsage `json:"usage"`
 }
 
 // sseError represents an SSE error event payload.
@@ -109,6 +117,41 @@ type contentBlock struct {
 	toolInput strings.Builder
 	thinking  strings.Builder // accumulated thinking text (thinking blocks only)
 	signature string          // thinking block signature (returned by signature_delta)
+}
+
+func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
+	if !adoptOnlyNonZero || usage.OutputTokens > 0 {
+		dst.OutputTokens = usage.OutputTokens
+	}
+	if !adoptOnlyNonZero || usage.CacheReadInputTokens > 0 {
+		dst.CacheReadTokens = usage.CacheReadInputTokens
+	}
+	if !adoptOnlyNonZero || usage.InputTokens > 0 {
+		// Chord tracks InputTokens as the full prompt-side token burden
+		// excluding cache writes but including cache reads. Anthropic-style
+		// transports report cache reads separately, so normalize here.
+		dst.InputTokens = usage.InputTokens + dst.CacheReadTokens
+	}
+
+	cacheWrite, cacheWrite1h := anthropicSSECacheWriteUsage(usage)
+	if !adoptOnlyNonZero || cacheWrite > 0 {
+		dst.CacheWriteTokens = cacheWrite
+		dst.CacheWrite1hTokens = cacheWrite1h
+	}
+}
+
+func anthropicSSECacheWriteUsage(usage sseUsage) (cacheWrite, cacheWrite1h int) {
+	// Prefer the nested cache_creation breakdown when present (it carries the
+	// 5m/1h TTL split), and fall back to the flat cache_creation_input_tokens
+	// counter that Anthropic-compatible gateways may report on its own.
+	cacheWrite = usage.CacheCreationInputTokens
+	if usage.CacheCreation != nil {
+		cacheWrite1h = usage.CacheCreation.Ephemeral1hInputTokens
+		if nested := usage.CacheCreation.Ephemeral5mInputTokens + cacheWrite1h; nested > 0 {
+			cacheWrite = nested
+		}
+	}
+	return cacheWrite, cacheWrite1h
 }
 
 // parseSSEStream reads an Anthropic SSE stream from reader and calls cb for
@@ -167,26 +210,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if resp.Usage == nil {
 					resp.Usage = &message.TokenUsage{}
 				}
-				cacheRead := ev.Message.Usage.CacheReadInputTokens
-				// Chord tracks InputTokens as the full prompt-side token burden
-				// excluding cache writes but including cache reads. Anthropic-style
-				// transports report cache reads separately, so normalize here.
-				resp.Usage.InputTokens = ev.Message.Usage.InputTokens + cacheRead
-				resp.Usage.CacheReadTokens = cacheRead
-				// Prefer the nested cache_creation breakdown when present (it
-				// carries the 5m/1h TTL split), and fall back to the flat
-				// cache_creation_input_tokens counter that Anthropic-compatible
-				// gateways may report on its own.
-				cacheWrite := ev.Message.Usage.CacheCreationInputTokens
-				cacheWrite1h := 0
-				if ev.Message.Usage.CacheCreation != nil {
-					cacheWrite1h = ev.Message.Usage.CacheCreation.Ephemeral1hInputTokens
-					if nested := ev.Message.Usage.CacheCreation.Ephemeral5mInputTokens + cacheWrite1h; nested > 0 {
-						cacheWrite = nested
-					}
-				}
-				resp.Usage.CacheWriteTokens = cacheWrite
-				resp.Usage.CacheWrite1hTokens = cacheWrite1h
+				applyAnthropicSSEUsage(resp.Usage, ev.Message.Usage, false)
 
 			case "content_block_start":
 				var ev sseContentBlockStart
@@ -331,7 +355,13 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if resp.Usage == nil {
 					resp.Usage = &message.TokenUsage{}
 				}
-				resp.Usage.OutputTokens = ev.Usage.OutputTokens
+				// Per the Anthropic streaming spec, message_delta.usage carries
+				// cumulative output/input/cache counts. Official endpoints emit
+				// input/cache in message_start and send 0 here, while some
+				// compatible gateways (e.g. ModelGate) report them only in
+				// message_delta. Adopt any non-zero value so usage is not lost,
+				// without letting an explicit 0 clobber the message_start values.
+				applyAnthropicSSEUsage(resp.Usage, ev.Usage, true)
 
 			case "message_stop":
 				// Stream complete. Return the assembled response.
@@ -424,7 +454,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		delete(blocks, idx)
 	}
 
-	if resp.Content != "" || len(resp.ToolCalls) > 0 {
+	if truncated && (resp.Content != "" || len(resp.ToolCalls) > 0) {
 		return &resp, nil
 	}
 	return nil, fmt.Errorf("SSE stream ended without message_stop event")
