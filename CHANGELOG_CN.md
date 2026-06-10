@@ -33,6 +33,7 @@
 - Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。
 - Shell 权限回退检查现在在展示命中规则建议时仍保留复合命令复审语义，避免窄 allow 规则自动放行未解析的复合命令。
 - 请求进行中挂起的 model-pool 切换现在会保留原始 pool，取消或应用切换时能恢复预期状态。
+- TUI 中 cache-read 百分比现在使用输入侧 prompt tokens 加上 provider 单独上报的 cache-write tokens 作为分母。
 - TUI 信息面板的 changed-files 区域现在会优先完整显示 `+N -N` 行数统计，而不是让长文件名挤掉改动数量，与较窄侧边栏的行为一致。
 - TUI 信息面板现在会在鼠标指针位于其上方时响应鼠标滚轮或触摸板独立滚动，较长的 changed files 或状态区块不再被输入区截断。
 - 被拒绝的折叠 Shell 工具卡片现在会把展开提示显示在拒绝原因之前，提示不再被挤到结果文本下方。

@@ -654,7 +654,7 @@ func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 	labelWidth := ansi.StringWidth("Cache W")
 	if stats.CacheReadTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache R", labelWidth,
-			formatUsageCacheValue(stats.CacheReadTokens, stats.InputTokens)))
+			formatUsageCacheValue(stats.CacheReadTokens, stats.InputTokens+stats.CacheWriteTokens)))
 	}
 	if stats.CacheWriteTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache W", labelWidth,
@@ -679,10 +679,10 @@ func renderUsageCacheDetailLine(lineW int, label string, labelWidth int, value s
 	return InfoPanelLineBg.Width(lineW).Render(line)
 }
 
-func formatUsageCacheValue(cacheTokens, inputTokens int64) string {
+func formatUsageCacheValue(cacheTokens, promptSideTokens int64) string {
 	text := InfoPanelValue.Render(formatUsageTokens(cacheTokens))
-	if inputTokens > 0 {
-		text += InfoPanelDim.Render(" (") + InfoPanelValue.Render(formatPercent(float64(cacheTokens)/float64(inputTokens))) + InfoPanelDim.Render(")")
+	if promptSideTokens > 0 {
+		text += InfoPanelDim.Render(" (") + InfoPanelValue.Render(formatPercent(float64(cacheTokens)/float64(promptSideTokens))) + InfoPanelDim.Render(")")
 	}
 	return text
 }

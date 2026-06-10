@@ -643,7 +643,7 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 	want := []string{
 		"TOKENS",
 		"↑ 10.0k",
-		"Cache R  2.3k (23%)",
+		"Cache R  2.3k (22%)",
 		"Cache W  640",
 	}
 	for _, expected := range want {
@@ -651,6 +651,24 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 		if !found {
 			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
 		}
+	}
+}
+
+func TestRenderInfoPanelUsageCacheReadPercentIncludesCacheWrites(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.usage = analytics.SessionStats{
+		InputTokens:      10_000,
+		CacheReadTokens:  5_000,
+		CacheWriteTokens: 10_000,
+	}
+
+	m := NewModel(backend)
+	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(36, 20)), "USAGE")
+	if !slices.Contains(usageLines, "Cache R  5.0k (25%)") {
+		t.Fatalf("usage lines = %#v, want cache read percent over input plus cache writes", usageLines)
+	}
+	if slices.Contains(usageLines, "Cache R  5.0k (50%)") {
+		t.Fatalf("usage lines = %#v, cache read percent should not ignore cache writes", usageLines)
 	}
 }
 
