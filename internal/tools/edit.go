@@ -197,7 +197,7 @@ func formatEditErrorResult(patch string, err error) string {
 	if patch == "" || !shouldShowEditPatchExcerpt(msg) {
 		return msg
 	}
-	return "Patch excerpt:\n" + fencedPatchExcerpt(patch) + "\n\nError: " + msg
+	return "Patch did not match the current file. Re-read the target lines and retry with the current text.\n\nPatch excerpt:\n" + fencedPatchExcerpt(patch) + "\n\nError: " + msg
 }
 
 func shouldShowEditPatchExcerpt(msg string) bool {

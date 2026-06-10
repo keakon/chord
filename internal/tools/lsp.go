@@ -29,7 +29,7 @@ func (LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t LspTool) Description() string {
-	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over grep/glob once the file path and cursor position are known and the file type has LSP coverage. Use grep/glob only to discover candidate files or positions when the location is not known yet. Use 1-based line and character from the raw file content; count tabs in the source line as a single character, and prefer the start of the target identifier."
+	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over grep/glob once the file path and cursor position are known and the file type has LSP coverage. Use grep/glob only to discover candidate files or positions when the location is not known yet. Put the cursor on the identifier itself, not file start or whitespace. If references fails because no identifier is found, re-read the file and retry on the symbol name. Use 1-based line and character from the raw file content; count tabs in the source line as a single character, and prefer the start of the target identifier."
 	if t.LSP == nil {
 		return base
 	}
@@ -54,7 +54,7 @@ func (t LspTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"operation": map[string]any{
 				"type":        "string",
-				"description": "One of: definition, references, implementation. Prefer these for semantic navigation and analysis once the file path and position are known. Use definition to jump to the symbol definition, references to find usages, and implementation to find concrete implementations.",
+				"description": "One of: definition, references, implementation. Prefer these for semantic navigation and analysis once the file path and position are known. Use definition to jump to the symbol definition, references to find usages, and implementation to find concrete implementations. For references/implementation, place the cursor on the identifier, not on empty space or the file beginning.",
 				"enum":        []string{"definition", "references", "implementation"},
 			},
 			"path": map[string]any{
@@ -67,7 +67,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"character": map[string]any{
 				"type":        "integer",
-				"description": "1-based character offset on the raw source line. Count tabs in the source line as a single character.",
+				"description": "1-based character offset on the raw source line. Count tabs in the source line as a single character. For symbol queries, this should point to a character inside the identifier.",
 			},
 			"include_declaration": map[string]any{
 				"type":        "boolean",
