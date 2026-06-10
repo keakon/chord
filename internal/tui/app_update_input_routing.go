@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,14 @@ import (
 var imagePlaceholderRE = regexp.MustCompile(`\[image(\d+)\]`)
 
 const inlineImagePlaceholderDisplay = "[image]"
+
+func attachmentReferenceText(att Attachment) string {
+	name := strings.TrimSpace(att.FileName)
+	if name == "" {
+		name = "attachment"
+	}
+	return "[" + name + "]"
+}
 
 func imagePlaceholder(index int) string {
 	if index <= 0 {
@@ -42,7 +51,7 @@ func isInlineImagePlaceholderPart(part message.ContentPart) bool {
 	if part.InlineToken != "" && part.InlineToken != inlineImageTokenMarker {
 		return false
 	}
-	if part.InlineToken == "" && part.DisplayText != inlineImagePlaceholderDisplay {
+	if part.InlineToken == "" && part.DisplayText == "" {
 		return false
 	}
 	_, ok := inlineImagePlaceholderIndex(part.Text)
@@ -60,7 +69,7 @@ func attachmentContentPart(att Attachment) message.ContentPart {
 	return message.ContentPart{Type: attachmentPartType(att.MimeType), MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath, FileName: att.FileName}
 }
 
-func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
+func interleaveAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
 	if part.Type != message.ContentPartText || part.Text == "" || message.IsFileRefContent(part.Text) {
 		return []message.ContentPart{part}
 	}
@@ -80,6 +89,9 @@ func interleaveImageAttachmentsInTextPart(part message.ContentPart, attachments 
 }
 
 func interleavePlainImagePlaceholdersInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {
+	if out, ok := interleaveAttachmentReferencePlaceholdersInTextPart(part, attachments, used); ok {
+		return out
+	}
 	placeholderCount := strings.Count(part.Text, inlineImagePlaceholderDisplay)
 	if placeholderCount == 0 {
 		return []message.ContentPart{part}
@@ -108,6 +120,50 @@ func interleavePlainImagePlaceholdersInTextPart(part message.ContentPart, attach
 		return nil
 	}
 	return out
+}
+
+func interleaveAttachmentReferencePlaceholdersInTextPart(part message.ContentPart, attachments []Attachment, used []bool) ([]message.ContentPart, bool) {
+	type ref struct {
+		index int
+		text  string
+		pos   int
+	}
+	refs := make([]ref, 0, len(attachments))
+	for i, att := range attachments {
+		if used[i] {
+			continue
+		}
+		text := attachmentReferenceText(att)
+		pos := strings.Index(part.Text, text)
+		if pos < 0 {
+			continue
+		}
+		if strings.Count(part.Text, text) != 1 {
+			return nil, false
+		}
+		refs = append(refs, ref{index: i, text: text, pos: pos})
+	}
+	if len(refs) == 0 {
+		return nil, false
+	}
+	slices.SortFunc(refs, func(a, b ref) int { return a.pos - b.pos })
+	out := make([]message.ContentPart, 0, len(refs)*2+1)
+	cursor := 0
+	for _, r := range refs {
+		if r.pos < cursor {
+			return nil, false
+		}
+		if r.pos > cursor {
+			out = append(out, message.ContentPart{Type: message.ContentPartText, Text: part.Text[cursor:r.pos]})
+		}
+		used[r.index] = true
+		out = append(out, attachmentContentPart(attachments[r.index]))
+		cursor = r.pos + len(r.text)
+	}
+	if cursor < len(part.Text) {
+		out = append(out, message.ContentPart{Type: message.ContentPartText, Text: part.Text[cursor:]})
+	}
+	return out, true
 }
 
 func countUnusedInlineImageAttachments(attachments []Attachment, used []bool) int {
@@ -141,7 +197,7 @@ func nextUnusedImageAttachmentIndex(attachments []Attachment, used []bool) (int,
 //     the unused inline image attachments, avoiding ambiguous literal [image] text.
 //   - Unknown/out-of-range placeholders are kept as literal text.
 //   - Any attachment not referenced by a placeholder is appended to the end.
-func interleaveImageAttachments(parts []message.ContentPart, attachments []Attachment) []message.ContentPart {
+func interleaveAttachments(parts []message.ContentPart, attachments []Attachment) []message.ContentPart {
 	if len(parts) == 0 && len(attachments) == 0 {
 		return nil
 	}
@@ -149,7 +205,7 @@ func interleaveImageAttachments(parts []message.ContentPart, attachments []Attac
 	used := make([]bool, len(attachments))
 	out := make([]message.ContentPart, 0, len(parts)+len(attachments))
 	for _, part := range parts {
-		out = append(out, interleaveImageAttachmentsInTextPart(part, attachments, used)...)
+		out = append(out, interleaveAttachmentsInTextPart(part, attachments, used)...)
 	}
 	for i, att := range attachments {
 		if used[i] {
@@ -294,7 +350,7 @@ func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
 	m.input.ClearSelection()
 	imageOrdinal := m.nextInlineImageOrdinal()
 	placeholderRaw := imagePlaceholder(imageOrdinal)
-	m.input.InsertImagePlaceholder(imageOrdinal)
+	m.input.InsertImagePlaceholderWithDisplay(imageOrdinal, attachmentReferenceText(attach.attachment))
 	var syncCmd tea.Cmd
 	if pastedText != "" {
 		syncCmd = m.insertComposerText(pastedText)

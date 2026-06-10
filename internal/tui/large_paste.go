@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -75,11 +76,34 @@ func newInlineLargePaste(content string, seq int) *inlineLargePaste {
 	return &inlineLargePaste{Seq: seq, Kind: inlineTokenLargePaste, RawContent: content, DisplayText: formatInlineLargePasteDisplay(seq, lines)}
 }
 
-func newInlineImagePlaceholder(index int) *inlineLargePaste {
+func newInlineImagePlaceholder(index int, displayText string) *inlineLargePaste {
 	if index < 1 {
 		index = 1
 	}
-	return &inlineLargePaste{Kind: inlineTokenImage, RawContent: imagePlaceholder(index), DisplayText: inlineImagePlaceholderDisplay}
+	displayText = strings.TrimSpace(displayText)
+	if displayText == "" {
+		displayText = inlineImagePlaceholderDisplay
+	}
+	return &inlineLargePaste{Kind: inlineTokenImage, RawContent: imagePlaceholder(index), DisplayText: displayText}
+}
+
+func binaryPartReferenceText(part message.ContentPart, ordinal int) string {
+	name := strings.TrimSpace(part.FileName)
+	if name == "" {
+		base := filepath.Base(strings.TrimSpace(part.ImagePath))
+		if base != "" && base != "." && base != string(filepath.Separator) {
+			name = base
+		}
+	}
+	if name == "" {
+		switch part.Type {
+		case message.ContentPartPDF:
+			name = fmt.Sprintf("document%d%s", max(1, ordinal), attachmentExtForMimeType(part.MimeType))
+		default:
+			name = imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, max(1, ordinal))
+		}
+	}
+	return "[" + name + "]"
 }
 
 func copyInlineLargePastes(src []inlineLargePaste) []inlineLargePaste {
@@ -154,7 +178,7 @@ func inlineLargePastesFromParts(parts []message.ContentPart) []inlineLargePaste 
 	for _, part := range parts {
 		switch {
 		case part.Type == message.ContentPartImage:
-			token := newInlineImagePlaceholder(imageIndex)
+			token := newInlineImagePlaceholder(imageIndex, binaryPartReferenceText(part, imageIndex))
 			displayRunes := []rune(token.DisplayText)
 			token.Start = offset
 			token.End = offset + len(displayRunes)
@@ -164,7 +188,11 @@ func inlineLargePastesFromParts(parts []message.ContentPart) []inlineLargePaste 
 		case part.Type != message.ContentPartText || message.IsFileRefContent(part.Text):
 			continue
 		case inlineTokenKindFromContentPart(part) == inlineTokenImage:
-			token := newInlineImagePlaceholder(imageIndex)
+			displayText := part.DisplayText
+			if displayText == "" || displayText == inlineImagePlaceholderDisplay {
+				displayText = part.Text
+			}
+			token := newInlineImagePlaceholder(imageIndex, displayText)
 			displayRunes := []rune(token.DisplayText)
 			token.Start = offset
 			token.End = offset + len(displayRunes)
@@ -222,15 +250,23 @@ func displayTextAndInlinePastes(parts []message.ContentPart, fallback string) (s
 	if len(parts) == 0 {
 		return fallback, nil
 	}
-	var b strings.Builder
+	var (
+		b             strings.Builder
+		binaryOrdinal = 1
+	)
 	for _, part := range parts {
 		switch {
-		case part.Type == message.ContentPartImage:
-			b.WriteString(inlineImagePlaceholderDisplay)
+		case part.IsBinary():
+			b.WriteString(binaryPartReferenceText(part, binaryOrdinal))
+			binaryOrdinal++
 		case part.Type != message.ContentPartText || message.IsFileRefContent(part.Text):
 			continue
 		case inlineTokenKindFromContentPart(part) == inlineTokenImage:
-			b.WriteString(inlineImagePlaceholderDisplay)
+			if part.DisplayText != "" {
+				b.WriteString(part.DisplayText)
+			} else {
+				b.WriteString(part.Text)
+			}
 		case part.DisplayText != "":
 			b.WriteString(part.DisplayText)
 		default:

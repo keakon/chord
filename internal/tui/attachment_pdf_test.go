@@ -61,7 +61,7 @@ func TestInterleaveImageAttachments_AppendsPDF(t *testing.T) {
 	atts := []Attachment{
 		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
 	}
-	out := interleaveImageAttachments(parts, atts)
+	out := interleaveAttachments(parts, atts)
 	if len(out) != 2 {
 		t.Fatalf("interleave len = %d, want 2", len(out))
 	}
@@ -79,7 +79,7 @@ func TestInterleaveImageAttachments_MapsInlineImagesAfterPDF(t *testing.T) {
 		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
 		{FileName: "shot.png", MimeType: "image/png", Data: []byte("png"), InlineImagePlaceholder: true},
 	}
-	out := interleaveImageAttachments(parts, atts)
+	out := interleaveAttachments(parts, atts)
 	if len(out) != 2 {
 		t.Fatalf("interleave len = %d, want 2", len(out))
 	}
@@ -96,7 +96,7 @@ func TestInterleaveImageAttachments_KeepsLiteralImageTextForRegularAttachment(t 
 	atts := []Attachment{
 		{FileName: "shot.png", MimeType: "image/png", Data: []byte("png")},
 	}
-	out := interleaveImageAttachments(parts, atts)
+	out := interleaveAttachments(parts, atts)
 	if len(out) != 2 {
 		t.Fatalf("interleave len = %d, want 2", len(out))
 	}

@@ -1890,6 +1890,26 @@ func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
 	}
 }
 
+func TestEditToolCallCopyUsesRawArgsWhenContentTrimmed(t *testing.T) {
+	// On a failed edit, Content is display-trimmed (patch stripped) and the full
+	// patch lives only in RawArgs, mirroring the card render path.
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"foo.txt"}`,
+		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
+		ResultContent: "hunk not found. No files were modified",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	if !strings.Contains(got, "## Diff\n\n```diff\n@@\n-old\n+new\n```") {
+		t.Fatalf("copied edit block should include patch from RawArgs; got:\n%s", got)
+	}
+}
+
 func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,

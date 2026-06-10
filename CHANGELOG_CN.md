@@ -13,6 +13,7 @@
 - `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
 - `edit` 现在不再要求先通过 `read` 或系统解析的 `@file` mention 观察文件再应用 patch；已观察过的文件仍会作为 snapshot 跟踪，因此外部变更仍会触发风险提示并在必要时创建备份。
 - 当 `edit` 的 hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
+- TUI 内容查看器现在会在全量复制快捷键下复制原始查看内容；失败的 `edit` 工具卡片复制会在可见卡片内容被裁剪时使用完整 raw patch；恢复 inline 图片/PDF 附件时，输入框会使用文件名标签显示附件，但不会向模型消息额外添加重复文本 part。
 - 权限确认的规则建议现在会为复合 Shell 命令列出命中的 ask 规则，规则选择器也会预先勾选每一条命中的 ask 规则，让一次批准即可保存所有阻塞规则。
 - `question` 现在容忍用单个问题对象代替文档中要求的 `questions` 数组，与 `grep`、`glob` 的标量转单元素列表容错保持一致。
 - 请求级上下文剪裁现在会保护近期高风险工具输出，例如 diff、失败断言、stack trace、权限/安全错误，避免它们仅因很长的单轮工具链推进了 effective age 就被剪裁。默认 `context.reduction.read_like_age_turns` 也基于近期会话统计从 1 上调到 2，让刚读取的文件上下文以较低的观测 token 成本多保留一个 effective turn。

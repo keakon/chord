@@ -579,7 +579,7 @@ func editToolCallMarkdownContent(b *Block) string {
 	}
 	diff := strings.TrimSpace(b.Diff)
 	if diff == "" {
-		diff = editPatchFromArgs(b.Content)
+		diff = editPatchFromArgs(b.editPatchArgsJSON())
 	}
 	if diff != "" {
 		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
@@ -589,7 +589,10 @@ func editToolCallMarkdownContent(b *Block) string {
 
 func (m *Model) handleSuperCopy() tea.Cmd {
 	if m.mode == ModeContentViewer {
-		return m.copyContentViewerSelection()
+		if m.contentViewerHasSelection() {
+			return m.copyContentViewerSelection()
+		}
+		return m.copyContentViewerAll()
 	}
 	// In confirm sub-modes, the focused textarea isn't m.input, so copy from it.
 	if m.mode == ModeConfirm {

@@ -366,7 +366,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 						loaded[i].Data = data
 					}
 				}
-				parts = interleaveImageAttachments(parts, loaded)
+				parts = interleaveAttachments(parts, loaded)
 			}
 			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now()}
 			m.attachments = nil

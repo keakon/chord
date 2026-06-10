@@ -327,12 +327,15 @@ func TestLoadQueuedDraftIntoComposerRestoresInlineImagePlaceholder(t *testing.T)
 
 	_ = m.loadQueuedDraftIntoComposer(draft)
 
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
-		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay)
+	if got := m.input.Value(); got != "[image1.png]" {
+		t.Fatalf("input value = %q, want %q", got, "[image1.png]")
 	}
 	pastes := m.input.InlinePastes()
 	if len(pastes) != 1 || pastes[0].Kind != inlineTokenImage {
 		t.Fatalf("inline pastes = %#v, want one image token", pastes)
+	}
+	if got := pastes[0].RawContent; got != imagePlaceholder(1) {
+		t.Fatalf("inline paste raw = %q, want %q", got, imagePlaceholder(1))
 	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments len = %d, want 1", got)

@@ -1307,7 +1307,7 @@ func TestHandleInsertHistoryUpLoadsLastUserMessageIntoComposer(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 
-	if got := m.input.Value(); got != "[Pasted text #1 +11 lines]"+inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != "[Pasted text #1 +11 lines][shot.png]" {
 		t.Fatalf("input value = %q, want inline text placeholder followed by image token", got)
 	}
 	if !m.input.HasInlinePastes() {
@@ -4146,7 +4146,7 @@ func TestForkSessionEventBackfillsTextInlinePastesAndImages(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert after ForkSessionEvent", m.mode)
 	}
-	if got := m.input.Value(); got != "[Pasted text #1 +59 lines]"+inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != "[Pasted text #1 +59 lines][screenshot.png]" {
 		t.Fatalf("input value = %q, want inline paste placeholder followed by image token", got)
 	}
 	if !m.input.HasInlinePastes() {
@@ -4229,7 +4229,7 @@ func TestForkSessionEventSubmitRestoresImageAfterPlainTextEdit(t *testing.T) {
 		t.Fatalf("sent parts = %d, want 2", got)
 	}
 	if got := sent[0].Text; got != "edited what is this?" {
-		t.Fatalf("sent text = %q, want edited prompt", got)
+		t.Fatalf("sent text = %q, want edited prompt without UI-only attachment label", got)
 	}
 	img := sent[1]
 	if img.Type != "image" {
@@ -4266,8 +4266,8 @@ func TestForkSessionEventSubmitKeepsLiteralImageTextAfterPlainTextEdit(t *testin
 	if got := len(sent); got != 2 {
 		t.Fatalf("sent parts = %d, want 2", got)
 	}
-	if got := sent[0].Text; got != "edited literal [image] text"+inlineImagePlaceholderDisplay {
-		t.Fatalf("sent text = %q, want literal text plus visible placeholder", got)
+	if got := sent[0].Text; got != "edited literal [image] text" {
+		t.Fatalf("sent text = %q, want literal text without UI-only attachment label", got)
 	}
 	img := sent[1]
 	if img.Type != "image" {
@@ -4330,7 +4330,7 @@ func TestForkSessionEventBackfillsImagesOnly(t *testing.T) {
 	if got := m.attachments[1].FileName; got != "diagram.png" {
 		t.Fatalf("attachments[1].FileName = %q, want diagram.png", got)
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != "[photo.jpg][diagram.png]" {
 		t.Fatalf("input value = %q, want two inline image placeholders", got)
 	}
 	pastes := m.input.InlinePastes()

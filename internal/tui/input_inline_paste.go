@@ -220,7 +220,11 @@ func (i *Input) InsertLargePaste(content string) bool {
 }
 
 func (i *Input) InsertImagePlaceholder(index int) bool {
-	return i.insertInlinePaste(newInlineImagePlaceholder(index))
+	return i.insertInlinePaste(newInlineImagePlaceholder(index, ""))
+}
+
+func (i *Input) InsertImagePlaceholderWithDisplay(index int, displayText string) bool {
+	return i.insertInlinePaste(newInlineImagePlaceholder(index, displayText))
 }
 
 func (i *Input) InsertStringPreserveInlinePastes(s string) bool {

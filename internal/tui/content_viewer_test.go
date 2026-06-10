@@ -85,6 +85,67 @@ func TestContentViewerCopyWritesRawContent(t *testing.T) {
 	}
 }
 
+func TestContentViewerHandleKeyMsgYYCopiesRawContent(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 100, 20)
+	m.openContentViewer("Done report", "# Finished\n\nAll done.")
+
+	_ = m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("yy should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "View content copied to clipboard" {
+		t.Fatalf("clipboard success = %q", second.success)
+	}
+	if copied != "# Finished\n\nAll done." {
+		t.Fatalf("copied content = %q", copied)
+	}
+}
+
+func TestContentViewerSuperCopyWithoutSelectionCopiesRawContent(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 100, 20)
+	m.openContentViewer("Done report", "# Finished\n\nAll done.")
+
+	cmd := m.handleSuperCopy()
+	if cmd == nil {
+		t.Fatal("copy should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "View content copied to clipboard" {
+		t.Fatalf("clipboard success = %q", second.success)
+	}
+	if copied != "# Finished\n\nAll done." {
+		t.Fatalf("copied content = %q", copied)
+	}
+}
+
 func TestContentViewerCopySelectionThenFullWithYY(t *testing.T) {
 	origWrite := clipboardWriteAll
 	var copied []string

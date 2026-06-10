@@ -74,8 +74,8 @@ func TestPasteMsgPrefersClipboardImageOverText(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected paste handler to return image-added toast cmd")
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"hello" {
-		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay+"hello")
+	if got := m.input.Value(); got != "[image1.png]hello" {
+		t.Fatalf("input value = %q, want %q", got, "[image1.png]hello")
 	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments = %d, want 1", got)
@@ -112,8 +112,8 @@ func TestInsertAttachClipboardPrefersClipboardImageOverText(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected ctrl+v to return image-added toast cmd")
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
-		t.Fatalf("input value = %q, want %q", got, inlineImagePlaceholderDisplay)
+	if got := m.input.Value(); got != "[image1.png]" {
+		t.Fatalf("input value = %q, want %q", got, "[image1.png]")
 	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments = %d, want 1", got)
@@ -161,8 +161,8 @@ func TestPasteImageDeduplicatesKeyAndPasteMsg(t *testing.T) {
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments after duplicate PasteMsg = %d, want 1", got)
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
-		t.Fatalf("input value after duplicate PasteMsg = %q, want %q", got, inlineImagePlaceholderDisplay)
+	if got := m.input.Value(); got != "[image1.png]" {
+		t.Fatalf("input value after duplicate PasteMsg = %q, want %q", got, "[image1.png]")
 	}
 }
 
@@ -196,8 +196,8 @@ func TestPasteImageDeduplicatesPasteMsgAndKey(t *testing.T) {
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments after PasteMsg = %d, want 1", got)
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"clipboard text" {
-		t.Fatalf("input value after PasteMsg = %q, want %q", got, inlineImagePlaceholderDisplay+"clipboard text")
+	if got := m.input.Value(); got != "[image1.png]clipboard text" {
+		t.Fatalf("input value after PasteMsg = %q, want %q", got, "[image1.png]clipboard text")
 	}
 
 	cmd = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
@@ -207,8 +207,8 @@ func TestPasteImageDeduplicatesPasteMsgAndKey(t *testing.T) {
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments after duplicate ctrl+v = %d, want 1", got)
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"clipboard text" {
-		t.Fatalf("input value after duplicate ctrl+v = %q, want %q", got, inlineImagePlaceholderDisplay+"clipboard text")
+	if got := m.input.Value(); got != "[image1.png]clipboard text" {
+		t.Fatalf("input value after duplicate ctrl+v = %q, want %q", got, "[image1.png]clipboard text")
 	}
 }
 
@@ -250,7 +250,7 @@ func TestPasteImageSecondPasteAddsOneAttachment(t *testing.T) {
 	if got := m.attachments[1].FileName; got != "image2.jpg" {
 		t.Fatalf("second attachment name = %q, want image2.jpg", got)
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != "[image1.jpg][image2.jpg]" {
 		t.Fatalf("input value after second ctrl+v = %q, want two placeholders", got)
 	}
 }
@@ -283,7 +283,7 @@ func TestPasteImageAfterPDFUsesNextInlineImageOrdinal(t *testing.T) {
 	if len(pastes) != 1 || pastes[0].RawContent != imagePlaceholder(1) {
 		t.Fatalf("inline image paste = %#v, want image1 placeholder", pastes)
 	}
-	parts := interleaveImageAttachments([]message.ContentPart{{Type: "text", Text: imagePlaceholder(1), DisplayText: inlineImagePlaceholderDisplay, InlineToken: inlineImageTokenMarker}}, m.attachments)
+	parts := interleaveAttachments([]message.ContentPart{{Type: "text", Text: imagePlaceholder(1), DisplayText: "[image1.png]", InlineToken: inlineImageTokenMarker}}, m.attachments)
 	if len(parts) != 2 {
 		t.Fatalf("interleaved parts len = %d, want 2", len(parts))
 	}
