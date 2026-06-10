@@ -160,9 +160,9 @@ func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBa
 	var notes []string
 	if stale {
 		if stalePaths > 1 {
-			notes = append(notes, "Warning: one or more files changed on disk since they were last observed; the tool validated current contents before writing and continued.")
+			notes = append(notes, "Warning: one or more files changed on disk since their last tracked snapshot; the tool validated current contents before writing and continued.")
 		} else {
-			notes = append(notes, "Warning: the file changed on disk since it was last observed; the tool validated current contents before writing and continued.")
+			notes = append(notes, "Warning: the file changed on disk since its last tracked snapshot; the tool validated current contents before writing and continued.")
 		}
 	}
 	for _, backup := range outcome.Records {

@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestMainAgent_EditRequiresObservationFirst(t *testing.T) {
+func TestMainAgent_EditCanPatchFileWithoutPriorSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -37,30 +37,22 @@ func TestMainAgent_EditRequiresObservationFirst(t *testing.T) {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
 	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.PreFilePath != "" || result.PreContent != "" || result.PreExisted {
-		t.Fatalf("unread Edit captured pre-write state before read precondition: path=%q existed=%v content=%q", result.PreFilePath, result.PreExisted, result.PreContent)
-	}
-
-	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
-		t.Fatalf("Marshal read args: %v", err)
+		t.Fatalf("Edit without Read failed: %v", err)
 	}
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-1", Name: tools.NameRead, Args: readArgs}); err != nil {
-		t.Fatalf("Read failed: %v", err)
+	if result.PreFilePath == "" || result.PreContent != "before" || !result.PreExisted {
+		t.Fatalf("unread Edit pre-write state = path %q existed %v content %q, want captured before content", result.PreFilePath, result.PreExisted, result.PreContent)
 	}
-
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: patchArgs}); err != nil {
-		t.Fatalf("Edit after Read failed: %v", err)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "after" {
+		t.Fatalf("file content = %q, want after", got)
 	}
 }
 
-func TestMainAgent_FailedUnreadEditDoesNotGrantObservation(t *testing.T) {
+func TestMainAgent_FailedEditWithoutReadDoesNotModifyFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -70,15 +62,20 @@ func TestMainAgent_FailedUnreadEditDoesNotGrantObservation(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.EditTool{})
 
-	for i := 0; i < 2; i++ {
-		err := executeEdit(t, a, path, "before", "after")
-		if err == nil || !strings.Contains(err.Error(), "has not been observed") {
-			t.Fatalf("attempt %d error = %v, want unread-file error", i+1, err)
-		}
+	err := executeEdit(t, a, path, "missing", "after")
+	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("error = %v, want hunk-not-found error", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "before" {
+		t.Fatalf("file content = %q, want unchanged before", got)
 	}
 }
 
-func TestMainAgent_EditAfterWriteUsesWriteAsObservation(t *testing.T) {
+func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 
@@ -103,12 +100,20 @@ func TestMainAgent_EditAfterWriteUsesWriteAsObservation(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
+	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+		t.Fatalf("external WriteFile: %v", err)
+	}
+
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
+	if err != nil {
 		t.Fatalf("Edit after Write failed: %v", err)
+	}
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
+		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -119,7 +124,7 @@ func TestMainAgent_EditAfterWriteUsesWriteAsObservation(t *testing.T) {
 	}
 }
 
-func TestMainAgent_EditAfterFileMentionObservation(t *testing.T) {
+func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
@@ -138,13 +143,20 @@ func TestMainAgent_EditAfterFileMentionObservation(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.EditTool{})
 	a.recordCommittedUserMessage(message.Message{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: `<file path="` + path + `">` + "\nbefore\n</file>"}}})
+	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+		t.Fatalf("external WriteFile: %v", err)
+	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
+	if err != nil {
 		t.Fatalf("Edit after @file mention failed: %v", err)
+	}
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
+		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 }
 

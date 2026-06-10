@@ -77,11 +77,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err != nil {
 		return execResult, err
 	}
-	if tc.Name == tools.NameEdit {
-		if err := ensureTrackedEditPreconditions(p.fileTrack, p.agentID, trackedFilePath, tc.Name); err != nil {
-			return execResult, wrapTrackedWriteError(err)
-		}
-	}
 	if deleteLocks != nil {
 		defer deleteLocks.Release()
 	}
@@ -128,13 +123,6 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
-	}
-	if tc.Name == tools.NameEdit {
-		if path := tools.ExtractEditPathFromArgsInDir(tc.Args, p.projectRoot); path != "" {
-			if err := ensureTrackedEditPreconditions(p.fileTrack, p.agentID, path, tc.Name); err != nil {
-				return execResult, wrapTrackedWriteError(err)
-			}
-		}
 	}
 	hooks, err := prepareSpeculativeToolCall(tc, p.fileTrack, p.agentID, p.projectRoot)
 	if err != nil {
@@ -315,7 +303,7 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 		execResult.FileState = buildReadFileState(trackedFilePath)
 		if p.fileTrack != nil {
 			if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
-				p.fileTrack.TrackRead(trackedFilePath, p.agentID, hash)
+				p.fileTrack.TrackSnapshot(trackedFilePath, p.agentID, hash)
 			}
 		}
 		return
@@ -324,7 +312,7 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 		execResult.FileState = buildWriteFileState(trackedFilePath)
 		if p.fileTrack != nil {
 			if hash := firstWriteHashForPath(execResult.FileState, trackedFilePath); hash != "" {
-				p.fileTrack.TrackRead(trackedFilePath, p.agentID, hash)
+				p.fileTrack.TrackSnapshot(trackedFilePath, p.agentID, hash)
 			}
 		}
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(p.registry, tc.Name, trackedFilePath)
@@ -547,5 +535,5 @@ func commitPromotedReadToolSideEffects(track *filelock.FileTracker, agentID, too
 	if hash == "" {
 		hash = computeFileHash(parsed.Path)
 	}
-	track.TrackRead(parsed.Path, agentID, hash)
+	track.TrackSnapshot(parsed.Path, agentID, hash)
 }

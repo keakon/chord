@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestTrackReadAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
+func TestTrackSnapshotAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
 	ft := NewFileTracker()
 	dir := t.TempDir()
 	oldwd, err := os.Getwd()
@@ -28,12 +28,12 @@ func TestTrackReadAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
 		t.Fatalf("Abs: %v", err)
 	}
 
-	ft.TrackRead(pathA, "agent-1", "hash-v1")
-	if !ft.HasRead(pathB, "agent-1") {
-		t.Fatal("HasRead should treat equivalent relative spellings as the same file")
+	ft.TrackSnapshot(pathA, "agent-1", "hash-v1")
+	if !ft.HasSnapshot(pathB, "agent-1") {
+		t.Fatal("HasSnapshot should treat equivalent relative spellings as the same file")
 	}
-	if !ft.HasRead(absPath, "agent-1") {
-		t.Fatal("HasRead should treat equivalent relative and absolute spellings as the same file")
+	if !ft.HasSnapshot(absPath, "agent-1") {
+		t.Fatal("HasSnapshot should treat equivalent relative and absolute spellings as the same file")
 	}
 	if err := ft.AcquireWrite(pathB, "agent-1", "hash-v1"); err != nil {
 		t.Fatalf("AcquireWrite with equivalent relative path: %v", err)
@@ -44,13 +44,13 @@ func TestTrackReadAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
 	}
 }
 
-func TestTrackRead_ConcurrentReads(t *testing.T) {
+func TestTrackSnapshot_ConcurrentReads(t *testing.T) {
 	ft := NewFileTracker()
 
 	// Multiple agents can read the same file without conflict.
-	ft.TrackRead("main.go", "agent-1", "hash-abc")
-	ft.TrackRead("main.go", "agent-2", "hash-abc")
-	ft.TrackRead("main.go", "agent-3", "hash-abc")
+	ft.TrackSnapshot("main.go", "agent-1", "hash-abc")
+	ft.TrackSnapshot("main.go", "agent-2", "hash-abc")
+	ft.TrackSnapshot("main.go", "agent-3", "hash-abc")
 
 	// Same agent can acquire and release without conflict.
 	if err := ft.AcquireWrite("main.go", "agent-1", "hash-abc"); err != nil {
@@ -111,7 +111,7 @@ func TestAcquireWrite_ReadModifyWriteDetection(t *testing.T) {
 	ft := NewFileTracker()
 
 	// agent-1 reads the file.
-	ft.TrackRead("main.go", "agent-1", "hash-v1")
+	ft.TrackSnapshot("main.go", "agent-1", "hash-v1")
 
 	// agent-2 writes and changes the file content.
 	if err := ft.AcquireWrite("main.go", "agent-2", "hash-v1"); err != nil {
@@ -120,12 +120,12 @@ func TestAcquireWrite_ReadModifyWriteDetection(t *testing.T) {
 	ft.ReleaseWrite("main.go", "agent-2", "hash-v2")
 
 	// agent-1 now tries to write — should detect stale read.
-	// The currentHash is "hash-v2" (what's on disk), but agent-1's read hash
-	// was invalidated by ReleaseWrite, so the readHashes entry was deleted.
+	// The currentHash is "hash-v2" (what's on disk), but agent-1's snapshot hash
+	// was invalidated by ReleaseWrite, so the snapshotHashes entry was deleted.
 	// agent-1 needs to re-read the file to get a fresh hash.
 
 	// Re-read scenario: agent-1 reads again with old hash → trackRead updates.
-	ft.TrackRead("main.go", "agent-1", "hash-v2")
+	ft.TrackSnapshot("main.go", "agent-1", "hash-v2")
 	if err := ft.AcquireWrite("main.go", "agent-1", "hash-v2"); err != nil {
 		t.Fatalf("agent-1 with fresh read should succeed: %v", err)
 	}
@@ -136,8 +136,8 @@ func TestAcquireWrite_StaleReadDetection(t *testing.T) {
 	ft := NewFileTracker()
 
 	// agent-1 and agent-2 both read the file.
-	ft.TrackRead("main.go", "agent-1", "hash-v1")
-	ft.TrackRead("main.go", "agent-2", "hash-v1")
+	ft.TrackSnapshot("main.go", "agent-1", "hash-v1")
+	ft.TrackSnapshot("main.go", "agent-2", "hash-v1")
 
 	// agent-2 writes, changing the content.
 	if err := ft.AcquireWrite("main.go", "agent-2", "hash-v1"); err != nil {
@@ -145,7 +145,7 @@ func TestAcquireWrite_StaleReadDetection(t *testing.T) {
 	}
 	ft.ReleaseWrite("main.go", "agent-2", "hash-v2")
 
-	// agent-1's read hash was invalidated by ReleaseWrite (empty sentinel).
+	// agent-1's snapshot hash was invalidated by ReleaseWrite (empty sentinel).
 	status, err := ft.AcquireWriteStatus("main.go", "agent-1", "hash-v2")
 	if err != nil {
 		t.Fatalf("stale read should warn but still acquire: %v", err)
@@ -156,7 +156,7 @@ func TestAcquireWrite_StaleReadDetection(t *testing.T) {
 	ft.AbortWrite("main.go", "agent-1")
 
 	ft2 := NewFileTracker()
-	ft2.TrackRead("f.go", "a1", "h1")
+	ft2.TrackSnapshot("f.go", "a1", "h1")
 	status, err = ft2.AcquireWriteStatus("f.go", "a1", "h2")
 	if err != nil {
 		t.Fatalf("external modification should warn but still acquire: %v", err)
@@ -170,8 +170,8 @@ func TestReleaseAll_Cleanup(t *testing.T) {
 	ft := NewFileTracker()
 
 	// agent-1 reads and writes multiple files.
-	ft.TrackRead("a.go", "agent-1", "ha")
-	ft.TrackRead("b.go", "agent-1", "hb")
+	ft.TrackSnapshot("a.go", "agent-1", "ha")
+	ft.TrackSnapshot("b.go", "agent-1", "hb")
 	if err := ft.AcquireWrite("a.go", "agent-1", "ha"); err != nil {
 		t.Fatalf("acquire a.go: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestReleaseAll_Cleanup(t *testing.T) {
 	}
 
 	// agent-2 also has a read on a.go.
-	ft.TrackRead("a.go", "agent-2", "ha")
+	ft.TrackSnapshot("a.go", "agent-2", "ha")
 
 	// Release all for agent-1.
 	ft.ReleaseAll("agent-1")
@@ -199,12 +199,12 @@ func TestReleaseAll_Cleanup(t *testing.T) {
 func TestReleaseAll_CleansUpEmptyReadHashes(t *testing.T) {
 	ft := NewFileTracker()
 
-	ft.TrackRead("solo.go", "agent-1", "h1")
+	ft.TrackSnapshot("solo.go", "agent-1", "h1")
 	ft.ReleaseAll("agent-1")
 
-	// Internal state: readHashes["solo.go"] should be fully removed.
+	// Internal state: snapshotHashes["solo.go"] should be fully removed.
 	// Verify by having agent-2 track and write — should not see stale entries.
-	ft.TrackRead("solo.go", "agent-2", "h1")
+	ft.TrackSnapshot("solo.go", "agent-2", "h1")
 	if err := ft.AcquireWrite("solo.go", "agent-2", "h1"); err != nil {
 		t.Fatalf("agent-2 should write after full cleanup: %v", err)
 	}
@@ -213,8 +213,8 @@ func TestReleaseAll_CleansUpEmptyReadHashes(t *testing.T) {
 func TestReleaseWrite_InvalidatesOtherReadHashes(t *testing.T) {
 	ft := NewFileTracker()
 
-	ft.TrackRead("f.go", "agent-1", "v1")
-	ft.TrackRead("f.go", "agent-2", "v1")
+	ft.TrackSnapshot("f.go", "agent-1", "v1")
+	ft.TrackSnapshot("f.go", "agent-2", "v1")
 
 	// agent-1 writes.
 	if err := ft.AcquireWrite("f.go", "agent-1", "v1"); err != nil {
@@ -222,13 +222,13 @@ func TestReleaseWrite_InvalidatesOtherReadHashes(t *testing.T) {
 	}
 	ft.ReleaseWrite("f.go", "agent-1", "v2")
 
-	// agent-1's own read hash should be updated to v2.
+	// agent-1's own snapshot hash should be updated to v2.
 	if err := ft.AcquireWrite("f.go", "agent-1", "v2"); err != nil {
 		t.Fatalf("agent-1 should re-acquire with v2: %v", err)
 	}
 	ft.ReleaseWrite("f.go", "agent-1", "v2")
 
-	// agent-2's read hash was set to "" sentinel by ReleaseWrite.
+	// agent-2's snapshot hash was set to "" sentinel by ReleaseWrite.
 	// They can acquire, but the status reports stale/external changes.
 	status, err := ft.AcquireWriteStatus("f.go", "agent-2", "v2")
 	if err != nil {
@@ -240,7 +240,7 @@ func TestReleaseWrite_InvalidatesOtherReadHashes(t *testing.T) {
 	ft.AbortWrite("f.go", "agent-2")
 
 	// agent-2 must re-read the file first, then can write.
-	ft.TrackRead("f.go", "agent-2", "v2")
+	ft.TrackSnapshot("f.go", "agent-2", "v2")
 	if err := ft.AcquireWrite("f.go", "agent-2", "v2"); err != nil {
 		t.Fatalf("agent-2 should be able to write after re-reading: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			agentID := fmt.Sprintf("agent-%d", id)
-			ft.TrackRead("shared.go", agentID, "h1")
+			ft.TrackSnapshot("shared.go", agentID, "h1")
 		}(i)
 	}
 

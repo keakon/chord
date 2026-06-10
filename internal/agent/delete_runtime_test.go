@@ -48,7 +48,7 @@ func TestAcquireDeleteLocksLocksExistingPathsAndReleaseAborts(t *testing.T) {
 func TestAcquireDeleteLocksReportsStaleRead(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "stale.txt", "before")
-	tracker.TrackRead(path, "main", computeFileHash(path))
+	tracker.TrackSnapshot(path, "main", computeFileHash(path))
 	if err := os.WriteFile(path, []byte("external"), 0o644); err != nil {
 		t.Fatalf("WriteFile external: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDeleteLockCommitInvalidatesOtherReaders(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "deleted.txt", "before")
 	otherHash := computeFileHash(path)
-	tracker.TrackRead(path, "other", otherHash)
+	tracker.TrackSnapshot(path, "other", otherHash)
 
 	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path))
 	if err != nil {
@@ -105,7 +105,7 @@ func TestDeleteLockCommitInvalidatesOtherReaders(t *testing.T) {
 	}
 	defer tracker.AbortWrite(path, "other")
 	if !status.ExternalChanged {
-		t.Fatal("committed delete release should invalidate another agent's read hash")
+		t.Fatal("committed delete release should invalidate another agent's snapshot hash")
 	}
 }
 

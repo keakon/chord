@@ -238,16 +238,6 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 - pay special attention to whether the issue starts after long-running background jobs or durable status updates in a long session
 - if it still reproduces, capture a screenshot and logs so the transcript state can be compared with the rendered bottom rows
 
-## Edit reports `file ... has not been observed in this conversation`
-
-Chord requires `edit` to have an observed target file earlier in the conversation. An observation can come from `read`, a successful `write`/`edit` in the same session, or a system-resolved `@file` mention. Mentions may be truncated, so use `read` when you need more surrounding context.
-
-If you see this error:
-
-- run `read` on the target file or mention it with `@file` first;
-- retry with a small patch hunk that has enough unique `@@` context;
-- re-read the smallest unique 2-4 line block before retrying if any earlier edit or external tool may have changed the file.
-
 ## A file-edit tool warns that the file changed since it was observed
 
 This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `edit` still validates hunks against the current file contents, while `write` and `delete` back up risky non-empty pre-write contents before continuing.

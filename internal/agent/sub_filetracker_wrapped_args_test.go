@@ -77,7 +77,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 	}
 }
 
-func TestSubAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
+func TestSubAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -111,6 +111,6 @@ func TestSubAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAs
 		t.Fatalf("Marshal patch args: %v", err)
 	}
 	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}, false); err != nil {
-		t.Fatalf("equivalent paths should satisfy read precondition: %v", err)
+		t.Fatalf("Edit failed: %v", err)
 	}
 }

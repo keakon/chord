@@ -1866,6 +1866,30 @@ func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
 	}
 }
 
+func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
+		ResultContent: "hunk not found. No files were modified",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	for _, want := range []string{
+		"# Tool call: edit",
+		"foo.txt",
+		"## Result\n\nhunk not found. No files were modified",
+		"## Diff\n\n```diff\n@@\n-old\n+new\n```",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("copied edit block missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
 func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *testing.T) {
 	block := &Block{
 		ID:            1,

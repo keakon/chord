@@ -36,8 +36,7 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 		"everything after that first line is exact file text without line-number gutters or extra indentation",
 		"copy only the text after READ_RESULT into edit hunks",
 		"approximate 20k-token read budget",
-		"Before edit, the file must have been observed via read or a system-resolved @file mention",
-		"read the intended nearby block before patching",
+		"if you need more surrounding context, read the intended nearby block before patching",
 		"For edit, include a few unchanged source lines around the intended change",
 		"read output normalizes line endings to LF",
 	} {

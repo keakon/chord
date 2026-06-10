@@ -95,12 +95,11 @@ type restoreReadCandidate struct {
 	durable bool
 }
 
-// restoreTrackedFileStateFromMessages rebuilds the tracked-read safety
-// sentinel from durable tool metadata persisted in prior session messages.
-// Restored reads are attached to the current runtime agentID rather than the
-// historical main/subagent IDs that originally produced them, so a restored
-// session regains the conversation-level edit precondition in the current
-// runtime without replaying the old execution topology.
+// restoreTrackedFileStateFromMessages rebuilds tracked file snapshots from
+// durable tool metadata persisted in prior session messages. Restored snapshots
+// are attached to the current runtime agentID rather than the historical
+// main/subagent IDs that originally produced them, so stale/external-change
+// detection continues without replaying the old execution topology.
 func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID string, messages []message.Message) restoreTrackedFileStateResult {
 	var result restoreTrackedFileStateResult
 	if tracker == nil || strings.TrimSpace(agentID) == "" || len(messages) == 0 {
@@ -234,7 +233,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 			continue
 		}
 		current := computeFileHash(candidate.path)
-		tracker.TrackRead(candidate.path, agentID, candidate.hash)
+		tracker.TrackSnapshot(candidate.path, agentID, candidate.hash)
 		if current != "" && current == candidate.hash {
 			result.RestoredUsable++
 		} else {

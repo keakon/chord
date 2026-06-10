@@ -24,7 +24,7 @@ func (a *MainAgent) trackObservedFileParts(parts []message.ContentPart) {
 			continue
 		}
 		if hash := computeFileHash(path); hash != "" {
-			a.fileTrack.TrackRead(path, a.instanceID, hash)
+			a.fileTrack.TrackSnapshot(path, a.instanceID, hash)
 		}
 	}
 }

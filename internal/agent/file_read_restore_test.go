@@ -50,7 +50,7 @@ func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *test
 	mustExecuteEdit(t, a, path, "changed", "after")
 }
 
-func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
+func TestRestoreTrackedFileStateFailedReadDoesNotRestoreUsableRead(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
@@ -65,9 +65,8 @@ func TestRestoreTrackedFileStateFailedReadDoesNotGrantEdit(t *testing.T) {
 		t.Fatalf("restore result = %+v, want no usable restore", result)
 	}
 
-	err := executeEdit(t, a, path, "before", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("edit error = %v, want unread-file error", err)
+	if a.fileTrack.HasSnapshot(path, a.instanceID) {
+		t.Fatal("failed read should not restore a usable tracked snapshot")
 	}
 }
 
@@ -101,13 +100,13 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 		t.Fatalf("restore result = %+v, want real path restored", result)
 	}
 
-	if err := executeEdit(t, a, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("old path edit error = %v, want unread-file error", err)
+	if a.fileTrack.HasSnapshot(oldPath, a.instanceID) {
+		t.Fatal("original args path should not be restored as a tracked snapshot")
 	}
 	mustExecuteEdit(t, a, realPath, "real", "updated")
 }
 
-func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T) {
+func TestRestoreTrackedFileStateImportedProvenanceDoesNotRestoreUsableRead(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "before")
@@ -120,9 +119,8 @@ func TestRestoreTrackedFileStateImportedProvenanceDoesNotGrantEdit(t *testing.T)
 		t.Fatalf("restore result = %+v, want no imported restore", result)
 	}
 
-	err := executeEdit(t, a, path, "before", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("edit error = %v, want unread-file error", err)
+	if a.fileTrack.HasSnapshot(path, a.instanceID) {
+		t.Fatal("imported provenance should not restore a usable tracked snapshot")
 	}
 }
 
@@ -148,9 +146,8 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 		t.Fatalf("restore result = %+v, want delete to remove candidate", result)
 	}
 
-	err := executeEdit(t, a, path, "recreated", "after")
-	if err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("edit error = %v, want unread-file error", err)
+	if a.fileTrack.HasSnapshot(path, a.instanceID) {
+		t.Fatal("delete should remove restored tracked snapshot candidate")
 	}
 }
 
@@ -188,7 +185,7 @@ func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T
 	a := newRestoreEditTestAgent(t, projectRoot)
 	otherPath := filepath.Join(projectRoot, "other.txt")
 	writeTestFile(t, otherPath, "other")
-	a.fileTrack.TrackRead(otherPath, a.instanceID, computeFileHash(otherPath))
+	a.fileTrack.TrackSnapshot(otherPath, a.instanceID, computeFileHash(otherPath))
 
 	loaded := &loadedSessionState{
 		SessionPath: filepath.Join(projectRoot, ".chord", "sessions", "loaded"),
@@ -200,8 +197,8 @@ func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T
 	a.activateLoadedSession(loaded)
 
 	mustExecuteEdit(t, a, path, "before", "after")
-	if err := executeEdit(t, a, otherPath, "other", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("other path edit error = %v, want tracker reset to drop old session", err)
+	if a.fileTrack.HasSnapshot(otherPath, a.instanceID) {
+		t.Fatal("loaded session activation should reset old session tracked snapshot")
 	}
 }
 
@@ -281,8 +278,8 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want one usable restore from persisted effective args", result)
 	}
-	if err := executeEdit(t, b, oldPath, "old", "updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("old path edit error = %v, want unread-file error", err)
+	if b.fileTrack.HasSnapshot(oldPath, b.instanceID) {
+		t.Fatal("original hook args path should not be restored as a tracked snapshot")
 	}
 	mustExecuteEdit(t, b, realPath, "real", "updated")
 }

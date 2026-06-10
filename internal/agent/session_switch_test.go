@@ -637,7 +637,7 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.fileTrack.TrackRead(betaPath, a.instanceID, computeFileHash(betaPath))
+	a.fileTrack.TrackSnapshot(betaPath, a.instanceID, computeFileHash(betaPath))
 
 	msgs := []message.Message{{Role: "user", Content: "read alpha"}}
 	msgs = append(msgs, restoreReadMessages(t, "read-alpha", alphaPath, computeFileHash(alphaPath), nil)...)
@@ -657,11 +657,8 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 	a.handleForkSessionCommand(3)
 
 	mustExecuteEdit(t, a, alphaPath, "alpha", "alpha-updated")
-	if a.fileTrack.HasRead(betaPath, a.instanceID) {
-		t.Fatal("fork should not preserve tracked reads that occur after the fork prefix")
-	}
-	if err := executeEdit(t, a, betaPath, "beta", "beta-updated"); err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("beta edit error = %v, want unread-file error after fork", err)
+	if a.fileTrack.HasSnapshot(betaPath, a.instanceID) {
+		t.Fatal("fork should not preserve tracked snapshots that occur after the fork prefix")
 	}
 }
 
@@ -946,8 +943,8 @@ func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
 	if gotMsgs[2].Role != "tool" {
 		t.Fatalf("last remaining message = %+v, want tool result before removed tail user message", gotMsgs[2])
 	}
-	if !a.fileTrack.HasRead(alphaPath, a.instanceID) {
-		t.Fatal("tracked read for prefix message should be preserved after in-place tail edit")
+	if !a.fileTrack.HasSnapshot(alphaPath, a.instanceID) {
+		t.Fatal("tracked snapshot for prefix message should be preserved after in-place tail edit")
 	}
 
 	persisted, err := a.recovery.LoadMessages("main")

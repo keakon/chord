@@ -11,7 +11,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestMainAgent_EditRequiresPriorRead(t *testing.T) {
+func TestMainAgent_EditAllowsWrappedArgsWithoutPriorSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
 	oldWD, err := os.Getwd()
 	if err != nil {
@@ -34,21 +34,19 @@ func TestMainAgent_EditRequiresPriorRead(t *testing.T) {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
 	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
-	if err == nil {
-		t.Fatal("expected Edit precondition error")
+	if err != nil {
+		t.Fatalf("Edit without prior Read failed: %v", err)
 	}
-	for _, want := range []string{
-		"has not been observed in this conversation",
-		"use Read or a system-resolved @file mention before Edit",
-		"small unique patch hunk",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("err = %q, want substring %q", err.Error(), want)
-		}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if got := string(data); got != "after" {
+		t.Fatalf("file content = %q, want after", got)
 	}
 }
 
-func TestMainAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
+func TestMainAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSameFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -81,7 +79,7 @@ func TestMainAgent_EditReadPreconditionTreatsEquivalentRelativeAndAbsolutePathsA
 		t.Fatalf("Marshal patch args: %v", err)
 	}
 	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
-		t.Fatalf("equivalent paths should satisfy read precondition: %v", err)
+		t.Fatalf("Edit failed: %v", err)
 	}
 }
 

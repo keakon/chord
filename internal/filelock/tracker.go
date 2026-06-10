@@ -13,8 +13,7 @@ import (
 )
 
 // ConflictError is returned when a file write conflicts with another agent's
-// concurrent write, or when another agent invalidated this agent's read
-// sentinel (empty read hash) before a write.
+// concurrent write.
 type ConflictError struct {
 	Path       string // file path that caused the conflict
 	ModifiedBy string // agent ID that holds the conflicting lock (write-write only)
@@ -22,15 +21,6 @@ type ConflictError struct {
 }
 
 func (e *ConflictError) Error() string { return e.Message }
-
-// UnreadFileError is returned when Edit attempts to modify a file that this
-// agent has not successfully Read in the current conversation.
-type UnreadFileError struct {
-	Path    string
-	Message string
-}
-
-func (e *UnreadFileError) Error() string { return e.Message }
 
 // WriteStatus reports non-blocking risk detected while acquiring a write lock.
 type WriteStatus struct {
@@ -84,25 +74,24 @@ type FileTracker struct {
 	mu sync.Mutex
 	// file path → agent ID currently holding write permission
 	writers map[string]string
-	// file path → agent ID → content hash recorded by in-process agent at read time
-	readHashes map[string]map[string]string
-	// file path → agent ID → actual disk hash recorded when agent last read the file
-	diskHashes map[string]map[string]string
+	// file path → agent ID → content hash recorded by in-process agent at snapshot time
+	snapshotHashes map[string]map[string]string
+	// file path → agent ID → actual disk hash recorded when the snapshot was taken
+	diskSnapshotHashes map[string]map[string]string
 }
 
 // NewFileTracker creates a new FileTracker with empty state.
 func NewFileTracker() *FileTracker {
 	return &FileTracker{
-		writers:    make(map[string]string),
-		readHashes: make(map[string]map[string]string),
-		diskHashes: make(map[string]map[string]string),
+		writers:            make(map[string]string),
+		snapshotHashes:     make(map[string]map[string]string),
+		diskSnapshotHashes: make(map[string]map[string]string),
 	}
 }
 
-// TrackRead records the content hash that an agent observed when reading a
-// file. This forms the basis for optimistic lock detection and external
-// modification detection.
-func (t *FileTracker) TrackRead(path, agentID, contentHash string) {
+// TrackSnapshot records the content hash that an agent observed for a file. This
+// forms the basis for optimistic stale/external modification detection.
+func (t *FileTracker) TrackSnapshot(path, agentID, contentHash string) {
 	path = normalizeTrackedPath(path)
 	if path == "" {
 		return
@@ -110,22 +99,21 @@ func (t *FileTracker) TrackRead(path, agentID, contentHash string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.readHashes[path] == nil {
-		t.readHashes[path] = make(map[string]string)
+	if t.snapshotHashes[path] == nil {
+		t.snapshotHashes[path] = make(map[string]string)
 	}
-	t.readHashes[path][agentID] = contentHash
+	t.snapshotHashes[path][agentID] = contentHash
 
-	if t.diskHashes[path] == nil {
-		t.diskHashes[path] = make(map[string]string)
+	if t.diskSnapshotHashes[path] == nil {
+		t.diskSnapshotHashes[path] = make(map[string]string)
 	}
-	t.diskHashes[path][agentID] = contentHash
+	t.diskSnapshotHashes[path][agentID] = contentHash
 }
 
-// HasRead reports whether the given agent has a recorded successful Read for
-// path in the current tracker state. It returns true even if the agent's read
-// hash was later invalidated to a stale-read sentinel (""), since the agent
-// still needs to re-read before writing.
-func (t *FileTracker) HasRead(path, agentID string) bool {
+// HasSnapshot reports whether the given agent has a recorded snapshot for path in
+// the current tracker state. It returns true even if the snapshot hash was later
+// invalidated to a stale sentinel ("").
+func (t *FileTracker) HasSnapshot(path, agentID string) bool {
 	if t == nil {
 		return false
 	}
@@ -135,7 +123,7 @@ func (t *FileTracker) HasRead(path, agentID string) bool {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if hashes, ok := t.readHashes[path]; ok {
+	if hashes, ok := t.snapshotHashes[path]; ok {
 		_, tracked := hashes[agentID]
 		return tracked
 	}
@@ -170,7 +158,7 @@ func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (Wri
 	t.mu.Lock()
 	var diskReadHash string
 	var checkExternal bool
-	if dh, ok := t.diskHashes[path]; ok {
+	if dh, ok := t.diskSnapshotHashes[path]; ok {
 		if h, tracked := dh[agentID]; tracked && h != "" {
 			diskReadHash = h
 			checkExternal = true
@@ -196,10 +184,10 @@ func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (Wri
 		}
 	}
 
-	// Stale read: tracked content hash for this agent does not match the hash
+	// Stale snapshot: tracked content hash for this agent does not match the hash
 	// the caller sees now (typically the current on-disk file).
-	if hashes, ok := t.readHashes[path]; ok {
-		if readHash, tracked := hashes[agentID]; tracked && currentHash != readHash {
+	if hashes, ok := t.snapshotHashes[path]; ok {
+		if snapshotHash, tracked := hashes[agentID]; tracked && currentHash != snapshotHash {
 			status.ExternalChanged = true
 		}
 	}
@@ -207,7 +195,7 @@ func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (Wri
 	// External modification detection.
 	// Re-check diskReadHash under the new lock acquisition (state may have changed).
 	if checkExternal {
-		if dh, ok := t.diskHashes[path]; ok {
+		if dh, ok := t.diskSnapshotHashes[path]; ok {
 			if currentStoredHash, tracked := dh[agentID]; tracked {
 				diskReadHash = currentStoredHash
 			}
@@ -238,8 +226,7 @@ func (t *FileTracker) AbortWrite(path, agentID string) {
 }
 
 // ReleaseWrite releases write permission for a single file and invalidates
-// other agents' read hashes for that file (so they will detect stale reads
-// if they attempt to write).
+// other agents' snapshots for that file so later writes report stale risk.
 func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
 	path = normalizeTrackedPath(path)
 	if path == "" {
@@ -252,13 +239,13 @@ func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
 		delete(t.writers, path)
 	}
 
-	// Update the writer's own read hash to reflect the new content.
-	if hashes, ok := t.readHashes[path]; ok {
+	// Update the writer's own snapshot to reflect the new content.
+	if hashes, ok := t.snapshotHashes[path]; ok {
 		hashes[agentID] = newHash
-		// Invalidate other agents' read hashes by setting them to an empty
-		// sentinel value. This ensures AcquireWrite detects stale reads
+		// Invalidate other agents' snapshots by setting them to an empty
+		// sentinel value. This ensures AcquireWrite detects stale snapshots
 		// (empty sentinel never matches any real content hash) while
-		// preserving the evidence that the other agent had read the file.
+		// preserving evidence that the other agent had a snapshot.
 		for otherAgent := range hashes {
 			if otherAgent != agentID {
 				hashes[otherAgent] = ""
@@ -267,7 +254,7 @@ func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
 	}
 
 	// Update disk hashes similarly.
-	if dh, ok := t.diskHashes[path]; ok {
+	if dh, ok := t.diskSnapshotHashes[path]; ok {
 		dh[agentID] = newHash
 		for otherAgent := range dh {
 			if otherAgent != agentID {
@@ -277,7 +264,7 @@ func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
 	}
 }
 
-// ReleaseAll releases all write permissions and read tracking for the given
+// ReleaseAll releases all write permissions and snapshot tracking for the given
 // agent. This should be called when an agent completes or errors out.
 func (t *FileTracker) ReleaseAll(agentID string) {
 	t.mu.Lock()
@@ -289,11 +276,11 @@ func (t *FileTracker) ReleaseAll(agentID string) {
 		}
 	}
 
-	for _, hashes := range t.readHashes {
+	for _, hashes := range t.snapshotHashes {
 		delete(hashes, agentID)
 	}
 
-	for _, dh := range t.diskHashes {
+	for _, dh := range t.diskSnapshotHashes {
 		delete(dh, agentID)
 	}
 }

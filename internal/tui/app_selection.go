@@ -562,8 +562,29 @@ func toolCallMarkdownContent(b *Block) string {
 	if toolNameKey(toolName) == tools.NameDone {
 		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
 	}
+	if toolNameKey(toolName) == tools.NameEdit {
+		return editToolCallMarkdownContent(b)
+	}
 
 	return convformat.ToolCallMarkdown(b.ToolName, b.Content, toolExpandedResultContent(b.ToolName, b.ResultContent), b.Diff)
+}
+
+func editToolCallMarkdownContent(b *Block) string {
+	parts := []string{"# Tool call: edit"}
+	if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
+		parts = append(parts, "## Path\n\n"+path)
+	}
+	if result := strings.TrimSpace(toolExpandedResultContent(b.ToolName, b.ResultContent)); result != "" {
+		parts = append(parts, "## Result\n\n"+result)
+	}
+	diff := strings.TrimSpace(b.Diff)
+	if diff == "" {
+		diff = editPatchFromArgs(b.Content)
+	}
+	if diff != "" {
+		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (m *Model) handleSuperCopy() tea.Cmd {

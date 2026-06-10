@@ -193,15 +193,12 @@ func TestStartPlanExecutionResetsTrackedReadState(t *testing.T) {
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.fileTrack.TrackRead(stalePath, a.instanceID, computeFileHash(stalePath))
+	a.fileTrack.TrackSnapshot(stalePath, a.instanceID, computeFileHash(stalePath))
 
 	a.startPlanExecution(planPath, "builder")
 
-	if a.fileTrack.HasRead(stalePath, a.instanceID) {
-		t.Fatal("plan execution should reset tracked reads from the previous session runtime")
-	}
-	if err := ensureTrackedEditPreconditions(a.fileTrack, a.instanceID, stalePath, tools.NameEdit); err == nil || !strings.Contains(err.Error(), "has not been observed") {
-		t.Fatalf("edit precondition error = %v, want unread-file error after execution session reset", err)
+	if a.fileTrack.HasSnapshot(stalePath, a.instanceID) {
+		t.Fatal("plan execution should reset tracked snapshots from the previous session runtime")
 	}
 }
 
