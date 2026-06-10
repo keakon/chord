@@ -544,15 +544,7 @@ model_templates:
   claude-1m: &claude-1m
     limit:
       context: 1000000
-      output: 65536
-    cost:
-      input: 5
-      output: 25
-      cache_read: 0.5
-      cache_write: 6.25
-      cache_write_1h: 10
-      service_tier_multipliers:
-        fast: 6
+      output: 128000
     thinking:
       type: adaptive
       effort: medium
@@ -570,6 +562,50 @@ model_templates:
           display: summarized
     modalities:
       input: [text, image, pdf]
+
+  claude-opus: &claude-opus
+    <<: *claude-1m
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+      service_tier_multipliers:
+        fast: 6
+    supported_service_tiers: [fast]
+
+  claude-opus-4.8: &claude-opus-4_8
+    <<: *claude-opus
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+      service_tier_multipliers:
+        fast: 2
+
+  claude-sonnet: &claude-sonnet
+    <<: *claude-1m
+    limit:
+      context: 1000000
+      output: 64000
+    cost:
+      input: 3
+      output: 15
+      cache_read: 0.3
+      cache_write: 3.75
+      cache_write_1h: 6
+
+  claude-fable: &claude-fable
+    <<: *claude-1m
+    cost:
+      input: 10
+      output: 50
+      cache_read: 1
+      cache_write: 12.5
+      cache_write_1h: 20
 
 providers:
   codex:
@@ -591,9 +627,10 @@ providers:
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
-    supported_service_tiers: [fast]
     models:
-      claude-opus-4.8: *claude-1m
+      claude-opus-4.8: *claude-opus-4_8
+      claude-sonnet-4.6: *claude-sonnet
+      claude-fable-5: *claude-fable
 ```
 
 用到的模型字段含义：
