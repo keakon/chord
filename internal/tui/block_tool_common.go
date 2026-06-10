@@ -28,7 +28,12 @@ var (
 
 	lspDiagnosticsOmittedLineRe = regexp.MustCompile(`^\s*\.\.\. \d+ diagnostics not shown due to output limits; they may still need fixing\.$`)
 
-	readResultHeaderRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)/(\d+)\b`)
+	// readResultLineRe matches any READ_RESULT metadata line (including the
+	// lines=none empty-range form) so it is never rendered as a source line.
+	readResultLineRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(?:\d+-\d+|none)\b`)
+	// readResultRangeRe extracts the 1-based start line when a concrete range
+	// is present; lines=none carries no start line.
+	readResultRangeRe = regexp.MustCompile(`\blines=(\d+)-(\d+)\b`)
 )
 
 // maxToolCallCompactResultLines is the default visible height for generic tool output until space expands.
@@ -657,11 +662,16 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 		line = strings.TrimSuffix(line, "\r")
 		content := sanitizeToolDisplayText(line)
 		if i == 0 {
-			if m := readResultHeaderRe.FindStringSubmatch(content); len(m) == 4 {
-				if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-					sourceLineNo = n
+			// The READ_RESULT metadata line is for the model only; never render
+			// it in the card. Use its 1-based start line to align code numbering
+			// (it is authoritative when the model's offset and the returned range
+			// differ, e.g. after a budget truncation).
+			if readResultLineRe.MatchString(content) {
+				if m := readResultRangeRe.FindStringSubmatch(content); len(m) == 3 {
+					if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+						sourceLineNo = n
+					}
 				}
-				rows = append(rows, readDisplayLine{IsCode: false, Content: content})
 				continue
 			}
 		}

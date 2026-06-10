@@ -28,10 +28,14 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	desc := (ReadTool{}).Description()
 	for _, want := range []string{
 		"Successful output starts with one READ_RESULT metadata line",
+		"`READ_RESULT lines=a-b total=N`",
+		"`READ_RESULT lines=none total=N`",
+		"A read that simply did not reach the end of the file is not truncation",
+		"`truncated=budget requested_lines=a-d`",
+		"omits encoding for UTF-8 files",
 		"everything after that first line is exact file text without line-number gutters or extra indentation",
 		"copy only the text after READ_RESULT into edit hunks",
 		"approximate 20k-token read budget",
-		"truncated to fit",
 		"Before edit, the file must have been observed via read or a system-resolved @file mention",
 		"read the intended nearby block before patching",
 		"For edit, include a few unchanged source lines around the intended change",
@@ -90,11 +94,56 @@ func TestReadToolExecuteReportsEmptyContentForEmptyRange(t *testing.T) {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
 	header, body := readTestHeaderAndBody(t, got)
-	if !strings.Contains(header, "lines=2-1/1") || !strings.Contains(header, "content_lines=0") || !strings.Contains(header, "truncated=false") {
+	if !strings.Contains(header, "lines=none") || !strings.Contains(header, "total=1") {
 		t.Fatalf("ReadTool.Execute header = %q, want empty range metadata", header)
+	}
+	if strings.Contains(header, "truncated") {
+		t.Fatalf("ReadTool.Execute header = %q, empty paged range must not be marked truncated", header)
 	}
 	if body != "" {
 		t.Fatalf("ReadTool.Execute body = %q, want empty body", body)
+	}
+}
+
+func TestReadToolExecuteClampsOffsetPlusLimitToEndOfFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// offset is valid but offset+limit runs past EOF: return through the last
+	// line without error or truncation marker.
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":3,"limit":50}`, path))
+	got, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ReadTool.Execute: %v", err)
+	}
+	header, body := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, "lines=4-5") || !strings.Contains(header, "total=5") {
+		t.Fatalf("ReadTool.Execute header = %q, want lines=4-5 total=5", header)
+	}
+	if strings.Contains(header, "truncated") {
+		t.Fatalf("ReadTool.Execute header = %q, reaching EOF via limit is not truncation", header)
+	}
+	if body != "d\ne\n" {
+		t.Fatalf("ReadTool.Execute body = %q, want d\\ne\\n", body)
+	}
+}
+
+func TestReadToolExecuteErrorsWhenOffsetPastEndOfFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// offset strictly past the last line is an error (caller's file-size
+	// expectation is wrong); offset == totalLines is covered elsewhere as valid.
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":10,"limit":5}`, path))
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil || !strings.Contains(err.Error(), "exceeds file length") {
+		t.Fatalf("ReadTool.Execute err = %v, want offset-exceeds-length error", err)
 	}
 }
 
@@ -116,8 +165,11 @@ func TestReadToolExecuteNormalizesCRLFOutput(t *testing.T) {
 		t.Fatal("ReadTool.Execute returned empty content")
 	}
 	header, body := readTestHeaderAndBody(t, got)
-	if !strings.Contains(header, "lines=1-2/2") || !strings.Contains(header, "content_lines=2") || !strings.Contains(header, "encoding=\"utf-8\"") {
+	if !strings.Contains(header, "lines=1-2") || !strings.Contains(header, "total=2") {
 		t.Fatalf("ReadTool.Execute header = %q, want range metadata", header)
+	}
+	if strings.Contains(header, "encoding=") {
+		t.Fatalf("ReadTool.Execute header = %q, UTF-8 reads must omit encoding", header)
 	}
 	if body != "col1,col2\n\"a\",\"b\"\n" {
 		t.Fatalf("ReadTool.Execute body = %q, want normalized raw LF output", body)
@@ -194,7 +246,7 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
 	header, body := readTestHeaderAndBody(t, got)
-	if !strings.Contains(header, "READ_RESULT ") || !strings.Contains(header, "lines=1-") || !strings.Contains(header, "/1200") || !strings.Contains(header, "truncated=true") || !strings.Contains(header, "budget_truncated=true") || !strings.Contains(header, "token_budget=20000") {
+	if !strings.Contains(header, "READ_RESULT ") || !strings.Contains(header, "lines=1-") || !strings.Contains(header, "total=1200") || !strings.Contains(header, "truncated=budget") || !strings.Contains(header, "requested_lines=1-1200") {
 		t.Fatalf("expected token-budget truncation metadata, got header %q", header)
 	}
 	if strings.Contains(body, strings.Repeat("abcdefghij", 8)+"\n"+"READ_RESULT") {
@@ -223,11 +275,35 @@ func TestReadToolExecuteAllowsTargetedRangeWithinTokenBudget(t *testing.T) {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
 	header, body := readTestHeaderAndBody(t, got)
-	if !strings.Contains(header, "lines=1-50/1200") || !strings.Contains(header, "content_lines=50") || !strings.Contains(header, "truncated=true") {
+	if !strings.Contains(header, "lines=1-50") || !strings.Contains(header, "total=1200") {
 		t.Fatalf("expected ranged output metadata, got %q", header)
+	}
+	if strings.Contains(header, "truncated") {
+		t.Fatalf("targeted range within budget must not be marked truncated, got %q", header)
 	}
 	if strings.Count(body, "\n") != 50 {
 		t.Fatalf("expected 50 content lines, got body with %d newlines", strings.Count(body, "\n"))
+	}
+}
+
+func TestReadToolExecuteReportsEncodingOnlyForNonUTF8(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "utf16.txt")
+	// UTF-16LE BOM (0xFF 0xFE) followed by "hi" so detection picks a non-UTF-8
+	// encoding and the header must surface it.
+	data := []byte{0xFF, 0xFE, 'h', 0x00, 'i', 0x00}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q}`, path))
+	got, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ReadTool.Execute: %v", err)
+	}
+	header, _ := readTestHeaderAndBody(t, got)
+	if !strings.Contains(header, `encoding="utf-16le"`) {
+		t.Fatalf("non-UTF-8 read header = %q, want encoding reported", header)
 	}
 }
 

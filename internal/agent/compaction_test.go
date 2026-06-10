@@ -1266,16 +1266,15 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 			HighPressureUsage:    1.0,
 		}},
 	}
-	content := strings.Join([]string{
-		"  41\tfunc important() {",
-		"  42\t\treturn true",
-		"  43\t}",
-		"",
-		"(showing lines 41-43 of 200 total; content truncated...)",
-	}, "\n") + "\n" + strings.Repeat("  44\tpadding line to force reduction\n", 40)
+	bodyLines := []string{"func important() {", "\treturn computeImportantValue()"}
+	for range 60 {
+		bodyLines = append(bodyLines, "\tpadding line to force reduction")
+	}
+	bodyLines = append(bodyLines, "}")
+	content := "READ_RESULT lines=41-103 total=200\n" + strings.Join(bodyLines, "\n") + "\n"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":40,"limit":3}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":40,"limit":63}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", Content: "ack"},
@@ -1283,14 +1282,18 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, `path="internal/agent/compaction_policy.go"`) {
-		t.Fatalf("expected read summary path, got %q", prepared[2].Content)
+	got := prepared[2].Content
+	// Stale reduction keeps only leading lines and reuses the shared
+	// READ_RESULT header with truncated=stale; the lines range starts at the
+	// original start and total stays the file total.
+	if !strings.HasPrefix(got, "READ_RESULT lines=41-") || !strings.Contains(got, "total=200") || !strings.Contains(got, "truncated=stale") {
+		t.Fatalf("expected stale READ_RESULT header, got %q", got)
 	}
-	if !strings.Contains(prepared[2].Content, "requested range: offset=40 limit=3") {
-		t.Fatalf("expected requested range details, got %q", prepared[2].Content)
+	if !strings.Contains(got, "func important() {") {
+		t.Fatalf("expected leading lines preserved, got %q", got)
 	}
-	if !strings.Contains(prepared[2].Content, "displayed range: lines 41-43 of 200 total") {
-		t.Fatalf("expected displayed range details, got %q", prepared[2].Content)
+	if strings.Contains(got, "}") && strings.HasSuffix(strings.TrimSpace(got), "}") {
+		t.Fatalf("expected trailing lines dropped by head truncation, got %q", got)
 	}
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
@@ -1300,7 +1303,7 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 
 func TestParseDisplayedReadRangeSupportsReadResultHeader(t *testing.T) {
 	content := strings.Join([]string{
-		`READ_RESULT path="internal/agent/compaction_policy.go" lines=41-43/200 content_lines=3 truncated=true encoding="utf-8"`,
+		`READ_RESULT lines=41-43 total=200`,
 		"func important() {",
 		"\treturn true",
 		"}",

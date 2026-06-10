@@ -28,7 +28,7 @@ func evidencePackTokenBudget(contextLimit int) int {
 	return b
 }
 
-var readResultRangeRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)/(\d+)\b`)
+var readResultRangeRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)\b.*\btotal=(\d+)\b`)
 
 func splitMessagesForCompactionWithSelections(messages []message.Message, recentTail []message.Message, evidenceItems []evidenceItem) (head []message.Message, evidence []message.Message) {
 	if len(messages) < 4 {
@@ -1341,8 +1341,23 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 }
 
 func compactReadOutputSummary(argsJSON, content string) string {
+	displayed := parseDisplayedReadRange(content)
+	body := stripReadResultHeaderLine(content)
+
+	// Preferred path: a READ_RESULT range is present, so rebuild the same header
+	// the read tool emits, marked truncated=stale, keeping only leading lines.
+	if displayed.OK && strings.TrimSpace(body) != "" {
+		headLines, headEnd := reduceReadHeadLines(body, displayed.Start, displayed.End, compactReadSnippetChars)
+		if len(headLines) > 0 {
+			linesField := fmt.Sprintf("%d-%d", displayed.Start, headEnd)
+			header := tools.FormatReadResultHeader(linesField, displayed.Total, tools.ReadTruncatedStale, "", "")
+			return header + "\n" + strings.Join(headLines, "\n")
+		}
+	}
+
+	// Fallback for read output without a parseable range (e.g. legacy sessions
+	// or non-paged content): keep the path hint and a short excerpt.
 	request := parseReadRequestSummary(argsJSON)
-	path := request.Path
 	snippet := strings.TrimSpace(compactTextSnippet(content, compactReadSnippetChars))
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
@@ -1351,14 +1366,49 @@ func compactReadOutputSummary(argsJSON, content string) string {
 	if request.Offset > 0 || request.Limit > 0 {
 		requestedRange = fmt.Sprintf("; requested range: offset=%d limit=%d", request.Offset, request.Limit)
 	}
-	displayedRange := ""
-	if displayed := parseDisplayedReadRange(content); displayed.OK {
-		displayedRange = fmt.Sprintf("\n- displayed range: lines %d-%d of %d total", displayed.Start, displayed.End, displayed.Total)
+	if request.Path == "" {
+		return "[Older " + tools.NameRead + " output truncated for this request to save context" + requestedRange + "]\n" + snippet
 	}
-	if path == "" {
-		return "[Older " + tools.NameRead + " output truncated for this request to save context" + requestedRange + "]\n" + snippet + displayedRange
+	return fmt.Sprintf("[Older %s output truncated for this request to save context; path=%q%s]\n%s", tools.NameRead, request.Path, requestedRange, snippet)
+}
+
+// stripReadResultHeaderLine returns content without its leading READ_RESULT
+// metadata line, leaving only the raw source body.
+func stripReadResultHeaderLine(content string) string {
+	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
+		if readResultRangeRe.MatchString(strings.TrimSpace(content[:idx])) {
+			return content[idx+1:]
+		}
 	}
-	return fmt.Sprintf("[Older %s output truncated for this request to save context; path=%q%s]\n%s%s", tools.NameRead, path, requestedRange, snippet, displayedRange)
+	return content
+}
+
+// reduceReadHeadLines keeps whole leading lines of a read body within a rough
+// character budget, never splitting a line. startLine is the 1-based source
+// line of the first body line; endLine bounds the head so it never claims more
+// than the original range. It returns the surviving head lines and the source
+// line number of the last kept line.
+func reduceReadHeadLines(body string, startLine, endLine, budget int) ([]string, int) {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if len(lines) == 0 {
+		return nil, startLine
+	}
+	maxLines := endLine - startLine + 1
+	if maxLines > 0 && maxLines < len(lines) {
+		lines = lines[:maxLines]
+	}
+
+	kept := 0
+	used := 0
+	for kept < len(lines) {
+		cost := len(lines[kept]) + 1
+		if kept > 0 && used+cost > budget {
+			break
+		}
+		used += cost
+		kept++
+	}
+	return lines[:kept], startLine + kept - 1
 }
 
 func compactReadLikeOutputSummary(toolName, argsJSON, content string) string {

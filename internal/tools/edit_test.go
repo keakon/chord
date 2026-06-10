@@ -332,7 +332,7 @@ func TestEditToolDiagnosesMissingHunkReadResultHeader(t *testing.T) {
 	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	patch := "@@\n READ_RESULT path=\"demo.txt\" lines=1-2/2 content_lines=2 truncated=false encoding=\"utf-8\"\n-alpha\n+gamma\n"
+	patch := "@@\n READ_RESULT lines=1-2 total=2\n-alpha\n+gamma\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
 	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "remove the READ_RESULT line") {

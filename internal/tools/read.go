@@ -32,7 +32,7 @@ func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines. Successful output starts with one READ_RESULT metadata line; everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. Very large reads are truncated to fit the approximate 20k-token read budget and report that in the READ_RESULT line; use offset/limit to narrow the range. Before edit, the file must have been observed via read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For edit, include a few unchanged source lines around the intended change. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
+	return "Read file contents with optional offset/limit paging, up to 2000 lines. Successful output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. A read that simply did not reach the end of the file is not truncation. Only when the tool itself drops requested lines to fit the approximate 20k-token read budget does the header add `truncated=budget requested_lines=a-d`, where a-d is the range you originally requested; compare it with the returned lines=a-b and page further with offset/limit. A later context-reduction pass may instead mark an aged read output with `truncated=stale`, keeping only its leading lines (lines=a-b then covers just the kept head) to save tokens; re-read with offset/limit if you need the rest. The header omits encoding for UTF-8 files and reports it only for other encodings. Before edit, the file must have been observed via read or a system-resolved @file mention; if the mention may be truncated or you need more surrounding context, read the intended nearby block before patching. For edit, include a few unchanged source lines around the intended change. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
 }
 
 func (ReadTool) Parameters() map[string]any {
@@ -112,22 +112,67 @@ func quoteReadHeaderValue(value string) string {
 	return string(encoded)
 }
 
-func readResultHeader(displayPath string, startLine, endLine, contentLineCount, totalLines int, truncated bool, encoding string, budgetTruncated bool) string {
-	if encoding == "" {
-		encoding = "utf-8"
+// readResultHeader builds the single metadata line that precedes the raw file
+// text. It is intentionally minimal: the model already knows the path it asked
+// for, so only information it cannot derive from the request is reported.
+//
+//   - lines=a-b total=N is always present so the model knows which 1-based range
+//     it received and how many lines the file has (it cannot infer the total
+//     from its own offset/limit). When no line was returned (empty file or an
+//     offset at/after EOF) the range is reported as lines=none instead of a
+//     confusing start>end pair.
+//   - truncated=budget is emitted ONLY when this read tool actively returned
+//     fewer lines than requested to fit the output budget. It is paired with
+//     requested_lines=a-d (the range the caller originally asked for) so the
+//     model can see it received fewer lines than requested and page further.
+//     A read that simply did not reach EOF because of offset/limit is NOT
+//     truncation and carries no truncated field.
+//   - encoding is reported only for non-UTF-8 files, since UTF-8 is the norm.
+func readResultHeader(startLine, endLine, totalLines, requestedEndLine int, encoding string, budgetTruncated bool) string {
+	linesField := "none"
+	if startLine >= 1 && endLine >= startLine {
+		linesField = fmt.Sprintf("%d-%d", startLine, endLine)
 	}
-	header := fmt.Sprintf(
-		"READ_RESULT path=%s lines=%d-%d/%d content_lines=%d truncated=%t encoding=%s",
-		quoteReadHeaderValue(displayPath),
-		startLine,
-		endLine,
-		totalLines,
-		contentLineCount,
-		truncated,
-		quoteReadHeaderValue(encoding),
-	)
+	requestedLines := ""
+	truncatedKind := ""
 	if budgetTruncated {
-		header += fmt.Sprintf(" budget_truncated=true token_budget=%d", MaxReadOutputTokens)
+		truncatedKind = ReadTruncatedBudget
+		requestedLines = fmt.Sprintf("%d-%d", startLine, requestedEndLine)
+	}
+	return FormatReadResultHeader(linesField, totalLines, truncatedKind, requestedLines, encoding)
+}
+
+// Read header truncation kinds. budget means the read tool itself dropped
+// requested lines at call time to fit the output budget; stale means a later
+// context-reduction pass trimmed an aged read output to save tokens.
+const (
+	ReadTruncatedBudget = "budget"
+	ReadTruncatedStale  = "stale"
+)
+
+// FormatReadResultHeader builds the single READ_RESULT metadata line shared by
+// the read tool and the context-reduction summary so both truncation paths
+// (truncated=budget and truncated=stale) render identically and differ only in
+// the truncation reason.
+//
+// linesField is the already-formatted returned range: "a-b", a multi-segment
+// "a-b,c-d" when only head/tail lines survive, or "none" when no line was
+// returned. truncatedKind is "", ReadTruncatedBudget or ReadTruncatedStale.
+// requestedLines (e.g. "a-d") is appended only for budget truncation. encoding
+// is appended only for non-UTF-8 files.
+func FormatReadResultHeader(linesField string, totalLines int, truncatedKind, requestedLines, encoding string) string {
+	header := fmt.Sprintf("READ_RESULT lines=%s total=%d", linesField, totalLines)
+	switch truncatedKind {
+	case ReadTruncatedBudget:
+		header += " truncated=" + ReadTruncatedBudget
+		if requestedLines != "" {
+			header += " requested_lines=" + requestedLines
+		}
+	case ReadTruncatedStale:
+		header += " truncated=" + ReadTruncatedStale
+	}
+	if normalized := strings.ToLower(strings.TrimSpace(encoding)); normalized != "" && normalized != "utf-8" {
+		header += " encoding=" + quoteReadHeaderValue(encoding)
 	}
 	return header
 }
@@ -143,20 +188,24 @@ func buildReadContent(header string, contentLines []string) string {
 	return b.String()
 }
 
-func truncateReadContentToBudget(displayPath string, contentLines []string, startLine, totalLines int, encoding string) string {
+func truncateReadContentToBudget(contentLines []string, startLine, totalLines int, encoding string) string {
 	if len(contentLines) == 0 {
 		line := 0
 		if totalLines > 0 {
 			line = startLine
 		}
-		return buildReadContent(readResultHeader(displayPath, line, max(line-1, 0), 0, totalLines, startLine <= totalLines, encoding, false), nil)
+		return buildReadContent(readResultHeader(line, max(line-1, 0), totalLines, 0, encoding, false), nil)
 	}
 
+	// The caller already narrowed contentLines to the requested offset/limit
+	// window, so its last line is what the model asked for; budget truncation
+	// only returns a prefix of it.
+	requestedEndLine := startLine + len(contentLines) - 1
 	lo, hi := 1, len(contentLines)
 	best := ""
 	for lo <= hi {
 		mid := lo + (hi-lo)/2
-		header := readResultHeader(displayPath, startLine, startLine+mid-1, mid, totalLines, true, encoding, true)
+		header := readResultHeader(startLine, startLine+mid-1, totalLines, requestedEndLine, encoding, true)
 		candidate := buildReadContent(
 			header,
 			contentLines[:mid],
@@ -171,7 +220,7 @@ func truncateReadContentToBudget(displayPath string, contentLines []string, star
 	if best != "" {
 		return best
 	}
-	header := readResultHeader(displayPath, startLine, max(startLine-1, 0), 0, totalLines, true, encoding, true)
+	header := readResultHeader(startLine, max(startLine-1, 0), totalLines, requestedEndLine, encoding, true)
 	return buildReadContent(header, nil)
 }
 
@@ -218,8 +267,11 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	offset := 0
 	if a.Offset != nil {
 		offset = max(*a.Offset, 0)
+		// offset == totalLines is the natural end of paging (nothing left to
+		// read) and stays valid; offset strictly past the last line means the
+		// caller has the wrong idea of the file size, so surface it as an error.
 		if offset > totalLines {
-			offset = totalLines
+			return "", fmt.Errorf("offset %d exceeds file length (%d lines)", offset, totalLines)
 		}
 	}
 
@@ -251,10 +303,9 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		startLine = offset + 1
 		endLine = offset
 	}
-	truncated := end < totalLines
-	content := buildReadContent(readResultHeader(a.Path, startLine, endLine, len(contentLines), totalLines, truncated, decoded.Encoding.Name, false), contentLines)
+	content := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, decoded.Encoding.Name, false), contentLines)
 	if !readOutputFitsBudget(content) {
-		content = truncateReadContentToBudget(a.Path, contentLines, offset+1, totalLines, decoded.Encoding.Name)
+		content = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name)
 	}
 
 	if t.LSP != nil {

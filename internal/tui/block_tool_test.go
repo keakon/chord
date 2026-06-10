@@ -2413,26 +2413,38 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 
 func TestReadCallTreatsReadResultHeaderAsMetadata(t *testing.T) {
 	result := strings.Join([]string{
-		`READ_RESULT path="sample.csv" lines=41-42/200 content_lines=2 truncated=true encoding="utf-8"`,
+		`READ_RESULT lines=41-42 total=200`,
 		"issue,label",
 		`"a","b"`,
 	}, "\n")
 
 	rows, source := parseReadDisplayLines(result, 1)
-	if len(rows) != 3 {
-		t.Fatalf("rows len = %d, want 3", len(rows))
+	// The READ_RESULT line is model-only metadata; it must not be rendered, and
+	// its start line drives code numbering even when the caller passes a stale
+	// startLine (here 1).
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2 (header hidden)", len(rows))
 	}
-	if rows[0].IsCode {
-		t.Fatalf("READ_RESULT header should be metadata, got code row %#v", rows[0])
+	if !rows[0].IsCode || rows[0].LineNo != "41" || rows[0].Content != "issue,label" {
+		t.Fatalf("first source row = %#v, want line 41 issue,label", rows[0])
 	}
-	if !rows[1].IsCode || rows[1].LineNo != "41" || rows[1].Content != "issue,label" {
-		t.Fatalf("first source row = %#v, want line 41 issue,label", rows[1])
-	}
-	if !rows[2].IsCode || rows[2].LineNo != "42" || rows[2].Content != `"a","b"` {
-		t.Fatalf("second source row = %#v, want line 42 quoted row", rows[2])
+	if !rows[1].IsCode || rows[1].LineNo != "42" || rows[1].Content != `"a","b"` {
+		t.Fatalf("second source row = %#v, want line 42 quoted row", rows[1])
 	}
 	if source != "issue,label\n\"a\",\"b\"" {
 		t.Fatalf("source = %q, want raw content without header", source)
+	}
+}
+
+func TestReadCallHidesEmptyRangeReadResultHeader(t *testing.T) {
+	// lines=none is the empty-range header form; it must still be recognized as
+	// metadata and hidden, not rendered as a source line.
+	rows, source := parseReadDisplayLines("READ_RESULT lines=none total=0", 1)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %#v, want no rows for empty-range header", rows)
+	}
+	if source != "" {
+		t.Fatalf("source = %q, want empty source", source)
 	}
 }
 
