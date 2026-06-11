@@ -15,6 +15,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `edit` no longer requires a prior `read` or system-resolved `@file` mention before applying a patch. Previously observed files are still tracked as snapshots so external changes can warn and create backups before risky writes.
 - Failed `edit` hunks now point out a near-miss file line and the first differing column when the mismatch is only a small long-line drift, making stale single-line prompts, URLs, and doc strings easier to recover.
 - TUI content viewers now copy the raw viewed content when using copy-all shortcuts, failed `edit` tool-card copy uses the full raw patch when the visible card content was trimmed, and restored inline image/PDF attachments use filename labels in the composer without adding duplicate text parts to model messages.
+- TUI assistant cards now end their background surface at the wrapped-text cap on wide viewports, reducing unnecessary card-width background fill on large terminals.
+- TUI palette contrast is improved with widened card-surface greyscale steps and adjusted secondary foreground colors, making tool cards and assistant messages easier to distinguish.
+- Streaming render is more efficient during long model responses, providing smoother text appearance.
 - The resume session picker now shows an aligned `Msgs` column so large and small sessions are easier to distinguish before opening them.
 - Permission confirmation rule suggestions now include the matched ask rules for compound Shell commands, and the rule picker pre-selects every matched ask rule so one approval can save all blocking rules.
 - `question` now tolerates a single question object in place of the documented `questions` array, mirroring the scalar-to-list tolerance used by `grep` and `glob`.
@@ -30,6 +33,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixes
 
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
+- Forked TUI messages now preserve inline image and PDF attachments after session restore and fork events, without being cleared by a deferred transcript rebuild.
 - Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.
 - Shell permission fallback checks now keep compound-command review semantics when exposing matched rule suggestions, so narrow allow rules do not auto-approve unparsed compound commands.
 - Pending model-pool switches now preserve their original pool while a request is in flight, so cancelling or applying the switch restores the intended state.
