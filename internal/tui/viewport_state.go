@@ -64,6 +64,7 @@ func (v *Viewport) SetFilter(agentID string) {
 	v.filterAgentID = agentID
 	v.invalidateVisibleBlocksCache()
 	v.markHotBudgetDirty()
+	v.bumpRenderVersion()
 	for _, block := range v.blocks {
 		block.viewportCache = nil
 		block.viewportCacheWidth = 0
@@ -185,7 +186,11 @@ func (v *Viewport) measureSpanLines(block *Block) int {
 		}
 		return lc
 	}
-	return block.MeasureLineCount(v.width)
+	// Use the cache-populating LineCount here: this path is the streaming tail
+	// block, which Viewport.Render renders right after measuring. Populating
+	// lineCache lets RenderRange reuse the freshly rendered lines instead of
+	// running the full card assembly a second time in the same frame.
+	return block.LineCount(v.width)
 }
 
 func (v *Viewport) recalcTotalLines() {

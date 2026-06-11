@@ -47,6 +47,8 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.streamTailLines = append([]string(nil), src.streamTailLines...)
 	clone.streamTailSyntheticPrefixWidths = append([]int(nil), src.streamTailSyntheticPrefixWidths...)
 	clone.streamTailSoftWrapContinuations = append([]bool(nil), src.streamTailSoftWrapContinuations...)
+	clone.streamCardHeadLines = append([]string(nil), src.streamCardHeadLines...)
+	clone.streamCardHeadKey = src.streamCardHeadKey
 	clone.lineCache = append([]string(nil), src.lineCache...)
 	clone.viewportCache = append([]string(nil), src.viewportCache...)
 	clone.renderSyntheticPrefixWidths = append([]int(nil), src.renderSyntheticPrefixWidths...)
@@ -157,6 +159,7 @@ func (b *Block) LineCount(width int) int {
 		b.lineCache = b.Render(width, "")
 		b.lineCacheWidth = width
 		b.lineCountCache = len(b.lineCache)
+		b.hotBytesMemoValid = false
 	}
 	return b.lineCountCache
 }
@@ -193,6 +196,7 @@ func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []st
 		b.lineCache = lines
 		b.lineCacheWidth = width
 		b.lineCountCache = len(lines)
+		b.hotBytesMemoValid = false
 	}
 	if start >= len(lines) {
 		return nil
@@ -204,9 +208,9 @@ func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []st
 }
 
 // MeasureLineCount returns the block's rendered line count without populating
-// lineCache. This is useful on hot paths where the caller only needs the span
-// (e.g. deferred tail-block height recompute during streaming) and the block
-// will be rendered again immediately afterward for viewport output.
+// lineCache. Use this only when the rendered lines will not be needed afterward
+// (e.g. spill inspection or debug dumps); hot paths that render the block right
+// after measuring should prefer LineCount so the render is reused.
 func (b *Block) MeasureLineCount(width int) int {
 	_ = b.ensureMaterialized()
 	return len(b.Render(width, ""))
@@ -284,6 +288,7 @@ func (b *Block) InvalidateCache() {
 	b.lineCache = nil
 	b.lineCacheWidth = 0
 	b.lineCountCache = 0
+	b.hotBytesMemoValid = false
 	if b.Streaming {
 		b.mdCache = nil
 		b.mdCacheWidth = 0
@@ -319,6 +324,10 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamTailSyntheticPrefixWidths = nil
 	b.streamTailSoftWrapContinuations = nil
 	b.streamSettledLineCount = 0
+	b.streamCardHeadLines = nil
+	b.streamCardHeadKey = streamCardHeadKey{}
+	b.streamTableCheckedLen = 0
+	b.streamTableFound = false
 }
 
 // InvalidateThinkingStreamingSettledCache clears cached rendered markdown for
@@ -326,6 +335,8 @@ func (b *Block) InvalidateStreamingSettledCache() {
 // non-monotonically or part ordering changes.
 func (b *Block) InvalidateThinkingStreamingSettledCache() {
 	b.thinkingStreamSettled = nil
+	b.streamCardHeadLines = nil
+	b.streamCardHeadKey = streamCardHeadKey{}
 }
 
 // GetViewportCache returns the styled and truncated lines cached for Viewport.Render,
@@ -348,6 +359,7 @@ func (b *Block) GetViewportCache(width int, spinnerFrame string) []string {
 func (b *Block) SetViewportCache(width int, lines []string) {
 	b.viewportCache = append([]string(nil), lines...)
 	b.viewportCacheWidth = width
+	b.hotBytesMemoValid = false
 }
 
 // Summary returns a one-line description for the message directory.

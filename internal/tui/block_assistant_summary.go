@@ -11,24 +11,6 @@ func isAssistantSummaryFieldLine(line string) bool {
 	return assistantSummaryFieldRE.MatchString(strings.TrimSpace(line))
 }
 
-func countLeadingAssistantSummaryFieldLines(lines []string) int {
-	count := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if count > 0 {
-				break
-			}
-			continue
-		}
-		if !isAssistantSummaryFieldLine(trimmed) {
-			break
-		}
-		count++
-	}
-	return count
-}
-
 func (s assistantSummary) empty() bool {
 	return strings.TrimSpace(s.TasksCompleted) == "" &&
 		strings.TrimSpace(s.FilesModified) == "" &&
@@ -86,13 +68,32 @@ func parseAssistantSummary(content string) assistantSummary {
 		return assistantSummary{}
 	}
 
-	lines := strings.Split(content, "\n")
-	if countLeadingAssistantSummaryFieldLines(lines) < 2 {
+	// Lazy pre-check over the leading lines only: almost all content does not
+	// start with a summary block, and this runs on every render of streaming
+	// blocks, so avoid splitting the whole string for the common bail-out.
+	leading := 0
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if leading > 0 {
+				break
+			}
+			continue
+		}
+		if !isAssistantSummaryFieldLine(trimmed) {
+			break
+		}
+		leading++
+		if leading >= 2 {
+			break
+		}
+	}
+	if leading < 2 {
 		return assistantSummary{}
 	}
 
 	var summary assistantSummary
-	for _, line := range lines {
+	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			if summary.HasMeta {

@@ -454,6 +454,104 @@ func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix,
 	return b.String()
 }
 
+// prewrappedCardFrame precomputes the per-line wrapping parameters used by
+// renderPrewrappedCard so streaming renders can re-wrap only changed body
+// lines while reusing cached card output for the stable prefix.
+type prewrappedCardFrame struct {
+	innerWidth   int
+	bgColorNum   string
+	bgSeq        string
+	marginPrefix string
+	marginSuffix string
+	innerPrefix  string
+	innerSuffix  string
+	railSeq      string
+	padTop       int
+	padBottom    int
+	marginTop    int
+	marginBottom int
+	blankWrapped string
+	blankMargin  string
+}
+
+func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, railSeq string) prewrappedCardFrame {
+	if innerWidth < 0 {
+		innerWidth = 0
+	}
+	padTop, padRight, padBottom, padLeft := style.GetPadding()
+	marginTop, marginRight, marginBottom, marginLeft := style.GetMargin()
+	bgSeq := colorToANSIBgSeq(bgColorNum)
+	marginPrefix := strings.Repeat(" ", marginLeft)
+	marginSuffix := strings.Repeat(" ", marginRight)
+	lineWidth := padLeft + innerWidth + padRight
+	return prewrappedCardFrame{
+		innerWidth:   innerWidth,
+		bgColorNum:   bgColorNum,
+		bgSeq:        bgSeq,
+		marginPrefix: marginPrefix,
+		marginSuffix: marginSuffix,
+		innerPrefix:  strings.Repeat(" ", padLeft),
+		innerSuffix:  strings.Repeat(" ", padRight),
+		railSeq:      railSeq,
+		padTop:       padTop,
+		padBottom:    padBottom,
+		marginTop:    marginTop,
+		marginBottom: marginBottom,
+		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq),
+		blankMargin:  strings.Repeat(" ", marginLeft+lineWidth+marginRight),
+	}
+}
+
+func (f *prewrappedCardFrame) renderBodyLine(line string) string {
+	line = preserveBackground(line, f.bgColorNum)
+	lineDisplayWidth, plainASCII := plainASCIIWidth(line)
+	if !plainASCII {
+		lineDisplayWidth = tuiStringWidth(line)
+	}
+	if lineDisplayWidth > f.innerWidth {
+		line = truncateLineToDisplayWidth(line, f.innerWidth)
+		line = preserveBackground(line, f.bgColorNum)
+	} else if lineDisplayWidth < f.innerWidth {
+		line += strings.Repeat(" ", f.innerWidth-lineDisplayWidth)
+	}
+	return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq)
+}
+
+// appendBodyLines renders already-wrapped body lines into dst, splitting any
+// embedded newlines per line so output matches a pre-split input.
+func (f *prewrappedCardFrame) appendBodyLines(dst []string, lines []string) []string {
+	for _, line := range lines {
+		if strings.ContainsRune(line, '\n') {
+			for part := range strings.SplitSeq(line, "\n") {
+				dst = append(dst, f.renderBodyLine(part))
+			}
+			continue
+		}
+		dst = append(dst, f.renderBodyLine(line))
+	}
+	return dst
+}
+
+func (f *prewrappedCardFrame) appendTop(dst []string) []string {
+	for range f.marginTop {
+		dst = append(dst, f.blankMargin)
+	}
+	for range f.padTop {
+		dst = append(dst, f.blankWrapped)
+	}
+	return dst
+}
+
+func (f *prewrappedCardFrame) appendBottom(dst []string) []string {
+	for range f.padBottom {
+		dst = append(dst, f.blankWrapped)
+	}
+	for range f.marginBottom {
+		dst = append(dst, f.blankMargin)
+	}
+	return dst
+}
+
 // renderPrewrappedCard applies card padding/margins/background to lines that
 // are already wrapped to the target inner width. Callers may pass raw ANSI-rich
 // lines from Markdown/Glamour/chroma renderers; this helper owns final card-bg
@@ -461,50 +559,11 @@ func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix,
 // This avoids sending a large ANSI-rich multi-line string back through lipgloss
 // Width(...).Render(...), which would otherwise re-wrap and re-measure every line.
 func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, bgColorNum string, railSeq string) []string {
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
-	lines = splitEmbeddedNewlines(lines)
-	padTop, padRight, padBottom, padLeft := style.GetPadding()
-	marginTop, marginRight, marginBottom, marginLeft := style.GetMargin()
-	bgSeq := colorToANSIBgSeq(bgColorNum)
-	marginPrefix := strings.Repeat(" ", marginLeft)
-	marginSuffix := strings.Repeat(" ", marginRight)
-	innerPrefix := strings.Repeat(" ", padLeft)
-	innerSuffix := strings.Repeat(" ", padRight)
-	lineWidth := padLeft + innerWidth + padRight
-	blankWrapped := wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq)
-	blankMargin := strings.Repeat(" ", marginLeft+lineWidth+marginRight)
-
-	out := make([]string, 0, marginTop+padTop+len(lines)+padBottom+marginBottom)
-	for range marginTop {
-		out = append(out, blankMargin)
-	}
-	for range padTop {
-		out = append(out, blankWrapped)
-	}
-	for _, line := range lines {
-		line = preserveBackground(line, bgColorNum)
-		lineDisplayWidth, plainASCII := plainASCIIWidth(line)
-		if !plainASCII {
-			lineDisplayWidth = tuiStringWidth(line)
-		}
-		var rendered string
-		if lineDisplayWidth > innerWidth {
-			line = truncateLineToDisplayWidth(line, innerWidth)
-			line = preserveBackground(line, bgColorNum)
-		} else if lineDisplayWidth < innerWidth {
-			line += strings.Repeat(" ", innerWidth-lineDisplayWidth)
-		}
-		rendered = wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq)
-		out = append(out, rendered)
-	}
-	for range padBottom {
-		out = append(out, blankWrapped)
-	}
-	for range marginBottom {
-		out = append(out, blankMargin)
-	}
+	frame := newPrewrappedCardFrame(style, innerWidth, bgColorNum, railSeq)
+	out := make([]string, 0, frame.marginTop+frame.padTop+len(lines)+frame.padBottom+frame.marginBottom)
+	out = frame.appendTop(out)
+	out = frame.appendBodyLines(out, lines)
+	out = frame.appendBottom(out)
 	return out
 }
 
@@ -519,19 +578,6 @@ func renderPrewrappedToolCard(style lipgloss.Style, cardWidth int, title string,
 	final = append(final, body...)
 	final = preserveCardBg(final, bgColorNum)
 	return renderPrewrappedCard(style, cardWidth, final, bgColorNum, railSeq)
-}
-
-func splitEmbeddedNewlines(lines []string) []string {
-	for _, line := range lines {
-		if strings.ContainsRune(line, '\n') {
-			out := make([]string, 0, len(lines)+1)
-			for _, line := range lines {
-				out = append(out, strings.Split(line, "\n")...)
-			}
-			return out
-		}
-	}
-	return lines
 }
 
 // railANSISeq returns the ANSI foreground sequence for the conversation rail

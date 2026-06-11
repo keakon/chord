@@ -234,6 +234,7 @@ type Block struct {
 	streamSettledFrontier              int
 	streamSettledWidth                 int
 	streamSettledLines                 []string
+	streamSettledPrefixedLines         []string // settled lines with the card content prefix pre-applied
 	streamSettledSyntheticPrefixWidths []int
 	streamSettledSoftWrapContinuations []bool
 	streamSettledLineCount             int // lines from settled prefix in mdCache (rest are tail cheap-path)
@@ -242,17 +243,33 @@ type Block struct {
 	streamTailLines                    []string
 	streamTailSyntheticPrefixWidths    []int
 	streamTailSoftWrapContinuations    []bool
-	streamContentBuilder               *strings.Builder
-	lineCache                          []string
-	lineCacheWidth                     int
-	lineCountCache                     int
-	viewportCache                      []string
-	viewportCacheWidth                 int
-	renderSyntheticPrefixWidths        []int
-	renderSoftWrapContinuations        []bool
-	renderSyntheticPrefixWidthsW       int
-	searchTextLower                    string
-	searchTextReady                    bool
+	// streamCardHead* caches the final card-wrapped output for the stable head
+	// of an in-flight streaming card (label + settled prefix) so each flush
+	// only re-wraps the cheap tail lines. See Block.renderStreamingCardLines.
+	streamCardHeadLines []string
+	streamCardHeadKey   streamCardHeadKey
+	// streamTableCheckedLen/streamTableFound cache the markdown-table scan over
+	// the settled portion of in-flight content so each flush only scans the
+	// unsettled tail. Settled frontiers sit on paragraph boundaries outside
+	// code fences, so scanning regions independently matches a full scan.
+	streamTableCheckedLen        int
+	streamTableFound             bool
+	streamContentBuilder         *strings.Builder
+	lineCache                    []string
+	lineCacheWidth               int
+	lineCountCache               int
+	viewportCache                []string
+	viewportCacheWidth           int
+	renderSyntheticPrefixWidths  []int
+	renderSoftWrapContinuations  []bool
+	renderSyntheticPrefixWidthsW int
+	searchTextLower              string
+	searchTextReady              bool
+	// hotBytesMemo caches estimatedHotBytes; invalidated whenever render caches
+	// are cleared (InvalidateCache) or repopulated, so the viewport hot-budget
+	// recompute stays O(blocks) instead of O(total cached lines).
+	hotBytesMemo      int64
+	hotBytesMemoValid bool
 
 	spillRef        *BlockSpillRef
 	spillStore      *ViewportSpillStore

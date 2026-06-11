@@ -262,13 +262,7 @@ func lastVisibleBlockStartedWall(v *Viewport) (time.Time, bool) {
 	if v == nil {
 		return time.Time{}, false
 	}
-	blocks := v.visibleBlocks()
-	for i := len(blocks) - 1; i >= 0; i-- {
-		if t := blocks[i].StartedAt; !t.IsZero() {
-			return t, true
-		}
-	}
-	return time.Time{}, false
+	return v.LastVisibleBlockStartedWall()
 }
 
 func (m Model) renderActivityPrimaryText(a agent.AgentActivityEvent) string {

@@ -124,8 +124,12 @@ func TestEstimatedHotBytesIncludesStreamingTailCache(t *testing.T) {
 	withTail := block.estimatedHotBytes()
 	savedTail := block.streamTailLines
 	block.streamTailLines = nil
+	// Direct field mutation bypasses the cache-population entry points that
+	// normally invalidate the hot-bytes memo, so drop it explicitly.
+	block.hotBytesMemoValid = false
 	withoutTail := block.estimatedHotBytes()
 	block.streamTailLines = savedTail
+	block.hotBytesMemoValid = false
 
 	if withTail <= withoutTail {
 		t.Fatalf("estimatedHotBytes with tail = %d, without tail = %d; expected tail cache to contribute", withTail, withoutTail)

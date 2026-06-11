@@ -1057,3 +1057,38 @@ func TestIsASCIILettersOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamingCardHeadCacheMatchesColdRender guards the settled card-head
+// cache: a warm streaming render (head cache populated by previous flushes)
+// must produce byte-identical lines to a cold render of the same content.
+func TestStreamingCardHeadCacheMatchesColdRender(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := strings.Repeat("First settled paragraph with prose.\n\nSecond settled paragraph with **bold** text.\n\n", 6) +
+		"unsettled streaming tail without trailing newline"
+
+	for _, tc := range []struct {
+		name      string
+		blockType BlockType
+	}{
+		{name: "assistant", blockType: BlockAssistant},
+		{name: "thinking", blockType: BlockThinking},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			warm := &Block{ID: 7, Type: tc.blockType, Streaming: true}
+			// Simulate streaming: render at a shorter prefix first so the head
+			// cache is populated, then extend the content and re-render.
+			warm.Content = content[:len(content)/2]
+			_ = warm.Render(100, "")
+			warm.Content = content
+			warm.InvalidateCache()
+			got := warm.Render(100, "")
+
+			cold := &Block{ID: 7, Type: tc.blockType, Streaming: true, Content: content}
+			want := cold.Render(100, "")
+
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("warm streaming render diverged from cold render\nwarm lines=%d cold lines=%d", len(got), len(want))
+			}
+		})
+	}
+}

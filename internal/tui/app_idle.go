@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime/debug"
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -13,18 +14,14 @@ const (
 	backgroundHousekeepingDelay = 1 * time.Second
 )
 
-// Note: We intentionally do NOT call runtime.GC() during idle sweep.
-// The primary memory reduction mechanism is:
-// - Dropping render caches for off-screen blocks
-// - Shrinking hot budget to force aggressive spill
+// Memory reduction during background idle happens in two steps:
+//   - Dropping render caches for off-screen blocks and shrinking the hot
+//     budget to force aggressive spill (performIdleSweep, on the Update path)
+//   - A single debug.FreeOSMemory pass after each sweep, run asynchronously
+//     via freeOSMemoryCmd so the forced GC + scavenge never blocks Update.
 //
-// Explicit GC is only worth considering if:
-// - Cache drop + aggressive spill don't reduce RSS enough
-// - A single low-frequency GC shows measurable benefit
-// - It can be gated to background-idle only with minimum intervals
-//
-// Current implementation favors letting Go's GC run naturally after
-// we've released references via cache drops.
+// FreeOSMemory is gated to background-idle sweeps only, which already enforce
+// a minimum interval of idleSweepDelay between runs.
 
 // idleSweepTickMsg is sent when it's time to check for an idle sweep.
 type idleSweepTickMsg struct {
@@ -129,7 +126,17 @@ func (m *Model) handleIdleSweepTick(msg idleSweepTickMsg) tea.Cmd {
 	m.lastSweepAt = time.Now()
 	m.backgroundIdleSince = m.lastSweepAt
 
-	return m.scheduleIdleSweepTick(idleSweepDelay)
+	return tea.Batch(freeOSMemoryCmd(), m.scheduleIdleSweepTick(idleSweepDelay))
+}
+
+// freeOSMemoryCmd returns the cached render memory released by the sweep back
+// to the OS. It runs in a command goroutine because FreeOSMemory forces a full
+// GC and scavenge, which can take tens of milliseconds on a large heap.
+func freeOSMemoryCmd() tea.Cmd {
+	return func() tea.Msg {
+		debug.FreeOSMemory()
+		return nil
+	}
 }
 
 // performIdleSweep executes the actual idle cleanup work.

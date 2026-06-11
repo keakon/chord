@@ -60,8 +60,8 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenBusy(t *testing.T) {
 	if c.visualAnimDelay != backgroundActiveVisualAnimCadence {
 		t.Fatalf("background-active visualAnimDelay = %v, want %v", c.visualAnimDelay, backgroundActiveVisualAnimCadence)
 	}
-	if c.titleTickerDelay != titleSpinnerCadence {
-		t.Fatalf("background-active titleTickerDelay = %v, want %v", c.titleTickerDelay, titleSpinnerCadence)
+	if c.titleTickerDelay != backgroundTitleSpinnerCadence {
+		t.Fatalf("background-active titleTickerDelay = %v, want %v", c.titleTickerDelay, backgroundTitleSpinnerCadence)
 	}
 	if c.hostRedrawAllowed {
 		t.Fatal("background-active should not allow host redraw")

@@ -170,6 +170,7 @@ func (b *Block) ensureMaterialized() error {
 		}
 		b.Content = b.spillSummary + "\n(content unavailable)"
 		b.spillCold = false
+		b.hotBytesMemoValid = false
 		return err
 	}
 
@@ -237,6 +238,9 @@ func (b *Block) estimatedHotBytes() int64 {
 	if b == nil || b.spillCold {
 		return 0
 	}
+	if b.hotBytesMemoValid {
+		return b.hotBytesMemo
+	}
 	var total int
 	total += len(b.Content)
 	total += len(b.ResultContent)
@@ -259,8 +263,29 @@ func (b *Block) estimatedHotBytes() int64 {
 	for _, line := range b.mdCache {
 		total += len(line)
 	}
+	for _, line := range b.streamSettledLines {
+		total += len(line)
+	}
+	for _, line := range b.streamSettledPrefixedLines {
+		total += len(line)
+	}
 	for _, line := range b.streamTailLines {
 		total += len(line)
+	}
+	for _, line := range b.streamCardHeadLines {
+		total += len(line)
+	}
+	for i := range b.thinkingStreamSettled {
+		cache := &b.thinkingStreamSettled[i]
+		for _, line := range cache.lines {
+			total += len(line)
+		}
+		for _, line := range cache.tailLines {
+			total += len(line)
+		}
+		for _, line := range cache.styledLines {
+			total += len(line)
+		}
 	}
 	for _, line := range b.lineCache {
 		total += len(line)
@@ -274,7 +299,9 @@ func (b *Block) estimatedHotBytes() int64 {
 	if total < 512 {
 		total = 512
 	}
-	return int64(total)
+	b.hotBytesMemo = int64(total)
+	b.hotBytesMemoValid = true
+	return b.hotBytesMemo
 }
 
 func (b *Block) fallbackSummary() string {

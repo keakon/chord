@@ -39,6 +39,16 @@ type Viewport struct {
 	blockSpansCache           []int
 	blockPositionCacheVersion uint64
 	renderVersion             uint64
+
+	// Per-render-version caches for status-bar scans that are consulted several
+	// times per frame. All block mutations that affect them go through paths
+	// that bump renderVersion (append/update/replace/invalidate).
+	shellPendingCache           bool
+	shellPendingCacheValid      bool
+	shellPendingCacheVersion    uint64
+	lastStartedWallCache        time.Time
+	lastStartedWallCacheValid   bool
+	lastStartedWallCacheVersion uint64
 }
 
 func NewViewport(width, height int) *Viewport {
@@ -73,12 +83,42 @@ func (v *Viewport) SetWorkingDir(path string) {
 }
 
 func (v *Viewport) HasUserLocalShellPending() bool {
+	if v.shellPendingCacheValid && v.shellPendingCacheVersion == v.renderVersion {
+		return v.shellPendingCache
+	}
+	pending := false
 	for _, b := range v.visibleBlocks() {
 		if b.Type == BlockUser && b.UserLocalShellCmd != "" && b.UserLocalShellPending {
-			return true
+			pending = true
+			break
 		}
 	}
-	return false
+	v.shellPendingCache = pending
+	v.shellPendingCacheValid = true
+	v.shellPendingCacheVersion = v.renderVersion
+	return pending
+}
+
+// LastVisibleBlockStartedWall returns the StartedAt of the most recent visible
+// block that has one. The backward scan is cached per render version: after a
+// session restore all StartedAt fields are cleared, which would otherwise make
+// the status bar rescan the whole transcript on every frame.
+func (v *Viewport) LastVisibleBlockStartedWall() (time.Time, bool) {
+	if v.lastStartedWallCacheValid && v.lastStartedWallCacheVersion == v.renderVersion {
+		return v.lastStartedWallCache, !v.lastStartedWallCache.IsZero()
+	}
+	var found time.Time
+	blocks := v.visibleBlocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if t := blocks[i].StartedAt; !t.IsZero() {
+			found = t
+			break
+		}
+	}
+	v.lastStartedWallCache = found
+	v.lastStartedWallCacheValid = true
+	v.lastStartedWallCacheVersion = v.renderVersion
+	return found, !found.IsZero()
 }
 
 func (v *Viewport) LatestVisiblePendingUserLocalShellStartedAt() (time.Time, bool) {

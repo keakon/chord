@@ -54,7 +54,8 @@ const (
 	backgroundActiveContentFlushCadence = 1 * time.Second
 	visualSpinnerCadence                = 200 * time.Millisecond // running tool/local-shell spinner tick (foreground only)
 	backgroundActiveVisualAnimCadence   = 0                      // terminal is blurred; keep housekeeping but skip invisible visual frames
-	titleSpinnerCadence                 = 500 * time.Millisecond // terminal title spinner tick (foreground + background)
+	titleSpinnerCadence                 = 500 * time.Millisecond // terminal title spinner tick (foreground)
+	backgroundTitleSpinnerCadence       = time.Second            // blurred tab title still animates, but at half the wakeup rate
 	backgroundIdleAnimTickCadence       = 5 * time.Second
 )
 
@@ -75,7 +76,7 @@ var (
 		// Background-active work still needs stale detection/progress housekeeping,
 		// but visual spinner frames are invisible while the terminal is blurred.
 		visualAnimDelay:     backgroundActiveVisualAnimCadence,
-		titleTickerDelay:    titleSpinnerCadence,
+		titleTickerDelay:    backgroundTitleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
 		hostRedrawAllowed:   false,
 		aggressiveHotBudget: false,

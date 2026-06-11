@@ -128,6 +128,22 @@ func benchmarkAssistantStreamingLongTextBlock() *Block {
 	return b
 }
 
+// benchmarkAssistantStreamingSettledBlock returns a streaming block whose
+// content is mostly settled markdown paragraphs with a short unsettled tail —
+// the steady-state shape of a long streaming reply.
+func benchmarkAssistantStreamingSettledBlock() *Block {
+	b := benchmarkAssistantStreamingBlock()
+	var sb strings.Builder
+	for range 120 {
+		sb.WriteString("A settled paragraph of explanatory prose that wraps across the assistant card width and exercises the settled-prefix caches.\n\n")
+	}
+	sb.WriteString("trailing unsettled tail text still streaming")
+	b.Content = sb.String()
+	b.Streaming = true
+	b.InvalidateStreamingSettledCache()
+	return b
+}
+
 // BenchmarkRenderInfoPanelCacheHit measures the cost when the fingerprint is
 // unchanged (the common case during scrolling). Should be O(1) — just a string
 // compare and a return of the cached string, with zero lipgloss work.
@@ -407,6 +423,22 @@ func BenchmarkRenderAssistantStreamingLongTextCard(b *testing.B) {
 func BenchmarkRenderAssistantStreamingLongTextCardCachedWarm(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	block := benchmarkAssistantStreamingLongTextBlock()
+	_ = block.Render(100, "")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+// BenchmarkRenderAssistantStreamingSettledCardWarm measures the per-flush cost
+// of re-rendering a streaming card whose settled prefix is unchanged. With the
+// settled card-head cache this should stay proportional to the unsettled tail
+// (plus per-line bookkeeping), not the full block height.
+func BenchmarkRenderAssistantStreamingSettledCardWarm(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkAssistantStreamingSettledBlock()
 	_ = block.Render(100, "")
 	b.ResetTimer()
 	b.ReportAllocs()

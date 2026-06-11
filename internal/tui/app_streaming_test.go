@@ -218,7 +218,9 @@ func BenchmarkStreamTextDeltaBurstDeferredView(b *testing.B) {
 	deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
 	b.ReportAllocs()
 	for b.Loop() {
+		b.StopTimer()
 		m := newStreamTextRenderedModel(b, "seed")
+		b.StartTimer()
 		for _, delta := range deltas {
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
 			_ = m.View()
@@ -230,7 +232,9 @@ func BenchmarkStreamTextDeltaBurstCadenceFlush(b *testing.B) {
 	deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
 	b.ReportAllocs()
 	for b.Loop() {
+		b.StopTimer()
 		m := newStreamTextRenderedModel(b, "seed")
+		b.StartTimer()
 		for i, delta := range deltas {
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
 			if (i+1)%32 == 0 {
@@ -246,7 +250,9 @@ func BenchmarkStreamTextDeltaSteadyStateCadenceFlush(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
+		b.StopTimer()
 		m := newStreamTextRenderedModel(b, "seed")
+		b.StartTimer()
 		for i, delta := range deltas {
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
 			if (i+1)%32 == 0 {
@@ -261,7 +267,9 @@ func BenchmarkStreamThinkingDeltaBurstDeferredView(b *testing.B) {
 	deltas := repeatedStreamDeltas(128, "analysis detail ")
 	b.ReportAllocs()
 	for b.Loop() {
+		b.StopTimer()
 		m := newStreamThinkingRenderedModel(b, "plan")
+		b.StartTimer()
 		for _, delta := range deltas {
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: delta}})
 			_ = m.View()
@@ -273,8 +281,10 @@ func BenchmarkToolCallUpdateArgsStreamingCadence(b *testing.B) {
 	args := streamingToolArgs(128)
 	b.ReportAllocs()
 	for b.Loop() {
+		b.StopTimer()
 		m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
 		_ = m.View()
+		b.StartTimer()
 		_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 			ID:       "call-stream-args",
 			Name:     "shell",
