@@ -270,6 +270,11 @@ type Model struct {
 
 	// Pending image attachments (shown above input box, sent with next message)
 	attachments []Attachment
+	// Session restore rebuilds are deferred; when a ForkSessionEvent in the same
+	// event batch has already repopulated the composer, the deferred rebuild must
+	// not wipe those restored attachments.
+	preserveAttachmentsOnNextRebuild bool
+	pendingSessionRestoreRebuild     bool
 
 	completionState
 	activityRuntimeState

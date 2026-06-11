@@ -101,7 +101,12 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	}
 	rebuildStarted := time.Now()
 	m.finalizeTurn()
-	m.attachments = nil
+	preserveAttachments := m.preserveAttachmentsOnNextRebuild
+	m.pendingSessionRestoreRebuild = false
+	m.preserveAttachmentsOnNextRebuild = false
+	if !preserveAttachments {
+		m.attachments = nil
+	}
 	m.queuedDrafts = nil
 	m.agentComposerStates = nil
 	m.editingQueuedDraftID = ""
@@ -404,7 +409,6 @@ func assistantThinkingBlocksForTranscript(msg message.Message) []message.Thinkin
 	}
 	return []message.ThinkingBlock{{Thinking: msg.ReasoningContent}}
 }
-
 
 type transcriptToolResult struct {
 	argsJSON       string

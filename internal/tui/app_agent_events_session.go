@@ -36,6 +36,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	case agent.SessionRestoredEvent:
 		m.thinkingStreamMsgIndex = -1
 		m.thinkingStreamBlockIndex = 0
+		m.pendingSessionRestoreRebuild = true
 		reason := "session_restored"
 		if m.startupRestorePending {
 			reason = "startup_restored"

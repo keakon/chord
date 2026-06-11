@@ -128,6 +128,9 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.input.SetDisplayValueAndPastes(text, inlinePastes, nextPasteSeq)
 			m.input.syncHeight()
 			m.attachments = attachmentsFromParts(evt.Parts)
+			if m.pendingSessionRestoreRebuild {
+				m.preserveAttachmentsOnNextRebuild = true
+			}
 			cmd := m.switchModeWithIME(ModeInsert)
 			m.recalcViewportSize()
 			effects.addFollowup(tea.Batch(m.input.Focus(), cmd))

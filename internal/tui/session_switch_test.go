@@ -4164,6 +4164,53 @@ func TestForkSessionEventBackfillsTextInlinePastesAndImages(t *testing.T) {
 	}
 }
 
+func TestForkSessionRebuildPreservesRestoredImageAttachments(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeNormal
+
+	parts := []message.ContentPart{
+		{Type: message.ContentPartImage, MimeType: "image/jpeg", Data: []byte("a"), FileName: "image1.jpg"},
+	}
+
+	rebuildCmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ForkSessionEvent{Parts: parts}})
+	applyTestCmd(t, &m, rebuildCmd)
+
+	if len(m.attachments) != 1 || m.attachments[0].FileName != "image1.jpg" || string(m.attachments[0].Data) != "a" {
+		t.Fatalf("attachments after deferred rebuild = %+v, want original image1.jpg attachment", m.attachments)
+	}
+	if got := m.nextInlineImageOrdinal(); got != 2 {
+		t.Fatalf("nextInlineImageOrdinal() = %d, want 2", got)
+	}
+
+	m.input.InsertImagePlaceholderWithDisplay(2, "[image2.jpg]")
+	m.handleAttachmentReadyMsg(attachmentReadyMsg{
+		attachment:                Attachment{FileName: "image2.jpg", MimeType: "image/jpeg", Data: []byte("b")},
+		inlineImagePlaceholderRaw: imagePlaceholder(2),
+	})
+	if len(m.attachments) != 2 {
+		t.Fatalf("attachments after second image = %+v, want 2 attachments", m.attachments)
+	}
+
+	sentParts := interleaveAttachments(m.input.ContentParts(), m.attachments)
+	var images []message.ContentPart
+	for _, part := range sentParts {
+		if part.Type == message.ContentPartImage {
+			images = append(images, part)
+		}
+	}
+	if len(images) != 2 {
+		t.Fatalf("sent image parts = %+v, want 2 images", images)
+	}
+	if images[0].FileName != "image1.jpg" || string(images[0].Data) != "a" {
+		t.Fatalf("first image = %+v, want original image1.jpg/a", images[0])
+	}
+	if images[1].FileName != "image2.jpg" || string(images[1].Data) != "b" {
+		t.Fatalf("second image = %+v, want new image2.jpg/b", images[1])
+	}
+}
+
 func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
