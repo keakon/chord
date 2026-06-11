@@ -79,7 +79,7 @@ func (m *Model) renderHelpView() string {
 	for _, line := range visible {
 		line = ansi.Truncate(line, width, "…")
 		line = padLineToDisplayWidth(line, width)
-		rendered = append(rendered, ViewportLineStyle.Width(width).Render(line))
+		rendered = append(rendered, line)
 	}
 	out := strings.Join(rendered, "\n")
 	m.help.renderCacheWidth = width

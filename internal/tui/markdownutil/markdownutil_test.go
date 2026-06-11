@@ -87,6 +87,73 @@ func TestFindStreamingSettledFrontier(t *testing.T) {
 	}
 }
 
+func TestStreamingFrontierScannerMatchesFind(t *testing.T) {
+	// Verify that StreamingFrontierScanner.Advance (incremental) produces
+	// the same results as FindStreamingSettledFrontier (full-scan).
+	// Test full-content scan first, then incremental appends.
+	parts := []string{
+		"",
+		"para one continues\n",
+		"still no blank\n\n",
+		"settled paragraph\n",
+		"```go\nfunc main() {\n",
+		"\tfmt.Println(\"hi\")\n",
+		"```\n",
+		"after fence\n",
+	}
+	var full string
+	var s StreamingFrontierScanner
+	for _, part := range parts {
+		full += part
+		want := FindStreamingSettledFrontier(full)
+		got := s.Advance(full)
+		if got != want {
+			t.Fatalf("after append %q: Advance() = %d, want %d (full=%q)", part, got, want, full)
+		}
+	}
+}
+
+func TestStreamingFrontierScannerReplaysUnterminatedLine(t *testing.T) {
+	// Appends frequently land mid-line; the scanner must rescan the last
+	// unterminated line so incremental results stay identical to full scans.
+	cases := []struct {
+		name  string
+		parts []string
+	}{
+		{"paragraph then blank line", []string{"hello", "\n\nworld"}},
+		{"partial blank line grows into text", []string{"a\n", " ", "x\n\ndone\n"}},
+		{"fence opener split mid-line", []string{"``", "`go\nbody\n", "```\nafter\n\nnext"}},
+		{"crlf split across appends", []string{"para\r", "\n\r\nnext\r\n"}},
+		{"repeated advance on unterminated tail", []string{"hello", "", "\n\nworld", ""}},
+		{"single line grows then terminates", []string{"abc", "def", "ghi\nnext\n\ntail"}},
+		{"fence opener invalidated by later backtick", []string{"```", "a`b\n\nrest\n"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var s StreamingFrontierScanner
+			var full string
+			for _, part := range tc.parts {
+				full += part
+				want := FindStreamingSettledFrontier(full)
+				if got := s.Advance(full); got != want {
+					t.Fatalf("after append %q: Advance() = %d, want %d (full=%q)", part, got, want, full)
+				}
+			}
+		})
+	}
+}
+
+func TestStreamingFrontierScannerResetsOnNonAppend(t *testing.T) {
+	s := StreamingFrontierScanner{}
+	s.Advance("hello\n\nworld")
+	// Shrink content – should reset.
+	got := s.Advance("hello\n\n")
+	want := FindStreamingSettledFrontier("hello\n\n")
+	if got != want {
+		t.Fatalf("after shrink: Advance() = %d, want %d", got, want)
+	}
+}
+
 func TestRepairForDisplayClosesOpenFence(t *testing.T) {
 	tests := []struct {
 		name, content, want string
@@ -117,12 +184,51 @@ func buildStreamingFrontierBenchmarkContent() string {
 	return b.String()
 }
 
+func buildStreamingFrontierBenchmarkSnapshots() []string {
+	const chunks = 1024
+	snapshots := make([]string, 0, chunks+1)
+	var b strings.Builder
+	for i := range chunks {
+		b.WriteString("streaming paragraph line that should stay cheap until a blank line arrives\n")
+		if i%8 == 7 {
+			b.WriteByte('\n')
+		}
+		snapshots = append(snapshots, b.String())
+	}
+	b.WriteString("tail without a structural boundary")
+	snapshots = append(snapshots, b.String())
+	return snapshots
+}
+
 func BenchmarkFindStreamingSettledFrontierLongContent(b *testing.B) {
 	content := buildStreamingFrontierBenchmarkContent()
 	b.SetBytes(int64(len(content)))
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = FindStreamingSettledFrontier(content)
+	}
+}
+
+func BenchmarkFindStreamingSettledFrontierAppendSnapshots(b *testing.B) {
+	snapshots := buildStreamingFrontierBenchmarkSnapshots()
+	b.SetBytes(int64(len(snapshots[len(snapshots)-1])))
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, content := range snapshots {
+			_ = FindStreamingSettledFrontier(content)
+		}
+	}
+}
+
+func BenchmarkStreamingFrontierScannerAppendSnapshots(b *testing.B) {
+	snapshots := buildStreamingFrontierBenchmarkSnapshots()
+	b.SetBytes(int64(len(snapshots[len(snapshots)-1])))
+	b.ReportAllocs()
+	for b.Loop() {
+		var scanner StreamingFrontierScanner
+		for _, content := range snapshots {
+			_ = scanner.Advance(content)
+		}
 	}
 }
 

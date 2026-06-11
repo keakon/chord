@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 // BlockImagePart stores render metadata for an attached image preview.
@@ -227,6 +228,9 @@ type Block struct {
 	// thinkingStreamSettled caches the rendered settled markdown prefix for each
 	// in-flight thinking part independently from assistant body streaming caches.
 	thinkingStreamSettled []thinkingStreamSettledCache
+	// streamFrontierScanner incrementally tracks the settled frontier for
+	// the assistant body content, avoiding full re-scans on each flush.
+	streamFrontierScanner *markdownutil.StreamingFrontierScanner
 	// streamSettled* caches the rendered markdown for the stable prefix of
 	// in-flight streaming content. They survive append-only streaming updates so
 	// unchanged settled prefixes can be reused across deltas.

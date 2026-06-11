@@ -16,6 +16,7 @@ cd "$ROOT_DIR"
 
 TEST_PATTERN='TestInfoPanel|TestSeparator|TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans|TestViewportVisibleWindowBlockIDsAllocsGuard|TestFindMatchesAtWidthAllocsGuard|TestStreamingAssistantCheapPathAllocsGuard|TestModelViewCachedAllocsGuard|TestScheduleStreamFlush|TestStreamTextDeltasReuseCachedViewUntilFlush|TestRenderToCachePreservesAllPlainTextCells|TestEnsureScreenBufferReusesExistingBuffer|TestStreamingAssistantUsesCheapWrapPath|TestHasVisibleInlineImageRequiresVisibleRenderedImage|TestViewShowsRestoringSessionPlaceholderDuringStartupRestore'
 BENCH_PATTERN='BenchmarkRenderAssistantCard|BenchmarkRenderAssistantCardCachedWarm|BenchmarkRenderAssistantStreamingCard|BenchmarkRenderAssistantStreamingTextCard|BenchmarkRenderAssistantStreamingLongTextCard|BenchmarkRenderAssistantStreamingLongTextCardCachedWarm|BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence|BenchmarkRenderToolCallCard|BenchmarkViewportVisibleWindowBlockIDs|BenchmarkViewportRenderLargeTranscriptAtBottom|BenchmarkViewportRenderLargeTranscriptScrollWindow|BenchmarkApplyWheelScrollDeltaLargeTranscript|BenchmarkDeferredStartupTranscriptJumpOrdinalWindowSwitch|BenchmarkDeferredStartupTranscriptJumpTopBottomWindowSwitch|BenchmarkFindMatchesAtWidth|BenchmarkModelViewCached|BenchmarkRenderStatusBarModelPillCacheHit|BenchmarkRenderStatusBarAgentSnapshotDirty|BenchmarkRenderStatusBarSessionSummaryDirty|BenchmarkRenderConfirmDialogOpen|BenchmarkRenderQuestionDialogOpen|BenchmarkModelViewAtMentionPopupOpen|BenchmarkRenderDirectoryOpen|BenchmarkRenderSessionSelectDialogOpen|BenchmarkRenderUsageStatsDialogOpen|BenchmarkOverlayListRenderCacheHit|BenchmarkOverlayListRenderCacheMiss|BenchmarkOverlayTableRenderCacheHit|BenchmarkOverlayTableRenderCacheMiss'
+FRONTIER_BENCH_PATTERN='BenchmarkFindStreamingSettledFrontierAppendSnapshots|BenchmarkStreamingFrontierScannerAppendSnapshots'
 
 printf '==> Running targeted TUI regression tests\n'
 go test ./internal/tui -run "$TEST_PATTERN"
@@ -26,6 +27,13 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/tui "${bench_args[@]}" | tee /tmp/chord-tui-bench.txt
+
+printf '\n==> Running streaming frontier benchmarks\n'
+frontier_bench_args=(-run '^$' -bench "$FRONTIER_BENCH_PATTERN" -benchmem)
+if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
+  frontier_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
+fi
+go test ./internal/tui/markdownutil "${frontier_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 if [[ $# -eq 2 ]]; then
   if command -v benchstat >/dev/null 2>&1; then

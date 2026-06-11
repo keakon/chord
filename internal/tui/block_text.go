@@ -416,31 +416,50 @@ func preserveStyleAfterResets(line string, style lipgloss.Style) string {
 	return line
 }
 
-func wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix string) string {
-	if bgSeq == "" {
+// spacePad is a reusable run of spaces so writeSpaces can fill padding without
+// allocating a fresh strings.Repeat result per line.
+const spacePad = "                                                                "
+
+// writeSpaces appends n spaces to b, reusing spacePad to avoid per-call allocs.
+func writeSpaces(b *strings.Builder, n int) {
+	for n > 0 {
+		chunk := n
+		if chunk > len(spacePad) {
+			chunk = len(spacePad)
+		}
+		b.WriteString(spacePad[:chunk])
+		n -= chunk
+	}
+}
+
+func wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix string, pad int) string {
+	if bgSeq == "" && pad == 0 {
 		return marginPrefix + innerPrefix + line + innerSuffix + marginSuffix
 	}
 	var b strings.Builder
-	b.Grow(len(marginPrefix) + len(bgSeq) + len(innerPrefix) + len(line) + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
+	b.Grow(len(marginPrefix) + len(bgSeq) + len(innerPrefix) + len(line) + pad + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
 	b.WriteString(marginPrefix)
 	b.WriteString(bgSeq)
 	b.WriteString(innerPrefix)
 	b.WriteString(line)
+	writeSpaces(&b, pad)
 	b.WriteString(innerSuffix)
-	b.WriteString(ansi.ResetStyle)
+	if bgSeq != "" {
+		b.WriteString(ansi.ResetStyle)
+	}
 	b.WriteString(marginSuffix)
 	return b.String()
 }
 
-func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq string) string {
+func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq string, pad int) string {
 	if railSeq == "" {
-		return wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix)
+		return wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, pad)
 	}
-	if bgSeq == "" {
+	if bgSeq == "" && pad == 0 {
 		return railSeq + "│" + ansi.ResetStyle + marginPrefix + innerPrefix + line + innerSuffix + marginSuffix
 	}
 	var b strings.Builder
-	b.Grow(len(railSeq) + len("│") + len(ansi.ResetStyle) + len(bgSeq) + len(marginPrefix) + len(innerPrefix) + len(line) + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
+	b.Grow(len(railSeq) + len("│") + len(ansi.ResetStyle) + len(bgSeq) + len(marginPrefix) + len(innerPrefix) + len(line) + pad + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
 	b.WriteString(railSeq)
 	b.WriteString("│")
 	b.WriteString(ansi.ResetStyle)
@@ -448,8 +467,11 @@ func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix,
 	b.WriteString(marginPrefix)
 	b.WriteString(innerPrefix)
 	b.WriteString(line)
+	writeSpaces(&b, pad)
 	b.WriteString(innerSuffix)
-	b.WriteString(ansi.ResetStyle)
+	if bgSeq != "" {
+		b.WriteString(ansi.ResetStyle)
+	}
 	b.WriteString(marginSuffix)
 	return b.String()
 }
@@ -497,7 +519,7 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 		padBottom:    padBottom,
 		marginTop:    marginTop,
 		marginBottom: marginBottom,
-		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq),
+		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq, 0),
 		blankMargin:  strings.Repeat(" ", marginLeft+lineWidth+marginRight),
 	}
 }
@@ -511,10 +533,13 @@ func (f *prewrappedCardFrame) renderBodyLine(line string) string {
 	if lineDisplayWidth > f.innerWidth {
 		line = truncateLineToDisplayWidth(line, f.innerWidth)
 		line = preserveBackground(line, f.bgColorNum)
-	} else if lineDisplayWidth < f.innerWidth {
-		line += strings.Repeat(" ", f.innerWidth-lineDisplayWidth)
+		return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq, 0)
 	}
-	return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq)
+	pad := 0
+	if lineDisplayWidth < f.innerWidth {
+		pad = f.innerWidth - lineDisplayWidth
+	}
+	return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq, pad)
 }
 
 // appendBodyLines renders already-wrapped body lines into dst, splitting any

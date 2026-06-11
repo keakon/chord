@@ -455,7 +455,7 @@ func (m *Model) renderContentViewer() string {
 	marginX := contentViewerHorizontalMargin(width)
 	marginY := contentViewerVerticalMargin(height)
 	innerWidth := contentViewerInnerWidth(width)
-	blank := ViewportLineStyle.Width(width).Render(strings.Repeat(" ", width))
+	blank := strings.Repeat(" ", width)
 	rendered := make([]string, 0, height)
 	for range marginY {
 		rendered = append(rendered, blank)
@@ -471,7 +471,7 @@ func (m *Model) renderContentViewer() string {
 			line = strings.Repeat(" ", marginX) + line
 			line = padLineToDisplayWidth(line, width)
 		}
-		rendered = append(rendered, ViewportLineStyle.Width(width).Render(line))
+		rendered = append(rendered, line)
 	}
 	for len(rendered) < height {
 		rendered = append(rendered, blank)

@@ -328,6 +328,7 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamCardHeadKey = streamCardHeadKey{}
 	b.streamTableCheckedLen = 0
 	b.streamTableFound = false
+	b.streamFrontierScanner = nil
 }
 
 // InvalidateThinkingStreamingSettledCache clears cached rendered markdown for

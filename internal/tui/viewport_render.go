@@ -13,8 +13,7 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 		v.UpdateLastBlock()
 	}
 
-	lineBg := ViewportLineStyle.Width(v.width)
-	emptyLine := lineBg.Render(padLineToDisplayWidth("", v.width))
+	emptyLine := strings.Repeat(" ", v.width)
 
 	blocks := v.visibleBlocks()
 	if len(blocks) == 0 {
@@ -134,7 +133,7 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 				line := expandTabsForDisplayANSI(l, preformattedTabWidth)
 				line = truncateLineToDisplayWidth(line, v.width)
 				line = padLineToDisplayWidth(line, v.width)
-				finalLines[i] = lineBg.Render(line)
+				finalLines[i] = line
 			}
 			if lo == 0 && hi == blockCount {
 				block.SetViewportCache(v.width, finalLines)

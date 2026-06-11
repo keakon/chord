@@ -610,7 +610,10 @@ func (b *Block) streamingHasMarkdownTable(bodyContent, rawContent string) bool {
 	if !b.Streaming || bodyContent != rawContent {
 		return containsMarkdownTable(bodyContent)
 	}
-	frontier := markdownutil.FindStreamingSettledFrontier(rawContent)
+	if b.streamFrontierScanner == nil {
+		b.streamFrontierScanner = &markdownutil.StreamingFrontierScanner{}
+	}
+	frontier := b.streamFrontierScanner.Advance(rawContent)
 	return b.streamingContainsMarkdownTable(rawContent, frontier)
 }
 
@@ -777,7 +780,10 @@ func (b *Block) renderAssistant(width int) []string {
 				// split into a stable prefix (settled, rendered via glamour once per
 				// frontier advance) and an unstable tail (cheap wrapText path).
 				rawContent := removeTrailingCursorGlyph(b.Content)
-				frontier := markdownutil.FindStreamingSettledFrontier(rawContent)
+				if b.streamFrontierScanner == nil {
+					b.streamFrontierScanner = &markdownutil.StreamingFrontierScanner{}
+				}
+				frontier := b.streamFrontierScanner.Advance(rawContent)
 
 				if frontier > 0 {
 					settledRaw := rawContent[:frontier]

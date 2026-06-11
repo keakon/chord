@@ -59,7 +59,8 @@ This prevents long responses from repeatedly re-rendering the entire Markdown do
 Useful checks:
 
 ```bash
-go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingCard|BenchmarkStreamThinking' -benchmem
+go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreaming|BenchmarkStreamThinking' -benchmem
+go test ./internal/tui/markdownutil -run '^$' -bench 'BenchmarkFindStreamingSettledFrontier|BenchmarkStreamingFrontierScanner' -benchmem
 ```
 
 ### 4. View and draw caching

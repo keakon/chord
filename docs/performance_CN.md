@@ -59,7 +59,8 @@ Assistant 和 thinking block 在流式输出期间会走更便宜的路径：
 常用检查：
 
 ```bash
-go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingCard|BenchmarkStreamThinking' -benchmem
+go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreaming|BenchmarkStreamThinking' -benchmem
+go test ./internal/tui/markdownutil -run '^$' -bench 'BenchmarkFindStreamingSettledFrontier|BenchmarkStreamingFrontierScanner' -benchmem
 ```
 
 ### 4. View / Draw 缓存
