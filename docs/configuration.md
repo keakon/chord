@@ -757,7 +757,9 @@ Provider HTTP 400 handling is intentionally conservative:
   can cool the current key, rotate to the next key, and continue after all keys
   are cooling.
 - Request/parameter/model-incompatible 400s still stop instead of retrying
-  forever, for example `invalid_request_error`, `missing required parameter`,
+  forever, for example a structured `code`/`type` such as `invalid_request_error`,
+  `invalid_request`, or `missing_required_parameter`, or message-only inputs like
+  `missing required parameter`,
   `Store must be set to false`, or `Stream must be set to true`.
 
 - `0` keeps the default behavior: retry until success, cancellation, or a terminal failure.

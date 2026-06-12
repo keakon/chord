@@ -381,6 +381,7 @@ func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *A
 	var errResp anthropicErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
 		apiErr.Message = errResp.Error.Message
+		apiErr.Type = errResp.Error.Type
 	} else {
 		// Fallback: use raw body (truncated).
 		msg := string(body)

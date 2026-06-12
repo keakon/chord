@@ -1504,6 +1504,42 @@ func TestResponsesProvider_CodexWSIncrementalRetryUsageLimitSkipsHTTPFallback(t 
 	}
 }
 
+func TestResponsesProvider_CodexWSUsageLimitCodeStillSkipsHTTPFallback(t *testing.T) {
+	var httpCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+		return nil, false, &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"}
+	}
+
+	_, err := r.CompleteStream(
+		context.Background(), "oauth-key", "gpt-5", "system",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "usage limit") {
+		t.Fatalf("CompleteStream error = %v, want usage limit error", err)
+	}
+	if httpCalls != 0 {
+		t.Fatalf("http calls = %d, want 0 after terminal Codex WebSocket error", httpCalls)
+	}
+}
+
 func TestMarkKeyCooldownCodexWSUsageLimitWithoutHTTPStatusUsesResetWindow(t *testing.T) {
 	ctx := context.Background()
 	resetPrimary := time.Now().Add(2 * time.Hour)
@@ -1519,6 +1555,62 @@ func TestMarkKeyCooldownCodexWSUsageLimitWithoutHTTPStatusUsesResetWindow(t *tes
 	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"})
 	if !res.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for Codex WebSocket usage limit")
+	}
+	p.mu.Lock()
+	exhaustedUntil := p.keyStates[0].ExhaustedUntil
+	cooldownEnd := p.keyStates[0].CooldownEnd
+	p.mu.Unlock()
+	if exhaustedUntil.Before(resetSecondary.Add(-2*time.Second)) || exhaustedUntil.After(resetSecondary.Add(2*time.Second)) {
+		t.Fatalf("ExhaustedUntil = %v, want ~%v", exhaustedUntil, resetSecondary)
+	}
+	if !cooldownEnd.IsZero() {
+		t.Fatalf("CooldownEnd = %v, want zero when quota exhaustion uses hard reset window", cooldownEnd)
+	}
+}
+
+func TestMarkKeyCooldownCodexWSMessageOnlyUsageLimitUsesResetWindow(t *testing.T) {
+	ctx := context.Background()
+	resetPrimary := time.Now().Add(2 * time.Hour)
+	resetSecondary := time.Now().Add(24 * time.Hour)
+	p := NewProviderConfig("codex", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	p.UpdateKeySnapshot("oauth-key", &ratelimit.KeyRateLimitSnapshot{
+		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
+	})
+	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Message: "You've hit your usage limit"})
+	if !res.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true for message-only Codex usage limit")
+	}
+	p.mu.Lock()
+	exhaustedUntil := p.keyStates[0].ExhaustedUntil
+	cooldownEnd := p.keyStates[0].CooldownEnd
+	p.mu.Unlock()
+	if exhaustedUntil.Before(resetSecondary.Add(-2*time.Second)) || exhaustedUntil.After(resetSecondary.Add(2*time.Second)) {
+		t.Fatalf("ExhaustedUntil = %v, want ~%v", exhaustedUntil, resetSecondary)
+	}
+	if !cooldownEnd.IsZero() {
+		t.Fatalf("CooldownEnd = %v, want zero when quota exhaustion uses hard reset window", cooldownEnd)
+	}
+}
+
+func TestMarkKeyCooldownCodexWSMessageOnlyQuotaUsesResetWindow(t *testing.T) {
+	ctx := context.Background()
+	resetPrimary := time.Now().Add(90 * time.Minute)
+	resetSecondary := time.Now().Add(3 * time.Hour)
+	p := NewProviderConfig("codex", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	p.UpdateKeySnapshot("oauth-key", &ratelimit.KeyRateLimitSnapshot{
+		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
+	})
+	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Message: "You have exceeded your current quota"})
+	if !res.cooldownApplied {
+		t.Fatal("expected cooldownApplied=true for message-only Codex quota exhaustion")
 	}
 	p.mu.Lock()
 	exhaustedUntil := p.keyStates[0].ExhaustedUntil

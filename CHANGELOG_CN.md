@@ -33,6 +33,7 @@
 
 ### 修复
 
+- Provider 错误分类现在优先使用结构化的 `code`/`type` 信号（包括错误体内嵌套的 JSON），而非纯文本匹配；对于不提供结构化字段的网关仍保留消息文本回退。未识别的 HTTP 400 现在按终态请求/参数错误处理，不再跨 key 和模型重试；而配额、上下文超限、并发限制、Codex WebSocket 链路状态不匹配以及带 `Retry-After` 的 400 仍保留各自的重试/冷却处理。
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
 - Fork 编辑后的 TUI 消息现在在会话恢复与 fork 事件后仍会保留 inline 图片/PDF 附件，不会被延后执行的 transcript 重建清除。
 - Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。

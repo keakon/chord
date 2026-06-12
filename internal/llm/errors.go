@@ -88,6 +88,99 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Message)
 }
 
+func apiErrorStructuredSignals(apiErr *APIError) []string {
+	if apiErr == nil {
+		return nil
+	}
+	signals := make([]string, 0, 6)
+	add := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			signals = append(signals, value)
+		}
+	}
+	add(apiErr.Code)
+	add(apiErr.Type)
+	msg := strings.TrimSpace(apiErr.Message)
+	if msg == "" || !strings.HasPrefix(msg, "{") {
+		return signals
+	}
+	var body struct {
+		Code  string `json:"code"`
+		Type  string `json:"type"`
+		Error struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+		Detail struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(msg), &body); err != nil {
+		return signals
+	}
+	add(body.Code)
+	add(body.Type)
+	add(body.Error.Code)
+	add(body.Error.Type)
+	add(body.Detail.Code)
+	add(body.Detail.Type)
+	return signals
+}
+
+func apiErrorSignalContains(apiErr *APIError, needles ...string) bool {
+	for _, signal := range apiErrorStructuredSignals(apiErr) {
+		for _, needle := range needles {
+			if strings.Contains(signal, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// apiErrMessageContainsAny reports whether the normalized (lowercased) Message
+// contains any of the given substrings.
+func apiErrMessageContainsAny(apiErr *APIError, substrs ...string) bool {
+	if apiErr == nil {
+		return false
+	}
+	msg := strings.ToLower(apiErr.Message)
+	for _, s := range substrs {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// apiErrMessageContains reports whether the normalized (lowercased) Message
+// contains all of the given substrings (AND semantics).
+func apiErrMessageContains(apiErr *APIError, substrs ...string) bool {
+	if apiErr == nil {
+		return false
+	}
+	msg := strings.ToLower(apiErr.Message)
+	for _, s := range substrs {
+		if !strings.Contains(msg, s) {
+			return false
+		}
+	}
+	return true
+}
+
+func apiErrorSignalEquals(apiErr *APIError, values ...string) bool {
+	for _, signal := range apiErrorStructuredSignals(apiErr) {
+		for _, value := range values {
+			if signal == value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NoUsableKeysError indicates a provider has configured keys/credentials, but
 // none of them are selectable because they were permanently disabled.
 type NoUsableKeysError struct {
@@ -162,35 +255,19 @@ func IsContextLengthExceeded(err error) bool {
 // classifyContextLengthExceeded checks APIError status code and message for
 // oversize signals from various providers.
 func classifyContextLengthExceeded(apiErr *APIError) bool {
-	msg := strings.ToLower(apiErr.Message)
-	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
-	if code == "context_length_exceeded" || code == "context_window_exceeded" || code == "input_too_long" {
+	if apiErrorSignalEquals(apiErr, "context_length_exceeded", "context_window_exceeded", "input_too_long") {
 		return true
 	}
 
 	switch apiErr.StatusCode {
 	case 400:
-		// OpenAI: "context_length_exceeded" or "maximum context length"
-		if strings.Contains(msg, "context_length_exceeded") {
-			return true
-		}
-		if strings.Contains(msg, "maximum context length") {
-			return true
-		}
-		if strings.Contains(msg, "exceeds the context window") {
-			return true
-		}
-		if strings.Contains(msg, "input is too long") {
-			return true
-		}
-		// Anthropic: "prompt is too long"
-		if strings.Contains(msg, "prompt is too long") {
-			return true
-		}
-		// Generic: "too many tokens"
-		if strings.Contains(msg, "too many tokens") && strings.Contains(msg, "context") {
-			return true
-		}
+		return apiErrMessageContainsAny(apiErr,
+			"context_length_exceeded",
+			"maximum context length",
+			"exceeds the context window",
+			"input is too long",
+			"prompt is too long",
+		) || apiErrMessageContains(apiErr, "too many tokens", "context")
 	case 413:
 		// HTTP 413 Payload Too Large — some proxies/gateways use this for context
 		return true
@@ -413,8 +490,7 @@ func isRetriable(err error) bool {
 	}
 
 	// Request/parameter errors: never retry (wrong body, missing param, etc.).
-	// Some proxies may return 5xx for bad request; treat by message to avoid long retry loops.
-	if isRequestOrParamError(apiErr.Message) {
+	if isRequestOrParamError(apiErr) {
 		return false
 	}
 
@@ -442,26 +518,58 @@ func isConcurrentRequestLimit429(err error) bool {
 	if !errors.As(err, &apiErr) || apiErr == nil || apiErr.StatusCode != 429 {
 		return false
 	}
-	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "too many concurrent requests") ||
-		strings.Contains(msg, "concurrent requests for this model") ||
-		(strings.Contains(msg, "concurrent") && strings.Contains(msg, "requests") && strings.Contains(msg, "model"))
+	return apiErrMessageContainsAny(apiErr, "too many concurrent requests", "concurrent requests for this model") ||
+		apiErrMessageContains(apiErr, "concurrent", "requests", "model")
 }
 
-// isRequestOrParamError returns true if the API message indicates a client/request
-// error (e.g. missing parameter, invalid request, or missing required replayed
-// thinking/reasoning content). Such errors are not retriable.
-func isRequestOrParamError(message string) bool {
-	msg := strings.ToLower(message)
-	return strings.Contains(msg, "missing required parameter") ||
-		strings.Contains(msg, "invalid_request_error") ||
-		strings.Contains(msg, "invalid parameter") ||
-		strings.Contains(msg, "invalid request") ||
-		strings.Contains(msg, "content or tool_calls must be set") ||
-		(strings.Contains(msg, "store") && strings.Contains(msg, "must be set to false")) ||
-		(strings.Contains(msg, "stream") && strings.Contains(msg, "must be set to true")) ||
-		strings.Contains(msg, "reasoning_content") && strings.Contains(msg, "must be passed back") ||
-		strings.Contains(msg, "content[].thinking") && strings.Contains(msg, "must be passed back")
+// isRequestOrParamError reports request/parameter failures that are not useful
+// to retry with another key. Classification is anchored on the 400 status: a
+// 400 is treated as a request/parameter error by default, since the request
+// shape is the most likely cause and rotating keys or models will keep failing
+// identically. 400s that are actually other error types — quota/usage
+// exhaustion, concurrency/capacity limits, oversize context, or the Codex WS
+// chain-state mismatch — are carved out so they keep their own retry/cooldown
+// handling. For non-400 statuses, only explicit structured request/parameter
+// code/type signals classify; request-shaped free text alone stays retriable.
+func isRequestOrParamError(apiErr *APIError) bool {
+	if apiErr == nil {
+		return false
+	}
+	if apiErr.StatusCode == 400 {
+		return !is400OtherError(apiErr)
+	}
+	return apiErrorSignalContains(apiErr,
+		"invalid_request",
+		"invalid_parameter",
+		"invalid_argument",
+		"missing_required_parameter",
+	)
+}
+
+// is400OtherError reports whether a 400 actually represents a non-request-shape
+// error with dedicated handling elsewhere: a transient state the gateway asked
+// to retry (Retry-After), quota/usage exhaustion, oversize context, a Codex WS
+// chain-state mismatch, or a concurrency/capacity limit. These must not
+// collapse into a terminal parameter error.
+func is400OtherError(apiErr *APIError) bool {
+	// A Retry-After hint means the gateway is explicitly asking to retry: a
+	// transient capacity/availability state, not a request-shape error.
+	if apiErr.RetryAfter > 0 {
+		return true
+	}
+	if confirmedCodexUsageLimitError(apiErr) ||
+		classifyContextLengthExceeded(apiErr) ||
+		isCodexWSChainStateMismatch(apiErr) {
+		return true
+	}
+	// Concurrency / capacity limits some gateways report as 400 without a
+	// Retry-After are still transient, not request-shape errors.
+	return apiErrMessageContainsAny(apiErr,
+		"concurrent",
+		"concurrency",
+		"please retry later",
+		"too many requests",
+	)
 }
 
 // isTerminalModelPoolFailureForProvider reports errors that should stop after
@@ -484,5 +592,5 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	if apiErr.StatusCode != 400 {
 		return false
 	}
-	return providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr.Message)
+	return providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr)
 }

@@ -1077,7 +1077,7 @@ func TestMarkKeyCooldown401OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -1102,13 +1102,41 @@ func TestMarkKeyCooldown401OAuthNoRefresherDeactivatesKey(t *testing.T) {
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
 	// no OAuthRefresher set → TryRefreshOAuthKey returns false → MarkDeactivated
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
 	_, total := p.AvailableKeyCount()
 	if total != 0 {
 		t.Fatalf("total = %d, want 0: deactivated OAuth key should be excluded", total)
+	}
+}
+
+func TestMarkKeyCooldownOAuthMessageOnlyDeactivatesKey(t *testing.T) {
+	ctx := context.Background()
+	for _, status := range []int{401, 403} {
+		t.Run(fmt.Sprintf("HTTP_%d", status), func(t *testing.T) {
+			p := newTestProviderConfig([]string{"oauth-key"})
+			p.mu.Lock()
+			p.keyStates[0].OAuthInfo = &OAuthKeyInfo{
+				AccountID: "acc-1",
+				Email:     "user@example.com",
+				Expires:   time.Now().Add(time.Hour).UnixMilli(),
+			}
+			p.mu.Unlock()
+
+			result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: status, Message: "Your account has been disabled."})
+			if !result.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true")
+			}
+			if result.deactivatedAccountID != "acc-1" || result.deactivatedEmail != "user@example.com" {
+				t.Fatalf("deactivated identity = %q/%q, want acc-1/user@example.com", result.deactivatedAccountID, result.deactivatedEmail)
+			}
+			_, total := p.AvailableKeyCount()
+			if total != 0 {
+				t.Fatalf("total = %d, want 0: deactivated OAuth key should be excluded", total)
+			}
+		})
 	}
 }
 
@@ -1148,6 +1176,54 @@ func TestMarkKeyCooldown401OAuthInvalidatedSkipsRefreshAndDeactivatesKey(t *test
 	_, total := p.AvailableKeyCount()
 	if total != 0 {
 		t.Fatalf("total = %d, want 0: invalidated OAuth key should be excluded", total)
+	}
+}
+
+func TestMarkKeyCooldownOAuthMessageOnlyInvalidatedSkipsRefresh(t *testing.T) {
+	ctx := context.Background()
+	for _, status := range []int{401, 403} {
+		t.Run(fmt.Sprintf("HTTP_%d", status), func(t *testing.T) {
+			refreshHit := false
+			refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				refreshHit = true
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, `{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}`)
+			}))
+			defer refreshServer.Close()
+
+			expires := time.Now().Add(time.Hour).UnixMilli()
+			auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{
+				Access:        "oauth-key",
+				Refresh:       "refresh-token",
+				Expires:       expires,
+				AccountUserID: "user-1__acc-1",
+				AccountID:     "acc-1",
+				Email:         "user@example.com",
+			}}}}
+			var authMu sync.Mutex
+			p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+			p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+				"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Expires: expires},
+			}, "")
+
+			result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: status, Message: "Your authentication token has been revoked."})
+			if !result.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true")
+			}
+			if refreshHit {
+				t.Fatal("refresh endpoint was called for message-only invalidated account")
+			}
+			if result.invalidatedAccountID != "acc-1" || result.invalidatedEmail != "user@example.com" {
+				t.Fatalf("invalidated identity = %q/%q, want acc-1/user@example.com", result.invalidatedAccountID, result.invalidatedEmail)
+			}
+			if auth["openai"][0].OAuth.Status != config.OAuthStatusInvalidated {
+				t.Fatalf("OAuth status = %q, want invalidated", auth["openai"][0].OAuth.Status)
+			}
+			_, total := p.AvailableKeyCount()
+			if total != 0 {
+				t.Fatalf("total = %d, want 0: invalidated OAuth key should be excluded", total)
+			}
+		})
 	}
 }
 

@@ -429,13 +429,7 @@ func isCodexWSChainStateMismatch(err error) bool {
 	if apiErr.StatusCode != http.StatusBadRequest {
 		return false
 	}
-	msg := strings.ToLower(strings.TrimSpace(apiErr.Message))
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "no tool call found for function call output") ||
-		strings.Contains(msg, "no tool call found for custom tool call output") ||
-		strings.Contains(msg, "previous_response_id")
+	return apiErrMessageContainsAny(apiErr, "no tool call found for function call output", "no tool call found for custom tool call output", "previous_response_id")
 }
 
 // sendAndParse sends a Responses API request and parses the SSE stream.

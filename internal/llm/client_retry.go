@@ -512,7 +512,7 @@ func (c *Client) completeStreamTarget(
 			retriable := isRetriable(err)
 			var apiErrPtr *APIError
 			if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
-				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 || (apiErrPtr.StatusCode == 400 && !providerUsesOfficialAPI(t.provider) && !isRequestOrParamError(apiErrPtr.Message)) {
+				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 || (apiErrPtr.StatusCode == 400 && !providerUsesOfficialAPI(t.provider) && !isRequestOrParamError(apiErrPtr)) {
 					retriable = true
 				}
 			}
@@ -528,7 +528,7 @@ func (c *Client) completeStreamTarget(
 					modelDone = true
 					break
 				}
-				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr.Message)) {
+				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr)) {
 					return result, lastInputTokens, err
 				}
 				modelDone = true

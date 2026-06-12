@@ -118,9 +118,17 @@ func TestShouldContinueRetryKeepsRetryingConcurrent429AfterDefaultCap(t *testing
 
 func TestIsRetriableRequestShapeMessageNotRetriableEvenOn5xx(t *testing.T) {
 	t.Parallel()
-	err := &APIError{StatusCode: 500, Message: "invalid_request_error: bad field"}
+	err := &APIError{StatusCode: 500, Type: "invalid_request_error", Message: "bad field"}
 	if isRetriable(err) {
-		t.Fatal("request-shaped 5xx message should not be retriable")
+		t.Fatal("request-shaped 5xx type should not be retriable")
+	}
+}
+
+func TestIsRetriableRequestShapeMessageAloneDoesNotClassify(t *testing.T) {
+	t.Parallel()
+	err := &APIError{StatusCode: 500, Message: "invalid_request_error: bad field"}
+	if !isRetriable(err) {
+		t.Fatal("request-shaped text without structured code/type should remain retriable")
 	}
 }
 
@@ -211,5 +219,87 @@ func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testi
 	err := &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"}
 	if isTerminalModelPoolFailureForProvider(compatible, err) {
 		t.Fatal("compatible gateway 400 should not stop after model pool exhaustion")
+	}
+}
+
+func TestIsAccountDeactivatedMessageFallback(t *testing.T) {
+	t.Parallel()
+	// Structured code/type signals.
+	for _, apiErr := range []*APIError{
+		{StatusCode: 401, Code: "account_deactivated"},
+		{StatusCode: 402, Message: `{"detail":{"code":"deactivated_workspace"}}`},
+	} {
+		if !isAccountDeactivated(apiErr) {
+			t.Fatalf("expected deactivated for %#v", apiErr)
+		}
+	}
+	// Free-text fallback: gateways that omit a structured code/type must still
+	// be recognized so a permanently disabled account is not retried in a loop.
+	for _, msg := range []string{
+		"Your account has been deactivated.",
+		"This account has been disabled.",
+	} {
+		if !isAccountDeactivated(&APIError{StatusCode: 403, Message: msg}) {
+			t.Fatalf("expected deactivated for plaintext %q", msg)
+		}
+	}
+	if isAccountDeactivated(&APIError{StatusCode: 500, Message: "internal error"}) {
+		t.Fatal("unrelated error should not classify as deactivated")
+	}
+	// A bare "disabled" substring (e.g. a disabled feature/tool) must not
+	// permanently remove an otherwise-healthy key.
+	for _, msg := range []string{
+		"This feature is disabled for your current plan.",
+		"Tool calling is disabled for this model.",
+	} {
+		if isAccountDeactivated(&APIError{StatusCode: 403, Message: msg}) {
+			t.Fatalf("unrelated %q should not classify as deactivated", msg)
+		}
+	}
+}
+
+func TestIsAccountInvalidatedMessageFallback(t *testing.T) {
+	t.Parallel()
+	for _, apiErr := range []*APIError{
+		{StatusCode: 401, Code: "account_invalidated"},
+		{StatusCode: 401, Code: "token_revoked"},
+	} {
+		if !isAccountInvalidated(apiErr) {
+			t.Fatalf("expected invalidated for %#v", apiErr)
+		}
+	}
+	for _, msg := range []string{
+		"Your authentication token has been invalidated.",
+		"This token has been revoked.",
+		"could not parse your authentication token",
+	} {
+		if !isAccountInvalidated(&APIError{StatusCode: 401, Message: msg}) {
+			t.Fatalf("expected invalidated for plaintext %q", msg)
+		}
+	}
+}
+
+func TestIsRequestOrParamError400DefaultsToParamError(t *testing.T) {
+	t.Parallel()
+	// A bare 400 with no transient/quota/context signal is a request/parameter
+	// error: rotating keys or models will keep failing identically.
+	if !isRequestOrParamError(&APIError{StatusCode: 400, Message: "bad"}) {
+		t.Fatal("bare 400 should classify as a request/parameter error")
+	}
+	// A Retry-After hint marks a transient state, not a request-shape error.
+	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "upstream temporarily busy", RetryAfter: time.Millisecond}) {
+		t.Fatal("400 with Retry-After should be transient, not a param error")
+	}
+	// Quota/concurrency carve-outs stay non-param.
+	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "Concurrency limit exceeded, please retry later"}) {
+		t.Fatal("concurrency 400 should be transient, not a param error")
+	}
+	// Non-400 request-shaped free text alone must not classify (stays retriable).
+	if isRequestOrParamError(&APIError{StatusCode: 500, Message: "invalid_request_error: bad field"}) {
+		t.Fatal("non-400 request-shaped free text should not classify")
+	}
+	// Non-400 with a structured request signal classifies.
+	if !isRequestOrParamError(&APIError{StatusCode: 500, Code: "invalid_request_error"}) {
+		t.Fatal("structured invalid_request signal should classify at any status")
 	}
 }

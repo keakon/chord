@@ -709,7 +709,7 @@ Provider HTTP 400 的处理是有意保守的：
 
 - 官方 API 会把 400 视为终态 invalid-request 错误；
 - 非官方兼容网关有时会把并发限制、上游容量不足等临时状态映射成 400。这类非请求形态的 400 会冷却当前 key、轮换到下一个 key，并在所有 key 都冷却时等待后继续；
-- 请求参数/模型不兼容类 400 仍会停止，避免无限重试，例如 `invalid_request_error`、`missing required parameter`、`Store must be set to false` 或 `Stream must be set to true`。
+- 请求参数/模型不兼容类 400 仍会停止，避免无限重试，例如结构化 `code`/`type` 为 `invalid_request_error`、`invalid_request` 或 `missing_required_parameter`，或仅消息文本包含 `missing required parameter`、`Store must be set to false` 或 `Stream must be set to true`。
 
 - `0` 保持默认行为：一直重试，直到成功、被取消，或遇到终态失败；
 - 正整数表示最多重试这么多轮，即使是 cooling / 并发 429 这类通常会继续等待的错误，也会在达到上限后停止；

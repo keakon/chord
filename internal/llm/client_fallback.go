@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -53,17 +52,14 @@ func confirmedCodexUsageLimitError(apiErr *APIError) bool {
 	if apiErr == nil {
 		return false
 	}
-	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
-	msg := strings.ToLower(strings.TrimSpace(apiErr.Message))
-	return code == "usage_limit_reached" ||
-		code == "usage_limit_exceeded" ||
-		code == "insufficient_quota" ||
-		code == "insufficient_user_quota" ||
-		strings.Contains(msg, "usage limit has been reached") ||
-		strings.Contains(msg, "you've hit your usage limit") ||
-		strings.Contains(msg, "you have hit your usage limit") ||
-		strings.Contains(msg, "exceeded your current quota") ||
-		strings.Contains(msg, "insufficient_quota")
+	if apiErrorSignalContains(apiErr, "usage_limit", "quota") {
+		return true
+	}
+	// Some upstream gateways report usage limits as free text without a
+	// structured code/type. Treat message-only quota/usage-limit text as a
+	// confirmed Codex usage-limit signal so WS→HTTP fallback stops and the
+	// Codex reset-window cooldown still applies.
+	return apiErrMessageContainsAny(apiErr, "usage limit", "quota")
 }
 
 // confirmedCodexQuotaExhausted reports whether a 429 or explicit Codex usage-limit error
@@ -118,27 +114,26 @@ type markKeyCooldownResult struct {
 // isAccountDeactivated reports whether the API error indicates a permanently
 // deactivated account (as opposed to a temporary auth failure or proxy error).
 func isAccountDeactivated(apiErr *APIError) bool {
-	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
-	if code == "account_deactivated" || code == "deactivated_workspace" {
+	if apiErrorSignalContains(apiErr, "deactivated", "disabled") {
 		return true
 	}
-	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "deactivated_workspace") ||
-		strings.Contains(msg, "deactivated") ||
-		strings.Contains(msg, "account has been disabled")
+	// Some gateways report a deactivated account as free text without a
+	// structured code/type. Keep the message fallback so a permanently
+	// disabled account is not retried in a loop, but require the full
+	// "account ... disabled" phrasing rather than a bare "disabled" so an
+	// unrelated message (e.g. a disabled feature/tool) does not permanently
+	// remove an otherwise-healthy key.
+	return apiErrMessageContainsAny(apiErr, "deactivated_workspace", "deactivated", "account has been disabled")
 }
 
 // isAccountInvalidated reports whether the API error indicates an invalidated
 // account that typically requires re-auth (as opposed to a banned/deactivated account).
 func isAccountInvalidated(apiErr *APIError) bool {
-	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
-	if code == "account_invalidated" || code == "token_invalidated" || code == "token_revoked" {
+	if apiErrorSignalContains(apiErr, "invalidated") || apiErrorSignalEquals(apiErr, "token_revoked") {
 		return true
 	}
-	msg := strings.ToLower(apiErr.Message)
-	return strings.Contains(msg, "invalidated") ||
-		strings.Contains(msg, "revoked") ||
-		strings.Contains(msg, "could not parse your authentication token")
+	// Fall back to free-text signals for gateways that omit code/type.
+	return apiErrMessageContainsAny(apiErr, "invalidated", "revoked", "could not parse your authentication token")
 }
 
 // applyCodexQuotaOrCooldown marks the key unavailable until the confirmed
@@ -184,7 +179,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 	}
 	switch apiErr.StatusCode {
 	case 400:
-		if providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr.Message) {
+		if providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr) {
 			return markKeyCooldownResult{}
 		}
 		cooldown := apiErr.RetryAfter
