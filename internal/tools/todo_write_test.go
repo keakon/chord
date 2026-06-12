@@ -25,8 +25,8 @@ func TestTodoWriteDescriptionIncludesFinalSyncGuidance(t *testing.T) {
 	if !strings.Contains(desc, "Before the final response") {
 		t.Fatalf("Description() missing final-response guidance: %q", desc)
 	}
-	if !strings.Contains(desc, "Delegate-enabled parallel work") {
-		t.Fatalf("Description() missing Delegate parallel-work guidance: %q", desc)
+	if !strings.Contains(desc, "current role supports parallel delegated workstreams") {
+		t.Fatalf("Description() missing delegated workstream guidance: %q", desc)
 	}
 	if !strings.Contains(desc, "unique active_form") {
 		t.Fatalf("Description() missing unique active_form requirement: %q", desc)
@@ -74,6 +74,8 @@ func TestTodoWriteExecuteRejectsMultipleInProgressWithoutPolicy(t *testing.T) {
 	raw := []byte(`{"todos":[{"id":"1","content":"A","status":"in_progress","active_form":"doing A"},{"id":"2","content":"B","status":"in_progress","active_form":"doing B"}]}`)
 	if _, err := tool.Execute(context.Background(), raw); err == nil {
 		t.Fatal("expected error for multiple in_progress items")
+	} else if !strings.Contains(err.Error(), "current role supports parallel delegated workstreams") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(store.items) != 0 {
 		t.Fatalf("store should not be updated on error, got %+v", store.items)
