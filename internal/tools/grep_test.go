@@ -208,6 +208,50 @@ func TestGrepSupportsMultiplePaths(t *testing.T) {
 	}
 }
 
+func TestGrepMixedPathNoMatchReportsPartialNotAllFailed(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good")
+	if err := os.Mkdir(good, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real file that exists but does not contain the pattern, so the
+	// successful root yields zero matches.
+	if err := os.WriteFile(filepath.Join(good, "a.go"), []byte("nothing here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "does-not-exist")
+
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{good, missing}})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute returned error for partial success: %v", err)
+	}
+	if strings.Contains(out, "all search paths failed") {
+		t.Fatalf("successful-but-empty search plus one failed path should not be reported as all-failed:\n%s", out)
+	}
+	if !strings.Contains(out, "No matches found.") {
+		t.Fatalf("output should report no matches:\n%s", out)
+	}
+	if !strings.Contains(out, "grep: skipped path:") {
+		t.Fatalf("output should note the skipped failing path:\n%s", out)
+	}
+}
+
+func TestGrepAllPathsFailReturnsAggregateError(t *testing.T) {
+	dir := t.TempDir()
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{
+		filepath.Join(dir, "missing-a"),
+		filepath.Join(dir, "missing-b"),
+	}})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error when all search paths fail")
+	}
+	if !strings.Contains(err.Error(), "all search paths failed") {
+		t.Fatalf("error = %v, want all-failed aggregate", err)
+	}
+}
+
 func TestGrepIncludesPathGlobs(t *testing.T) {
 	dir := t.TempDir()
 	paths := map[string]string{

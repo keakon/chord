@@ -153,15 +153,18 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	includes := grepIncludes(a)
 	searched := make([]string, 0, len(paths))
 
+	var pathErrors []string
 	for _, searchPath := range paths {
 		resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
 		if err != nil {
-			return "", grepPathErrorWithHint(searchPath, err)
+			pathErrors = append(pathErrors, grepPathErrorWithHint(searchPath, err).Error())
+			continue
 		}
 		searched = append(searched, resolvedSearchPath)
 		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
 		if err != nil {
-			return "", err
+			pathErrors = append(pathErrors, fmt.Sprintf("%s: %v", resolvedSearchPath, err))
+			continue
 		}
 		matches = append(matches, rootMatches...)
 		outputBytes += rootBytes
@@ -172,9 +175,20 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 		}
 	}
 
+	// Every path failed to resolve/search: return the aggregate error. Judge by
+	// whether all paths errored, not by match count, otherwise a successful but
+	// empty search plus one failed path would be misreported as all-failed.
+	if len(pathErrors) > 0 && len(pathErrors) == len(paths) {
+		return "", fmt.Errorf("all search paths failed: %s", strings.Join(pathErrors, "; "))
+	}
+
 	filter := strings.Join(includes, ",")
 	searchLabel := strings.Join(searched, ",")
 	notes := grepCoerceNotes(a)
+	// Append per-path failures as notes when partial results exist.
+	for _, pe := range pathErrors {
+		notes = append(notes, "grep: skipped path: "+pe)
+	}
 	if len(matches) == 0 {
 		logSlowSearch("Grep", searchLabel, a.Pattern, filter, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
 		msg := "No matches found."

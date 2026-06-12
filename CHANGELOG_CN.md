@@ -11,6 +11,7 @@
 - `read` 现在返回不带行号 gutter、也不额外缩进的原始文件文本，复制片段用于 patch hunk 或缩进敏感格式时更安全。
 - `read` 现在使用更精简的 `READ_RESULT lines=a-b total=N` header；只有实际丢弃请求行时才报告 `truncated=budget`，不再为 UTF-8 文件显示 encoding 噪音，并会在 `offset` 严格超过 EOF 时直接报错而不是静默夹到文件末尾。
 - `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
+- `grep` 在部分搜索路径失败时，现在会把每个失败路径作为结果备注返回部分结果，而不是整个调用失败；只有所有请求路径都失败时才报错。
 - `chord import` 现在会在参数能标准化时始终把可识别的外部工具调用转换为结构化 Chord 工具卡。此前发布过的 `--tool-mode` flag 已移除，因为它不再改变导入行为。
 - `edit` 现在不再要求先通过 `read` 或系统解析的 `@file` mention 观察文件再应用 patch；已观察过的文件仍会作为 snapshot 跟踪，因此外部变更仍会触发风险提示并在必要时创建备份。
 - 当 `edit` 的 hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
