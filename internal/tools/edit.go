@@ -602,8 +602,8 @@ func diagnoseMissingHunk(fileLines, oldSeq []string, start int) string {
 	if start >= len(fileLines) {
 		return "The previous hunk matched near the end of the file, so this hunk starts searching past EOF; combine nearby edits or include context after the previous match."
 	}
-	if hasExactLineMatches(fileLines, oldSeq, start) {
-		return "Some hunk lines exist in the file, but not as one contiguous block; Re-read the target area and include the current surrounding lines."
+	if diag := analyzeContiguousMatch(fileLines, oldSeq, start); diag != "" {
+		return diag
 	}
 	if hasTrimmedLineMatches(fileLines, oldSeq, start) {
 		return "The expected text is present only after trimming whitespace; rebuild the hunk with the file's exact indentation and blank-line spacing."
@@ -685,15 +685,75 @@ func hunkLooksLikeReadOutput(lines []string) bool {
 	return false
 }
 
-func hasExactLineMatches(fileLines, oldSeq []string, start int) bool {
+// analyzeContiguousMatch examines why a hunk's old sequence does not form a
+// contiguous block in the file and returns a targeted diagnostic message.
+func analyzeContiguousMatch(fileLines, oldSeq []string, start int) string {
+	// Determine how many old-seq lines exist in the file, whether they appear
+	// in order, and the longest contiguous sub-run that still matches.
+	exactCount := 0
 	for _, want := range oldSeq {
 		for i := start; i < len(fileLines); i++ {
 			if fileLines[i] == want {
-				return true
+				exactCount++
+				break
 			}
 		}
 	}
-	return false
+	if exactCount == 0 {
+		return ""
+	}
+
+	// Find the longest contiguous sub-run of oldSeq that still matches
+	// sequentially in the file starting from 'start'.
+	bestRun, bestFileLine := longestContiguousRun(fileLines, oldSeq, start)
+
+	switch {
+	case exactCount < len(oldSeq):
+		// Some lines are missing from the file entirely, suggesting the
+		// file has been modified since the hunk was written.
+		return fmt.Sprintf("Some hunk lines no longer exist in the file (%d of %d lines found); the file likely changed since the hunk was written. Re-read the target area and rebuild the hunk from the current contents.", exactCount, len(oldSeq))
+	case bestRun < len(oldSeq):
+		// All lines exist individually but not as a contiguous block.
+		if bestRun > 0 && bestFileLine >= 0 {
+			return fmt.Sprintf("All hunk lines exist in the file, but not as one contiguous block (longest adjacent match: %d of %d lines starting at line %d); extra content may have been inserted or removed between them. Re-read the target area and include the current surrounding lines.", bestRun, len(oldSeq), bestFileLine+1)
+		}
+		return "All hunk lines exist in the file, but not as one contiguous block; Re-read the target area and include the current surrounding lines."
+	default:
+		// All lines exist and form a contiguous block — shouldn't happen
+		// because the caller already failed to find a match, but provide a
+		// fallback.
+		return "Some hunk lines exist in the file, but not as one contiguous block; Re-read the target area and include the current surrounding lines."
+	}
+}
+
+// longestContiguousRun finds the longest sub-sequence of oldSeq that appears
+// as a contiguous run in fileLines starting at or after 'start'. It returns
+// the length of that run and the 0-based file line index where it starts.
+func longestContiguousRun(fileLines, oldSeq []string, start int) (runLen int, fileLine int) {
+	bestLen := 0
+	bestStart := -1
+	// Try each position in oldSeq as a potential start of a contiguous run.
+	for from := 0; from < len(oldSeq); from++ {
+		// Try every occurrence of oldSeq[from] at or after start, not just the
+		// first: an earlier occurrence may fail to extend while a later one
+		// continues into a longer contiguous run.
+		for j := start; j < len(fileLines); j++ {
+			if fileLines[j] != oldSeq[from] {
+				continue
+			}
+			// Extend the run as far as consecutive file lines match consecutive
+			// old-seq lines.
+			run := 1
+			for run < len(oldSeq)-from && j+run < len(fileLines) && fileLines[j+run] == oldSeq[from+run] {
+				run++
+			}
+			if run > bestLen {
+				bestLen = run
+				bestStart = j
+			}
+		}
+	}
+	return bestLen, bestStart
 }
 
 func hasTrimmedLineMatches(fileLines, oldSeq []string, start int) bool {

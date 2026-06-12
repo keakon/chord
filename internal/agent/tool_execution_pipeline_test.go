@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,6 +12,21 @@ import (
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestWrapStaleEditError(t *testing.T) {
+	base := errors.New("hunk did not apply")
+	wrapped := wrapStaleEditError(base)
+	if !errors.Is(wrapped, base) {
+		t.Fatalf("wrapped error does not unwrap to the original: %v", wrapped)
+	}
+	msg := wrapped.Error()
+	if !strings.HasPrefix(msg, base.Error()) {
+		t.Fatalf("wrapped error should preserve the original prefix, got %q", msg)
+	}
+	if !strings.Contains(msg, "file changed on disk") {
+		t.Fatalf("wrapped error missing stale-content note, got %q", msg)
+	}
+}
 
 type requiredValueTool struct{}
 

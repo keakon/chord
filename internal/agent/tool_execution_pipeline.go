@@ -103,6 +103,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()
 	if err != nil {
+		if staleWrite && tc.Name == tools.NameEdit {
+			err = wrapStaleEditError(err)
+		}
 		if result != "" {
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 		}
@@ -152,6 +155,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult.Images = imageSink.Drain()
 	if err != nil {
 		rollbackSpeculativeToolHooks(execResult)
+		if staleWrite && tc.Name == tools.NameEdit {
+			err = wrapStaleEditError(err)
+		}
 		if result != "" {
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 		}
@@ -492,6 +498,10 @@ func formatToolExecutionOutput(result, sessionDir, artifactKey, toolName string,
 	truncated := tools.TruncateOutputWithOptions(result, sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 	content := tools.NormalizeEmptySuccessOutput(toolName, truncated.Content, execErr)
 	return tools.AppendArtifactGuidance(content, truncated, guidance)
+}
+
+func wrapStaleEditError(err error) error {
+	return fmt.Errorf("%w: file changed on disk since it was last read; hunk may be based on stale content; re-read the file and retry with current contents", err)
 }
 
 func toolCallArtifactKey(tc message.ToolCall) string {

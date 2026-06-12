@@ -532,3 +532,108 @@ func TestExtractEditPathFromArgsFallsBackToLegacyEnvelope(t *testing.T) {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
 }
+
+func TestDiagnoseContiguousMatchPartialLinesMissing(t *testing.T) {
+	// Some hunk lines are completely absent from the file → "no longer exist"
+	fileLines := []string{"alpha", "beta", "delta"}
+	oldSeq := []string{"alpha", "gamma", "delta"} // "gamma" is not in the file
+	got := diagnoseMissingHunk(fileLines, oldSeq, 0)
+	if !strings.Contains(got, "no longer exist") {
+		t.Fatalf("diagnosis = %q, want mention of lines no longer existing", got)
+	}
+	if !strings.Contains(got, "2 of 3") {
+		t.Fatalf("diagnosis = %q, want '2 of 3 lines found'", got)
+	}
+	if !strings.Contains(got, "likely changed") {
+		t.Fatalf("diagnosis = %q, want mention of file likely changed", got)
+	}
+}
+
+func TestDiagnoseContiguousMatchAllExistNotContiguous(t *testing.T) {
+	// All lines exist individually but not contiguous → "not as one contiguous block"
+	fileLines := []string{"alpha", "inserted", "beta", "gamma"}
+	oldSeq := []string{"alpha", "beta", "gamma"} // "inserted" breaks contiguity
+	got := diagnoseMissingHunk(fileLines, oldSeq, 0)
+	if !strings.Contains(got, "not as one contiguous block") {
+		t.Fatalf("diagnosis = %q, want 'not as one contiguous block'", got)
+	}
+	if !strings.Contains(got, "longest adjacent match") {
+		t.Fatalf("diagnosis = %q, want longest adjacent match info", got)
+	}
+}
+
+func TestDiagnoseContiguousMatchAllExistLongestRun(t *testing.T) {
+	// All lines exist, longest run is 2 of 3 at a known position.
+	fileLines := []string{"alpha", "beta", "extra", "gamma"}
+	oldSeq := []string{"alpha", "beta", "gamma"}
+	got := diagnoseMissingHunk(fileLines, oldSeq, 0)
+	if !strings.Contains(got, "2 of 3") {
+		t.Fatalf("diagnosis = %q, want '2 of 3 lines'", got)
+	}
+	if !strings.Contains(got, "line 1") {
+		t.Fatalf("diagnosis = %q, want 'starting at line 1'", got)
+	}
+}
+
+func TestLongestContiguousRun(t *testing.T) {
+	tests := []struct {
+		fileLines []string
+		oldSeq    []string
+		start     int
+		wantLen   int
+		wantLine  int
+	}{
+		{
+			fileLines: []string{"a", "b", "c"},
+			oldSeq:    []string{"a", "b", "c"},
+			start:     0,
+			wantLen:   3, wantLine: 0,
+		},
+		{
+			fileLines: []string{"a", "x", "b", "c"},
+			oldSeq:    []string{"a", "b", "c"},
+			start:     0,
+			wantLen:   2, wantLine: 2,
+		},
+		{
+			fileLines: []string{"x", "a", "b", "y", "c"},
+			oldSeq:    []string{"a", "b", "c"},
+			start:     0,
+			wantLen:   2, wantLine: 1,
+		},
+		{
+			// The first occurrence of "a" (line 0) cannot extend, but a later
+			// occurrence (line 2) continues into "b": must find the longer run
+			// rather than stopping at the first match.
+			fileLines: []string{"a", "x", "a", "b"},
+			oldSeq:    []string{"a", "b"},
+			start:     0,
+			wantLen:   2, wantLine: 2,
+		},
+		{
+			fileLines: []string{"a", "b"},
+			oldSeq:    []string{"c", "d"},
+			start:     0,
+			wantLen:   0, wantLine: -1,
+		},
+	}
+	for _, tt := range tests {
+		runLen, fileLine := longestContiguousRun(tt.fileLines, tt.oldSeq, tt.start)
+		if runLen != tt.wantLen || fileLine != tt.wantLine {
+			t.Errorf("longestContiguousRun(%v, %v, %d) = (%d, %d), want (%d, %d)",
+				tt.fileLines, tt.oldSeq, tt.start, runLen, fileLine, tt.wantLen, tt.wantLine)
+		}
+	}
+}
+
+func TestDiagnoseContiguousMatchNoExactMatches(t *testing.T) {
+	// No exact line matches → analyzeContiguousMatch returns empty string,
+	// falling through to hasTrimmedLineMatches.
+	fileLines := []string{"  alpha  ", "  beta  "}
+	oldSeq := []string{"gamma", "delta"}
+	got := diagnoseMissingHunk(fileLines, oldSeq, 0)
+	// Should fall through to the trimmed or generic message.
+	if strings.Contains(got, "no longer exist") {
+		t.Fatalf("diagnosis = %q, should not mention 'no longer exist' when no exact matches exist", got)
+	}
+}
