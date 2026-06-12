@@ -59,17 +59,44 @@ make docs-check
 make docs-examples-check
 ```
 
-If your changes touch TUI performance-critical paths, also run:
-
-```bash
-./scripts/bench_tui_regression.sh
-```
+If your changes touch TUI performance-critical paths, also run the checks in [Performance-sensitive changes](#performance-sensitive-changes).
 
 Optional integration tests that require external tools are not part of the default CI run. To run the real Pyright LSP integration test locally, install `pyright-langserver` and run:
 
 ```bash
 CHORD_RUN_REAL_PYRIGHT_TESTS=1 go test ./internal/tools -run Pyright
 ```
+
+## Performance-sensitive changes
+
+`./scripts/bench_tui_regression.sh` is the canonical validation entry point for TUI hot paths — it combines correctness tests, alloc guards, and the stable micro-benchmark set, and accepts two result files for a `benchstat` comparison:
+
+```bash
+./scripts/bench_tui_regression.sh
+./scripts/bench_tui_regression.sh ./old.txt ./new.txt   # benchstat compare
+```
+
+For a quick focused loop while iterating on streaming or rendering, run the benchmarks closest to the path you are changing, for example:
+
+```bash
+go test ./internal/tui -run '^$' -bench 'BenchmarkStream.*|BenchmarkRender.*|BenchmarkModelViewCached' -benchmem
+```
+
+When benchmark results do not explain real CPU usage, collect a profile during the problematic interaction:
+
+```bash
+CHORD_PPROF_PORT=6060 chord
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=15
+```
+
+Interpreting common hotspots:
+
+- `bubbletea.(*Program).render`, terminal writes, or renderer cell output: redraws are too frequent, or stream events are too fragmented.
+- Markdown / glamour / goldmark functions during active streaming: the cheap streaming path is being bypassed.
+- Viewport measurement, line wrapping, or ANSI width functions: visible-window or line-count caches may be invalidating too often.
+- Animation or status tick handlers while nothing changes: stale or duplicate tick chains may be running.
+
+Tuning trade-offs to keep in mind: larger stream micro-batch windows reduce CPU but make text feel less immediate; longer flush cadence reduces redraws but makes streamed output chunkier; more aggressive cache retention improves redraw speed but increases memory, while more aggressive eviction does the opposite. Prefer the smallest change that fixes the measured bottleneck, and keep benchmarks close to the path being optimized.
 
 ## Scope & style
 
@@ -99,7 +126,7 @@ When you add a new top-level page under `docs/`, also list it in:
 - `docs/index.md` and `docs/index_CN.md` (the per-section navigation),
 - `website/astro.config.mjs` (the Starlight sidebar) — add an entry under the right group with both English label and `zh-CN` translation.
 
-The docs site is automatically built and deployed by `.github/workflows/docs.yml` whenever `docs/`, `website/`, `scripts/sync-docs.mjs`, or the README files change on `main`.
+The docs site is automatically built and deployed by `.github/workflows/docs.yml` whenever `docs/`, `website/`, the docs sync/check scripts, or the README / CONTRIBUTING files change on `main`.
 
 ## Security
 

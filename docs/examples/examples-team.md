@@ -18,7 +18,6 @@ providers:
       claude-opus-4.8:
         limit:
           context: 1000000
-          input: 1000000
           output: 128000
         thinking:
           type: adaptive

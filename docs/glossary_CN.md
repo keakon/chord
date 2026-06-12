@@ -134,7 +134,7 @@ Vim 风格的两种 TUI 模式。**Insert** 是输入态，用于打字；**Norm
 
 ## 自定义 slash 命令
 
-用户定义的 `/name [args]` 命令，输入框中输入后展开为固定文本（或 `$ARGUMENTS` 模板），作为用户消息发给模型。在 `config.yaml` 的 `commands:` 下定义，或放到 `commands/` 目录。详见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。
+用户定义的 `/name [args]` 命令，输入框中输入后展开为固定文本（或 `$ARGUMENTS` 模板），作为用户消息发给模型。在 `config.yaml` 的 `commands:` 下定义，或放到 `commands/` 目录。详见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
 
 ## 相关
 

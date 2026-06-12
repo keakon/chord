@@ -58,7 +58,7 @@ Start with the core experience you notice immediately:
 - **Long sessions use less context.** Chord trims stale tool output at request time and keeps typed summaries for large search results, JSON blobs, build/test logs, and file reads. Before a conversation approaches the model's token limit, it can compact earlier turns in the background. Paired with `/loop`, complex tasks can run continuously for hours while wasting fewer tokens.
 - **Stays out of the way.** Chord can load sessions with thousands of messages almost instantly, exits without a shutdown wait, keeps memory usage low, and unloads idle LSP/MCP resources until they are needed again.
 - **You see the network state.** While waiting for a model response, Chord shows precise request status and elapsed wait time. Never wonder if it is stuck again.
-- **Keyboard-first, Vim-style.** Built for keyboard-heavy workflows: Insert / Normal modes, Vim-flavoured navigation, and message search. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
+- **Keyboard-first, Vim-style.** Built for keyboard-heavy workflows: Insert / Normal modes, Vim-flavoured navigation, message search, and optional automatic input-method switching on mode change. Quitting takes two taps so you do not lose work to a stray Ctrl+C.
 - **Hot-swap model setups.** Group models into reusable pools (`fast`, `thinking`, `cheap`, …); switch the active pool at runtime via `/models` or `Ctrl+P`. Each agent picks its own pool; the runtime falls back through the ordered list automatically.
 - **Drive it remotely.** `chord headless` exposes a stdio JSONL control plane; pair with [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord from chat surfaces.
 - **Bring old sessions in.** `chord import` migrates Claude Code, Codex, and OpenCode sessions into resumable Chord sessions.
@@ -114,27 +114,13 @@ For manual provider/model setup and model-limit guidance, see [Quickstart](./doc
 
 ### Release download notes
 
-GitHub Releases provide prebuilt binaries for supported platforms. On macOS, the downloaded binary may be blocked on first run because the file came from the internet and is not notarized. If that happens, remove the quarantine attribute and make the binary executable:
-
-```bash
-xattr -dr com.apple.quarantine /path/to/chord
-chmod +x /path/to/chord
-/path/to/chord --version
-```
-
-If macOS still blocks it, add a local ad-hoc signature:
-
-```bash
-codesign --force --sign - /path/to/chord
-```
-
-For example, if you installed Chord at `/usr/local/bin/chord`, replace `/path/to/chord` with `/usr/local/bin/chord`.
+GitHub Releases provide prebuilt binaries for supported platforms. On macOS, the downloaded binary may be blocked on first run because the file came from the internet and is not notarized. See [Quickstart — Install](./docs/quickstart.md#1-install) for the `xattr` / `codesign` commands that unblock it.
 
 ## Documentation
 
 - [Docs home](./docs/index.md)
 - Getting started: [Quickstart](./docs/quickstart.md) · [Usage](./docs/usage.md) · [Glossary](./docs/glossary.md)
-- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
+- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Built-in tools](./docs/tools.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
 - Going further: [Customization](./docs/customization.md) · [Hooks](./docs/hooks.md) · [Examples](./docs/examples/index.md)
 - Integration: [Headless](./docs/headless.md)
 - Safety: [Permissions & Safety](./docs/permissions-and-safety.md)

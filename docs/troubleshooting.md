@@ -13,12 +13,6 @@ Check first:
 
 If `config.yaml` is missing, run `chord` once in an interactive terminal to launch the setup wizard. If stdin is redirected but Chord can still open the controlling TTY, the wizard runs there. If there is no controlling TTY, Chord exits immediately with an initialization error. If `config.yaml` exists but is malformed, fix the file first; the wizard only runs for missing configs.
 
-You can run:
-
-```bash
-go test ./cmd/chord/...
-```
-
 If you are using a built binary, rerun it and inspect terminal error output.
 
 ## 401 / 403 / auth failures
@@ -206,30 +200,18 @@ Note: fragments like `;250m pyright` during a corruption episode are usually not
 
 ### Repeated separator lines / stale border artifacts
 
-If the main symptom is repeated horizontal lines, duplicated input/status separators, stale card borders, or old sidebar borders, the most useful question is whether the extra line exists in Chord's current frame or is a stale terminal artifact from an older frame.
-
-Capture evidence in this order:
+If the main symptom is repeated horizontal lines, duplicated input/status separators, stale card borders, or old sidebar borders:
 
 1. Take a screenshot before forcing a redraw. Include the full terminal window, especially the input area, status bar, and right sidebar.
-2. Export a diagnostics bundle immediately, before resizing the terminal. Use the diagnostics shortcut if available; the bundle contains `metadata.txt`, `tui-dump.txt`, and `chord.log`.
-3. In `tui-dump.txt`, compare the screenshot against:
-   - `[layout]` and `expected_separator_rows`: `main`, `info_panel`, `input`, `status`, `input_separator_row`, plus the aggregated `expected_separator_rows` line show every row where Chord expected a separator.
-   - `[frame_bottom]` and `[screen_buffer_bottom]`: show the bottom rows of the frame Chord most recently rendered.
-   - `[screen_buffer]`: shows Chord's full current screen buffer.
-   - `[screen_buffer_horizontal_lines]`: lists every screen-buffer row that contains a horizontal box-drawing run, so you can match the screenshot's extra line to a specific row and tell Chord-drawn separators from stale artifacts.
-   - `last_host_redraw`, `host_redraw_generation`, `host_full_frame`, and `render_frame_generation`: show whether a host redraw, fallback replay, or Ghostty-safe full-frame path was involved, and which render frame produced the captured buffer.
-   - `recent_events`: look for `render-frame`, `host-redraw`, `host-redraw-skip`, `post-host-redraw-fallback-arm`, `image-protocol`, `focus`, `resize`, `scroll-flush`, or `content-boundary` events near the capture time. A `render-frame` entry is recorded whenever the layout or separator rows change, so its `separators` and `frame` fields show the most recent separator geometry.
+2. Export a diagnostics bundle (`Ctrl+G`) immediately, before resizing the terminal — the bundle captures the frame Chord most recently rendered, so it lets maintainers tell a Chord-drawn duplicate from a stale terminal artifact.
+3. Attach both to your report, plus your terminal emulator name and version.
 
-Interpretation:
+Two quick local observations also help narrow it down:
 
-- If the extra line appears in `[screen_buffer]` at the same row as the screenshot, Chord likely generated the duplicate separator in the current frame. Keep the bundle and note the matching row.
-- If the extra line appears in the screenshot but not in `[screen_buffer]`, it is probably a stale terminal/renderer artifact from a previous frame. This is most commonly associated with host redraw, focus restore, right-edge wrapping, or clear/repaint timing.
-- If the line appears only near the far right edge or disappears when the terminal is made one or two columns narrower, suspect right-edge wrap behavior. Record `size` and `host_full_frame safe_width/raw_width`.
-- If the artifact appears immediately after image preview, paste image, or diagnostics export, also inspect `last_image_protocol_reason` and `last_image_protocol_summary`.
+- If the extra line disappears when the terminal is made one or two columns narrower, mention that — it points at right-edge wrap behavior.
+- If the artifact appears right after image preview, paste image, or diagnostics export, mention that too.
 
-For maintainer-level isolation, replaying the final ANSI output in multiple terminals is useful: if the same captured output only shows stale lines in Ghostty/libghostty but not in Terminal.app, iTerm2, or WezTerm, keep both the replay file and the Ghostty screenshot. If multiple terminals show the same duplicate line, prefer investigating Chord or the Bubble Tea/Ultraviolet renderer output.
-
-Note: starting in v0.6.x, Chord disables only Bubble Tea / Ultraviolet DECSTBM scroll-region optimization for its TUI. Other hard-scroll optimizations stay enabled, while streaming scroll updates that would require DECSTBM fall back to in-place line redraws. This sidesteps terminals that mishandle region scrolls (especially libghostty during the post-focus-restore surface-invalidation window, the path that left stale separators and stale borders behind). The cost is a few extra bytes for affected scroll frames and is usually negligible over local PTYs. The existing `useFocusResizeFreeze` full-frame rendering, `safe_width` right-edge avoidance, and the host-redraw / fallback machinery are preserved as orthogonal defenses.
+Chord already avoids terminal scroll-region optimizations that some terminals mishandle around focus restore, so most of these reports come down to terminal-specific redraw behavior; the screenshot-plus-bundle pair is what makes them diagnosable.
 
 ## Bottom transcript rows are unreachable in long sessions
 
@@ -266,11 +248,11 @@ If you see this:
 
 If scrolling, streaming output, or large message rendering feels noticeably slow:
 
-- reduce the current session context size
+- reduce the current session context size (`/compact`, or a new session for unrelated work)
 - streaming assistant/thinking output keeps only stable structure (blank-line-separated paragraphs and closed fences) on the markdown path; long single paragraphs stay on the cheaper plain-text path until they settle
 - compare behavior in different terminals
 
-- for render hotspot analysis, maintainers can profile `go test ./internal/tui -run '^$' -bench 'BenchmarkRenderAssistantStreamingLongTextCardProfile' -cpuprofile cpu.out -memprofile mem.out` and inspect the remaining cost in block rendering vs viewport slicing
+See [Performance](./performance.md) for how rendering and streaming are optimized and how to capture a CPU profile for a bug report.
 
 ## Compaction not triggering / triggering too often
 

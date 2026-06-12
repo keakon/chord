@@ -42,7 +42,7 @@ Chord writes here. Lose it and you lose history.
 │   └── <project-key>/
 │       ├── project.json                # canonical-root, display-name, timestamps
 │       └── <session-id>/               # one session
-│           ├── messages.jsonl
+│           ├── main.jsonl
 │           ├── traces/
 │           │   └── llm-trace.jsonl     # lightweight per-request LLM trace (always on)
 │           └── …                       # additional session artifacts

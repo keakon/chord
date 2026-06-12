@@ -15,7 +15,7 @@ These examples are starting points, not rigid templates. For field semantics and
 
 ## Context and output limits
 
-The bundled example configs set `limit.context`, `limit.input`, and `limit.output` per model. For what each field means — and how Chord derives the input budget when a provider does not publish a separate input cap — see the [Glossary](../glossary.md). For how those limits interact with compaction, see [Configuration — Compaction](../configuration.md#context-compaction).
+The bundled example configs set `limit.context` and `limit.output` per model; examples include `limit.input` only when the provider publishes a separate input cap. For what each field means — and how Chord derives the input budget when a provider does not publish a separate input cap — see the [Glossary](../glossary.md). For how those limits interact with compaction, see [Configuration — Compaction](../configuration.md#context-compaction).
 
 ## Where things go
 

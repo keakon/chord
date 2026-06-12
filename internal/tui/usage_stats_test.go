@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -24,6 +25,14 @@ func TestHandleUsageStatsKeyTabResetsScroll(t *testing.T) {
 }
 
 func TestHandleUsageStatsKeyScopeStartsProjectLoad(t *testing.T) {
+	// The project load registers the working dir via EnsureProject; keep that
+	// write inside a temp state dir instead of the user's real sessions root.
+	chordRoot := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", filepath.Join(chordRoot, "config"))
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(chordRoot, "state"))
+	t.Setenv("CHORD_CACHE_DIR", filepath.Join(chordRoot, "cache"))
+	t.Setenv("CHORD_SESSIONS_DIR", filepath.Join(chordRoot, "sessions"))
+
 	m := NewModel(&sessionControlAgent{})
 	m.workingDir = t.TempDir()
 	m.openUsageStats()

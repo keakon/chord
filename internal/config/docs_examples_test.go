@@ -41,8 +41,14 @@ func TestDocsExampleConfigsLoad(t *testing.T) {
 					if strings.TrimSpace(modelName) == "" {
 						t.Fatalf("provider %q contains an empty model name", providerName)
 					}
-					if model.Limit.Context <= 0 || model.Limit.Input <= 0 || model.Limit.Output <= 0 {
-						t.Fatalf("provider %q model %q must define positive context/input/output limits: %+v", providerName, modelName, model.Limit)
+					// limit.input is intentionally optional: examples set it only
+					// when the provider publishes a separate input cap, matching
+					// the documented guidance.
+					if model.Limit.Context <= 0 || model.Limit.Output <= 0 {
+						t.Fatalf("provider %q model %q must define positive context/output limits: %+v", providerName, modelName, model.Limit)
+					}
+					if model.Limit.Input < 0 {
+						t.Fatalf("provider %q model %q must not define a negative input limit: %+v", providerName, modelName, model.Limit)
 					}
 				}
 			}

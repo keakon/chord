@@ -57,4 +57,4 @@ npm run preview         # serve the built site locally
 
 The CI workflow at `.github/workflows/docs.yml` runs the same `build` step
 and deploys `dist/` to GitHub Pages on every change to `docs/`, `website/`,
-or `README.md`.
+the docs sync/check scripts, or the README / CONTRIBUTING files.

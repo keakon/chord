@@ -200,13 +200,15 @@ hooks:
       paths: ["**/*.go"]
       min_changed_files: 1
       shell: |
-        out=$(golangci-lint run ./... 2>&1) || status=failed
+        status=success
+        append_context=false
+        out=$(golangci-lint run ./... 2>&1) || { status=failed; append_context=true; }
         cat <<JSON
         {
-          "status": "${status:-success}",
+          "status": "$status",
           "summary": "golangci-lint",
           "body": $(jq -Rs . <<<"$out"),
-          "append_context": ${status:+true,$0}false
+          "append_context": $append_context
         }
         JSON
       result: append_on_failure

@@ -11,6 +11,8 @@
 
 适合做外层集成，但**不**自带浏览器前端、多租户隔离、完整权限托管。
 
+> **协议稳定性：** Chord 还在 1.0 之前，headless 协议在版本之间可能变化。请把未知的 envelope 字段和事件类型当作不透明数据处理，固定集成所测试过的 Chord 版本，并在升级前查看[变更记录](https://github.com/keakon/chord/blob/main/CHANGELOG_CN.md)。
+
 ## 启动
 
 ```bash

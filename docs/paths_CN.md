@@ -28,7 +28,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 └── skills/                # 全局 skill，每个为 <name>/SKILL.md
 ```
 
-`config.yaml` 的 schema 见 [配置与认证](./configuration_CN.md)。Agent 见 [扩展与定制 — Agent](./customization_CN.md#agent)。Skill 见 [扩展与定制 — Skills](./customization_CN.md#skills)。自定义 slash 命令见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。
+`config.yaml` 的 schema 见 [配置与认证](./configuration_CN.md)。Agent 见 [扩展与定制 — Agent](./customization_CN.md#自定义-agents)。Skill 见 [扩展与定制 — Skills](./customization_CN.md#skills)。自定义 slash 命令见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
 
 `auth.state.json` 是共享运行时缓存，用来保存 OAuth 状态、Codex 额度快照、reset 时间和 warm-up 时间戳。它由 Chord 自动维护，通常不需要手工编辑。删除它是安全的，但在后续 warm-up 重新填充前，会暂时失去跨重启保留的额度排序缓存。
 
@@ -42,7 +42,7 @@ Chord 写在这里。删了就丢历史。
 │   └── <project-key>/
 │       ├── project.json                # canonical-root、display-name、时间戳
 │       └── <session-id>/               # 单个会话
-│           ├── messages.jsonl
+│           ├── main.jsonl
 │           ├── traces/
 │           │   └── llm-trace.jsonl     # 轻量 LLM 请求 trace（默认开启）
 │           └── …                       # 该会话的其他产物

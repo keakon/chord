@@ -36,7 +36,7 @@ Legend: ✅ supported · ⚠️ supported with caveats · ❌ not supported / no
 
 ### `prevent_sleep`
 
-macOS uses `caffeinate(1)` under the hood. On Linux / Windows / WSL this setting is a no-op — the implementation is `internal/power/power_other.go` (a `NoopBackend`). If you depend on always-on behavior elsewhere, configure your OS power settings directly.
+macOS uses `caffeinate(1)` under the hood. On Linux / Windows / WSL this setting is a no-op. If you depend on always-on behavior elsewhere, configure your OS power settings directly.
 
 The first-run setup wizard asks about `prevent_sleep` only on macOS, and only as an explicit opt-in confirmation. It is intended for longer-running agent sessions where idle sleep would be disruptive.
 

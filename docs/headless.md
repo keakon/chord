@@ -11,6 +11,8 @@
 
 It is suitable for outer-layer integration, but it does not provide a browser frontend, multi-tenant isolation, or complete permission hosting.
 
+> **Protocol stability:** Chord is pre-1.0, so the headless protocol can change between releases. Treat unknown envelope fields and event types as opaque, pin the Chord version your integration was tested against, and check the [changelog](https://github.com/keakon/chord/blob/main/CHANGELOG.md) before upgrading.
+
 ## Start
 
 ```bash

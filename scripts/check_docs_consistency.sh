@@ -134,4 +134,80 @@ for page in docs/examples/examples-*.md; do
  fi
 done
 
+# Validate in-page anchor links (target.md#fragment) against real headings.
+# Slugs follow GitHub's algorithm (lowercase, drop a fixed punctuation set,
+# spaces -> hyphens) and are Unicode-aware so CN/accented headings resolve.
+if ! perl - <<'PERL'
+use strict;
+use warnings;
+use File::Basename qw(dirname);
+use File::Spec;
+
+binmode STDOUT, ':encoding(UTF-8)';
+binmode STDERR, ':encoding(UTF-8)';
+
+my @files = ('README.md', 'README_CN.md');
+push @files, sort glob('docs/*.md docs/examples/*.md');
+@files = grep { -f $_ } @files;
+
+sub slugify {
+    my ($s) = @_;
+    $s = lc $s;
+    # GitHub keeps letters, marks, numbers, connector punctuation (_) and hyphen;
+    # everything else (incl. ASCII and CJK fullwidth punctuation/symbols) is dropped.
+    $s =~ s/[^\p{L}\p{M}\p{N}\p{Pc}\- ]//g;
+    $s =~ s/ /-/g;
+    return $s;
+}
+
+my %slugs;
+for my $f (@files) {
+    open my $fh, '<:encoding(UTF-8)', $f or next;
+    my %seen;
+    while (my $line = <$fh>) {
+        next unless $line =~ /^#{1,6}\s+(.*?)\s*#*\s*$/;
+        my $text = $1;
+        $text =~ s/\[([^\]]*)\]\([^)]*\)/$1/g;
+        $text =~ s/[*_`]//g;
+        my $slug = slugify($text);
+        if (exists $seen{$slug}) { my $n = $seen{$slug}++; $slug = "$slug-$n"; }
+        else { $seen{$slug} = 1; }
+        $slugs{$f}{$slug} = 1;
+    }
+    close $fh;
+}
+
+my $issues = 0;
+for my $f (@files) {
+    open my $fh, '<:encoding(UTF-8)', $f or next;
+    my $dir = dirname($f);
+    while (my $line = <$fh>) {
+        while ($line =~ /\[[^\]]*\]\(([^)\s]+)\)/g) {
+            my $target = $1;
+            next unless $target =~ /#/;
+            my ($path, $frag) = split /#/, $target, 2;
+            next if !defined $frag || $frag eq '';
+            next if $path =~ m{^https?://} || $path =~ /^mailto:/;
+            my $tf;
+            if ($path eq '') {
+                $tf = $f;
+            } else {
+                next unless $path =~ /\.md$/;
+                $tf = File::Spec->abs2rel(File::Spec->rel2abs($path, $dir));
+            }
+            next unless exists $slugs{$tf};
+            unless ($slugs{$tf}{$frag}) {
+                print "BAD ANCHOR $f -> $target\n";
+                $issues++;
+            }
+        }
+    }
+    close $fh;
+}
+exit($issues > 0 ? 1 : 0);
+PERL
+then
+    fail "found broken in-page anchor links (see BAD ANCHOR lines above)"
+fi
+
 echo 'docs consistency check passed'

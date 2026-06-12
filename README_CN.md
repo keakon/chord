@@ -114,27 +114,13 @@ cd my-project && chord
 
 ### Release 下载说明
 
-GitHub Releases 提供多个支持平台的预构建二进制。macOS 下载版首次运行时可能因文件来自互联网且未公证而被系统阻止。遇到此情况时，移除 quarantine 属性并确保文件可执行：
-
-```bash
-xattr -dr com.apple.quarantine /path/to/chord
-chmod +x /path/to/chord
-/path/to/chord --version
-```
-
-若仍被 macOS 阻止，可添加本地 ad-hoc 签名：
-
-```bash
-codesign --force --sign - /path/to/chord
-```
-
-安装到 `/usr/local/bin/chord` 时，将 `/path/to/chord` 替换为 `/usr/local/bin/chord`。
+GitHub Releases 提供多个支持平台的预构建二进制。macOS 下载版首次运行时可能因文件来自互联网且未公证而被系统阻止，解除阻止的 `xattr` / `codesign` 命令见[快速开始 — 安装](./docs/quickstart_CN.md#1-安装)。
 
 ## 文档
 
 - [文档首页](./docs/index_CN.md)
 - 入门：[快速开始](./docs/quickstart_CN.md) · [使用指南](./docs/usage_CN.md) · [术语表](./docs/glossary_CN.md)
-- 参考：[CLI](./docs/cli_CN.md) · [配置与认证](./docs/configuration_CN.md) · [快捷键](./docs/keybindings_CN.md) · [目录与路径](./docs/paths_CN.md) · [环境变量](./docs/environment_CN.md) · [平台支持](./docs/platforms_CN.md) · [性能优化](./docs/performance_CN.md)
+- 参考：[CLI](./docs/cli_CN.md) · [配置与认证](./docs/configuration_CN.md) · [内置工具](./docs/tools_CN.md) · [快捷键](./docs/keybindings_CN.md) · [目录与路径](./docs/paths_CN.md) · [环境变量](./docs/environment_CN.md) · [平台支持](./docs/platforms_CN.md) · [性能](./docs/performance_CN.md)
 - 进阶：[扩展与定制](./docs/customization_CN.md) · [Hooks](./docs/hooks_CN.md) · [示例配置库](./docs/examples/index_CN.md)
 - 集成：[Headless](./docs/headless_CN.md)
 - 安全：[权限与安全](./docs/permissions-and-safety_CN.md)

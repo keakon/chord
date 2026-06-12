@@ -39,10 +39,12 @@ export default defineConfig({
           items: [
             { slug: 'cli', translations: { 'zh-CN': 'CLI' } },
             { slug: 'configuration', translations: { 'zh-CN': '配置与认证' } },
+            { slug: 'tools', translations: { 'zh-CN': '内置工具' } },
             { slug: 'keybindings', translations: { 'zh-CN': '快捷键' } },
             { slug: 'paths', translations: { 'zh-CN': '目录与路径' } },
             { slug: 'environment', translations: { 'zh-CN': '环境变量' } },
             { slug: 'platforms', translations: { 'zh-CN': '平台支持' } },
+            { slug: 'performance', translations: { 'zh-CN': '性能' } },
           ],
         },
         {

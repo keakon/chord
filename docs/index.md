@@ -26,11 +26,12 @@ Start with what works out of the box; move on to customization and advanced work
 
 - [CLI](./cli.md) — every command, subcommand, and flag
 - [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
+- [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
 - [Keybindings](./keybindings.md) — complete key map and how to customize it
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads
 - [Platform support](./platforms.md) — what works on macOS / Linux / Windows / WSL
-- [Performance](./performance.md) — TUI streaming, rendering, scrolling, and benchmark guidance
+- [Performance](./performance.md) — how Chord stays fast and what to do when it feels slow
 
 ## Going further
 

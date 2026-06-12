@@ -50,7 +50,7 @@ To shorten the wait during a provider's finalize phase, Chord executes a small s
 - Eligible: `read`, `grep`, `glob`, rollback-safe file mutations (`write`, `edit`, `delete`), and a conservative read-only `shell` subset (single command, no pipes/redirects/`&&`/`;`): `pwd`, `ls`, `cat`, `which`, and `git status|log|diff|show|branch|rev-parse`.
 - Not eligible: non-read-only `shell`, interactive/control tools, or any call whose permission action is `ask`.
 - Speculative file mutations are real on-disk writes/deletes, but Chord captures pre-state first and rolls them back if finalize discards the call. Conflicting speculative mutations on the same path within a turn are skipped for the finalized path, and read-like speculation is skipped while any unpromoted speculative mutation exists in the turn, so it never observes uncommitted state.
-- Speculative results may show early in the UI, but they are only appended to the conversation context after finalize validation.
+- Speculative results may show early in the UI, but they are only appended to the conversation context after finalize validation. Calls discarded at finalize are rolled back and their cards are marked as discarded speculative execution that is not part of the conversation context.
 
 ### How `edit` applies patches
 
@@ -190,9 +190,14 @@ Export the current session as Markdown (default) or JSON.
 
 The export includes every conversation message plus the current session usage statistics. On success, the TUI displays the saved path.
 
-In the TUI info panel's `USAGE` block, `Context` shows the actual input-side token burden reported for the most recent model request. `Bytes` and `Messages` describe the conversation context that will be sent to the model: after request-level context reduction runs, `Bytes` shows the post-reduction request byte count followed by `↓` and the saved percentage. When a session is restored, Chord precomputes the same request-level reduction for display so `Bytes` starts with the post-reduction estimate instead of dropping after the next request; before any request surface can be prepared, it falls back to the current durable context estimate. `Bytes` counts the installed system prompt, message content, image payloads, and tool names/descriptions, while excluding JSON escaping overhead, tool-call argument JSON, thinking metadata, and request parameters such as stream settings or thinking budgets. These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active. When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens; output tokens are excluded because prompt caching applies only to the input side.
+### Reading the info panel `USAGE` block
 
-In the info panel's `USAGE` block, `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
+- `Context` shows the actual input-side token burden reported for the most recent model request.
+- `Bytes` and `Messages` describe the conversation context that will be sent to the model. After request-level context reduction runs, `Bytes` shows the post-reduction request byte count followed by `↓` and the saved percentage. When a session is restored, Chord precomputes the same reduction for display, so `Bytes` starts at the post-reduction estimate instead of dropping after the next request; before any request surface can be prepared, it falls back to the current durable context estimate.
+- `Bytes` counts the installed system prompt, message content, image payloads, and tool names/descriptions. It excludes JSON escaping overhead, tool-call argument JSON, thinking metadata, and request parameters such as stream settings or thinking budgets.
+- These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
+- When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
+- `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
 
 ### `/stats` — usage statistics overlay
 
