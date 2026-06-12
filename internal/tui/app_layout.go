@@ -7,6 +7,24 @@ import (
 	uv "github.com/keakon/ultraviolet"
 )
 
+const (
+	// rightPanelWidth is the column width reserved for the right panel
+	// (agent list + info panel) when it is visible.
+	rightPanelWidth = 32
+	// rightPanelGap is the 1-column visual gap between the main content
+	// area and the right panel.
+	rightPanelGap = 1
+	// rightPanelShowMinWidth / rightPanelHideMinWidth implement visibility
+	// hysteresis: the panel appears at >= show width and only hides again
+	// below the hide width. The gap between them absorbs rapid intermediate
+	// WindowSizeMsgs that would otherwise cause flicker.
+	rightPanelShowMinWidth = 120
+	rightPanelHideMinWidth = 116
+	// minViewportWidth is the floor for the scrollable content viewport so it
+	// stays usable even on very narrow terminals.
+	minViewportWidth = 20
+)
+
 // inputAreaHeight returns the height of the input area (separator line + content lines + bottom margin).
 func (m *Model) inputAreaHeight() int {
 	if m.isViewingReadOnlySubAgent() {
@@ -23,17 +41,17 @@ func (m *Model) inputAreaHeight() int {
 }
 
 // updateRightPanelVisible applies hysteresis to the right-panel visibility flag.
-// The panel appears once width reaches 120 cols, but is only hidden again when
-// width drops below 116. This prevents flicker caused by terminals emitting
-// rapid intermediate WindowSizeMsgs during startup or tab switches that briefly
-// cross the threshold.
+// The panel appears once width reaches rightPanelShowMinWidth, but is only hidden
+// again when width drops below rightPanelHideMinWidth. This prevents flicker
+// caused by terminals emitting rapid intermediate WindowSizeMsgs during startup
+// or tab switches that briefly cross the threshold.
 func (m *Model) updateRightPanelVisible() {
-	if m.width >= 120 {
+	if m.width >= rightPanelShowMinWidth {
 		m.rightPanelVisible = true
-	} else if m.width < 116 {
+	} else if m.width < rightPanelHideMinWidth {
 		m.rightPanelVisible = false
 	}
-	// Between 116 and 119: keep current state (hysteresis zone).
+	// Between the hide and show widths: keep current state (hysteresis zone).
 }
 
 func (m *Model) recalcViewportSize() {
@@ -60,11 +78,11 @@ func (m *Model) recalcViewportSize() {
 	// Reduce viewport width when the right panel (info + agents) is visible.
 	vpWidth := m.width
 	if m.rightPanelVisible && m.mode != ModeHelp {
-		vpWidth -= 32 // right panel width
-		vpWidth--     // 1-column gap before right panel
+		vpWidth -= rightPanelWidth
+		vpWidth -= rightPanelGap
 	}
-	if vpWidth < 20 {
-		vpWidth = 20
+	if vpWidth < minViewportWidth {
+		vpWidth = minViewportWidth
 	}
 	m.viewport.SetSize(vpWidth, vpHeight)
 	if oldW != vpWidth || oldH != vpHeight {
@@ -110,18 +128,17 @@ func (m *Model) generateLayout(w, h int) tuiLayout {
 	contentHeight := contentEnd
 
 	// Content row: main | rightPanel
-	// The right panel (width >= 120) hosts both the agent list (sidebar) on
+	// When visible, the right panel hosts both the agent list (sidebar) on
 	// top and the info panel below. No left-side sidebar any more.
-	rightPanelWidth := 0
+	panelWidth := 0
+	gap := 0
 	if m.rightPanelVisible && m.mode != ModeHelp {
-		rightPanelWidth = 32
+		panelWidth = rightPanelWidth
+		gap = rightPanelGap
 	}
-	mainMaxX := w - rightPanelWidth
-	if rightPanelWidth > 0 {
-		mainMaxX-- // 1-column visual gap before right panel
-	}
+	mainMaxX := w - panelWidth - gap
 	lay.main = image.Rect(0, 0, mainMaxX, contentHeight)
-	lay.infoPanel = image.Rect(w-rightPanelWidth, 0, w, contentHeight)
+	lay.infoPanel = image.Rect(w-panelWidth, 0, w, contentHeight)
 	return lay
 }
 
