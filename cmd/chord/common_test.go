@@ -229,6 +229,40 @@ func TestResolveModelRefStripsInlineVariant(t *testing.T) {
 	}
 }
 
+func TestResolveModelRefAppliesAPIBaseOverride(t *testing.T) {
+	prev := flagAPIBase
+	flagAPIBase = "https://override.example.invalid/v1/responses"
+	t.Cleanup(func() { flagAPIBase = prev })
+
+	providers := map[string]config.ProviderConfig{
+		"test": {
+			Type:   config.ProviderTypeResponses,
+			APIURL: "https://config.example.invalid/v1/responses",
+			Models: map[string]config.ModelConfig{
+				"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		},
+	}
+	auth := config.AuthConfig{"test": {{APIKey: "test-key"}}}
+	cache := &providerCache{
+		m:     make(map[string]*llm.ProviderConfig),
+		impls: make(map[string]llm.Provider),
+		auth:  auth,
+		cfg:   &config.Config{},
+	}
+
+	provCfg, _, _, _, _, err := resolveModelRef(
+		context.Background(),
+		"test/test-model", providers, auth, "", cache.getOrCreate, cache.getOrCreateImpl,
+	)
+	if err != nil {
+		t.Fatalf("resolveModelRef: %v", err)
+	}
+	if got := provCfg.APIURL(); got != flagAPIBase {
+		t.Fatalf("provider APIURL = %q, want override %q", got, flagAPIBase)
+	}
+}
+
 func TestResolveModelRefReusesCachedProviderImpl(t *testing.T) {
 	providers := map[string]config.ProviderConfig{
 		"test": {

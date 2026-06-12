@@ -131,6 +131,9 @@ func newRootCmd() *cobra.Command {
 			if strings.TrimSpace(flagLogsDir) != "" {
 				os.Setenv("CHORD_LOGS_DIR", strings.TrimSpace(flagLogsDir))
 			}
+			if strings.TrimSpace(flagAPIBase) == "" {
+				flagAPIBase = strings.TrimSpace(os.Getenv("CHORD_API_BASE"))
+			}
 			return nil
 		},
 		RunE: runRoot,
@@ -138,7 +141,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.SetVersionTemplate(cliVersionTemplate())
 
 	rootCmd.PersistentFlags().StringVar(&flagAPIBase, "api-base", "",
-		"API base URL for providers without api_url")
+		"API base URL override for provider requests (overrides CHORD_API_BASE)")
 
 	// Storage path overrides (see docs/guides/session-storage.md).
 	rootCmd.PersistentFlags().StringVar(&flagConfigHome, "config-home", "",
@@ -163,6 +166,13 @@ func newRootCmd() *cobra.Command {
 
 	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
 	return rootCmd
+}
+
+func applyRuntimeAPIBaseOverride(providerCfg config.ProviderConfig) config.ProviderConfig {
+	if apiBase := strings.TrimSpace(flagAPIBase); apiBase != "" {
+		providerCfg.APIURL = apiBase
+	}
+	return providerCfg
 }
 
 func main() {
@@ -483,6 +493,7 @@ func resolveModelRef(
 	if err != nil {
 		return nil, nil, "", 0, 0, err
 	}
+	providerCfg = applyRuntimeAPIBaseOverride(providerCfg)
 
 	creds := auth[provName]
 	apiKeys := config.ExtractAPIKeys(creds)

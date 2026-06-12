@@ -281,9 +281,7 @@ func setupInitialLLMClient(
 		authPath: authPath,
 		cfg:      cfg,
 	}
-	if flagAPIBase != "" {
-		cfgProvider.APIURL = flagAPIBase
-	}
+	cfgProvider = applyRuntimeAPIBaseOverride(cfgProvider)
 	creds := auth[providerName]
 	apiKeys := config.ExtractAPIKeys(creds)
 	providerCfg, err := ac.GetOrCreateProvider(providerName, cfgProvider, apiKeys)

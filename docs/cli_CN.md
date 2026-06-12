@@ -34,7 +34,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 | Flag             | 说明                                                                                                | 环境变量              | 默认值                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| `--api-base`     | provider 未配 `api_url` 时作为统一基础 URL。`CHORD_API_BASE` 会出现在 `--help` 中，但当前构建并不读取它；只有该 flag 或 provider 级 `api_url` 生效 | `CHORD_API_BASE`      | 空                                                                           |
+| `--api-base`     | 本次运行的 provider 基础 URL 覆盖；设置后优先于各 provider 的 `api_url` | `CHORD_API_BASE`      | 空                                                                           |
 | `--config-home`  | 配置主目录，包含 `config.yaml`、`auth.yaml`、`agents/`、`skills/`、`commands/`                      | `CHORD_CONFIG_HOME`   | 已设 `$XDG_CONFIG_HOME` 时取 `$XDG_CONFIG_HOME/chord`，否则 `~/.config/chord` |
 | `--state-dir`    | 持久运行时状态（sessions、exports、logs、project registry、worktree metadata）                      | `CHORD_STATE_DIR`     | 已设 `$XDG_STATE_HOME` 时取 `$XDG_STATE_HOME/chord`，否则 `~/.local/state/chord` |
 | `--cache-dir`    | 可重建缓存（runtime caches、临时产物）                                                              | `CHORD_CACHE_DIR`     | 已设 `$XDG_CACHE_HOME` 时取 `$XDG_CACHE_HOME/chord`，否则 `~/.cache/chord`  |

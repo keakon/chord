@@ -243,3 +243,29 @@ func TestTUIProgramFactoryOpenTTYError(t *testing.T) {
 		t.Fatalf("factory.build err = %v, want terminal error", err)
 	}
 }
+
+func TestAPIBaseEnvFallback(t *testing.T) {
+	defer func(prev string) { flagAPIBase = prev }(flagAPIBase)
+
+	t.Setenv("CHORD_API_BASE", "https://example.invalid/v1")
+	flagAPIBase = ""
+	cmd := newRootCmd()
+	if err := cmd.PersistentPreRunE(cmd, nil); err != nil {
+		t.Fatalf("PersistentPreRunE err = %v", err)
+	}
+	if flagAPIBase != "https://example.invalid/v1" {
+		t.Fatalf("flagAPIBase = %q, want env fallback value", flagAPIBase)
+	}
+
+	// The CLI flag wins over the environment variable.
+	cmd = newRootCmd()
+	if err := cmd.PersistentFlags().Set("api-base", "https://flag.example.invalid/v1"); err != nil {
+		t.Fatalf("set api-base flag: %v", err)
+	}
+	if err := cmd.PersistentPreRunE(cmd, nil); err != nil {
+		t.Fatalf("PersistentPreRunE err = %v", err)
+	}
+	if flagAPIBase != "https://flag.example.invalid/v1" {
+		t.Fatalf("flagAPIBase = %q, want flag value to win", flagAPIBase)
+	}
+}

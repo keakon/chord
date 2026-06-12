@@ -112,7 +112,7 @@ These are intended for development, troubleshooting, and bug reports — not for
 
 ## A note on `CHORD_API_BASE`
 
-`chord --help` mentions `CHORD_API_BASE` in the help text for the `--api-base` flag. The flag itself is honoured, but the current build does not actually read `CHORD_API_BASE` from the environment — only the `--api-base` CLI flag (or per-provider `api_url` in `config.yaml`) takes effect. If you need a global override across `chord` invocations, prefer setting `api_url` on each provider in `config.yaml`.
+`CHORD_API_BASE` overrides the provider base URL for the whole invocation, the same as passing `--api-base`; the CLI flag wins when both are set. It applies to every provider in that run, so for a persistent per-provider override prefer setting `api_url` on each provider in `config.yaml`.
 
 ## Related
 
