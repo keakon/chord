@@ -14,6 +14,12 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	defaultHTTPDialTimeout           = 15 * time.Second
+	defaultHTTPTLSHandshakeTimeout   = 10 * time.Second
+	defaultHTTPResponseHeaderTimeout = 25 * time.Second
+)
+
 // NewHTTPClientWithProxyAndHeaderTimeout creates an *http.Client with proxy support,
 // caller-controlled total timeout, and caller-controlled response header timeout.
 // Connection-establishment timeout semantics remain unchanged.
@@ -22,12 +28,12 @@ func NewHTTPClientWithProxyAndHeaderTimeout(proxyURL string, totalTimeout, respo
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   60 * time.Second,
+			Timeout:   defaultHTTPDialTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   defaultHTTPTLSHandshakeTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
 		MaxIdleConns:          32,
 		MaxIdleConnsPerHost:   16,
@@ -68,7 +74,7 @@ func NewHTTPClientWithProxyAndHeaderTimeout(proxyURL string, totalTimeout, respo
 }
 
 func NewHTTPClientWithProxy(proxyURL string, totalTimeout time.Duration) (*http.Client, error) {
-	return NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, 60*time.Second)
+	return NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, defaultHTTPResponseHeaderTimeout)
 }
 
 // ProxyScheme returns the scheme of proxyURL ("http", "https", "socks5") or "" if none.

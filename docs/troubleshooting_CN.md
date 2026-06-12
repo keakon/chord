@@ -71,6 +71,8 @@ curl -I https://api.openai.com/v1
 
 如果连接建立超时，或在超时前没有收到首 token，Chord 会把当前 key 标记为 recovering，使下一次重试优先选择其它健康 key。
 
+Responses HTTP provider 的初始 `connecting` 阶段也有边界。如果上游或网关迟迟不返回 HTTP response header，Chord 会在约 25 秒后让本次尝试失败，而不是无限等待；随后正常进入重试 / fallback 路径。这个限制只针对等待 response header 的阶段；健康流一旦开始，后续仍由 stream-idle timeout 管理，不是固定总请求时长。
+
 ### DeepSeek / OpenAI 兼容 thinking 模式 400
 
 如果你使用的是 DeepSeek 这类 `chat-completions` provider，并看到下面这类报错：

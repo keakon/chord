@@ -75,7 +75,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 			directClient = client
 		}
 		if timeout > 0 {
-			if rebuilt, err := rebuildClientWithHeaderTimeout(client, timeout); err == nil && rebuilt != nil {
+			if rebuilt, err := rebuildClientWithTotalTimeout(client, timeout); err == nil && rebuilt != nil {
 				client = rebuilt
 			}
 		}
@@ -124,7 +124,9 @@ func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax i
 	return client
 }
 
-func rebuildClientWithHeaderTimeout(client *llm.Client, totalTimeout time.Duration) (*llm.Client, error) {
+// rebuildClientWithTotalTimeout rebuilds the client with a custom http.Client.Timeout
+// while keeping connection and header timeouts at their default values (15s dial, 25s header).
+func rebuildClientWithTotalTimeout(client *llm.Client, totalTimeout time.Duration) (*llm.Client, error) {
 	if client == nil {
 		return nil, nil
 	}
@@ -133,7 +135,7 @@ func rebuildClientWithHeaderTimeout(client *llm.Client, totalTimeout time.Durati
 		return nil, nil
 	}
 	proxyURL := providerCfg.EffectiveProxyURL()
-	httpClient, err := llm.NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, totalTimeout)
+	httpClient, err := llm.NewHTTPClientWithProxy(proxyURL, totalTimeout)
 	if err != nil {
 		return nil, err
 	}

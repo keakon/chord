@@ -37,6 +37,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Provider error classification now prefers structured `code`/`type` signals (including nested JSON in the error body) over free-text matching, with message fallbacks kept for gateways that omit them. Unrecognized HTTP 400s are now treated as terminal request/parameter errors instead of being retried across keys and models, while quota, oversize-context, concurrency, Codex WebSocket chain-state, and `Retry-After` 400s keep their existing retry/cooldown handling.
 - The `CHORD_API_BASE` environment variable is now honored as a fallback for `--api-base`; the CLI flag still wins when both are set.
+- All provider HTTP clients now bound the initial response-header wait to about 25 seconds (down from 60s) and the connection dial timeout to 15 seconds (down from 60s); healthy streams remain governed by the stream-idle timeout, and auxiliary model-pool calls keep their longer overall request timeout without stretching the header wait.
 - AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
 - Forked TUI messages now preserve inline image and PDF attachments after session restore and fork events, without being cleared by a deferred transcript rebuild.
 - Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.

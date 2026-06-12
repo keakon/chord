@@ -15,13 +15,16 @@ func TestNewHTTPClientWithProxyUsesDocumentedTimeouts(t *testing.T) {
 	if !ok {
 		t.Fatalf("client.Transport = %T, want *http.Transport", client.Transport)
 	}
-	if transport.ResponseHeaderTimeout != 60*time.Second {
-		t.Fatalf("ResponseHeaderTimeout = %v, want 60s", transport.ResponseHeaderTimeout)
+	if transport.ResponseHeaderTimeout != 25*time.Second {
+		t.Fatalf("ResponseHeaderTimeout = %v, want 25s", transport.ResponseHeaderTimeout)
 	}
 	if transport.TLSHandshakeTimeout != 10*time.Second {
 		t.Fatalf("TLSHandshakeTimeout = %v, want 10s", transport.TLSHandshakeTimeout)
 	}
 	if transport.ExpectContinueTimeout != time.Second {
 		t.Fatalf("ExpectContinueTimeout = %v, want 1s", transport.ExpectContinueTimeout)
+	}
+	if transport.DialContext == nil {
+		t.Fatal("transport.DialContext = nil, want configured dialer")
 	}
 }

@@ -79,6 +79,8 @@ For non-official OpenAI-compatible gateways, Chord treats unknown HTTP 400 respo
 
 If a connection cannot be established or no first token arrives before timeout, Chord marks the current key as recovering so the next retry prefers another healthy key.
 
+For Responses HTTP providers, the initial `connecting` phase is also bounded. If the upstream or gateway never starts the HTTP response, Chord fails that attempt after about 25 seconds instead of waiting indefinitely, allowing the normal retry / fallback path to continue. This limit applies to waiting for response headers; once a healthy stream has started, normal streaming is still governed by stream-idle timeout rather than a fixed total request cap.
+
 ### DeepSeek / OpenAI-compatible thinking-mode 400s
 
 If you use a `chat-completions` provider such as DeepSeek and see errors like:
