@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/keakon/chord/internal/agent"
 )
@@ -33,6 +34,33 @@ func (b *Block) finishStreamingContent() {
 	if b != nil {
 		b.streamContentBuilder = nil
 	}
+}
+
+func visibleAssistantStreamContent(content string) string {
+	content = removeTrailingCursorGlyph(content)
+	content = stripANSI(strings.TrimSpace(content))
+	return strings.TrimSpace(content)
+}
+
+func assistantStreamContentIsPlaceholder(content string) bool {
+	content = visibleAssistantStreamContent(content)
+	if content == "" {
+		return true
+	}
+	dots := 0
+	hasEllipsis := false
+	for _, r := range content {
+		switch {
+		case r == '.':
+			dots++
+		case r == '…':
+			hasEllipsis = true
+		case unicode.IsSpace(r):
+		default:
+			return false
+		}
+	}
+	return hasEllipsis || dots > 0
 }
 
 func (m *Model) currentMainAssistantMsgIndex() int {
@@ -80,8 +108,19 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.nextBlockID++
 			m.assistantBlockAppended = false
 		}
+		if !m.assistantBlockAppended && assistantStreamContentIsPlaceholder(m.currentAssistantBlock.Content) {
+			m.currentAssistantBlock.Content = ""
+			m.currentAssistantBlock.streamContentBuilder = nil
+			if assistantStreamContentIsPlaceholder(evt.Text) {
+				m.currentAssistantBlock.InvalidateCache()
+				m.exitRenderFreeze()
+				m.markStreamRenderDirty()
+				effects.addFollowup(m.scheduleStreamFlush(0))
+				return true, effects
+			}
+		}
 		m.currentAssistantBlock.appendStreamingContent(evt.Text)
-		if !m.assistantBlockAppended {
+		if !m.assistantBlockAppended && !assistantStreamContentIsPlaceholder(m.currentAssistantBlock.Content) {
 			m.appendViewportBlock(m.currentAssistantBlock)
 			m.assistantBlockAppended = true
 			if m.displayState == stateForeground {

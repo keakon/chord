@@ -45,8 +45,10 @@ func (m *Model) finalizeAssistantBlock() {
 		// completed tool call.
 		shouldDiscard := false
 		if m.assistantBlockAppended && m.currentAssistantBlock.Type == BlockAssistant {
-			content := removeTrailingCursorGlyph(m.currentAssistantBlock.Content)
-			nonWS := stripANSI(strings.TrimSpace(content))
+			nonWS := visibleAssistantStreamContent(m.currentAssistantBlock.Content)
+			if assistantStreamContentIsPlaceholder(nonWS) {
+				shouldDiscard = true
+			}
 			// Check if content is 1-3 chars or a single short word (<=5 chars, letters only)
 			isVeryShort := len(nonWS) <= 3 || (len(nonWS) <= 5 && isASCIILettersOnly(nonWS))
 			if isVeryShort {

@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestScheduleStreamFlushCoalescesUntilConsumed(t *testing.T) {
@@ -132,6 +133,95 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 	flushed := stripANSI(m.View().Content)
 	if !strings.Contains(flushed, "first second") {
 		t.Fatalf("View should include accumulated stream text after flush, got:\n%s", flushed)
+	}
+}
+
+func TestStreamTextPlaceholderDoesNotAppendAssistantBlock(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	for _, text := range []string{"", " \n\t", ".", "..", "...", " … \n"} {
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: text}})
+	}
+
+	if m.currentAssistantBlock == nil {
+		t.Fatal("placeholder stream should remain buffered for a later visible delta")
+	}
+	if m.assistantBlockAppended {
+		t.Fatal("placeholder stream should not append an assistant block")
+	}
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("visible blocks = %d, want 0 before visible assistant content", got)
+	}
+	if got := m.currentAssistantBlock.Content; got != "" {
+		t.Fatalf("placeholder content = %q, want empty pending block", got)
+	}
+}
+
+func TestStreamTextVisibleContentReplacesBufferedPlaceholder(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "..."}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "Answer"}})
+
+	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "Answer" {
+		t.Fatalf("assistant content = %q, want visible content without placeholder prefix", blockContentForTest(m.currentAssistantBlock))
+	}
+	if !m.assistantBlockAppended {
+		t.Fatal("visible assistant content should append the buffered block")
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 || blocks[0].Type != BlockAssistant {
+		t.Fatalf("visible blocks = %#v, want one assistant block", blocks)
+	}
+}
+
+func TestStreamTextSplitDotPlaceholderDoesNotPolluteVisibleContent(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	for _, text := range []string{".", ".", ".", "Answer"} {
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: text}})
+	}
+
+	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "Answer" {
+		t.Fatalf("assistant content = %q, want visible content without dot placeholder prefix", blockContentForTest(m.currentAssistantBlock))
+	}
+	if !m.assistantBlockAppended {
+		t.Fatal("visible assistant content should append the buffered block")
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 || blocks[0].Type != BlockAssistant || blocks[0].Content != "Answer" {
+		t.Fatalf("visible blocks = %#v, want one assistant block with Answer", blocks)
+	}
+}
+
+func TestToolCallAfterStreamPlaceholderLeavesNoAssistantCard(t *testing.T) {
+	for _, deltas := range [][]string{{"..."}, {".", ".", "."}, {" … "}} {
+		m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+		for _, delta := range deltas {
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
+		}
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+			ID:       "call-1",
+			Name:     tools.NameShell,
+			ArgsJSON: `{"command":"pwd"}`,
+		}})
+
+		if m.currentAssistantBlock != nil || m.assistantBlockAppended {
+			t.Fatalf("deltas %q: tool call should clear a placeholder-only assistant stream", deltas)
+		}
+		blocks := m.viewport.visibleBlocks()
+		if len(blocks) != 1 || blocks[0].Type != BlockToolCall {
+			t.Fatalf("deltas %q: visible blocks = %#v, want only the tool call", deltas, blocks)
+		}
+	}
+}
+
+func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
+	for _, content := range []string{"", " \n", ".", "..", "...", " … "} {
+		block := &Block{ID: 1, Type: BlockAssistant, Streaming: true, Content: content}
+		if lines := block.Render(120, ""); len(lines) != 0 {
+			t.Fatalf("placeholder %q rendered %d lines, want none", content, len(lines))
+		}
 	}
 }
 

@@ -38,6 +38,7 @@
 - Provider 错误分类现在优先使用结构化的 `code`/`type` 信号（包括错误体内嵌套的 JSON），而非纯文本匹配；对于不提供结构化字段的网关仍保留消息文本回退。未识别的 HTTP 400 现在按终态请求/参数错误处理，不再跨 key 和模型重试；而配额、上下文超限、并发限制、Codex WebSocket 链路状态不匹配以及带 `Retry-After` 的 400 仍保留各自的重试/冷却处理。
 - 环境变量 `CHORD_API_BASE` 现在会作为 `--api-base` 的回退真正生效；两者同时设置时仍以 CLI flag 为准。
 - 所有 provider 的 HTTP client 现在会把初始响应头等待限制在约 25 秒（原为 60 秒），并把连接 dial 超时限制在 15 秒（原为 60 秒）；健康流仍由流式空闲超时管理，辅助模型池调用保留较长的总请求超时，但不会拉长响应头等待。
+- 流式 assistant 卡片在内容仅为占位符（点号或省略号）时不再加入会话；真实内容到达后会替换占位符，仅含占位符的块会被丢弃而不是渲染成空卡片。
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
 - Fork 编辑后的 TUI 消息现在在会话恢复与 fork 事件后仍会保留 inline 图片/PDF 附件，不会被延后执行的 transcript 重建清除。
 - Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。
