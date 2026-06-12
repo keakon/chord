@@ -17,6 +17,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Failed `edit` hunks now point out a near-miss file line and the first differing column when the mismatch is only a small long-line drift, making stale single-line prompts, URLs, and doc strings easier to recover.
 - TUI content viewers now copy the raw viewed content when using copy-all shortcuts, failed `edit` tool-card copy uses the full raw patch when the visible card content was trimmed, and restored inline image/PDF attachments use filename labels in the composer without adding duplicate text parts to model messages.
 - TUI assistant cards now end their background surface at the wrapped-text cap on wide viewports, reducing unnecessary card-width background fill on large terminals.
+- Natural-language prose (user/assistant messages, thinking, status cards) now wraps at up to 160 columns on wide terminals, while code blocks, diffs, and tool cards keep the 120-column cap that suits column-aligned content.
 - TUI palette contrast is improved with widened card-surface greyscale steps and adjusted secondary foreground colors, making tool cards and assistant messages easier to distinguish.
 - Streaming render is more efficient during long model responses, providing smoother text appearance.
 - The resume session picker now shows an aligned `Msgs` column so large and small sessions are easier to distinguish before opening them.

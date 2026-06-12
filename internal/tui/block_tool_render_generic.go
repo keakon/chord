@@ -367,7 +367,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 }
 
 func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
-	metrics := newToolCardMetrics(width)
+	metrics := newDoneToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth

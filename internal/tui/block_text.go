@@ -19,6 +19,15 @@ const (
 	// maxTextWidth is the maximum width for text content to prevent unreadable
 	// wide text on large terminals.
 	maxTextWidth = 120
+	// maxProseWidth is the wrapping cap for natural-language prose (user/assistant
+	// messages, thinking, status/summary cards). It is wider than maxTextWidth so
+	// wide terminals lose fewer columns to right-side whitespace, which shortens
+	// paragraphs vertically and fits more cards on screen. Monospace/structural
+	// content (tool cards, shell output, code, diffs) keeps maxTextWidth because
+	// column-aligned text gains nothing from extra width and reads worse when
+	// stretched. Narrower viewports still wrap to the available width; this is
+	// only an upper bound, never a floor.
+	maxProseWidth = 160
 	// maxMarkdownTableWidth lets tables use more of a wide viewport without making
 	// ordinary prose harder to read.
 	maxMarkdownTableWidth = 220

@@ -2396,6 +2396,74 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 	}
 }
 
+func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	width := maxProseWidth + 80
+	block := &Block{
+		ID:           1,
+		Type:         BlockToolCall,
+		ToolName:     "done",
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
+		DoneReport:   "## Summary\nAll requested work is complete.",
+	}
+
+	lines := block.renderDoneCall(width, "")
+	got := 0
+	for _, line := range stripANSILines(lines) {
+		got = max(got, tuiStringWidth(line))
+	}
+
+	metrics := newDoneToolCardMetrics(width)
+	style := metrics.blockStyle
+	want := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
+	if railANSISeq("tool", false) != "" {
+		want++
+	}
+	if got != want {
+		t.Fatalf("done card width = %d, want %d", got, want)
+	}
+
+	generic := newToolCardMetrics(width)
+	genericWidth := style.GetMarginLeft() + style.GetPaddingLeft() + generic.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
+	if railANSISeq("tool", false) != "" {
+		genericWidth++
+	}
+	if got <= genericWidth {
+		t.Fatalf("done card width = %d, want wider than generic tool width %d", got, genericWidth)
+	}
+	if metrics.contentWidth <= generic.contentWidth {
+		t.Fatalf("done content width = %d, want wider than generic tool content width %d", metrics.contentWidth, generic.contentWidth)
+	}
+	if metrics.contentWidth > maxProseWidth {
+		t.Fatalf("done content width = %d, want no more than %d", metrics.contentWidth, maxProseWidth)
+	}
+}
+
+func TestDoneReportCodeBlockKeepsTextWidthCap(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+
+	metrics := newDoneToolCardMetrics(maxProseWidth + 80)
+	var hl *codeHighlighter
+	lines := renderRichMarkdownContent("```text\nhello\n```", metrics.contentWidth, &hl)
+
+	var codeLine string
+	for _, line := range lines {
+		if strings.Contains(stripANSI(line), "hello") {
+			codeLine = line
+			break
+		}
+	}
+	if codeLine == "" {
+		t.Fatalf("missing rendered code line in %#v", stripANSILines(lines))
+	}
+	if got := tuiStringWidth(codeLine); got != maxTextWidth {
+		t.Fatalf("done report code block width = %d, want %d; line=%q", got, maxTextWidth, codeLine)
+	}
+}
+
 func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	block := &Block{
 		ID:            1,

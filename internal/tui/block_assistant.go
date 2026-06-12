@@ -514,7 +514,7 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 
 	for _, seg := range segments {
 		if seg.code {
-			segLines, _, _ := renderCodeFence(seg, content, width, 0, hl, theme)
+			segLines, _, _ := renderCodeFence(seg, content, min(width, maxTextWidth), 0, hl, theme)
 			appendSegment(segLines)
 			continue
 		}
@@ -570,7 +570,7 @@ func renderAssistantMarkdownContent(content, codeSample string, width, continuat
 		var segSynthetic []int
 		var segSoftWraps []bool
 		if seg.code {
-			segLines, segSynthetic, segSoftWraps = renderAssistantCodeFence(seg, codeSample, width, continuationExtra, hl)
+			segLines, segSynthetic, segSoftWraps = renderAssistantCodeFence(seg, codeSample, min(width, maxTextWidth), continuationExtra, hl)
 		} else {
 			segLines = renderMarkdownContent(seg.raw, renderWidth)
 			segSynthetic = make([]int, len(segLines))
@@ -593,7 +593,7 @@ func markdownRenderWidthWithTable(hasTable bool, innerWidth int) int {
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	limit := maxTextWidth
+	limit := maxProseWidth
 	if hasTable {
 		limit = maxMarkdownTableWidth
 	}
@@ -728,7 +728,7 @@ func (b *Block) renderAssistant(width int) []string {
 	// End the card surface at the wrapped-text cap instead of stretching a
 	// mostly-empty background across very wide viewports. Tables widen the
 	// cap so wide-table content keeps its surface.
-	textCap := maxTextWidth
+	textCap := maxProseWidth
 	if hasTable {
 		textCap = maxMarkdownTableWidth
 	}
@@ -1139,13 +1139,13 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	if len(b.ThinkingParts) == 0 {
 		return nil
 	}
-	innerWidth = clampCardInnerWidth(innerWidth, ThinkingCardStyle, maxTextWidth)
+	innerWidth = clampCardInnerWidth(innerWidth, ThinkingCardStyle, maxProseWidth)
 	contentWidth := innerWidth - 2
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	if contentWidth > maxTextWidth {
-		contentWidth = maxTextWidth
+	if contentWidth > maxProseWidth {
+		contentWidth = maxProseWidth
 	}
 	// Build a single slice: header, gap, then for each part both title and content lines.
 	// Previously rawLines (titles) and tempLines (content) were merged by rawLines = tempLines,
@@ -1196,13 +1196,13 @@ func (b *Block) renderThinking(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := innerWidth - 2
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	if contentWidth > maxTextWidth {
-		contentWidth = maxTextWidth
+	if contentWidth > maxProseWidth {
+		contentWidth = maxProseWidth
 	}
 	content := removeTrailingCursorGlyph(b.Content)
 	// preprocessThinkingMarkdown runs inside renderThinkingMarkdownPart; do not

@@ -133,8 +133,8 @@ func (b *Block) renderUserPlain(width int) []string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
-	contentWidth := min(innerWidth-2, maxTextWidth)
+	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
+	contentWidth := min(innerWidth-2, maxProseWidth)
 
 	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 && len(b.PDFNames) == 0 {
 		return nil

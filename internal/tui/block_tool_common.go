@@ -56,6 +56,10 @@ type toolCardMetrics struct {
 }
 
 func newToolCardMetrics(width int) toolCardMetrics {
+	return newToolCardMetricsWithContentCap(width, maxTextWidth)
+}
+
+func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
 	blockStyle := ToolBlockStyle
 	boxWidth := width - blockStyle.GetHorizontalMargins()
 	if boxWidth < 10 {
@@ -67,8 +71,8 @@ func newToolCardMetrics(width int) toolCardMetrics {
 	}
 	// Keep the card surface aligned with the prose cards' right edge on very
 	// wide viewports instead of stretching empty background past the text cap.
-	cardWidth = clampCardInnerWidth(cardWidth, blockStyle, maxTextWidth)
-	contentWidth := min(cardWidth-4, maxTextWidth)
+	cardWidth = clampCardInnerWidth(cardWidth, blockStyle, contentCap)
+	contentWidth := min(cardWidth-4, contentCap)
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
@@ -78,6 +82,10 @@ func newToolCardMetrics(width int) toolCardMetrics {
 		cardWidth:    cardWidth,
 		contentWidth: contentWidth,
 	}
+}
+
+func newDoneToolCardMetrics(width int) toolCardMetrics {
+	return newToolCardMetricsWithContentCap(width, maxProseWidth)
 }
 
 // pendingToolGlyph is used for speculative tool cards that have finished
