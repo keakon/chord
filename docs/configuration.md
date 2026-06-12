@@ -92,67 +92,6 @@ Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`
 
 For `type: responses`, Chord follows the Responses request shape used by Codex: the stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. This keeps compatible gateways from receiving a system-role message in `input`.
 
-### Request-level context reduction
-
-Chord enables deterministic request-level context reduction by default. It only changes the current request sent to the model; it does not delete durable session history. Decisions use only local signals (message count, local token estimates, model input budget, and tool-output age/bytes), not provider-reported prompt-cache tokens. Provider usage is only used for offline analysis.
-
-Usually you do not need per-field tuning. Either form uses the built-in defaults:
-
-```yaml
-context:
-  reduction: true
-```
-
-```yaml
-context:
-  reduction: {}
-```
-
-`context.reduction: false` is not supported; omit `context.reduction` or use `true` / `{}` to keep the default request-level reduction behavior.
-
-Current defaults:
-
-```yaml
-context:
-  reduction:
-    confirm_age_turns: 2
-    error_age_turns: 3
-    high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
-    cache_aware_min_usage: 0.75
-    warmup_message_limit: 32
-    min_incremental_saved_tokens: 4096
-    high_pressure_usage: 0.80
-    force_prune_usage: 0.90
-```
-
-Default behavior:
-
-- Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
-- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` skips destructive new reduction for that one request when the same model is still active and the context is not under high pressure, avoiding a last-minute prompt-cache break before the final answer. New user input, model changes, or high-pressure context sizing resume normal reduction.
-- Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
-- High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
-- Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. A cost-first setup can lower this to `1`; current-turn high-risk output still remains intact, while older high-risk output may be conservatively summarized. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, without deleting the tool result the model just received in the active user turn.
-- Successful shell output is treated as low risk once it is old enough. The default `shell_success_bytes: 4000` trims verbose success logs earlier than the previous 8 KiB threshold, while failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling instead of this success-output omission path.
-- Large old tool results remain age/byte-pruned, but Chord now preserves more structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, and build/test logs keep key failure or warning lines. Older errors, diagnostics, confirmations, and successful shell output are still reduced to compact fixed markers or summaries.
-
-Cost-first example:
-
-```yaml
-context:
-  reduction:
-    high_risk_protect_age_turns: 1
-    shell_success_bytes: 4000
-    wrap_up_grace_requests: 1
-```
-
 ### OpenAI Codex preset
 
 ```yaml
@@ -678,7 +617,7 @@ Model fields used in the example:
 - `variants`: named model parameter presets. Use a model ref like
   `openai/gpt-5.5@high` or `anthropic/claude-opus-4.8@xhigh` to select one.
 - `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
-  - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI priority (`fast`) or flex (`slow`).
+  - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI's priority-style `fast` tier or its flex-style `slow` tier.
   - `cost.input_tiers`: optional long-context pricing overrides. Each entry uses `above_input_tokens` as a strict threshold; when billable input is greater than that value, Chord uses the highest matching tier's `input`, `output`, `cache_read`, and optional `cache_write` prices before applying any service-tier multiplier.
 - `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` and `image`.
 - `supported_service_tiers`: explicit non-standard service tiers accepted by a provider or model, for example `[fast, slow]` for OpenAI service tiers or `[fast]` for Anthropic speed. Provider-level values act as defaults for all models in that provider; model-level values override provider defaults. If both are omitted, Chord uses preset defaults. Pricing is configured separately with `cost.service_tier_multipliers` for service-tier rates and `cost.input_tiers` for long-context thresholds. `standard` is always available and is not listed in `supported_service_tiers`. Manual switching only selects tiers supported by the current provider/model: `Ctrl+R` cycles through the available set (`standard` plus supported non-standard tiers), and `/tier fast` or `/tier slow` shows an error when the current provider/model does not support that tier. When the active provider/model changes and a previously requested `fast` or `slow` is no longer supported, the info panel still shows the requested `tier: fast` or `tier: slow` in dim strikethrough text so the requested mode remains visible while indicating it is not effective.
@@ -1051,7 +990,61 @@ selected models have smaller input budgets or split input/output limits.
 Before each LLM request, Chord applies a set of deterministic rules to inspect
 tool results in the conversation and trim large, stale output. **This only
 affects the prompt sent for the current request — it never rewrites session
-files on disk.**
+files on disk.** Decisions use only local signals (message count, local token
+estimates, model input budget, and tool-output age/bytes), not provider-reported
+prompt-cache tokens.
+
+Reduction is enabled by default and usually needs no per-field tuning. Either
+form keeps the built-in defaults:
+
+```yaml
+context:
+  reduction: true
+```
+
+```yaml
+context:
+  reduction: {}
+```
+
+`context.reduction: false` is not supported; omit `context.reduction` or use
+`true` / `{}` to keep the default request-level reduction behavior.
+
+The full set of fields and their defaults:
+
+```yaml
+context:
+  reduction:
+    confirm_age_turns: 2
+    error_age_turns: 3
+    high_risk_protect_age_turns: 4
+    shell_success_age_turns: 2
+    shell_success_bytes: 4000
+    read_like_age_turns: 2
+    read_like_output_bytes: 4000
+    stale_age_turns: 4
+    stale_output_bytes: 1500
+    wrap_up_grace_requests: 1
+    min_tool_results_prune: 8
+    cache_aware_min_usage: 0.75
+    warmup_message_limit: 32
+    min_incremental_saved_tokens: 4096
+    high_pressure_usage: 0.80
+    force_prune_usage: 0.90
+```
+
+Unset or non-positive threshold fields use these defaults. Project-level
+`.chord/config.yaml` can override global config field by field.
+
+Default behavior:
+
+- Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
+- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` skips destructive new reduction for that one request when the same model is still active and the context is not under high pressure, avoiding a last-minute prompt-cache break before the final answer. New user input, model changes, or high-pressure context sizing resume normal reduction.
+- Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
+- High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
+- Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, while current-turn high-risk output always remains intact.
+- Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling instead of this success-output omission path.
+- Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, and build/test logs keep key failure or warning lines. Older errors, diagnostics, confirmations, and successful shell output are reduced to compact fixed markers or summaries.
 
 In loop mode, reduction is not applied to newly added messages. If you enable
 `/loop on` while an LLM request is already in flight, Chord freezes and reuses
@@ -1080,33 +1073,20 @@ surface no longer matches the active Codex identity.
 > **Most users do not need to configure this section.** The built-in defaults
 > are conservative and work well for common scenarios. In empirical local-session
 > analysis, reduction produced meaningful savings without systematically
-> breaking prompt-cache reuse; if you want a cache-friendlier balance, use the
-> recommended profile below.
+> breaking prompt-cache reuse; the tuning table below shows how to bias further
+> in either direction.
 
-**Recommended default profile** (keeps recent medium-sized reads/logs intact while
-still trimming large stale output):
+Keep the defaults when prompt-cache stability matters and your sessions commonly
+reuse the same active files across several turns. If your main problem is
+hitting context limits quickly in tool-heavy sessions, lower the byte
+thresholds, for example `read_like_output_bytes: 2500`. A cost-first setup can
+also lower the high-risk protection window:
 
 ```yaml
 context:
   reduction:
-    confirm_age_turns: 2
-    error_age_turns: 3
-    high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
+    high_risk_protect_age_turns: 1
 ```
-
-Use the defaults when prompt-cache stability matters and your sessions commonly
-reuse the same active files across several turns. If your main problem is
-hitting context limits quickly in tool-heavy sessions, you can lower the byte
-thresholds, for example `shell_success_bytes: 4000` and
-`read_like_output_bytes: 2500`.
 
 **Reduction categories**: Tool results are classified by output type and age.
 Specialized summaries are tried before the generic stale-output fallback, so old
@@ -1163,27 +1143,6 @@ How to read the age and size parameters:
 | File contents often need to be revisited | Raise `read_like_age_turns` (e.g. `3`) and `read_like_output_bytes` (e.g. `8000`) |
 | Final answers after TODO completion cost more because the prompt cache was disturbed | Keep `wrap_up_grace_requests: 1`; use `2` only if your workflow usually needs one extra verification request after TODO completion |
 | All tool output is important, nothing should be dropped | Raise all `*_age_turns` and `*_bytes` globally |
-
-Full configuration example (showing all defaults):
-
-```yaml
-context:
-  reduction:
-    confirm_age_turns: 2
-    error_age_turns: 3
-    high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
-```
-
-Unset or non-positive threshold fields use the defaults above. Project-level
-`.chord/config.yaml` can override global config field by field.
 
 ## Post-tool diagnostics
 

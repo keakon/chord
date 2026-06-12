@@ -87,67 +87,6 @@ providers:
 
 对 `type: responses`，Chord 使用与 Codex 一致的 Responses 请求形态：稳定 system prompt 会放在顶层 `instructions` 字段；对话消息仍保留为 typed `input` item，例如 `{"type":"message","role":"user",...}`。这样兼容网关不会在 `input` 里收到 system-role message。
 
-### 请求级上下文剪裁
-
-Chord 默认启用确定性的 request-level context reduction：它只影响发送给模型的当前请求，不会删除持久会话历史。剪裁决策只使用本地可确定信号（消息数、本地 token 估算、模型输入预算、工具输出 age/bytes），不会依赖 provider 是否返回 prompt cache 命中 token；provider usage 只用于离线分析。
-
-通常无需逐项配置，只写以下任一形式即可使用默认最佳参数：
-
-```yaml
-context:
-  reduction: true
-```
-
-```yaml
-context:
-  reduction: {}
-```
-
-不支持 `context.reduction: false`；不写 `context.reduction`，或使用 `true` / `{}`，都会保留默认的请求级剪裁行为。
-
-当前默认值：
-
-```yaml
-context:
-  reduction:
-    confirm_age_turns: 2
-    error_age_turns: 3
-    high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
-    cache_aware_min_usage: 0.75
-    warmup_message_limit: 32
-    min_incremental_saved_tokens: 4096
-    high_pressure_usage: 0.80
-    force_prune_usage: 0.90
-```
-
-这些参数的默认策略：
-
-- 短会话且上下文压力低时不急着剪裁：当消息数不超过 `warmup_message_limit`，且估算输入低于可用输入预算 `cache_aware_min_usage` 时，保护 prompt cache 热身和近期证据。
-- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 会在同模型且非高压上下文时跳过破坏性的新增剪裁，避免最终回复前临时打破已有 prompt cache。用户新提问、模型切换或上下文高压力会恢复正常剪裁。
-- 较老消息冻结复用：同一 turn 内形成稳定剪裁 surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。
-- 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
-- 近期高风险工具输出会优先按真实 user-turn age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个用户轮次。成本优先配置可降到 `1`：当前用户轮刚产生、模型正要继续使用的高风险输出仍完整保留；更早轮次的高风险输出则可以进入保守摘要。这是主要的成本/正确性权衡旋钮。
-- 成功 shell 输出在变旧后按低风险噪音处理。默认 `shell_success_bytes: 4000` 会比原先 8 KiB 更早剪掉冗长成功日志；失败、stack trace、diff 和 warning 密集的构建日志不会走这个成功输出省略路径，而是由高风险保护或结构化日志摘要处理。
-- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出和成功 shell 输出仍会被压成固定短 marker 或摘要。
-
-成本优先示例：
-
-```yaml
-context:
-  reduction:
-    high_risk_protect_age_turns: 1
-    shell_success_bytes: 4000
-    wrap_up_grace_requests: 1
-```
-
 ### OpenAI Codex preset
 
 ```yaml
@@ -649,7 +588,7 @@ providers:
 - `thinking`：Anthropic 扩展思考选项。`type: adaptive` 表示 Chord 根据 `effort` 推算合适的思考预算；`display: summarized` 会请求 Claude 返回可展示的 summarized thinking block（仅在 `type: enabled` 或 `adaptive` 下有效，`disabled` 模式会被拒绝）；variant 可覆盖 `thinking.effort` 与 `thinking.display`。
 - `variants`：命名模型参数预设，可通过 `openai/gpt-5.5@high` 或 `anthropic/claude-opus-4.8@xhigh` 引用。
 - `cost`：估算价格，单位是 USD / 1M tokens。`input`、`output`、`cache_read`、`cache_write`、`cache_write_1h` 都是可选字段；配置后，Chord 会在 UI 和 `/usage` 输出中估算费用。`cache_write` 是默认 prompt-cache 写入价格，对 Anthropic 通常对应 5 分钟 TTL；当 provider 报告或配置为请求 1 小时 cache write 时，使用 `cache_write_1h`。缺少匹配的 cache-write 价格时，Chord 会按生效后的 `input` 价格估算 cache-write token。
-  - `cost.service_tier_multipliers`：可选的 service tier 价格倍数，会在选中基础价格或匹配的 `input_tiers` 价格之后应用。用于表达 provider 的 service tier，例如 OpenAI priority（`fast`）或 flex（`slow`）。
+  - `cost.service_tier_multipliers`：可选的 service tier 价格倍数，会在选中基础价格或匹配的 `input_tiers` 价格之后应用。用于表达 provider 的 service tier，例如 OpenAI 的 priority 类加速档（`fast`）或 flex 类低价档（`slow`）。
   - `cost.input_tiers`：可选的长上下文价格覆盖。每项使用 `above_input_tokens` 作为严格阈值；当 billable input 大于该值时，Chord 会使用匹配阈值最高一项的 `input`、`output`、`cache_read` 和可选的 `cache_write`，然后再应用 service-tier 倍数。
 - `modalities.input`：模型支持的输入类型，可选 `text`、`image`、`pdf`。省略时默认 `[text, image]`。
 - `supported_service_tiers`：显式声明 provider 或 model 可接收的非 standard service tier，例如 OpenAI 可用 `[fast, slow]`，Anthropic 可用 `[fast]`。provider-level 值作为该 provider 下所有 model 的默认值；model-level 值会覆盖 provider 默认。两者都省略时使用 preset 默认值。定价需单独在 `cost.service_tier_multipliers`（service-tier 费率）和 `cost.input_tiers`（长上下文阈值）里配置。`standard` 始终可用，不需要写进 `supported_service_tiers`。手动切换只会选择当前 provider/model 支持的 tier：`Ctrl+R` 只在可用集合（`standard` 加上支持的非 standard tier）内循环；手动输入 `/tier fast` 或 `/tier slow` 但当前 provider/model 不支持时会显示错误提示。当切换 provider/model 后，之前请求的 `fast` 或 `slow` 不再受支持时，信息侧栏仍会显示用户请求的 `tier: fast` 或 `tier: slow`，并用灰色删除线表示该模式当前未实际生效。
@@ -945,15 +884,23 @@ providers:
 
 ### 上下文剪裁（Reduction）
 
-每次向 LLM 发送请求前，Chord 会用一套确定性规则检查对话中的工具输出，对过时的大段内容做裁剪。**这只影响本次请求的 prompt，不会改写磁盘上的会话文件。**
+每次向 LLM 发送请求前，Chord 会用一套确定性规则检查对话中的工具输出，对过时的大段内容做裁剪。**这只影响本次请求的 prompt，不会改写磁盘上的会话文件。**剪裁决策只使用本地可确定信号（消息数、本地 token 估算、模型输入预算、工具输出 age/bytes），不会依赖 provider 是否返回 prompt cache 命中 token。
 
-在 loop 模式下，新增消息不会再应用剪裁。如果你在某个 LLM 请求仍在进行时启用 `/loop on`，Chord 会冻结并复用该请求已经准备好的前缀，避免旧历史从“已剪裁形态”翻回完整原始工具输出，从而保持 prompt cache 前缀稳定；loop 期间产生的新消息会保持未剪裁，直到退出 loop 后再恢复普通剪裁策略。切换 loop 模式本身不会新增、删除或重写稳定的 system prompt 文本；否则即使任务上下文没有变化，也会导致 prompt cache 失效。
+剪裁默认启用，通常无需逐项配置，只写以下任一形式即可使用默认参数：
 
-当当前主 Agent provider 使用 Codex rate-limit surface，且 5h 或 7d 额度窗口剩余不足 10% 时，Chord 会在连续自动 continuation 中临时冻结完整的 LLM-facing request surface。冻结范围包括请求级剪裁结果、已安装的系统提示词和可见工具定义。这样做是有意的：接近额度耗尽时，Codex 只有在上下文表面不变的情况下，才可能沿着 `stop_reason=tool_call` 链继续执行直到 `end_turn`；如果此时上下文形态变化，可能导致 Codex 在额度用尽后无法继续复用当前会话。冻结会在交互边界解除——例如 Agent 回到 idle，或用户发送真实的新消息——因此 MCP / YOLO 等显式用户切换可以在下一次请求重新构建 surface。如果 key 或运行模型发生变化，Chord 也会允许下一次请求重建 surface，因为之前冻结的 surface 已不再匹配当前 Codex 身份。
+```yaml
+context:
+  reduction: true
+```
 
-> **大多数用户不需要配置这一节。** 内置默认值偏保守，已适配常见场景。基于本地真实会话的统计，剪裁能带来可观节省，且没有系统性破坏 prompt cache 复用；如果你希望在节省上下文和缓存稳定性之间更均衡，可使用下面的推荐配置。
+```yaml
+context:
+  reduction: {}
+```
 
-**推荐的默认配置**（保留中等大小的近期读取/日志，同时继续剪掉大型旧输出）：
+不支持 `context.reduction: false`；不写 `context.reduction`，或使用 `true` / `{}`，都会保留默认的请求级剪裁行为。
+
+全部字段及默认值：
 
 ```yaml
 context:
@@ -969,9 +916,38 @@ context:
     stale_output_bytes: 1500
     wrap_up_grace_requests: 1
     min_tool_results_prune: 8
+    cache_aware_min_usage: 0.75
+    warmup_message_limit: 32
+    min_incremental_saved_tokens: 4096
+    high_pressure_usage: 0.80
+    force_prune_usage: 0.90
 ```
 
-当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，默认配置是推荐选择。如果主要问题是工具密集型会话很快顶到上下文上限，可以下调字节阈值，例如 `shell_success_bytes: 4000`、`read_like_output_bytes: 2500`。
+未设置或非正数的字段使用以上默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
+
+这些参数的默认策略：
+
+- 短会话且上下文压力低时不急着剪裁：当消息数不超过 `warmup_message_limit`，且估算输入低于可用输入预算 `cache_aware_min_usage` 时，保护 prompt cache 热身和近期证据。
+- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 会在同模型且非高压上下文时跳过破坏性的新增剪裁，避免最终回复前临时打破已有 prompt cache。用户新提问、模型切换或上下文高压力会恢复正常剪裁。
+- 较老消息冻结复用：同一 turn 内形成稳定剪裁 surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。
+- 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
+- 近期高风险工具输出会优先按真实 user-turn age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个用户轮次。这是主要的成本/正确性权衡旋钮：调低能让更早轮次的高风险输出提前进入保守摘要，而当前用户轮刚产生、模型正要继续使用的高风险输出始终完整保留。
+- 成功 shell 输出在变旧且超过 `shell_success_bytes` 后按低风险噪音处理；失败、stack trace、diff 和 warning 密集的构建日志不会走这个成功输出省略路径，而是由高风险保护或结构化日志摘要处理。
+- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出和成功 shell 输出会被压成固定短 marker 或摘要。
+
+在 loop 模式下，新增消息不会再应用剪裁。如果你在某个 LLM 请求仍在进行时启用 `/loop on`，Chord 会冻结并复用该请求已经准备好的前缀，避免旧历史从“已剪裁形态”翻回完整原始工具输出，从而保持 prompt cache 前缀稳定；loop 期间产生的新消息会保持未剪裁，直到退出 loop 后再恢复普通剪裁策略。切换 loop 模式本身不会新增、删除或重写稳定的 system prompt 文本；否则即使任务上下文没有变化，也会导致 prompt cache 失效。
+
+当当前主 Agent provider 使用 Codex rate-limit surface，且 5h 或 7d 额度窗口剩余不足 10% 时，Chord 会在连续自动 continuation 中临时冻结完整的 LLM-facing request surface。冻结范围包括请求级剪裁结果、已安装的系统提示词和可见工具定义。这样做是有意的：接近额度耗尽时，Codex 只有在上下文表面不变的情况下，才可能沿着 `stop_reason=tool_call` 链继续执行直到 `end_turn`；如果此时上下文形态变化，可能导致 Codex 在额度用尽后无法继续复用当前会话。冻结会在交互边界解除——例如 Agent 回到 idle，或用户发送真实的新消息——因此 MCP / YOLO 等显式用户切换可以在下一次请求重新构建 surface。如果 key 或运行模型发生变化，Chord 也会允许下一次请求重建 surface，因为之前冻结的 surface 已不再匹配当前 Codex 身份。
+
+> **大多数用户不需要配置这一节。** 内置默认值偏保守，已适配常见场景。基于本地真实会话的统计，剪裁能带来可观节省，且没有系统性破坏 prompt cache 复用；想往某个方向调整时，参考下面的调参思路表。
+
+当你重视 prompt cache 稳定性、且会在多个轮次中反复围绕同一批活跃文件工作时，保持默认即可。如果主要问题是工具密集型会话很快顶到上下文上限，可以下调字节阈值，例如 `read_like_output_bytes: 2500`；成本优先的配置还可以缩短高风险保护窗口：
+
+```yaml
+context:
+  reduction:
+    high_risk_protect_age_turns: 1
+```
 
 **剪裁规则**：Chord 会按工具输出类型和时效分类处理。专门摘要会优先于通用旧结果省略，因此旧的大块输出可以保留高价值结构，同时不会改写持久会话历史。
 
@@ -1004,26 +980,6 @@ context:
 | 文件内容经常需要回头查阅 | 调高 `read_like_age_turns`（如 `3`）和 `read_like_output_bytes`（如 `8000`） |
 | TODO 完成后的最终回复因 prompt cache 被扰动而更贵 | 保持 `wrap_up_grace_requests: 1`；只有当你的流程通常在 TODO 完成后还会多一次验证请求时才考虑设为 `2` |
 | 工具输出都很重要不想丢 | 整体调高各 `*_age_turns` 和 `*_bytes` |
-
-完整配置示例（同时展示所有默认值）：
-
-```yaml
-context:
-  reduction:
-    confirm_age_turns: 2
-    error_age_turns: 3
-    high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
-    stale_output_bytes: 1500
-    wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
-```
-
-未设置或非正数的字段使用默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
 
 ## 工具后诊断
 
@@ -1092,7 +1048,7 @@ chord doctor models --pool thinking
 | `desktop_notification`  | bool                  | `false`                         | global / project         | 终端非聚焦时启用本地 TUI 终端通知；Chord 会按终端自动选择 OSC 9 或 OSC 777（不支持的终端通常会忽略该序列）。                                            |
 | `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
-| `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-命令)。 |
+| `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |
 | `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |
 | `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 输出较多。                                                              |
 | `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
