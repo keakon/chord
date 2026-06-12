@@ -393,6 +393,8 @@ func (m *Model) statusBarModeText() string {
 		return "HANDOFF"
 	case ModeUsageStats:
 		return "STATS"
+	case ModeErrorPanel:
+		return "ERRORS"
 	case ModeHelp:
 		return "HELP"
 	case ModeContentViewer:

@@ -135,9 +135,8 @@ func (m *Model) closeUsageStats() tea.Cmd {
 }
 
 func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
-		return m.closeUsageStats()
+	key := msg.String()
+	switch key {
 	case "tab":
 		m.cycleUsageStatsView(1)
 	case "shift+tab":
@@ -159,7 +158,7 @@ func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
 	case "G":
 		m.usageStats.scrollOffset = m.usageStatsMaxScroll()
 	default:
-		if keyMatches(msg.String(), m.keyMap.UsageStats) {
+		if m.overlayCloseKeyMatches(key, m.keyMap.UsageStats) {
 			return m.closeUsageStats()
 		}
 	}

@@ -11,6 +11,7 @@ package tui
 //	enter_insert, quit, help_toggle
 //	scroll_down, scroll_up, full_page_down, full_page_up, scroll_to_bottom, scroll_to_top_seq
 //	next_block, prev_block, toggle_collapse, fork_session, directory, usage_stats
+//	error_panel
 //	search_start, search_next, search_prev
 //	switch_agent, switch_role, switch_model, service_tier
 //
@@ -57,6 +58,7 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.ForkSession, "fork_session")
 	apply(&km.Directory, "directory")
 	apply(&km.UsageStats, "usage_stats")
+	apply(&km.ErrorPanel, "error_panel")
 	apply(&km.SearchStart, "search_start")
 	apply(&km.SearchNext, "search_next")
 	apply(&km.SearchPrev, "search_prev")

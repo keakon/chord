@@ -60,6 +60,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | Key       | Action                                                              |
 | --------- | ------------------------------------------------------------------- |
 | `Ctrl+T`  | Open the message directory (jump-to-card overlay)                   |
+| `Ctrl+E`  | Open the error panel                                                |
 | `$`       | Open the usage statistics overlay                                   |
 
 ### Normal mode — search

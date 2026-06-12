@@ -569,6 +569,8 @@ func debugModeString(mode Mode) string {
 		return "handoff-select"
 	case ModeUsageStats:
 		return "usage-stats"
+	case ModeErrorPanel:
+		return "error-panel"
 	case ModeHelp:
 		return "help"
 	case ModeContentViewer:

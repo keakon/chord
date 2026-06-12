@@ -252,6 +252,19 @@ func emitStreamStatusDelta(cb StreamCallback, status message.StatusDelta) {
 	cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &status})
 }
 
+func emitRetryError(cb StreamCallback, err error, provider, model, keySuffix string) {
+	if cb == nil || err == nil {
+		return
+	}
+	cb(message.StreamDelta{
+		Type:      message.StreamDeltaRetryError,
+		Err:       err,
+		Provider:  provider,
+		Model:     model,
+		KeySuffix: keySuffix,
+	})
+}
+
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
 	keySuffixValue := keySuffix(apiKey)
 	return &visibleStreamTracker{
@@ -505,6 +518,7 @@ func (c *Client) completeStreamTarget(
 			if IsContextLengthExceeded(err) {
 				result.setLastErr(t.provider, err)
 				oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+				emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 				modelDone = true
 				break
 			}
@@ -525,12 +539,14 @@ func (c *Client) completeStreamTarget(
 			if !retriable {
 				log.Errorf("non-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
+					emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 					modelDone = true
 					break
 				}
 				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr)) {
 					return result, lastInputTokens, err
 				}
+				emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 				modelDone = true
 				break
 			}
@@ -540,6 +556,7 @@ func (c *Client) completeStreamTarget(
 			}
 
 			log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+			emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 			if cb != nil && keyAttempt+1 < keyCount {
 				if err := abortIfCancelled(); err != nil {
 					return result, lastInputTokens, err
@@ -560,6 +577,7 @@ func (c *Client) completeStreamTarget(
 			break
 		}
 		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+		emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 		if cb != nil {
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err

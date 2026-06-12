@@ -38,6 +38,7 @@ type KeyMap struct {
 	// Normal mode – overlays
 	Directory  []string
 	UsageStats []string
+	ErrorPanel []string
 
 	// Normal mode – search
 	SearchStart []string // enter search mode
@@ -91,6 +92,7 @@ func DefaultKeyMap() KeyMap {
 		// Normal mode – overlays
 		Directory:  []string{"ctrl+t"},
 		UsageStats: []string{"$"},
+		ErrorPanel: []string{"ctrl+e"},
 
 		// Normal mode – search
 		SearchStart: []string{"/"},
@@ -113,4 +115,8 @@ func DefaultKeyMap() KeyMap {
 // keyMatches returns true if key matches any of the given bindings.
 func keyMatches(key string, bindings []string) bool {
 	return slices.Contains(bindings, key)
+}
+
+func (m *Model) overlayCloseKeyMatches(key string, toggleBindings []string) bool {
+	return key == "esc" || key == "q" || keyMatches(key, m.keyMap.Quit) || keyMatches(key, toggleBindings)
 }

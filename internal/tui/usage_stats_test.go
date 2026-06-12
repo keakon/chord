@@ -24,6 +24,21 @@ func TestHandleUsageStatsKeyTabResetsScroll(t *testing.T) {
 	}
 }
 
+func TestUsageStatsCloseKeysMatchOverlayHelp(t *testing.T) {
+	m := NewModel(&sessionControlAgent{})
+	m.openUsageStats()
+	_ = m.handleUsageStatsKey(tea.KeyPressMsg(tea.Key{Text: "q", Code: 'q'}))
+	if m.mode == ModeUsageStats {
+		t.Fatal("mode still ModeUsageStats after q, want closed")
+	}
+
+	m.openUsageStats()
+	_ = m.handleUsageStatsKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.mode == ModeUsageStats {
+		t.Fatal("mode still ModeUsageStats after esc, want closed")
+	}
+}
+
 func TestHandleUsageStatsKeyScopeStartsProjectLoad(t *testing.T) {
 	// The project load registers the working dir via EnsureProject; keep that
 	// write inside a temp state dir instead of the user's real sessions root.

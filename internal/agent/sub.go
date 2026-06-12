@@ -526,36 +526,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			s.parent.emitActivity(s.instanceID, ActivityStreaming, "")
 		}
 
-		streamReducer := &llmStreamReducer{}
-		streamReducer.content = streamContentReducer{
-			agentID:               s.instanceID,
-			emit:                  s.parent.emitToTUI,
-			scrubThinkingDelta:    false,
-			scrubThinkingFinal:    scrubThinkingMarkers,
-			thinkingCommitMode:    streamContentCommitFullText,
-			textFlushInterval:     defaultStreamTextFlushInterval,
-			thinkingFlushInterval: 0,
-		}
-		streamReducer.tool = streamToolDeltaReducer{
-			agentID:                  s.instanceID,
-			turn:                     turn,
-			registry:                 s.tools,
-			ruleset:                  func() permission.Ruleset { return s.ruleset },
-			emit:                     s.parent.emitToTUI,
-			flushBeforeTool:          streamReducer.content.flushTextDelta,
-			promoteStreamingActivity: promoteStreamingActivity,
-			recordToolUseEnd:         s.parent.recordToolTraceToolUseEnd,
-			discardSpeculativeOnRollback: func(turn *Turn, reason string) {
-				s.parent.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
-			},
-		}
-		streamReducer.emitActivity = func(activity ActivityType, detail string) {
-			s.parent.emitActivity(s.instanceID, activity, detail)
-		}
-		streamReducer.promoteStreamingActivity = promoteStreamingActivity
-		streamReducer.onError = func(text string) {
-			log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", text, s.instanceID)
-		}
+		streamReducer := s.newSubLLMStreamReducer(turn, promoteStreamingActivity, scrubThinkingMarkers)
 
 		callback := streamReducer.Handle
 
@@ -620,6 +591,50 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 		case <-s.parentCtx.Done():
 		}
 	}()
+}
+
+func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool) *llmStreamReducer {
+	streamReducer := &llmStreamReducer{}
+	streamReducer.content = streamContentReducer{
+		agentID:               s.instanceID,
+		emit:                  s.parent.emitToTUI,
+		scrubThinkingDelta:    false,
+		scrubThinkingFinal:    scrubThinkingMarkers,
+		thinkingCommitMode:    streamContentCommitFullText,
+		textFlushInterval:     defaultStreamTextFlushInterval,
+		thinkingFlushInterval: 0,
+	}
+	streamReducer.tool = streamToolDeltaReducer{
+		agentID:                  s.instanceID,
+		turn:                     turn,
+		registry:                 s.tools,
+		ruleset:                  func() permission.Ruleset { return s.ruleset },
+		emit:                     s.parent.emitToTUI,
+		flushBeforeTool:          streamReducer.content.flushTextDelta,
+		promoteStreamingActivity: promoteStreamingActivity,
+		recordToolUseEnd:         s.parent.recordToolTraceToolUseEnd,
+		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
+		},
+	}
+	streamReducer.emitActivity = func(activity ActivityType, detail string) {
+		s.parent.emitActivity(s.instanceID, activity, detail)
+	}
+	streamReducer.promoteStreamingActivity = promoteStreamingActivity
+	streamReducer.onRetryError = func(err error, provider, model, keySuffix string) {
+		s.parent.emitToTUI(ErrorEvent{
+			Err:      err,
+			AgentID:  s.instanceID,
+			Silent:   true,
+			Provider: provider,
+			Model:    model,
+			Key:      keySuffix,
+		})
+	}
+	streamReducer.onError = func(text string) {
+		log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", text, s.instanceID)
+	}
+	return streamReducer
 }
 
 // ---------------------------------------------------------------------------

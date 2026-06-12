@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -69,5 +70,69 @@ func TestStreamContentReducerSubAgentKeepsImmediateThinkingDeltaAndFinalText(t *
 	}
 	if got, ok := events[2].(StreamTextEvent); !ok || got.AgentID != "agent-1" || got.Text != "done" {
 		t.Fatalf("events[2] = %#v, want subagent text", events[2])
+	}
+}
+
+func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	retryErr := errors.New("rate limited")
+	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil)
+
+	reducer.Handle(message.StreamDelta{
+		Type:      message.StreamDeltaRetryError,
+		Err:       retryErr,
+		Provider:  "provider",
+		Model:     "model-1",
+		KeySuffix: "...abc1",
+	})
+
+	select {
+	case evt := <-a.outputCh:
+		errEvt, ok := evt.(ErrorEvent)
+		if !ok {
+			t.Fatalf("event = %T, want ErrorEvent", evt)
+		}
+		if errEvt.Err != retryErr || !errEvt.Silent || errEvt.AgentID != a.instanceID {
+			t.Fatalf("error event = %#v, want silent retry error for main agent", errEvt)
+		}
+		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "...abc1" {
+			t.Fatalf("error event metadata = %#v, want retry metadata", errEvt)
+		}
+	default:
+		t.Fatal("missing retry ErrorEvent")
+	}
+}
+
+func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	retryErr := errors.New("rate limited")
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+	}
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false)
+
+	reducer.Handle(message.StreamDelta{
+		Type:      message.StreamDeltaRetryError,
+		Err:       retryErr,
+		Provider:  "provider",
+		Model:     "model-1",
+		KeySuffix: "...abc1",
+	})
+
+	select {
+	case evt := <-a.outputCh:
+		errEvt, ok := evt.(ErrorEvent)
+		if !ok {
+			t.Fatalf("event = %T, want ErrorEvent", evt)
+		}
+		if errEvt.Err != retryErr || !errEvt.Silent || errEvt.AgentID != sub.instanceID {
+			t.Fatalf("error event = %#v, want silent retry error for subagent", errEvt)
+		}
+		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "...abc1" {
+			t.Fatalf("error event metadata = %#v, want retry metadata", errEvt)
+		}
+	default:
+		t.Fatal("missing retry ErrorEvent")
 	}
 }

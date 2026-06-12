@@ -38,6 +38,7 @@ const (
 	ModeSessionDeleteConfirm             // delete-session confirmation overlay from session picker
 	ModeHandoffSelect                    // Handoff agent selector overlay
 	ModeUsageStats                       // stats panel overlay ($, /stats)
+	ModeErrorPanel                       // error panel overlay (ctrl+e)
 	ModeHelp                             // full-screen help overlay
 	ModeImageViewer                      // fullscreen image viewer overlay
 	ModeContentViewer                    // fullscreen markdown content viewer overlay
@@ -413,6 +414,13 @@ type Model struct {
 	tuiDiagnosticEvents [maxTUIDiagnosticEvents]tuiDiagnosticEvent
 	tuiDiagnosticNext   int
 	tuiDiagnosticCount  int
+
+	// agentErrors keeps a ring buffer of recent agent error events for the error panel.
+	agentErrors      [maxAgentErrors]agentErrorRecord
+	agentErrorsNext  int
+	agentErrorsCount int
+
+	errorPanel errorPanelState
 
 	pendingPostHostRedrawFallback map[string]uint64
 	pendingLocalStatusCards       []localStatusCard

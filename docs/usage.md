@@ -37,9 +37,41 @@ Common keys:
 - `Ctrl+T`: open the message directory
 - `Ctrl+P`: switch the main role model pool
 - `Ctrl+O`: open the MCP server selector
+- `Ctrl+E`: open the error panel (view all errors from the current session)
 - `Ctrl+G`: export a diagnostics bundle
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
+
+### Error panel
+
+Press `Ctrl+E` in normal mode to open the error panel, which shows all errors encountered during the current session. This includes:
+
+- **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean.
+- **Final errors**: errors that exhausted all retries and appear as red error blocks in the conversation.
+
+Each error record shows:
+
+- Timestamp (HH:MM:SS)
+- Provider and model (e.g., `Anthropic/claude-opus-4-8`)
+- API key suffix (e.g., `key=...xyz9`, last 4 characters for safe identification)
+- HTTP status code (when available)
+- Error code and type (when provided by the API)
+- Error message (wrapped to panel width)
+
+Example error entry:
+```
+14:25:38  Anthropic/claude-opus-4-8  key=...xyz9  HTTP 503  code=model_not_found
+  No available channel for model sample/model under group default
+```
+
+Navigation:
+
+- `j` / `k`: scroll one line
+- `Ctrl+F` / `Ctrl+B`: page down / up
+- `g` / `G`: jump to top / bottom
+- `Esc`: close the panel
+
+The error panel keeps the most recent 80 errors in a ring buffer (newest first). Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.
 
 ## Tool execution details
 

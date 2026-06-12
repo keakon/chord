@@ -661,7 +661,12 @@ func TestClient_400ErrorTriesFallbackModel(t *testing.T) {
 		ContextLimit:   128000,
 	}}, 0)
 
-	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hello"}}, nil, func(message.StreamDelta) {})
+	var retryErrors []message.StreamDelta
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hello"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaRetryError {
+			retryErrors = append(retryErrors, delta)
+		}
+	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
 	}
@@ -681,6 +686,12 @@ func TestClient_400ErrorTriesFallbackModel(t *testing.T) {
 	}
 	if st.RunningModelRef != "compatible/compatible-model" {
 		t.Fatalf("RunningModelRef = %q, want compatible/compatible-model", st.RunningModelRef)
+	}
+	if len(retryErrors) != 1 {
+		t.Fatalf("retry error delta count = %d, want 1", len(retryErrors))
+	}
+	if retryErrors[0].Err == nil || retryErrors[0].Provider != "strict" || retryErrors[0].Model != "strict-model" {
+		t.Fatalf("retry error delta = %#v, want primary 400 metadata", retryErrors[0])
 	}
 }
 
@@ -1811,7 +1822,12 @@ func TestClientCompleteStreamOfficial400DoesNotRetry(t *testing.T) {
 	}
 	c := NewClient(cfg, impl, "gpt-test", 4096, "sys")
 
-	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	var retryErrors []message.StreamDelta
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaRetryError {
+			retryErrors = append(retryErrors, delta)
+		}
+	})
 	if err == nil {
 		t.Fatal("expected official 400 error")
 	}
@@ -1820,6 +1836,9 @@ func TestClientCompleteStreamOfficial400DoesNotRetry(t *testing.T) {
 	}
 	if got := impl.apiKeys; len(got) != 1 || got[0] != "k1" {
 		t.Fatalf("api keys = %#v, want only [k1]", got)
+	}
+	if len(retryErrors) != 0 {
+		t.Fatalf("retry error delta count = %d, want 0 for terminal official 400: %#v", len(retryErrors), retryErrors)
 	}
 }
 

@@ -291,6 +291,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		m.openUsageStats()
 		return nil
 
+	// -- error panel -----------------------------------------------------
+	case keyMatches(key, m.keyMap.ErrorPanel):
+		m.openErrorPanel()
+		return nil
+
 	// -- search ----------------------------------------------------------
 	case keyMatches(key, m.keyMap.SearchStart):
 		if m.hasDeferredStartupTranscript() {

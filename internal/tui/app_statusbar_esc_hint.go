@@ -16,6 +16,8 @@ func (m *Model) nextEscHint() string {
 		return "close help"
 	case ModeUsageStats:
 		return "close stats"
+	case ModeErrorPanel:
+		return "close errors"
 	case ModeInsert:
 		return "normal mode"
 	case ModeNormal:

@@ -118,6 +118,9 @@ func (m *Model) handleCtrlC() tea.Cmd {
 	if m.mode == ModeUsageStats {
 		return m.closeUsageStats()
 	}
+	if m.mode == ModeErrorPanel {
+		return m.closeErrorPanel()
+	}
 	if m.pendingQuitBy == "ctrl+c" && !m.pendingQuitAt.IsZero() && now.Sub(m.pendingQuitAt) < pendingQuitWindow {
 		m.clearPendingQuit()
 		m.quitting = true

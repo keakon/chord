@@ -73,10 +73,14 @@ func sessionSwitchLabel(kind, sessionID string) string {
 }
 
 func (m *Model) beginSessionSwitch(kind, sessionID string) {
+	kind = strings.TrimSpace(kind)
 	m.sessionSwitch = sessionSwitchState{
-		kind:      strings.TrimSpace(kind),
+		kind:      kind,
 		sessionID: strings.TrimSpace(sessionID),
 		startedAt: time.Now(),
+	}
+	if kind == "new" || kind == "resume" {
+		m.clearAgentErrors()
 	}
 	m.cachedStatusKey = ""
 	m.cachedStatusRender = cachedRenderable{}

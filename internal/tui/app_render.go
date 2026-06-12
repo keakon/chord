@@ -367,6 +367,11 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			dialogRect := centeredRect(area, dialog)
 			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
 		}
+	case ModeErrorPanel:
+		if dialog := m.renderErrorPanelDialog(); dialog != "" {
+			dialogRect := centeredRect(area, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		}
 	case ModeConfirm:
 		if dialog := m.renderConfirmDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)

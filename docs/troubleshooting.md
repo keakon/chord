@@ -50,6 +50,11 @@ Recommendations:
 - reduce concurrency or retries
 - check for accidental looped calls
 
+To diagnose which keys or models are hitting rate limits or errors:
+
+- Press `Ctrl+E` in the TUI to open the error panel, which shows all retry errors including 429s with the provider, model, and key suffix.
+- Check the error panel to see the pattern: if one specific key is repeatedly hitting 429, that key is rate-limited; if multiple keys on the same provider fail with 503, the provider itself may be degraded.
+
 UI note:
 
 - the right-side RATE LIMIT panel shows the last Codex rate-limit snapshot (e.g. `5h: 42% 2h30m`). When a reset timestamp is reached, the countdown may disappear briefly while Chord refreshes usage; depending on provider semantics (rolling windows), usage may drop gradually rather than jumping straight to 0%.

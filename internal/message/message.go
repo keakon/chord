@@ -157,7 +157,8 @@ type ToolDefinition struct {
 type StreamDelta struct {
 	// Type is one of: "text", "tool_use_start", "tool_use_delta", "tool_use_end",
 	// "thinking", "thinking_end", "error", "status", "rate_limits", "rollback",
-	// "key_switched", "key_confirmed", "key_deactivated", "key_invalidated", "key_expired".
+	// "key_switched", "key_confirmed", "key_deactivated", "key_invalidated",
+	// "key_expired", "retry_error".
 	//
 	// key_confirmed may carry Status.ModelRef/Status.Reason to identify the
 	// effective model that produced the first visible token for the current
@@ -170,6 +171,10 @@ type StreamDelta struct {
 	Rollback  *RollbackDelta                  // for Type="rollback"
 	AccountID string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired": the OAuth account ID
 	Email     string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired": the OAuth account email, if available
+	Err       error                           // for Type="retry_error": the error from a failed retry attempt
+	Provider  string                          // for Type="retry_error": provider name
+	Model     string                          // for Type="retry_error": model ID
+	KeySuffix string                          // for Type="retry_error": last 4 chars of the key (safe for logs)
 	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
 }
 
@@ -191,6 +196,7 @@ const (
 	StreamDeltaKeyDeactivated = "key_deactivated"
 	StreamDeltaKeyInvalidated = "key_invalidated"
 	StreamDeltaKeyExpired     = "key_expired"
+	StreamDeltaRetryError     = "retry_error"
 )
 
 // StatusDelta represents a technical state change during an LLM request.

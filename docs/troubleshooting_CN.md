@@ -42,6 +42,11 @@ chord doctor models --pool thinking
 
 建议：换一个 key、降低并发或减少重试、检查是否存在异常循环调用。
 
+如果要判断哪些 key 或模型反复限流 / 报错：
+
+- 在 TUI 的 Normal 模式下按 `Ctrl+E` 打开错误面板；这里会记录包含 429 在内的重试错误，并显示 provider、model 和 key 后缀。
+- 看错误面板里的模式：如果总是同一个 key 返回 429，通常是这个 key 被限流；如果同一 provider 的多个 key 都返回 503，更可能是 provider 侧异常。
+
 界面说明：
 
 - 右侧 RATE LIMIT 面板展示的是 Codex 最近一次用量/限流快照（如 `5h: 42% 2h30m`）。到达 reset 时间点后倒计时会短暂消失，Chord 触发一次用量刷新；由于服务端可能使用滚动窗口，刷新后百分比不一定立即变成 0%，可能是逐步下降。
