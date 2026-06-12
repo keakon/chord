@@ -538,7 +538,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 			if text == "" && strings.TrimSpace(msg.ToolDiff) == "" {
 				continue
 			}
-			if strings.Contains(text, "Error:") || isToolErrorContent(text) {
+			if isToolResultErrorMessage(msg) {
 				item := buildEvidenceItem(
 					evidenceToolError,
 					"Latest failing tool result",
@@ -582,6 +582,14 @@ func (a *MainAgent) evidenceItemsForCompaction(_ []message.Message, contextLimit
 
 func isToolErrorContent(content string) bool {
 	return strings.HasPrefix(strings.TrimSpace(content), "Error:")
+}
+
+func isToolResultErrorStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), string(ToolResultStatusError))
+}
+
+func isToolResultErrorMessage(msg message.Message) bool {
+	return isToolResultErrorStatus(msg.ToolStatus) || strings.Contains(msg.Content, "Error:")
 }
 
 func isConfirmationOutput(content string) bool {

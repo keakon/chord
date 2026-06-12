@@ -1218,7 +1218,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			item.Sequence = len(a.evidenceCandidates) + 1
 			a.addEvidenceCandidate(item)
 		}
-		if strings.Contains(text, "Error:") || isToolErrorContent(text) {
+		if isToolResultErrorMessage(msg) {
 			a.addEvidenceCandidate(buildEvidenceItem(
 				evidenceToolError,
 				"Latest failing tool result",

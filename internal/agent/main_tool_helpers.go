@@ -354,9 +354,20 @@ func composeToolResultTexts(rawResult string, err error) (displayResult, context
 	if strings.TrimSpace(rawResult) == "" {
 		return errorText, fmt.Sprintf("Error: %s", errorText), errorText, true
 	}
+	if deduped, ok := deduplicateMatchingToolError(rawResult, errorText); ok {
+		return deduped, deduped, errorText, true
+	}
 
 	combined := strings.TrimRight(rawResult, "\n") + "\n\nError: " + errorText
 	return combined, combined, errorText, true
+}
+
+func deduplicateMatchingToolError(rawResult, errorText string) (string, bool) {
+	result := strings.TrimRight(rawResult, "\n")
+	if strings.TrimSpace(result) == strings.TrimSpace(errorText) {
+		return result, true
+	}
+	return "", false
 }
 
 func applyToolArgsAuditToContextResult(content string, _ *message.ToolArgsAudit) string {

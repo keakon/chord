@@ -3194,6 +3194,34 @@ func TestRecordEvidenceFromMessageCapturesToolErrorAndDiff(t *testing.T) {
 	}
 }
 
+func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.recordEvidenceFromMessage(message.Message{
+		Role:       "tool",
+		Content:    "patch makes no changes. No files were modified",
+		ToolStatus: string(ToolResultStatusError),
+	})
+	if got := len(a.evidenceCandidates); got != 1 {
+		t.Fatalf("len(evidenceCandidates) = %d, want 1", got)
+	}
+	if a.evidenceCandidates[0].Kind != evidenceToolError {
+		t.Fatalf("evidence kind = %q, want %q", a.evidenceCandidates[0].Kind, evidenceToolError)
+	}
+}
+
+func TestClassifyRequestReductionToolOutputUsesToolStatusError(t *testing.T) {
+	ctx := requestReductionContext{
+		Content:    "patch makes no changes. No files were modified",
+		ToolStatus: string(ToolResultStatusError),
+		Age:        compactErrorAgeTurns,
+		Policy:     defaultContextReductionPolicy(),
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionToolError {
+		t.Fatalf("class = %q, want %q", got, requestReductionToolError)
+	}
+}
+
 func TestCollectEvidenceItemsPreservesLatestDoneRejectedReason(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "tool", Content: "Done rejected: older request"},

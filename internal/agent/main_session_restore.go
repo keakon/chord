@@ -871,7 +871,7 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 			continue
 		}
 		name, ok := assistantSkillCalls[msg.ToolCallID]
-		if !ok || strings.HasPrefix(strings.TrimSpace(msg.Content), "Error:") {
+		if !ok || isToolResultErrorMessage(msg) {
 			continue
 		}
 		if meta, ok := visibleByName[name]; ok {

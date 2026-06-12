@@ -283,6 +283,7 @@ type requestReductionContext struct {
 	ToolName    string
 	Meta        toolCallMeta
 	Content     string
+	ToolStatus  string
 	Age         int
 	UserTurnAge int
 	Policy      contextReductionPolicy
@@ -297,7 +298,7 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.UserTurnAge < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 		return requestReductionNone
 	}
-	if ctx.Age >= ctx.Policy.ErrorAgeTurns && isToolErrorContent(ctx.Content) {
+	if ctx.Age >= ctx.Policy.ErrorAgeTurns && (isToolResultErrorStatus(ctx.ToolStatus) || isToolErrorContent(ctx.Content)) {
 		return requestReductionToolError
 	}
 	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {

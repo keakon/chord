@@ -416,6 +416,26 @@ func TestComposeToolResultTextsWithOutputError(t *testing.T) {
 	}
 }
 
+func TestComposeToolResultTextsDeduplicatesMatchingResultAndError(t *testing.T) {
+	raw := "patch makes no changes. No files were modified"
+	display, contextResult, errorText, isError := composeToolResultTexts(raw, errors.New(raw))
+	if !isError {
+		t.Fatal("expected error status")
+	}
+	if errorText != raw {
+		t.Fatalf("errorText = %q, want %q", errorText, raw)
+	}
+	if display != raw {
+		t.Fatalf("display = %q, want %q", display, raw)
+	}
+	if contextResult != raw {
+		t.Fatalf("contextResult = %q, want %q", contextResult, raw)
+	}
+	if strings.Contains(display, "\n\nError:") {
+		t.Fatalf("display should not duplicate matching error text, got %q", display)
+	}
+}
+
 func TestWrapToolRejectedByUserDisplaysWithoutSentinelDuplication(t *testing.T) {
 	err := wrapToolRejectedByUser("Write", "")
 	if !errors.Is(err, errToolRejectedByUser) {
