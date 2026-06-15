@@ -662,7 +662,7 @@ func (c *Client) completeStreamWithRetry(
 	lastInputTokens := c.getLastInputTokens()
 	outputCapSetting := c.getOutputTokenMax()
 	systemPrompt := c.getSystemPrompt()
-	variantForStart := strings.TrimSpace(startVariant)
+	variantForStart := validVariantForModel(startProvider, startModelID, startVariant)
 
 	retryCount := 0
 

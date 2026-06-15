@@ -205,14 +205,21 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 		client.SetSessionID(sid)
 	}
 
-	a.swapLLMClientWithRef(client, modelName, ctxLimit, providerModel)
+	selectedRef := strings.TrimSpace(client.NextRequestModelRef())
+	if selectedRef == "" {
+		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
+	}
+	if selectedRef == "" {
+		selectedRef = providerModel
+	}
+	a.swapLLMClientWithRef(client, modelName, ctxLimit, selectedRef)
 	a.mainModelPolicyDirty.Store(false)
 	if a.modelPoolPolicy != nil {
 		cfg := a.currentActiveConfig()
 		if cfg != nil {
 			effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
 			if effectivePool != "" {
-				a.modelPoolPolicy.SetLastPicked(cfg.Name, effectivePool, providerModel)
+				a.modelPoolPolicy.SetLastPicked(cfg.Name, effectivePool, selectedRef)
 			}
 		}
 	}
@@ -221,11 +228,11 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 		effectiveRunningRef = client.PrimaryModelRef()
 	}
 	if effectiveRunningRef == "" {
-		effectiveRunningRef = providerModel
+		effectiveRunningRef = selectedRef
 	}
 	a.emitToTUI(RunningModelChangedEvent{
 		AgentID:          a.instanceID,
-		ProviderModelRef: providerModel,
+		ProviderModelRef: selectedRef,
 		RunningModelRef:  effectiveRunningRef,
 	})
 	if showToast {

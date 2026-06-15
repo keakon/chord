@@ -4068,6 +4068,77 @@ func TestClientSetVariantOverridesParallelToolCalls(t *testing.T) {
 	}
 }
 
+func TestClientSetModelPoolIgnoresUndefinedVariant(t *testing.T) {
+	provider := &recordingTuningProvider{}
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {
+				Limit:     config.ModelLimit{Context: 400000, Output: 128000},
+				Reasoning: &config.ReasoningConfig{Effort: "medium", Summary: "auto"},
+				Variants: map[string]config.ModelVariant{
+					"high": {Reasoning: &config.ReasoningConfig{Effort: "high"}},
+				},
+			},
+		},
+	}, []string{"k"})
+	c := NewClient(cfg, provider, "gpt-5.5", 4096, "sys")
+	c.SetModelPool([]FallbackModel{{
+		ProviderConfig: cfg,
+		ProviderImpl:   provider,
+		ModelID:        "gpt-5.5",
+		MaxTokens:      4096,
+		ContextLimit:   400000,
+		Variant:        "missing",
+	}}, 0)
+
+	if got := c.ActiveVariant(); got != "" {
+		t.Fatalf("ActiveVariant = %q, want empty for undefined variant", got)
+	}
+	if got := c.NextRequestModelRef(); got != "openai/gpt-5.5" {
+		t.Fatalf("NextRequestModelRef = %q, want openai/gpt-5.5", got)
+	}
+	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if len(provider.tuning) != 1 {
+		t.Fatalf("len(provider.tuning) = %d, want 1", len(provider.tuning))
+	}
+	got := provider.tuning[0].OpenAI
+	if got.ReasoningEffort != "medium" || got.ReasoningSummary != "auto" {
+		t.Fatalf("OpenAI tuning = %+v, want model defaults without undefined variant", got)
+	}
+}
+
+func TestCompleteStreamAppliesActiveVariantOpenAITuning(t *testing.T) {
+	provider := &recordingTuningProvider{}
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {
+				Limit:     config.ModelLimit{Context: 400000, Input: 272000, Output: 128000},
+				Reasoning: &config.ReasoningConfig{Summary: "auto"},
+				Variants: map[string]config.ModelVariant{
+					"xhigh": {Reasoning: &config.ReasoningConfig{Effort: "xhigh"}},
+				},
+			},
+		},
+	}, []string{"k"})
+	c := NewClient(cfg, provider, "gpt-5.5", 4096, "sys")
+	c.SetVariant("xhigh")
+
+	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if len(provider.tuning) != 1 {
+		t.Fatalf("len(provider.tuning) = %d, want 1", len(provider.tuning))
+	}
+	got := provider.tuning[0].OpenAI
+	if got.ReasoningEffort != "xhigh" || got.ReasoningSummary != "auto" {
+		t.Fatalf("OpenAI tuning = %+v, want reasoning effort xhigh summary auto", got)
+	}
+}
+
 func TestClientRunningModelRefIncludesVariantOnPrimarySuccess(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

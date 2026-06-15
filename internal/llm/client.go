@@ -35,7 +35,7 @@ type FallbackModel struct {
 	ContextLimit     int    // from ModelConfig.Limit.Context
 	InputLimit       int    // fixed input-side override; when zero the client derives the current budget from model limits/output cap
 	DeriveInputLimit bool   // when true, re-derive InputLimit from the current output cap and use InputLimit only as a fallback cache
-	Variant          string // named variant to apply; empty = use model defaults
+	Variant          string // named variant to apply; empty or undefined = use model defaults
 }
 
 // Client is the high-level LLM client that handles retries and key selection.
@@ -238,9 +238,37 @@ func (c *Client) SetSystemPrompt(prompt string) {
 func (c *Client) SetFallbackModels(models []FallbackModel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.fallbackModels = append([]FallbackModel(nil), models...)
+	c.fallbackModels = sanitizeFallbackModelVariants(models)
 	c.poolCursor = 0
 	c.toolSurfacePrimary = c.primaryModelEntryLocked()
+}
+
+func validVariantForModel(provider *ProviderConfig, modelID, variant string) string {
+	variant = strings.TrimSpace(variant)
+	if provider == nil || strings.TrimSpace(modelID) == "" || variant == "" {
+		return ""
+	}
+	m, ok := provider.GetModel(modelID)
+	if !ok {
+		return ""
+	}
+	if _, ok := m.Variants[variant]; !ok {
+		return ""
+	}
+	return variant
+}
+
+func sanitizeFallbackModelVariant(model FallbackModel) FallbackModel {
+	model.Variant = validVariantForModel(model.ProviderConfig, model.ModelID, model.Variant)
+	return model
+}
+
+func sanitizeFallbackModelVariants(models []FallbackModel) []FallbackModel {
+	out := make([]FallbackModel, 0, len(models))
+	for _, model := range models {
+		out = append(out, sanitizeFallbackModelVariant(model))
+	}
+	return out
 }
 
 // SetModelPool configures the client with an ordered model pool.
@@ -256,6 +284,7 @@ func (c *Client) SetModelPool(models []FallbackModel, selectedIdx int) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	models = sanitizeFallbackModelVariants(models)
 	sel := models[selectedIdx]
 	c.toolSurfacePrimary = models[0]
 	c.provider = sel.ProviderConfig
@@ -331,7 +360,7 @@ func (c *Client) primaryModelEntryLocked() FallbackModel {
 		ProviderImpl:   c.providerImpl,
 		ModelID:        c.modelID,
 		MaxTokens:      c.maxTokens,
-		Variant:        c.activeVariant,
+		Variant:        validVariantForModel(c.provider, c.modelID, c.activeVariant),
 	}
 	if c.provider != nil {
 		if m, ok := c.provider.GetModel(c.modelID); ok {
@@ -1009,13 +1038,14 @@ func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel
 		return msgs, modelcompat.NormalizeReport{}
 	}
 	modelRef := providerModelRef(target.ProviderConfig, target.ModelID)
-	if strings.TrimSpace(target.Variant) != "" {
-		modelRef = modelRef + "@" + strings.TrimSpace(target.Variant)
+	variant := validVariantForModel(target.ProviderConfig, target.ModelID, target.Variant)
+	if variant != "" {
+		modelRef = modelRef + "@" + variant
 	}
 	tm := modelcompat.TargetModel{
 		ProviderID:              target.ProviderConfig.Name(),
 		ModelID:                 target.ModelID,
-		Variant:                 target.Variant,
+		Variant:                 variant,
 		ModelRef:                modelRef,
 		WireFamily:              providerWireFamily(target.ProviderConfig),
 		ThinkingReplayEnabled:   thinkingReplayEnabled(target.ProviderConfig, target.ModelID, tuning),
@@ -1092,10 +1122,11 @@ func tuningForPoolTarget(t FallbackModel) RequestTuning {
 		return RequestTuning{}
 	}
 	base := tuningFromModel(m, t.ProviderConfig.Preset(), t.ProviderConfig.SupportedServiceTiers())
-	if t.Variant == "" {
+	variant := validVariantForModel(t.ProviderConfig, t.ModelID, t.Variant)
+	if variant == "" {
 		return base
 	}
-	if v, ok := m.Variants[t.Variant]; ok {
+	if v, ok := m.Variants[variant]; ok {
 		return mergeVariantTuning(base, v)
 	}
 	return base
@@ -1106,8 +1137,8 @@ func modelRefWithVariant(t FallbackModel) string {
 		return ""
 	}
 	ref := providerModelRef(t.ProviderConfig, t.ModelID)
-	if t.Variant != "" {
-		ref += "@" + t.Variant
+	if variant := validVariantForModel(t.ProviderConfig, t.ModelID, t.Variant); variant != "" {
+		ref += "@" + variant
 	}
 	return ref
 }

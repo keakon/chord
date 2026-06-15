@@ -708,6 +708,46 @@ func TestSwitchModelAcceptsInlineVariant(t *testing.T) {
 	}
 }
 
+func TestSwitchModelIgnoresUndefinedInlineVariant(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetProviderModelRef("sample/model-a")
+
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-b": {
+				Limit: config.ModelLimit{Context: 16384, Output: 2048},
+				Variants: map[string]config.ModelVariant{
+					"high": {Reasoning: &config.ReasoningConfig{Effort: "high"}},
+				},
+			},
+		},
+	}, []string{"test-key"})
+	client := llm.NewClient(providerCfg, stubProvider{}, "model-b", 2048, "")
+
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "sample/model-b@missing" {
+			t.Fatalf("providerModel = %q, want sample/model-b@missing", providerModel)
+		}
+		client.SetVariant("missing")
+		return client, "model-b", 16384, nil
+	})
+
+	if err := a.SwitchModel("sample/model-b@missing"); err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	if got := a.ProviderModelRef(); got != "sample/model-b" {
+		t.Fatalf("ProviderModelRef = %q, want sample/model-b", got)
+	}
+	if got := a.RunningVariant(); got != "" {
+		t.Fatalf("RunningVariant = %q, want empty", got)
+	}
+	if got := a.RunningModelRef(); got != "sample/model-b" {
+		t.Fatalf("RunningModelRef = %q, want sample/model-b", got)
+	}
+}
+
 func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
