@@ -59,7 +59,8 @@ Each error record shows:
 - Error message (wrapped to panel width)
 
 Example error entry:
-```
+
+```text
 14:25:38  Anthropic/claude-opus-4-8  key=...xyz9  HTTP 503  code=model_not_found
   No available channel for model sample/model under group default
 ```
