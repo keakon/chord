@@ -158,3 +158,96 @@ func mergeVariantTuning(base RequestTuning, v config.ModelVariant) RequestTuning
 	}
 	return base
 }
+
+func cloneServiceTiers(tiers map[config.ServiceTier]bool) map[config.ServiceTier]bool {
+	if tiers == nil {
+		return nil
+	}
+	out := make(map[config.ServiceTier]bool, len(tiers))
+	for tier, supported := range tiers {
+		out[tier] = supported
+	}
+	return out
+}
+
+func cloneRequestTuning(tuning RequestTuning) RequestTuning {
+	copy := tuning
+	if tuning.Anthropic.Temperature != nil {
+		copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
+	}
+	if tuning.OpenAI.ParallelToolCalls != nil {
+		copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
+	}
+	if tuning.Gemini.ThinkingBudget != nil {
+		copy.Gemini.ThinkingBudget = new(*tuning.Gemini.ThinkingBudget)
+	}
+	if tuning.Gemini.IncludeThoughts != nil {
+		copy.Gemini.IncludeThoughts = new(*tuning.Gemini.IncludeThoughts)
+	}
+	copy.SupportedServiceTiers = cloneServiceTiers(tuning.SupportedServiceTiers)
+	return copy
+}
+
+func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
+	if tuning.Anthropic.ThinkingType != "" {
+		base.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
+	}
+	if tuning.Anthropic.ThinkingBudget != 0 {
+		base.Anthropic.ThinkingBudget = tuning.Anthropic.ThinkingBudget
+	}
+	if tuning.Anthropic.ThinkingEffort != "" {
+		base.Anthropic.ThinkingEffort = tuning.Anthropic.ThinkingEffort
+	}
+	if tuning.Anthropic.ThinkingDisplay != "" {
+		base.Anthropic.ThinkingDisplay = tuning.Anthropic.ThinkingDisplay
+	}
+	if tuning.Anthropic.PromptCacheMode != "" {
+		base.Anthropic.PromptCacheMode = tuning.Anthropic.PromptCacheMode
+	}
+	if tuning.Anthropic.PromptCacheTTL != "" {
+		base.Anthropic.PromptCacheTTL = tuning.Anthropic.PromptCacheTTL
+	}
+	if tuning.Anthropic.CacheTools {
+		base.Anthropic.CacheTools = true
+	}
+	if tuning.Anthropic.ServiceTier != "" {
+		base.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
+	}
+	if tuning.Anthropic.ToolChoice != "" {
+		base.Anthropic.ToolChoice = tuning.Anthropic.ToolChoice
+	}
+	if tuning.Anthropic.Temperature != nil {
+		base.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
+	}
+	if tuning.OpenAI.ReasoningEffort != "" {
+		base.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
+	}
+	if tuning.OpenAI.ReasoningSummary != "" {
+		base.OpenAI.ReasoningSummary = tuning.OpenAI.ReasoningSummary
+	}
+	if tuning.OpenAI.TextVerbosity != "" {
+		base.OpenAI.TextVerbosity = tuning.OpenAI.TextVerbosity
+	}
+	if tuning.OpenAI.ParallelToolCalls != nil {
+		base.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
+	}
+	if tuning.OpenAI.ToolChoice != "" {
+		base.OpenAI.ToolChoice = tuning.OpenAI.ToolChoice
+	}
+	if tuning.Gemini.ToolChoice != "" {
+		base.Gemini.ToolChoice = tuning.Gemini.ToolChoice
+	}
+	if tuning.Gemini.ThinkingBudget != nil {
+		base.Gemini.ThinkingBudget = new(*tuning.Gemini.ThinkingBudget)
+	}
+	if tuning.Gemini.ThinkingLevel != "" {
+		base.Gemini.ThinkingLevel = tuning.Gemini.ThinkingLevel
+	}
+	if tuning.Gemini.IncludeThoughts != nil {
+		base.Gemini.IncludeThoughts = new(*tuning.Gemini.IncludeThoughts)
+	}
+	if len(tuning.SupportedServiceTiers) > 0 {
+		base.SupportedServiceTiers = cloneServiceTiers(tuning.SupportedServiceTiers)
+	}
+	return base
+}

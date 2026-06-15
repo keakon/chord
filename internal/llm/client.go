@@ -459,95 +459,29 @@ func (c *Client) SetVariant(variantName string) {
 	c.activeVariant = variantName
 }
 
-// SetNextRequestTuningOverride applies a one-shot tuning override to the next
-// Complete or CompleteStream call only. It is intended for runtime recovery or
-// other per-request constraints that must not mutate the client's long-lived
-// model/variant defaults.
+// SetNextRequestTuningOverride applies one-shot tuning fields to the next
+// Complete or CompleteStream call only. The fields are merged over the
+// model/variant defaults so request-local constraints do not erase defaults such
+// as reasoning effort or text verbosity.
 func (c *Client) SetNextRequestTuningOverride(tuning RequestTuning) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	copy := tuning
-	if tuning.OpenAI.ParallelToolCalls != nil {
-		copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
-	}
-	if tuning.Anthropic.Temperature != nil {
-		copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
-	}
+	copy := cloneRequestTuning(tuning)
 	c.nextTuning = &copy
 }
 
-// MergeNextRequestTuningOverride merges a one-shot tuning override into the
-// next request override instead of replacing it. Non-zero/non-empty fields in
-// tuning win over the existing pending override.
+// MergeNextRequestTuningOverride merges tuning fields into the next request's
+// one-shot override instead of replacing it. Non-zero/non-empty fields in tuning
+// win over the existing pending override.
 func (c *Client) MergeNextRequestTuningOverride(tuning RequestTuning) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.nextTuning == nil {
-		copy := tuning
-		if tuning.OpenAI.ParallelToolCalls != nil {
-			copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
-		}
-		if tuning.Anthropic.Temperature != nil {
-			copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
-		}
+		copy := cloneRequestTuning(tuning)
 		c.nextTuning = &copy
 		return
 	}
-	merged := *c.nextTuning
-	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
-		merged.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
-	}
-	if c.nextTuning.Anthropic.Temperature != nil {
-		merged.Anthropic.Temperature = new(*c.nextTuning.Anthropic.Temperature)
-	}
-	if tuning.Anthropic.ThinkingType != "" {
-		merged.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
-	}
-	if tuning.Anthropic.ThinkingBudget != 0 {
-		merged.Anthropic.ThinkingBudget = tuning.Anthropic.ThinkingBudget
-	}
-	if tuning.Anthropic.ThinkingEffort != "" {
-		merged.Anthropic.ThinkingEffort = tuning.Anthropic.ThinkingEffort
-	}
-	if tuning.Anthropic.ThinkingDisplay != "" {
-		merged.Anthropic.ThinkingDisplay = tuning.Anthropic.ThinkingDisplay
-	}
-	if tuning.Anthropic.PromptCacheMode != "" {
-		merged.Anthropic.PromptCacheMode = tuning.Anthropic.PromptCacheMode
-	}
-	if tuning.Anthropic.PromptCacheTTL != "" {
-		merged.Anthropic.PromptCacheTTL = tuning.Anthropic.PromptCacheTTL
-	}
-	if tuning.Anthropic.CacheTools {
-		merged.Anthropic.CacheTools = true
-	}
-	if tuning.Anthropic.ServiceTier != "" {
-		merged.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
-	}
-	if tuning.Anthropic.ToolChoice != "" {
-		merged.Anthropic.ToolChoice = tuning.Anthropic.ToolChoice
-	}
-	if tuning.Anthropic.Temperature != nil {
-		merged.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
-	}
-	if tuning.OpenAI.ReasoningEffort != "" {
-		merged.OpenAI.ReasoningEffort = tuning.OpenAI.ReasoningEffort
-	}
-	if tuning.OpenAI.ReasoningSummary != "" {
-		merged.OpenAI.ReasoningSummary = tuning.OpenAI.ReasoningSummary
-	}
-	if tuning.OpenAI.TextVerbosity != "" {
-		merged.OpenAI.TextVerbosity = tuning.OpenAI.TextVerbosity
-	}
-	if tuning.OpenAI.ParallelToolCalls != nil {
-		merged.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
-	}
-	if tuning.OpenAI.ToolChoice != "" {
-		merged.OpenAI.ToolChoice = tuning.OpenAI.ToolChoice
-	}
-	if tuning.Gemini.ToolChoice != "" {
-		merged.Gemini.ToolChoice = tuning.Gemini.ToolChoice
-	}
+	merged := mergeRequestTuning(*c.nextTuning, tuning)
 	c.nextTuning = &merged
 }
 
@@ -556,13 +490,7 @@ func (c *Client) consumeRequestTuningOverrideLocked() (RequestTuning, bool) {
 	if c.nextTuning == nil {
 		return RequestTuning{}, false
 	}
-	override := *c.nextTuning
-	if c.nextTuning.OpenAI.ParallelToolCalls != nil {
-		override.OpenAI.ParallelToolCalls = new(*c.nextTuning.OpenAI.ParallelToolCalls)
-	}
-	if c.nextTuning.Anthropic.Temperature != nil {
-		override.Anthropic.Temperature = new(*c.nextTuning.Anthropic.Temperature)
-	}
+	override := cloneRequestTuning(*c.nextTuning)
 	c.nextTuning = nil
 	return override, true
 }
@@ -847,7 +775,7 @@ func (c *Client) CompleteStream(
 	orderedFallbacks := rotatePoolAfterStart(pool, startIdx)
 	requestTuning := tuningForPoolTarget(start)
 	if override, ok := c.consumeRequestTuningOverrideLocked(); ok {
-		requestTuning = override
+		requestTuning = mergeRequestTuning(requestTuning, override)
 	}
 	startRef := modelRefWithVariant(start)
 	startLimit := start.ContextLimit

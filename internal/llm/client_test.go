@@ -4310,6 +4310,8 @@ func TestClientNextRequestTuningOverrideIsOneShot(t *testing.T) {
 		Models: map[string]config.ModelConfig{
 			"gpt-5.5": {
 				Limit:             config.ModelLimit{Context: 400000, Output: 128000},
+				Reasoning:         &config.ReasoningConfig{Effort: "high", Summary: "auto"},
+				Text:              &config.TextConfig{Verbosity: "low"},
 				ParallelToolCalls: new(true),
 			},
 		},
@@ -4330,8 +4332,125 @@ func TestClientNextRequestTuningOverrideIsOneShot(t *testing.T) {
 	if provider.tuning[0].OpenAI.ParallelToolCalls == nil || *provider.tuning[0].OpenAI.ParallelToolCalls != parallelFalse {
 		t.Fatalf("first tuning = %#v, want parallel_tool_calls=false", provider.tuning[0])
 	}
+	if got := provider.tuning[0].OpenAI; got.ReasoningEffort != "high" || got.ReasoningSummary != "auto" || got.TextVerbosity != "low" {
+		t.Fatalf("first tuning OpenAI = %+v, want model defaults preserved", got)
+	}
 	if provider.tuning[1].OpenAI.ParallelToolCalls == nil || *provider.tuning[1].OpenAI.ParallelToolCalls != parallelTrue {
 		t.Fatalf("second tuning = %#v, want parallel_tool_calls=true", provider.tuning[1])
+	}
+}
+
+func TestClientEmptyNextRequestTuningOverridePreservesModelDefaults(t *testing.T) {
+	tests := []struct {
+		name       string
+		providerID string
+		provider   config.ProviderConfig
+		modelID    string
+		assert     func(t *testing.T, tuning RequestTuning)
+	}{
+		{
+			name:       "openai",
+			providerID: "openai",
+			provider: config.ProviderConfig{
+				Type: config.ProviderTypeResponses,
+				Models: map[string]config.ModelConfig{
+					"gpt-5.5": {
+						Limit:     config.ModelLimit{Context: 400000, Output: 128000},
+						Reasoning: &config.ReasoningConfig{Effort: "high", Summary: "auto"},
+						Text:      &config.TextConfig{Verbosity: "low"},
+					},
+				},
+			},
+			modelID: "gpt-5.5",
+			assert: func(t *testing.T, tuning RequestTuning) {
+				t.Helper()
+				got := tuning.OpenAI
+				if got.ReasoningEffort != "high" || got.ReasoningSummary != "auto" || got.TextVerbosity != "low" {
+					t.Fatalf("OpenAI tuning = %+v, want model defaults preserved", got)
+				}
+			},
+		},
+		{
+			name:       "anthropic",
+			providerID: "anthropic",
+			provider: config.ProviderConfig{
+				Type: config.ProviderTypeMessages,
+				Models: map[string]config.ModelConfig{
+					"claude-sonnet": {
+						Limit: config.ModelLimit{Context: 200000, Output: 8192},
+						Thinking: &config.ThinkingConfig{
+							Type:    "adaptive",
+							Effort:  "medium",
+							Display: "summarized",
+						},
+						PromptCache: &config.PromptCacheConfig{
+							Mode:       "auto",
+							TTL:        "1h",
+							CacheTools: new(true),
+						},
+					},
+				},
+			},
+			modelID: "claude-sonnet",
+			assert: func(t *testing.T, tuning RequestTuning) {
+				t.Helper()
+				got := tuning.Anthropic
+				if got.ThinkingType != "adaptive" || got.ThinkingEffort != "medium" || got.ThinkingDisplay != "summarized" {
+					t.Fatalf("Anthropic thinking tuning = %+v, want model defaults preserved", got)
+				}
+				if got.PromptCacheMode != "auto" || got.PromptCacheTTL != "1h" || !got.CacheTools {
+					t.Fatalf("Anthropic prompt cache tuning = %+v, want model defaults preserved", got)
+				}
+			},
+		},
+		{
+			name:       "gemini",
+			providerID: "gemini",
+			provider: config.ProviderConfig{
+				Type: config.ProviderTypeGenerateContent,
+				Models: map[string]config.ModelConfig{
+					"gemini-test": {
+						Limit: config.ModelLimit{Context: 1000000, Output: 8192},
+						Thinking: &config.ThinkingConfig{
+							Budget:          1024,
+							Level:           "high",
+							IncludeThoughts: new(true),
+						},
+					},
+				},
+			},
+			modelID: "gemini-test",
+			assert: func(t *testing.T, tuning RequestTuning) {
+				t.Helper()
+				got := tuning.Gemini
+				if got.ThinkingBudget == nil || *got.ThinkingBudget != 1024 {
+					t.Fatalf("Gemini thinking budget = %#v, want 1024", got.ThinkingBudget)
+				}
+				if got.ThinkingLevel != "high" {
+					t.Fatalf("Gemini thinking level = %q, want high", got.ThinkingLevel)
+				}
+				if got.IncludeThoughts == nil || !*got.IncludeThoughts {
+					t.Fatalf("Gemini include thoughts = %#v, want true", got.IncludeThoughts)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &recordingTuningProvider{}
+			cfg := NewProviderConfig(tt.providerID, tt.provider, []string{"k"})
+			c := NewClient(cfg, provider, tt.modelID, 4096, "sys")
+			c.SetNextRequestTuningOverride(RequestTuning{})
+
+			if _, err := c.CompleteStream(context.Background(), nil, nil, nil); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			if len(provider.tuning) != 1 {
+				t.Fatalf("len(provider.tuning) = %d, want 1", len(provider.tuning))
+			}
+			tt.assert(t, provider.tuning[0])
+		})
 	}
 }
 
