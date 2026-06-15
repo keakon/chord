@@ -184,7 +184,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		}
 		cooldown := apiErr.RetryAfter
 		if cooldown <= 0 {
-			cooldown = time.Minute
+			cooldown = time.Second
 		}
 		if cooldown > time.Minute {
 			cooldown = time.Minute

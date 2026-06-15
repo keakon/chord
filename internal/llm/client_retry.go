@@ -124,9 +124,12 @@ func roundRetryDelay(backoffDelay, pendingRoundWait time.Duration) time.Duration
 	return backoffDelay
 }
 
-func nextRetryCount(current int, roundHadUsableReply bool) int {
+func nextRetryCount(current int, roundHadRequestAttempt, roundHadUsableReply bool, lastErr error, hardCap bool) int {
 	if roundHadUsableReply {
 		return 0
+	}
+	if !hardCap && !roundHadRequestAttempt && isAllKeysCoolingError(lastErr) {
+		return current
 	}
 	return current + 1
 }
@@ -678,20 +681,32 @@ func (c *Client) completeStreamWithRetry(
 		}
 		// Apply backoff delay only between full retry rounds.
 		if round > 0 {
+			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait > 0
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait)
-			log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
-			if cb != nil {
-				if err := abortIfCancelled(); err != nil {
-					return nil, err
+			if waitingForCooling {
+				delay = pendingRoundWait
+				log.Infof("waiting for API keys to cool before next LLM request round attempt=%v delay=%v error=%v", round+1, delay, lastErr)
+				if cb != nil {
+					if err := abortIfCancelled(); err != nil {
+						return nil, err
+					}
+					emitStreamStatus(cb, "cooling", delay.Round(time.Second).String())
 				}
-				detail := fmt.Sprintf("round %d", round+1)
-				cb(message.StreamDelta{
-					Type: "status",
-					Status: &message.StatusDelta{
-						Type:   "retrying",
-						Detail: detail,
-					},
-				})
+			} else {
+				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
+				if cb != nil {
+					if err := abortIfCancelled(); err != nil {
+						return nil, err
+					}
+					detail := fmt.Sprintf("round %d", round+1)
+					cb(message.StreamDelta{
+						Type: "status",
+						Status: &message.StatusDelta{
+							Type:   "retrying",
+							Detail: detail,
+						},
+					})
+				}
 			}
 			if delay > 0 {
 				select {
@@ -810,7 +825,7 @@ func (c *Client) completeStreamWithRetry(
 		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) {
 			return nil, lastErr
 		}
-		retryCount = nextRetryCount(retryCount, roundHadUsableReply)
+		retryCount = nextRetryCount(retryCount, roundHadRequestAttempt, roundHadUsableReply, lastErr, hardCap)
 	} // end attempts loop
 
 	log.Errorf("LLM all retries exhausted max_attempts=%v provider=%v model=%v error=%v", maxAttempts, startProvider.Name(), startModelID, lastErr)

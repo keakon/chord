@@ -916,6 +916,21 @@ func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 		}
 	})
 
+	t.Run("compatible_400_without_retry_after_uses_short_probe_cooldown", func(t *testing.T) {
+		p := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true for retriable compatible 400")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		remain := time.Until(end)
+		if remain < 500*time.Millisecond || remain > 1500*time.Millisecond {
+			t.Fatalf("expected ~1s cooldown for compatible 400 without Retry-After, got remaining %v", remain)
+		}
+	})
+
 	t.Run("402_deactivated_workspace_code_deactivates_oauth_key", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
 		p.mu.Lock()
@@ -1978,6 +1993,34 @@ func TestClientCompleteStreamConfiguredRetryRoundsHardCapsConcurrent429(t *testi
 	}
 }
 
+func TestClientCompleteStreamConfiguredRetryRoundsHardCapsAllKeysCooling(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	cfg.MarkCooldown("k1", 50*time.Millisecond)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{resp: &message.Response{Content: "should not be reached"}},
+	}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected configured retry cap to stop all-keys-cooling retries")
+	}
+	var coolingErr *AllKeysCoolingError
+	if !errors.As(err, &coolingErr) {
+		t.Fatalf("CompleteStream err = %v, want AllKeysCoolingError", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %#v, want nil on capped cooling failure", resp)
+	}
+	if got := impl.CallCount(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0 while key is cooling and stream_retry_rounds=1", got)
+	}
+}
+
 func TestClientCompleteStreamConnectionEstablishmentTimeoutRetriesProviderNextRound(t *testing.T) {
 	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
 	impl := &recordingProvider{}
@@ -2275,6 +2318,51 @@ func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 	}
 	if got := impl.CallCount(); got != 1 {
 		t.Fatalf("provider calls = %d, want 1 after cooldown wait", got)
+	}
+}
+
+func TestCompleteStreamWithRetryDoesNotCountPureCoolingRoundAsSoftRetry(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	primaryCfg.MarkCooldown("k1", 20*time.Millisecond)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{resp: &message.Response{Content: "ok after cooldown"}},
+	}
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+
+	var retryingStatuses []string
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == "retrying" {
+				retryingStatuses = append(retryingStatuses, delta.Status.Detail)
+			}
+		},
+		false,
+		nil,
+		1,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after cooldown" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 after cooldown wait", got)
+	}
+	if len(retryingStatuses) != 0 {
+		t.Fatalf("pure cooling round emitted retrying statuses: %#v", retryingStatuses)
 	}
 }
 
